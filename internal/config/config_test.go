@@ -46,8 +46,23 @@ func TestLoadValid(t *testing.T) {
 	root := writeRepo(t, validYAML, "packages/libs/core", "packages/apps/app")
 	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
 	require.NoError(t, err)
-	assert.Equal(t, 3, cfg.Concurrency)
+	assert.Equal(t, 3, cfg.BuildConcurrency, "single value applies to build")
+	assert.Equal(t, 3, cfg.PublishConcurrency, "single value applies to publish")
 	assert.True(t, cfg.Spaces["libs"].IsBuildWaitingPublish)
+}
+
+func TestLoadConcurrencyPair(t *testing.T) {
+	yml := `
+scripts: {build: "echo b", publish: "echo p"}
+spaces:
+  libs: {path: pkgs, buildScript: build, publishScript: publish}
+concurrency: [4, 2]
+`
+	root := writeRepo(t, yml, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 4, cfg.BuildConcurrency)
+	assert.Equal(t, 2, cfg.PublishConcurrency)
 }
 
 func TestLoadDefaults(t *testing.T) {
@@ -59,14 +74,15 @@ spaces:
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, cfg.Concurrency, 1, "default concurrency")
+	assert.GreaterOrEqual(t, cfg.BuildConcurrency, 1, "default build concurrency")
+	assert.GreaterOrEqual(t, cfg.PublishConcurrency, 1, "default publish concurrency")
 	assert.Equal(t, "pretty", cfg.LogLevel, "default logLevel")
 }
 
 func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
 	t.Helper()
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	fs.Int("concurrency", 0, "")
+	fs.IntSlice("concurrency", nil, "")
 	fs.String("log-level", "", "")
 	require.NoError(t, fs.Parse(args))
 	return fs
@@ -75,17 +91,27 @@ func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
 func TestLoadFlagOverrides(t *testing.T) {
 	root := writeRepo(t, validYAML)
 	cfg, err := Load(filepath.Join(root, "monorel.yaml"),
-		testFlags(t, "--concurrency", "7", "--log-level", "debug"))
+		testFlags(t, "--concurrency", "4,2", "--log-level", "debug"))
 	require.NoError(t, err)
-	assert.Equal(t, 7, cfg.Concurrency, "explicit flag overrides config")
+	assert.Equal(t, 4, cfg.BuildConcurrency, "explicit flag overrides config")
+	assert.Equal(t, 2, cfg.PublishConcurrency, "explicit flag overrides config")
 	assert.Equal(t, "debug", cfg.LogLevel, "explicit flag overrides config")
+}
+
+func TestLoadFlagSingleValue(t *testing.T) {
+	root := writeRepo(t, validYAML)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), testFlags(t, "--concurrency", "7"))
+	require.NoError(t, err)
+	assert.Equal(t, 7, cfg.BuildConcurrency)
+	assert.Equal(t, 7, cfg.PublishConcurrency)
 }
 
 func TestLoadFlagDefaultsDoNotOverride(t *testing.T) {
 	root := writeRepo(t, validYAML)
 	cfg, err := Load(filepath.Join(root, "monorel.yaml"), testFlags(t))
 	require.NoError(t, err)
-	assert.Equal(t, 3, cfg.Concurrency, "config wins over unset flag")
+	assert.Equal(t, 3, cfg.BuildConcurrency, "config wins over unset flag")
+	assert.Equal(t, 3, cfg.PublishConcurrency, "config wins over unset flag")
 	assert.Equal(t, "pretty", cfg.LogLevel, "config wins over unset flag")
 }
 
@@ -115,6 +141,7 @@ func TestLoadErrors(t *testing.T) {
 		{"unknown script", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: nope, publishScript: b}}", "unknown script"},
 		{"missing scripts", "scripts: {b: x}\nspaces: {a: {path: p}}", "required"},
 		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: -1", "concurrency"},
+		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: [1, 2, 3]", "at most two"},
 		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogLevel: loud", "logLevel"},
 		{"self dependency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\ndependencies: [{consumer: x, provider: x}]", "itself"},
 	}

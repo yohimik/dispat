@@ -36,7 +36,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "monorepo root folder")
 	cfgName := fs.String("config", "monorel.yaml", "config file name, relative to --root")
-	fs.Int("concurrency", 0, "override the configured concurrency")
+	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2)")
 	fs.String("log-level", "", "override the configured logLevel (pretty, trace, debug, info, warn, error)")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `usage: monorel [command] [flags]
@@ -102,11 +102,12 @@ flags:
 	}
 
 	exec := &release.Executor{
-		Concurrency: cfg.Concurrency,
-		Runner:      &script.ShellRunner{},
-		Tagger:      git,
-		Changelog:   &changelog.FileWriter{},
-		Log:         log,
+		BuildConcurrency:   cfg.BuildConcurrency,
+		PublishConcurrency: cfg.PublishConcurrency,
+		Runner:             &script.ShellRunner{},
+		Tagger:             git,
+		Changelog:          &changelog.FileWriter{},
+		Log:                log,
 	}
 	start := time.Now()
 	results := exec.Run(ctx, pl)

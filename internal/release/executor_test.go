@@ -19,23 +19,28 @@ import (
 	"github.com/yohimik/monorel/internal/semver"
 )
 
-// fakeRunner records "command pkgDir" events and can fail selected ones.
+// fakeRunner records "command pkgDir" events, tracks per-command concurrency
+// and can fail selected events.
 type fakeRunner struct {
-	mu         sync.Mutex
-	events     []string
-	fail       map[string]bool
-	delay      time.Duration
-	current    int
-	maxCurrent int
+	mu      sync.Mutex
+	events  []string
+	fail    map[string]bool
+	delay   time.Duration
+	current map[string]int
+	maxCur  map[string]int
 }
 
 func (r *fakeRunner) Run(_ context.Context, dir, command string, _, _ io.Writer) error {
 	key := command + " " + dir
 	r.mu.Lock()
+	if r.current == nil {
+		r.current = map[string]int{}
+		r.maxCur = map[string]int{}
+	}
 	r.events = append(r.events, key)
-	r.current++
-	if r.current > r.maxCurrent {
-		r.maxCurrent = r.current
+	r.current[command]++
+	if r.current[command] > r.maxCur[command] {
+		r.maxCur[command] = r.current[command]
 	}
 	shouldFail := r.fail[key]
 	r.mu.Unlock()
@@ -45,7 +50,7 @@ func (r *fakeRunner) Run(_ context.Context, dir, command string, _, _ io.Writer)
 	}
 
 	r.mu.Lock()
-	r.current--
+	r.current[command]--
 	r.mu.Unlock()
 	if shouldFail {
 		return errors.New("boom")
@@ -122,13 +127,14 @@ func mkPlan(waitPublish bool, ownBump map[string]semver.Bump, deps map[string][]
 	return p
 }
 
-func newExecutor(r *fakeRunner, tg *fakeTagger, cl *fakeChangelog, conc int) *Executor {
+func newExecutor(r *fakeRunner, tg *fakeTagger, cl *fakeChangelog, buildConc, publishConc int) *Executor {
 	return &Executor{
-		Concurrency: conc,
-		Runner:      r,
-		Tagger:      tg,
-		Changelog:   cl,
-		Log:         zerolog.Nop(),
+		BuildConcurrency:   buildConc,
+		PublishConcurrency: publishConc,
+		Runner:             r,
+		Tagger:             tg,
+		Changelog:          cl,
+		Log:                zerolog.Nop(),
 	}
 }
 
@@ -138,7 +144,7 @@ func TestRunSuccessOrder(t *testing.T) {
 	r := &fakeRunner{}
 	tg := &fakeTagger{}
 	cl := &fakeChangelog{}
-	res := newExecutor(r, tg, cl, 4).Run(context.Background(), p)
+	res := newExecutor(r, tg, cl, 4, 4).Run(context.Background(), p)
 
 	for _, n := range []string{"a", "b"} {
 		require.Equal(t, StatusPublished, res[n].Status, "%s: %v", n, res[n].Err)
@@ -154,7 +160,7 @@ func TestRunSuccessOrder(t *testing.T) {
 func TestRunBuildWaitsPublish(t *testing.T) {
 	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4).Run(context.Background(), p)
+	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["b"].Status)
 	assert.Less(t, r.indexOf("publish a"), r.indexOf("build b"),
@@ -165,7 +171,7 @@ func TestRunFailureSkipsConsumer(t *testing.T) {
 	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 4).Run(context.Background(), p)
+	res := newExecutor(r, tg, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Error(t, res["a"].Err)
@@ -178,7 +184,7 @@ func TestRunFailureConsumerWithOwnChangesProceeds(t *testing.T) {
 	p := mkPlan(true, map[string]semver.Bump{"b": semver.BumpPatch},
 		map[string][]string{"b": {"a"}}, "a", "b")
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4).Run(context.Background(), p)
+	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusPublished, res["b"].Status,
@@ -189,22 +195,39 @@ func TestRunSkipCascades(t *testing.T) {
 	// chain a -> b -> c: a fails, b skipped, c skipped too.
 	p := mkPlan(true, nil, map[string][]string{"b": {"a"}, "c": {"b"}}, "a", "b", "c")
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4).Run(context.Background(), p)
+	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
 
 	assert.Equal(t, StatusSkipped, res["b"].Status)
 	assert.Equal(t, StatusSkipped, res["c"].Status)
 }
 
-func TestRunConcurrencyLimit(t *testing.T) {
+func TestRunConcurrencyLimits(t *testing.T) {
 	names := []string{"p1", "p2", "p3", "p4", "p5", "p6"}
 	p := mkPlan(false, nil, nil, names...)
 	r := &fakeRunner{delay: 10 * time.Millisecond}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 2).Run(context.Background(), p)
+	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 2, 2).Run(context.Background(), p)
 
 	for _, n := range names {
 		require.Equal(t, StatusPublished, res[n].Status, n)
 	}
-	assert.LessOrEqual(t, r.maxCurrent, 2, "concurrency budget")
+	assert.LessOrEqual(t, r.maxCur["build"], 2, "build budget")
+	assert.LessOrEqual(t, r.maxCur["publish"], 2, "publish budget")
+}
+
+func TestRunSeparateStageBudgets(t *testing.T) {
+	names := []string{"p1", "p2", "p3", "p4"}
+	p := mkPlan(false, nil, nil, names...)
+	r := &fakeRunner{delay: 10 * time.Millisecond}
+	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 3, 1).Run(context.Background(), p)
+
+	for _, n := range names {
+		require.Equal(t, StatusPublished, res[n].Status, n)
+	}
+	assert.LessOrEqual(t, r.maxCur["build"], 3, "build budget")
+	assert.LessOrEqual(t, r.maxCur["publish"], 1, "publishes must be serialized")
+	// With independent budgets, builds are allowed to overlap while a
+	// publish is running, so builds should actually reach parallelism > 1.
+	assert.Greater(t, r.maxCur["build"], 1, "builds should overlap")
 }
 
 func TestRunUnchangedExcluded(t *testing.T) {
@@ -216,7 +239,7 @@ func TestRunUnchangedExcluded(t *testing.T) {
 		Next:    semver.Version{Major: 3},
 	}
 	p.Order = append(p.Order, "quiet")
-	res := newExecutor(&fakeRunner{}, &fakeTagger{}, &fakeChangelog{}, 1).Run(context.Background(), p)
+	res := newExecutor(&fakeRunner{}, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
 
 	assert.NotContains(t, res, "quiet", "unchanged package must not appear in results")
 	assert.Len(t, res, 1)

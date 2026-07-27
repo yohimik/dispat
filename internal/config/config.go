@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
@@ -25,8 +26,15 @@ type File struct {
 	Scripts      map[string]string      `mapstructure:"scripts"`
 	Spaces       map[string]SpaceConfig `mapstructure:"spaces"`
 	Dependencies []DependencyConfig     `mapstructure:"dependencies"`
-	Concurrency  int                    `mapstructure:"concurrency"`
-	LogLevel     string                 `mapstructure:"logLevel"`
+	// Concurrency accepts a single value applied to both stages
+	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
+	// 0 entries mean "number of CPUs".
+	Concurrency []int  `mapstructure:"concurrency"`
+	LogLevel    string `mapstructure:"logLevel"`
+
+	// Resolved limits, populated by validation.
+	BuildConcurrency   int `mapstructure:"-"`
+	PublishConcurrency int `mapstructure:"-"`
 }
 
 // SpaceConfig is the raw configuration of one space.
@@ -74,7 +82,9 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 
 	var cfg File
 	// UnmarshalExact rejects unknown keys, catching config typos early.
-	if err := v.UnmarshalExact(&cfg); err != nil {
+	// WeaklyTypedInput lets a scalar concurrency value decode into the slice.
+	weak := func(dc *mapstructure.DecoderConfig) { dc.WeaklyTypedInput = true }
+	if err := v.UnmarshalExact(&cfg, weak); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
 	if err := cfg.validate(); err != nil {
@@ -94,12 +104,26 @@ func (c *File) validate() error {
 	if len(c.Spaces) == 0 {
 		return errors.New("at least one space is required")
 	}
-	if c.Concurrency < 0 {
-		return fmt.Errorf("concurrency must be >= 0, got %d", c.Concurrency)
+	var build, publish int
+	switch len(c.Concurrency) {
+	case 0: // not configured: default both
+	case 1:
+		build, publish = c.Concurrency[0], c.Concurrency[0]
+	case 2:
+		build, publish = c.Concurrency[0], c.Concurrency[1]
+	default:
+		return fmt.Errorf("concurrency accepts at most two values [build, publish], got %v", c.Concurrency)
 	}
-	if c.Concurrency == 0 {
-		c.Concurrency = runtime.NumCPU()
+	if build < 0 || publish < 0 {
+		return fmt.Errorf("concurrency values must be >= 0, got %v", c.Concurrency)
 	}
+	if build == 0 {
+		build = runtime.NumCPU()
+	}
+	if publish == 0 {
+		publish = runtime.NumCPU()
+	}
+	c.BuildConcurrency, c.PublishConcurrency = build, publish
 	if c.LogLevel == "" {
 		c.LogLevel = "pretty"
 	}

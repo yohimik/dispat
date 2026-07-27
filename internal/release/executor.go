@@ -67,15 +67,17 @@ type ChangelogWriter interface {
 // build depends on each changed provider's build — and on the provider's
 // publish when the provider's space sets isBuildWaitingPublish. A consumer's
 // publish always waits for its providers' publishes, since publishing against
-// a not-yet-published provider version would be invalid. At most Concurrency
-// tasks run at once; a package never runs its two tasks concurrently, so this
-// bounds parallel packages as required.
+// a not-yet-published provider version would be invalid. Build and publish
+// stages have independent parallelism budgets: at most BuildConcurrency build
+// scripts and PublishConcurrency publish scripts run at any moment. A package
+// never runs its two tasks concurrently.
 type Executor struct {
-	Concurrency int
-	Runner      script.Runner
-	Tagger      Tagger
-	Changelog   ChangelogWriter
-	Log         zerolog.Logger
+	BuildConcurrency   int
+	PublishConcurrency int
+	Runner             script.Runner
+	Tagger             Tagger
+	Changelog          ChangelogWriter
+	Log                zerolog.Logger
 }
 
 type taskKind uint8
@@ -143,36 +145,56 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	var mu sync.Mutex
 	started := make(map[string]time.Time)
 
-	ready := make([]task, 0, total)
+	// Separate ready queues per stage, so a stalled stage never blocks the
+	// other stage's budget.
+	var readyBuild, readyPublish []task
+	push := func(t task) {
+		if t.kind == taskBuild {
+			readyBuild = append(readyBuild, t)
+		} else {
+			readyPublish = append(readyPublish, t)
+		}
+	}
 	for t, d := range indeg {
 		if d == 0 {
-			ready = append(ready, t)
+			push(t)
 		}
 	}
 
-	conc := e.Concurrency
-	if conc < 1 {
-		conc = 1
-	}
+	buildConc := max(1, e.BuildConcurrency)
+	publishConc := max(1, e.PublishConcurrency)
 	doneCh := make(chan task)
-	inflight, finished := 0, 0
+	launch := func(t task) {
+		go func() {
+			e.execute(ctx, t, p, results, &mu, started)
+			doneCh <- t
+		}()
+	}
+	inBuild, inPublish, finished := 0, 0, 0
 	for finished < total {
-		for len(ready) > 0 && inflight < conc {
-			t := ready[len(ready)-1]
-			ready = ready[:len(ready)-1]
-			inflight++
-			go func(t task) {
-				e.execute(ctx, t, p, results, &mu, started)
-				doneCh <- t
-			}(t)
+		for len(readyBuild) > 0 && inBuild < buildConc {
+			t := readyBuild[len(readyBuild)-1]
+			readyBuild = readyBuild[:len(readyBuild)-1]
+			inBuild++
+			launch(t)
+		}
+		for len(readyPublish) > 0 && inPublish < publishConc {
+			t := readyPublish[len(readyPublish)-1]
+			readyPublish = readyPublish[:len(readyPublish)-1]
+			inPublish++
+			launch(t)
 		}
 		t := <-doneCh
-		inflight--
+		if t.kind == taskBuild {
+			inBuild--
+		} else {
+			inPublish--
+		}
 		finished++
 		for _, dep := range dependents[t] {
 			indeg[dep]--
 			if indeg[dep] == 0 {
-				ready = append(ready, dep)
+				push(dep)
 			}
 		}
 	}
