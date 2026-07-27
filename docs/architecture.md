@@ -6,10 +6,10 @@
 2. Load and validate `monorel.json` (viper; unknown keys rejected; flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path, names unique across spaces.
 4. Build the dependency graph from configured relations; topologically sort it (cycles abort with the members named).
-5. For each package: resolve the latest `pkg@*` tag (highest parseable version when the newest tag parses; otherwise
-   the unparseable newest tag with the baseline taken from config `initials`, default 0.0.0), scan commit subjects
-   since it, compute the own bump; then one topological pass propagates provider changes into consumer patch bumps and
-   fixes next versions.
+5. For each package: resolve the latest `pkg@*` tag (highest parseable version when the newest tag parses; otherwise the
+   unparseable newest tag with the baseline taken from config `initials`, default 0.0.0), scan commit subjects since it,
+   compute the own bump; then one topological pass propagates provider changes into consumer patch bumps and fixes next
+   versions.
 6. Print the full graph, highlighting changed packages with `old -> new` versions. `status` stops here.
 7. When `commit.push` or GitHub releases are enabled: verify remote/API access up front (`git ls-remote`,
    `GET /repos/{owner}/{repo}`) and fail fast before any release work.
@@ -85,16 +85,16 @@ A failed script (or release recorder) marks the package failed; nothing aborts t
 where it failed (informational, shown in the summary). At the start of every task the package re-evaluates the skip
 rule: skip if some changed provider failed (at any stage) or was skipped AND the package has neither own commits nor a
 successfully published changed provider. A consumer's terminal outcome is deterministic in both modes: its publish
-always waits for its providers' publishes, so a provider's publish failure is guaranteed to be seen at the latest
-there. With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage;
-with `false` the consumer may spend a version/build on a release that its publish then skips — the trade-off that flag
-opts into. The version stage filters failed/skipped providers out of `MONOREL_UPDATED_PROVIDERS` and skips its script
-entirely when none remain.
+always waits for its providers' publishes, so a provider's publish failure is guaranteed to be seen at the latest there.
+With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage; with `false`
+the consumer may spend a version/build on a release that its publish then skips — the trade-off that flag opts into. The
+version stage filters failed/skipped providers out of `MONOREL_UPDATED_PROVIDERS` and skips its script entirely when
+none remain.
 
-For spaces with `revertOnFail: true`, a failing package (any stage, including a failing release recorder) has its
-folder rolled back via the `Reverter` interface (`gitx.CLI`: `git checkout -- <dir>` + `git clean -fd <dir>` — tracked
-files restored from HEAD, untracked files removed, scoped to the package folder). The same rollback runs when a package
-is skipped after its version stage already modified files. A revert error is logged but the package keeps its original
+For spaces with `revertOnFail: true`, a failing package (any stage, including a failing release recorder) has its folder
+rolled back via the `Reverter` interface (`gitx.CLI`: `git checkout -- <dir>` + `git clean -fd <dir>` — tracked files
+restored from HEAD, untracked files removed, scoped to the package folder). The same rollback runs when a package is
+skipped after its version stage already modified files. A revert error is logged but the package keeps its original
 failure status.
 
 ## Design decisions
@@ -127,15 +127,15 @@ scheduling overhead on top of script runtime.
 
 `go test ./...` — testify-based unit tests with in-memory fakes:
 
-| Package      | Coverage                                                                                                                                                                                               |
-|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| semver       | Parse/compare/bump tables, invalid inputs, overflow guard.                                                                                                                                             |
-| conventional | Subject classification incl. `!` marker, malformed headers, scope rules.                                                                                                                               |
-| graph        | Ordering constraints, alphabetical determinism, cycle errors, unknown nodes.                                                                                                                           |
-| config       | Defaults, JSON+YAML loading, flag precedence, optional scripts, changelog/github objects, initials parsing and validation, discovery errors.                                                           |
-| plan         | Own bumps, propagation, single-patch rule, breaking changes, first releases, initials baselines (untagged and unparseable-tag cases), cycles.                                                          |
-| release      | Ordering under both `isBuildWaitingPublish` values, version-task placement, failed/skipped provider filtering, publish-failure and build-failure cascades in both modes, skip cascades, per-stage budgets, script envs, script-less releases, recorder failures, revertOnFail at every stage. |
-| changelog    | Section/entry rendering, custom formats, file prepend, custom file/title.                                                                                                                              |
-| github       | Request shape (path, auth, payload) via httptest, custom format, API and connection errors.                                                                                                            |
-| gitx         | Against a real temporary git repo: tag round trips, unparseable-newest and backport tag resolution, scoped RevertDir, CommitDirs (incl. empty-stage no-op), VerifyRemote and pushes to a bare remote.  |
+| Package      | Coverage                                                                                                                                                                                                                                                                                                                   |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| semver       | Parse/compare/bump tables, invalid inputs, overflow guard.                                                                                                                                                                                                                                                                 |
+| conventional | Subject classification incl. `!` marker, malformed headers, scope rules.                                                                                                                                                                                                                                                   |
+| graph        | Ordering constraints, alphabetical determinism, cycle errors, unknown nodes.                                                                                                                                                                                                                                               |
+| config       | Defaults, JSON+YAML loading, flag precedence, optional scripts, changelog/github objects, initials parsing and validation, discovery errors.                                                                                                                                                                               |
+| plan         | Own bumps, propagation, single-patch rule, breaking changes, first releases, initials baselines (untagged and unparseable-tag cases), cycles.                                                                                                                                                                              |
+| release      | Ordering under both `isBuildWaitingPublish` values, version-task placement, failed/skipped provider filtering, publish-failure and build-failure cascades in both modes, skip cascades, per-stage budgets, script envs, script-less releases, recorder failures, revertOnFail at every stage.                              |
+| changelog    | Section/entry rendering, custom formats, file prepend, custom file/title.                                                                                                                                                                                                                                                  |
+| github       | Request shape (path, auth, payload) via httptest, custom format, API and connection errors.                                                                                                                                                                                                                                |
+| gitx         | Against a real temporary git repo: tag round trips, unparseable-newest and backport tag resolution, scoped RevertDir, CommitDirs (incl. empty-stage no-op), VerifyRemote and pushes to a bare remote.                                                                                                                      |
 | cli          | End-to-end against a real temporary git repo: status/release commands, disabled changelog, revertOnFail restoration, initials with a broken tag, release commit + push to a bare remote (tag placement, templated message, clean worktree), fail-fast remote verification, github owner/repo/token resolution, exit codes. |

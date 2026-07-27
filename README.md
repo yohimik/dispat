@@ -1,8 +1,8 @@
 # monorel
 
 **monorel** releases monorepos: it detects which packages changed from conventional commits, computes their next
-semantic versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel,
-with changelogs, git tags and GitHub releases on the way out.
+semantic versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel, with
+changelogs, git tags and GitHub releases on the way out.
 
 ## Key features
 
@@ -21,20 +21,20 @@ with changelogs, git tags and GitHub releases on the way out.
   and exit non-zero on failure. Logs are human-pretty locally and JSON in CI.
 - **Release records built in** — per-package `CHANGELOG.md` entries and GitHub releases from the same commit data,
   optional single release commit + push, all customisable or disableable.
-- **Safe by design** — upfront git/GitHub credential verification, optional per-space rollback of half-finished
-  packages (`revertOnFail`), and no publishing against unpublished dependency versions, ever.
+- **Safe by design** — upfront git/GitHub credential verification, optional per-space rollback of half-finished packages
+  (`revertOnFail`), and no publishing against unpublished dependency versions, ever.
 - **Built from scratch in Go for scale** — a single static binary with no runtime dependencies, written for giant
-  project graphs and large commit histories: O((V+E) log V) topological planning, a lock-free dependency-counting
+  project graphs and large commit histories: O ((V+E) log V) topological planning, a lock-free dependency-counting
   scheduler, regex-free single-pass commit and semver parsers, and one bounded `git tag`/`git log` query pair per
   package instead of full-history walks.
 
 Documentation:
 
-| Document                                       | Contents                                                                       |
-|------------------------------------------------|--------------------------------------------------------------------------------|
-| [Getting started](docs/getting-started.md)     | Install, first config, commands, CI setup.                                     |
-| [Configuration & CLI](docs/configuration.md)   | Every config option, CLI flag, script environment variable, exit codes.        |
-| [Architecture](docs/architecture.md)           | Modules, algorithms, execution model, design decisions, testing.               |
+| Document                                     | Contents                                                                |
+|----------------------------------------------|-------------------------------------------------------------------------|
+| [Getting started](docs/getting-started.md)   | Install, first config, commands, CI setup.                              |
+| [Configuration & CLI](docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
+| [Architecture](docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
 
 ## Versioning flow
 
@@ -48,12 +48,12 @@ scanned from the unparseable tag.
 Commit subjects are classified by a minimal, regex-free conventional-commits parser; the scope must equal the package
 name:
 
-| Subject                                            | Own bump |
-|----------------------------------------------------|----------|
-| `fix(pkg): …`                                      | patch    |
-| `feat(pkg): …`                                     | minor    |
-| `BREAKING CHANGE(pkg): …` / `BREAKING-CHANGE(pkg): …` / any `type(pkg)!: …` | major |
-| anything else                                      | none     |
+| Subject                                                                     | Own bump |
+|-----------------------------------------------------------------------------|----------|
+| `fix(pkg): …`                                                               | patch    |
+| `feat(pkg): …`                                                              | minor    |
+| `BREAKING CHANGE(pkg): …` / `BREAKING-CHANGE(pkg): …` / any `type(pkg)!: …` | major    |
+| anything else                                                               | none     |
 
 **Propagation.** A consumer of one or more changed providers gets a single patch bump, regardless of how many providers
 changed. If the consumer's own commits demand more (minor/major), the higher bump wins. Propagation runs in topological
@@ -68,9 +68,9 @@ already built (allowed by `isBuildWaitingPublish: false` while the provider was 
 publish once the provider's publish failure is known — nothing is ever published against an unpublished provider
 version. Skips cascade down the dependency chain by the same rule. A consumer that proceeds on its own reason runs its
 pipeline normally, except that failed and skipped providers are filtered from `MONOREL_UPDATED_PROVIDERS`, and if none
-remain the version script is not executed at all.
-Spaces with `revertOnFail: true` additionally roll back all local changes inside a failing package's folder (tracked
-files restored, untracked files removed), so a half-finished release leaves no residue in the worktree.
+remain the version script is not executed at all. Spaces with `revertOnFail: true` additionally roll back all local
+changes inside a failing package's folder (tracked files restored, untracked files removed), so a half-finished release
+leaves no residue in the worktree.
 
 **Pipeline per changed package.** Up to three stages, each optional to script:
 
@@ -82,14 +82,14 @@ files restored, untracked files removed), so a half-finished release leaves no r
    recorders run (changelog file, GitHub release), then the annotated tag `package@version` is created (pushing is left
    to CI by default).
 
-Optionally the run can end with a *finalize phase* (disabled by default): the `commit` option creates one release
-commit capturing all published packages' changelog and manifest changes — tags then point at that commit, GitHub
-releases move to the end of the run, and `commit.push` pushes the commit and tags (`git`/GitHub access is verified up
-front, before any work starts).
+Optionally the run can end with a *finalize phase* (disabled by default): the `commit` option creates one release commit
+capturing all published packages' changelog and manifest changes — tags then point at that commit, GitHub releases move
+to the end of the run, and `commit.push` pushes the commit and tags (`git`/GitHub access is verified up front, before
+any work starts).
 
 Build and publish have independent concurrency budgets (`concurrency: [build, publish]`); version tasks share the build
-budget. A stage without a configured script still runs — ordering, statuses, tags and release records are preserved —
-it just executes no shell command.
+budget. A stage without a configured script still runs — ordering, statuses, tags and release records are preserved — it
+just executes no shell command.
 
 ## Quick start
 

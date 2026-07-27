@@ -6,10 +6,10 @@
 monorel [command] [flags]
 ```
 
-| Command             | Effect                                                                                                          |
-|---------------------|------------------------------------------------------------------------------------------------------------------|
-| `release` (default) | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.          |
-| `status`            | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.        |
+| Command             | Effect                                                                                                   |
+|---------------------|----------------------------------------------------------------------------------------------------------|
+| `release` (default) | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.   |
+| `status`            | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written. |
 
 | Flag            | Default        | Effect                                                                |
 |-----------------|----------------|-----------------------------------------------------------------------|
@@ -47,14 +47,14 @@ script and space names are effectively case-insensitive.
 
 ### Space options
 
-| Key                     | Type        | Required   | Description                                                                                                                                                            |
-|-------------------------|-------------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`                  | string      | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped). Package names must be unique across all spaces. |
+| Key                     | Type        | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
+|-------------------------|-------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `path`                  | string      | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped). Package names must be unique across all spaces.                                                                                                                                                                                                                  |
 | `isBuildWaitingPublish` | bool        | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
-| `revertOnFail`          | bool        | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage — or is skipped after its version stage already modified files. |
-| `buildScript`           | script name | no         | Build stage command.                                                                                                                                                   |
-| `publishScript`         | script name | no         | Publish stage command.                                                                                                                                                 |
-| `versionScript`         | script name | no         | Manifest-sync stage command; runs exactly before the build, only for packages bumped due to provider updates.                                                          |
+| `revertOnFail`          | bool        | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage — or is skipped after its version stage already modified files.                                                                                                                                                  |
+| `buildScript`           | script name | no         | Build stage command.                                                                                                                                                                                                                                                                                                                                                                    |
+| `publishScript`         | script name | no         | Publish stage command.                                                                                                                                                                                                                                                                                                                                                                  |
+| `versionScript`         | script name | no         | Manifest-sync stage command; runs exactly before the build, only for packages bumped due to provider updates.                                                                                                                                                                                                                                                                           |
 
 All script references are optional. A stage without a script still runs — ordering, skip semantics, statuses, tags and
 release records are fully preserved — it just executes no shell command. Scripts run through the configured `shell`
@@ -62,35 +62,35 @@ release records are fully preserved — it just executes no shell command. Scrip
 
 ### Entry format options (shared by `changelog` and `github`)
 
-| Key                 | Default            | Description                          |
-|---------------------|--------------------|--------------------------------------|
-| `dateFormat`        | `2006-01-02`       | Go time layout for the entry date.   |
-| `breakingTitle`     | `Breaking Changes` | Section title for breaking changes.  |
-| `featuresTitle`     | `Features`         | Section title for features.          |
-| `fixesTitle`        | `Fixes`            | Section title for fixes.             |
-| `dependenciesTitle` | `Dependencies`     | Section title for provider updates.  |
+| Key                 | Default            | Description                         |
+|---------------------|--------------------|-------------------------------------|
+| `dateFormat`        | `2006-01-02`       | Go time layout for the entry date.  |
+| `breakingTitle`     | `Breaking Changes` | Section title for breaking changes. |
+| `featuresTitle`     | `Features`         | Section title for features.         |
+| `fixesTitle`        | `Fixes`            | Section title for fixes.            |
+| `dependenciesTitle` | `Dependencies`     | Section title for provider updates. |
 
 ### `changelog`
 
-| Key       | Default        | Description                                        |
-|-----------|----------------|----------------------------------------------------|
-| `enabled` | `true`         | Write a changelog file per published package.      |
-| `file`    | `CHANGELOG.md` | File name inside the package folder.               |
-| `title`   | `# Changelog`  | First line of the file.                            |
-| *format*  |                | All entry format options above.                    |
+| Key       | Default        | Description                                   |
+|-----------|----------------|-----------------------------------------------|
+| `enabled` | `true`         | Write a changelog file per published package. |
+| `file`    | `CHANGELOG.md` | File name inside the package folder.          |
+| `title`   | `# Changelog`  | First line of the file.                       |
+| *format*  |                | All entry format options above.               |
 
 New entries are prepended below the title, newest first.
 
 ### `github`
 
-| Key        | Default                  | Description                                                               |
-|------------|--------------------------|---------------------------------------------------------------------------|
-| `enabled`  | `true`                   | Create a GitHub release per published package.                            |
-| `owner`    | from `$GITHUB_REPOSITORY`| Repository owner.                                                         |
-| `repo`     | from `$GITHUB_REPOSITORY`| Repository name.                                                          |
-| `apiUrl`   | `https://api.github.com` | REST endpoint; set for GitHub Enterprise.                                 |
-| `tokenEnv` | `GITHUB_TOKEN`           | Name of the environment variable holding the API token.                   |
-| *format*   |                          | All entry format options above (the release body has no entry header).    |
+| Key        | Default                   | Description                                                            |
+|------------|---------------------------|------------------------------------------------------------------------|
+| `enabled`  | `true`                    | Create a GitHub release per published package.                         |
+| `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                      |
+| `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                       |
+| `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                              |
+| `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                |
+| *format*   |                           | All entry format options above (the release body has no entry header). |
 
 The release is named after the tag (`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no
 repository or token can be resolved at runtime, GitHub releases are skipped with a warning instead of failing the run.
@@ -98,27 +98,27 @@ If the tag has not been pushed yet, GitHub creates it at the default branch head
 
 ### `initials`
 
-A map of package name → `MAJOR.MINOR.PATCH` (validated at load time). The value is the *baseline* the next release
-bumps from — it never becomes a release by itself. It applies in exactly two situations:
+A map of package name → `MAJOR.MINOR.PATCH` (validated at load time). The value is the *baseline* the next release bumps
+from — it never becomes a release by itself. It applies in exactly two situations:
 
 - the package has no `pkg@*` tag at all (a first release), or
 - the newest `pkg@*` tag (by creation date) exists but its version cannot be parsed as strict semver — e.g. a stray
-  `core@0.0.1-0.0.0`. In that case older parseable tags are deliberately *not* used, and commits are still scanned
-  from the unparseable tag (not the whole history).
+  `core@0.0.1-0.0.0`. In that case older parseable tags are deliberately *not* used, and commits are still scanned from
+  the unparseable tag (not the whole history).
 
 Example: `"initials": {"core": "1.0.0"}` with an unparseable newest tag and one `fix(core)` commit since it releases
 `core@1.0.1`. Packages without an entry fall back to `0.0.0` as usual. A parseable latest tag always beats initials.
-Keys are matched case-insensitively against discovered packages (viper lowercases map keys); entries matching no
-package are warned about and ignored.
+Keys are matched case-insensitively against discovered packages (viper lowercases map keys); entries matching no package
+are warned about and ignored.
 
 ### `commit`
 
-| Key             | Default                   | Description                                                              |
-|-----------------|---------------------------|--------------------------------------------------------------------------|
-| `enabled`       | `false`                   | Create one release commit at the end of a successful run.                |
-| `messageFormat` | `chore(release): {tags}`  | Template; `{tags}` and `{packages}` become comma-separated lists.        |
-| `push`          | `false`                   | Push the release commit and tags (`git push --follow-tags <remote> HEAD`). Only applies when `enabled` is true. |
-| `remote`        | `origin`                  | Remote to push to.                                                       |
+| Key             | Default                  | Description                                                                                                     |
+|-----------------|--------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `enabled`       | `false`                  | Create one release commit at the end of a successful run.                                                       |
+| `messageFormat` | `chore(release): {tags}` | Template; `{tags}` and `{packages}` become comma-separated lists.                                               |
+| `push`          | `false`                  | Push the release commit and tags (`git push --follow-tags <remote> HEAD`). Only applies when `enabled` is true. |
+| `remote`        | `origin`                 | Remote to push to.                                                                                              |
 
 When enabled, the run finishes with a *finalize phase*: all published packages' folders are staged and committed in a
 single commit (changelog files, version-script manifest changes — add build outputs to `.gitignore` or they get

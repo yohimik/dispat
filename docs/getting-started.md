@@ -35,7 +35,12 @@ under `dependencies` so bumps propagate and ordering is enforced:
 
 ```json
 {
-  "dependencies": [{ "consumer": "app", "provider": "core" }]
+  "dependencies": [
+    {
+      "consumer": "app",
+      "provider": "core"
+    }
+  ]
 }
 ```
 
@@ -87,9 +92,8 @@ Notes:
 - `fetch-depth: 0` matters — without full history and tags the planner cannot find previous releases.
 - By default monorel creates tags locally; push them after a successful run (as above). Alternatively enable
   `"commit": {"enabled": true, "push": true}` in the config: monorel then creates one release commit (changelogs +
-  manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This
-  requires a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work
-  starts.
+  manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This requires
+  a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work starts.
 - Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent monorel runs on the
   same checkout are not guarded by a lock — serialize release jobs in CI.
 - GitHub releases are created via the API (enabled by default). In release-commit mode their body always documents the
