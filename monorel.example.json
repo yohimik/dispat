@@ -1,0 +1,58 @@
+{
+  "scripts": {
+    "build": "npm ci && npm run build",
+    "publish": "npm publish --access public",
+    "sync-deps": "node ./scripts/sync-deps.js",
+    "build-go": "go build ./...",
+    "publish-go": "./scripts/release.sh"
+  },
+  "spaces": {
+    "libs": {
+      "path": "packages/libs",
+      "isBuildWaitingPublish": true,
+      "revertOnFail": true,
+      "buildScript": "build",
+      "publishScript": "publish",
+      "versionScript": "sync-deps"
+    },
+    "apps": {
+      "path": "packages/apps",
+      "isBuildWaitingPublish": false,
+      "buildScript": "build-go",
+      "publishScript": "publish-go"
+    }
+  },
+  "dependencies": [
+    { "consumer": "app", "provider": "core" },
+    { "consumer": "app", "provider": "utils" }
+  ],
+  "initials": {
+    "core": "1.0.0"
+  },
+  "concurrency": [4, 2],
+  "logLevel": "pretty",
+  "changelog": {
+    "enabled": true,
+    "file": "CHANGELOG.md",
+    "title": "# Changelog",
+    "dateFormat": "2006-01-02",
+    "breakingTitle": "Breaking Changes",
+    "featuresTitle": "Features",
+    "fixesTitle": "Fixes",
+    "dependenciesTitle": "Dependencies"
+  },
+  "commit": {
+    "enabled": false,
+    "messageFormat": "chore(release): {tags}",
+    "push": false,
+    "remote": "origin"
+  },
+  "github": {
+    "enabled": true,
+    "owner": "acme",
+    "repo": "monorepo",
+    "apiUrl": "https://api.github.com",
+    "tokenEnv": "GITHUB_TOKEN",
+    "featuresTitle": "Features"
+  }
+}

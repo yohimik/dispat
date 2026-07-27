@@ -11,10 +11,20 @@ type Space struct {
 	// only start building after the provider has been published (not merely
 	// built).
 	BuildWaitsPublish bool
-	// BuildScript and PublishScript are resolved shell commands (not script
-	// names) executed inside the package folder.
+	// RevertOnFail: when true, all local changes inside the package folder
+	// are rolled back (tracked files restored, untracked files removed) if
+	// the package fails during its version, build or publish stage.
+	RevertOnFail bool
+	// BuildScript, PublishScript and VersionScript are resolved shell
+	// commands (not script names) executed inside the package folder. Any of
+	// them may be empty: the corresponding pipeline stage still runs (with
+	// tags, changelogs and ordering intact) but executes no shell command.
+	// VersionScript runs right before a consumer's build, only when the
+	// consumer is released because of provider updates — its job is syncing
+	// manifests (package.json, go.mod, ...) to the new provider versions.
 	BuildScript   string
 	PublishScript string
+	VersionScript string
 }
 
 // Package is a single releasable folder inside a space.

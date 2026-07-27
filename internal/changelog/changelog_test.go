@@ -1,6 +1,7 @@
 package changelog
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,9 +30,10 @@ func testRelease(dir string, next semver.Version) *plan.Release {
 	}
 }
 
-func TestRender(t *testing.T) {
-	rel := testRelease("/tmp/x", semver.Version{Major: 2})
-	out := Render(rel, time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC))
+var testDate = time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC)
+
+func TestRenderEntryDefaults(t *testing.T) {
+	out := RenderEntry(testRelease("/tmp/x", semver.Version{Major: 2}), testDate, Format{})
 
 	for _, want := range []string{
 		"## core@2.0.0 (2026-07-26)",
@@ -50,12 +52,46 @@ func TestRender(t *testing.T) {
 		"Breaking Changes must be rendered before Features")
 }
 
-func TestAppendCreatesAndPrepends(t *testing.T) {
-	dir := t.TempDir()
-	w := &FileWriter{Now: func() time.Time { return time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC) }}
+func TestRenderEntryCustomFormat(t *testing.T) {
+	f := Format{
+		DateFormat:        "02.01.2006",
+		BreakingTitle:     "Breaking",
+		FeaturesTitle:     "Added",
+		FixesTitle:        "Fixed",
+		DependenciesTitle: "Bumped",
+	}
+	out := RenderEntry(testRelease("/tmp/x", semver.Version{Major: 2}), testDate, f)
 
-	require.NoError(t, w.Append(testRelease(dir, semver.Version{Major: 2})))
-	require.NoError(t, w.Append(testRelease(dir, semver.Version{Major: 2, Minor: 1})))
+	assert.Contains(t, out, "## core@2.0.0 (26.07.2026)")
+	assert.Contains(t, out, "### Breaking")
+	assert.Contains(t, out, "### Added")
+	assert.Contains(t, out, "### Fixed")
+	assert.Contains(t, out, "### Bumped")
+	assert.NotContains(t, out, "### Features")
+}
+
+func TestRenderSections(t *testing.T) {
+	out := RenderSections(testRelease("/tmp/x", semver.Version{Major: 2}), Format{})
+	assert.True(t, strings.HasPrefix(out, "### Breaking Changes"), "no entry header in sections: %q", out)
+	assert.NotContains(t, out, "## core@")
+}
+
+func TestRenderSectionsEmpty(t *testing.T) {
+	rel := &plan.Release{
+		Pkg:  &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
+		Next: semver.Version{Major: 2},
+	}
+	assert.Empty(t, RenderSections(rel, Format{}))
+	assert.Equal(t, "## core@2.0.0 (2026-07-26)\n", RenderEntry(rel, testDate, Format{}))
+}
+
+func TestRecordCreatesAndPrepends(t *testing.T) {
+	dir := t.TempDir()
+	w := &FileWriter{Now: func() time.Time { return testDate }}
+	ctx := context.Background()
+
+	require.NoError(t, w.Record(ctx, testRelease(dir, semver.Version{Major: 2})))
+	require.NoError(t, w.Record(ctx, testRelease(dir, semver.Version{Major: 2, Minor: 1})))
 
 	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -68,4 +104,22 @@ func TestAppendCreatesAndPrepends(t *testing.T) {
 	require.NotEqual(t, -1, second, "missing 2.0.0 entry:\n%s", content)
 	assert.Less(t, first, second, "newest release must be at the top")
 	assert.Equal(t, 1, strings.Count(content, "# Changelog"), "header must not be duplicated")
+}
+
+func TestRecordCustomFileAndTitle(t *testing.T) {
+	dir := t.TempDir()
+	w := &FileWriter{
+		File:   "HISTORY.md",
+		Title:  "# History",
+		Format: Format{FeaturesTitle: "Added"},
+		Now:    func() time.Time { return testDate },
+	}
+	require.NoError(t, w.Record(context.Background(), testRelease(dir, semver.Version{Major: 2})))
+
+	data, err := os.ReadFile(filepath.Join(dir, "HISTORY.md"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.True(t, strings.HasPrefix(content, "# History\n"))
+	assert.Contains(t, content, "### Added")
+	assert.NoFileExists(t, filepath.Join(dir, "CHANGELOG.md"))
 }

@@ -30,6 +30,11 @@ func (f *fakeGit) Subjects(_ context.Context, sinceTag string) ([]string, error)
 
 func (f *fakeGit) CreateTag(context.Context, string, string) error { return nil }
 
+// tag builds a parseable canned tag.
+func tag(name string, v semver.Version) gitx.Tag {
+	return gitx.Tag{Name: name, Version: v, Parsed: true}
+}
+
 func testPackages() ([]*model.Package, []model.Dependency) {
 	libs := &model.Space{Name: "libs", BuildWaitsPublish: true}
 	apps := &model.Space{Name: "apps"}
@@ -49,8 +54,8 @@ func TestComputePropagation(t *testing.T) {
 	pkgs, deps := testPackages()
 	git := &fakeGit{
 		tags: map[string]gitx.Tag{
-			"core": {Name: "core@1.2.3", Version: semver.Version{Major: 1, Minor: 2, Patch: 3}},
-			"app":  {Name: "app@0.1.0", Version: semver.Version{Minor: 1}},
+			"core": tag("core@1.2.3", semver.Version{Major: 1, Minor: 2, Patch: 3}),
+			"app":  tag("app@0.1.0", semver.Version{Minor: 1}),
 		},
 		logs: map[string][]string{
 			// core: one feature since its tag -> minor.
@@ -62,12 +67,13 @@ func TestComputePropagation(t *testing.T) {
 		},
 	}
 
-	p, err := Compute(context.Background(), git, pkgs, deps)
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
 	require.NoError(t, err)
 
 	core := p.Releases["core"]
 	assert.Equal(t, semver.BumpMinor, core.Bump)
 	assert.Equal(t, semver.Version{Major: 1, Minor: 3}, core.Next, "core -> 1.3.0")
+	assert.True(t, core.Tagged)
 
 	app := p.Releases["app"]
 	assert.Equal(t, semver.BumpPatch, app.Bump, "consumer of changed core gets a patch")
@@ -91,8 +97,8 @@ func TestComputeOwnBumpWins(t *testing.T) {
 	pkgs, deps := testPackages()
 	git := &fakeGit{
 		tags: map[string]gitx.Tag{
-			"core": {Name: "core@1.0.0", Version: semver.Version{Major: 1}},
-			"app":  {Name: "app@2.0.0", Version: semver.Version{Major: 2}},
+			"core": tag("core@1.0.0", semver.Version{Major: 1}),
+			"app":  tag("app@2.0.0", semver.Version{Major: 2}),
 		},
 		logs: map[string][]string{
 			"core@1.0.0": {"fix(core): edge case"},
@@ -101,7 +107,7 @@ func TestComputeOwnBumpWins(t *testing.T) {
 			"":          {},
 		},
 	}
-	p, err := Compute(context.Background(), git, pkgs, deps)
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
 	require.NoError(t, err)
 
 	app := p.Releases["app"]
@@ -113,9 +119,9 @@ func TestComputeSinglePatchForMultipleProviders(t *testing.T) {
 	pkgs, deps := testPackages()
 	git := &fakeGit{
 		tags: map[string]gitx.Tag{
-			"core":  {Name: "core@1.0.0", Version: semver.Version{Major: 1}},
-			"utils": {Name: "utils@1.0.0", Version: semver.Version{Major: 1}},
-			"app":   {Name: "app@1.0.0", Version: semver.Version{Major: 1}},
+			"core":  tag("core@1.0.0", semver.Version{Major: 1}),
+			"utils": tag("utils@1.0.0", semver.Version{Major: 1}),
+			"app":   tag("app@1.0.0", semver.Version{Major: 1}),
 		},
 		logs: map[string][]string{
 			"core@1.0.0":  {"fix(core): a", "fix(utils): b"},
@@ -123,7 +129,7 @@ func TestComputeSinglePatchForMultipleProviders(t *testing.T) {
 			"app@1.0.0":   {"fix(core): a", "fix(utils): b"},
 		},
 	}
-	p, err := Compute(context.Background(), git, pkgs, deps)
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
 	require.NoError(t, err)
 
 	app := p.Releases["app"]
@@ -136,14 +142,14 @@ func TestComputeBreakingChange(t *testing.T) {
 	pkgs, deps := testPackages()
 	git := &fakeGit{
 		tags: map[string]gitx.Tag{
-			"core": {Name: "core@1.5.2", Version: semver.Version{Major: 1, Minor: 5, Patch: 2}},
+			"core": tag("core@1.5.2", semver.Version{Major: 1, Minor: 5, Patch: 2}),
 		},
 		logs: map[string][]string{
 			"core@1.5.2": {"BREAKING CHANGE(core): drop old API"},
 			"":           {"BREAKING CHANGE(core): drop old API", "feat(app): support new core API"},
 		},
 	}
-	p, err := Compute(context.Background(), git, pkgs, deps)
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, semver.Version{Major: 2}, p.Releases["core"].Next, "core -> 2.0.0")
@@ -154,6 +160,92 @@ func TestComputeBreakingChange(t *testing.T) {
 	assert.Equal(t, semver.Version{Minor: 1}, app.Next, "first release -> 0.1.0")
 }
 
+func TestComputeInitialsForUntaggedPackage(t *testing.T) {
+	pkgs, deps := testPackages()
+	git := &fakeGit{
+		tags: map[string]gitx.Tag{},
+		logs: map[string][]string{
+			"": {"feat(core): first feature"},
+		},
+	}
+	initials := map[string]semver.Version{"core": {Major: 1, Minor: 2, Patch: 3}}
+
+	p, err := Compute(context.Background(), git, pkgs, deps, initials)
+	require.NoError(t, err)
+
+	core := p.Releases["core"]
+	assert.True(t, core.FromInitials)
+	assert.False(t, core.Tagged)
+	assert.Equal(t, semver.Version{Major: 1, Minor: 2, Patch: 3}, core.Current, "baseline from initials")
+	assert.Equal(t, semver.Version{Major: 1, Minor: 3}, core.Next, "feat bumps on top of the baseline")
+}
+
+func TestComputeInitialsForUnparseableTag(t *testing.T) {
+	// The user's scenario: newest tag core@0.0.1-0.0.0 is unparseable; the
+	// pre-last 0.0.0 must NOT be used — the baseline comes from initials and
+	// commits are scanned since the unparseable tag.
+	pkgs, deps := testPackages()
+	git := &fakeGit{
+		tags: map[string]gitx.Tag{
+			"core": {Name: "core@0.0.1-0.0.0"}, // Parsed: false
+		},
+		logs: map[string][]string{
+			"core@0.0.1-0.0.0": {"fix(core): repair"},
+			"":                 {"fix(core): repair", "feat(core): older, must not count"},
+		},
+	}
+	initials := map[string]semver.Version{"core": {Major: 1}}
+
+	p, err := Compute(context.Background(), git, pkgs, deps, initials)
+	require.NoError(t, err)
+
+	core := p.Releases["core"]
+	assert.True(t, core.FromInitials)
+	assert.Equal(t, semver.Version{Major: 1}, core.Current)
+	assert.Equal(t, semver.BumpPatch, core.OwnBump, "only commits since the unparseable tag count")
+	assert.Equal(t, semver.Version{Major: 1, Patch: 1}, core.Next, "1.0.0 + fix -> 1.0.1")
+}
+
+func TestComputeUnparseableTagWithoutInitials(t *testing.T) {
+	pkgs, deps := testPackages()
+	git := &fakeGit{
+		tags: map[string]gitx.Tag{
+			"core": {Name: "core@0.0.1-0.0.0"}, // Parsed: false
+		},
+		logs: map[string][]string{
+			"core@0.0.1-0.0.0": {"fix(core): repair"},
+		},
+	}
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
+	require.NoError(t, err)
+
+	core := p.Releases["core"]
+	assert.False(t, core.FromInitials)
+	assert.Equal(t, semver.Version{}, core.Current, "no initials entry: default 0.0.0")
+	assert.Equal(t, semver.Version{Patch: 1}, core.Next)
+}
+
+func TestComputeInitialsIgnoredWhenTagged(t *testing.T) {
+	pkgs, deps := testPackages()
+	git := &fakeGit{
+		tags: map[string]gitx.Tag{
+			"core": tag("core@2.0.0", semver.Version{Major: 2}),
+		},
+		logs: map[string][]string{
+			"core@2.0.0": {"fix(core): x"},
+			"":           {},
+		},
+	}
+	initials := map[string]semver.Version{"core": {Major: 9}}
+
+	p, err := Compute(context.Background(), git, pkgs, deps, initials)
+	require.NoError(t, err)
+
+	core := p.Releases["core"]
+	assert.False(t, core.FromInitials, "a parseable tag beats initials")
+	assert.Equal(t, semver.Version{Major: 2, Patch: 1}, core.Next)
+}
+
 func TestComputeCycle(t *testing.T) {
 	pkgs, _ := testPackages()
 	deps := []model.Dependency{
@@ -161,7 +253,7 @@ func TestComputeCycle(t *testing.T) {
 		{Consumer: "core", Provider: "app"},
 	}
 	git := &fakeGit{tags: map[string]gitx.Tag{}, logs: map[string][]string{}}
-	_, err := Compute(context.Background(), git, pkgs, deps)
+	_, err := Compute(context.Background(), git, pkgs, deps, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cycle")
 }

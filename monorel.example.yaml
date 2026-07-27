@@ -1,0 +1,83 @@
+# Same configuration as monorel.example.json in YAML. monorel defaults to
+# monorel.json; point at this file with: monorel --config monorel.yaml
+scripts:
+  build: "npm ci && npm run build"
+  publish: "npm publish --access public"
+  # Sync manifests to just-released provider versions; receives
+  # MONOREL_UPDATED_PROVIDERS as JSON.
+  sync-deps: "node ./scripts/sync-deps.js"
+  build-go: "go build ./..."
+  publish-go: "./scripts/release.sh"
+
+# All script references are optional: a stage without a script still runs
+# (ordering, tags, changelogs, github releases) but executes no shell command.
+spaces:
+  libs:
+    path: packages/libs
+    # Consumers may only build after a provider from this space is published.
+    isBuildWaitingPublish: true
+    # Roll back all local changes inside the package folder when a package
+    # from this space fails during version, build or publish.
+    revertOnFail: true
+    buildScript: build
+    publishScript: publish
+    versionScript: sync-deps
+  apps:
+    path: packages/apps
+    isBuildWaitingPublish: false
+    buildScript: build-go
+    publishScript: publish-go
+
+dependencies:
+  - consumer: app
+    provider: core
+  - consumer: app
+    provider: utils
+
+# Baseline versions used when a package's latest tag is missing or cannot be
+# parsed (e.g. a stray core@0.0.1-0.0.0). The next release bumps on top of
+# this value; a parseable latest tag always wins over initials.
+initials:
+  core: 1.0.0
+
+# One value for both stages (concurrency: 4) or [build, publish].
+# 0 means "number of CPUs".
+concurrency: [4, 2]
+
+# pretty (default, human console output) or trace/debug/info/warn/error (JSON).
+logLevel: pretty
+
+# Per-package changelog file; enabled by default. All fields optional.
+changelog:
+  enabled: true
+  file: CHANGELOG.md
+  title: "# Changelog"
+  dateFormat: "2006-01-02"
+  breakingTitle: "Breaking Changes"
+  featuresTitle: "Features"
+  fixesTitle: "Fixes"
+  dependenciesTitle: "Dependencies"
+
+# Optional finalize phase (disabled by default): one release commit capturing
+# changelog/manifest changes of all published packages (tags then point at
+# it), optionally pushed together with the tags. Remote access is verified
+# before any release work starts.
+commit:
+  enabled: false
+  messageFormat: "chore(release): {tags}"  # {tags}, {packages}
+  push: false
+  remote: origin
+
+# Shell used for all scripts; default /bin/sh -c.
+# shell: ["bash", "-c"]
+
+# GitHub release per published package; enabled by default (needs a repo and
+# token: owner/repo here or $GITHUB_REPOSITORY, token in $GITHUB_TOKEN or the
+# env var named by tokenEnv). Same format fields as changelog.
+github:
+  enabled: true
+  owner: acme
+  repo: monorepo
+  apiUrl: https://api.github.com
+  tokenEnv: GITHUB_TOKEN
+  featuresTitle: "Features"

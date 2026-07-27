@@ -18,6 +18,7 @@ spaces:
   libs:
     path: packages/libs
     isBuildWaitingPublish: true
+    revertOnFail: true
     buildScript: build
     publishScript: publish
   apps:
@@ -49,6 +50,8 @@ func TestLoadValid(t *testing.T) {
 	assert.Equal(t, 3, cfg.BuildConcurrency, "single value applies to build")
 	assert.Equal(t, 3, cfg.PublishConcurrency, "single value applies to publish")
 	assert.True(t, cfg.Spaces["libs"].IsBuildWaitingPublish)
+	assert.True(t, cfg.Spaces["libs"].RevertOnFail)
+	assert.False(t, cfg.Spaces["apps"].RevertOnFail, "revertOnFail defaults to false")
 }
 
 func TestLoadConcurrencyPair(t *testing.T) {
@@ -132,6 +135,193 @@ spaces:
 	assert.Equal(t, "echo p", pkgs[0].Space.PublishScript)
 }
 
+func TestLoadOptionalScripts(t *testing.T) {
+	// Scripts are optional; a space may configure none, some or all of them.
+	yml := `
+scripts: {sync: "npm install"}
+spaces:
+  libs: {path: pkgs, versionScript: sync}
+`
+	root := writeRepo(t, yml, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := cfg.Discover(root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Empty(t, pkgs[0].Space.BuildScript)
+	assert.Empty(t, pkgs[0].Space.PublishScript)
+	assert.Equal(t, "npm install", pkgs[0].Space.VersionScript)
+}
+
+func TestLoadInitials(t *testing.T) {
+	yml := validYAML + `
+initials:
+  core: 1.2.3
+  legacy-pkg: "0.9.0"
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	require.Len(t, cfg.InitialVersions, 2)
+	assert.Equal(t, 1, cfg.InitialVersions["core"].Major)
+	assert.Equal(t, 3, cfg.InitialVersions["core"].Patch)
+	assert.Equal(t, 9, cfg.InitialVersions["legacy-pkg"].Minor)
+}
+
+func TestLoadInitialsInvalidVersion(t *testing.T) {
+	yml := validYAML + `
+initials:
+  core: "not-a-version"
+`
+	root := writeRepo(t, yml)
+	_, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "initials")
+	assert.Contains(t, err.Error(), "not-a-version")
+}
+
+func TestLoadInitialsAbsent(t *testing.T) {
+	root := writeRepo(t, validYAML)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.InitialVersions)
+}
+
+func TestLoadChangelogGitHubDefaults(t *testing.T) {
+	root := writeRepo(t, validYAML)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.True(t, cfg.Changelog.IsEnabled(), "changelog defaults to enabled")
+	assert.True(t, cfg.GitHub.IsEnabled(), "github defaults to enabled")
+	assert.Empty(t, cfg.Changelog.File)
+	assert.Empty(t, cfg.GitHub.Owner)
+}
+
+func TestLoadChangelogOptions(t *testing.T) {
+	yml := validYAML + `
+changelog:
+  enabled: false
+  file: HISTORY.md
+  title: "# History"
+  dateFormat: "02.01.2006"
+  breakingTitle: "Breaking"
+  featuresTitle: "Added"
+  fixesTitle: "Fixed"
+  dependenciesTitle: "Bumped"
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.False(t, cfg.Changelog.IsEnabled())
+	assert.Equal(t, "HISTORY.md", cfg.Changelog.File)
+	assert.Equal(t, "# History", cfg.Changelog.Title)
+	assert.Equal(t, "02.01.2006", cfg.Changelog.DateFormat)
+	assert.Equal(t, "Breaking", cfg.Changelog.BreakingTitle)
+	assert.Equal(t, "Added", cfg.Changelog.FeaturesTitle)
+	assert.Equal(t, "Fixed", cfg.Changelog.FixesTitle)
+	assert.Equal(t, "Bumped", cfg.Changelog.DependenciesTitle)
+}
+
+func TestLoadGitHubOptions(t *testing.T) {
+	yml := validYAML + `
+github:
+  enabled: false
+  owner: acme
+  repo: mono
+  apiUrl: https://ghe.example.com/api/v3
+  tokenEnv: GH_RELEASE_TOKEN
+  featuresTitle: "New"
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.False(t, cfg.GitHub.IsEnabled())
+	assert.Equal(t, "acme", cfg.GitHub.Owner)
+	assert.Equal(t, "mono", cfg.GitHub.Repo)
+	assert.Equal(t, "https://ghe.example.com/api/v3", cfg.GitHub.APIURL)
+	assert.Equal(t, "GH_RELEASE_TOKEN", cfg.GitHub.TokenEnv)
+	assert.Equal(t, "New", cfg.GitHub.FeaturesTitle)
+}
+
+func TestLoadCommitDefaults(t *testing.T) {
+	root := writeRepo(t, validYAML)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.False(t, cfg.Commit.IsEnabled(), "commit defaults to disabled")
+	assert.False(t, cfg.Commit.PushEnabled(), "push defaults to disabled")
+	assert.Empty(t, cfg.Shell, "shell defaults to empty (runner falls back to /bin/sh -c)")
+}
+
+func TestLoadCommitOptions(t *testing.T) {
+	yml := validYAML + `
+commit:
+  enabled: true
+  messageFormat: "release: {packages} ({tags})"
+  push: true
+  remote: upstream
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.True(t, cfg.Commit.IsEnabled())
+	assert.Equal(t, "release: {packages} ({tags})", cfg.Commit.MessageFormat)
+	assert.True(t, cfg.Commit.PushEnabled())
+	assert.Equal(t, "upstream", cfg.Commit.Remote)
+}
+
+func TestLoadCommitPushWithoutCommitDisabled(t *testing.T) {
+	yml := validYAML + `
+commit:
+  push: true
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.False(t, cfg.Commit.PushEnabled(), "push only applies when the commit is enabled")
+}
+
+func TestLoadShellOption(t *testing.T) {
+	yml := validYAML + `
+shell: ["bash", "-c"]
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"bash", "-c"}, cfg.Shell)
+}
+
+func TestLoadShellEmptyInterpreter(t *testing.T) {
+	yml := validYAML + `
+shell: ["", "-c"]
+`
+	root := writeRepo(t, yml)
+	_, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shell")
+}
+
+func TestLoadJSONConfig(t *testing.T) {
+	jsonCfg := `{
+  "scripts": {"build": "echo b", "publish": "echo p"},
+  "spaces": {"libs": {"path": "pkgs", "buildScript": "build", "publishScript": "publish"}},
+  "concurrency": [4, 2],
+  "github": {"enabled": false}
+}`
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkgs", "core"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "monorel.json"), []byte(jsonCfg), 0o644))
+
+	cfg, err := Load(filepath.Join(root, "monorel.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 4, cfg.BuildConcurrency)
+	assert.Equal(t, 2, cfg.PublishConcurrency)
+	assert.False(t, cfg.GitHub.IsEnabled())
+	pkgs, _, err := cfg.Discover(root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "core", pkgs[0].Name)
+}
+
 func TestLoadErrors(t *testing.T) {
 	cases := []struct {
 		name, yml, wantErr string
@@ -139,7 +329,7 @@ func TestLoadErrors(t *testing.T) {
 		{"unknown field", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b, typo: 1}}", "invalid format"},
 		{"no spaces", "scripts: {b: x}", "at least one space"},
 		{"unknown script", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: nope, publishScript: b}}", "unknown script"},
-		{"missing scripts", "scripts: {b: x}\nspaces: {a: {path: p}}", "required"},
+		{"unknown version script", "scripts: {b: x}\nspaces: {a: {path: p, versionScript: nope}}", "unknown script"},
 		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: -1", "concurrency"},
 		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: [1, 2, 3]", "at most two"},
 		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogLevel: loud", "logLevel"},

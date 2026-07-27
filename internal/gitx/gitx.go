@@ -8,15 +8,20 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/yohimik/monorel/internal/semver"
 )
 
-// Tag is a parsed "pkg@MAJOR.MINOR.PATCH" release tag.
+// Tag is a "pkg@version" release tag. When the newest tag's version is not
+// strict MAJOR.MINOR.PATCH (e.g. "pkg@0.0.1-0.0.0"), Parsed is false: Name is
+// still usable as a git revision, but Version is meaningless and the caller
+// must take the baseline from elsewhere (config initials).
 type Tag struct {
 	Name    string
 	Version semver.Version
+	Parsed  bool
 }
 
 // TagName renders the canonical release tag for a package version.
@@ -24,7 +29,10 @@ func TagName(pkg string, v semver.Version) string { return pkg + "@" + v.String(
 
 // Git abstracts the repository operations used by planning and publishing.
 type Git interface {
-	// LatestTag returns the highest "pkg@semver" tag for the package, if any.
+	// LatestTag returns the latest "pkg@*" tag for the package, if any. When
+	// the newest tag (by creation date) has a parseable version, the returned
+	// tag is the highest parseable version with Parsed=true; when the newest
+	// tag's version cannot be parsed, that tag is returned with Parsed=false.
 	LatestTag(ctx context.Context, pkg string) (Tag, bool, error)
 	// Subjects lists commit subject lines reachable from HEAD, newest first.
 	// When sinceTag is non-empty only commits after that tag are listed;
@@ -53,31 +61,44 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	return out.String(), nil
 }
 
-// LatestTag lists tags matching "pkg@*" and returns the highest parseable
-// semantic version. Tags with unparseable versions are ignored.
+// LatestTag lists tags matching "pkg@*", newest first by creation date (ties
+// broken by version-aware name order). If the newest tag's version parses,
+// the highest parseable version is returned (robust against out-of-order tag
+// creation, e.g. backport tags); if the newest tag's version cannot be
+// parsed, that tag itself is returned with Parsed=false so the caller can
+// fall back to a configured initial version while still scanning commits
+// from the tag.
 func (c *CLI) LatestTag(ctx context.Context, pkg string) (Tag, bool, error) {
-	out, err := c.run(ctx, "tag", "--list", pkg+"@*")
+	// The last --sort key is primary: creation date desc, name as tie-break.
+	out, err := c.run(ctx, "tag", "--list", "--sort=-v:refname", "--sort=-creatordate", pkg+"@*")
 	if err != nil {
 		return Tag{}, false, err
 	}
 	prefix := pkg + "@"
-	var best Tag
-	found := false
+	var names []string
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, prefix) {
-			continue
+		if strings.HasPrefix(line, prefix) {
+			names = append(names, line)
 		}
-		v, perr := semver.Parse(line[len(prefix):])
+	}
+	if len(names) == 0 {
+		return Tag{}, false, nil
+	}
+	if _, perr := semver.Parse(names[0][len(prefix):]); perr != nil {
+		return Tag{Name: names[0]}, true, nil // newest tag exists but is unparseable
+	}
+	best := Tag{}
+	for _, name := range names {
+		v, perr := semver.Parse(name[len(prefix):])
 		if perr != nil {
 			continue
 		}
-		if !found || best.Version.Compare(v) < 0 {
-			best = Tag{Name: line, Version: v}
-			found = true
+		if !best.Parsed || best.Version.Compare(v) < 0 {
+			best = Tag{Name: name, Version: v, Parsed: true}
 		}
 	}
-	return best, found, nil
+	return best, true, nil
 }
 
 func (c *CLI) Subjects(ctx context.Context, sinceTag string) ([]string, error) {
@@ -98,5 +119,72 @@ func (c *CLI) Subjects(ctx context.Context, sinceTag string) ([]string, error) {
 
 func (c *CLI) CreateTag(ctx context.Context, name, message string) error {
 	_, err := c.run(ctx, "tag", "-a", name, "-m", message)
+	return err
+}
+
+// pathspec renders dir relative to the repo root, avoiding symlinked-tempdir
+// mismatches in git pathspecs.
+func (c *CLI) pathspec(dir string) string {
+	if rel, err := filepath.Rel(c.Dir, dir); err == nil {
+		return rel
+	}
+	return dir
+}
+
+// RevertDir discards all local changes inside dir: tracked files are restored
+// from HEAD and untracked files and folders are removed. Note this also wipes
+// any pre-existing uncommitted changes in that folder — CI runs from a clean
+// checkout, which is the intended environment.
+func (c *CLI) RevertDir(ctx context.Context, dir string) error {
+	spec := c.pathspec(dir)
+	if _, err := c.run(ctx, "checkout", "--", spec); err != nil {
+		return err
+	}
+	_, err := c.run(ctx, "clean", "-fd", "--", spec)
+	return err
+}
+
+// CommitDirs stages all changes inside the given directories and creates a
+// single commit. It reports whether a commit was actually created: when the
+// staged set turns out empty (e.g. changelogs disabled and no manifest
+// changes) no commit is made and (false, nil) is returned.
+func (c *CLI) CommitDirs(ctx context.Context, dirs []string, message string) (bool, error) {
+	args := []string{"add", "--"}
+	for _, d := range dirs {
+		args = append(args, c.pathspec(d))
+	}
+	if _, err := c.run(ctx, args...); err != nil {
+		return false, err
+	}
+	// diff --cached --quiet exits non-zero when something is staged.
+	if _, err := c.run(ctx, "diff", "--cached", "--quiet"); err == nil {
+		return false, nil // nothing staged
+	}
+	if _, err := c.run(ctx, "commit", "-m", message); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// HeadSHA returns the full SHA of the current HEAD commit.
+func (c *CLI) HeadSHA(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// VerifyRemote checks that the remote exists, is reachable and authenticated.
+// Meant to run before any release work so misconfigured credentials fail fast.
+func (c *CLI) VerifyRemote(ctx context.Context, remote string) error {
+	_, err := c.run(ctx, "ls-remote", "--heads", remote)
+	return err
+}
+
+// Push pushes the current branch (HEAD) together with reachable annotated
+// tags to the remote. Requires a checked-out branch (not a detached HEAD).
+func (c *CLI) Push(ctx context.Context, remote string) error {
+	_, err := c.run(ctx, "push", "--follow-tags", remote, "HEAD")
 	return err
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/yohimik/monorel/internal/model"
+	"github.com/yohimik/monorel/internal/semver"
 )
 
 // File mirrors the configuration at the monorepo root. Viper infers the
@@ -29,20 +30,96 @@ type File struct {
 	// Concurrency accepts a single value applied to both stages
 	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
 	// 0 entries mean "number of CPUs".
-	Concurrency []int  `mapstructure:"concurrency"`
-	LogLevel    string `mapstructure:"logLevel"`
+	Concurrency []int           `mapstructure:"concurrency"`
+	LogLevel    string          `mapstructure:"logLevel"`
+	Changelog   ChangelogConfig `mapstructure:"changelog"`
+	GitHub      GitHubConfig    `mapstructure:"github"`
+	Commit      CommitConfig    `mapstructure:"commit"`
+	// Shell is the command prefix scripts are appended to, e.g.
+	// ["bash", "-c"] or ["cmd", "/C"]. Default: ["/bin/sh", "-c"].
+	Shell []string `mapstructure:"shell"`
+	// Initials maps package names to the baseline version used when the
+	// package's latest release tag is missing or unparseable (e.g. a stray
+	// "pkg@0.0.1-0.0.0" tag). The next release bumps on top of this value.
+	// Keys are matched case-insensitively against discovered packages.
+	Initials map[string]string `mapstructure:"initials"`
 
-	// Resolved limits, populated by validation.
-	BuildConcurrency   int `mapstructure:"-"`
-	PublishConcurrency int `mapstructure:"-"`
+	// Resolved values, populated by validation.
+	BuildConcurrency   int                       `mapstructure:"-"`
+	PublishConcurrency int                       `mapstructure:"-"`
+	InitialVersions    map[string]semver.Version `mapstructure:"-"`
 }
 
-// SpaceConfig is the raw configuration of one space.
+// EntryFormatConfig customises how a release entry is rendered; shared by the
+// changelog file and the GitHub release body. All fields are optional.
+type EntryFormatConfig struct {
+	DateFormat        string `mapstructure:"dateFormat"`        // Go time layout, default "2006-01-02"
+	BreakingTitle     string `mapstructure:"breakingTitle"`     // default "Breaking Changes"
+	FeaturesTitle     string `mapstructure:"featuresTitle"`     // default "Features"
+	FixesTitle        string `mapstructure:"fixesTitle"`        // default "Fixes"
+	DependenciesTitle string `mapstructure:"dependenciesTitle"` // default "Dependencies"
+}
+
+// ChangelogConfig customises (or disables) the per-package changelog file.
+type ChangelogConfig struct {
+	Enabled           *bool  `mapstructure:"enabled"` // default true
+	File              string `mapstructure:"file"`    // default "CHANGELOG.md"
+	Title             string `mapstructure:"title"`   // default "# Changelog"
+	EntryFormatConfig `mapstructure:",squash"`
+}
+
+// IsEnabled reports whether the changelog file is written (default true).
+func (c ChangelogConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+
+// GitHubConfig customises (or disables) GitHub release creation.
+type GitHubConfig struct {
+	Enabled           *bool  `mapstructure:"enabled"`  // default true
+	Owner             string `mapstructure:"owner"`    // default: derived from $GITHUB_REPOSITORY
+	Repo              string `mapstructure:"repo"`     // default: derived from $GITHUB_REPOSITORY
+	APIURL            string `mapstructure:"apiUrl"`   // default https://api.github.com
+	TokenEnv          string `mapstructure:"tokenEnv"` // env var holding the token, default GITHUB_TOKEN
+	EntryFormatConfig `mapstructure:",squash"`
+}
+
+// IsEnabled reports whether GitHub releases are created (default true; still
+// requires a resolvable repository and token at runtime).
+func (c GitHubConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+
+// CommitConfig customises the finalize phase: a single release commit created
+// at the end of a successful run, capturing changelog and version-script
+// manifest changes of all published packages. Disabled by default. When
+// enabled, tags are created on the release commit (after it) instead of
+// during each publish, and GitHub releases move to the end of the run — after
+// the push when push is enabled, so they reference commits and tags that
+// exist on the remote.
+type CommitConfig struct {
+	Enabled *bool `mapstructure:"enabled"` // default false
+	// MessageFormat supports {tags} and {packages} placeholders (comma-
+	// separated lists). Default: "chore(release): {tags}".
+	MessageFormat string `mapstructure:"messageFormat"`
+	// Push pushes the release commit and tags (git push --follow-tags).
+	// Remote access is verified before any release work starts.
+	Push   bool   `mapstructure:"push"`   // default false
+	Remote string `mapstructure:"remote"` // default "origin"
+}
+
+// IsEnabled reports whether the release commit is created (default false).
+func (c CommitConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enabled }
+
+// PushEnabled reports whether the release commit and tags are pushed; only
+// meaningful with the commit enabled.
+func (c CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
+
+// SpaceConfig is the raw configuration of one space. All script references
+// are optional: a missing script means the stage runs without executing a
+// shell command.
 type SpaceConfig struct {
 	Path                  string `mapstructure:"path"`
 	IsBuildWaitingPublish bool   `mapstructure:"isBuildWaitingPublish"`
+	RevertOnFail          bool   `mapstructure:"revertOnFail"`
 	BuildScript           string `mapstructure:"buildScript"`
 	PublishScript         string `mapstructure:"publishScript"`
+	VersionScript         string `mapstructure:"versionScript"`
 }
 
 // DependencyConfig is one consumer -> provider relation.
@@ -134,10 +211,10 @@ func (c *File) validate() error {
 		if s.Path == "" {
 			return fmt.Errorf("space %q: path is required", name)
 		}
-		if s.BuildScript == "" || s.PublishScript == "" {
-			return fmt.Errorf("space %q: buildScript and publishScript are required", name)
-		}
-		for _, ref := range []string{s.BuildScript, s.PublishScript} {
+		for _, ref := range []string{s.BuildScript, s.PublishScript, s.VersionScript} {
+			if ref == "" { // scripts are optional
+				continue
+			}
 			if _, ok := c.script(ref); !ok {
 				return fmt.Errorf("space %q references unknown script %q", name, ref)
 			}
@@ -149,6 +226,19 @@ func (c *File) validate() error {
 		}
 		if d.Consumer == d.Provider {
 			return fmt.Errorf("dependencies[%d]: package %q cannot depend on itself", i, d.Consumer)
+		}
+	}
+	if len(c.Shell) > 0 && c.Shell[0] == "" {
+		return errors.New("shell: first element (the interpreter) must not be empty")
+	}
+	if len(c.Initials) > 0 {
+		c.InitialVersions = make(map[string]semver.Version, len(c.Initials))
+		for name, raw := range c.Initials {
+			v, err := semver.Parse(raw)
+			if err != nil {
+				return fmt.Errorf("initials[%q]: invalid version %q: %w", name, raw, err)
+			}
+			c.InitialVersions[name] = v
 		}
 	}
 	return nil
@@ -170,12 +260,15 @@ func (c *File) Discover(root string) ([]*model.Package, []model.Dependency, erro
 		sc := c.Spaces[sn]
 		build, _ := c.script(sc.BuildScript)
 		publish, _ := c.script(sc.PublishScript)
+		version, _ := c.script(sc.VersionScript)
 		space := &model.Space{
 			Name:              sn,
 			Path:              sc.Path,
 			BuildWaitsPublish: sc.IsBuildWaitingPublish,
+			RevertOnFail:      sc.RevertOnFail,
 			BuildScript:       build,
 			PublishScript:     publish,
+			VersionScript:     version,
 		}
 		dir := filepath.Join(root, sc.Path)
 		entries, err := os.ReadDir(dir)
