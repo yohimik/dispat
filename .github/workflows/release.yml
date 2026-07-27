@@ -7,10 +7,10 @@ on:
       - 'v*'
 
 permissions:
-  contents: write   # required to create the release and upload assets
+  contents: write
 
 env:
-  APP_NAME: myapp   # <-- change this to your binary/app name
+  APP_NAME: monorel
 
 jobs:
   build:
@@ -22,7 +22,7 @@ jobs:
           - goos: linux
             goarch: amd64
             ext: ""
-          - goos: linux
+          - goos: darwin
             goarch: arm64
             ext: ""
           - goos: windows
