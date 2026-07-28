@@ -102,6 +102,19 @@ func (f *fakeChangelog) Record(_ context.Context, rel *plan.Release) error {
 	return nil
 }
 
+type fakeReverter struct {
+	mu   sync.Mutex
+	dirs []string
+	err  error
+}
+
+func (f *fakeReverter) RevertDir(_ context.Context, dir string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dirs = append(f.dirs, dir)
+	return f.err
+}
+
 // mkPlan builds a plan of changed packages. waitPublish applies to the "libs"
 // space that every package lives in. ownBump marks packages with own commits.
 // Consumers listed in deps get DueTo set, mirroring plan.Compute (every listed
@@ -137,19 +150,6 @@ func mkPlan(waitPublish bool, ownBump map[string]semver.Bump, deps map[string][]
 		}
 	}
 	return p
-}
-
-type fakeReverter struct {
-	mu   sync.Mutex
-	dirs []string
-	err  error
-}
-
-func (f *fakeReverter) RevertDir(_ context.Context, dir string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.dirs = append(f.dirs, dir)
-	return f.err
 }
 
 func newExecutor(r *fakeRunner, tg *fakeTagger, cl *fakeChangelog, buildConc, publishConc int) *Executor {
@@ -374,17 +374,6 @@ func TestRunVersionTaskOrderingAndEnv(t *testing.T) {
 	assert.Equal(t, "1.0.1", updates[0]["newVersion"])
 }
 
-func TestRunVersionScriptFailureFailsPackage(t *testing.T) {
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
-	p.Releases["a"].Pkg.Space.VersionScript = "version"
-	r := &fakeRunner{fail: map[string]bool{"version b": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
-
-	require.Equal(t, StatusPublished, res["a"].Status)
-	require.Equal(t, StatusFailed, res["b"].Status)
-	assert.Equal(t, -1, r.indexOf("build b"), "build must not run after a failed version stage")
-}
-
 func TestRunVersionOrderingNoWaitPublish(t *testing.T) {
 	// isBuildWaitingPublish=false: the version stage only waits for provider
 	// builds, not their publishes.
@@ -416,6 +405,17 @@ func TestRunVersionSkippedOnProviderBuildFailureNoWait(t *testing.T) {
 	require.Equal(t, StatusSkipped, res["b"].Status)
 	assert.Equal(t, -1, r.indexOf("version b"))
 	assert.Equal(t, -1, r.indexOf("build b"))
+}
+
+func TestRunVersionScriptFailureFailsPackage(t *testing.T) {
+	p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p.Releases["a"].Pkg.Space.VersionScript = "version"
+	r := &fakeRunner{fail: map[string]bool{"version b": true}}
+	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, res["a"].Status)
+	require.Equal(t, StatusFailed, res["b"].Status)
+	assert.Equal(t, -1, r.indexOf("build b"), "build must not run after a failed version stage")
 }
 
 func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {

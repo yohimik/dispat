@@ -71,20 +71,6 @@ func TestRecordCustomFormat(t *testing.T) {
 	assert.Contains(t, gotBody.Body, "### New Stuff")
 }
 
-func TestRecordAPIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"message":"Validation Failed"}`))
-	}))
-	defer srv.Close()
-
-	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
-	err := rel.Record(context.Background(), testRelease())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "422")
-	assert.Contains(t, err.Error(), "Validation Failed")
-}
-
 func TestRecordWithCommitSHA(t *testing.T) {
 	var gotBody releaseRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +137,20 @@ func TestVerifyFailure(t *testing.T) {
 	err := rel.Verify(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "404")
+}
+
+func TestRecordAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"Validation Failed"}`))
+	}))
+	defer srv.Close()
+
+	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	err := rel.Record(context.Background(), testRelease())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "422")
+	assert.Contains(t, err.Error(), "Validation Failed")
 }
 
 func TestRecordConnectionError(t *testing.T) {
