@@ -15,8 +15,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/yohimik/monorel/internal/model"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/model"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // File mirrors the configuration at the monorepo root. Viper infers the

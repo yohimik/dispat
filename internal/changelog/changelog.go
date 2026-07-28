@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yohimik/monorel/internal/conventional"
-	"github.com/yohimik/monorel/internal/gitx"
-	"github.com/yohimik/monorel/internal/plan"
+	"github.com/yohimik/dispat/internal/conventional"
+	"github.com/yohimik/dispat/internal/gitx"
+	"github.com/yohimik/dispat/internal/plan"
 )
 
 // Format customises how a release entry is rendered. Zero values fall back to

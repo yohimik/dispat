@@ -1,4 +1,4 @@
-// Command monorel builds and publishes the changed packages of a monorepo.
+// Command dispat builds and publishes the changed packages of a monorepo.
 //
 // It reads a root configuration file, discovers packages inside configured
 // spaces, decides new semantic versions from conventional commits found in git
@@ -9,7 +9,7 @@ package main
 import (
 	"os"
 
-	"github.com/yohimik/monorel/internal/cli"
+	"github.com/yohimik/dispat/internal/cli"
 )
 
 func main() {

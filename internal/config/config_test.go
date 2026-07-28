@@ -39,13 +39,13 @@ func writeRepo(t *testing.T, cfgYAML string, pkgDirs ...string) string {
 	for _, d := range pkgDirs {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
-	require.NoError(t, os.WriteFile(filepath.Join(root, "monorel.yaml"), []byte(cfgYAML), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.yaml"), []byte(cfgYAML), 0o644))
 	return root
 }
 
 func TestLoadValid(t *testing.T) {
 	root := writeRepo(t, validYAML, "packages/libs/core", "packages/apps/app")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.Equal(t, 3, cfg.BuildConcurrency, "single value applies to build")
 	assert.Equal(t, 3, cfg.PublishConcurrency, "single value applies to publish")
@@ -62,7 +62,7 @@ spaces:
 concurrency: [4, 2]
 `
 	root := writeRepo(t, yml, "pkgs/core")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.Equal(t, 4, cfg.BuildConcurrency)
 	assert.Equal(t, 2, cfg.PublishConcurrency)
@@ -75,7 +75,7 @@ spaces:
   libs: {path: pkgs, buildScript: build, publishScript: publish}
 `
 	root := writeRepo(t, yml, "pkgs/core")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, cfg.BuildConcurrency, 1, "default build concurrency")
 	assert.GreaterOrEqual(t, cfg.PublishConcurrency, 1, "default publish concurrency")
@@ -93,7 +93,7 @@ func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
 
 func TestLoadFlagOverrides(t *testing.T) {
 	root := writeRepo(t, validYAML)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"),
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"),
 		testFlags(t, "--concurrency", "4,2", "--log-level", "debug"))
 	require.NoError(t, err)
 	assert.Equal(t, 4, cfg.BuildConcurrency, "explicit flag overrides config")
@@ -103,7 +103,7 @@ func TestLoadFlagOverrides(t *testing.T) {
 
 func TestLoadFlagSingleValue(t *testing.T) {
 	root := writeRepo(t, validYAML)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), testFlags(t, "--concurrency", "7"))
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), testFlags(t, "--concurrency", "7"))
 	require.NoError(t, err)
 	assert.Equal(t, 7, cfg.BuildConcurrency)
 	assert.Equal(t, 7, cfg.PublishConcurrency)
@@ -111,7 +111,7 @@ func TestLoadFlagSingleValue(t *testing.T) {
 
 func TestLoadFlagDefaultsDoNotOverride(t *testing.T) {
 	root := writeRepo(t, validYAML)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), testFlags(t))
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), testFlags(t))
 	require.NoError(t, err)
 	assert.Equal(t, 3, cfg.BuildConcurrency, "config wins over unset flag")
 	assert.Equal(t, 3, cfg.PublishConcurrency, "config wins over unset flag")
@@ -126,7 +126,7 @@ spaces:
   libs: {path: pkgs, buildScript: buildAll, publishScript: publishAll}
 `
 	root := writeRepo(t, yml, "pkgs/core")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	pkgs, _, err := cfg.Discover(root)
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ spaces:
   libs: {path: pkgs, versionScript: sync}
 `
 	root := writeRepo(t, yml, "pkgs/core")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	pkgs, _, err := cfg.Discover(root)
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ initials:
   legacy-pkg: "0.9.0"
 `
 	root := writeRepo(t, yml)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	require.Len(t, cfg.InitialVersions, 2)
 	assert.Equal(t, 1, cfg.InitialVersions["core"].Major)
@@ -174,7 +174,7 @@ initials:
   core: "not-a-version"
 `
 	root := writeRepo(t, yml)
-	_, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "initials")
 	assert.Contains(t, err.Error(), "not-a-version")
@@ -182,14 +182,14 @@ initials:
 
 func TestLoadInitialsAbsent(t *testing.T) {
 	root := writeRepo(t, validYAML)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.InitialVersions)
 }
 
 func TestLoadChangelogGitHubDefaults(t *testing.T) {
 	root := writeRepo(t, validYAML)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.True(t, cfg.Changelog.IsEnabled(), "changelog defaults to enabled")
 	assert.True(t, cfg.GitHub.IsEnabled(), "github defaults to enabled")
@@ -210,7 +210,7 @@ changelog:
   dependenciesTitle: "Bumped"
 `
 	root := writeRepo(t, yml)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.False(t, cfg.Changelog.IsEnabled())
 	assert.Equal(t, "HISTORY.md", cfg.Changelog.File)
@@ -233,7 +233,7 @@ github:
   featuresTitle: "New"
 `
 	root := writeRepo(t, yml)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.False(t, cfg.GitHub.IsEnabled())
 	assert.Equal(t, "acme", cfg.GitHub.Owner)
@@ -245,7 +245,7 @@ github:
 
 func TestLoadCommitDefaults(t *testing.T) {
 	root := writeRepo(t, validYAML)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.False(t, cfg.Commit.IsEnabled(), "commit defaults to disabled")
 	assert.False(t, cfg.Commit.PushEnabled(), "push defaults to disabled")
@@ -261,7 +261,7 @@ commit:
   remote: upstream
 `
 	root := writeRepo(t, yml)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.True(t, cfg.Commit.IsEnabled())
 	assert.Equal(t, "release: {packages} ({tags})", cfg.Commit.MessageFormat)
@@ -275,7 +275,7 @@ commit:
   push: true
 `
 	root := writeRepo(t, yml)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.False(t, cfg.Commit.PushEnabled(), "push only applies when the commit is enabled")
 }
@@ -285,7 +285,7 @@ func TestLoadShellOption(t *testing.T) {
 shell: ["bash", "-c"]
 `
 	root := writeRepo(t, yml)
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"bash", "-c"}, cfg.Shell)
 }
@@ -295,7 +295,7 @@ func TestLoadShellEmptyInterpreter(t *testing.T) {
 shell: ["", "-c"]
 `
 	root := writeRepo(t, yml)
-	_, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "shell")
 }
@@ -309,9 +309,9 @@ func TestLoadJSONConfig(t *testing.T) {
 }`
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkgs", "core"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "monorel.json"), []byte(jsonCfg), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(jsonCfg), 0o644))
 
-	cfg, err := Load(filepath.Join(root, "monorel.json"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 	assert.Equal(t, 4, cfg.BuildConcurrency)
 	assert.Equal(t, 2, cfg.PublishConcurrency)
@@ -338,7 +338,7 @@ func TestLoadErrors(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := writeRepo(t, c.yml)
-			_, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+			_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)
 		})
@@ -353,7 +353,7 @@ func TestLoadMissingFile(t *testing.T) {
 func TestDiscover(t *testing.T) {
 	root := writeRepo(t, validYAML,
 		"packages/libs/core", "packages/libs/utils", "packages/apps/app")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	pkgs, deps, err := cfg.Discover(root)
 	require.NoError(t, err)
@@ -376,7 +376,7 @@ func TestDiscover(t *testing.T) {
 func TestDiscoverDuplicatePackage(t *testing.T) {
 	root := writeRepo(t, validYAML,
 		"packages/libs/core", "packages/apps/core", "packages/apps/app")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	_, _, err = cfg.Discover(root)
 	require.Error(t, err)
@@ -385,7 +385,7 @@ func TestDiscoverDuplicatePackage(t *testing.T) {
 
 func TestDiscoverUnknownDependency(t *testing.T) {
 	root := writeRepo(t, validYAML, "packages/libs/core", "packages/apps/other")
-	cfg, err := Load(filepath.Join(root, "monorel.yaml"), nil)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	_, _, err = cfg.Discover(root)
 	require.Error(t, err)

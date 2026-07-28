@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 func TestParse(t *testing.T) {

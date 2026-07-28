@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // initRepo creates a git repo with one committed package file.

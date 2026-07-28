@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/monorel/internal/config"
+	"github.com/yohimik/dispat/internal/config"
 )
 
 // github is disabled in test configs so runs never touch the real API even
@@ -49,7 +49,7 @@ func initRepo(t *testing.T, cfg string) string {
 	}
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "core"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "monorel.json"), []byte(cfg), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(cfg), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "main.txt"), []byte("hi"), 0o644))
 
 	git := func(args ...string) {
@@ -266,9 +266,9 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
   "concurrency": 1,
   "logLevel": "info",
   "commit": {"enabled": true},
-  "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "MONOREL_TEST_TOKEN"}
+  "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "DISPAT_TEST_TOKEN"}
 }`
-	t.Setenv("MONOREL_TEST_TOKEN", "tkn")
+	t.Setenv("DISPAT_TEST_TOKEN", "tkn")
 	root := initRepo(t, cfg)
 	var stdout, stderr bytes.Buffer
 
@@ -304,7 +304,7 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestInvalidConfig(t *testing.T) {
-	root := t.TempDir() // no monorel.json
+	root := t.TempDir() // no dispat.json
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"status", "--root", root}, &stdout, &stderr)
 	assert.Equal(t, 1, code)

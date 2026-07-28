@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  APP_NAME: monorel
+  APP_NAME: dispat
 
 jobs:
   build:

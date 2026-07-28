@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yohimik/monorel/internal/changelog"
-	"github.com/yohimik/monorel/internal/gitx"
-	"github.com/yohimik/monorel/internal/plan"
+	"github.com/yohimik/dispat/internal/changelog"
+	"github.com/yohimik/dispat/internal/gitx"
+	"github.com/yohimik/dispat/internal/plan"
 )
 
 // DefaultAPIURL is the public GitHub REST API endpoint.

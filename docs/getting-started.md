@@ -4,15 +4,15 @@
 
 ```sh
 git clone <your fork or vendor path>
-cd monorel
+cd dispat
 go mod tidy
-go build -o monorel .
+go build -o dispat .
 go test ./...
 ```
 
 ## First configuration
 
-Create `monorel.json` at your monorepo root (YAML or TOML work too — pass `--config monorel.yaml`). Minimal example:
+Create `dispat.json` at your monorepo root (YAML or TOML work too — pass `--config dispat.yaml`). Minimal example:
 
 ```json
 {
@@ -48,8 +48,8 @@ Beyond scripts and spaces there are optional top-level knobs — `concurrency` (
 and `github` (customise or disable the release records), `initials` (baseline versions for packages without a usable
 tag), `commit` and `push` (end-of-run release commit and pushing, disabled by default) — and per-space options
 `isBuildWaitingPublish`, `revertOnFail` and `versionScript`. All are covered in
-[Configuration & CLI](configuration.md). Annotated full examples: [`monorel.example.json`](../monorel.example.json),
-[`monorel.example.yaml`](../monorel.example.yaml).
+[Configuration & CLI](configuration.md). Annotated full examples: [`dispat.example.json`](../dispat.example.json),
+[`dispat.example.yaml`](../dispat.example.yaml).
 
 ## Commit convention
 
@@ -60,11 +60,11 @@ ignored for versioning.
 ## Commands
 
 ```sh
-./monorel status               # print the project graph and planned versions; changes nothing
-./monorel                      # release (default command): full pipeline
-./monorel release --root path  # same, explicit
-./monorel --concurrency 4,2    # override build/publish parallelism
-./monorel --log-level info     # JSON logs for CI
+./dispat status               # print the project graph and planned versions; changes nothing
+./dispat                      # release (default command): full pipeline
+./dispat release --root path  # same, explicit
+./dispat --concurrency 4,2    # override build/publish parallelism
+./dispat --log-level info     # JSON logs for CI
 ```
 
 ## Running in CI (GitHub Actions example)
@@ -78,23 +78,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0      # full history: monorel reads tags and commit ranges
+          fetch-depth: 0      # full history: dispat reads tags and commit ranges
       - uses: actions/setup-go@v5
       - run: go run . --log-level info
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # GITHUB_REPOSITORY is set automatically by Actions
-      - run: git push origin --tags   # publish the tags monorel created
+      - run: git push origin --tags   # publish the tags dispat created
 ```
 
 Notes:
 
 - `fetch-depth: 0` matters — without full history and tags the planner cannot find previous releases.
-- By default monorel creates tags locally; push them after a successful run (as above). Alternatively enable
-  `"commit": {"enabled": true, "push": true}` in the config: monorel then creates one release commit (changelogs +
+- By default dispat creates tags locally; push them after a successful run (as above). Alternatively enable
+  `"commit": {"enabled": true, "push": true}` in the config: dispat then creates one release commit (changelogs +
   manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This requires
   a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work starts.
-- Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent monorel runs on the
+- Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent dispat runs on the
   same checkout are not guarded by a lock — serialize release jobs in CI.
 - GitHub releases are created via the API (enabled by default). In release-commit mode their body always documents the
   release commit SHA and tag. With `commit.push` enabled they are created after the push and pinned to the release

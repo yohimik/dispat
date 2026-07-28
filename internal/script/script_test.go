@@ -21,7 +21,7 @@ func TestShellRunnerDefault(t *testing.T) {
 	requireShell(t, "/bin/sh")
 	var out, errb bytes.Buffer
 	r := &ShellRunner{}
-	err := r.Run(context.Background(), t.TempDir(), "echo $MONOREL_PACKAGE", []string{"MONOREL_PACKAGE=core"}, &out, &errb)
+	err := r.Run(context.Background(), t.TempDir(), "echo $DISPAT_PACKAGE", []string{"DISPAT_PACKAGE=core"}, &out, &errb)
 	require.NoError(t, err)
 	assert.Equal(t, "core\n", out.String(), "env must reach the script")
 }

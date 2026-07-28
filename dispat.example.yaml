@@ -1,10 +1,10 @@
-# Same configuration as monorel.example.json in YAML. monorel defaults to
-# monorel.json; point at this file with: monorel --config monorel.yaml
+# Same configuration as dispat.example.json in YAML. dispat defaults to
+# dispat.json; point at this file with: dispat --config dispat.yaml
 scripts:
   build: "npm ci && npm run build"
   publish: "npm publish --access public"
   # Sync manifests to just-released provider versions; receives
-  # MONOREL_UPDATED_PROVIDERS as JSON.
+  # DISPAT_UPDATED_PROVIDERS as JSON.
   sync-deps: "node ./scripts/sync-deps.js"
   build-go: "go build ./..."
   publish-go: "./scripts/release.sh"

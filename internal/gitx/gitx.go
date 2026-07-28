@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // Tag is a "pkg@version" release tag. When the newest tag's version is not

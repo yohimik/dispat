@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/monorel/internal/conventional"
-	"github.com/yohimik/monorel/internal/model"
-	"github.com/yohimik/monorel/internal/plan"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/conventional"
+	"github.com/yohimik/dispat/internal/model"
+	"github.com/yohimik/dispat/internal/plan"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // fakeRunner records "command pkgDir" events, captures script environments,
@@ -362,11 +362,11 @@ func TestRunVersionTaskOrderingAndEnv(t *testing.T) {
 		"version runs exactly before the consumer's build")
 
 	env := r.envs["version b"]
-	assert.Equal(t, "b", envValue(t, env, "MONOREL_PACKAGE"))
-	assert.Equal(t, "version", envValue(t, env, "MONOREL_STAGE"))
+	assert.Equal(t, "b", envValue(t, env, "DISPAT_PACKAGE"))
+	assert.Equal(t, "version", envValue(t, env, "DISPAT_STAGE"))
 
 	var updates []map[string]string
-	require.NoError(t, json.Unmarshal([]byte(envValue(t, env, "MONOREL_UPDATED_PROVIDERS")), &updates))
+	require.NoError(t, json.Unmarshal([]byte(envValue(t, env, "DISPAT_UPDATED_PROVIDERS")), &updates))
 	require.Len(t, updates, 1)
 	assert.Equal(t, "a", updates[0]["package"])
 	assert.Equal(t, "libs", updates[0]["space"])
@@ -436,7 +436,7 @@ func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {
 
 func TestRunVersionFiltersFailedProviders(t *testing.T) {
 	// b consumes a1 (fails) and a2 (succeeds) and has its own bump: the
-	// version script runs, but only a2 appears in MONOREL_UPDATED_PROVIDERS.
+	// version script runs, but only a2 appears in DISPAT_UPDATED_PROVIDERS.
 	p := mkPlan(true, map[string]semver.Bump{"b": semver.BumpPatch},
 		map[string][]string{"b": {"a1", "a2"}}, "a1", "a2", "b")
 	p.Releases["b"].Pkg.Space.VersionScript = "version"
@@ -449,7 +449,7 @@ func TestRunVersionFiltersFailedProviders(t *testing.T) {
 	require.NotEqual(t, -1, r.indexOf("version b"))
 
 	var updates []map[string]string
-	raw := envValue(t, r.envs["version b"], "MONOREL_UPDATED_PROVIDERS")
+	raw := envValue(t, r.envs["version b"], "DISPAT_UPDATED_PROVIDERS")
 	require.NoError(t, json.Unmarshal([]byte(raw), &updates))
 	require.Len(t, updates, 1, "failed provider must be filtered out")
 	assert.Equal(t, "a2", updates[0]["package"])
@@ -462,14 +462,14 @@ func TestRunScriptEnv(t *testing.T) {
 	require.Equal(t, StatusPublished, res["a"].Status)
 
 	env := r.envs["build a"]
-	assert.Equal(t, "a", envValue(t, env, "MONOREL_PACKAGE"))
-	assert.Equal(t, "libs", envValue(t, env, "MONOREL_SPACE"))
-	assert.Equal(t, "1.0.0", envValue(t, env, "MONOREL_OLD_VERSION"))
-	assert.Equal(t, "1.0.1", envValue(t, env, "MONOREL_NEW_VERSION"))
-	assert.Equal(t, "patch", envValue(t, env, "MONOREL_BUMP"))
-	assert.Equal(t, "a@1.0.1", envValue(t, env, "MONOREL_TAG"))
-	assert.Equal(t, "build", envValue(t, env, "MONOREL_STAGE"))
-	assert.Equal(t, "publish", envValue(t, r.envs["publish a"], "MONOREL_STAGE"))
+	assert.Equal(t, "a", envValue(t, env, "DISPAT_PACKAGE"))
+	assert.Equal(t, "libs", envValue(t, env, "DISPAT_SPACE"))
+	assert.Equal(t, "1.0.0", envValue(t, env, "DISPAT_OLD_VERSION"))
+	assert.Equal(t, "1.0.1", envValue(t, env, "DISPAT_NEW_VERSION"))
+	assert.Equal(t, "patch", envValue(t, env, "DISPAT_BUMP"))
+	assert.Equal(t, "a@1.0.1", envValue(t, env, "DISPAT_TAG"))
+	assert.Equal(t, "build", envValue(t, env, "DISPAT_STAGE"))
+	assert.Equal(t, "publish", envValue(t, r.envs["publish a"], "DISPAT_STAGE"))
 }
 
 func TestRunWithoutScripts(t *testing.T) {

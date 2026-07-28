@@ -17,15 +17,15 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
-	"github.com/yohimik/monorel/internal/changelog"
-	"github.com/yohimik/monorel/internal/config"
-	"github.com/yohimik/monorel/internal/github"
-	"github.com/yohimik/monorel/internal/gitx"
-	"github.com/yohimik/monorel/internal/model"
-	"github.com/yohimik/monorel/internal/plan"
-	"github.com/yohimik/monorel/internal/release"
-	"github.com/yohimik/monorel/internal/script"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/changelog"
+	"github.com/yohimik/dispat/internal/config"
+	"github.com/yohimik/dispat/internal/github"
+	"github.com/yohimik/dispat/internal/gitx"
+	"github.com/yohimik/dispat/internal/model"
+	"github.com/yohimik/dispat/internal/plan"
+	"github.com/yohimik/dispat/internal/release"
+	"github.com/yohimik/dispat/internal/script"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // Commands accepted by Run.
@@ -36,14 +36,14 @@ const (
 
 // Run is the program entry point; it returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
-	fs := pflag.NewFlagSet("monorel", pflag.ContinueOnError)
+	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "monorepo root folder")
-	cfgName := fs.String("config", "monorel.json", "config file name, relative to --root")
+	cfgName := fs.String("config", "dispat.json", "config file name, relative to --root")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2)")
 	fs.String("log-level", "", "override the configured logLevel (pretty, trace, debug, info, warn, error)")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, `usage: monorel [command] [flags]
+		fmt.Fprintf(stderr, `usage: dispat [command] [flags]
 
 commands:
   release  build and publish changed packages (default)

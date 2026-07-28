@@ -3,7 +3,7 @@
 ## CLI
 
 ```
-monorel [command] [flags]
+dispat [command] [flags]
 ```
 
 | Command             | Effect                                                                                                   |
@@ -14,7 +14,7 @@ monorel [command] [flags]
 | Flag            | Default        | Effect                                                                |
 |-----------------|----------------|-----------------------------------------------------------------------|
 | `--root`        | `.`            | Monorepo root folder (git repo root).                                 |
-| `--config`      | `monorel.json` | Config file name, relative to `--root`.                               |
+| `--config`      | `dispat.json` | Config file name, relative to `--root`.                               |
 | `--concurrency` | from config    | Override: one value for both stages (`7`) or `build,publish` (`4,2`). |
 | `--log-level`   | from config    | Override: `pretty`, `trace`, `debug`, `info`, `warn`, `error`.        |
 | `--help`        |                | Print usage.                                                          |
@@ -26,7 +26,7 @@ Exit codes: `0` success (including "nothing changed"), `1` configuration/plannin
 
 ## Configuration file
 
-Loaded with viper: the format is inferred from the file extension, so JSON (default `monorel.json`), YAML or TOML all
+Loaded with viper: the format is inferred from the file extension, so JSON (default `dispat.json`), YAML or TOML all
 work. Unknown keys are rejected (typo protection). Viper matches keys case-insensitively and lowercases map keys, so
 script and space names are effectively case-insensitive.
 
@@ -142,15 +142,15 @@ Every script receives, on top of the parent environment:
 
 | Variable              | Example      | Meaning                                               |
 |-----------------------|--------------|-------------------------------------------------------|
-| `MONOREL_PACKAGE`     | `core`       | Package name.                                         |
-| `MONOREL_SPACE`       | `libs`       | Space name.                                           |
-| `MONOREL_OLD_VERSION` | `1.2.3`      | Version being replaced (`0.0.0` for a first release). |
-| `MONOREL_NEW_VERSION` | `1.3.0`      | Version being released.                               |
-| `MONOREL_BUMP`        | `minor`      | `patch`, `minor` or `major`.                          |
-| `MONOREL_TAG`         | `core@1.3.0` | Tag that will be created on success.                  |
-| `MONOREL_STAGE`       | `build`      | `version`, `build` or `publish`.                      |
+| `DISPAT_PACKAGE`     | `core`       | Package name.                                         |
+| `DISPAT_SPACE`       | `libs`       | Space name.                                           |
+| `DISPAT_OLD_VERSION` | `1.2.3`      | Version being replaced (`0.0.0` for a first release). |
+| `DISPAT_NEW_VERSION` | `1.3.0`      | Version being released.                               |
+| `DISPAT_BUMP`        | `minor`      | `patch`, `minor` or `major`.                          |
+| `DISPAT_TAG`         | `core@1.3.0` | Tag that will be created on success.                  |
+| `DISPAT_STAGE`       | `build`      | `version`, `build` or `publish`.                      |
 
-The version stage additionally receives `MONOREL_UPDATED_PROVIDERS`: a JSON array like
+The version stage additionally receives `DISPAT_UPDATED_PROVIDERS`: a JSON array like
 `[{"package":"core","space":"libs","oldVersion":"1.2.3","newVersion":"1.3.0"}]` listing this package's changed
 providers. Providers that failed or were skipped are filtered out (their versions were never released); if no
 successfully updated provider remains — the package proceeds only on its own commits — the version script is not

@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/monorel/internal/gitx"
-	"github.com/yohimik/monorel/internal/model"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/gitx"
+	"github.com/yohimik/dispat/internal/model"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // fakeGit serves canned tags and history. logs is keyed by the sinceTag

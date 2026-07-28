@@ -1,22 +1,22 @@
-# monorel
+# dispat
 
-**monorel** releases monorepos: it detects which packages changed from conventional commits, computes their next
+**dispat** releases monorepos: it detects which packages changed from conventional commits, computes their next
 semantic versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel, with
 changelogs, git tags and GitHub releases on the way out.
 
 ## Key features
 
-- **Graph release orchestration** — packages declare consumer → provider relations; monorel topologically orders the
+- **Graph release orchestration** — packages declare consumer → provider relations; dispat topologically orders the
   whole pipeline, bumps dependants of changed packages automatically, skips consumers of failed packages (unless they
   have changes of their own), and keeps the rest of the graph releasing.
 - **Parallel execution** — independent packages build and publish concurrently, with separate configurable concurrency
   budgets for the build and publish stages and deterministic ordering guarantees.
-- **Single-file configuration** — one `monorel.json` (YAML/TOML work too) at the repo root describes everything:
+- **Single-file configuration** — one `dispat.json` (YAML/TOML work too) at the repo root describes everything:
   scripts, package spaces, dependencies, concurrency, changelog/GitHub/commit behavior.
 - **Tool-, infra- and language-agnostic** — packages are just folders; build/publish/version steps are any shell
-  commands (npm, go, cargo, docker, …) run through a configurable shell and fed context via `MONOREL_*` env vars.
+  commands (npm, go, cargo, docker, …) run through a configurable shell and fed context via `DISPAT_*` env vars.
   Versions live purely in git tags (`package@1.2.3`) — no version files, no lockstep, no framework buy-in.
-- **Status tracking** — `monorel status` prints the full project graph with computed bumps and next versions without
+- **Status tracking** — `dispat status` prints the full project graph with computed bumps and next versions without
   touching anything; releases end with a per-package summary (published / failed / skipped, durations, failed stage)
   and exit non-zero on failure. Logs are human-pretty locally and JSON in CI.
 - **Release records built in** — per-package `CHANGELOG.md` entries and GitHub releases from the same commit data,
@@ -67,7 +67,7 @@ their own conventional commits, or another changed provider that did publish suc
 already built (allowed by `isBuildWaitingPublish: false` while the provider was still publishing) is skipped at its
 publish once the provider's publish failure is known — nothing is ever published against an unpublished provider
 version. Skips cascade down the dependency chain by the same rule. A consumer that proceeds on its own reason runs its
-pipeline normally, except that failed and skipped providers are filtered from `MONOREL_UPDATED_PROVIDERS`, and if none
+pipeline normally, except that failed and skipped providers are filtered from `DISPAT_UPDATED_PROVIDERS`, and if none
 remain the version script is not executed at all. Spaces with `revertOnFail: true` additionally roll back all local
 changes inside a failing package's folder (tracked files restored, untracked files removed), so a half-finished release
 leaves no residue in the worktree.
@@ -94,10 +94,10 @@ just executes no shell command.
 ## Quick start
 
 ```sh
-go build -o monorel .
-./monorel status   # print the graph and planned versions, change nothing
-./monorel          # release: run the full pipeline
+go build -o dispat .
+./dispat status   # print the graph and planned versions, change nothing
+./dispat          # release: run the full pipeline
 ```
 
-See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and `monorel.example.json` /
-`monorel.example.yaml` for annotated configs.
+See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and `dispat.example.json` /
+`dispat.example.yaml` for annotated configs.

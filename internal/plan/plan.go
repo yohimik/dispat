@@ -7,11 +7,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yohimik/monorel/internal/conventional"
-	"github.com/yohimik/monorel/internal/gitx"
-	"github.com/yohimik/monorel/internal/graph"
-	"github.com/yohimik/monorel/internal/model"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/conventional"
+	"github.com/yohimik/dispat/internal/gitx"
+	"github.com/yohimik/dispat/internal/graph"
+	"github.com/yohimik/dispat/internal/model"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // Release describes what (if anything) will happen to one package.

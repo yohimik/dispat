@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/monorel/internal/changelog"
-	"github.com/yohimik/monorel/internal/conventional"
-	"github.com/yohimik/monorel/internal/model"
-	"github.com/yohimik/monorel/internal/plan"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/changelog"
+	"github.com/yohimik/dispat/internal/conventional"
+	"github.com/yohimik/dispat/internal/model"
+	"github.com/yohimik/dispat/internal/plan"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 func testRelease() *plan.Release {

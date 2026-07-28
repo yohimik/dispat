@@ -15,7 +15,7 @@ package conventional
 import (
 	"strings"
 
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // Kind classifies a commit subject.

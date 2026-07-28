@@ -1,4 +1,4 @@
-module github.com/yohimik/monorel
+module github.com/yohimik/dispat
 
 go 1.26
 

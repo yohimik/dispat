@@ -12,10 +12,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/yohimik/monorel/internal/gitx"
-	"github.com/yohimik/monorel/internal/plan"
-	"github.com/yohimik/monorel/internal/script"
-	"github.com/yohimik/monorel/internal/semver"
+	"github.com/yohimik/dispat/internal/gitx"
+	"github.com/yohimik/dispat/internal/plan"
+	"github.com/yohimik/dispat/internal/script"
+	"github.com/yohimik/dispat/internal/semver"
 )
 
 // Status is the terminal state of a package release.
@@ -91,8 +91,8 @@ type Reverter interface {
 //
 // A stage with no configured script still runs — orderings, statuses,
 // changelogs and tags are preserved — it just executes no shell command.
-// Scripts receive MONOREL_* environment variables (package, space, versions,
-// bump, stage, tag; the version stage also gets MONOREL_UPDATED_PROVIDERS as
+// Scripts receive DISPAT_* environment variables (package, space, versions,
+// bump, stage, tag; the version stage also gets DISPAT_UPDATED_PROVIDERS as
 // JSON).
 //
 // Build and publish stages have independent parallelism budgets: at most
@@ -371,7 +371,7 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 }
 
 // providerUpdate is the JSON shape passed to version scripts via
-// MONOREL_UPDATED_PROVIDERS.
+// DISPAT_UPDATED_PROVIDERS.
 type providerUpdate struct {
 	Package    string `json:"package"`
 	Space      string `json:"space"`
@@ -402,24 +402,24 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 	return updates
 }
 
-// scriptEnv builds the MONOREL_* environment for one task's script.
+// scriptEnv builds the DISPAT_* environment for one task's script.
 func (e *Executor) scriptEnv(t task, p *plan.Plan, updates []providerUpdate) []string {
 	rel := p.Releases[t.pkg]
 	env := []string{
-		"MONOREL_PACKAGE=" + t.pkg,
-		"MONOREL_SPACE=" + rel.Pkg.Space.Name,
-		"MONOREL_OLD_VERSION=" + rel.Current.String(),
-		"MONOREL_NEW_VERSION=" + rel.Next.String(),
-		"MONOREL_BUMP=" + rel.Bump.String(),
-		"MONOREL_TAG=" + gitx.TagName(t.pkg, rel.Next),
-		"MONOREL_STAGE=" + t.kind.String(),
+		"DISPAT_PACKAGE=" + t.pkg,
+		"DISPAT_SPACE=" + rel.Pkg.Space.Name,
+		"DISPAT_OLD_VERSION=" + rel.Current.String(),
+		"DISPAT_NEW_VERSION=" + rel.Next.String(),
+		"DISPAT_BUMP=" + rel.Bump.String(),
+		"DISPAT_TAG=" + gitx.TagName(t.pkg, rel.Next),
+		"DISPAT_STAGE=" + t.kind.String(),
 	}
 	if t.kind == taskVersion {
 		data, err := json.Marshal(updates)
 		if err != nil { // unreachable for these plain structs
 			data = []byte("[]")
 		}
-		env = append(env, "MONOREL_UPDATED_PROVIDERS="+string(data))
+		env = append(env, "DISPAT_UPDATED_PROVIDERS="+string(data))
 	}
 	return env
 }

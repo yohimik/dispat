@@ -3,7 +3,7 @@
 ## Runtime steps
 
 1. Parse the command line (pflag); dispatch `release` or `status`.
-2. Load and validate `monorel.json` (viper; unknown keys rejected; flag bindings applied).
+2. Load and validate `dispat.json` (viper; unknown keys rejected; flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path, names unique across spaces.
 4. Build the dependency graph from configured relations; topologically sort it (cycles abort with the members named).
 5. For each package: resolve the latest `pkg@*` tag (highest parseable version when the newest tag parses; otherwise the
@@ -50,7 +50,7 @@ internal/
   release    the executor: task-graph construction (version/build/publish
              nodes, dependency edges), dependency-counting scheduler with
              per-stage worker budgets, skip propagation, provider-update
-             filtering, MONOREL_* script environments, line-buffered log
+             filtering, DISPAT_* script environments, line-buffered log
              streaming of script output
   script     Runner interface + ShellRunner (configurable shell, default
              sh -c; injected env, cwd = package)
@@ -88,7 +88,7 @@ successfully published changed provider. A consumer's terminal outcome is determ
 always waits for its providers' publishes, so a provider's publish failure is guaranteed to be seen at the latest there.
 With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage; with `false`
 the consumer may spend a version/build on a release that its publish then skips — the trade-off that flag opts into. The
-version stage filters failed/skipped providers out of `MONOREL_UPDATED_PROVIDERS` and skips its script entirely when
+version stage filters failed/skipped providers out of `DISPAT_UPDATED_PROVIDERS` and skips its script entirely when
 none remain.
 
 For spaces with `revertOnFail: true`, a failing package (any stage, including a failing release recorder) has its folder
