@@ -101,3 +101,23 @@ go build -o dispat .
 
 See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and `dispat.example.json` /
 `dispat.example.yaml` for annotated configs.
+
+## Planned features
+
+- **Per-package overrides within a space** — a package will be able to override its enclosing space's configuration
+  (scripts, concurrency, `revertOnFail`, changelog/GitHub behavior, …) for itself alone, so one-off exceptions no
+  longer require carving a package out into its own space.
+- **Computed dependency graph** — a command that analyzes packages' project files directly (manifests, module/import
+  declarations, …) and derives the consumer → provider graph from them, so relations no longer have to be declared by
+  hand in config; explicit overrides will be supported for cases the analysis can't or shouldn't infer.
+- **File-based commit-to-package matching** — an alternative to scope-based conventional commits, where a commit is
+  attributed to a package by the files it actually touches overridable by current style `type(pkg):`.
+
+## Projects using dispat (Real-world examples)
+
+- [webxash3d-fwgs](https://github.com/yohimik/webxash3d-fwgs) — WebAssembly port of the Xash3D-FWGS game engine
+  "real work docker depending on docker depending on npm" provider chain, four levels deep parallel builds from engine package to modded server image.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE.md) file for more information.
