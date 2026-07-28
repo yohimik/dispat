@@ -11,13 +11,14 @@ dispat [command] [flags]
 | `release` (default) | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.   |
 | `status`            | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written. |
 
-| Flag            | Default        | Effect                                                                |
-|-----------------|----------------|-----------------------------------------------------------------------|
-| `--root`        | `.`            | Monorepo root folder (git repo root).                                 |
+| Flag            | Default       | Effect                                                                |
+|-----------------|---------------|-----------------------------------------------------------------------|
+| `--root`        | `.`           | Monorepo root folder (git repo root).                                 |
 | `--config`      | `dispat.json` | Config file name, relative to `--root`.                               |
-| `--concurrency` | from config    | Override: one value for both stages (`7`) or `build,publish` (`4,2`). |
-| `--log-level`   | from config    | Override: `pretty`, `trace`, `debug`, `info`, `warn`, `error`.        |
-| `--help`        |                | Print usage.                                                          |
+| `--concurrency` | from config   | Override: one value for both stages (`7`) or `build,publish` (`4,2`). |
+| `--log-level`   | from config   | Override: `trace`, `debug`, `info`, `warn`, `error`.                  |
+| `--log-format`  | from config   | Override: `pretty` or `json`.                                         |
+| `--help`        |               | Print usage.                                                          |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
 
@@ -38,7 +39,8 @@ script and space names are effectively case-insensitive.
 | `spaces`       | map name → space               | yes (≥ 1) | Package groups sharing build/publish behaviour.                                                                                  |
 | `dependencies` | list of `{consumer, provider}` | no        | Package-level consumer → provider relations. Both must exist; self-dependencies and cycles are rejected; duplicates are ignored. |
 | `concurrency`  | int or `[int, int]`            | no        | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.       |
-| `logLevel`     | string                         | no        | `pretty` (default; colored console output) or a concrete level (`trace`…`error`) which switches to JSON lines for CI ingestion.  |
+| `logLevel`     | string                         | no        | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                        |
+| `logFormat`    | string                         | no        | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                   |
 | `changelog`    | object                         | no        | Per-package changelog file options; see below.                                                                                   |
 | `github`       | object                         | no        | GitHub release options; see below.                                                                                               |
 | `initials`     | map package → version          | no        | Baseline versions used when a package's latest tag is missing or unparseable; see below.                                         |
@@ -83,14 +85,14 @@ New entries are prepended below the title, newest first.
 
 ### `github`
 
-| Key        | Default                   | Description                                                            |
-|------------|---------------------------|------------------------------------------------------------------------|
-| `enabled`  | `true`                    | Create a GitHub release per published package.                         |
-| `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                      |
-| `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                       |
-| `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                              |
-| `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                |
-| *format*   |                           | All entry format options above (the release body has no entry header). |
+| Key        | Default                   | Description                                                                                                                                                                                                                                                                    |
+|------------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`  | `true`                    | Create a GitHub release per published package.                                                                                                                                                                                                                                 |
+| `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                              |
+| `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                               |
+| `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                                                                                                                                                                                                                                      |
+| `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                                                                                                                                                                                                                        |
+| *format*   |                           | All entry format options above. The release body contains only the sections — the `## pkg@version (date)` header line used in changelog files is omitted, since the release title is already the tag and GitHub shows its own date; `dateFormat` therefore has no effect here. |
 
 The release is named after the tag (`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no
 repository or token can be resolved at runtime, GitHub releases are skipped with a warning instead of failing the run.
@@ -140,8 +142,8 @@ exits 1, but already-published registry artifacts stay published.
 
 Every script receives, on top of the parent environment:
 
-| Variable              | Example      | Meaning                                               |
-|-----------------------|--------------|-------------------------------------------------------|
+| Variable             | Example      | Meaning                                               |
+|----------------------|--------------|-------------------------------------------------------|
 | `DISPAT_PACKAGE`     | `core`       | Package name.                                         |
 | `DISPAT_SPACE`       | `libs`       | Space name.                                           |
 | `DISPAT_OLD_VERSION` | `1.2.3`      | Version being replaced (`0.0.0` for a first release). |

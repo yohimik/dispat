@@ -41,7 +41,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	root := fs.String("root", ".", "monorepo root folder")
 	cfgName := fs.String("config", "dispat.json", "config file name, relative to --root")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2)")
-	fs.String("log-level", "", "override the configured logLevel (pretty, trace, debug, info, warn, error)")
+	fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
+	fs.String("log-format", "", "override the configured logFormat (pretty, json)")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `usage: dispat [command] [flags]
 
@@ -83,7 +84,7 @@ flags:
 		bootLog.Error().Err(err).Msg("invalid configuration")
 		return 1
 	}
-	log := newLogger(cfg.LogLevel, stdout)
+	log := newLogger(cfg.LogLevel, cfg.LogFormat, stdout)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -333,16 +334,16 @@ func entryFormat(f config.EntryFormatConfig) changelog.Format {
 	}
 }
 
-// newLogger builds the run logger. "pretty" renders human-friendly console
-// output; any other level emits machine-readable JSON for CI pipelines.
-func newLogger(level string, out io.Writer) zerolog.Logger {
-	if level == "pretty" {
-		w := zerolog.ConsoleWriter{Out: out, TimeFormat: "15:04:05"}
-		return zerolog.New(w).Level(zerolog.InfoLevel).With().Timestamp().Logger()
-	}
+// newLogger builds the run logger at the configured level. Format "pretty"
+// renders human-friendly console output; "json" emits machine-readable lines
+// for CI pipelines.
+func newLogger(level, format string, out io.Writer) zerolog.Logger {
 	lvl, err := zerolog.ParseLevel(level)
 	if err != nil { // config validation makes this unreachable
 		lvl = zerolog.InfoLevel
+	}
+	if format == "pretty" {
+		out = zerolog.ConsoleWriter{Out: out, TimeFormat: "15:04:05"}
 	}
 	return zerolog.New(out).Level(lvl).With().Timestamp().Logger()
 }

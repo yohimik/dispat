@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
@@ -30,11 +29,15 @@ type File struct {
 	// Concurrency accepts a single value applied to both stages
 	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
 	// 0 entries mean "number of CPUs".
-	Concurrency []int           `mapstructure:"concurrency"`
-	LogLevel    string          `mapstructure:"logLevel"`
-	Changelog   ChangelogConfig `mapstructure:"changelog"`
-	GitHub      GitHubConfig    `mapstructure:"github"`
-	Commit      CommitConfig    `mapstructure:"commit"`
+	Concurrency []int `mapstructure:"concurrency"`
+	// LogLevel is the minimum level: trace, debug, info, warn or error.
+	LogLevel string `mapstructure:"logLevel"`
+	// LogFormat selects the logger output: "pretty" (human console output)
+	// or "json" (machine-readable lines for CI ingestion).
+	LogFormat string          `mapstructure:"logFormat"`
+	Changelog ChangelogConfig `mapstructure:"changelog"`
+	GitHub    GitHubConfig    `mapstructure:"github"`
+	Commit    CommitConfig    `mapstructure:"commit"`
 	// Shell is the command prefix scripts are appended to, e.g.
 	// ["bash", "-c"] or ["cmd", "/C"]. Default: ["/bin/sh", "-c"].
 	Shell []string `mapstructure:"shell"`
@@ -129,15 +132,14 @@ type DependencyConfig struct {
 }
 
 var validLevels = map[string]bool{
-	"pretty": true, "trace": true, "debug": true,
-	"info": true, "warn": true, "error": true,
+	"trace": true, "debug": true, "info": true, "warn": true, "error": true,
 }
 
 // Load reads and validates the configuration file. When flags is non-nil the
-// "concurrency" and "log-level" flags are bound through viper, so explicitly
-// set flags override file values (and file values override flag defaults).
-// Defaults applied afterwards: concurrency 0 means the number of CPUs,
-// logLevel defaults to "pretty".
+// "concurrency", "log-level" and "log-format" flags are bound through viper,
+// so explicitly set flags override file values (and file values override flag
+// defaults). Defaults applied afterwards: concurrency 0 means the number of
+// CPUs, logLevel defaults to "info", logFormat to "pretty".
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
@@ -148,6 +150,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 		for key, flagName := range map[string]string{
 			"concurrency": "concurrency",
 			"logLevel":    "log-level",
+			"logFormat":   "log-format",
 		} {
 			if f := flags.Lookup(flagName); f != nil {
 				if err := v.BindPFlag(key, f); err != nil {
@@ -202,10 +205,16 @@ func (c *File) validate() error {
 	}
 	c.BuildConcurrency, c.PublishConcurrency = build, publish
 	if c.LogLevel == "" {
-		c.LogLevel = "pretty"
+		c.LogLevel = "info"
 	}
 	if !validLevels[c.LogLevel] {
-		return fmt.Errorf("unknown logLevel %q (want pretty, trace, debug, info, warn or error)", c.LogLevel)
+		return fmt.Errorf("unknown logLevel %q (want trace, debug, info, warn or error)", c.LogLevel)
+	}
+	if c.LogFormat == "" {
+		c.LogFormat = "pretty"
+	}
+	if c.LogFormat != "pretty" && c.LogFormat != "json" {
+		return fmt.Errorf("unknown logFormat %q (want pretty or json)", c.LogFormat)
 	}
 	for name, s := range c.Spaces {
 		if s.Path == "" {

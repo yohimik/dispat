@@ -35,12 +35,7 @@ under `dependencies` so bumps propagate and ordering is enforced:
 
 ```json
 {
-  "dependencies": [
-    {
-      "consumer": "app",
-      "provider": "core"
-    }
-  ]
+  "dependencies": [{ "consumer": "app", "provider": "core" }]
 }
 ```
 
@@ -64,7 +59,8 @@ ignored for versioning.
 ./dispat                      # release (default command): full pipeline
 ./dispat release --root path  # same, explicit
 ./dispat --concurrency 4,2    # override build/publish parallelism
-./dispat --log-level info     # JSON logs for CI
+./dispat --log-format json    # machine-readable logs for CI
+./dispat --log-level debug    # more verbose output
 ```
 
 ## Running in CI (GitHub Actions example)
@@ -80,7 +76,7 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
       - uses: actions/setup-go@v5
-      - run: go run . --log-level info
+      - run: go run . --log-format json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # GITHUB_REPOSITORY is set automatically by Actions
@@ -92,8 +88,9 @@ Notes:
 - `fetch-depth: 0` matters — without full history and tags the planner cannot find previous releases.
 - By default dispat creates tags locally; push them after a successful run (as above). Alternatively enable
   `"commit": {"enabled": true, "push": true}` in the config: dispat then creates one release commit (changelogs +
-  manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This requires
-  a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work starts.
+  manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This
+  requires a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work
+  starts.
 - Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent dispat runs on the
   same checkout are not guarded by a lock — serialize release jobs in CI.
 - GitHub releases are created via the API (enabled by default). In release-commit mode their body always documents the

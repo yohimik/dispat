@@ -95,10 +95,10 @@ type nameHeap struct {
 	names []string
 }
 
-func (h *nameHeap) Len() int           { return len(h.items) }
-func (h *nameHeap) Less(i, j int) bool { return h.names[h.items[i]] < h.names[h.items[j]] }
-func (h *nameHeap) Swap(i, j int)      { h.items[i], h.items[j] = h.items[j], h.items[i] }
-func (h *nameHeap) Push(x interface{}) { h.items = append(h.items, x.(int)) }
+func (h *nameHeap) Len() int            { return len(h.items) }
+func (h *nameHeap) Less(i, j int) bool  { return h.names[h.items[i]] < h.names[h.items[j]] }
+func (h *nameHeap) Swap(i, j int)       { h.items[i], h.items[j] = h.items[j], h.items[i] }
+func (h *nameHeap) Push(x interface{})  { h.items = append(h.items, x.(int)) }
 func (h *nameHeap) Pop() interface{} {
 	n := len(h.items) - 1
 	v := h.items[n]

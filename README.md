@@ -1,7 +1,7 @@
 # dispat
 
-**dispat** releases monorepos: it detects which packages changed from conventional commits, computes their next
-semantic versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel, with
+**dispat** releases monorepos: it detects which packages changed from conventional commits, computes their next semantic
+versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel, with
 changelogs, git tags and GitHub releases on the way out.
 
 ## Key features

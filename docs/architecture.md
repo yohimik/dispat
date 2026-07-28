@@ -88,8 +88,8 @@ successfully published changed provider. A consumer's terminal outcome is determ
 always waits for its providers' publishes, so a provider's publish failure is guaranteed to be seen at the latest there.
 With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage; with `false`
 the consumer may spend a version/build on a release that its publish then skips — the trade-off that flag opts into. The
-version stage filters failed/skipped providers out of `DISPAT_UPDATED_PROVIDERS` and skips its script entirely when
-none remain.
+version stage filters failed/skipped providers out of `DISPAT_UPDATED_PROVIDERS` and skips its script entirely when none
+remain.
 
 For spaces with `revertOnFail: true`, a failing package (any stage, including a failing release recorder) has its folder
 rolled back via the `Reverter` interface (`gitx.CLI`: `git checkout -- <dir>` + `git clean -fd <dir>` — tracked files

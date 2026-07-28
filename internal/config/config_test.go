@@ -29,7 +29,8 @@ dependencies:
   - consumer: app
     provider: core
 concurrency: 3
-logLevel: pretty
+logLevel: info
+logFormat: pretty
 `
 
 // writeRepo lays out a fake monorepo and returns its root.
@@ -79,7 +80,8 @@ spaces:
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, cfg.BuildConcurrency, 1, "default build concurrency")
 	assert.GreaterOrEqual(t, cfg.PublishConcurrency, 1, "default publish concurrency")
-	assert.Equal(t, "pretty", cfg.LogLevel, "default logLevel")
+	assert.Equal(t, "info", cfg.LogLevel, "default logLevel")
+	assert.Equal(t, "pretty", cfg.LogFormat, "default logFormat")
 }
 
 func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
@@ -87,6 +89,7 @@ func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	fs.IntSlice("concurrency", nil, "")
 	fs.String("log-level", "", "")
+	fs.String("log-format", "", "")
 	require.NoError(t, fs.Parse(args))
 	return fs
 }
@@ -94,11 +97,24 @@ func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
 func TestLoadFlagOverrides(t *testing.T) {
 	root := writeRepo(t, validYAML)
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"),
-		testFlags(t, "--concurrency", "4,2", "--log-level", "debug"))
+		testFlags(t, "--concurrency", "4,2", "--log-level", "debug", "--log-format", "json"))
 	require.NoError(t, err)
 	assert.Equal(t, 4, cfg.BuildConcurrency, "explicit flag overrides config")
 	assert.Equal(t, 2, cfg.PublishConcurrency, "explicit flag overrides config")
 	assert.Equal(t, "debug", cfg.LogLevel, "explicit flag overrides config")
+	assert.Equal(t, "json", cfg.LogFormat, "explicit flag overrides config")
+}
+
+func TestLoadLogFormatJSON(t *testing.T) {
+	yml := `
+scripts: {b: x}
+spaces: {a: {path: p, buildScript: b, publishScript: b}}
+logFormat: json
+`
+	root := writeRepo(t, yml)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, "json", cfg.LogFormat)
 }
 
 func TestLoadFlagSingleValue(t *testing.T) {
@@ -115,7 +131,8 @@ func TestLoadFlagDefaultsDoNotOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, cfg.BuildConcurrency, "config wins over unset flag")
 	assert.Equal(t, 3, cfg.PublishConcurrency, "config wins over unset flag")
-	assert.Equal(t, "pretty", cfg.LogLevel, "config wins over unset flag")
+	assert.Equal(t, "info", cfg.LogLevel, "config wins over unset flag")
+	assert.Equal(t, "pretty", cfg.LogFormat, "config wins over unset flag")
 }
 
 func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
@@ -333,6 +350,8 @@ func TestLoadErrors(t *testing.T) {
 		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: -1", "concurrency"},
 		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: [1, 2, 3]", "at most two"},
 		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogLevel: loud", "logLevel"},
+		{"pretty is not a level", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogLevel: pretty", "logLevel"},
+		{"bad format", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogFormat: fancy", "logFormat"},
 		{"self dependency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\ndependencies: [{consumer: x, provider: x}]", "itself"},
 	}
 	for _, c := range cases {

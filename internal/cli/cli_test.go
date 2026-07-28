@@ -29,6 +29,7 @@ const testConfig = `{
   },
   "concurrency": 1,
   "logLevel": "info",
+  "logFormat": "json",
   "github": {"enabled": false}
 }`
 
@@ -37,6 +38,7 @@ const testConfigNoChangelog = `{
   "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
   "concurrency": 1,
   "logLevel": "info",
+  "logFormat": "json",
   "changelog": {"enabled": false},
   "github": {"enabled": false}
 }`
@@ -114,6 +116,7 @@ const testConfigInitials = `{
   "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
   "concurrency": 1,
   "logLevel": "info",
+  "logFormat": "json",
   "initials": {"core": "1.0.0", "ghost": "5.0.0"},
   "github": {"enabled": false}
 }`
@@ -151,6 +154,7 @@ const testConfigRevert = `{
   },
   "concurrency": 1,
   "logLevel": "info",
+  "logFormat": "json",
   "github": {"enabled": false}
 }`
 
@@ -177,6 +181,7 @@ const testConfigCommitPush = `{
   "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
   "concurrency": 1,
   "logLevel": "info",
+  "logFormat": "json",
   "commit": {"enabled": true, "messageFormat": "release: {packages} -> {tags}", "push": true},
   "github": {"enabled": false}
 }`
@@ -265,6 +270,7 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
   "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
   "concurrency": 1,
   "logLevel": "info",
+  "logFormat": "json",
   "commit": {"enabled": true},
   "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "DISPAT_TEST_TOKEN"}
 }`

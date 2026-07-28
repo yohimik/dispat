@@ -30,7 +30,8 @@
     "core": "1.0.0"
   },
   "concurrency": [4, 2],
-  "logLevel": "pretty",
+  "logLevel": "info",
+  "logFormat": "pretty",
   "changelog": {
     "enabled": true,
     "file": "CHANGELOG.md",

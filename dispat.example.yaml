@@ -44,8 +44,12 @@ initials:
 # 0 means "number of CPUs".
 concurrency: [4, 2]
 
-# pretty (default, human console output) or trace/debug/info/warn/error (JSON).
-logLevel: pretty
+# Minimum log level: trace, debug, info (default), warn or error.
+logLevel: info
+
+# Logger output: pretty (default, human console output) or json (machine-
+# readable lines for CI ingestion).
+logFormat: pretty
 
 # Per-package changelog file; enabled by default. All fields optional.
 changelog:
