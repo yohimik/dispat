@@ -108,7 +108,7 @@ go build -o dispat .
 ./dispat          # release: run the full pipeline
 ```
 
-See [./services/cli/docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and `dispat.example.json` /
+See [./services/cli/docs/getting-started.md](./services/cli/docs/getting-started.md) for the full walkthrough, and `dispat.example.json` /
 `dispat.example.yaml` for annotated configs.
 
 ## Planned features
