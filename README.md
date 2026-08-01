@@ -31,11 +31,11 @@ changelogs, git tags and GitHub releases on the way out.
 
 Documentation:
 
-| Document                                     | Contents                                                                |
-|----------------------------------------------|-------------------------------------------------------------------------|
-| [Getting started](docs/getting-started.md)   | Install, first config, commands, CI setup.                              |
-| [Configuration & CLI](docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
-| [Architecture](docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
+| Document                                               | Contents                                                                |
+|--------------------------------------------------------|-------------------------------------------------------------------------|
+| [Getting started](./services/cli/docs/getting-started.md)     | Install, first config, commands, CI setup.                              |
+| [Configuration & CLI](./services/cli/docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
+| [Architecture](./services/cli/docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
 
 ## Versioning flow
 
@@ -108,7 +108,7 @@ go build -o dispat .
 ./dispat          # release: run the full pipeline
 ```
 
-See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and `dispat.example.json` /
+See [./services/cli/docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and `dispat.example.json` /
 `dispat.example.yaml` for annotated configs.
 
 ## Planned features
