@@ -123,7 +123,7 @@ are warned about and ignored.
 | `remote`        | `origin`                 | Remote to push to.                                                                                              |
 
 When enabled, the run finishes with a *finalize phase*: all published packages' folders are staged and committed in a
-single commit (changelog files, version-script manifest changes — add build outputs to `.gitignore` or they get
+single commit (changelog files, version-script manifest changes — add build outputs to `../../../.gitignore` or they get
 committed too), release tags are created **on that commit** instead of during each publish, and GitHub releases move to
 the end of the run. Every GitHub release body then documents the release commit SHA and the tag in a `### Release`
 section — whether or not they were pushed. With `push` on, releases are created after the push and the tag is

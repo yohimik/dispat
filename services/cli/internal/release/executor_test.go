@@ -586,6 +586,51 @@ func TestRunMultipleRecorders(t *testing.T) {
 	assert.Equal(t, []string{"a"}, second.entries)
 }
 
+func TestRunCatchUpConsumerWithUnchangedProvider(t *testing.T) {
+	// Catch-up release: b missed a's already-published update in a previous
+	// run. a is unchanged now (no tasks), b runs its full pipeline; the
+	// version stage receives a's released version (old == new).
+	libs := &model.Space{Name: "libs", BuildScript: "build", PublishScript: "publish", VersionScript: "version"}
+	p := &plan.Plan{
+		Order: []string{"a", "b"},
+		Releases: map[string]*plan.Release{
+			"a": { // unchanged: already released at 2.0.0
+				Pkg:     &model.Package{Name: "a", Dir: "a", Space: libs},
+				Current: semver.Version{Major: 2},
+				Next:    semver.Version{Major: 2},
+				Tagged:  true,
+			},
+			"b": { // catch-up patch due to a
+				Pkg:     &model.Package{Name: "b", Dir: "b", Space: libs},
+				Current: semver.Version{Major: 1},
+				Bump:    semver.BumpPatch,
+				Next:    semver.Version{Major: 1, Patch: 1},
+				Tagged:  true,
+				DueTo:   []string{"a"},
+			},
+		},
+		Providers: map[string][]string{"b": {"a"}},
+		Consumers: map[string][]string{"a": {"b"}},
+	}
+	r := &fakeRunner{}
+	tg := &fakeTagger{}
+	res := newExecutor(r, tg, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+
+	require.Len(t, res, 1, "only b is processed")
+	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
+	assert.Equal(t, []string{"b@1.0.1"}, tg.tags)
+	assert.Equal(t, -1, r.indexOf("build a"), "unchanged provider runs nothing")
+	require.NotEqual(t, -1, r.indexOf("version b"), "catch-up still syncs manifests")
+
+	var updates []map[string]string
+	raw := envValue(t, r.envs["version b"], "DISPAT_UPDATED_PROVIDERS")
+	require.NoError(t, json.Unmarshal([]byte(raw), &updates))
+	require.Len(t, updates, 1)
+	assert.Equal(t, "a", updates[0]["package"])
+	assert.Equal(t, "2.0.0", updates[0]["oldVersion"], "already-released provider: old == new")
+	assert.Equal(t, "2.0.0", updates[0]["newVersion"])
+}
+
 func TestRunNilTaggerDefersTagging(t *testing.T) {
 	// A nil Tagger (release-commit mode) publishes without tagging.
 	p := mkPlan(false, nil, nil, "a")

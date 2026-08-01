@@ -43,8 +43,8 @@ Beyond scripts and spaces there are optional top-level knobs — `concurrency` (
 and `github` (customise or disable the release records), `initials` (baseline versions for packages without a usable
 tag), `commit` and `push` (end-of-run release commit and pushing, disabled by default) — and per-space options
 `isBuildWaitingPublish`, `revertOnFail` and `versionScript`. All are covered in
-[Configuration & CLI](configuration.md). Annotated full examples: [`dispat.example.json`](../dispat.example.json),
-[`dispat.example.yaml`](../dispat.example.yaml).
+[Configuration & CLI](configuration.md). Annotated full examples: [`../../../dispat.example.json`](../../../dispat.example.json),
+[`../../../dispat.example.yaml`](../../../dispat.example.yaml).
 
 ## Commit convention
 

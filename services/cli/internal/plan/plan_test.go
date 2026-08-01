@@ -35,6 +35,11 @@ func tag(name string, v semver.Version) gitx.Tag {
 	return gitx.Tag{Name: name, Version: v, Parsed: true}
 }
 
+// tagAt builds a parseable canned tag with a creation time.
+func tagAt(name string, v semver.Version, created int64) gitx.Tag {
+	return gitx.Tag{Name: name, Version: v, Parsed: true, Created: created}
+}
+
 func testPackages() ([]*model.Package, []model.Dependency) {
 	libs := &model.Space{Name: "libs", BuildWaitsPublish: true}
 	apps := &model.Space{Name: "apps"}
@@ -244,6 +249,82 @@ func TestComputeInitialsIgnoredWhenTagged(t *testing.T) {
 	core := p.Releases["core"]
 	assert.False(t, core.FromInitials, "a parseable tag beats initials")
 	assert.Equal(t, semver.Version{Major: 2, Patch: 1}, core.Next)
+}
+
+func TestComputeCatchUpAfterConsumerFailure(t *testing.T) {
+	// The orphaned-consumer scenario: in a previous run core@2.0.0 was
+	// published and tagged, but app failed and kept its older app@1.0.0 tag.
+	// This run has no new commits at all — app must still be scheduled for
+	// the missed patch release.
+	pkgs, deps := testPackages()
+	git := &fakeGit{
+		tags: map[string]gitx.Tag{
+			"core": tagAt("core@2.0.0", semver.Version{Major: 2}, 200),
+			"app":  tagAt("app@1.0.0", semver.Version{Major: 1}, 100),
+		},
+		logs: map[string][]string{
+			"core@2.0.0": {},
+			"app@1.0.0":  {},
+			"":           {},
+		},
+	}
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
+	require.NoError(t, err)
+
+	assert.False(t, p.Releases["core"].Changed(), "core itself has nothing new")
+
+	app := p.Releases["app"]
+	assert.True(t, app.Changed(), "app must catch up on core@2.0.0")
+	assert.Equal(t, semver.BumpPatch, app.Bump)
+	assert.Equal(t, semver.Version{Major: 1, Patch: 1}, app.Next)
+	assert.Equal(t, []string{"core"}, app.DueTo)
+}
+
+func TestComputeNoCatchUpWhenConsumerIsFresh(t *testing.T) {
+	// app's tag was created after (or at the same second as) core's — the
+	// normal outcome of a successful run. Nothing to do.
+	pkgs, deps := testPackages()
+	for _, appCreated := range []int64{200, 300} { // same second and later
+		git := &fakeGit{
+			tags: map[string]gitx.Tag{
+				"core": tagAt("core@2.0.0", semver.Version{Major: 2}, 200),
+				"app":  tagAt("app@1.0.1", semver.Version{Major: 1, Patch: 1}, appCreated),
+			},
+			logs: map[string][]string{
+				"core@2.0.0": {},
+				"app@1.0.1":  {},
+				"":           {},
+			},
+		}
+		p, err := Compute(context.Background(), git, pkgs, deps, nil)
+		require.NoError(t, err)
+		assert.False(t, p.Releases["app"].Changed(), "appCreated=%d: fresh consumer must not release", appCreated)
+	}
+}
+
+func TestComputeCatchUpForNeverReleasedConsumer(t *testing.T) {
+	// app failed even its first release: core is tagged, app never was, and
+	// no commits mention app. It must still be scheduled.
+	pkgs, deps := testPackages()
+	git := &fakeGit{
+		tags: map[string]gitx.Tag{
+			"core": tagAt("core@0.1.0", semver.Version{Minor: 1}, 100),
+		},
+		logs: map[string][]string{
+			"core@0.1.0": {},
+			"":           {"chore: add app skeleton"},
+		},
+	}
+	p, err := Compute(context.Background(), git, pkgs, deps, nil)
+	require.NoError(t, err)
+
+	app := p.Releases["app"]
+	assert.True(t, app.Changed(), "never-released consumer of a released provider must catch up")
+	assert.Equal(t, semver.Version{Patch: 1}, app.Next, "0.0.0 + patch")
+	assert.Equal(t, []string{"core"}, app.DueTo)
+
+	utils := p.Releases["utils"]
+	assert.False(t, utils.Changed(), "utils has no providers and stays untouched")
 }
 
 func TestComputeCycle(t *testing.T) {

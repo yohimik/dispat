@@ -21,8 +21,9 @@ type Release struct {
 	// parseable tag; otherwise the configured initial version; otherwise
 	// 0.0.0.
 	Current      semver.Version
-	Tagged       bool           // whether a previous parseable release tag exists
-	FromInitials bool           // Current came from the config initials
+	Tagged       bool  // whether a previous parseable release tag exists
+	TagCreated   int64 // creation time (unix) of that tag; 0 when untagged
+	FromInitials bool  // Current came from the config initials
 	OwnBump      semver.Bump    // bump demanded by the package's own commits
 	Bump         semver.Bump    // final bump including provider propagation
 	Next         semver.Version // version to release; equals Current when unchanged
@@ -50,7 +51,12 @@ type Plan struct {
 //     feat=minor, breaking=major; the highest wins);
 //   - a consumer of one or more changed providers gets at least one patch
 //     bump (a single patch, regardless of how many providers changed);
-//   - a higher own bump always wins over the propagated patch.
+//   - a higher own bump always wins over the propagated patch;
+//   - catch-up: a consumer whose provider's latest release tag is newer than
+//     the consumer's own latest tag — or whose provider has a release while
+//     the consumer was never released at all — also gets the patch bump.
+//     This heals runs where the provider published but the consumer failed:
+//     the next run schedules the missed consumer release automatically.
 //
 // Baseline resolution: the latest parseable tag wins. When the newest tag
 // exists but its version cannot be parsed, or no tag exists at all, the
@@ -93,6 +99,7 @@ func Compute(ctx context.Context, git gitx.Git, pkgs []*model.Package, deps []mo
 		switch {
 		case found && tag.Parsed:
 			rel.Current, rel.Tagged, since = tag.Version, true, tag.Name
+			rel.TagCreated = tag.Created
 		case found: // newest tag exists but is unparseable: scan from it,
 			// take the baseline from initials (default 0.0.0).
 			since = tag.Name
@@ -125,7 +132,17 @@ func Compute(ctx context.Context, git gitx.Git, pkgs []*model.Package, deps []mo
 	for _, name := range order {
 		rel := releases[name]
 		for _, prov := range providers[name] {
-			if releases[prov].Changed() {
+			pr := releases[prov]
+			switch {
+			case pr.Changed():
+				rel.Bump = semver.Max(rel.Bump, semver.BumpPatch)
+				rel.DueTo = append(rel.DueTo, prov)
+			case pr.Tagged && (!rel.Tagged || pr.TagCreated > rel.TagCreated):
+				// Catch-up: the provider's latest release is newer than this
+				// package's own latest release (or this package was never
+				// released while the provider has been) — the consumer missed
+				// a provider update, e.g. it failed in the run that published
+				// the provider. Schedule the pending patch release now.
 				rel.Bump = semver.Max(rel.Bump, semver.BumpPatch)
 				rel.DueTo = append(rel.DueTo, prov)
 			}

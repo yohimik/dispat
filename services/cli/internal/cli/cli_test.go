@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -291,6 +292,61 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
 		"release body documents the release commit")
 	assert.Contains(t, releases[0].Body, "- tag: core@0.1.0")
 	assert.Empty(t, releases[0].TargetCommitish, "unpushed SHA must not be sent as target_commitish")
+}
+
+const testConfigCatchUp = `{
+  "scripts": {"build": "[ ! -f FAIL ]", "publish": "echo publishing"},
+  "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
+  "dependencies": [{"consumer": "app", "provider": "core"}],
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "github": {"enabled": false}
+}`
+
+func TestReleaseCatchUpAfterConsumerFailure(t *testing.T) {
+	// The orphaned-consumer scenario end to end. Run 1: core publishes and
+	// is tagged, app's build fails (FAIL marker). Run 2, with no new
+	// commits: app must be caught up and released; core must not re-release.
+	root := initRepo(t, testConfigCatchUp)
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return string(bytes.TrimSpace(out))
+	}
+	// Add the app package without any conventional commits of its own, then
+	// plant the failure marker (untracked, so no commit needed to remove it).
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "app"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "app", "main.txt"), []byte("app"), 0o644))
+	git("add", "packages/app/main.txt")
+	git("commit", "-qm", "chore: add app skeleton")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "app", "FAIL"), []byte("x"), 0o644))
+
+	// Run 1: core succeeds, app fails.
+	var out1, err1 bytes.Buffer
+	code := Run([]string{"--root", root}, &out1, &err1)
+	require.Equal(t, 1, code, "app's failure must fail the run\n%s", out1.String())
+	tags := git("tag")
+	assert.Contains(t, tags, "core@0.1.0")
+	assert.NotContains(t, tags, "app@", "failed app must not be tagged")
+
+	// Fix the failure and run again — no new commits anywhere.
+	require.NoError(t, os.Remove(filepath.Join(root, "packages", "app", "FAIL")))
+	var out2, err2 bytes.Buffer
+	code = Run([]string{"--root", root}, &out2, &err2)
+	require.Equal(t, 0, code, "stderr: %s\nstdout: %s", err2.String(), out2.String())
+
+	tags = git("tag")
+	assert.Contains(t, tags, "app@0.0.1", "app must catch up on core's release")
+	assert.Equal(t, 1, strings.Count(tags, "core@"), "core must not be re-released")
+
+	// Run 3: everything is fresh, nothing to do.
+	var out3, err3 bytes.Buffer
+	code = Run([]string{"--root", root}, &out3, &err3)
+	require.Equal(t, 0, code)
+	tags = git("tag")
+	assert.Equal(t, 1, strings.Count(tags, "app@"), "no repeat release once caught up")
 }
 
 func TestRenderCommitMessage(t *testing.T) {

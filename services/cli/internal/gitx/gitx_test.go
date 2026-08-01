@@ -97,6 +97,7 @@ func TestTagRoundTrip(t *testing.T) {
 	assert.True(t, tag.Parsed)
 	assert.Equal(t, "core@0.2.0", tag.Name)
 	assert.Equal(t, semver.Version{Minor: 2}, tag.Version)
+	assert.Positive(t, tag.Created, "tag creation time must be resolved")
 }
 
 func TestLatestTagUnparseableNewest(t *testing.T) {

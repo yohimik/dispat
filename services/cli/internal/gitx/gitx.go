@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/yohimik/dispat/internal/semver"
@@ -22,6 +23,10 @@ type Tag struct {
 	Name    string
 	Version semver.Version
 	Parsed  bool
+	// Created is the tag's creation time (unix seconds). Used to detect
+	// consumers whose provider was released after the consumer's own last
+	// release (e.g. the consumer failed in that run) and catch them up.
+	Created int64
 }
 
 // TagName renders the canonical release tag for a package version.
@@ -70,32 +75,49 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 // from the tag.
 func (c *CLI) LatestTag(ctx context.Context, pkg string) (Tag, bool, error) {
 	// The last --sort key is primary: creation date desc, name as tie-break.
-	out, err := c.run(ctx, "tag", "--list", "--sort=-v:refname", "--sort=-creatordate", pkg+"@*")
+	// Ref names cannot contain spaces, so "name timestamp" splits cleanly.
+	out, err := c.run(ctx, "tag", "--list", "--sort=-v:refname", "--sort=-creatordate",
+		"--format=%(refname:short) %(creatordate:unix)", pkg+"@*")
 	if err != nil {
 		return Tag{}, false, err
 	}
 	prefix := pkg + "@"
-	var names []string
+	type entry struct {
+		name    string
+		created int64
+	}
+	var entries []entry
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			names = append(names, line)
+		if line == "" {
+			continue
+		}
+		name, created := line, int64(0)
+		if i := strings.LastIndexByte(line, ' '); i > 0 {
+			name = line[:i]
+			if ts, terr := strconv.ParseInt(strings.TrimSpace(line[i+1:]), 10, 64); terr == nil {
+				created = ts
+			}
+		}
+		if strings.HasPrefix(name, prefix) {
+			entries = append(entries, entry{name: name, created: created})
 		}
 	}
-	if len(names) == 0 {
+	if len(entries) == 0 {
 		return Tag{}, false, nil
 	}
-	if _, perr := semver.Parse(names[0][len(prefix):]); perr != nil {
-		return Tag{Name: names[0]}, true, nil // newest tag exists but is unparseable
+	if _, perr := semver.Parse(entries[0].name[len(prefix):]); perr != nil {
+		// Newest tag exists but is unparseable.
+		return Tag{Name: entries[0].name, Created: entries[0].created}, true, nil
 	}
 	best := Tag{}
-	for _, name := range names {
-		v, perr := semver.Parse(name[len(prefix):])
+	for _, e := range entries {
+		v, perr := semver.Parse(e.name[len(prefix):])
 		if perr != nil {
 			continue
 		}
 		if !best.Parsed || best.Version.Compare(v) < 0 {
-			best = Tag{Name: name, Version: v, Parsed: true}
+			best = Tag{Name: e.name, Version: v, Parsed: true, Created: e.created}
 		}
 	}
 	return best, true, nil

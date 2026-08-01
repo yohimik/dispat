@@ -8,7 +8,8 @@ changelogs, git tags and GitHub releases on the way out.
 
 - **Graph release orchestration** — packages declare consumer → provider relations; dispat topologically orders the
   whole pipeline, bumps dependants of changed packages automatically, skips consumers of failed packages (unless they
-  have changes of their own), and keeps the rest of the graph releasing.
+  have changes of their own), and keeps the rest of the graph releasing. Runs are self-healing: a consumer that failed
+  while its provider published is caught up automatically on the next run.
 - **Parallel execution** — independent packages build and publish concurrently, with separate configurable concurrency
   budgets for the build and publish stages and deterministic ordering guarantees.
 - **Single-file configuration** — one `dispat.json` (YAML/TOML work too) at the repo root describes everything:
@@ -72,6 +73,14 @@ remain the version script is not executed at all. Spaces with `revertOnFail: tru
 changes inside a failing package's folder (tracked files restored, untracked files removed), so a half-finished release
 leaves no residue in the worktree.
 
+**Catch-up: failed consumers are never lost.** When a provider publishes but its consumer fails, the next run detects it
+without any state files: a consumer whose provider's latest release tag is *newer* than the consumer's own latest tag
+(or whose provider has a release while the consumer was never released at all) is scheduled for the missed patch release
+automatically, even if nothing else changed. Its version stage receives the provider's already-released version in
+`DISPAT_UPDATED_PROVIDERS` (`oldVersion == newVersion` signals a catch-up), so manifests still sync. Runs are
+self-healing: a consumer that keeps failing is retried every run until it succeeds, and once its tag is newer than its
+providers' the catch-up stops.
+
 **Pipeline per changed package.** Up to three stages, each optional to script:
 
 1. **version** — only when the package is bumped due to provider updates; runs exactly before the build. With
@@ -105,18 +114,23 @@ See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough,
 ## Planned features
 
 - **Per-package overrides within a space** — a package will be able to override its enclosing space's configuration
-  (scripts, concurrency, `revertOnFail`, changelog/GitHub behavior, …) for itself alone, so one-off exceptions no
-  longer require carving a package out into its own space.
-- **Computed dependency graph** — a command that analyzes packages' project files directly (manifests, module/import
-  declarations, …) and derives the consumer → provider graph from them, so relations no longer have to be declared by
-  hand in config; explicit overrides will be supported for cases the analysis can't or shouldn't infer.
+  (scripts, concurrency, `revertOnFail`, changelog/GitHub behavior, …) for itself alone, so one-off exceptions no longer
+  require carving a package out into its own space.
+- **Computed dependency graph** — a command that analyzes packages' project files directly and derives the consumer →
+  provider graph from them, so relations no longer have to be declared by hand in config; explicit overrides will be
+  supported for cases the analysis can't or shouldn't infer.
 - **File-based commit-to-package matching** — an alternative to scope-based conventional commits, where a commit is
   attributed to a package by the files it actually touches overridable by current style `type(pkg):`.
+- **Extendable config** — configuration will be splittable across multiple files, so large monorepos don't have to keep
+  every space and package declaration in one flat file.
+- **Auto versioning for a broad range of languages** — version bumps will be applied natively across package managers,
+  so packages get automatic bump treatment without hand-rolled scripts.
 
 ## Projects using dispat (Real-world examples)
 
 - [webxash3d-fwgs](https://github.com/yohimik/webxash3d-fwgs) — WebAssembly port of the Xash3D-FWGS game engine
-  "real work docker depending on docker depending on npm" provider chain, four levels deep parallel builds from engine package to modded server image.
+  "real work docker depending on docker depending on npm" provider chain, four levels deep parallel builds from engine
+  package to modded server image.
 
 ## License
 
