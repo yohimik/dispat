@@ -1,0 +1,16 @@
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Go build and test artefacts
+*.test
+*.out
+coverage.txt
+
+# NOTE: testdata/ is NOT ignored.
+#
+# `go test -fuzz` writes only *failing* inputs to testdata/fuzz/<Target>/, and
+# those are regression cases: Go replays them on every plain `go test`. They
+# must be committed. The much larger coverage-guided corpus lives in the build
+# cache ($GOCACHE/fuzz) and is regenerated, so it is neither here nor tracked.
