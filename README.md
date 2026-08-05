@@ -4,39 +4,74 @@
 versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel, with
 changelogs, git tags and GitHub releases on the way out.
 
+## Why one more monorepo tool?
+
+Every major monorepo tool can topologically sort a dependency graph. Build everything in order, then publish
+everything — or publish only what changed, sequentially. That model works right up until reality asks two questions:
+
+1. **What happens when an error hits in the middle?** Half the packages are published, half are not. Most tools either
+   abort the whole run or plough on and leave you to reconstruct what shipped and what didn't. Re-running tends to
+   re-release things that are already out — or you end up writing recovery scripts by hand.
+2. **What if a consumer can only be *built* after its provider is *published*?** A Node package can be built before its
+   consumers publish, but a Docker image is often buildable only by pulling its base image from a registry — the
+   provider must already be published. "Build all, then publish all" quietly assumes every ecosystem behaves like npm,
+   and mixed graphs break it entirely.
+
+Modern projects are exactly that mix: many packages, built on different infrastructure — npm next to Docker next to Go —
+wired into one dependency graph. No mainstream release tool handles a complex project graph *and* its error cases
+smoothly. That gap is what dispat is built for:
+
+- **Polyglot by construction.** Packages are just folders; build/publish/version steps are any shell commands. Per-space
+  `isBuildWaitingPublish` states whether a consumer's build needs the provider merely *built* (node) or already
+  *published* (docker), so a four-level npm→docker chain schedules correctly out of the box.
+- **Built around an error model, not a happy path.** A failure never aborts the run: the broken package's consumers are
+  skipped (unless they have changes of their own) and every unaffected subgraph keeps releasing. Failed or skipped
+  consumers are never lost — the next run **catches them up** automatically, at the exact version they were originally
+  owed, with no state file and no double release. Runs are **self-healing**: recovery *is* re-running, not a separate
+  repair procedure.
+
+Could you wire the same thing up in a general-purpose task scheduler? With enough YAML and glue, probably. dispat
+deliberately does less: it handles **release logic only** — build + publish to a registry, with versioning, tagging and
+changelogs around them. That focus is what keeps it easy to configure: one file, a predefined set of script slots
+(`version`, `build`, `publish`, `announce`, `login`, per-stage hooks, `onFail`/`onSkip`) that between them cover every
+project release need — you fill in shell commands, dispat supplies the orchestration, ordering and failure semantics.
+
 ## Key features
 
-- **Graph release orchestration** — packages declare consumer → provider relations; dispat topologically orders the
-  whole pipeline, propagates bumps to dependants exactly as far as each commit asks, skips consumers of failed packages
-  (unless they have changes of their own), and keeps the rest of the graph releasing. Runs are self-healing: a consumer
-  that failed while its provider published is caught up automatically on the next run.
-- **Blast radius written in the commit** — every commit says how far it reaches: `feat(core): x` releases `core` alone,
-  `feat(core)^: x` reaches its direct consumers, `feat(core)^^: x` the whole transitive closure, and
-  `Propagate-Scope` narrows the set. Nothing is released because a tool guessed.
-- **Prerelease trains** — `@beta` puts a package on a prerelease line, `^@beta++1` takes its consumers with it, and
-  `@beta>stable` graduates whatever is still on that line. Channels are derived from tags, so a train needs no
-  directives to stay together and no state file to survive a fresh clone.
-- **Parallel execution** — independent packages build and publish concurrently, with separate configurable concurrency
-  budgets for the build and publish stages and deterministic ordering guarantees.
-- **Single-file configuration** — one `dispat.json` (YAML/TOML work too) at the repo root describes everything:
-  scripts, package spaces, dependencies, tag formats, concurrency, changelog/GitHub/commit behavior.
-- **Tool-, infra- and language-agnostic** — packages are just folders; build/publish/version steps are any shell
-  commands (npm, go, cargo, docker, …) run through a configurable shell and fed context via `DISPAT_*` env vars.
-  Versions live purely in git tags — `package@1.2.3` by default, or any per-space `tagFormat` you like — so there are no
-  version files, no lockstep and no framework buy-in.
-- **Status tracking** — `dispat status` prints the full project graph with computed bumps, channels and next versions
-  without touching anything; releases end with a per-package summary (published / failed / skipped, durations, failed
-  stage) and exit non-zero on failure. Logs are human-pretty locally and JSON in CI.
-- **Release records built in** — per-package `CHANGELOG.md` entries and GitHub releases from the same commit data
-  (prereleases marked as such), optional single release commit + push, all customisable or disableable.
-- **Safe by design** — upfront git/GitHub credential verification, optional per-space rollback of half-finished packages
-  (`revertOnFail`), no publishing against unpublished dependency versions ever, and diagnostics that explain every
-  release a reader of the commit log alone could not account for.
-- **Built from scratch in Go for scale** — a single static binary whose only runtime dependency is `git`, written for
-  giant project graphs and large commit histories: O ((V+E) log V) topological planning, a dependency-counting scheduler
-  with no locks in its hot path, a regex-free single-pass commit parser, and exactly one bounded
-  `git tag`/`git log` query pair per package instead of full-history walks. Both baselines a package needs are
-  selections over the same tag listing, and both propagation axes read one history walk.
+- **Releases the graph, not a list** — consumer → provider relations, topological ordering, parallel execution of
+  independent packages with separate build/publish concurrency budgets, deterministic everywhere.
+- **Blast radius written in the commit** — `feat(core):` releases `core` alone; `feat(core)^:` reaches direct consumers,
+  `^^` the transitive closure, `+N` exactly N edges. Nothing is released because a tool guessed.
+- **Failures don't stop the world** — a broken package skips only the consumers that truly depend on it; the rest of the
+  graph keeps releasing, and CI still gets a non-zero exit.
+- **Self-healing runs** — consumers that missed a run are caught up on the next one, at the version they were planned at
+  originally. No orphans, no double releases, no state files: re-running is always safe.
+- **Prerelease trains** — `@beta` starts a line, `^@beta++1` takes consumers along, `@beta>stable` graduates the train.
+  Channels are derived from tags, so trains survive a fresh clone with zero state.
+- **Polyglot & infra-agnostic** — any language, any registry: scripts are shell commands fed context via `DISPAT_*`
+  env vars, and versions live purely in git tags. No version files, no lockstep, no framework buy-in.
+- **One config file** — spaces, dependencies, scripts, hooks, tag formats, concurrency, changelog/GitHub behavior in a
+  single `dispat.json` (YAML/TOML work too).
+- **Dry-run first** — `dispat status` prints the whole plan — versions, channels, diagnostics — without touching
+  anything. Run it on every pull request.
+- **Release records built in** — per-package changelogs, annotated tags, GitHub releases, optional single release
+  commit + push; all customisable or disableable.
+- **Safe by design** — upfront git/GitHub credential verification, optional rollback of half-finished packages
+  (`revertOnFail`), and never a publish against an unpublished dependency version.
+- **A single static Go binary built for scale** — only runtime dependency is `git`; O ((V+E) log V) planning, a
+  lock-free scheduling hot path, a regex-free single-pass commit parser, and exactly one bounded `git tag`/`git log`
+  query pair per package instead of full-history walks.
+
+## Inspiration
+
+dispat stands on the shoulders of two things:
+
+- **[Lerna](https://lerna.js.org/)** — the original monorepo release manager, which proved that versioning and
+  publishing many packages from one repository can be a single command. dispat takes that idea beyond JavaScript and
+  rebuilds it around an explicit dependency graph and an explicit error model.
+- **[Conventional Commits](https://www.conventionalcommits.org/)** — commit messages as machine-readable release intent.
+  dispat's parser, [`pkg/ccme`](./pkg/ccme), implements a strict superset of Conventional Commits 1.0.0 that adds the
+  monorepo dimension: scopes as packages, propagation depth, prerelease channels.
 
 Documentation:
 
@@ -113,8 +148,8 @@ their own conventional commits, or another changed provider that did publish suc
 already built (allowed by `isBuildWaitingPublish: false` while the provider was still publishing) is skipped at its
 publish once the provider's publish failure is known — nothing is ever published against an unpublished provider
 version. Skips cascade down the dependency chain by the same rule. A consumer that proceeds on its own reason runs its
-pipeline normally, except that failed and skipped providers are filtered from the `DISPAT_UPDATED_*` variables, and if none
-remain the version script is not executed at all. Spaces with `revertOnFail: true` additionally roll back all local
+pipeline normally, except that failed and skipped providers are filtered from the `DISPAT_UPDATED_*` variables, and if
+none remain the version script is not executed at all. Spaces with `revertOnFail: true` additionally roll back all local
 changes inside a failing package's folder (tracked files restored, untracked files removed), so a half-finished release
 leaves no residue in the worktree.
 
@@ -135,9 +170,9 @@ Four properties follow, and they are what make re-running safe:
 
 Such a release is labelled a **catch-up** in the plan and reported with the origin's *published* version, because a
 package appearing with no commits of its own and no releasing dependency is otherwise baffling to review. Its version
-stage receives the provider's already-released version in the `DISPAT_UPDATED_*` variables, so manifests still sync. To stop a
-catch-up you no longer want, act on the **consumer** — `cancel(<consumer>)` to drop it, or a hold to defer it. Acting on
-the provider does nothing: its version is already public, and cancellation never reaches a published release.
+stage receives the provider's already-released version in the `DISPAT_UPDATED_*` variables, so manifests still sync. To
+stop a catch-up you no longer want, act on the **consumer** — `cancel(<consumer>)` to drop it, or a hold to defer it.
+Acting on the provider does nothing: its version is already public, and cancellation never reaches a published release.
 
 **Pipeline per released package.** Up to four stages, each optional to script:
 
@@ -146,21 +181,21 @@ the provider does nothing: its version is already public, and cancellation never
    it waits for the provider's *build* only.
 2. **build** — the package's build command.
 3. **publish** — waits for the package's own build and always for its providers' publishes. A space with a
-   `run.login` authenticates **once per space** before its first publish (every other publish of the space waits for
-   it; a login failure fails them all). On success: release recorders run (changelog file, GitHub release), then the
+   `run.login` authenticates **once per space** before its first publish (every other publish of the space waits for it;
+   a login failure fails them all). On success: release recorders run (changelog file, GitHub release), then the
    annotated tag is created (pushing is left to CI by default).
-4. **announce** — after the publish frame, for pushing the release out to update channels (a Slack message, a webhook,
-   a docs feed). It gets the release notes as `DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` — the same
+4. **announce** — after the publish frame, for pushing the release out to update channels (a Slack message, a webhook, a
+   docs feed). It gets the release notes as `DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` — the same
    grouped data the changelog and GitHub release render — and the whole frame (its `run.beforeAnnounce` /
    `run.postAnnounce` hooks included) only warns on failure: the release is already out.
 
 Every script option accepts a single script name or an array of names run sequentially; a failing command in a
 release-gating sequence stops it and fails the package, while warn-only sequences keep running and only log. The stages
 can also be bracketed with per-space hooks — `run.beforeAll`, `run.beforeVersion`/`run.postVersion`,
-`run.beforeBuild`/`run.postBuild`, `run.beforePublish` all *gate* the release (their failure fails the package),
-while `run.postPublish` only warns since the release is already out. Run-level hooks observe the whole run: a gating
-`run.beforeAll` runs once before the task graph (its failure aborts the run), and the warn-only `run.postAll` plus
-the commit/push hooks below run after, with the outcome exported as
+`run.beforeBuild`/`run.postBuild`, `run.beforePublish` all *gate* the release (their failure fails the package), while
+`run.postPublish` only warns since the release is already out. Run-level hooks observe the whole run: a gating
+`run.beforeAll` runs once before the task graph (its failure aborts the run), and the warn-only `run.postAll` plus the
+commit/push hooks below run after, with the outcome exported as
 `DISPAT_PUBLISHED/FAILED/SKIPPED/UNPLANNED_PACKAGES` and per-package `DISPAT_RESULT_*` variables.
 
 Everything released is versioned and tagged, whatever its build produces — an exception there would cost convergence,
@@ -188,6 +223,40 @@ dispat          # release: run the full pipeline
 See [./services/cli/docs/getting-started.md](./services/cli/docs/getting-started.md) for the full walkthrough, and
 `dispat.example.json` /
 `dispat.example.yaml` for annotated configs.
+
+## Testing
+
+dispat's failure semantics are its main promise, so they are tested at two independent layers — over 365 test functions
+plus fuzzing across the workspace, all runnable with `go test ./...` in each module.
+
+**Unit tests** (testify, in-memory fakes; `gitx` and `cli` against real temporary git repositories):
+
+| Module / package                 | Statement coverage                                                                        |
+|----------------------------------|-------------------------------------------------------------------------------------------|
+| `pkg/ccme` (commit parser)       | **96.9%** — plus fuzz tests, allocation tests and the specification's conformance vectors |
+| `services/cli` (all packages)    | **91.0%** aggregate                                                                       |
+| — `script`                       | 100%                                                                                      |
+| — `graph` (scheduler)            | 98.5%                                                                                     |
+| — `release` (executor)           | 97.6%                                                                                     |
+| — `changelog`                    | 96.6%                                                                                     |
+| — `config`                       | 95.4%                                                                                     |
+| — `gitx`                         | 90.7%                                                                                     |
+| — `plan` (planner)               | 86.4%                                                                                     |
+| — `github`                       | 86.0%                                                                                     |
+| — `cli` (end-to-end, in-process) | 82.2%                                                                                     |
+
+The planner's two formulations of staleness — walking down from a provider and up from a consumer — are asserted to
+agree, a cheap conformance check on the propagation rules. The full per-package test inventory is in
+[Architecture → Testing](./services/cli/docs/architecture.md#testing).
+
+**Integration tests** ([`tests/integration`](./tests/integration)) are a separate Go module that structurally *cannot*
+import dispat's internals: it compiles the real binary, drives it against disposable git repositories exactly as a
+user's shell would, and asserts on the three outputs a release run actually has — git state (tags, commits, files), JSON
+log events, and nanosecond-resolution execution timelines from a purpose-built timing probe. Every concurrency claim is
+verified three independent ways, and the suite covers concurrency budgets, graph-ordered execution under both
+`isBuildWaitingPublish` modes, failure/catch-up/prerelease-train scenarios spanning multiple consecutive runs, and
+config/login/outcome-script behavior. The suite is race-clean (`-race`) and stable under repeated `-count` runs. See
+the [integration test plan](./tests/integration/docs/test-plan.md).
 
 ## Planned features
 
