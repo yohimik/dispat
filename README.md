@@ -73,7 +73,7 @@ dispat stands on the shoulders of two things:
   dispat's parser, [`pkg/ccme`](./pkg/ccme), implements a strict superset of Conventional Commits 1.0.0 that adds the
   monorepo dimension: scopes as packages, propagation depth, prerelease channels.
 
-Documentation:
+## Documentation
 
 | Document                                                    | Contents                                                                |
 |-------------------------------------------------------------|-------------------------------------------------------------------------|
