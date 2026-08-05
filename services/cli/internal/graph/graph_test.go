@@ -72,3 +72,58 @@ func TestAddNodeIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a"}, order)
 }
+
+func TestSchedulerReadyAndDoneCascade(t *testing.T) {
+	// A diamond: a -> b, a -> c, b -> d, c -> d. Only a starts ready; d
+	// becomes ready when its LAST dependency completes, not its first.
+	s := NewScheduler[string]()
+	s.AddEdge("a", "b")
+	s.AddEdge("a", "c")
+	s.AddEdge("b", "d")
+	s.AddEdge("c", "d")
+
+	assert.Equal(t, 4, s.Len())
+	assert.Equal(t, []string{"a"}, s.Ready())
+	assert.Empty(t, s.Ready(), "the frontier is handed out once")
+
+	assert.Equal(t, []string{"b", "c"}, s.Done("a"), "edge insertion order")
+	assert.Empty(t, s.Done("b"), "d still waits for c")
+	assert.Equal(t, []string{"d"}, s.Done("c"))
+	assert.Empty(t, s.Blocked(), "everything was reachable")
+}
+
+func TestSchedulerIsolatedAndImplicitNodes(t *testing.T) {
+	s := NewScheduler[string]()
+	s.Add("lone")
+	s.Add("lone")       // idempotent
+	s.AddEdge("x", "y") // registers both implicitly
+
+	assert.Equal(t, 3, s.Len())
+	assert.Equal(t, []string{"lone", "x"}, s.Ready(), "node insertion order")
+}
+
+func TestSchedulerBlockedNamesCycleMembers(t *testing.T) {
+	s := NewScheduler[string]()
+	s.AddEdge("root", "a")
+	s.AddEdge("a", "b")
+	s.AddEdge("b", "a") // cycle a <-> b
+
+	for _, n := range s.Ready() {
+		s.Done(n)
+	}
+	assert.Equal(t, []string{"a", "b"}, s.Blocked(),
+		"after draining the reachable frontier, what remains is the cycle")
+}
+
+func TestSchedulerGenericNodeType(t *testing.T) {
+	// The executor's use: struct-typed task nodes.
+	type node struct {
+		pkg, stage string
+	}
+	s := NewScheduler[node]()
+	build, publish := node{"core", "build"}, node{"core", "publish"}
+	s.AddEdge(build, publish)
+
+	assert.Equal(t, []node{build}, s.Ready())
+	assert.Equal(t, []node{publish}, s.Done(build))
+}

@@ -1,0 +1,162 @@
+package gitx
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/pkg/ccme"
+)
+
+// Formats that spell the prerelease out must render both shapes — the
+// prerelease one and the stable one, with the section's glued literals gone —
+// and read either back into the same SemVer version. The round trip is the
+// property everything rests on: the tag is only a spelling, and a spelling
+// that loses the version loses the package's history.
+func TestTagFormatPrereleasePlaceholders(t *testing.T) {
+	pre := ccme.Version{Major: 1, Minor: 2, Patch: 3, Prerelease: []string{"beta", "4"}}
+	stable := ccme.Version{Major: 1, Minor: 2, Patch: 3}
+
+	for _, tc := range []struct {
+		format    TagFormat
+		pkg       string
+		preTag    string
+		stableTag string
+	}{
+		{"{name}@{version}-{channel}{counter}", "core", "core@1.2.3-beta4", "core@1.2.3"},
+		{"{name}@{version}.{channel}.{counter}", "core", "core@1.2.3.beta.4", "core@1.2.3"},
+		{"{name}@v{version}-{channel}.{counter}", "core", "core@v1.2.3-beta.4", "core@v1.2.3"},
+		{"services/{name}@v{version}-{channel}{counter}", "core",
+			"services/core@v1.2.3-beta4", "services/core@v1.2.3"},
+		// No separating literals at all: the byte classes still split it —
+		// the core is digits and dots, the channel cannot start past a digit
+		// run's end, and the counter is what remains.
+		{"{name}@{version}{channel}{counter}", "core", "core@1.2.3beta4", "core@1.2.3"},
+		// A scoped npm name exercises the same "@" appearing as a literal.
+		{"{name}@{version}-{channel}{counter}", "@acme/ui", "@acme/ui@1.2.3-beta4", "@acme/ui@1.2.3"},
+	} {
+		require.NoError(t, tc.format.Validate(), "%q", tc.format)
+
+		assert.Equal(t, tc.preTag, tc.format.Render(tc.pkg, pre), "prerelease render %q", tc.format)
+		assert.Equal(t, tc.stableTag, tc.format.Render(tc.pkg, stable), "stable render %q", tc.format)
+
+		got, ok := tc.format.ParseVersion(tc.pkg, tc.preTag)
+		require.True(t, ok, "parse %q under %q", tc.preTag, tc.format)
+		assert.Equal(t, pre.String(), got.String(),
+			"the version is rebuilt in SemVer's shape whatever the tag spells")
+
+		got, ok = tc.format.ParseVersion(tc.pkg, tc.stableTag)
+		require.True(t, ok, "parse %q under %q", tc.stableTag, tc.format)
+		assert.Equal(t, stable.String(), got.String())
+
+		// One glob must cover both shapes: baseline(P) is a selection over a
+		// single listing, and a pattern that misses the prerelease tags would
+		// silently restart every train at .0.
+		assert.True(t, tc.format.Matches(tc.pkg, tc.preTag), "matches %q", tc.preTag)
+		assert.True(t, tc.format.Matches(tc.pkg, tc.stableTag), "matches %q", tc.stableTag)
+	}
+}
+
+func TestTagFormatCounterBeyondTheSpec(t *testing.T) {
+	// §11.3's counter is a bare number, but an exact Release-As may carry any
+	// prerelease SemVer allows — "2.0.0-rc.1.hotfix" — and whatever render can
+	// write must read back, or the release's own tag becomes an unparseable
+	// baseline one run later.
+	v := ccme.Version{Major: 2, Prerelease: []string{"rc", "1", "hotfix"}}
+
+	for _, tc := range []struct {
+		format TagFormat
+		tag    string
+	}{
+		{"{name}@{version}-{channel}.{counter}", "core@2.0.0-rc.1.hotfix"},
+		{"{name}@v{version}-{channel}{counter}", "core@v2.0.0-rc1.hotfix"},
+		{"{name}@{version}.{channel}.{counter}", "core@2.0.0.rc.1.hotfix"},
+	} {
+		assert.Equal(t, tc.tag, tc.format.Render("core", v), "render %q", tc.format)
+		got, ok := tc.format.ParseVersion("core", tc.tag)
+		require.True(t, ok, "parse %q under %q", tc.tag, tc.format)
+		assert.Equal(t, v.String(), got.String(), "round trip %q", tc.format)
+	}
+
+	// The greedy split keeps the channel a whole identifier: "beta10" is
+	// beta/10, never b/eta10 — which is also what keeps counters ordering
+	// numerically instead of restarting a train at every tenth release.
+	got, ok := TagFormat("{name}@{version}-{channel}{counter}").ParseVersion("core", "core@1.2.3-beta10")
+	require.True(t, ok)
+	assert.Equal(t, "1.2.3-beta.10", got.String())
+}
+
+func TestTagFormatPrereleaseValidate(t *testing.T) {
+	for _, bad := range []struct {
+		format TagFormat
+		why    string
+	}{
+		// One placeholder without the other cannot name a train's releases
+		// apart, so the mistake is refused at load rather than at tag time.
+		{"{name}@{version}-{channel}", "channel without counter"},
+		{"{name}@{version}-{counter}", "counter without channel"},
+		{"{name}@{version}-{counter}.{channel}", "counter before channel"},
+		{"{name}@{channel}{counter}-{version}", "prerelease before version"},
+		{"{name}@{version}-{channel}{channel}{counter}", "duplicate channel"},
+		{"{name}@{version}-{channel}{counter}{counter}", "duplicate counter"},
+		{"{name}@{version}-{channel}{name}{counter}", "placeholder inside the dropped section"},
+	} {
+		assert.Error(t, bad.format.Validate(), "%q (%s)", bad.format, bad.why)
+	}
+
+	// An unknown "{...}" stays literal text, exactly as it always has; here
+	// it makes the rendered sample fail git's ref rules, not the grammar.
+	assert.NoError(t, TagFormat("{name}@{version}-{channel}.{counter}").Validate())
+}
+
+func TestBaselineUnderPrereleaseFormat(t *testing.T) {
+	// The listing must read both shapes of a spelled-out format, or a package
+	// mid-train has no baseline and the next run believes the train never
+	// started.
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	f := TagFormat("{name}@v{version}-{channel}{counter}")
+	require.NoError(t, f.Validate())
+
+	tagAt(t, root, "core@v1.2.3", "2026-01-01T10:00:00")
+	tagAt(t, root, "core@v1.3.0-beta0", "2026-01-02T10:00:00")
+	tagAt(t, root, "core@v1.3.0-beta1", "2026-01-03T10:00:00")
+
+	tags := tagsOf(t, cli, ctx, "core", f)
+
+	tag, found := tags.Baseline()
+	require.True(t, found)
+	assert.Equal(t, "core@v1.3.0-beta1", tag.Name)
+	assert.Equal(t, "1.3.0-beta.1", tag.Version.String(),
+		"the SemVer separators come back even though the tag never wrote them")
+
+	stableTag, found := tags.StableBaseline()
+	require.True(t, found)
+	assert.Equal(t, "core@v1.2.3", stableTag.Name,
+		"the stable baseline skips the prerelease shape of the same format")
+}
+
+func TestRenderVersion(t *testing.T) {
+	// The version section of the tag alone: {version} through {counter} with
+	// the literals between them, nothing of the name or the decoration glued
+	// before the version.
+	pre := ccme.Version{Major: 1, Patch: 1, Prerelease: []string{"beta", "4"}}
+	stable := ccme.Version{Major: 1, Patch: 1}
+	for _, tc := range []struct {
+		format     string
+		wantPre    string
+		wantStable string
+	}{
+		{"{name}@{version}", "1.0.1-beta.4", "1.0.1"},
+		{"{name}@v{version}-{channel}{counter}", "1.0.1-beta4", "1.0.1"},
+		{"{name}@{version}.{channel}.{counter}", "1.0.1.beta.4", "1.0.1"},
+		{"services/{name}@v{version}", "1.0.1-beta.4", "1.0.1"},
+	} {
+		f := TagFormat(tc.format)
+		require.NoError(t, f.Validate(), tc.format)
+		assert.Equal(t, tc.wantPre, f.RenderVersion(pre), "%s, prerelease", tc.format)
+		assert.Equal(t, tc.wantStable, f.RenderVersion(stable), "%s, stable", tc.format)
+	}
+}

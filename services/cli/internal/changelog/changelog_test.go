@@ -11,29 +11,43 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/dispat/internal/conventional"
-	"github.com/yohimik/dispat/internal/model"
-	"github.com/yohimik/dispat/internal/plan"
-	"github.com/yohimik/dispat/internal/semver"
+	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/cli/internal/model"
+	"github.com/yohimik/dispat/services/cli/internal/plan"
 )
 
-func testRelease(dir string, next semver.Version) *plan.Release {
+// testUnit builds the minimum of a parsed unit that the renderer reads: the
+// bump it was classified as, and the description it renders.
+func testUnit(typ string, bump ccme.Bump, description string) *ccme.Unit {
+	return &ccme.Unit{
+		Header: ccme.Header{Type: typ, Description: description},
+		Bump:   bump,
+		Valid:  true,
+	}
+}
+
+func testRelease(dir string, next ccme.Version) *plan.Release {
 	return &plan.Release{
 		Pkg:  &model.Package{Name: "core", Dir: dir, Space: &model.Space{Name: "libs"}},
 		Next: next,
-		Commits: []conventional.Commit{
-			{Kind: conventional.KindFeat, Scope: "core", Description: "add streaming"},
-			{Kind: conventional.KindFix, Scope: "core", Description: "close leak"},
-			{Kind: conventional.KindBreaking, Scope: "core", Description: "drop old API"},
+		Units: []*ccme.Unit{
+			testUnit("feat", ccme.BumpMinor, "add streaming"),
+			testUnit("fix", ccme.BumpPatch, "close leak"),
+			testUnit("feat", ccme.BumpMajor, "drop old API"),
 		},
 		DueTo: []string{"utils"},
+		Updates: []plan.ProviderUpdate{{
+			Name: "utils",
+			From: ccme.Version{Major: 1, Minor: 1},
+			To:   ccme.Version{Major: 1, Minor: 2},
+		}},
 	}
 }
 
 var testDate = time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC)
 
 func TestRenderEntryDefaults(t *testing.T) {
-	out := RenderEntry(testRelease("/tmp/x", semver.Version{Major: 2}), testDate, Format{})
+	out := RenderEntry(testRelease("/tmp/x", ccme.Version{Major: 2}), testDate, Format{})
 
 	for _, want := range []string{
 		"## core@2.0.0 (2026-07-26)",
@@ -44,7 +58,7 @@ func TestRenderEntryDefaults(t *testing.T) {
 		"### Fixes",
 		"- close leak",
 		"### Dependencies",
-		"- updated providers: utils",
+		"- utils: 1.1.0 -> 1.2.0",
 	} {
 		assert.Contains(t, out, want)
 	}
@@ -60,7 +74,7 @@ func TestRenderEntryCustomFormat(t *testing.T) {
 		FixesTitle:        "Fixed",
 		DependenciesTitle: "Bumped",
 	}
-	out := RenderEntry(testRelease("/tmp/x", semver.Version{Major: 2}), testDate, f)
+	out := RenderEntry(testRelease("/tmp/x", ccme.Version{Major: 2}), testDate, f)
 
 	assert.Contains(t, out, "## core@2.0.0 (26.07.2026)")
 	assert.Contains(t, out, "### Breaking")
@@ -71,7 +85,7 @@ func TestRenderEntryCustomFormat(t *testing.T) {
 }
 
 func TestRenderSections(t *testing.T) {
-	out := RenderSections(testRelease("/tmp/x", semver.Version{Major: 2}), Format{})
+	out := RenderSections(testRelease("/tmp/x", ccme.Version{Major: 2}), Format{})
 	assert.True(t, strings.HasPrefix(out, "### Breaking Changes"), "no entry header in sections: %q", out)
 	assert.NotContains(t, out, "## core@")
 }
@@ -79,7 +93,7 @@ func TestRenderSections(t *testing.T) {
 func TestRenderSectionsEmpty(t *testing.T) {
 	rel := &plan.Release{
 		Pkg:  &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
-		Next: semver.Version{Major: 2},
+		Next: ccme.Version{Major: 2},
 	}
 	assert.Empty(t, RenderSections(rel, Format{}))
 	assert.Equal(t, "## core@2.0.0 (2026-07-26)\n", RenderEntry(rel, testDate, Format{}))
@@ -90,8 +104,8 @@ func TestRecordCreatesAndPrepends(t *testing.T) {
 	w := &FileWriter{Now: func() time.Time { return testDate }}
 	ctx := context.Background()
 
-	require.NoError(t, w.Record(ctx, testRelease(dir, semver.Version{Major: 2})))
-	require.NoError(t, w.Record(ctx, testRelease(dir, semver.Version{Major: 2, Minor: 1})))
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2, Minor: 1})))
 
 	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -114,7 +128,7 @@ func TestRecordCustomFileAndTitle(t *testing.T) {
 		Format: Format{FeaturesTitle: "Added"},
 		Now:    func() time.Time { return testDate },
 	}
-	require.NoError(t, w.Record(context.Background(), testRelease(dir, semver.Version{Major: 2})))
+	require.NoError(t, w.Record(context.Background(), testRelease(dir, ccme.Version{Major: 2})))
 
 	data, err := os.ReadFile(filepath.Join(dir, "HISTORY.md"))
 	require.NoError(t, err)
@@ -122,4 +136,14 @@ func TestRecordCustomFileAndTitle(t *testing.T) {
 	assert.True(t, strings.HasPrefix(content, "# History\n"))
 	assert.Contains(t, content, "### Added")
 	assert.NoFileExists(t, filepath.Join(dir, "CHANGELOG.md"))
+}
+
+func TestRenderSectionsFallsBackToNamesWithoutVersions(t *testing.T) {
+	// A Release built without version data (Updates empty) still names its
+	// providers rather than dropping the section.
+	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
+	rel.Updates = nil
+	out := RenderSections(rel, Format{})
+	assert.Contains(t, out, "### Dependencies")
+	assert.Contains(t, out, "- utils")
 }

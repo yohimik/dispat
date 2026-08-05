@@ -10,21 +10,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/dispat/internal/changelog"
-	"github.com/yohimik/dispat/internal/conventional"
-	"github.com/yohimik/dispat/internal/model"
-	"github.com/yohimik/dispat/internal/plan"
-	"github.com/yohimik/dispat/internal/semver"
+	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/cli/internal/changelog"
+	"github.com/yohimik/dispat/services/cli/internal/model"
+	"github.com/yohimik/dispat/services/cli/internal/plan"
 )
 
 func testRelease() *plan.Release {
 	return &plan.Release{
 		Pkg:  &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
-		Next: semver.Version{Major: 1, Minor: 3},
-		Commits: []conventional.Commit{
-			{Kind: conventional.KindFeat, Scope: "core", Description: "add streaming"},
-		},
+		Next: ccme.Version{Major: 1, Minor: 3},
+		Units: []*ccme.Unit{{
+			Header: ccme.Header{Type: "feat", Description: "add streaming"},
+			Bump:   ccme.BumpMinor,
+			Valid:  true,
+		}},
 		DueTo: []string{"utils"},
+		Updates: []plan.ProviderUpdate{{
+			Name: "utils",
+			From: ccme.Version{Major: 2},
+			To:   ccme.Version{Major: 2, Patch: 1},
+		}},
 	}
 }
 
@@ -51,8 +57,48 @@ func TestRecordCreatesRelease(t *testing.T) {
 	assert.Equal(t, "core@1.3.0", gotBody.Name)
 	assert.Contains(t, gotBody.Body, "### Features")
 	assert.Contains(t, gotBody.Body, "- add streaming")
-	assert.Contains(t, gotBody.Body, "- updated providers: utils")
+	assert.Contains(t, gotBody.Body, "- utils: 2.0.0 -> 2.0.1",
+		"the dependencies section carries the version movement, not the bare name")
 	assert.NotContains(t, gotBody.Body, "## core@", "release body has no entry header")
+	assert.False(t, gotBody.Prerelease, "1.3.0 is a stable release")
+}
+
+func TestRecordMarksPrereleases(t *testing.T) {
+	// GitHub presents the newest non-prerelease as "Latest"; a beta shipped
+	// without the flag would take that slot.
+	var gotBody releaseRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Next = ccme.Version{Major: 1, Minor: 3, Prerelease: []string{"beta", "0"}}
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	require.NoError(t, r.Record(context.Background(), rel))
+
+	assert.Equal(t, "core@1.3.0-beta.0", gotBody.TagName)
+	assert.True(t, gotBody.Prerelease)
+}
+
+func TestRecordUsesTheSpaceTagFormat(t *testing.T) {
+	var gotBody releaseRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Pkg.Space.TagFormat = "services/{name}@v{version}"
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	require.NoError(t, r.Record(context.Background(), rel))
+
+	assert.Equal(t, "services/core@v1.3.0", gotBody.TagName,
+		"the release must name the tag the run actually creates")
 }
 
 func TestRecordCustomFormat(t *testing.T) {

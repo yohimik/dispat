@@ -1,27 +1,41 @@
 {
   "scripts": {
-    "build": "npm ci && npm run build",
+    "install": "npm ci",
+    "build": "npm run build",
     "publish": "npm publish --access public",
     "sync-deps": "node ./scripts/sync-deps.js",
+    "npm-login": "npm whoami || npm login",
+    "smoke-test": "npm run smoke",
+    "announce": "./scripts/announce.sh",
     "build-go": "go build ./...",
-    "publish-go": "./scripts/release.sh"
+    "publish-go": "./scripts/release.sh",
+    "notify": "./scripts/notify.sh"
   },
   "spaces": {
     "libs": {
       "path": "packages/libs",
       "isBuildWaitingPublish": true,
       "revertOnFail": true,
-      "buildScript": "build",
-      "publishScript": "publish",
-      "versionScript": "sync-deps"
+      "run": {
+        "build": ["install", "build"],
+        "publish": "publish",
+        "version": "sync-deps",
+        "login": "npm-login",
+        "postBuild": "smoke-test",
+        "announce": "announce"
+      }
     },
     "apps": {
       "path": "packages/apps",
       "isBuildWaitingPublish": false,
-      "buildScript": "build-go",
-      "publishScript": "publish-go"
+      "run": {
+        "build": "build-go",
+        "publish": "publish-go"
+      },
+      "tagFormat": "packages/apps/{name}@v{version}"
     }
   },
+  "run": {"postAll": "notify"},
   "dependencies": [
     { "consumer": "app", "provider": "core" },
     { "consumer": "app", "provider": "utils" }
@@ -29,6 +43,9 @@
   "initials": {
     "core": "1.0.0"
   },
+  "tagFormat": "{name}@{version}",
+  "commitErrors": "warn",
+  "nonPackageScopes": ["release"],
   "concurrency": [4, 2],
   "logLevel": "info",
   "logFormat": "pretty",

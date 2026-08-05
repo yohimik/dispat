@@ -3,11 +3,7 @@
 ## Install
 
 ```sh
-git clone <your fork or vendor path>
-cd dispat
-go mod tidy
-go build -o dispat .
-go test ./...
+go install github.com/yohimik/dispat@latest
 ```
 
 ## First configuration
@@ -23,8 +19,10 @@ Create `dispat.json` at your monorepo root (YAML or TOML work too — pass `--co
   "spaces": {
     "libs": {
       "path": "packages/libs",
-      "buildScript": "build",
-      "publishScript": "publish"
+      "run": {
+        "build": "build",
+        "publish": "publish"
+      }
     }
   }
 }
@@ -39,28 +37,68 @@ under `dependencies` so bumps propagate and ordering is enforced:
 }
 ```
 
-Beyond scripts and spaces there are optional top-level knobs — `concurrency` (`[build, publish]` budgets), `changelog`
-and `github` (customise or disable the release records), `initials` (baseline versions for packages without a usable
-tag), `commit` and `push` (end-of-run release commit and pushing, disabled by default) — and per-space options
-`isBuildWaitingPublish`, `revertOnFail` and `versionScript`. All are covered in
+Beyond scripts and spaces there are optional top-level knobs — `concurrency` (`[build, publish]` budgets), `tagFormat`
+(the release tag template), `commitErrors` (whether a bad commit message stops the run), `nonPackageScopes`,
+`changelog` and `github` (customise or disable the release records), `initials` (baseline versions for packages without
+a usable tag), `commit` and `push` (end-of-run release commit and pushing, disabled by default), the run-level hooks
+(the gating `run.beforeAll`, `run.postAll` and the commit/push hooks) — and per-space options `isBuildWaitingPublish`, `revertOnFail`,
+`run.version`, `run.login` (once-per-space authentication before the first publish), `run.announce` (a warn-only
+stage after the publish for pushing the release to update channels), the stage hooks
+(`run.beforeAll` … `run.postAnnounce`), the outcome scripts (`run.onFail` / `run.onSkip`, run when a package
+fails or is skipped) and `tagFormat`. Every script option takes one script name or an array run in
+order. All are covered in
 [Configuration & CLI](configuration.md). Annotated full examples: [`../../../dispat.example.json`](../../../dispat.example.json),
 [`../../../dispat.example.yaml`](../../../dispat.example.yaml).
 
 ## Commit convention
 
-Name the package in the commit scope: `fix(core): close leak` (patch), `feat(core): add streaming` (minor),
-`BREAKING CHANGE(core): drop old API` or `feat(core)!: new API` (major). Commits without a recognized form or scope are
-ignored for versioning.
+Name the package in the commit scope:
+
+```
+fix(core): close leak            # patch, core only
+feat(core): add streaming        # minor, core only
+feat(core)!: drop the old API    # major, core only
+```
+
+**Reaching consumers is opt-in.** A plain `feat(core):` releases `core` and nothing else — add a caret to say how far
+the change reaches:
+
+```
+feat(core)^: add streaming       # core + its direct consumers
+feat(core)^^: add streaming      # core + every transitive consumer
+feat(core)+2: add streaming      # core + consumers up to two edges away
+feat(core)^minor: add streaming  # consumers take minor instead of the default patch
+```
+
+Consumers reached this way take a `patch` unless the commit says otherwise, and their own commits still win if they
+demand more. If you are coming from a tool where propagation was automatic, this is the one habit to change: without a
+caret, dependants are not bumped.
+
+A few more forms worth knowing early — the full reference is in
+[Configuration & CLI](configuration.md#commit-message-reference):
+
+```
+fix(core,utils): shared fix      # several packages
+fix(*,-app): workspace-wide      # everything except app
+fix: touch up the loader         # no scope: the packages owning the changed files
+feat(core)@beta: try it out      # put core on a beta prerelease line
+release(core)@stable: promote    # graduate it back
+release(app): hold               # with a `Release-As: none` footer: withhold app
+cancel(app): drop pending work   # discard app's unreleased metadata
+```
+
+A commit whose scope names no known package is an error by default — a typo would otherwise silently drop a release.
+Scopes that are deliberately not packages (like `release`) go in `nonPackageScopes`.
 
 ## Commands
 
 ```sh
-./dispat status               # print the project graph and planned versions; changes nothing
-./dispat                      # release (default command): full pipeline
-./dispat release --root path  # same, explicit
-./dispat --concurrency 4,2    # override build/publish parallelism
-./dispat --log-format json    # machine-readable logs for CI
-./dispat --log-level debug    # more verbose output
+dispat status               # print the project graph and planned versions; changes nothing
+dispat                      # release (default command): full pipeline
+dispat release --root path  # same, explicit
+dispat --concurrency 4,2    # override build/publish parallelism
+dispat --log-format json    # machine-readable logs for CI
+dispat --log-level debug    # more verbose output
 ```
 
 ## Running in CI (GitHub Actions example)
@@ -85,7 +123,8 @@ jobs:
 
 Notes:
 
-- `fetch-depth: 0` matters — without full history and tags the planner cannot find previous releases.
+- `fetch-depth: 0` matters — without full history and tags the planner cannot find previous releases, and a shallow
+  clone is not detected.
 - By default dispat creates tags locally; push them after a successful run (as above). Alternatively enable
   `"commit": {"enabled": true, "push": true}` in the config: dispat then creates one release commit (changelogs +
   manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This
@@ -98,3 +137,19 @@ Notes:
   commit via `target_commitish`; without it, GitHub creates the tag ref at the default branch head until you push (the
   true commit/tag stay recorded in the body) — or disable releases with `"github": {"enabled": false}`.
 - Exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
+- Run `dispat status` on pull requests to review the plan before it is a release: it prints the diagnostics, the graph
+  in publish order, and every version and channel transition, without touching anything.
+
+## Reviewing a plan
+
+Four things in a plan cannot be explained by reading the commit log alone, so dispat always reports them:
+
+| Marker           | Meaning                                                                                            |
+|------------------|-----------------------------------------------------------------------------------------------------|
+| **catch-up**     | The package is releasing only because a dependency published in an *earlier* run. Carries that version. |
+| **channel-only** | The package is releasing only because its channel changed. Carries both channels.                    |
+| **held**         | The package accumulated a bump but `Release-As: none` is withholding it. Carries the version it would have. |
+| **blocked**      | The package was planned and never attempted, because a dependency failed to publish.                 |
+
+A caret that reached a consumer and could not oblige it — a stable consumer of a prerelease — is reported too, so a
+directive that looks like it should have released something and did not is visible rather than silent.

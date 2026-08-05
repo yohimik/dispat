@@ -1,16 +1,23 @@
 # Same configuration as dispat.example.json in YAML. dispat defaults to
 # dispat.json; point at this file with: dispat --config dispat.yaml
 scripts:
-  build: "npm ci && npm run build"
+  install: "npm ci"
+  build: "npm run build"
   publish: "npm publish --access public"
-  # Sync manifests to just-released provider versions; receives
-  # DISPAT_UPDATED_PROVIDERS as JSON.
+  # Sync manifests to just-released provider versions; receives them as
+  # per-package DISPAT_UPDATED_* variables.
   sync-deps: "node ./scripts/sync-deps.js"
+  npm-login: "npm whoami || npm login"
+  smoke-test: "npm run smoke"
+  announce: "./scripts/announce.sh"
   build-go: "go build ./..."
   publish-go: "./scripts/release.sh"
+  notify: "./scripts/notify.sh"
 
-# All script references are optional: a stage without a script still runs
-# (ordering, tags, changelogs, github releases) but executes no shell command.
+# A space's `run` object says what runs at which stage, referencing the named
+# scripts above. Every entry is optional (a stage without a script still runs —
+# ordering, tags, changelogs, github releases — it just executes no shell
+# command) and accepts one name or an array of names run in order.
 spaces:
   libs:
     path: packages/libs
@@ -19,14 +26,44 @@ spaces:
     # Roll back all local changes inside the package folder when a package
     # from this space fails during version, build or publish.
     revertOnFail: true
-    buildScript: build
-    publishScript: publish
-    versionScript: sync-deps
+    run:
+      build: [install, build]
+      publish: publish
+      version: sync-deps
+      # Runs once per space, before the space's first publish; every other
+      # publish of the space waits for it, and its failure fails them all.
+      login: npm-login
+      # Hooks around the package stages (beforeAll, beforeVersion,
+      # postVersion, beforeBuild, postBuild, beforePublish, postPublish,
+      # beforeAnnounce, postAnnounce). Everything up to beforePublish gates
+      # the release — a failure fails the package; postPublish and the
+      # announce hooks warn. onFail / onSkip run when a package fails or is
+      # skipped, warn-only.
+      postBuild: smoke-test
+      # A fourth stage after a successful publish: push the release out to
+      # update channels. Receives DISPAT_BREAKING_CHANGES / DISPAT_FEATURES /
+      # DISPAT_FIXES (the changelog's groupings) and only warns on failure.
+      announce: announce
   apps:
     path: packages/apps
     isBuildWaitingPublish: false
-    buildScript: build-go
-    publishScript: publish-go
+    run:
+      build: build-go
+      publish: publish-go
+    # Overrides the repository-wide tagFormat for this space only.
+    tagFormat: "packages/apps/{name}@v{version}"
+
+# The top-level `run` object holds the run-level hooks, executed in the
+# monorepo root. beforeAll is the one gating run hook — it runs once before
+# the task graph starts and its failure aborts the run. All the others only
+# warn on failure. postAll runs once after the whole task graph finishes with
+# the run outcome in DISPAT_PUBLISHED/FAILED/SKIPPED/UNPLANNED_PACKAGES and
+# DISPAT_RESULT_* variables. The commit hooks (beforeCommit, afterCommit,
+# postCommit) and push hooks (beforePush, afterPush) bracket the finalize
+# phase when commit/push are enabled.
+run:
+  # beforeAll: check-preconditions
+  postAll: notify
 
 dependencies:
   - consumer: app
@@ -35,10 +72,34 @@ dependencies:
     provider: utils
 
 # Baseline versions used when a package's latest tag is missing or cannot be
-# parsed (e.g. a stray core@0.0.1-0.0.0). The next release bumps on top of
+# parsed (e.g. a stray core@0.0.1.0). The next release bumps on top of
 # this value; a parseable latest tag always wins over initials.
 initials:
   core: 1.0.0
+
+# Release tag template, overridable per space above. Placeholders are {name},
+# {version}, and optionally {channel} with {counter} to spell prereleases your
+# own way ("{name}@v{version}-{channel}{counter}" tags core@v1.2.3-beta4, and
+# core@v1.2.3 when stable — the prerelease section and its glued literals are
+# dropped). Every other byte is literal, so "v" prefixes and path prefixes
+# both work. A tag that matches the shape but whose version cannot be parsed
+# puts the package on the `initials` fallback, exactly as before.
+tagFormat: "{name}@{version}"
+
+# What an error in a commit message does to the run:
+#   warn  (default) the offending unit contributes nothing and the run
+#                   continues, which is the blast radius the spec assigns to
+#                   unit-scoped errors
+#   error           any commit error stops the run before anything is released
+# Repository-scoped failures — an unreadable tag, a version that would go
+# backwards, a dependency cycle — abort under either setting.
+commitErrors: warn
+
+# Scope names that are deliberately not packages, so naming one is not the
+# typo that an unknown-package error exists to catch. "release" is dispat's
+# own release-commit scope: without the exemption every run would leave an
+# error behind for the next one.
+nonPackageScopes: [release]
 
 # One value for both stages (concurrency: 4) or [build, publish].
 # 0 means "number of CPUs".

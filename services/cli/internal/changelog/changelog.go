@@ -12,9 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yohimik/dispat/internal/conventional"
-	"github.com/yohimik/dispat/internal/gitx"
-	"github.com/yohimik/dispat/internal/plan"
+	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/cli/internal/plan"
 )
 
 // Format customises how a release entry is rendered. Zero values fall back to
@@ -48,22 +47,35 @@ func defaultStr(s *string, def string) {
 func RenderSections(rel *plan.Release, f Format) string {
 	f = f.withDefaults()
 	var parts []string
-	collect := func(title string, kind conventional.Kind) {
+	collect := func(title string, kind ccme.Bump) {
 		var lines []string
-		for _, c := range rel.Commits {
-			if c.Kind == kind {
-				lines = append(lines, "- "+c.Description)
+		for _, c := range rel.Units {
+			if c.Bump == kind {
+				lines = append(lines, "- "+c.Header.Description+"\n"+c.Body)
 			}
 		}
 		if len(lines) > 0 {
 			parts = append(parts, "### "+title+"\n\n"+strings.Join(lines, "\n")+"\n")
 		}
 	}
-	collect(f.BreakingTitle, conventional.KindBreaking)
-	collect(f.FeaturesTitle, conventional.KindFeat)
-	collect(f.FixesTitle, conventional.KindFix)
+	collect(f.BreakingTitle, ccme.BumpMajor)
+	collect(f.FeaturesTitle, ccme.BumpMinor)
+	collect(f.FixesTitle, ccme.BumpPatch)
 	if len(rel.DueTo) > 0 {
-		parts = append(parts, "### "+f.DependenciesTitle+"\n\n- updated providers: "+strings.Join(rel.DueTo, ", ")+"\n")
+		// One line per provider, carrying the version movement the consumer
+		// picks up — a bare name would leave the reader to hunt the provider's
+		// own changelog for what actually changed underneath. On a catch-up
+		// From equals To: the provider's version was already out.
+		var lines []string
+		for _, u := range rel.Updates {
+			lines = append(lines, "- "+u.Name+": "+u.From.String()+" -> "+u.To.String())
+		}
+		if len(lines) == 0 { // no version data (e.g. a hand-built Release): names alone
+			for _, name := range rel.DueTo {
+				lines = append(lines, "- "+name)
+			}
+		}
+		parts = append(parts, "### "+f.DependenciesTitle+"\n\n"+strings.Join(lines, "\n")+"\n")
 	}
 	return strings.Join(parts, "\n")
 }
@@ -72,7 +84,7 @@ func RenderSections(rel *plan.Release, f Format) string {
 // header followed by the sections.
 func RenderEntry(rel *plan.Release, date time.Time, f Format) string {
 	f = f.withDefaults()
-	header := fmt.Sprintf("## %s (%s)\n", gitx.TagName(rel.Pkg.Name, rel.Next), date.Format(f.DateFormat))
+	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), date.Format(f.DateFormat))
 	sections := RenderSections(rel, f)
 	if sections == "" {
 		return header

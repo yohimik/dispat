@@ -1,4 +1,4 @@
-module github.com/yohimik/dispat
+module github.com/yohimik/dispat/services/cli
 
 go 1.26
 
@@ -8,7 +8,10 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
+	github.com/yohimik/dispat/pkg/ccme v0.0.0-00010101000000-000000000000
 )
+
+replace github.com/yohimik/dispat/pkg/ccme => ../../pkg/ccme
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

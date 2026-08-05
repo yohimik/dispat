@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yohimik/dispat/internal/changelog"
-	"github.com/yohimik/dispat/internal/gitx"
-	"github.com/yohimik/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/cli/internal/changelog"
+	"github.com/yohimik/dispat/services/cli/internal/plan"
 )
 
 // DefaultAPIURL is the public GitHub REST API endpoint.
@@ -51,6 +50,11 @@ type releaseRequest struct {
 	Name            string `json:"name"`
 	Body            string `json:"body"`
 	TargetCommitish string `json:"target_commitish,omitempty"`
+	// Prerelease marks a release on a prerelease channel (§11.1), so that
+	// GitHub does not present a `1.3.0-beta.0` as the repository's latest
+	// release. It is always sent: a graduation has to be able to clear the
+	// flag as well as set it.
+	Prerelease bool `json:"prerelease"`
 }
 
 // Verify checks that the repository is reachable with the configured token
@@ -88,7 +92,7 @@ func (r *Releaser) Verify(ctx context.Context) error {
 
 // Record implements release.ReleaseRecorder.
 func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
-	tag := gitx.TagName(rel.Pkg.Name, rel.Next)
+	tag := rel.TagName()
 	body := changelog.RenderSections(rel, r.Format)
 	if r.CommitSHA != "" {
 		if body != "" {
@@ -101,6 +105,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		Name:            tag,
 		Body:            body,
 		TargetCommitish: r.TargetCommitish,
+		Prerelease:      rel.IsPrerelease(),
 	})
 	if err != nil {
 		return fmt.Errorf("github: %w", err)

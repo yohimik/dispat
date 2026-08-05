@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,12 +20,14 @@ spaces:
     path: packages/libs
     isBuildWaitingPublish: true
     revertOnFail: true
-    buildScript: build
-    publishScript: publish
+    run:
+      build: build
+      publish: publish
   apps:
     path: packages/apps
-    buildScript: build
-    publishScript: publish
+    run:
+      build: build
+      publish: publish
 dependencies:
   - consumer: app
     provider: core
@@ -59,7 +62,7 @@ func TestLoadConcurrencyPair(t *testing.T) {
 	yml := `
 scripts: {build: "echo b", publish: "echo p"}
 spaces:
-  libs: {path: pkgs, buildScript: build, publishScript: publish}
+  libs: {path: pkgs, run: {build: build, publish: publish}}
 concurrency: [4, 2]
 `
 	root := writeRepo(t, yml, "pkgs/core")
@@ -73,7 +76,7 @@ func TestLoadDefaults(t *testing.T) {
 	yml := `
 scripts: {build: "echo b", publish: "echo p"}
 spaces:
-  libs: {path: pkgs, buildScript: build, publishScript: publish}
+  libs: {path: pkgs, run: {build: build, publish: publish}}
 `
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -82,6 +85,96 @@ spaces:
 	assert.GreaterOrEqual(t, cfg.PublishConcurrency, 1, "default publish concurrency")
 	assert.Equal(t, "info", cfg.LogLevel, "default logLevel")
 	assert.Equal(t, "pretty", cfg.LogFormat, "default logFormat")
+	assert.Equal(t, CommitErrorsWarn, cfg.CommitErrors,
+		"§16 default: a unit-scoped error invalidates the unit, not the run")
+	assert.Equal(t, []string{"release"}, cfg.NonPackageScopes,
+		"dispat's own release-commit scope is exempt by default")
+	assert.Equal(t, "{name}@{version}", cfg.TagFormat, "default tag format")
+}
+
+func TestLoadCommitErrors(t *testing.T) {
+	base := `
+scripts: {build: "echo b"}
+spaces:
+  libs: {path: pkgs, run: {build: build}}
+commitErrors: %s
+`
+	for _, tc := range []struct {
+		value string
+		want  string
+		ok    bool
+	}{
+		{`"warn"`, CommitErrorsWarn, true},
+		{`"error"`, CommitErrorsError, true},
+		{`"fatal"`, "", false},
+	} {
+		root := writeRepo(t, fmt.Sprintf(base, tc.value), "pkgs/core")
+		cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+		if !tc.ok {
+			require.Error(t, err, "commitErrors: %s", tc.value)
+			assert.Contains(t, err.Error(), "commitErrors")
+			continue
+		}
+		require.NoError(t, err, "commitErrors: %s", tc.value)
+		assert.Equal(t, tc.want, cfg.CommitErrors)
+	}
+}
+
+func TestLoadNonPackageScopes(t *testing.T) {
+	yml := `
+scripts: {build: "echo b"}
+spaces:
+  libs: {path: pkgs, run: {build: build}}
+nonPackageScopes: [release, deps]
+`
+	root := writeRepo(t, yml, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"release", "deps"}, cfg.NonPackageScopes)
+}
+
+func TestLoadTagFormatPerSpace(t *testing.T) {
+	yml := `
+scripts: {build: "echo b"}
+tagFormat: "{name}@v{version}"
+spaces:
+  libs: {path: pkgs, run: {build: build}}
+  services: {path: svc, run: {build: build}, tagFormat: "services/{name}@v{version}"}
+`
+	root := writeRepo(t, yml, "pkgs/core", "svc/api")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+
+	pkgs, _, err := cfg.Discover(root)
+	require.NoError(t, err)
+
+	byName := map[string]string{}
+	for _, p := range pkgs {
+		byName[p.Name] = p.Space.TagFormat
+	}
+	assert.Equal(t, "{name}@v{version}", byName["core"], "a space with no format inherits the repository's")
+	assert.Equal(t, "services/{name}@v{version}", byName["api"], "and may override it")
+}
+
+func TestLoadTagFormatInvalid(t *testing.T) {
+	for _, yml := range []string{
+		`
+scripts: {build: "echo b"}
+tagFormat: "{name}"
+spaces:
+  libs: {path: pkgs, run: {build: build}}
+`,
+		`
+scripts: {build: "echo b"}
+spaces:
+  libs: {path: pkgs, run: {build: build}, tagFormat: "{name}@{version}-{version}"}
+`,
+	} {
+		root := writeRepo(t, yml, "pkgs/core")
+		_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "{version}")
+	}
 }
 
 func testFlags(t *testing.T, args ...string) *pflag.FlagSet {
@@ -108,7 +201,7 @@ func TestLoadFlagOverrides(t *testing.T) {
 func TestLoadLogFormatJSON(t *testing.T) {
 	yml := `
 scripts: {b: x}
-spaces: {a: {path: p, buildScript: b, publishScript: b}}
+spaces: {a: {path: p, run: {build: b, publish: b}}}
 logFormat: json
 `
 	root := writeRepo(t, yml)
@@ -140,7 +233,7 @@ func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 	yml := `
 scripts: {buildAll: "echo b", publishAll: "echo p"}
 spaces:
-  libs: {path: pkgs, buildScript: buildAll, publishScript: publishAll}
+  libs: {path: pkgs, run: {build: buildAll, publish: publishAll}}
 `
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -148,8 +241,8 @@ spaces:
 	pkgs, _, err := cfg.Discover(root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
-	assert.Equal(t, "echo b", pkgs[0].Space.BuildScript)
-	assert.Equal(t, "echo p", pkgs[0].Space.PublishScript)
+	assert.Equal(t, []string{"echo b"}, pkgs[0].Space.BuildScript)
+	assert.Equal(t, []string{"echo p"}, pkgs[0].Space.PublishScript)
 }
 
 func TestLoadOptionalScripts(t *testing.T) {
@@ -157,7 +250,7 @@ func TestLoadOptionalScripts(t *testing.T) {
 	yml := `
 scripts: {sync: "npm install"}
 spaces:
-  libs: {path: pkgs, versionScript: sync}
+  libs: {path: pkgs, run: {version: sync}}
 `
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -167,7 +260,7 @@ spaces:
 	require.Len(t, pkgs, 1)
 	assert.Empty(t, pkgs[0].Space.BuildScript)
 	assert.Empty(t, pkgs[0].Space.PublishScript)
-	assert.Equal(t, "npm install", pkgs[0].Space.VersionScript)
+	assert.Equal(t, []string{"npm install"}, pkgs[0].Space.VersionScript)
 }
 
 func TestLoadInitials(t *testing.T) {
@@ -180,9 +273,10 @@ initials:
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 	require.Len(t, cfg.InitialVersions, 2)
-	assert.Equal(t, 1, cfg.InitialVersions["core"].Major)
-	assert.Equal(t, 3, cfg.InitialVersions["core"].Patch)
-	assert.Equal(t, 9, cfg.InitialVersions["legacy-pkg"].Minor)
+	// Compare rendered versions: the fields are uint64, and an untyped
+	// constant in an interface argument arrives as int.
+	assert.Equal(t, "1.2.3", cfg.InitialVersions["core"].String())
+	assert.Equal(t, "0.9.0", cfg.InitialVersions["legacy-pkg"].String())
 }
 
 func TestLoadInitialsInvalidVersion(t *testing.T) {
@@ -320,7 +414,7 @@ shell: ["", "-c"]
 func TestLoadJSONConfig(t *testing.T) {
 	jsonCfg := `{
   "scripts": {"build": "echo b", "publish": "echo p"},
-  "spaces": {"libs": {"path": "pkgs", "buildScript": "build", "publishScript": "publish"}},
+  "spaces": {"libs": {"path": "pkgs", "run": {"build": "build", "publish": "publish"}}},
   "concurrency": [4, 2],
   "github": {"enabled": false}
 }`
@@ -343,16 +437,16 @@ func TestLoadErrors(t *testing.T) {
 	cases := []struct {
 		name, yml, wantErr string
 	}{
-		{"unknown field", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b, typo: 1}}", "invalid format"},
+		{"unknown field", "scripts: {b: x}\nspaces: {a: {path: p, typo: 1, run: {build: b, publish: b}}}", "invalid format"},
 		{"no spaces", "scripts: {b: x}", "at least one space"},
-		{"unknown script", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: nope, publishScript: b}}", "unknown script"},
-		{"unknown version script", "scripts: {b: x}\nspaces: {a: {path: p, versionScript: nope}}", "unknown script"},
-		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: -1", "concurrency"},
-		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nconcurrency: [1, 2, 3]", "at most two"},
-		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogLevel: loud", "logLevel"},
-		{"pretty is not a level", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogLevel: pretty", "logLevel"},
-		{"bad format", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\nlogFormat: fancy", "logFormat"},
-		{"self dependency", "scripts: {b: x}\nspaces: {a: {path: p, buildScript: b, publishScript: b}}\ndependencies: [{consumer: x, provider: x}]", "itself"},
+		{"unknown script", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: nope, publish: b}}}", "unknown script"},
+		{"unknown version script", "scripts: {b: x}\nspaces: {a: {path: p, run: {version: nope}}}", "unknown script"},
+		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nconcurrency: -1", "concurrency"},
+		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nconcurrency: [1, 2, 3]", "at most two"},
+		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nlogLevel: loud", "logLevel"},
+		{"pretty is not a level", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nlogLevel: pretty", "logLevel"},
+		{"bad format", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nlogFormat: fancy", "logFormat"},
+		{"self dependency", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\ndependencies: [{consumer: x, provider: x}]", "itself"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -409,4 +503,144 @@ func TestDiscoverUnknownDependency(t *testing.T) {
 	_, _, err = cfg.Discover(root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown consumer")
+}
+
+func TestLoadScriptArraysAndScalars(t *testing.T) {
+	// Every script field accepts a single name or an array of names; a scalar
+	// lifts into a one-element sequence and arrays keep their order.
+	yml := `
+scripts: {clean: "echo clean", compile: "echo compile", pub: "echo pub"}
+spaces:
+  libs:
+    path: pkgs
+    run:
+      build: [clean, compile]
+      publish: pub
+`
+	root := writeRepo(t, yml, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := cfg.Discover(root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, []string{"echo clean", "echo compile"}, pkgs[0].Space.BuildScript,
+		"array form resolves in configuration order")
+	assert.Equal(t, []string{"echo pub"}, pkgs[0].Space.PublishScript,
+		"scalar form lifts into a one-element sequence")
+}
+
+func TestLoadLoginAndHookScripts(t *testing.T) {
+	yml := `
+scripts:
+  auth: "npm login"
+  hook: "echo hook"
+  build: "echo build"
+spaces:
+  libs:
+    path: pkgs
+    run:
+      build: build
+      login: auth
+      announce: [hook, build]
+      beforeAll: hook
+      beforeVersion: hook
+      postVersion: [hook, build]
+      beforeBuild: hook
+      postBuild: hook
+      beforePublish: hook
+      postPublish: hook
+      beforeAnnounce: hook
+      postAnnounce: hook
+      onFail: hook
+      onSkip: [hook, build]
+`
+	root := writeRepo(t, yml, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := cfg.Discover(root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	sp := pkgs[0].Space
+	assert.Equal(t, []string{"npm login"}, sp.LoginScript)
+	assert.Equal(t, []string{"echo hook", "echo build"}, sp.AnnounceScript)
+	assert.Equal(t, []string{"echo hook"}, sp.BeforeAnnounceScript)
+	assert.Equal(t, []string{"echo hook"}, sp.PostAnnounceScript)
+	assert.Equal(t, []string{"echo hook"}, sp.OnFailScript)
+	assert.Equal(t, []string{"echo hook", "echo build"}, sp.OnSkipScript)
+	assert.Equal(t, []string{"echo hook"}, sp.BeforeAllScript)
+	assert.Equal(t, []string{"echo hook"}, sp.BeforeVersionScript)
+	assert.Equal(t, []string{"echo hook", "echo build"}, sp.PostVersionScript)
+	assert.Equal(t, []string{"echo hook"}, sp.BeforeBuildScript)
+	assert.Equal(t, []string{"echo hook"}, sp.PostBuildScript)
+	assert.Equal(t, []string{"echo hook"}, sp.BeforePublishScript)
+	assert.Equal(t, []string{"echo hook"}, sp.PostPublishScript)
+}
+
+func TestLoadRunHooks(t *testing.T) {
+	yml := `
+scripts: {build: "echo b", notify: "echo notify", lint: "echo lint"}
+spaces:
+  libs: {path: pkgs, run: {build: build}}
+run:
+  beforeAll: lint
+  postAll: notify
+  beforeCommit: [lint, notify]
+  afterCommit: notify
+  postCommit: notify
+  beforePush: notify
+  afterPush: notify
+`
+	root := writeRepo(t, yml, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"lint"}, cfg.Run.BeforeAll)
+	assert.Equal(t, []string{"notify"}, cfg.Run.PostAll)
+	assert.Equal(t, []string{"lint", "notify"}, cfg.Run.BeforeCommit)
+	assert.Equal(t, []string{"echo lint", "echo notify"}, cfg.Commands(cfg.Run.BeforeCommit),
+		"references resolve to the named commands in order")
+	assert.Equal(t, []string{"echo notify"}, cfg.Commands(cfg.Run.AfterPush))
+}
+
+func TestLoadScriptReferenceErrors(t *testing.T) {
+	cases := []struct {
+		name, yml, wantErr string
+	}{
+		{"unknown login script",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, login: nope}}}",
+			"run.login references unknown script"},
+		{"unknown hook script",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, beforeBuild: nope}}}",
+			"run.beforeBuild references unknown script"},
+		{"unknown run hook script",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b}}}\nrun: {postAll: nope}",
+			"run.postAll references unknown script"},
+		{"unknown beforeAll run hook script",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b}}}\nrun: {beforeAll: nope}",
+			"run.beforeAll references unknown script"},
+		{"unknown script in an array",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: [b, nope]}}}",
+			"run.build references unknown script"},
+		{"empty space script reference",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: [\"\"]}}}",
+			"empty script reference"},
+		{"empty run hook reference",
+			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b}}}\nrun: {beforePush: [\"\"]}",
+			"empty script reference"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := writeRepo(t, c.yml)
+			_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}
+
+func TestExampleConfigsAreValid(t *testing.T) {
+	// The annotated examples double as documentation; they must always load.
+	for _, f := range []string{"dispat.example.json", "dispat.example.yaml"} {
+		_, err := Load(filepath.Join("..", "..", f), nil)
+		require.NoError(t, err, f)
+	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,8 +15,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/yohimik/dispat/internal/config"
 )
 
 // github is disabled in test configs so runs never touch the real API even
@@ -26,7 +25,7 @@ const testConfig = `{
     "publish": "echo publishing"
   },
   "spaces": {
-    "libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}
+    "libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}
   },
   "concurrency": 1,
   "logLevel": "info",
@@ -36,7 +35,7 @@ const testConfig = `{
 
 const testConfigNoChangelog = `{
   "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "concurrency": 1,
   "logLevel": "info",
   "logFormat": "json",
@@ -45,6 +44,10 @@ const testConfigNoChangelog = `{
 }`
 
 // initRepo creates a git monorepo with one package and one feat commit.
+//
+// The commit carries a caret. propagation.depth defaults to 0 (§14), so a
+// caret-less feat reaches no consumer at all; every end-to-end test here that
+// exercises a dependency edge needs the unit to opt in to propagation.
 func initRepo(t *testing.T, cfg string) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -65,7 +68,7 @@ func initRepo(t *testing.T, cfg string) string {
 	git("config", "user.email", "test@example.com")
 	git("config", "user.name", "Test")
 	git("add", ".")
-	git("commit", "-qm", "feat(core): first release")
+	git("commit", "-qm", "feat(core)^: first release")
 	return root
 }
 
@@ -114,7 +117,7 @@ func TestReleaseCommandChangelogDisabled(t *testing.T) {
 
 const testConfigInitials = `{
   "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "concurrency": 1,
   "logLevel": "info",
   "logFormat": "json",
@@ -131,7 +134,7 @@ func TestStatusInitialsWithUnparseableTag(t *testing.T) {
 		require.NoError(t, err, "git %v: %s", args, out)
 	}
 	// Newest (only) tag is unparseable; a fix lands after it.
-	git("tag", "-a", "core@0.1.0-broken", "-m", "broken tag")
+	git("tag", "-a", "core@0.1.0.broken", "-m", "broken tag")
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "fix.txt"), []byte("x"), 0o644))
 	git("add", ".")
 	git("commit", "-qm", "fix(core): repair")
@@ -151,7 +154,7 @@ const testConfigRevert = `{
     "bad-build": "echo dirty > main.txt && echo junk > generated.txt && exit 1"
   },
   "spaces": {
-    "libs": {"path": "packages", "revertOnFail": true, "buildScript": "bad-build"}
+    "libs": {"path": "packages", "revertOnFail": true, "run": {"build": "bad-build"}}
   },
   "concurrency": 1,
   "logLevel": "info",
@@ -177,9 +180,21 @@ func TestReleaseRevertOnFail(t *testing.T) {
 	assert.Empty(t, bytes.TrimSpace(tags), "failed package must not be tagged")
 }
 
+// testConfigCommit enables the release commit without pushing, so a run leaves
+// a `chore(release): ...` commit in the history the next run must read.
+const testConfigCommit = `{
+  "scripts": {"build": "echo building", "publish": "echo publishing"},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "commit": {"enabled": true},
+  "github": {"enabled": false}
+}`
+
 const testConfigCommitPush = `{
   "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "concurrency": 1,
   "logLevel": "info",
   "logFormat": "json",
@@ -268,7 +283,7 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
 
 	cfg := `{
   "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "concurrency": 1,
   "logLevel": "info",
   "logFormat": "json",
@@ -296,7 +311,7 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
 
 const testConfigCatchUp = `{
   "scripts": {"build": "[ ! -f FAIL ]", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "buildScript": "build", "publishScript": "publish"}},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "dependencies": [{"consumer": "app", "provider": "core"}],
   "concurrency": 1,
   "logLevel": "info",
@@ -349,14 +364,103 @@ func TestReleaseCatchUpAfterConsumerFailure(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(tags, "app@"), "no repeat release once caught up")
 }
 
-func TestRenderCommitMessage(t *testing.T) {
-	pkgs := []string{"core", "utils"}
-	tags := []string{"core@1.1.0", "utils@2.0.1"}
-	assert.Equal(t, "chore(release): core@1.1.0, utils@2.0.1",
-		renderCommitMessage("", pkgs, tags), "default format")
-	assert.Equal(t, "publish core, utils as core@1.1.0, utils@2.0.1",
-		renderCommitMessage("publish {packages} as {tags}", pkgs, tags))
-	assert.Equal(t, "no placeholders", renderCommitMessage("no placeholders", pkgs, tags))
+const testConfigCommitErrors = `{
+  "scripts": {"build": "echo building", "publish": "echo publishing"},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "commitErrors": "%s",
+  "github": {"enabled": false}
+}`
+
+func TestCommitErrorPolicy(t *testing.T) {
+	// A commit naming a package that does not exist is a unit-scoped error
+	// (§16): under the default policy the unit contributes nothing and the run
+	// goes ahead, and under "error" the run refuses to release at all.
+	for _, tc := range []struct {
+		policy   string
+		wantCode int
+		wantTag  bool
+	}{
+		{"warn", 0, true},
+		{"error", 1, false},
+	} {
+		root := initRepo(t, fmt.Sprintf(testConfigCommitErrors, tc.policy))
+		git := func(args ...string) string {
+			t.Helper()
+			out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+			require.NoError(t, err, "git %v: %s", args, out)
+			return string(bytes.TrimSpace(out))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "x.txt"), []byte("x"), 0o644))
+		git("add", ".")
+		git("commit", "-qm", "fix(nosuch): typo in the scope")
+
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"--root", root}, &stdout, &stderr)
+		assert.Equal(t, tc.wantCode, code, "commitErrors=%s\n%s", tc.policy, stdout.String())
+		assert.Contains(t, stdout.String(), "E130", "the diagnostic must be reported either way")
+		assert.Equal(t, tc.wantTag, strings.Contains(git("tag"), "core@"),
+			"commitErrors=%s: released?", tc.policy)
+	}
+}
+
+func TestReleaseCommitScopeDoesNotPoisonTheNextRun(t *testing.T) {
+	// dispat's own release commit is `chore(release): ...`, and `release` is
+	// not a package. Without the nonPackageScopes exemption the tool would
+	// leave an unknown-package error behind on every run for the next run to
+	// trip over.
+	root := initRepo(t, testConfigCommit) // commit mode: writes chore(release)
+	var out1, err1 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out1, &err1),
+		"first run: %s", out1.String())
+
+	subject, err := exec.Command("git", "-C", root, "log", "-1", "--format=%s").Output()
+	require.NoError(t, err)
+	require.Contains(t, string(subject), "chore(release)", "the release commit was created")
+
+	var out2, err2 bytes.Buffer
+	code := Run([]string{"status", "--root", root}, &out2, &err2)
+	assert.Equal(t, 0, code, "the release commit must not error the next run: %s", out2.String())
+	assert.NotContains(t, out2.String(), "E130")
+}
+
+const testConfigTagFormat = `{
+  "scripts": {"build": "echo building", "publish": "echo publishing"},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "tagFormat": "{name}@v{version}",
+  "github": {"enabled": false}
+}`
+
+func TestReleaseWithCustomTagFormat(t *testing.T) {
+	// The tag name is what the *next* run reads the baseline from, so a custom
+	// format has to round-trip: released under it, then read back under it.
+	root := initRepo(t, testConfigTagFormat)
+	tags := func() string {
+		out, err := exec.Command("git", "-C", root, "tag").Output()
+		require.NoError(t, err)
+		return string(out)
+	}
+
+	var out1, err1 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out1, &err1), "%s", out1.String())
+	assert.Contains(t, tags(), "core@v0.1.0", "the 'v' comes from the format")
+
+	// Second run: the tag must be recognised, so nothing is pending.
+	var out2, err2 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out2, &err2))
+	assert.Equal(t, 1, strings.Count(tags(), "core@"), "the format must round-trip")
+
+	// A new commit bumps on top of the version read back out of the tag.
+	git := exec.Command("git", "-C", root, "commit", "-q", "--allow-empty", "-m", "fix(core): repair")
+	require.NoError(t, git.Run())
+	var out3, err3 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out3, &err3), "%s", out3.String())
+	assert.Contains(t, tags(), "core@v0.1.1", "0.1.0 + fix, still under the custom format")
 }
 
 func TestUnknownCommand(t *testing.T) {
@@ -372,28 +476,222 @@ func TestInvalidConfig(t *testing.T) {
 	assert.Equal(t, 1, code)
 }
 
-func TestGithubReleaserResolution(t *testing.T) {
-	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
-	t.Setenv("GITHUB_TOKEN", "envtoken")
-	t.Setenv("CUSTOM_TOKEN", "customtoken")
+// testConfigRunHooks wires every run-level hook to a script that records the
+// stage it ran as, plus a postAll script dumping the run environment.
+const testConfigRunHooks = `{
+  "scripts": {
+    "build": "echo building",
+    "publish": "echo publishing",
+    "hook": "echo $DISPAT_STAGE >> hooks.log",
+    "dump": "env | grep '^DISPAT_' > postall.env"
+  },
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "commit": {"enabled": true, "push": true},
+  "github": {"enabled": false},
+  "run": {"beforeAll": "hook", "postAll": ["hook", "dump"], "beforeCommit": "hook", "afterCommit": "hook", "postCommit": "hook", "beforePush": "hook", "afterPush": "hook"}
+}`
 
-	gh, err := githubReleaser(config.GitHubConfig{})
+func TestReleaseRunHooksOrderAndEnvironment(t *testing.T) {
+	root := initRepo(t, testConfigRunHooks)
+	addBareRemote(t, root)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "stderr: %s\nstdout: %s", stderr.String(), stdout.String())
+
+	// The hooks run in the monorepo root, bracketing their phases in order.
+	data, err := os.ReadFile(filepath.Join(root, "hooks.log"))
 	require.NoError(t, err)
-	assert.Equal(t, "envowner", gh.Owner)
-	assert.Equal(t, "envrepo", gh.Repo)
-	assert.Equal(t, "envtoken", gh.Token)
+	assert.Equal(t, "beforeAll\npostAll\nbeforeCommit\nafterCommit\npostCommit\nbeforePush\nafterPush\n",
+		string(data))
 
-	gh, err = githubReleaser(config.GitHubConfig{Owner: "acme", Repo: "mono", TokenEnv: "CUSTOM_TOKEN"})
+	// postAll sees the run outcome and the workspace listing.
+	env, err := os.ReadFile(filepath.Join(root, "postall.env"))
 	require.NoError(t, err)
-	assert.Equal(t, "acme", gh.Owner)
-	assert.Equal(t, "mono", gh.Repo)
-	assert.Equal(t, "customtoken", gh.Token)
+	assert.Contains(t, string(env), "DISPAT_PUBLISHED_PACKAGES=CORE")
+	assert.Contains(t, string(env), "DISPAT_RESULT_CORE_STATUS=published")
+	assert.Contains(t, string(env), "DISPAT_RESULT_CORE_NEW_VERSION=0.1.0")
+	assert.Contains(t, string(env), "DISPAT_WORKSPACE_CORE_VERSION=0.1.0")
+	assert.Contains(t, string(env), "DISPAT_FAILED_PACKAGES=\n")
+	assert.Contains(t, string(env), "DISPAT_STAGE=postAll")
 
-	t.Setenv("GITHUB_REPOSITORY", "")
-	_, err = githubReleaser(config.GitHubConfig{})
-	assert.ErrorContains(t, err, "no repository")
+	// A second run releases nothing: postAll still reports the (empty) run,
+	// but the commit and push hooks are no-ops without a publish.
+	require.NoError(t, os.Remove(filepath.Join(root, "hooks.log")))
+	var out2, err2 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out2, &err2), "%s", out2.String())
+	data, err = os.ReadFile(filepath.Join(root, "hooks.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "beforeAll\npostAll\n", string(data),
+		"commit and push hooks must not run when nothing published")
+	env, err = os.ReadFile(filepath.Join(root, "postall.env"))
+	require.NoError(t, err)
+	assert.Contains(t, string(env), "DISPAT_UNPLANNED_PACKAGES=CORE",
+		"a package with nothing to release is reported as unplanned")
+}
 
-	t.Setenv("GITHUB_TOKEN", "")
-	_, err = githubReleaser(config.GitHubConfig{Owner: "acme", Repo: "mono"})
-	assert.ErrorContains(t, err, "GITHUB_TOKEN")
+const testConfigFailingRunHook = `{
+  "scripts": {
+    "build": "echo building",
+    "publish": "echo publishing",
+    "boom": "exit 1",
+    "hook": "echo $DISPAT_STAGE >> hooks.log"
+  },
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "github": {"enabled": false},
+  "run": {"postAll": ["boom", "hook"], "beforeCommit": "hook"}
+}`
+
+func TestReleaseRunHookFailureOnlyWarns(t *testing.T) {
+	// A failing run hook warns and the rest of its sequence still runs; the
+	// release itself stays successful. With the commit disabled, the commit
+	// hooks never fire at all.
+	root := initRepo(t, testConfigFailingRunHook)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "a failing run hook must not fail the run\n%s", stdout.String())
+	assert.Contains(t, stdout.String(), "postAll script failed (not fatal)")
+
+	tags, err := exec.Command("git", "-C", root, "tag").Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(tags), "core@0.1.0", "the release went out regardless")
+
+	data, err := os.ReadFile(filepath.Join(root, "hooks.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "postAll\n", string(data),
+		"the sequence continued past the failure; commit hooks stayed off")
+}
+
+// testConfigLogin exercises the config -> executor plumbing of run.login and
+// the per-package hooks end to end. Package scripts run inside the package
+// folder, so the markers land two levels up, in the monorepo root.
+const testConfigLogin = `{
+  "scripts": {
+    "build": "echo building",
+    "publish": "echo publishing",
+    "login": "echo login >> ../../login.log",
+    "hook": "echo $DISPAT_STAGE-$DISPAT_PACKAGE >> ../../pkg-hooks.log"
+  },
+  "spaces": {
+    "libs": {"path": "packages", "run": {"build": "build", "publish": "publish", "login": "login", "beforePublish": "hook", "announce": "hook"}}
+  },
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "github": {"enabled": false}
+}`
+
+func TestReleaseLoginOncePerSpaceEndToEnd(t *testing.T) {
+	root := initRepo(t, testConfigLogin)
+	// A second package, so two publishes share the space's one login.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "extra"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "extra", "main.txt"), []byte("x"), 0o644))
+	git := exec.Command("git", "-C", root, "add", ".")
+	require.NoError(t, git.Run())
+	git = exec.Command("git", "-C", root, "commit", "-qm", "feat(extra): second package")
+	require.NoError(t, git.Run())
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "stderr: %s\nstdout: %s", stderr.String(), stdout.String())
+
+	data, err := os.ReadFile(filepath.Join(root, "login.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "login\n", string(data), "two publishes, one space, one login")
+
+	hooks, err := os.ReadFile(filepath.Join(root, "pkg-hooks.log"))
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(hooks)), "\n")
+	assert.ElementsMatch(t, []string{
+		"beforePublish-core", "beforePublish-extra",
+		"announce-core", "announce-extra",
+	}, lines, "the announce stage runs after each publish")
+}
+
+const testConfigFailingBeforeAll = `{
+  "scripts": {
+    "build": "echo building",
+    "publish": "echo publishing",
+    "boom": "exit 1"
+  },
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "github": {"enabled": false},
+  "run": {"beforeAll": "boom"}
+}`
+
+func TestReleaseBeforeAllHookFailureAbortsTheRun(t *testing.T) {
+	// beforeAll is the one gating run hook: it fires before any release work,
+	// so its failure stops the run before anything is built, published or
+	// tagged.
+	root := initRepo(t, testConfigFailingBeforeAll)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"--root", root}, &stdout, &stderr)
+	require.Equal(t, 1, code, "a failing beforeAll must abort the run\n%s", stdout.String())
+	assert.Contains(t, stdout.String(), "beforeAll hook failed")
+
+	tags, err := exec.Command("git", "-C", root, "tag").Output()
+	require.NoError(t, err)
+	assert.Empty(t, bytes.TrimSpace(tags), "nothing may be tagged")
+	assert.NoFileExists(t, filepath.Join(root, "packages", "core", "CHANGELOG.md"),
+		"no release work may run after the gate refused")
+}
+
+func TestReleasePrereleaseTrainConvergesEndToEnd(t *testing.T) {
+	// The reported bug, end to end: release a beta, then run again with no
+	// new commits — the second run must find nothing to release. Then a new
+	// fix continues the train, and a graduation ends it.
+	root := initRepo(t, testConfig)
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return string(bytes.TrimSpace(out))
+	}
+	git("commit", "-q", "--allow-empty", "-m", "feat(core)@beta!: break everything")
+
+	// Run 1: the train starts at 1.0.0-beta.0.
+	var out1, err1 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out1, &err1), "%s", out1.String())
+	require.Contains(t, git("tag"), "core@1.0.0-beta.0")
+
+	// Run 2, no new commits: nothing to do, no new tag, exit 0.
+	var out2, err2 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out2, &err2), "%s", out2.String())
+	assert.Equal(t, 1, strings.Count(git("tag"), "core@"),
+		"a released prerelease must not re-release itself")
+	assert.Contains(t, out2.String(), "unchanged")
+	assert.NotContains(t, out2.String(), "W199",
+		"the directive that started the train is contained, not redundant")
+
+	// Run 3: a new fix continues the counter — and only once.
+	git("commit", "-q", "--allow-empty", "-m", "fix(core): tweak")
+	var out3, err3 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out3, &err3), "%s", out3.String())
+	tags := git("tag")
+	assert.Contains(t, tags, "core@1.0.0-beta.1", "new work continues the train")
+	var out4, err4 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out4, &err4), "%s", out4.String())
+	assert.Equal(t, 2, strings.Count(git("tag"), "core@"), "beta.1 converges too")
+
+	// Run 5: graduation releases the whole train as 1.0.0.
+	git("commit", "-q", "--allow-empty", "-m", "release(core)@stable: ship it")
+	var out5, err5 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out5, &err5), "%s", out5.String())
+	assert.Contains(t, git("tag"), "core@1.0.0", "the train graduates under the major it accumulated")
+
+	// And a graduated train is converged as well.
+	var out6, err6 bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &out6, &err6), "%s", out6.String())
+	assert.Equal(t, 3, strings.Count(git("tag"), "core@"), "no repeat release after graduation")
 }

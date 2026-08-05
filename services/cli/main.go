@@ -9,7 +9,7 @@ package main
 import (
 	"os"
 
-	"github.com/yohimik/dispat/internal/cli"
+	"github.com/yohimik/dispat/services/cli/internal/cli"
 )
 
 func main() {
