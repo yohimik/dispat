@@ -16,6 +16,10 @@
       "path": "packages/libs",
       "isBuildWaitingPublish": true,
       "revertOnFail": true,
+      "versioning": "independent",
+      "runScripts": {
+        "lint": "npm run lint"
+      },
       "run": {
         "build": ["install", "build"],
         "publish": "publish",

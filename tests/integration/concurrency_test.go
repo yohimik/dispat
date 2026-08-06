@@ -12,11 +12,12 @@ package integration
 // start-order argument) inside harness.AssertConcurrencyBudget.
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	models "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -29,16 +30,15 @@ import (
 func budgetRepo(t *testing.T, buildConc, publishConc int, buildSleep, publishSleep time.Duration) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {
-    "build": %q,
-    "publish": %q
-  },
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  %s
-}`, r.TsmarkScript("build.log", "$DISPAT_PACKAGE", buildSleep),
-		r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", publishSleep),
-		harness.Base(fmt.Sprintf("[%d, %d]", buildConc, publishConc))))
+	cfg := harness.BaseFile(buildConc, publishConc)
+	cfg.Scripts = map[string]string{
+		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", buildSleep),
+		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", publishSleep),
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Run: buildPublish()},
+	}
+	r.WriteConfigModel(cfg)
 	return r
 }
 
@@ -96,16 +96,20 @@ func TestConcurrencyPublishBudgetIsIndependentOfBuild(t *testing.T) {
 // overlap observable.
 func TestConcurrencyIndependentPickedUpConcurrentlyDependantAwaited(t *testing.T) {
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {"build": %q, "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "dependencies": [
-    {"consumer": "downstream", "provider": "a"},
-    {"consumer": "downstream", "provider": "b"},
-    {"consumer": "downstream", "provider": "c"}
-  ],
-  %s
-}`, r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 150*time.Millisecond), harness.Base("[3, 3]")))
+	cfg := harness.BaseFile(3, 3)
+	cfg.Scripts = map[string]string{
+		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 150*time.Millisecond),
+		"publish": "echo publishing",
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Run: buildPublish()},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "downstream", Provider: "a"},
+		{Consumer: "downstream", Provider: "b"},
+		{Consumer: "downstream", Provider: "c"},
+	}
+	r.WriteConfigModel(cfg)
 
 	for _, name := range []string{"a", "b", "c", "downstream"} {
 		r.SeedPackage("packages", name)

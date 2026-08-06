@@ -24,6 +24,7 @@ import (
 const (
 	cmdRelease = "release" // build and publish changed packages (default)
 	cmdStatus  = "status"  // only print the graph and new versions
+	cmdRun     = "run"     // run a space run script inside each changed package
 )
 
 // Run is the program entry point; it returns the process exit code.
@@ -32,15 +33,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "monorepo root folder")
 	cfgName := fs.String("config", "dispat.json", "config file name, relative to --root")
-	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2)")
+	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")
 	fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
 	fs.String("log-format", "", "override the configured logFormat (pretty, json)")
+	onError := fs.String("on-error", app.OnErrorSkip,
+		"run command: what a failing script does to the failed package's dependents (skip or continue)")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `usage: dispat [command] [flags]
 
 commands:
-  release  build and publish changed packages (default)
-  status   print the project graph and new versions, without building
+  release       build and publish changed packages (default)
+  status        print the project graph and new versions, without building
+  run <script>  run the named space run script inside each changed package,
+                honouring the dependency graph; "dispat <script>" is a
+                shorthand when <script> is not a command name
 
 flags:
 %s`, fs.FlagUsages())
@@ -49,6 +55,10 @@ flags:
 		if errors.Is(err, pflag.ErrHelp) {
 			return 0
 		}
+		// pflag's ContinueOnError mode returns the error without printing it,
+		// so an unrecognized flag would otherwise exit 2 in total silence.
+		fmt.Fprintf(stderr, "dispat: %v\n\n", err)
+		fs.Usage()
 		return 2
 	}
 
@@ -58,17 +68,39 @@ flags:
 		With().Timestamp().Logger()
 
 	cmd := cmdRelease
+	runScript := ""
 	if rest := fs.Args(); len(rest) > 0 {
 		cmd = rest[0]
-		if cmd != cmdRelease && cmd != cmdStatus {
-			bootLog.Error().Str("command", cmd).Msg("unknown command (want release or status)")
-			fs.Usage()
-			return 2
+		switch cmd {
+		case cmdRelease, cmdStatus:
+			if len(rest) > 1 {
+				bootLog.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
+				return 2
+			}
+		case cmdRun:
+			if len(rest) != 2 {
+				bootLog.Error().Msg("run requires exactly one argument: the run script name")
+				fs.Usage()
+				return 2
+			}
+			runScript = rest[1]
+		default:
+			// Not a command name: treat the word as a run script, so
+			// `dispat lint` is `dispat run lint`. A name no space defines
+			// still fails cleanly below, which also catches command typos.
+			if len(rest) > 1 {
+				bootLog.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
+				fs.Usage()
+				return 2
+			}
+			runScript = cmd
+			cmd = cmdRun
 		}
-		if len(rest) > 1 {
-			bootLog.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
-			return 2
-		}
+	}
+	if cmd == cmdRun && !app.ValidOnError(*onError) {
+		bootLog.Error().Str("on-error", *onError).Msgf("unknown --on-error value (want %q or %q)",
+			app.OnErrorSkip, app.OnErrorContinue)
+		return 2
 	}
 
 	cfg, err := config.Load(filepath.Join(*root, *cfgName), fs)
@@ -84,14 +116,19 @@ flags:
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.
 	a := app.New(*root, cfg, log)
-	if cmd == cmdStatus {
+	switch cmd {
+	case cmdStatus:
 		if a.Status(ctx) != nil {
 			return 1
 		}
-		return 0
-	}
-	if a.Release(ctx) != nil {
-		return 1
+	case cmdRun:
+		if a.RunScript(ctx, runScript, *onError) != nil {
+			return 1
+		}
+	default:
+		if a.Release(ctx) != nil {
+			return 1
+		}
 	}
 	return 0
 }

@@ -53,8 +53,12 @@ var noProposal = channelProposal{}
 // stable never graduates a dependent off a prerelease (W200). Graduation ends
 // a train and publishes under a version consumers resolve by default, so it
 // must not happen because an unrelated package's commit propagated a channel.
-// A transition is the deliberate exception, because its author had to name the
-// train being ended in order to write it.
+// A transition is the deliberate exception and bypasses the flag below: its
+// author had to name the train being ended (`beta>stable`) in order to write
+// it, and matching against the target's baseline is what keeps it precise —
+// packages not on that train are simply unmatched. This is what makes the
+// documented `release(core)@beta>stable@@beta>stable++*` form actually end
+// the whole train, dependants included.
 func resolveChannelValue(v ccme.ChannelValue, cur, origin string, graduates bool) channelProposal {
 	var target string
 
@@ -85,7 +89,7 @@ func resolveChannelValue(v ccme.ChannelValue, cur, origin string, graduates bool
 	if target == "" {
 		return noProposal
 	}
-	if target == ccme.ChannelStable && cur != ccme.ChannelStable && !graduates {
+	if target == ccme.ChannelStable && cur != ccme.ChannelStable && !graduates && !v.IsTransition() {
 		return refuses(CodeChannelNoGraduate,
 			"a propagated "+ccme.ChannelStable+" would graduate this package off "+cur+
 				"; write a transition to graduate deliberately")

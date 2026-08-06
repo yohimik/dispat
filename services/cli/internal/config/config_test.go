@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yohimik/dispat/pkg/ccme"
 )
 
 const validYAML = `
@@ -145,7 +146,7 @@ spaces:
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
 
-	pkgs, _, err := cfg.Discover(root)
+	pkgs, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 
 	byName := map[string]string{}
@@ -238,7 +239,7 @@ spaces:
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := cfg.Discover(root)
+	pkgs, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, []string{"echo b"}, pkgs[0].Space.BuildScript)
@@ -255,7 +256,7 @@ spaces:
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := cfg.Discover(root)
+	pkgs, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Empty(t, pkgs[0].Space.BuildScript)
@@ -427,7 +428,7 @@ func TestLoadJSONConfig(t *testing.T) {
 	assert.Equal(t, 4, cfg.BuildConcurrency)
 	assert.Equal(t, 2, cfg.PublishConcurrency)
 	assert.False(t, cfg.GitHub.IsEnabled())
-	pkgs, _, err := cfg.Discover(root)
+	pkgs, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "core", pkgs[0].Name)
@@ -468,7 +469,7 @@ func TestDiscover(t *testing.T) {
 		"packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	pkgs, deps, err := cfg.Discover(root)
+	pkgs, deps, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 3)
 
@@ -491,7 +492,7 @@ func TestDiscoverDuplicatePackage(t *testing.T) {
 		"packages/libs/core", "packages/apps/core", "packages/apps/app")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	_, _, err = cfg.Discover(root)
+	_, _, err = Discover(cfg, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unique")
 }
@@ -500,7 +501,7 @@ func TestDiscoverUnknownDependency(t *testing.T) {
 	root := writeRepo(t, validYAML, "packages/libs/core", "packages/apps/other")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	_, _, err = cfg.Discover(root)
+	_, _, err = Discover(cfg, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown consumer")
 }
@@ -520,7 +521,7 @@ spaces:
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := cfg.Discover(root)
+	pkgs, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, []string{"echo clean", "echo compile"}, pkgs[0].Space.BuildScript,
@@ -557,7 +558,7 @@ spaces:
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := cfg.Discover(root)
+	pkgs, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	sp := pkgs[0].Space
@@ -642,5 +643,303 @@ func TestExampleConfigsAreValid(t *testing.T) {
 	for _, f := range []string{"dispat.example.json", "dispat.example.yaml"} {
 		_, err := Load(filepath.Join("..", "..", f), nil)
 		require.NoError(t, err, f)
+	}
+}
+
+func TestLoadVersioning(t *testing.T) {
+	// The three modes load and normalize case-insensitively; the default is
+	// independent; an unknown value is rejected with the valid set named.
+	load := func(t *testing.T, versioning string) (*File, error) {
+		line := ""
+		if versioning != "" {
+			line = "\n    versioning: " + versioning
+		}
+		root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs`+line+`
+    run:
+      build: build
+`, "packages/libs/core")
+		return Load(filepath.Join(root, "dispat.yaml"), nil)
+	}
+
+	for raw, want := range map[string]string{
+		"":            VersioningIndependent,
+		"independent": VersioningIndependent,
+		"fixed":       VersioningFixed,
+		"Fixed":       VersioningFixed,
+		"fixedSparse": VersioningFixedSparse,
+		"fixedsparse": VersioningFixedSparse,
+	} {
+		cfg, err := load(t, raw)
+		require.NoError(t, err, "versioning %q", raw)
+		assert.Equal(t, want, cfg.Spaces["libs"].Versioning, "versioning %q", raw)
+	}
+
+	_, err := load(t, "locked")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown versioning "locked"`)
+	assert.Contains(t, err.Error(), "fixedSparse", "the message names the valid values")
+}
+
+func TestLoadRunScripts(t *testing.T) {
+	// runScripts values are shell commands, not references into `scripts`, so
+	// they need no scripts entry; keys are lowercased by viper and resolved
+	// case-insensitively; an empty command is rejected.
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+    runScripts:
+      Lint: "echo linting"
+      test: "go test ./..."
+`, "packages/libs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+
+	cmd, ok := cfg.Spaces["libs"].RunScript("LINT")
+	require.True(t, ok, "run script names resolve case-insensitively")
+	assert.Equal(t, "echo linting", cmd)
+	_, ok = cfg.Spaces["libs"].RunScript("format")
+	assert.False(t, ok)
+
+	rootBad := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+    runScripts:
+      lint: "  "
+`, "packages/libs/core")
+	_, err = Load(filepath.Join(rootBad, "dispat.yaml"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `runScripts["lint"] is empty`)
+}
+
+func TestDiscoverCarriesVersioningAndRunScripts(t *testing.T) {
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    versioning: fixed
+    run:
+      build: build
+    runScripts:
+      lint: "echo linting"
+`, "packages/libs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "fixed", string(pkgs[0].Space.Versioning))
+	assert.Equal(t, map[string]string{"lint": "echo linting"}, pkgs[0].Space.RunScripts)
+}
+
+func TestLoadRunScriptsEmptyNameRejected(t *testing.T) {
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+    runScripts:
+      "": "echo nameless"
+`, "packages/libs/core")
+	_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty script name")
+}
+
+func TestLoadSelfDependencyRejected(t *testing.T) {
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+dependencies:
+  - consumer: core
+    provider: core
+`, "packages/libs/core")
+	_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot depend on itself")
+}
+
+func TestDiscoverMissingSpaceFolder(t *testing.T) {
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: does/not/exist
+    run:
+      build: build
+`)
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err, "the folder is a discovery concern, not a load one")
+	_, _, err = Discover(cfg, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `space "libs"`)
+}
+
+func TestDiscoverSkipsHiddenFoldersAndFiles(t *testing.T) {
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+`, "packages/libs/core", "packages/libs/.hidden")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "libs", "notes.txt"), []byte("x"), 0o644))
+
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1, "only real package folders count")
+	assert.Equal(t, "core", pkgs[0].Name)
+}
+
+func TestDiscoverUnknownProvider(t *testing.T) {
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+dependencies:
+  - consumer: core
+    provider: ghost
+`, "packages/libs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	_, _, err = Discover(cfg, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
+}
+
+func TestLoadParserDefaults(t *testing.T) {
+	// No parser object: the resolved config is the zero ccme.Config, which
+	// ccme documents as the specification defaults — the parser dispat always
+	// built.
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+`, "packages/libs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, ccme.Config{}, cfg.ParserConfig)
+}
+
+func TestLoadParserOptions(t *testing.T) {
+	// Every knob maps onto the ccme configuration, with weak decoding letting
+	// a numeric depth stand next to "all".
+	root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+parser:
+  separator: "%%%"
+  types:
+    feat: minor
+    fix: patch
+    docs: patch
+  strictTypes: true
+  lenient: true
+  maxDescriptionLength: 72
+  propagation:
+    bump: minor
+    depth: 1
+    channelDepth: all
+    kinds: [dependencies, peerDependencies]
+    channel: inherit
+  limits:
+    unitsPerMessage: 8
+    scopeTermsPerUnit: 16
+    messageBytes: 65536
+  allowedChannels: [beta, rc]
+`, "packages/libs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+	require.NoError(t, err)
+
+	pc := cfg.ParserConfig
+	assert.Equal(t, "%%%", pc.Separator)
+	assert.Equal(t, map[string]ccme.Bump{"feat": ccme.BumpMinor, "fix": ccme.BumpPatch, "docs": ccme.BumpPatch}, pc.Types)
+	assert.True(t, pc.StrictTypes)
+	assert.True(t, pc.Lenient)
+	assert.Equal(t, 72, pc.MaxDescriptionLength)
+	assert.Equal(t, ccme.PropagateMinor, pc.Propagation.Bump)
+	assert.Equal(t, ccme.Depth(1), pc.Propagation.Depth)
+	assert.Equal(t, ccme.DepthAll, pc.Propagation.ChannelDepth)
+	assert.Equal(t, []ccme.DependencyKind{ccme.KindDependencies, ccme.KindPeerDependencies}, pc.Propagation.Kinds)
+	assert.Equal(t, ccme.ChannelInherit, pc.Propagation.Channel)
+	assert.Equal(t, ccme.Limits{UnitsPerMessage: 8, ScopeTermsPerUnit: 16, MessageBytes: 65536}, pc.Limits)
+	assert.Equal(t, []string{"beta", "rc"}, pc.AllowedChannels)
+}
+
+func TestLoadParserInvalidValues(t *testing.T) {
+	load := func(t *testing.T, parserYAML string) error {
+		root := writeRepo(t, `
+scripts:
+  build: "echo build"
+spaces:
+  libs:
+    path: packages/libs
+    run:
+      build: build
+parser:
+`+parserYAML, "packages/libs/core")
+		_, err := Load(filepath.Join(root, "dispat.yaml"), nil)
+		return err
+	}
+
+	for name, tc := range map[string]struct{ yaml, wantErr string }{
+		"bad_type_bump": {"  types:\n    docs: huge\n", `types["docs"]: unknown bump "huge"`},
+		// Viper lowercases map keys, so an uppercase name self-heals; a digit
+		// survives lowercasing and must be rejected.
+		"bad_type_name":  {"  types:\n    docs2: patch\n", "must consist of a-z only"},
+		"bad_prop_bump":  {"  propagation:\n    bump: massive\n", "propagation.bump"},
+		"bad_depth":      {"  propagation:\n    depth: -2\n", "propagation.depth"},
+		"bad_kind":       {"  propagation:\n    kinds: [imports]\n", `unknown kind "imports"`},
+		"bad_separator":  {"  separator: \"--\"\n", "at least three characters"},
+		"bad_channel":    {"  allowedChannels: [latest]\n", "reserved"},
+		"unknown_option": {"  colour: mauve\n", "invalid keys"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := load(t, tc.yaml)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
 	}
 }

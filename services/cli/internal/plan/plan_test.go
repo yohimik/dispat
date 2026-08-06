@@ -1554,3 +1554,47 @@ func TestReleaseUpdatesCarryProviderVersions(t *testing.T) {
 	assertVersion(t, v(1, 1, 0), app2.Updates[0].From)
 	assertVersion(t, v(1, 1, 0), app2.Updates[0].To, "already published: nothing moves, the consumer catches up to it")
 }
+
+func TestPropagatedTransitionGraduatesTheDependant(t *testing.T) {
+	// §9.3's deliberate exception, as channel.go documents it: a propagated
+	// `beta>stable` *transition* — unlike a propagated bare `stable` (W200,
+	// TestPropagatedStableNeverGraduates) — does graduate the dependants
+	// still on the named train, because its author had to name the train
+	// being ended in order to write it. This is the
+	// `release(core)@beta>stable@@beta>stable++*` form the configuration
+	// reference walks through.
+	git := newFakeGit(
+		commit{sha: "c0", message: "feat(core)^@beta++1: the train, both aboard"},
+		commit{sha: "c1", message: "release(core)@beta>stable@@beta>stable++1: graduate the whole train"},
+	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c0").
+		tag("app", "1.0.0", "").tag("app", "1.0.1-beta.0", "c0")
+
+	p := compute(t, git, nil)
+
+	core, app := p.Releases["core"], p.Releases["app"]
+	assert.Equal(t, ccme.ChannelStable, core.Channel)
+	assertVersion(t, v(1, 3, 0), core.Next, "core graduates over the whole train")
+
+	assert.Equal(t, ccme.ChannelStable, app.Channel, "the propagated transition graduates the dependant")
+	assert.Equal(t, "core", app.ChannelFrom)
+	require.True(t, app.Releasing())
+	assertVersion(t, v(1, 0, 1), app.Next, "graduated at the train's target")
+	assert.False(t, hasCode(p, CodeChannelNoGraduate), "no W200 for a transition, got %v", codes(p))
+	assert.False(t, hasCode(p, CodeTransitionUnmatched), "the transition matched, got %v", codes(p))
+}
+
+func TestPropagatedTransitionStillSkipsPackagesOffTheTrain(t *testing.T) {
+	// The transition's precision survives the graduation exception: a
+	// dependant whose baseline is not on the named train is unmatched and
+	// stays exactly where it is.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(core)@beta>stable@@beta>stable++1: graduate"},
+	).tag("core", "1.3.0-beta.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	assert.Equal(t, ccme.ChannelStable, p.Releases["core"].Channel)
+	app := p.Releases["app"]
+	assert.False(t, app.Releasing(), "a stable dependant is not on the train and must not move")
+	assert.Equal(t, ccme.ChannelStable, app.Channel)
+}

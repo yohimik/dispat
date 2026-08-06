@@ -124,6 +124,19 @@ const (
 	// releases on a channel the dependent can resolve (§9.3a).
 	// Non-suppressible.
 	CodeBumpSuppressed = "W208"
+	// CodeFixedAlign marks a release whose only cause is the space's fixed
+	// versioning: the package has no changes of its own and rides along to
+	// keep every package of the space on the shared version.
+	// Non-suppressible: like W193 and W202 it explains a presence in the plan
+	// that the commit log alone cannot account for.
+	CodeFixedAlign = "W210"
+	// CodeFixedPinConflict reports two exact Release-As pins competing for
+	// one fixed space's shared version; the newest won.
+	CodeFixedPinConflict = "W211"
+	// CodeFixedChannelConflict reports members of a fixed space resolving to
+	// different channels; the space can only move as one, so a deterministic
+	// winner is picked.
+	CodeFixedChannelConflict = "W212"
 
 	// --- release outcomes (§13.7a, §13.9) ---
 
@@ -186,7 +199,7 @@ func IsRepositoryScoped(code string) bool { return repositoryScoped[code] }
 // silence. Each reports a release outcome that a reader of the commit log
 // alone cannot account for: W193 and W202 explain a package's *presence* in a
 // plan, W194 and W208 explain an *absence*.
-var NonSuppressible = []string{CodeCatchUp, CodeBlocked, CodeChannelOnly, CodeBumpSuppressed}
+var NonSuppressible = []string{CodeCatchUp, CodeBlocked, CodeChannelOnly, CodeBumpSuppressed, CodeFixedAlign}
 
 // Level separates advisory diagnostics from ones that must fail the run.
 type Level int
@@ -306,8 +319,38 @@ type Release struct {
 	// ChannelOnly marks a release whose only cause is a channel change
 	// (§13.9, W202).
 	ChannelOnly bool
+	// FixedRide marks a release whose only cause is the space's fixed
+	// versioning (W210): the package has no changes of its own and releases
+	// solely to stay on the space's shared version. Its changelog receives a
+	// single "no changes" entry.
+	FixedRide bool
+
+	// Outputs are the values the package's scripts exported through their
+	// DISPAT_OUTPUT files, in first-export order with later re-exports
+	// overriding earlier values. They are produced at run time (by the
+	// executor) rather than by planning; each entry reaches every later
+	// script and hook of the package as DISPAT_OUTPUT_<NAME>=<value>. The
+	// GitHub recorder reads the GITHUB_ATTACHMENTS output for release assets.
+	Outputs []Output
 
 	Diagnostics []Diagnostic
+}
+
+// Output is one NAME=value pair a script exported through its DISPAT_OUTPUT
+// file.
+type Output struct {
+	Name  string
+	Value string
+}
+
+// Output returns the value of the named script output, if exported.
+func (r *Release) Output(name string) (string, bool) {
+	for _, o := range r.Outputs {
+		if o.Name == name {
+			return o.Value, true
+		}
+	}
+	return "", false
 }
 
 // Previous is the version the package last published: baseline(P) of §12.3.
@@ -347,7 +390,15 @@ func (r *Release) ChannelTransition() string {
 // the baseline prerelease, and re-admitting it would re-release the train on
 // every run.
 func (r *Release) Changed() bool {
-	return (r.Bump != ccme.BumpNone && r.NewWork) || r.ChannelChanged() || r.Pinned
+	return (r.Bump != ccme.BumpNone && r.NewWork) || r.ChannelChanged() || r.Pinned || r.FixedRide
+}
+
+// NoChanges reports whether the release carries no content of its own — no
+// units, no provider updates — and exists only to keep the space's fixed
+// versioning aligned. The changelog and the GitHub release render a single
+// "no changes" entry for it.
+func (r *Release) NoChanges() bool {
+	return r.FixedRide && len(r.Units) == 0 && len(r.DueTo) == 0
 }
 
 // Releasing reports whether the package is in this run's plan: it has a
@@ -406,6 +457,8 @@ func (r *Release) PreviousCounter() string { return counterOf(r.Previous()) }
 // Reason renders the §13.10 explanation of why the package is in the plan.
 func (r *Release) Reason() string {
 	switch {
+	case r.FixedRide:
+		return "fixed space versioning"
 	case r.CatchUp:
 		parts := make([]string, 0, len(r.Sources))
 		seen := make(map[string]bool)
@@ -584,6 +637,11 @@ type Options struct {
 	// naming one is not the typo E130 exists to catch. A unit scoping only
 	// these resolves to nothing, silently.
 	NonPackageScopes []string
+	// ParserConfig is the commit-message parser configuration (the config
+	// file's `parser` object). The zero value is the specification defaults,
+	// exactly as ccme documents it, so a caller with no opinions passes
+	// nothing.
+	ParserConfig ccme.Config
 }
 
 type computation struct {
@@ -671,7 +729,10 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
 		return nil, err
 	}
-	parser, err := ccme.NewParser(ccme.DefaultConfig())
+	// The parser options come from the configuration file's `parser` object;
+	// a zero Config is the specification defaults, so nothing changes for a
+	// repository that configures nothing.
+	parser, err := ccme.NewParser(opts.ParserConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1244,6 +1305,16 @@ func (cp *computation) sourcePackages(rec *commitRec, i int) map[string]bool {
 // ---------------------------------------------------------------------------
 
 func (cp *computation) finalise() {
+	// Members of a fixed/fixedSparse space version as one group; their
+	// per-package version computation is replaced by the group's.
+	groups := cp.fixedGroups()
+	shared := make(map[string]bool)
+	for _, members := range groups {
+		for _, m := range members {
+			shared[m] = true
+		}
+	}
+
 	for _, name := range cp.order {
 		rel := cp.rel[name]
 		if rel == nil {
@@ -1257,11 +1328,23 @@ func (cp *computation) finalise() {
 		}
 		rel.ChannelFrom = cp.channelFrom[name]
 
+		if shared[name] {
+			continue // versioned by its group below
+		}
 		if pin, ok := cp.pinned[name]; ok {
 			cp.applyPin(rel, pin)
 			continue
 		}
 		cp.computeVersion(rel)
+	}
+
+	spaceNames := make([]string, 0, len(groups))
+	for sn := range groups {
+		spaceNames = append(spaceNames, sn)
+	}
+	sort.Strings(spaceNames)
+	for _, sn := range spaceNames {
+		cp.applyFixedGroup(sn, groups[sn])
 	}
 
 	// Provider version movements, resolved after every version is final. The
@@ -1286,6 +1369,222 @@ func (cp *computation) finalise() {
 
 	cp.reportCatchUp()
 	cp.reportChannelOnly()
+}
+
+// fixedGroups maps each space with shared versioning (fixed or fixedSparse)
+// onto its member packages, in plan order.
+func (cp *computation) fixedGroups() map[string][]string {
+	out := make(map[string][]string)
+	for _, name := range cp.order {
+		rel := cp.rel[name]
+		if rel == nil || rel.Pkg.Space == nil || !rel.Pkg.Space.Versioning.Shared() {
+			continue
+		}
+		out[rel.Pkg.Space.Name] = append(out[rel.Pkg.Space.Name], name)
+	}
+	return out
+}
+
+// newerCommit reports whether commit a is newer than commit b in the examined
+// history ("" counts as infinitely old).
+func (cp *computation) newerCommit(a, b string) bool {
+	if b == "" {
+		return a != ""
+	}
+	ra, oka := cp.byKey[a]
+	rb, okb := cp.byKey[b]
+	if !oka || !okb {
+		return oka
+	}
+	return ra.rank < rb.rank // newest first: lower rank is newer
+}
+
+// applyFixedGroup versions one fixed/fixedSparse space as a single virtual
+// package and assigns the result to its members.
+//
+// The group aggregates what the version computation reads: the baselines of
+// every member (held ones included, so the shared version can never fall below
+// a position a member has already published), and the bumps, new work and
+// channel movements of the members that would release (a held member's
+// withheld work moves nothing, exactly as it propagates nothing). The
+// aggregate then goes through the ordinary §13.9 computation — pins, trains
+// and the E15x/E19x guards included — so a fixed space runs one prerelease
+// train and one Release-As applies to the space's single version.
+//
+// Assignment is where the two modes differ: fixed releases every non-held
+// member at the group version, marking members with no cause of their own as
+// FixedRide (W210); fixedSparse assigns the group version only to members
+// with a cause of their own and leaves the rest at their previous versions.
+func (cp *computation) applyFixedGroup(spaceName string, members []string) {
+	if len(members) == 0 {
+		return
+	}
+	first := cp.rel[members[0]]
+	mode := first.Pkg.Space.Versioning
+
+	// The synthetic release the group computation runs on. Its Pkg exists so
+	// diagnostics raised against the group name the space rather than an
+	// arbitrary member.
+	g := &Release{Pkg: &model.Package{Name: "space:" + spaceName, Space: first.Pkg.Space}}
+	for _, name := range members {
+		rel := cp.rel[name]
+		if rel.HasBaseline && (!g.HasBaseline || versionLess(g.Baseline, rel.Baseline)) {
+			g.Baseline, g.HasBaseline = rel.Baseline, true
+		}
+		if versionLess(g.Current, rel.Current) {
+			g.Current = rel.Current
+		}
+	}
+	g.Latest = g.Baseline
+	g.BaselineChannel = channelOf(g.Baseline, g.HasBaseline)
+	g.Channel = g.BaselineChannel
+	g.Next = g.Current
+	if g.HasBaseline {
+		g.Next = g.Baseline
+	}
+
+	var channelCands []string // distinct member channels departing from the group baseline
+	seenChan := make(map[string]bool)
+	for _, name := range members {
+		rel := cp.rel[name]
+		if rel.Held {
+			continue
+		}
+		g.OwnBump = ccme.MaxBump(g.OwnBump, rel.OwnBump)
+		g.PropagatedBump = ccme.MaxBump(g.PropagatedBump, rel.PropagatedBump)
+		if rel.NewWork {
+			g.NewWork = true
+		}
+		if rel.Channel != "" && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
+			seenChan[rel.Channel] = true
+			channelCands = append(channelCands, rel.Channel)
+		}
+	}
+	g.Bump = ccme.MaxBump(g.OwnBump, g.PropagatedBump)
+	if len(channelCands) > 0 {
+		if len(channelCands) > 1 {
+			cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
+				fmt.Sprintf("members of fixed space %q resolve to different channels %v; the space moves as one, using %q",
+					spaceName, channelCands, channelCands[0]))
+		}
+		g.Channel = channelCands[0]
+	}
+
+	// The newest exact pin among the members pins the space: with one shared
+	// version there is nothing narrower for it to name. Its scope breadth is
+	// deliberately reset to one package — the space is one version, so E154's
+	// "an exact version can name only one" is satisfied by construction here;
+	// packages outside the space that the same pin scoped still go through
+	// their own applyPin and its guards.
+	var groupPin pin
+	pinnedVersions := make(map[string]bool)
+	hasPin := false
+	for _, name := range members {
+		p, ok := cp.pinned[name]
+		if !ok {
+			continue
+		}
+		pinnedVersions[versionString(p.version)] = true
+		if !hasPin || cp.newerCommit(p.commit, groupPin.commit) {
+			groupPin = p
+			hasPin = true
+		}
+	}
+	if hasPin {
+		groupPin.packages = 1
+		if len(pinnedVersions) > 1 {
+			cp.warn(CodeFixedPinConflict, g.Pkg.Name, groupPin.commit,
+				fmt.Sprintf("%d exact Release-As pins compete for fixed space %q; the newest (%s) wins",
+					len(pinnedVersions), spaceName, versionString(groupPin.version)))
+		}
+		cp.applyPin(g, groupPin)
+	} else {
+		cp.computeVersion(g)
+	}
+	for _, d := range g.Diagnostics {
+		if d.Level == LevelError && IsRepositoryScoped(d.Code) {
+			return // no correct plan exists; the run aborts, leave members untouched
+		}
+	}
+
+	if !g.Changed() {
+		// Transitional states (heterogeneous member baselines) can leave a
+		// member changed while the aggregate is not — e.g. one member
+		// graduating while the max baseline is already stable. Fall back to
+		// per-member computation so such a member still releases correctly.
+		for _, name := range members {
+			rel := cp.rel[name]
+			if p, ok := cp.pinned[name]; ok {
+				cp.applyPin(rel, p)
+				continue
+			}
+			cp.computeVersion(rel)
+		}
+		if mode == model.VersioningFixed {
+			// The alignment catch-up: a fixed space promises one version for
+			// all members, and a member left behind — its ride failed in an
+			// earlier run, or the space adopted fixed with unequal versions —
+			// has nothing pending of its own to bring it forward. Releasing
+			// it at the space's published baseline is what re-establishes the
+			// invariant, exactly as a W193 catch-up discharges an earlier
+			// run's unfinished propagation.
+			cp.alignFixedLaggards(spaceName, g, members)
+		}
+		return
+	}
+
+	for _, name := range members {
+		rel := cp.rel[name]
+		if rel.Held {
+			// W154 reports the version the hold withholds; in a fixed space
+			// that is the group version the member will catch up to.
+			rel.Next = g.Next
+			continue
+		}
+		own := rel.Changed()
+		if _, ok := cp.pinned[name]; ok {
+			own = true // the member's pin has not been applied to it, only to the group
+		}
+		if mode == model.VersioningFixedSparse && !own {
+			continue // sparse: an unchanged member keeps its previous version
+		}
+		if !own {
+			rel.FixedRide = true
+			cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
+				"released at %s with no changes of its own, to keep space %q on one version",
+				versionString(g.Next), spaceName))
+		}
+		rel.Next = g.Next
+		rel.Bump = g.Bump
+		rel.NewWork = rel.NewWork || g.NewWork
+		rel.Channel = g.Channel
+		rel.Pinned = rel.Pinned || g.Pinned
+	}
+}
+
+// alignFixedLaggards releases every non-held, not-otherwise-releasing member
+// whose baseline sits below the fixed space's published baseline at exactly
+// that baseline version, restoring the one-version invariant after a failed
+// ride or a mid-life adoption of fixed versioning.
+func (cp *computation) alignFixedLaggards(spaceName string, g *Release, members []string) {
+	if !g.HasBaseline {
+		return // the space has never published: nothing to align to
+	}
+	for _, name := range members {
+		rel := cp.rel[name]
+		if rel.Held || rel.Releasing() {
+			continue
+		}
+		if rel.HasBaseline && !versionLess(rel.Baseline, g.Baseline) {
+			continue // already at (or somehow past) the space version
+		}
+		rel.FixedRide = true
+		rel.Next = g.Baseline
+		rel.Channel = g.BaselineChannel
+		cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
+			"released at %s with no changes of its own, catching up to space %q's published version",
+			versionString(g.Baseline), spaceName))
+	}
 }
 
 // computeVersion implements §13.9 for a package with no exact Release-As.
@@ -1364,9 +1663,19 @@ func (cp *computation) checkGreater(rel *Release) {
 // a change is, is a property of the change, and the type already declares it.
 // E156 is what keeps that true — a breaking change cannot be shipped as a
 // patch by writing a footer.
+//
+// A rejected pin has §16's unit-scoped blast radius: the offending directive
+// contributes nothing, and everything else the window carries still applies.
+// So each guard reports its error and then falls back to the ordinary
+// computed version, exactly as if the pin had never been written — a sibling
+// `feat` in the same commit still releases at its computed bump rather than
+// being silently swallowed with the bad footer. (Whether the raised error
+// stops the whole run is the caller's `commitErrors` policy, as with any
+// other unit-scoped error.)
 func (cp *computation) applyPin(rel *Release, p pin) {
 	baseline := rel.Previous()
 	computed := rel.Current.Bumped(rel.Bump)
+	rejected := func() { cp.computeVersion(rel) }
 
 	// E154's decidable cases — two explicit includes, or a term addressing the
 	// whole workspace — are caught by the parser. This is the case that needs
@@ -1375,18 +1684,21 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 		cp.pkgErr(rel, CodePinMultiPackage,
 			fmt.Sprintf("Release-As: %s applies to %d packages; an exact version can name only one",
 				versionString(p.version), p.packages))
+		rejected()
 		return
 	}
 	if !versionLess(baseline, p.version) {
 		cp.pkgErr(rel, CodePinNotGreater,
 			fmt.Sprintf("Release-As: %s does not move %s forward from %s",
 				versionString(p.version), rel.Pkg.Name, versionString(baseline)))
+		rejected()
 		return
 	}
 	if rel.Bump != ccme.BumpNone && versionLess(p.version, computed) {
 		cp.pkgErr(rel, CodePinBelowBump,
 			fmt.Sprintf("Release-As: %s is below %s, which the pending commits require",
 				versionString(p.version), versionString(computed)))
+		rejected()
 		return
 	}
 	// E157 is a default, not an opt-in: a typo'd major in a footer is a
@@ -1395,6 +1707,7 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 		cp.pkgErr(rel, CodePinMajorJump,
 			fmt.Sprintf("Release-As: %s raises the major version %d above the computed %s, more than the limit of %d",
 				versionString(p.version), jump, versionString(computed), MaxMajorJump))
+		rejected()
 		return
 	}
 
@@ -1467,8 +1780,9 @@ func (cp *computation) reportChannelOnly() {
 			continue
 		}
 		// A pinned release is explained by its footer, not by its channel,
-		// even when the pinned version happens to move it between lines.
-		if rel.Bump != ccme.BumpNone || rel.Pinned || !rel.ChannelChanged() {
+		// even when the pinned version happens to move it between lines; a
+		// fixed-versioning ride is already explained by W210.
+		if rel.Bump != ccme.BumpNone || rel.Pinned || rel.FixedRide || !rel.ChannelChanged() {
 			continue
 		}
 		rel.ChannelOnly = true

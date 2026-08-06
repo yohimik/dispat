@@ -46,6 +46,12 @@ func defaultStr(s *string, def string) {
 // suitable as the body of a GitHub release.
 func RenderSections(rel *plan.Release, f Format) string {
 	f = f.withDefaults()
+	// A fixed-versioning ride has no content to group: one line states that
+	// the version moved and nothing else did, in the changelog and in the
+	// GitHub release alike.
+	if rel.NoChanges() {
+		return "No changes — version bump to keep the space's fixed versioning.\n"
+	}
 	var parts []string
 	collect := func(title string, kind ccme.Bump) {
 		var lines []string

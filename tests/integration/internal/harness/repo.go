@@ -14,24 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// GithubDisabled is the `"github": {"enabled": false}` config fragment nearly
-// every test config includes, so a run never reaches the real GitHub API even
-// when GITHUB_TOKEN / GITHUB_REPOSITORY happen to be set in the environment
-// (e.g. a CI job running this very suite).
-const GithubDisabled = `"github": {"enabled": false}`
-
-// Base returns the config tail shared by nearly every test: the given
-// concurrency (raw JSON — "1" or "[4, 2]"), JSON logging so the run parses
-// into Events, and GitHub disabled. Callers concatenate it after their
-// scripts/spaces/dependencies keys; a test overriding any of these writes
-// its config in full instead.
-func Base(concurrency string) string {
-	return `"concurrency": ` + concurrency + `,
-  "logLevel": "info",
-  "logFormat": "json",
-  ` + GithubDisabled
-}
-
 // Repo is a disposable git monorepo driven through the real dispat and
 // tsmark binaries. It mirrors the fixture pattern of the cli package's own
 // end-to-end tests (initRepo + a "git" closure), promoted to a reusable type
@@ -186,6 +168,17 @@ func (r *Repo) StatusOK(flags ...string) RunResult {
 // Release runs `dispat release` (also the default command with no verb).
 func (r *Repo) Release(flags ...string) RunResult {
 	return r.run(flags...)
+}
+
+// RunScript runs `dispat run <name>`.
+func (r *Repo) RunScript(name string, flags ...string) RunResult {
+	return r.run(append([]string{"run", name}, flags...)...)
+}
+
+// RunScriptOK runs `dispat run <name>` and requires exit code 0.
+func (r *Repo) RunScriptOK(name string, flags ...string) RunResult {
+	r.T.Helper()
+	return r.requireOK(r.RunScript(name, flags...))
 }
 
 // ReleaseOK runs `dispat release` and requires exit code 0, with the run's

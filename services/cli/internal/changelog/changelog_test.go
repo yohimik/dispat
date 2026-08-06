@@ -147,3 +147,29 @@ func TestRenderSectionsFallsBackToNamesWithoutVersions(t *testing.T) {
 	assert.Contains(t, out, "### Dependencies")
 	assert.Contains(t, out, "- utils")
 }
+
+func TestRenderFixedRideNoChangesEntry(t *testing.T) {
+	// A fixed-versioning ride has no units and no provider updates: its
+	// entry states the bump-only nature instead of rendering empty sections.
+	rel := &plan.Release{
+		Pkg:       &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
+		Next:      ccme.Version{Major: 1, Minor: 1},
+		FixedRide: true,
+	}
+	sections := RenderSections(rel, Format{})
+	assert.Equal(t, "No changes — version bump to keep the space's fixed versioning.\n", sections)
+
+	entry := RenderEntry(rel, testDate, Format{})
+	assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\nNo changes — version bump to keep the space's fixed versioning.\n", entry)
+}
+
+func TestRenderFixedMemberWithOwnUnitsIsOrdinary(t *testing.T) {
+	// FixedRide is only set for members with no cause of their own, but even
+	// a defensive combination of the flag with real units must render the
+	// units: content always beats the placeholder.
+	rel := testRelease("core", ccme.Version{Major: 1, Minor: 1})
+	rel.FixedRide = true
+	sections := RenderSections(rel, Format{})
+	assert.Contains(t, sections, "### Features")
+	assert.NotContains(t, sections, "No changes")
+}

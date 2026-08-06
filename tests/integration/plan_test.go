@@ -16,11 +16,12 @@ package integration
 // script is markerBuild and buildRuns() counts its executions.
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	models "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -94,10 +95,10 @@ func TestPlanHoldResumeAndReleaseAsAuto(t *testing.T) {
 
 // TestPlanExactPinGuards checks the three exact-`Release-As` guards on a
 // bare `release(pkg)` directive with nothing else pending — the shape where
-// a rejected pin simply leaves the package unreleased. (Pairing a rejected
-// pin with a sibling bump in the same commit behaves surprisingly; that
-// case is pinned separately in
-// TestPlanRejectedPinSwallowsAnAccompanyingBump.) Each guard gets a fresh
+// a rejected pin's fallback has nothing to compute, so the package is simply
+// left unreleased. (A rejected pin paired with a sibling bump falls back to
+// the bump's computed version instead; that half is
+// TestPlanRejectedPinFallsBackToTheComputedBump.) Each guard gets a fresh
 // repository so a rejected pin can never collide with a tag a previous case
 // created.
 func TestPlanExactPinGuards(t *testing.T) {
@@ -132,24 +133,27 @@ func TestPlanExactPinGuards(t *testing.T) {
 	})
 }
 
-// TestPlanRejectedPinSwallowsAnAccompanyingBump documents a sharp edge this
-// suite turned up rather than assumed: a rejected exact pin paired with a
-// genuine bump in the *same* commit (a `feat` unit and a `release` unit
-// separated by `---`) does not fall back to releasing the bump at its
-// ordinarily-computed version. §16's unit-scoped blast radius suggests the
-// `feat` should still ship as 0.1.0 — instead the package publishes and
-// tags its unchanged baseline, silently discarding the feature release.
-// Pinned as a regression fence and flagged for a maintainer's second look;
-// nothing else in this suite treats it as the intended contract.
-func TestPlanRejectedPinSwallowsAnAccompanyingBump(t *testing.T) {
+// TestPlanRejectedPinFallsBackToTheComputedBump: a rejected exact pin has
+// §16's unit-scoped blast radius — the bad `release` unit contributes
+// nothing, and a genuine bump in the *same* commit (a `feat` unit separated
+// by `---`) still releases at its ordinarily-computed version. This was
+// originally a regression fence for the opposite, observed behaviour (the
+// package tagged its unchanged 0.0.0 baseline, silently discarding the
+// feature); the planner now falls back correctly and the fence guards the
+// fix.
+func TestPlanRejectedPinFallsBackToTheComputedBump(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.CommitEmpty("feat(core): needs a minor\n---\nrelease(core): pin too low\n\nRelease-As: 0.0.5\n")
 
-	res := r.ReleaseOK()
-	assert.True(t, harness.HasCode(res.Events, "E156"), "the below-bump guard does fire")
-	assert.False(t, r.HasTag("core@0.1.0"), "the feat's own minor bump was not released")
-	assert.True(t, r.HasTag("core@0.0.0"),
-		"instead the package published at its unchanged baseline — tags: %v", r.TagList())
+	res := r.ReleaseOK() // under commitErrors: warn the rejected pin does not fail the run
+	assert.True(t, harness.HasCode(res.Events, "E156"), "the below-bump guard still fires")
+	assert.True(t, r.HasTag("core@0.1.0"),
+		"the feat's own minor bump releases despite the rejected pin — tags: %v", r.TagList())
+	assert.False(t, r.HasTag("core@0.0.0"), "the unchanged baseline must not be tagged")
+
+	// Converged: the discharged feat and the spent pin release nothing more.
+	r.ReleaseOK()
+	assert.Equal(t, 1, r.TagCount("core@"))
 }
 
 // TestPlanConsumerFailureCatchesUpAfterProviderPublished is the "consumer
@@ -213,15 +217,13 @@ func TestPlanProviderBuildFailureBlocksConsumerThenHeals(t *testing.T) {
 // untagged package's window is not "since it started existing", it is
 // everything.
 func TestPlanCatchUpWholeHistoryForNeverReleasedConsumer(t *testing.T) {
-	configFor := func(deps string) string {
-		return fmt.Sprintf(`{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},%s
-  %s
-}`, deps, harness.Base("1"))
+	configFor := func(deps []models.DependencyConfig) models.File {
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Dependencies = deps
+		return cfg
 	}
 	r := harness.New(t)
-	r.WriteConfig(configFor(""))
+	r.WriteConfigModel(configFor(nil))
 	r.SeedPackage("packages", "core")
 	// A caret with no matching consumer yet: harmless, core just releases.
 	r.Commit("feat(core)^: v1, propagating to a consumer that does not exist yet")
@@ -232,8 +234,7 @@ func TestPlanCatchUpWholeHistoryForNeverReleasedConsumer(t *testing.T) {
 	// creates it. "release" is exempt from scope resolution by default, so
 	// the bootstrap commit itself contributes nothing.
 	r.SeedPackage("packages", "consumer")
-	r.WriteConfig(configFor(`
-  "dependencies": [{"consumer": "consumer", "provider": "core"}],`))
+	r.WriteConfigModel(configFor([]models.DependencyConfig{{Consumer: "consumer", Provider: "core"}}))
 	r.Commit("chore(release): wire up the new consumer package")
 
 	res := r.ReleaseOK()
@@ -268,12 +269,10 @@ func TestPlanPrereleaseTrainWeirdCases(t *testing.T) {
 	assert.True(t, r.HasTag("core@0.1.0-beta.1"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("consumer@0.0.1-beta.0"), "tags: %v", r.TagList())
 
-	// One graduation directive naming both packages directly. (A propagated
-	// "@@beta>stable" transition reaching consumer from a directive on core
-	// alone turns out not to graduate it — see
-	// TestPlanPropagatedGraduationTransitionIsSuppressed. Naming both in
-	// the release() scope-set sidesteps that path, and is itself a
-	// legitimate way to end a train.)
+	// One graduation directive naming both packages directly — one legitimate
+	// way to end a train; the propagated "@@beta>stable" transition from a
+	// directive on core alone is the other, covered by
+	// TestPlanPropagatedGraduationTransitionGraduatesTheTrain.
 	beforeGraduation := len(r.TagList())
 	r.CommitEmpty("release(core,consumer)@beta>stable: graduate the whole train")
 	r.ReleaseOK()
@@ -286,20 +285,19 @@ func TestPlanPrereleaseTrainWeirdCases(t *testing.T) {
 	assert.Equal(t, beforeGraduation+2, len(r.TagList()), "no repeat release for either package")
 }
 
-// TestPlanPropagatedGraduationTransitionIsSuppressed documents the second
-// sharp edge this suite turned up: configuration.md's own worked example —
-// `release(core)@beta>stable@@beta>stable++*: graduate core and everything
-// still on beta behind it` — describes a propagated transition as the
-// deliberate exception to "a propagated stable never graduates a
-// dependant" (channel.go: "A transition is the deliberate exception,
-// because its author had to name the train being ended in order to write
-// it"). The propagation call site does not carry the exception through: it
-// resolves every propagated value with graduates=false, so the transition
-// is refused by the very check the comment says it should skip (W200) and
-// the unit is then reported as matching no one it reached (W206). core's
-// own direct graduation is unaffected. A regression fence, not an
-// endorsement.
-func TestPlanPropagatedGraduationTransitionIsSuppressed(t *testing.T) {
+// TestPlanPropagatedGraduationTransitionGraduatesTheTrain: configuration.md's
+// worked example — `release(core)@beta>stable@@beta>stable++N: graduate core
+// and everything still on beta behind it` — works as documented: a
+// propagated *transition* is the deliberate exception to "a propagated
+// stable never graduates a dependant" (its author had to name the train
+// being ended in order to write it), so the consumer graduates together with
+// core, and the graduated train converges. This was originally a regression
+// fence for the opposite, observed behaviour (the propagated transition was
+// refused with W200 and reported unmatched, W206); the planner now carries
+// the exception through and the fence guards the fix. A propagated *bare*
+// `stable` is still suppressed — that half lives in
+// TestPlanPrereleaseTrainWeirdCases' W208 case and the unit suites.
+func TestPlanPropagatedGraduationTransitionGraduatesTheTrain(t *testing.T) {
 	r := linkedRepo(t, "core", "consumer", echoBuild)
 	r.CommitEmpty("feat(core)^@beta++1: start the train, bringing the consumer too")
 	r.ReleaseOK()
@@ -307,8 +305,15 @@ func TestPlanPropagatedGraduationTransitionIsSuppressed(t *testing.T) {
 
 	r.CommitEmpty("release(core)@beta>stable@@beta>stable++1: graduate the whole train")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "core's own direct transition still graduates it; tags: %v", r.TagList())
-	assert.False(t, r.HasTag("consumer@0.0.1"), "the propagated transition does not graduate consumer")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W200", "consumer"))
-	assert.True(t, harness.HasCode(res.Events, "W206"))
+	assert.True(t, r.HasTag("core@0.1.0"), "core's own direct transition graduates it; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("consumer@0.0.1"),
+		"the propagated transition graduates the consumer too; tags: %v", r.TagList())
+	assert.False(t, harness.HasCodeForPackage(res.Events, "W200", "consumer"),
+		"a transition is not a suppressed graduation")
+	assert.False(t, harness.HasCode(res.Events, "W206"), "the transition matched the consumer it reached")
+
+	// Converged: the graduated train has nothing left to do.
+	before := len(r.TagList())
+	r.ReleaseOK()
+	assert.Equal(t, before, len(r.TagList()))
 }

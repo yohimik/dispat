@@ -121,10 +121,6 @@ func (p propagation) allowsTarget(name string) bool {
 	return p.targets == nil || p.targets[name]
 }
 
-func (p propagation) allowsKind(k model.DepKind) bool {
-	return p.kinds == nil || p.kinds[k]
-}
-
 // reaches nobody reports the two inert shapes of §8.3b, which the parser has
 // already warned about (W152 / W201) and which cost a traversal to discover.
 func (p propagation) inert() bool { return p.Bump == ccme.BumpNone || p.Depth == 0 }
@@ -141,10 +137,6 @@ type channelPropagation struct {
 
 func (p channelPropagation) allowsTarget(name string) bool {
 	return p.targets == nil || p.targets[name]
-}
-
-func (p channelPropagation) allowsKind(k model.DepKind) bool {
-	return p.kinds == nil || p.kinds[k]
 }
 
 // inert reports a channel axis that reaches nobody: depth 0, or the explicit

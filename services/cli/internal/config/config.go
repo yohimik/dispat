@@ -1,5 +1,11 @@
 // Package config loads and validates the monorepo configuration file (via
 // viper) and discovers the packages living inside the configured spaces.
+//
+// The configuration model itself — the structs a config file decodes into —
+// is public, in the pkg/models module, so external tooling can author
+// configurations as typed values; this package aliases those types and owns
+// everything that needs the rest of the CLI: loading, validation, defaulting
+// and workspace discovery.
 package config
 
 import (
@@ -9,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -16,208 +23,46 @@ import (
 	"github.com/spf13/viper"
 	"github.com/yohimik/dispat/pkg/ccme"
 
+	public "github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/services/cli/internal/gitx"
 	"github.com/yohimik/dispat/services/cli/internal/model"
 )
 
-// File mirrors the configuration at the monorepo root. Viper infers the
-// format from the file extension (yaml, json, toml, ...); note that viper
-// treats keys case-insensitively and lowercases map keys, so script and space
-// names are matched case-insensitively.
-type File struct {
-	Scripts      map[string]string      `mapstructure:"scripts"`
-	Spaces       map[string]SpaceConfig `mapstructure:"spaces"`
-	Dependencies []DependencyConfig     `mapstructure:"dependencies"`
-	// Concurrency accepts a single value applied to both stages
-	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
-	// 0 entries mean "number of CPUs".
-	Concurrency []int `mapstructure:"concurrency"`
-	// LogLevel is the minimum level: trace, debug, info, warn or error.
-	LogLevel string `mapstructure:"logLevel"`
-	// LogFormat selects the logger output: "pretty" (human console output)
-	// or "json" (machine-readable lines for CI ingestion).
-	LogFormat string          `mapstructure:"logFormat"`
-	Changelog ChangelogConfig `mapstructure:"changelog"`
-	GitHub    GitHubConfig    `mapstructure:"github"`
-	Commit    CommitConfig    `mapstructure:"commit"`
-	// Shell is the command prefix scripts are appended to, e.g.
-	// ["bash", "-c"] or ["cmd", "/C"]. Default: ["/bin/sh", "-c"].
-	Shell []string `mapstructure:"shell"`
-	// Initials maps package names to the baseline version used when the
-	// package's latest release tag is missing or unparseable (e.g. a stray
-	// "pkg@0.0.1.0" tag). The next release bumps on top of this value.
-	// Keys are matched case-insensitively against discovered packages.
-	Initials map[string]string `mapstructure:"initials"`
-	// TagFormat is the repository-wide release tag template, overridable per
-	// space. Placeholders are {name} and {version}; every other byte is
-	// literal, so "{name}@v{version}" and "services/{name}@v{version}" both
-	// work. Default: "{name}@{version}", the form §14 makes normative.
-	TagFormat string `mapstructure:"tagFormat"`
-	// CommitErrors decides what an error in a commit message does to the run
-	// (§16):
-	//
-	//	"warn"  (default) the offending unit contributes nothing and the run
-	//	                  continues, which is the blast radius §16 assigns to
-	//	                  unit- and message-scoped errors
-	//	"error"           any error stops the run before anything is released
-	//
-	// Repository-scoped errors — a tag that cannot be read, a computed
-	// version that goes backwards, a dependency cycle — abort the run under
-	// either setting, because §16 requires it: they mean no correct plan
-	// exists, so no partial release may be emitted.
-	CommitErrors string `mapstructure:"commitErrors"`
-	// NonPackageScopes are scope names that are deliberately not packages, so
-	// naming one is not the typo E130 exists to catch. Default: ["release"],
-	// which is the scope of dispat's own release commit — without the
-	// exemption every run would poison the next one.
-	NonPackageScopes []string `mapstructure:"nonPackageScopes"`
+// The configuration model, aliased from the public package so the rest of the
+// CLI keeps importing internal/config alone.
+type (
+	File              = public.File
+	RunConfig         = public.RunConfig
+	EntryFormatConfig = public.EntryFormatConfig
+	ChangelogConfig   = public.ChangelogConfig
+	GitHubConfig      = public.GitHubConfig
+	CommitConfig      = public.CommitConfig
+	SpaceConfig       = public.SpaceConfig
+	SpaceRunConfig    = public.SpaceRunConfig
+	DependencyConfig  = public.DependencyConfig
+)
 
-	// Run is the run-level hooks object; see RunConfig.
-	Run RunConfig `mapstructure:"run"`
+// Values of the commitErrors key; see the public package for semantics.
+const (
+	CommitErrorsWarn  = public.CommitErrorsWarn
+	CommitErrorsError = public.CommitErrorsError
+)
 
-	// Resolved values, populated by validation.
-	BuildConcurrency   int                     `mapstructure:"-"`
-	PublishConcurrency int                     `mapstructure:"-"`
-	InitialVersions    map[string]ccme.Version `mapstructure:"-"`
-}
+// Versioning values of a space; see the public package for semantics.
+const (
+	VersioningIndependent = public.VersioningIndependent
+	VersioningFixed       = public.VersioningFixed
+	VersioningFixedSparse = public.VersioningFixedSparse
+)
 
-// RunConfig is the top-level `run` object: the hooks that observe the run as
-// a whole, keyed by hook name. Every value is a script name or an array of
-// names, exactly like the space stages — the two objects share one shape, and
-// `run` is deliberately not called `scripts`: `scripts` defines named
-// commands, `run` says what runs when.
-//
-// BeforeAll is the one gating run hook: it runs once before the task graph
-// starts, when nothing has happened yet, so its failure can honestly stop the
-// run — and does, before anything is built, published or tagged.
-//
-// All the others only warn on failure: they run after release work, when
-// failing them could no longer stop anything — a warning is the honest
-// report. PostAll runs once after the whole task graph finishes, with the
-// run-result variables. The commit hooks bracket the finalize phase —
-// beforeCommit / afterCommit around the release commit, postCommit after
-// commit and tags — and the push hooks bracket the push; all of them are
-// no-ops unless the corresponding phase is enabled and something published.
-type RunConfig struct {
-	BeforeAll    []string `mapstructure:"beforeAll"`
-	PostAll      []string `mapstructure:"postAll"`
-	BeforeCommit []string `mapstructure:"beforeCommit"`
-	AfterCommit  []string `mapstructure:"afterCommit"`
-	PostCommit   []string `mapstructure:"postCommit"`
-	BeforePush   []string `mapstructure:"beforePush"`
-	AfterPush    []string `mapstructure:"afterPush"`
-}
-
-// EntryFormatConfig customises how a release entry is rendered; shared by the
-// changelog file and the GitHub release body. All fields are optional.
-type EntryFormatConfig struct {
-	DateFormat        string `mapstructure:"dateFormat"`        // Go time layout, default "2006-01-02"
-	BreakingTitle     string `mapstructure:"breakingTitle"`     // default "Breaking Changes"
-	FeaturesTitle     string `mapstructure:"featuresTitle"`     // default "Features"
-	FixesTitle        string `mapstructure:"fixesTitle"`        // default "Fixes"
-	DependenciesTitle string `mapstructure:"dependenciesTitle"` // default "Dependencies"
-}
-
-// ChangelogConfig customises (or disables) the per-package changelog file.
-type ChangelogConfig struct {
-	Enabled           *bool  `mapstructure:"enabled"` // default true
-	File              string `mapstructure:"file"`    // default "CHANGELOG.md"
-	Title             string `mapstructure:"title"`   // default "# Changelog"
-	EntryFormatConfig `mapstructure:",squash"`
-}
-
-// IsEnabled reports whether the changelog file is written (default true).
-func (c ChangelogConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
-
-// GitHubConfig customises (or disables) GitHub release creation.
-type GitHubConfig struct {
-	Enabled           *bool  `mapstructure:"enabled"`  // default true
-	Owner             string `mapstructure:"owner"`    // default: derived from $GITHUB_REPOSITORY
-	Repo              string `mapstructure:"repo"`     // default: derived from $GITHUB_REPOSITORY
-	APIURL            string `mapstructure:"apiUrl"`   // default https://api.github.com
-	TokenEnv          string `mapstructure:"tokenEnv"` // env var holding the token, default GITHUB_TOKEN
-	EntryFormatConfig `mapstructure:",squash"`
-}
-
-// IsEnabled reports whether GitHub releases are created (default true; still
-// requires a resolvable repository and token at runtime).
-func (c GitHubConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
-
-// CommitConfig customises the finalize phase: a single release commit created
-// at the end of a successful run, capturing changelog and version-script
-// manifest changes of all published packages. Disabled by default. When
-// enabled, tags are created on the release commit (after it) instead of
-// during each publish, and GitHub releases move to the end of the run — after
-// the push when push is enabled, so they reference commits and tags that
-// exist on the remote.
-type CommitConfig struct {
-	Enabled *bool `mapstructure:"enabled"` // default false
-	// MessageFormat supports {tags} and {packages} placeholders (comma-
-	// separated lists). Default: "chore(release): {tags}".
-	MessageFormat string `mapstructure:"messageFormat"`
-	// Push pushes the release commit and tags (git push --follow-tags).
-	// Remote access is verified before any release work starts.
-	Push   bool   `mapstructure:"push"`   // default false
-	Remote string `mapstructure:"remote"` // default "origin"
-}
-
-// IsEnabled reports whether the release commit is created (default false).
-func (c CommitConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enabled }
-
-// PushEnabled reports whether the release commit and tags are pushed; only
-// meaningful with the commit enabled.
-func (c CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
-
-// SpaceConfig is the raw configuration of one space. Everything the space
-// runs — stages, hooks, outcome scripts — lives in its `run` object.
-type SpaceConfig struct {
-	Path                  string         `mapstructure:"path"`
-	IsBuildWaitingPublish bool           `mapstructure:"isBuildWaitingPublish"`
-	RevertOnFail          bool           `mapstructure:"revertOnFail"`
-	Run                   SpaceRunConfig `mapstructure:"run"`
-	// TagFormat overrides the repository-wide tagFormat for this space.
-	TagFormat string `mapstructure:"tagFormat"`
-}
-
-// SpaceRunConfig is a space's `run` object: what runs at which stage, keyed
-// by stage or hook name with no decoration. All entries are optional — a
-// stage with no script still runs, an unset hook is a no-op — and every one
-// accepts a single script name or an array of names run in order (weak
-// decoding lifts the scalar into a one-element slice, the same way a scalar
-// concurrency becomes a pair).
-type SpaceRunConfig struct {
-	Build   []string `mapstructure:"build"`
-	Publish []string `mapstructure:"publish"`
-	Version []string `mapstructure:"version"`
-	// Login runs once per space before its first publish; every other
-	// publish of the space waits for it, and its failure fails them all.
-	Login []string `mapstructure:"login"`
-	// Announce is a fourth stage after a successful publish: pushing the
-	// release out to update channels, with the release-notes variables in its
-	// environment. The whole frame — hooks included — only warns on failure.
-	Announce []string `mapstructure:"announce"`
-	// Hooks around the package stages. The before*/post* hooks up to
-	// beforePublish fail the package's release when they fail; postPublish and
-	// the announce hooks only warn, because by then the release is out.
-	BeforeAll      []string `mapstructure:"beforeAll"`
-	BeforeVersion  []string `mapstructure:"beforeVersion"`
-	PostVersion    []string `mapstructure:"postVersion"`
-	BeforeBuild    []string `mapstructure:"beforeBuild"`
-	PostBuild      []string `mapstructure:"postBuild"`
-	BeforePublish  []string `mapstructure:"beforePublish"`
-	PostPublish    []string `mapstructure:"postPublish"`
-	BeforeAnnounce []string `mapstructure:"beforeAnnounce"`
-	PostAnnounce   []string `mapstructure:"postAnnounce"`
-	// Outcome scripts, both warn-only: onFail runs when a package of the
-	// space fails at any stage, onSkip when it is skipped because a provider
-	// failed.
-	OnFail []string `mapstructure:"onFail"`
-	OnSkip []string `mapstructure:"onSkip"`
-}
+// DefaultNonPackageScopes returns the scopes exempt from the unknown-include
+// error by default. "release" is dispat's own release-commit scope.
+func DefaultNonPackageScopes() []string { return public.DefaultNonPackageScopes() }
 
 // scriptRefs returns every script reference field of the space, labelled for
 // error messages, so validation and resolution never disagree about the list.
-func (s *SpaceConfig) scriptRefs() map[string][]string {
+func scriptRefs(s *SpaceConfig) map[string][]string {
 	return map[string][]string{
 		"run.build":          s.Run.Build,
 		"run.publish":        s.Run.Publish,
@@ -238,30 +83,23 @@ func (s *SpaceConfig) scriptRefs() map[string][]string {
 	}
 }
 
-// DependencyConfig is one consumer -> provider relation.
-type DependencyConfig struct {
-	Consumer string `mapstructure:"consumer"`
-	Provider string `mapstructure:"provider"`
+// runHookRefs returns the run-level hook references, labelled for error
+// messages.
+func runHookRefs(c *File) map[string][]string {
+	return map[string][]string{
+		"run.beforeAll":    c.Run.BeforeAll,
+		"run.postAll":      c.Run.PostAll,
+		"run.beforeCommit": c.Run.BeforeCommit,
+		"run.afterCommit":  c.Run.AfterCommit,
+		"run.postCommit":   c.Run.PostCommit,
+		"run.beforePush":   c.Run.BeforePush,
+		"run.afterPush":    c.Run.AfterPush,
+	}
 }
 
 var validLevels = map[string]bool{
 	"trace": true, "debug": true, "info": true, "warn": true, "error": true,
 }
-
-// Values of the commitErrors key.
-const (
-	// CommitErrorsWarn is the §16 blast radius: a unit- or message-scoped
-	// error invalidates only what it names, and the run continues.
-	CommitErrorsWarn = "warn"
-	// CommitErrorsError stops the run on any error at all. Stricter than §16,
-	// and the setting to choose when a mistyped scope silently dropping a
-	// package is the worse failure.
-	CommitErrorsError = "error"
-)
-
-// DefaultNonPackageScopes returns the scopes exempt from the unknown-include
-// error by default. "release" is dispat's own release-commit scope.
-func DefaultNonPackageScopes() []string { return []string{"release"} }
 
 // Load reads and validates the configuration file. When flags is non-nil the
 // "concurrency", "log-level" and "log-format" flags are bound through viper,
@@ -295,50 +133,107 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	if err := v.UnmarshalExact(&cfg, weak); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
-	if err := cfg.validate(); err != nil {
+	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return &cfg, nil
 }
 
-// script resolves a script reference case-insensitively, because viper
-// lowercases the keys of the scripts map.
-func (c *File) script(ref string) (string, bool) {
-	s, ok := c.Scripts[strings.ToLower(ref)]
-	return s, ok
-}
-
-// Commands resolves a sequence of script references into the shell commands
-// they name, preserving order. Unknown references were rejected by validation,
-// so resolution cannot silently drop one.
-func (c *File) Commands(refs []string) []string {
-	if len(refs) == 0 {
-		return nil
+// resolveParser maps the config's `parser` object onto a ccme.Config. Unset
+// fields stay at their zero values, which ccme documents as "the
+// specification default" — an absent parser object is exactly the parser
+// dispat always built. The result is validated by actually constructing a
+// parser, so a bad value fails the load rather than the first release.
+func resolveParser(p public.ParserConfig) (ccme.Config, error) {
+	cfg := ccme.Config{
+		Separator:            p.Separator,
+		StrictTypes:          p.StrictTypes,
+		Lenient:              p.Lenient,
+		MaxDescriptionLength: p.MaxDescriptionLength,
+		AllowedChannels:      p.AllowedChannels,
+		MessageLevelTrailers: p.MessageLevelTrailers,
+		IssueTrailers:        p.IssueTrailers,
+		Limits: ccme.Limits{
+			UnitsPerMessage:   p.Limits.UnitsPerMessage,
+			ScopeTermsPerUnit: p.Limits.ScopeTermsPerUnit,
+			MessageBytes:      p.Limits.MessageBytes,
+		},
 	}
-	out := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		if s, ok := c.script(ref); ok {
-			out = append(out, s)
+	if len(p.Types) > 0 {
+		cfg.Types = make(map[string]ccme.Bump, len(p.Types))
+		for name, raw := range p.Types {
+			bump, ok := ccme.ParseBump(raw)
+			if !ok {
+				return cfg, fmt.Errorf("parser: types[%q]: unknown bump %q (want none, patch, minor or major)", name, raw)
+			}
+			cfg.Types[name] = bump
 		}
 	}
-	return out
-}
-
-// runHookRefs returns the run-level hook references, labelled for error
-// messages.
-func (c *File) runHookRefs() map[string][]string {
-	return map[string][]string{
-		"run.beforeAll":    c.Run.BeforeAll,
-		"run.postAll":      c.Run.PostAll,
-		"run.beforeCommit": c.Run.BeforeCommit,
-		"run.afterCommit":  c.Run.AfterCommit,
-		"run.postCommit":   c.Run.PostCommit,
-		"run.beforePush":   c.Run.BeforePush,
-		"run.afterPush":    c.Run.AfterPush,
+	if p.Propagation.Bump != "" {
+		prop, ok := ccme.ParsePropagate(p.Propagation.Bump)
+		if !ok {
+			return cfg, fmt.Errorf("parser: propagation.bump: unknown value %q", p.Propagation.Bump)
+		}
+		cfg.Propagation.Bump = prop
 	}
+	var err error
+	if cfg.Propagation.Depth, err = parseDepth(p.Propagation.Depth); err != nil {
+		return cfg, fmt.Errorf("parser: propagation.depth: %w", err)
+	}
+	if cfg.Propagation.ChannelDepth, err = parseDepth(p.Propagation.ChannelDepth); err != nil {
+		return cfg, fmt.Errorf("parser: propagation.channelDepth: %w", err)
+	}
+	if p.Propagation.Kinds != nil {
+		cfg.Propagation.Kinds = make([]ccme.DependencyKind, 0, len(p.Propagation.Kinds))
+		for _, raw := range p.Propagation.Kinds {
+			kind, ok := ccme.ParseDependencyKind(raw)
+			if !ok {
+				return cfg, fmt.Errorf("parser: propagation.kinds: unknown kind %q", raw)
+			}
+			cfg.Propagation.Kinds = append(cfg.Propagation.Kinds, kind)
+		}
+	}
+	cfg.Propagation.Channel = p.Propagation.Channel
+
+	if _, err := ccme.NewParser(cfg); err != nil {
+		return cfg, fmt.Errorf("parser: %w", err)
+	}
+	return cfg, nil
 }
 
-func (c *File) validate() error {
+// parseDepth reads a config depth: "" keeps the default (0), "all" or "*" is
+// the transitive closure, anything else a non-negative edge count. Weak
+// decoding turns a numeric config value into its decimal string, so both
+// `depth: 1` and `depth: "all"` load.
+func parseDepth(raw string) (ccme.Depth, error) {
+	switch raw {
+	case "":
+		return 0, nil
+	case "all", "*":
+		return ccme.DepthAll, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("want a non-negative number or %q, got %q", "all", raw)
+	}
+	return ccme.Depth(n), nil
+}
+
+// normalizeVersioning resolves a space's versioning value case-insensitively
+// onto the canonical constants; ok is false for an unknown value.
+func normalizeVersioning(raw string) (string, bool) {
+	switch strings.ToLower(raw) {
+	case "", strings.ToLower(VersioningIndependent):
+		return VersioningIndependent, true
+	case strings.ToLower(VersioningFixed):
+		return VersioningFixed, true
+	case strings.ToLower(VersioningFixedSparse):
+		return VersioningFixedSparse, true
+	}
+	return "", false
+}
+
+func validate(c *File) error {
 	if len(c.Spaces) == 0 {
 		return errors.New("at least one space is required")
 	}
@@ -399,23 +294,38 @@ func (c *File) validate() error {
 				return fmt.Errorf("space %q: %w", name, err)
 			}
 		}
-		for field, refs := range s.scriptRefs() {
+		versioning, ok := normalizeVersioning(s.Versioning)
+		if !ok {
+			return fmt.Errorf("space %q: unknown versioning %q (want %q, %q or %q)",
+				name, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
+		}
+		s.Versioning = versioning
+		c.Spaces[name] = s
+		for scriptName, cmd := range s.RunScripts {
+			if scriptName == "" {
+				return fmt.Errorf("space %q: runScripts contains an empty script name", name)
+			}
+			if strings.TrimSpace(cmd) == "" {
+				return fmt.Errorf("space %q: runScripts[%q] is empty", name, scriptName)
+			}
+		}
+		for field, refs := range scriptRefs(&s) {
 			for _, ref := range refs {
 				if ref == "" {
 					return fmt.Errorf("space %q: %s contains an empty script reference", name, field)
 				}
-				if _, ok := c.script(ref); !ok {
+				if _, ok := c.Script(ref); !ok {
 					return fmt.Errorf("space %q: %s references unknown script %q", name, field, ref)
 				}
 			}
 		}
 	}
-	for field, refs := range c.runHookRefs() {
+	for field, refs := range runHookRefs(c) {
 		for _, ref := range refs {
 			if ref == "" {
 				return fmt.Errorf("%s contains an empty script reference", field)
 			}
-			if _, ok := c.script(ref); !ok {
+			if _, ok := c.Script(ref); !ok {
 				return fmt.Errorf("%s references unknown script %q", field, ref)
 			}
 		}
@@ -441,13 +351,18 @@ func (c *File) validate() error {
 			c.InitialVersions[name] = v
 		}
 	}
+	parserCfg, err := resolveParser(c.Parser)
+	if err != nil {
+		return err
+	}
+	c.ParserConfig = parserCfg
 	return nil
 }
 
 // Discover walks every space folder and returns the packages found inside,
 // plus the validated dependency edges. Every direct sub-folder of a space is a
 // package named after the folder; names must be unique across all spaces.
-func (c *File) Discover(root string) ([]*model.Package, []model.Dependency, error) {
+func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error) {
 	spaceNames := make([]string, 0, len(c.Spaces))
 	for n := range c.Spaces {
 		spaceNames = append(spaceNames, n)
@@ -467,6 +382,8 @@ func (c *File) Discover(root string) ([]*model.Package, []model.Dependency, erro
 			Path:                 sc.Path,
 			BuildWaitsPublish:    sc.IsBuildWaitingPublish,
 			RevertOnFail:         sc.RevertOnFail,
+			Versioning:           model.Versioning(sc.Versioning),
+			RunScripts:           sc.RunScripts,
 			BuildScript:          c.Commands(sc.Run.Build),
 			PublishScript:        c.Commands(sc.Run.Publish),
 			VersionScript:        c.Commands(sc.Run.Version),

@@ -463,10 +463,29 @@ func TestReleaseWithCustomTagFormat(t *testing.T) {
 	assert.Contains(t, tags(), "core@v0.1.1", "0.1.0 + fix, still under the custom format")
 }
 
-func TestUnknownCommand(t *testing.T) {
+func TestUnknownCommandFallsBackToRunScript(t *testing.T) {
+	// A word that is not a command name is treated as `run <word>`, so
+	// `dispat lint` works — and a name no space defines (a command typo
+	// included) fails with exit 1 from the run script check.
+	root := initRepo(t, testConfigRunScripts)
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"bogus"}, &stdout, &stderr)
+	code := Run([]string{"lint", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	assert.FileExists(t, filepath.Join(root, "packages", "core", "lint.txt"))
+
+	code = Run([]string{"bogus", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "an unknown word is an unknown run script")
+
+	code = Run([]string{"bogus", "extra", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 2, code, "more than one non-command word stays a usage error")
+}
+
+func TestUnknownFlagPrintsUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--nope"}, &stdout, &stderr)
 	assert.Equal(t, 2, code)
+	assert.Contains(t, stderr.String(), "unknown flag", "the parse error must be reported, not swallowed")
+	assert.Contains(t, stderr.String(), "usage: dispat")
 }
 
 func TestInvalidConfig(t *testing.T) {
@@ -694,4 +713,56 @@ func TestReleasePrereleaseTrainConvergesEndToEnd(t *testing.T) {
 	var out6, err6 bytes.Buffer
 	require.Equal(t, 0, Run([]string{"--root", root}, &out6, &err6), "%s", out6.String())
 	assert.Equal(t, 3, strings.Count(git("tag"), "core@"), "no repeat release after graduation")
+}
+
+const testConfigRunScripts = `{
+  "scripts": {"build": "echo building", "publish": "echo publishing"},
+  "spaces": {
+    "libs": {"path": "packages", "run": {"build": "build", "publish": "publish"},
+             "runScripts": {"lint": "echo \"linted $DISPAT_PACKAGE at $DISPAT_NEW_VERSION\" > lint.txt"}}
+  },
+  "concurrency": 1,
+  "logLevel": "info",
+  "logFormat": "json",
+  "github": {"enabled": false}
+}`
+
+func TestRunCommand(t *testing.T) {
+	root := initRepo(t, testConfigRunScripts)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"run", "lint", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+
+	data, err := os.ReadFile(filepath.Join(root, "packages", "core", "lint.txt"))
+	require.NoError(t, err, "the run script must execute inside the changed package")
+	assert.Equal(t, "linted core at 0.1.0\n", string(data),
+		"the run script receives the package's full DISPAT_* environment")
+}
+
+func TestRunCommandUnknownScript(t *testing.T) {
+	root := initRepo(t, testConfigRunScripts)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"run", "nope", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "a script no space defines must fail, not silently run nothing")
+}
+
+func TestRunCommandRequiresAName(t *testing.T) {
+	root := initRepo(t, testConfigRunScripts)
+	var stdout, stderr bytes.Buffer
+
+	assert.Equal(t, 2, Run([]string{"run", "--root", root}, &stdout, &stderr))
+	assert.Equal(t, 2, Run([]string{"run", "a", "b", "--root", root}, &stdout, &stderr))
+}
+
+func TestNewLoggerFallsBackOnUnknownLevel(t *testing.T) {
+	// Config validation makes an unknown level unreachable through Run; the
+	// constructor still degrades to info rather than panicking or silencing.
+	var buf bytes.Buffer
+	log := newLogger("not-a-level", "json", &buf)
+	log.Info().Msg("visible")
+	log.Debug().Msg("hidden")
+	assert.Contains(t, buf.String(), "visible")
+	assert.NotContains(t, buf.String(), "hidden", "the fallback level is info")
 }

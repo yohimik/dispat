@@ -26,6 +26,21 @@ spaces:
     # Roll back all local changes inside the package folder when a package
     # from this space fails during version, build or publish.
     revertOnFail: true
+    # How versions relate across the space's packages:
+    #   independent (default)  every package versions from its own history
+    #   fixed                  one shared version — any change releases every
+    #                          member; single prerelease train; riders get a
+    #                          "no changes" changelog entry (W210)
+    #   fixedSparse            the shared version, but unchanged members keep
+    #                          their previous versions until they change
+    versioning: independent
+    # Named shell commands (NOT references into `scripts`) for `dispat run
+    # <name>` (or just `dispat <name>`): executed inside each changed package
+    # over the dependency graph with the full DISPAT_* environment; nothing
+    # is released or tagged. --on-error picks skip/continue for dependents of
+    # a failed package; --concurrency's build value bounds the parallelism.
+    runScripts:
+      lint: "npm run lint"
     run:
       build: [install, build]
       publish: publish
@@ -136,9 +151,34 @@ commit:
 # Shell used for all scripts; default /bin/sh -c.
 # shell: ["bash", "-c"]
 
+# Commit-message parser options; everything unset keeps the specification
+# default, so the whole object is optional. `types` REPLACES the standard
+# table wholesale (feat=minor, fix/perf/revert=patch, the rest none), so list
+# every type you keep. propagation.depth is the knob that turns propagation
+# from opt-in (0, the default) to on-by-default (1 reaches direct consumers
+# with no caret written); a directive on the unit always wins.
+# parser:
+#   separator: "---"
+#   types: { feat: minor, fix: patch, perf: patch, revert: patch, docs: patch }
+#   strictTypes: false
+#   lenient: false
+#   maxDescriptionLength: 100
+#   propagation:
+#     bump: patch
+#     depth: 0            # or a number of edges, or "all"
+#     channelDepth: 0
+#     kinds: [dependencies, peerDependencies, optionalDependencies]
+#     channel: inherit
+#   limits: { unitsPerMessage: 64, scopeTermsPerUnit: 256, messageBytes: 1048576 }
+#   allowedChannels: [beta, rc]
+
 # GitHub release per published package; enabled by default (needs a repo and
 # token: owner/repo here or $GITHUB_REPOSITORY, token in $GITHUB_TOKEN or the
-# env var named by tokenEnv). Same format fields as changelog.
+# env var named by tokenEnv). Same format fields as changelog. Any script may
+# export values GITHUB_OUTPUT-style through $DISPAT_OUTPUT (they reach later
+# scripts as DISPAT_OUTPUT_*); the GITHUB_ATTACHMENTS output — echo
+# "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT" — lists absolute
+# file paths uploaded as release assets.
 github:
   enabled: true
   owner: acme

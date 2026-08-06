@@ -48,6 +48,17 @@ project release need — you fill in shell commands, dispat supplies the orchest
   originally. No orphans, no double releases, no state files: re-running is always safe.
 - **Prerelease trains** — `@beta` starts a line, `^@beta++1` takes consumers along, `@beta>stable` graduates the train.
   Channels are derived from tags, so trains survive a fresh clone with zero state.
+- **Per-space versioning modes** — `independent` (the default), `fixed` (one shared version for the whole space: any
+  change releases every member, one prerelease train, riders get a "no changes" changelog entry) or `fixedSparse`
+  (the shared version, but unchanged packages stay at their previous versions until they change).
+- **Run scripts over the plan** — `dispat run lint` (or just `dispat lint`) executes a space-defined shell command
+  inside each *changed* package, honouring the dependency graph with the build concurrency budget, with the same
+  `DISPAT_*` environment the release stages get, releasing nothing; `--on-error` picks whether a failure skips the
+  failed package's dependents or lets them run.
+- **Script outputs & release assets** — every script and hook can export values `GITHUB_OUTPUT`-style through
+  `$DISPAT_OUTPUT`; they reach all later scripts of the package (onFail/onSkip included) as `DISPAT_OUTPUT_*` — and
+  in `dispat run` they carry across packages, provider to consumer. The special `GITHUB_ATTACHMENTS` output
+  (`echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"`) uploads files as GitHub release assets.
 - **Polyglot & infra-agnostic** — any language, any registry: scripts are shell commands fed context via `DISPAT_*`
   env vars, and versions live purely in git tags. No version files, no lockstep, no framework buy-in.
 - **One config file** — spaces, dependencies, scripts, hooks, tag formats, concurrency, changelog/GitHub behavior in a
@@ -80,6 +91,7 @@ dispat stands on the shoulders of two things:
 | [Getting started](./services/cli/docs/getting-started.md)   | Install, first config, commands, CI setup.                              |
 | [Configuration & CLI](./services/cli/docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
 | [Architecture](./services/cli/docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
+| [Integration tests](./tests/integration/README.md)          | The black-box suite: setup, running, coverage; links the test plan.     |
 
 ## Versioning flow
 
@@ -136,6 +148,17 @@ prerelease (it could not resolve it anyway) — `feat(core)^@beta` releases `cor
 consumers along, put them on the line too: `feat(core)^@beta++1`. Trains converge on their own: once a package is on
 `beta`, a directive saying `beta` proposes nothing.
 
+**Space versioning modes.** A space may declare how its packages' versions relate:
+[`versioning`](./services/cli/docs/configuration.md#versioning) is `independent` (default — everything above),
+`fixed` or `fixedSparse`. Under `fixed` the space versions as one package: a change to any member releases every
+member at one shared next version (computed over the space's highest baseline with the max bump), the space runs a
+single prerelease train, an exact `Release-As` on one member pins the space, and a member released with nothing of its
+own gets one "no changes — version bump" changelog entry, labelled `W210` in the plan. A member left behind (a failed
+ride) is re-aligned to the space's published version on the next run. `fixedSparse` computes the same shared version
+but releases only changed members — the rest keep their previous versions until they change, at which point they jump
+to the shared version. Commit and file scopes keep exactly one job in these modes: deciding which changelog entries
+(and GitHub release notes) each package receives.
+
 **Release control.** `Release-As: none` holds a package — its bump is retained and reported, not released, until a later
 `Release-As: auto` resumes it at the `max()` of everything accumulated. `Release-As: <version>` pins an exact version,
 guarded against going backwards, against undershooting what the commits require, and against a major jump of more than
@@ -179,7 +202,10 @@ Acting on the provider does nothing: its version is already public, and cancella
 1. **version** — only when the package is bumped due to provider updates; runs exactly before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with `false`
    it waits for the provider's *build* only.
-2. **build** — the package's build command.
+2. **build** — the package's build command. Like every script it may export outputs by appending `NAME=value` lines
+   to the file `$DISPAT_OUTPUT` points at: each value travels to every later script of the package as
+   `DISPAT_OUTPUT_<NAME>`, and the `GITHUB_ATTACHMENTS` output (absolute file paths) becomes the GitHub release's
+   assets.
 3. **publish** — waits for the package's own build and always for its providers' publishes. A space with a
    `run.login` authenticates **once per space** before its first publish (every other publish of the space waits for it;
    a login failure fails them all). On success: release recorders run (changelog file, GitHub release), then the
@@ -212,6 +238,11 @@ Build and publish have independent concurrency budgets (`concurrency: [build, pu
 budget. A stage without a configured script still runs — ordering, statuses, tags and release records are preserved — it
 just executes no shell command.
 
+Outside the release pipeline, `dispat run <name>` — or just `dispat <name>` — executes a space-defined
+[`runScripts`](./services/cli/docs/configuration.md#runscripts-and-dispat-run) command inside each changed package,
+honouring the dependency graph within the build concurrency budget (`--on-error` decides whether a failure skips the
+dependents) — same `DISPAT_*` environment, nothing released or tagged.
+
 ## Quick start
 
 ```sh
@@ -226,37 +257,37 @@ See [./services/cli/docs/getting-started.md](./services/cli/docs/getting-started
 
 ## Testing
 
-dispat's failure semantics are its main promise, so they are tested at two independent layers — over 365 test functions
+dispat's failure semantics are its main promise, so they are tested at two independent layers — over 450 test functions
 plus fuzzing across the workspace, all runnable with `go test ./...` in each module.
 
-**Unit tests** (testify, in-memory fakes; `gitx` and `cli` against real temporary git repositories):
+**Unit tests** (testify, in-memory fakes; `gitx`, `app` and `cli` against real temporary git repositories):
 
 | Module / package                 | Statement coverage                                                                        |
 |----------------------------------|-------------------------------------------------------------------------------------------|
 | `pkg/ccme` (commit parser)       | **96.9%** — plus fuzz tests, allocation tests and the specification's conformance vectors |
-| `services/cli` (all packages)    | **91.0%** aggregate                                                                       |
-| — `script`                       | 100%                                                                                      |
+| `pkg/models` (public config)     | 100%                                                                                      |
+| `services/cli` (all packages)    | **93.4%** aggregate                                                                       |
+| — `script`, `model`              | 100%                                                                                      |
 | — `graph` (scheduler)            | 98.5%                                                                                     |
-| — `release` (executor)           | 97.6%                                                                                     |
-| — `changelog`                    | 96.6%                                                                                     |
-| — `config`                       | 95.4%                                                                                     |
-| — `gitx`                         | 90.7%                                                                                     |
-| — `plan` (planner)               | 86.4%                                                                                     |
-| — `github`                       | 86.0%                                                                                     |
-| — `cli` (end-to-end, in-process) | 82.2%                                                                                     |
+| — `config`                       | 97.7%                                                                                     |
+| — `changelog`                    | 96.7%                                                                                     |
+| — `release` (executor)           | 96.7%                                                                                     |
+| — `plan` (planner)               | 94.3%                                                                                     |
+| — `gitx`                         | 91.0%                                                                                     |
+| — `github`                       | 90.6%                                                                                     |
+| — `cli` (end-to-end, in-process) | 88.5%                                                                                     |
+| — `app` (end-to-end, in-process) | 81.6% — plus everything the `cli` layer drives through it                                 |
 
 The planner's two formulations of staleness — walking down from a provider and up from a consumer — are asserted to
 agree, a cheap conformance check on the propagation rules. The full per-package test inventory is in
 [Architecture → Testing](./services/cli/docs/architecture.md#testing).
 
 **Integration tests** ([`tests/integration`](./tests/integration)) are a separate Go module that structurally *cannot*
-import dispat's internals: it compiles the real binary, drives it against disposable git repositories exactly as a
-user's shell would, and asserts on the three outputs a release run actually has — git state (tags, commits, files), JSON
-log events, and nanosecond-resolution execution timelines from a purpose-built timing probe. Every concurrency claim is
-verified three independent ways, and the suite covers concurrency budgets, graph-ordered execution under both
-`isBuildWaitingPublish` modes, failure/catch-up/prerelease-train scenarios spanning multiple consecutive runs, and
-config/login/outcome-script behavior. The suite is race-clean (`-race`) and stable under repeated `-count` runs. See
-the [integration test plan](./tests/integration/docs/test-plan.md).
+import dispat's internals: it compiles the real binary and drives it against disposable git repositories exactly as a
+user's shell would, asserting on git state, JSON log events and nanosecond-resolution execution timelines. Setup and
+how to run are in the [integration tests README](./tests/integration/README.md); the current status and coverage are
+in the [test results](./tests/integration/docs/test-results.md), with the claim-by-claim matrix in the
+[integration test plan](./tests/integration/docs/test-plan.md).
 
 ## Planned features
 

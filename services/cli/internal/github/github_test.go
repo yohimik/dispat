@@ -3,8 +3,11 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -205,4 +208,142 @@ func TestRecordConnectionError(t *testing.T) {
 
 	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn"}
 	assert.Error(t, rel.Record(context.Background(), testRelease()))
+}
+
+func TestRecordUploadsAttachments(t *testing.T) {
+	// The created release advertises its own asset endpoint (upload_url, a
+	// URI template); every attachment must be POSTed there as an
+	// octet-stream named after its file.
+	dir := t.TempDir()
+	asset := filepath.Join(dir, "app.tgz")
+	notes := filepath.Join(dir, "notes.txt")
+	require.NoError(t, os.WriteFile(asset, []byte("archive-bytes"), 0o644))
+	require.NoError(t, os.WriteFile(notes, []byte("notes-bytes"), 0o644))
+
+	type upload struct {
+		name, contentType, body string
+	}
+	var uploads []upload
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/mono/releases":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 7, "upload_url": "` + srv.URL + `/uploads/releases/7/assets{?name,label}"}`))
+		case "/uploads/releases/7/assets":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			uploads = append(uploads, upload{
+				name:        r.URL.Query().Get("name"),
+				contentType: r.Header.Get("Content-Type"),
+				body:        string(body),
+			})
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	// The output value is a whitespace-separated path list under one name.
+	rel := testRelease()
+	rel.Outputs = []plan.Output{{Name: AttachmentsOutput, Value: asset + " " + notes}}
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	require.NoError(t, r.Record(context.Background(), rel))
+
+	require.Len(t, uploads, 2)
+	assert.Equal(t, "app.tgz", uploads[0].name, "the asset is named after its file")
+	assert.Equal(t, "application/octet-stream", uploads[0].contentType)
+	assert.Equal(t, "archive-bytes", uploads[0].body)
+	assert.Equal(t, "notes.txt", uploads[1].name)
+	assert.Equal(t, "notes-bytes", uploads[1].body)
+}
+
+func TestRecordUploadFailureIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	asset := filepath.Join(dir, "app.tgz")
+	require.NoError(t, os.WriteFile(asset, []byte("x"), 0o644))
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/acme/mono/releases" {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"asset rejected"}`))
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Outputs = []plan.Output{{Name: AttachmentsOutput, Value: asset}}
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	err := r.Record(context.Background(), rel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "asset rejected")
+}
+
+func TestRecordAttachmentValidation(t *testing.T) {
+	// A bad GITHUB_ATTACHMENTS entry is an error, not a skip: a typo would
+	// otherwise surface as a silently missing asset.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"upload_url": "unused{?name,label}"}`))
+	}))
+	defer srv.Close()
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+
+	for name, value := range map[string]string{
+		"relative_path": "dist/app.tgz",
+		"missing_file":  filepath.Join(t.TempDir(), "never-created.tgz"),
+		"directory":     t.TempDir(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rel := testRelease()
+			rel.Outputs = []plan.Output{{Name: AttachmentsOutput, Value: value}}
+			err := r.Record(context.Background(), rel)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), AttachmentsOutput)
+		})
+	}
+}
+
+func TestRecordWithoutAttachmentsIgnoresMissingUploadURL(t *testing.T) {
+	// Servers in tests (and proxies) may return an empty creation body; with
+	// nothing to upload that must stay a success.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	assert.NoError(t, r.Record(context.Background(), testRelease()))
+}
+
+func TestAssetUploadURL(t *testing.T) {
+	url, err := assetUploadURL([]byte(`{"upload_url": "https://uploads.test/assets{?name,label}"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "https://uploads.test/assets", url, "the URI-template suffix is stripped")
+
+	url, err = assetUploadURL([]byte(`{"upload_url": "https://uploads.test/assets"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "https://uploads.test/assets", url, "a plain URL passes through")
+
+	_, err = assetUploadURL([]byte(`{}`))
+	assert.ErrorContains(t, err, "no upload_url")
+
+	_, err = assetUploadURL([]byte(`not json`))
+	assert.ErrorContains(t, err, "parsing created release")
+}
+
+func TestVerifyConnectionError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close() // immediately closed: connection refused
+
+	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn"}
+	assert.Error(t, rel.Verify(context.Background()))
 }

@@ -454,3 +454,10 @@ func TestVerifyRemoteAndPush(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "chore(release): core@0.1.0", "commit must arrive on the remote")
 }
+
+func TestTagNameNormativeForm(t *testing.T) {
+	v := ccme.Version{Major: 1, Minor: 2, Patch: 3}
+	assert.Equal(t, "core@1.2.3", TagName("core", v))
+	v.Prerelease = []string{"beta", "4"}
+	assert.Equal(t, "core@1.2.3-beta.4", TagName("core", v))
+}

@@ -15,13 +15,14 @@ package integration
 //     environment names exactly the providers it is catching up to.
 
 import (
-	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	models "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -32,20 +33,19 @@ import (
 // must order the run.
 func TestOrderChainRunsInTopologicalOrder(t *testing.T) {
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {
-    "build": %q,
-    "publish": %q
-  },
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "dependencies": [
-    {"consumer": "mid", "provider": "base"},
-    {"consumer": "top", "provider": "mid"}
-  ],
-  %s
-}`, r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
-		r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
-		harness.Base("3")))
+	cfg := harness.BaseFile(3)
+	cfg.Scripts = map[string]string{
+		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
+		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Run: buildPublish()},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "mid", Provider: "base"},
+		{Consumer: "top", Provider: "mid"},
+	}
+	r.WriteConfigModel(cfg)
 
 	for _, name := range []string{"base", "mid", "top"} {
 		r.SeedPackage("packages", name)
@@ -74,25 +74,21 @@ func TestOrderChainRunsInTopologicalOrder(t *testing.T) {
 func providerConsumerRepo(t *testing.T, isBuildWaitingPublish bool, providerPublishSleep time.Duration) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {
-    "provider-build": %q,
-    "provider-publish": %q,
-    "consumer-build": %q,
-    "consumer-publish": %q
-  },
-  "spaces": {
-    "provider": {"path": "packages/provider", "isBuildWaitingPublish": %t, "run": {"build": "provider-build", "publish": "provider-publish"}},
-    "consumer": {"path": "packages/consumer", "run": {"build": "consumer-build", "publish": "consumer-publish"}}
-  },
-  "dependencies": [{"consumer": "consumer", "provider": "provider"}],
-  %s
-}`,
-		r.TsmarkScript("timeline.log", "provider-build", 0),
-		r.TsmarkScript("timeline.log", "provider-publish", providerPublishSleep),
-		r.TsmarkScript("timeline.log", "consumer-build", 0),
-		r.TsmarkScript("timeline.log", "consumer-publish", 0),
-		isBuildWaitingPublish, harness.Base("2")))
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]string{
+		"provider-build":   r.TsmarkScript("timeline.log", "provider-build", 0),
+		"provider-publish": r.TsmarkScript("timeline.log", "provider-publish", providerPublishSleep),
+		"consumer-build":   r.TsmarkScript("timeline.log", "consumer-build", 0),
+		"consumer-publish": r.TsmarkScript("timeline.log", "consumer-publish", 0),
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"provider": {Path: "packages/provider", IsBuildWaitingPublish: isBuildWaitingPublish,
+			Run: models.SpaceRunConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
+		"consumer": {Path: "packages/consumer",
+			Run: models.SpaceRunConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
+	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages/provider", "provider")
 	r.SeedPackage("packages/consumer", "consumer")
 	r.Commit("feat(provider)^: reaches its one consumer")
@@ -149,19 +145,21 @@ func TestOrderBuildDoesNotWaitForPublishByDefault(t *testing.T) {
 // the publish stage.
 func TestOrderDiamondDependencyConverges(t *testing.T) {
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {"build": %q, "publish": %q},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "dependencies": [
-    {"consumer": "b", "provider": "a"},
-    {"consumer": "c", "provider": "a"},
-    {"consumer": "d", "provider": "b"},
-    {"consumer": "d", "provider": "c"}
-  ],
-  %s
-}`, r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 100*time.Millisecond),
-		r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
-		harness.Base("2")))
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]string{
+		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 100*time.Millisecond),
+		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Run: buildPublish()},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "b", Provider: "a"},
+		{Consumer: "c", Provider: "a"},
+		{Consumer: "d", Provider: "b"},
+		{Consumer: "d", Provider: "c"},
+	}
+	r.WriteConfigModel(cfg)
 	for _, name := range []string{"a", "b", "c", "d"} {
 		r.SeedPackage("packages", name)
 	}
@@ -198,16 +196,19 @@ func TestOrderDiamondDependencyConverges(t *testing.T) {
 func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 	const envFile = "version-env.txt"
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {
-    "build": "echo building",
-    "publish": "echo publishing",
-    "sync": "env | grep '^DISPAT_' | sort > %s"
-  },
-  "spaces": {"libs": {"path": "packages", "run": {"version": "sync", "build": "build", "publish": "publish"}}},
-  "dependencies": [{"consumer": "consumer", "provider": "provider"}],
-  %s
-}`, envFile, harness.Base("2")))
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]string{
+		"build":   "echo building",
+		"publish": "echo publishing",
+		"sync":    "env | grep '^DISPAT_' | sort > " + envFile,
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Run: models.SpaceRunConfig{
+			Version: []string{"sync"}, Build: []string{"build"}, Publish: []string{"publish"},
+		}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
+	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "provider")
 	r.SeedPackage("packages", "consumer")
 	r.Commit("feat(provider)^: reaches its one consumer")

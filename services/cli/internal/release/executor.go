@@ -187,8 +187,9 @@ func (e *Executor) hook(ctx context.Context, t task, p *plan.Plan, wsVars []stri
 		return nil
 	}
 	log.Debug().Str("hook", name).Msg("hook started")
+	rel := p.Releases[t.pkg]
 	env := append(e.scriptEnv(t, p, wsVars, updates, name), extra...)
-	return RunSequence(ctx, e.Runner, p.Releases[t.pkg].Pkg.Dir, name, commands, env, log, failFast)
+	return RunSequenceWithOutputs(ctx, e.Runner, rel, rel.Pkg.Dir, name, commands, env, log, failFast)
 }
 
 // Run executes the plan and returns one Result per changed package. Unchanged
@@ -445,7 +446,7 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 	} else {
 		log.Info().Msg(t.kind.String() + " started")
 		env := e.scriptEnv(t, p, wsVars, updates, t.kind.String())
-		if err := RunSequence(ctx, e.Runner, rel.Pkg.Dir, t.kind.String(), commands, env, log, true); err != nil {
+		if err := RunSequenceWithOutputs(ctx, e.Runner, rel, rel.Pkg.Dir, t.kind.String(), commands, env, log, true); err != nil {
 			fail(err, t.kind.String()+" script failed")
 			return
 		}
@@ -494,7 +495,7 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 	if len(space.AnnounceScript) > 0 {
 		log.Info().Msg("announce started")
 		env := e.scriptEnv(t, p, wsVars, updates, "announce")
-		_ = RunSequence(ctx, e.Runner, rel.Pkg.Dir, "announce", space.AnnounceScript, env, log, false)
+		_ = RunSequenceWithOutputs(ctx, e.Runner, rel, rel.Pkg.Dir, "announce", space.AnnounceScript, env, log, false)
 	}
 	_ = e.hook(ctx, t, p, wsVars, updates, "postAnnounce", space.PostAnnounceScript, log, false)
 }
@@ -760,13 +761,27 @@ func workspaceVersions(p *plan.Plan) []workspaceVersion {
 }
 
 // scriptEnv builds the DISPAT_* environment for one task's script or hook.
+func (e *Executor) scriptEnv(t task, p *plan.Plan, wsVars []string, updates []providerUpdate, stage string) []string {
+	return packageEnv(p, t.pkg, wsVars, updates, stage)
+}
+
+// CommandEnv builds the full per-package DISPAT_* environment outside a
+// release run: the package variables, the workspace listing and the package's
+// provider updates, all considered live since no run is deciding otherwise.
+// It is what `dispat run <script>` hands a space's run scripts, so a script
+// is movable between a stage and a run script without changing what it reads.
+func CommandEnv(p *plan.Plan, pkg, stage string, log zerolog.Logger) []string {
+	return packageEnv(p, pkg, WorkspaceEnv(p, log), liveProviderUpdates(pkg, p, nil), stage)
+}
+
+// packageEnv builds the DISPAT_* environment of one package's script or hook.
 // stage is what DISPAT_STAGE carries: the stage name for a stage script, the
 // hook name ("beforeBuild", "postPublish", ...) for a hook — every hook gets
 // the same full environment as the stage scripts, distinguished only there.
-func (e *Executor) scriptEnv(t task, p *plan.Plan, wsVars []string, updates []providerUpdate, stage string) []string {
-	rel := p.Releases[t.pkg]
+func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
+	rel := p.Releases[pkg]
 	env := []string{
-		"DISPAT_PACKAGE=" + t.pkg,
+		"DISPAT_PACKAGE=" + pkg,
 		"DISPAT_SPACE=" + rel.Pkg.Space.Name,
 		"DISPAT_OLD_VERSION=" + rel.Previous().String(),
 		"DISPAT_STABLE_BASELINE=" + rel.Current.String(),
@@ -839,6 +854,10 @@ func (e *Executor) scriptEnv(t task, p *plan.Plan, wsVars []string, updates []pr
 	// the same environment keeps a script movable between them.
 	env = append(env, wsVars...)
 	env = append(env, updatedEnv(updates)...)
+	// The accumulated script outputs: everything earlier scripts of the
+	// package exported through their DISPAT_OUTPUT files, as
+	// DISPAT_OUTPUT_<NAME> variables plus the DISPAT_OUTPUTS listing.
+	env = append(env, outputsEnv(rel)...)
 	return env
 }
 

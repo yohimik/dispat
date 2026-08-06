@@ -1,12 +1,48 @@
 // Package model holds the domain types shared across the tool.
 package model
 
+// Versioning is a space's versioning mode: how the versions of the space's
+// packages relate to each other.
+type Versioning string
+
+const (
+	// VersioningIndependent computes every package's version from its own
+	// history alone. The default and the zero value.
+	VersioningIndependent Versioning = "independent"
+	// VersioningFixed keeps every package of the space on one shared version:
+	// a change to any package releases every package of the space at the same
+	// next version, computed as if the whole space were one package (single
+	// prerelease train included). Commit and file scopes still decide which
+	// changelog entries a package receives; a package released only to keep
+	// the versions aligned gets a single "no changes" changelog entry.
+	VersioningFixed Versioning = "fixed"
+	// VersioningFixedSparse computes the space version exactly like
+	// VersioningFixed, but a package with no changes of its own keeps its
+	// previous version and is not released; changed packages release at the
+	// shared version.
+	VersioningFixedSparse Versioning = "fixedSparse"
+)
+
+// Shared reports whether the mode computes one version for the whole space
+// (fixed or fixedSparse).
+func (v Versioning) Shared() bool {
+	return v == VersioningFixed || v == VersioningFixedSparse
+}
+
 // Space groups packages that share build and publish behaviour.
 type Space struct {
 	Name string
 	// Path of the space folder, relative to the monorepo root. Every direct
 	// sub-folder is a package.
 	Path string
+	// Versioning is how versions relate across the space's packages; the zero
+	// value means VersioningIndependent.
+	Versioning Versioning
+	// RunScripts are the space's named `dispat run <name>` scripts: raw shell
+	// commands (not script references), keyed by lowercased name. `dispat run
+	// <name>` executes the command inside each changed package of the space in
+	// topological order with the package's full DISPAT_* environment.
+	RunScripts map[string]string
 	// BuildWaitsPublish: when true, consumers of packages from this space may
 	// only start building after the provider has been published (not merely
 	// built).

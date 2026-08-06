@@ -33,7 +33,12 @@ under `dependencies` so bumps propagate and ordering is enforced:
 
 ```json
 {
-  "dependencies": [{ "consumer": "app", "provider": "core" }]
+  "dependencies": [
+    {
+      "consumer": "app",
+      "provider": "core"
+    }
+  ]
 }
 ```
 
@@ -41,13 +46,18 @@ Beyond scripts and spaces there are optional top-level knobs — `concurrency` (
 (the release tag template), `commitErrors` (whether a bad commit message stops the run), `nonPackageScopes`,
 `changelog` and `github` (customise or disable the release records), `initials` (baseline versions for packages without
 a usable tag), `commit` and `push` (end-of-run release commit and pushing, disabled by default), the run-level hooks
-(the gating `run.beforeAll`, `run.postAll` and the commit/push hooks) — and per-space options `isBuildWaitingPublish`, `revertOnFail`,
-`run.version`, `run.login` (once-per-space authentication before the first publish), `run.announce` (a warn-only
-stage after the publish for pushing the release to update channels), the stage hooks
-(`run.beforeAll` … `run.postAnnounce`), the outcome scripts (`run.onFail` / `run.onSkip`, run when a package
-fails or is skipped) and `tagFormat`. Every script option takes one script name or an array run in
-order. All are covered in
-[Configuration & CLI](configuration.md). Annotated full examples: [`../../../dispat.example.json`](../../../dispat.example.json),
+(the gating `run.beforeAll`, `run.postAll` and the commit/push hooks) — and per-space options `isBuildWaitingPublish`,
+`revertOnFail`,
+`versioning` (`independent`, `fixed` — one shared version for the whole space — or `fixedSparse`),
+`run.version`, `run.login` (once-per-space authentication before the first publish), `run.announce` (a warn-only stage
+after the publish for pushing the release to update channels), the stage hooks (`run.beforeAll` … `run.postAnnounce`),
+the outcome scripts (`run.onFail` / `run.onSkip`, run when a package fails or is skipped), `runScripts` (named shell
+commands for `dispat run <name>`) and `tagFormat` — plus the top-level `parser` object (custom commit types, a default
+propagation depth, strict types, parser limits; unset fields keep the specification defaults). Every script option
+takes one script name or an array run in order.
+All are covered in
+[Configuration & CLI](configuration.md). Annotated full examples: [
+`../../../dispat.example.json`](../../../dispat.example.json),
 [`../../../dispat.example.yaml`](../../../dispat.example.yaml).
 
 ## Commit convention
@@ -96,6 +106,10 @@ Scopes that are deliberately not packages (like `release`) go in `nonPackageScop
 dispat status               # print the project graph and planned versions; changes nothing
 dispat                      # release (default command): full pipeline
 dispat release --root path  # same, explicit
+dispat run lint             # run the "lint" runScripts entry inside each changed
+                            # package, honouring the dependency graph; releases nothing
+dispat lint                 # the same — an unknown command word means "run <word>"
+dispat run lint --on-error continue   # keep running dependents of a failed package
 dispat --concurrency 4,2    # override build/publish parallelism
 dispat --log-format json    # machine-readable logs for CI
 dispat --log-level debug    # more verbose output
@@ -127,15 +141,18 @@ Notes:
   clone is not detected.
 - By default dispat creates tags locally; push them after a successful run (as above). Alternatively enable
   `"commit": {"enabled": true, "push": true}` in the config: dispat then creates one release commit (changelogs +
-  manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This
-  requires a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work
-  starts.
+  manifest changes), places the tags on it and pushes everything itself — drop the manual `git push` step. This requires
+  a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work starts.
 - Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent dispat runs on the
   same checkout are not guarded by a lock — serialize release jobs in CI.
 - GitHub releases are created via the API (enabled by default). In release-commit mode their body always documents the
   release commit SHA and tag. With `commit.push` enabled they are created after the push and pinned to the release
   commit via `target_commitish`; without it, GitHub creates the tag ref at the default branch head until you push (the
   true commit/tag stay recorded in the body) — or disable releases with `"github": {"enabled": false}`.
+- Any script can export values for the package's later scripts `GITHUB_OUTPUT`-style through `$DISPAT_OUTPUT`; the
+  special `GITHUB_ATTACHMENTS` output (a list of absolute paths) attaches files to the package's GitHub release:
+  `echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"`. See
+  [Script outputs](configuration.md#script-outputs).
 - Exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
 - Run `dispat status` on pull requests to review the plan before it is a release: it prints the diagnostics, the graph
   in publish order, and every version and channel transition, without touching anything.
@@ -144,12 +161,12 @@ Notes:
 
 Four things in a plan cannot be explained by reading the commit log alone, so dispat always reports them:
 
-| Marker           | Meaning                                                                                            |
-|------------------|-----------------------------------------------------------------------------------------------------|
-| **catch-up**     | The package is releasing only because a dependency published in an *earlier* run. Carries that version. |
-| **channel-only** | The package is releasing only because its channel changed. Carries both channels.                    |
+| Marker           | Meaning                                                                                                     |
+|------------------|-------------------------------------------------------------------------------------------------------------|
+| **catch-up**     | The package is releasing only because a dependency published in an *earlier* run. Carries that version.     |
+| **channel-only** | The package is releasing only because its channel changed. Carries both channels.                           |
 | **held**         | The package accumulated a bump but `Release-As: none` is withholding it. Carries the version it would have. |
-| **blocked**      | The package was planned and never attempted, because a dependency failed to publish.                 |
+| **blocked**      | The package was planned and never attempted, because a dependency failed to publish.                        |
 
 A caret that reached a consumer and could not oblige it — a stable consumer of a prerelease — is reported too, so a
 directive that looks like it should have released something and did not is visible rather than silent.

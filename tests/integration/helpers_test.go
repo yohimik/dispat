@@ -5,6 +5,11 @@ package integration
 // one test stays next to that test, written out in full, because the config
 // *is* the test input and hiding it behind a builder would obscure what is
 // being exercised.
+//
+// Configs are authored as typed models from the CLI's public package
+// (services/cli/pkg/config) and marshalled to JSON by WriteConfigModel; only
+// shapes the model cannot express — an unknown key, a legacy schema — fall
+// back to a raw map[string]any.
 
 import (
 	"fmt"
@@ -12,8 +17,28 @@ import (
 	"strings"
 	"testing"
 
+	models "github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
+
+// buildPublish is the standard space run object: a build and a publish stage
+// referencing the "build" and "publish" scripts.
+func buildPublish() models.SpaceRunConfig {
+	return models.SpaceRunConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+}
+
+// libsConfig returns the canonical one-space config: a "libs" space at
+// packages/ running the given build script (as scripts["build"]) plus an echo
+// publish, on top of harness.BaseFile(concurrency...).
+func libsConfig(buildScript string, concurrency ...int) models.File {
+	f := harness.BaseFile(concurrency...)
+	f.Scripts = map[string]string{"build": buildScript, "publish": "echo publishing"}
+	f.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Run: buildPublish()},
+	}
+	return f
+}
 
 // packageNames returns [prefix0, prefix1, ...] — the package set of the
 // budget-style concurrency scenarios.
@@ -47,11 +72,7 @@ func seedIndependentPackages(r *harness.Repo, names []string) {
 func singlePackageRepo(t *testing.T, buildScript string) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {"build": %q, "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  %s
-}`, buildScript, harness.Base("1")))
+	r.WriteConfigModel(libsConfig(buildScript, 1))
 	r.SeedPackage("packages", "core")
 	return r
 }
@@ -62,12 +83,9 @@ func singlePackageRepo(t *testing.T, buildScript string) *harness.Repo {
 func linkedRepo(t *testing.T, provider, consumer, buildScript string) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
-	r.WriteConfig(fmt.Sprintf(`{
-  "scripts": {"build": %q, "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "dependencies": [{"consumer": %q, "provider": %q}],
-  %s
-}`, buildScript, consumer, provider, harness.Base("1")))
+	cfg := libsConfig(buildScript, 1)
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: consumer, Provider: provider}}
+	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", provider)
 	r.SeedPackage("packages", consumer)
 	return r
