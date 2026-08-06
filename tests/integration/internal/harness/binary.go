@@ -1,6 +1,6 @@
 // Package harness is the black-box test support library for the integration
 // suite: it builds the real dispat binary (never the internal cli.Run entry
-// point — this module deliberately cannot import services/cli/internal/*,
+// point — this module deliberately cannot import services/dispat/internal/*,
 // which is the point: it exercises dispat exactly as a user's shell does),
 // drives it against disposable git repositories, and gives tests structured
 // ways to read back what happened — parsed JSON log events and, where a
@@ -29,7 +29,7 @@ var binaries struct {
 	err            error
 }
 
-// Build compiles the dispat CLI (from services/cli) and the tsmark timing
+// Build compiles the dispat CLI (from services/dispat) and the tsmark timing
 // helper (from this module's cmd/tsmark) once and returns their paths,
 // failing the test if the build failed.
 func Build(t testing.TB) (dispatBin, tsmarkBin string) {
@@ -58,7 +58,7 @@ func build() (dispat, tsmark string, err error) {
 	}
 
 	dispat = filepath.Join(dir, "dispat")
-	if err := goBuild(goBin, dispat, filepath.Join(root, "services", "cli")); err != nil {
+	if err := goBuild(goBin, dispat, filepath.Join(root, "services", "dispat")); err != nil {
 		return "", "", fmt.Errorf("building dispat: %w", err)
 	}
 	tsmark = filepath.Join(dir, "tsmark")

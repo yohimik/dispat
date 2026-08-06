@@ -1,8 +1,8 @@
 # Integration tests
 
 The black-box integration suite for the dispat CLI. It is a separate Go module that structurally *cannot* import
-`services/cli/internal/*` (Go's `internal` rule): it compiles the **real binary** from
-[`services/cli`](../../services/cli), drives it against disposable git repositories exactly as a user's shell would, and
+`services/dispat/internal/*` (Go's `internal` rule): it compiles the **real binary** from
+[`services/dispat`](../../services/dispat), drives it against disposable git repositories exactly as a user's shell would, and
 asserts on the three outputs a release run actually has:
 
 - **git state** — tags (their objects, messages and targets), commits, changelog files;

@@ -26,7 +26,7 @@ jobs:
         run: |
           go test -C pkg/ccme     ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
           go test -C pkg/models   ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-models.out"
-          go test -C services/cli ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
+          go test -C services/dispat ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
 
       - name: Compute total coverage
         run: |

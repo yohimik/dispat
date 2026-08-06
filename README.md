@@ -1,4 +1,4 @@
-# dispat
+# dispat <img alt="dispat logo" align="right" width="128" height="128" src="./imgs/logo.png" />
 
 [![CI](https://github.com/yohimik/dispat/actions/workflows/ci.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/ci.yml)
 [![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/ci.yml)
@@ -93,15 +93,15 @@ dispat stands on the shoulders of two things:
 
 | Document                                                    | Contents                                                                |
 |-------------------------------------------------------------|-------------------------------------------------------------------------|
-| [Getting started](./services/cli/docs/getting-started.md)   | Install, first config, commands, CI setup.                              |
-| [Configuration & CLI](./services/cli/docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
-| [Architecture](./services/cli/docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
+| [Getting started](./services/dispat/docs/getting-started.md)   | Install, first config, commands, CI setup.                              |
+| [Configuration & CLI](./services/dispat/docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
+| [Architecture](./services/dispat/docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
 | [Integration tests](./tests/integration/README.md)          | The black-box suite: setup, running, coverage; links the test plan.     |
 
 ## Versioning flow
 
 Versions live exclusively in annotated git tags — `package@MAJOR.MINOR.PATCH` by default, or whatever the space's
-[`tagFormat`](./services/cli/docs/configuration.md#tagformat) says. For each package the planner resolves two tags:
+[`tagFormat`](./services/dispat/docs/configuration.md#tagformat) says. For each package the planner resolves two tags:
 
 - **baseline** — the highest tag by semver precedence, prereleases included. This is what the package last published,
   and the channel it is on is read from it (`1.5.0-beta.3` → `beta`, `1.4.2` → `stable`).
@@ -154,7 +154,7 @@ consumers along, put them on the line too: `feat(core)^@beta++1`. Trains converg
 `beta`, a directive saying `beta` proposes nothing.
 
 **Space versioning modes.** A space may declare how its packages' versions relate:
-[`versioning`](./services/cli/docs/configuration.md#versioning) is `independent` (default — everything above),
+[`versioning`](./services/dispat/docs/configuration.md#versioning) is `independent` (default — everything above),
 `fixed` or `fixedSparse`. Under `fixed` the space versions as one package: a change to any member releases every member
 at one shared next version (computed over the space's highest baseline with the max bump), the space runs a single
 prerelease train, an exact `Release-As` on one member pins the space, and a member released with nothing of its own gets
@@ -246,7 +246,7 @@ budget. A stage without a configured script still runs — ordering, statuses, t
 just executes no shell command.
 
 Outside the release pipeline, `dispat run <name>` — or just `dispat <name>` — executes a space-defined
-[`runScripts`](./services/cli/docs/configuration.md#runscripts-and-dispat-run) command inside each changed package,
+[`runScripts`](./services/dispat/docs/configuration.md#runscripts-and-dispat-run) command inside each changed package,
 honouring the dependency graph within the build concurrency budget — the configured value, or `--concurrency`'s first
 value when given (`--on-error` decides whether a failure skips the dependents) — same `DISPAT_*` environment, nothing
 released or tagged.
@@ -259,7 +259,7 @@ dispat status   # print the graph and planned versions, change nothing
 dispat          # release: run the full pipeline
 ```
 
-See [./services/cli/docs/getting-started.md](./services/cli/docs/getting-started.md) for the full walkthrough, and
+See [./services/dispat/docs/getting-started.md](./services/dispat/docs/getting-started.md) for the full walkthrough, and
 `dispat.example.json` /
 `dispat.example.yaml` for annotated configs.
 
@@ -277,7 +277,7 @@ from the latest `main` build, never from this file.
 |----------------------------------|-------------------------------------------------------------------------------------------|
 | `pkg/ccme` (commit parser)       | **96.9%** — plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)     | 100%                                                                                      |
-| `services/cli` (all packages)    | **93.4%** aggregate                                                                       |
+| `services/dispat` (all packages)    | **93.4%** aggregate                                                                       |
 | — `script`, `model`              | 100%                                                                                      |
 | — `graph` (scheduler)            | 98.5%                                                                                     |
 | — `config`                       | 97.7%                                                                                     |
@@ -291,7 +291,7 @@ from the latest `main` build, never from this file.
 
 The planner's two formulations of staleness — walking down from a provider and up from a consumer — are asserted to
 agree, a cheap conformance check on the propagation rules. The full per-package test inventory is in
-[Architecture → Testing](./services/cli/docs/architecture.md#testing).
+[Architecture → Testing](./services/dispat/docs/architecture.md#testing).
 
 **Integration tests** ([`tests/integration`](./tests/integration)) are a separate Go module that structurally *cannot*
 import dispat's internals: it compiles the real binary and drives it against disposable git repositories exactly as a

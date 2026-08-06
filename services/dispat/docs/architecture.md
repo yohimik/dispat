@@ -1,0 +1,324 @@
+# Architecture
+
+## Runtime steps
+
+Steps 1–2 are the `cli` package — the command-line controller; everything from discovery on is the `app` package's
+`Status` (steps 3–6) and `Release` (all of them), so the same operations are callable without a command line.
+
+1. Parse the command line (pflag); dispatch `release`, `status` or `run <script>` — an unknown command word is
+   `run`'s shorthand (`dispat lint`). The run command computes the plan, then executes the named space run script inside
+   each changed package over the dependency graph (build concurrency budget; `--on-error` decides whether a failure
+   skips the failed package's dependents) and stops — nothing below step 6 applies to it.
+2. Load and validate `dispat.json` (viper; unknown keys rejected; flag bindings applied).
+3. Discover packages: every direct sub-folder of each space path, names unique across spaces.
+4. Build the dependency graph from configured relations; topologically sort it (cycles abort with the members named).
+5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
+   compute direct bumps, run the three propagation phases, then versions — with every `fixed`/`fixedSparse` space
+   versioned as one group (see "Fixed versioning groups" below).
+6. Print the diagnostics, then the full graph with `old -> new` versions and channel transitions, in publish order.
+   `status` stops here.
+7. Refuse to release when the plan has a repository-scoped error, or any error at all under `commitErrors: "error"`.
+8. When `commit.push` or GitHub releases are enabled: verify remote/API access up front (`git ls-remote`,
+   `GET /repos/{owner}/{repo}`) and fail fast before any release work.
+9. Run the gating run-level `beforeAll` hook; its failure aborts the run before any release work.
+10. Execute the task graph (version/build/publish per *releasing* package — held packages are excluded) with per-stage
+    concurrency budgets. Each stage is bracketed by the space's gating hooks (`beforeAll`, `beforeVersion`/
+    `postVersion`,
+    `beforeBuild`/`postBuild`, `beforePublish`), and a space's `run.login` runs once before its first publish, every
+    other publish of the space waiting on it.
+11. After each successful publish: run the release recorders (changelog file; GitHub release unless in release-commit
+    mode), then create the annotated tag (deferred in release-commit mode), then the warn-only `postPublish` hook and
+    the warn-only announce frame (`beforeAnnounce`, the announce stage, `postAnnounce`).
+12. Run the warn-only `postAll` hook with the run outcome (`DISPAT_RESULT_*`).
+13. Finalize phase (when `commit` is enabled): one release commit staging all published packages, tags on that commit,
+    push (`--follow-tags`, when `commit.push` is enabled), then GitHub releases referencing the pushed tags. The
+    warn-only commit/push hooks bracket these operations (`beforeCommit`/`afterCommit`, `postCommit` after tags,
+    `beforePush`/`afterPush`).
+14. Print a per-package summary plus totals; exit `1` if anything failed.
+
+## Planning
+
+The planner is a pure function of (history, graph, configuration). It never consults wall-clock time, tag creation dates
+or the outcome of any previous run — which is what makes re-running after a partial publish deterministic.
+
+**Windows.** Every question of the form "does this commit still count?" is answered against a *pending window*: the
+commits from a package's last **stable** tag to `HEAD`. Which package's window is consulted depends on the purpose, and
+conflating the two is the bug that loses releases:
+
+| Question                              | Window consulted |
+|---------------------------------------|------------------|
+| Does this unit bump `P` itself?       | `P`'s            |
+| Does this unit set `P`'s own channel? | `P`'s            |
+| Does this unit bump dependant `D`?    | **`D`'s**        |
+| Does this unit re-channel `D`?        | **`D`'s**        |
+
+Reading the last two against the *source's* window silently orphans consumers after a partial publish: the commit leaves
+the provider's window when it releases, the unit loses its source packages, and the consumer is never released on this
+or any future run. Reading them against the target's window is all that catch-up is — there is no repair pass, no second
+traversal and no timestamp comparison anywhere in the package.
+
+On a prerelease train the window deliberately spans commits the train's prereleases already published — that is what
+lets §11.4 recompute the train's target (and a graduation's version) over the whole train. But published work is
+published: a commit contained in the *baseline* tag (the newest tag of any kind) still counts toward the bump, and is
+discharged for every question of the form "is this still pending?" — it cannot re-release the train (otherwise every run
+would emit `beta.1`, `beta.2`, … from the same content), a `Release-As` it carries is consumed, and a `cancel`
+cannot discard it (a prerelease tag is a published tag). The discharge extends to diagnostics: a contained channel
+directive is not re-warned `W199` (it worked; the tag records it), contained propagated proposals are not re-judged
+(`W200`/`W208`), and a cancel discharged for every package it names is spent, not misaimed, so `W170` stays for live
+cancels only.
+
+**Propagation runs in three phases, and they may not be merged**, because phase 3 reads what phase 2 produces:
+
+1. **Channel axis** — each unit's `Propagate-Channel*` directives propose a channel per package, admitted against each
+   target's window.
+2. **Channel resolution** — settle `channel(P)` for every package: a direct directive beats every propagated one
+   regardless of age; among equals the newest commit wins, then the last unit in it. Candidates are built by pushing
+   from units to the packages they resolve to, rather than rescanning the window once per package.
+3. **Bump axis** — each unit's `Propagate*` directives, admitted only where a source releases on a channel the target
+   can resolve (`stable`, or the target's own). A stable consumer is not bumped by a provider's beta release: it would
+   be a republish with no content, and a stable package would ship declaring a prerelease dependency.
+
+There is no circularity in the other direction: phase 1 reads only the units and the packages' *baselines*, never a
+value computed in this run. That is also what makes the channel axis converge — having arrived on `beta`, a package is
+already there, so nothing further is proposed even though the commit is still in its window.
+
+The traversal is shared by both axes: breadth-first from the unit's source packages, single-visit, shortest-path depth,
+measured from the originating source set and never re-based on an intermediate. A package republishing as a catch-up
+does not propagate onward, so a failed publish can never enlarge what a commit releases.
+
+**Fixed versioning groups.** A space with `versioning: fixed` or `fixedSparse` is versioned as one virtual package,
+after the per-package pipeline has produced bumps, channels and pins. The group aggregates what the version computation
+reads — the baselines of *every* member (held ones included, so the shared version can never fall below a position a
+member already published) and the bumps, new work and channel movements of the members that would release — and runs it
+through the ordinary §13.9 computation, pins, trains and guards included: one shared next version, one prerelease train,
+one pin per space (the newest member pin wins; its scope breadth is one by construction, since the space is one
+version). Assignment is where the modes differ: `fixed` releases every non-held member at the group version, marking
+members with no cause of their own as rides (`W210`, non-suppressible, with a "no changes" changelog entry);
+`fixedSparse` assigns the group version only to members with a cause of their own. Scope resolution is untouched — each
+member keeps its *own* units for changelog and release notes. Two convergence properties are preserved: an aligned quiet
+space releases nothing, and under `fixed` a member left behind the space's published baseline (a failed ride, a mid-life
+adoption) is re-released at exactly that baseline on the next run.
+
+## Module map
+
+```
+pkg/ccme                 the commit-message parser: units, headers, inline
+                         directives, footers, scope terms, semver. Regex-free,
+                         single pass, no backtracking; immutable and safe for
+                         concurrent use. Knows nothing of git, workspaces or
+                         versions — it parses messages.
+pkg/models               the PUBLIC configuration model (its own module): the
+                         structs a dispat.json/.yaml decodes into, with json
+                         tags mirroring the mapstructure keys so external
+                         tooling (and the black-box integration suite) can
+                         author configs as typed values and marshal them to
+                         loadable JSON. Models and pure helpers only —
+                         loading, validation and discovery stay internal to
+                         the CLI.
+services/dispat/
+  main.go                thin entry point: os.Exit(cli.Run(...))
+  internal/
+    cli      the command-line controller: pflag flags, command dispatch
+             (release / status / run <script>, with an unknown word treated
+             as a run script name), zerolog setup, config loading — then
+             delegates to app and maps its results onto exit codes
+    app      the application: App with Status, Release and RunScript
+             (the `dispat run` implementation: changed packages scheduled
+             over the dependency graph within the build budget, --on-error
+             skip/continue semantics), holding recorder
+             assembly (changelog + github), diagnostic reporting and the
+             release-refusal policy, upfront remote/API verification,
+             run-level hooks (gating beforeAll; warn-only postAll +
+             commit/push hooks; all run in the repo root), finalize phase
+             (release commit, tags, push, github releases), graph printout,
+             summary — callable from any front end, not only the CLI
+    config   viper loading (UnmarshalExact + weak typing for scalar-or-pair
+             concurrency) over the public pkg/models structs (aliased, so the
+             rest of the CLI imports only this package), initials baseline
+             versions, tag formats, commit-error policy, versioning-mode and
+             runScripts validation, the parser-object resolution onto a
+             ccme.Config (validated by constructing a parser at load time),
+             package discovery on the filesystem
+    model    shared domain types: Space (incl. Versioning mode + RunScripts),
+             Package, Dependency, DepKind
+    graph    the shared dependency machinery: Scheduler[N], the incremental
+             core of Kahn's algorithm (nodes, edges, the ready frontier,
+             done -> newly-ready), used by the executor to drive its task
+             graph; and Graph, a validated string-node facade draining a
+             Scheduler through a name-ordered min-heap — O((V+E) log V),
+             deterministic output, cycle detection by leftover in-degree
+    gitx     Git interface + CLI implementation shelling out to git: TagFormat
+             (render/parse/glob, incl. {channel}/{counter} prerelease
+             spelling), one tag listing per package with peeled
+             target commits, from which Tags.Baseline and Tags.StableBaseline
+             are selections rather than second queries; merge-base ancestry,
+             commit log with
+             SHAs, parents and first-parent file lists, tag -a, checkout +
+             clean for revertOnFail rollbacks, add + commit for the release
+             commit, ls-remote verification, push --follow-tags
+    plan     the planner, split by concern:
+               plan.go        windows, cancellation, holds, direct bumps,
+                              versions, fixed versioning groups, emit,
+                              diagnostics
+               propagate.go   the three propagation phases and the shared
+                              depth-bounded traversal
+               channel.go     channel derivation, proposal resolution,
+                              prerelease version computation, graduation
+               scope.go       scope-set resolution: globs, exclusions, the
+                              file-derived set by longest path prefix
+               directives.go  the ccme -> plan adapters: unit accessors,
+                              propagation knobs, version helpers
+    release  the executor: task-graph construction (version/build/publish
+             nodes, dependency edges) over graph.Scheduler, with per-stage
+             worker budgets, skip propagation, provider-update
+             filtering, script sequences (fail-fast vs warn-only), per-stage
+             hooks, the once-per-space login gate (sync.Once keyed by space),
+             the warn-only announce frame after each publish, the warn-only
+             onFail/onSkip outcome scripts, DISPAT_* script environments incl.
+             the run-outcome and release-notes listings, the DISPAT_OUTPUT
+             export file every per-package sequence — the login included —
+             gets (parsed after the sequence, a failed one included; merged
+             onto the Release, login exports space-wide at each publish; and
+             carried into every later script's environment as DISPAT_OUTPUT_*
+             with DISPAT_OUTPUT_SOURCE_* provenance, DISPAT_EXPORT_GITHUB
+             passing through whole), line-buffered log streaming of script
+             output
+    script   Runner interface + ShellRunner (configurable shell, default
+             sh -c; injected env, cwd = package)
+    changelog entry rendering (Format with defaults) + FileWriter recorder that
+             prepends entries to the per-package changelog file
+    github   Releaser recorder: same changelog data delivered as a GitHub
+             release via POST /repos/{owner}/{repo}/releases — only for
+             packages that exported DISPAT_EXPORT_GITHUB — prereleases
+             marked as such, the export's files uploaded as release assets
+             through the created release's upload_url (invalid entries
+             skipped with a warning)
+```
+
+Tag names are built in exactly one place, `plan.Release.TagName()`. They have to be: the name is what the *next* run
+reads a package's baseline from, so a caller rendering one differently would silently give that package no history.
+
+## Task graph
+
+Each changed package contributes up to three task nodes:
+
+- `version` — exists only when the package's bump is `DueTo` provider updates. Incoming edges: each changed provider's
+  `build`, plus that provider's `publish` when the provider's space sets `isBuildWaitingPublish: true`. Outgoing edge:
+  the package's own `build`.
+- `build` — depends on `version` when present, otherwise carries the provider edges itself. Outgoing edge: `publish`.
+- `publish` — depends on the package's own `build` and always on every changed provider's `publish` (publishing against
+  an unpublished provider version would be broken regardless of the flag; `isBuildWaitingPublish` only controls whether
+  the consumer may *build* before the provider publishes).
+
+The scheduler is a dependency-counting loop (Kahn's idea at task granularity): tasks whose in-degree reaches zero enter
+their stage's ready queue; a single coordinating goroutine launches workers within each stage budget (`build` and
+`version` share the build budget, `publish` has its own) and collects completions over a channel. There are no locks in
+the scheduling hot path — a mutex guards only the shared result map that skip decisions and provider filtering read.
+Every task finishes exactly once, including no-op completions for packages already failed or skipped, which is what lets
+the counting terminate without special cases.
+
+## Failure semantics
+
+A failed script (or release recorder) marks the package failed; nothing aborts the run. `Result.FailedStage` records
+where it failed (informational, shown in the summary). At the start of every task the package re-evaluates the skip
+rule: skip if some changed provider failed (at any stage) or was skipped AND the package has neither own commits nor a
+successfully published changed provider. A consumer's terminal outcome is deterministic in both modes: its publish
+always waits for its providers' publishes, so a provider's publish failure is guaranteed to be seen at the latest there.
+With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage; with `false`
+the consumer may spend a version/build on a release that its publish then skips — the trade-off that flag opts into. The
+version stage filters failed/skipped providers out of the `DISPAT_UPDATED_*` variables and skips its script entirely
+when none remain.
+
+Failed or skipped consumers are not lost across runs, and nothing about that depends on tag creation times — those are
+not stable under merges, rebases or equal timestamps, and are used for reporting only. A commit propagates to a
+dependant while the *dependant's* window still contains it, so a consumer that missed a run is simply still owed its
+release (`DueTo` then contains an *unchanged* provider: it gets no task nodes, and the version stage passes its released
+version). A consumer that was never released while a provider has been is the same case, with the whole history as its
+window. Such a release is labelled a catch-up and reported with the origin's published version.
+
+Because admission is a window test, the guarantees are structural rather than heuristic: a contribution survives every
+run until the dependant releases past it and is not re-admitted afterwards; the version a package is caught up at is the
+one it was planned at originally; and a later run's target set is always a subset of the first run's, so a failed
+publish can never widen a commit's blast radius.
+
+A skipped package is recorded as *blocked* with the dependency responsible, rather than being silently absent from the
+summary: a package that was in the plan and produced nothing has to be accounted for.
+
+For spaces with `revertOnFail: true`, a failing package (any stage, including a failing release recorder) has its folder
+rolled back via the `Reverter` interface (`gitx.CLI`: `git checkout -- <dir>` + `git clean -fd <dir>` — tracked files
+restored from HEAD, untracked files removed, scoped to the package folder). The same rollback runs when a package is
+skipped after its version stage already modified files. A revert error is logged but the package keeps its original
+failure status.
+
+## Design decisions
+
+Interfaces decouple every side effect, keeping the planner and executor unit-testable with in-memory fakes:
+
+| Interface                 | Implementations                           | Used by |
+|---------------------------|-------------------------------------------|---------|
+| `gitx.Git`                | `gitx.CLI` (shells out to git)            | plan    |
+| `script.Runner`           | `script.ShellRunner`                      | release |
+| `release.Tagger`          | `gitx.CLI`                                | release |
+| `release.Reverter`        | `gitx.CLI`                                | release |
+| `release.ReleaseRecorder` | `changelog.FileWriter`, `github.Releaser` | release |
+
+`ReleaseRecorder` is the extension point for publishing release data anywhere: both current implementations render the
+same changelog sections (shared `changelog.Format`, zero-value fields fall back to defaults) and differ only in the
+destination — a file prepend vs. a REST call. Recorders run in order after each successful publish; a recorder error
+fails the package before tagging.
+
+Other choices: versions in git tags only (no version files to commit); one `git tag`/`git log` pair per package rather
+than a global log walk (simple and correct for per-package tag baselines); shelling out to the git binary to match CI
+byte-for-byte; script output streamed line-by-line into the structured logger so parallel package logs stay
+attributable; deterministic ordering everywhere (alphabetical tie-breaks in the toposort, sorted space iteration in
+discovery).
+
+Two diagnostics are deliberately not suppressible, because each explains a release outcome a reader of the commit log
+alone cannot account for: a **catch-up** and a **channel-only** release explain a package's *presence* in a plan, and a
+**blocked** package and a **suppressed propagation** explain an *absence*.
+
+Complexity: discovery O (packages), planning O (V+E) graph work per propagation phase plus exactly one `git tag` and one
+bounded `git log` per package, execution O (V+E) scheduling overhead on top of script runtime.
+
+Two places where that bound is easy to lose, and both are guarded by construction rather than by care. A package needs
+two baselines, and asking for them separately runs the same tag query twice — so the listing is the primitive and both
+are selections over it. And the propagation phase split costs a second pass over the *unit list* and a second set of
+graph traversals, but not a second pass over history: commit walking, window computation, parsing and scope resolution
+all happen once, before either phase runs, and the expensive part of a run is going to the object store. In a repository
+running no prerelease train no unit carries a channel directive at all and the channel phase does nothing.
+
+## Deliberately out of scope
+
+dispat implements the release computation. Some parts of the specification assume an engine that also reads package
+manifests and knows about registries; those are delegated to the version and publish scripts instead, which is what
+keeps dispat language-agnostic:
+
+| Not implemented                                             | Delegated to                                                          |
+|-------------------------------------------------------------|-----------------------------------------------------------------------|
+| Rewriting dependency ranges in manifests                    | `run.version`, via the `DISPAT_WORKSPACE_*` variables                 |
+| Manifest-vs-baseline version checks                         | —                                                                     |
+| Publish targets, registries, adopting published versions    | `run.publish`                                                         |
+| `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps         |
+| Per-run safety limits (max packages, majors, channel moves) | — (the exact-pin major-jump guard *is* enforced, with a default of 1) |
+| Post-run convergence verification                           | — (re-run `status`)                                                   |
+
+## Testing
+
+`go test ./...` — testify-based unit tests with in-memory fakes:
+
+| Package   | Coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ccme      | Its own suite: header grammar, footers, units, diagnostics, semver, allocation and fuzz tests, plus the specification's conformance vectors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| graph     | Ordering constraints, alphabetical determinism, cycle errors, unknown nodes; Scheduler frontier/cascade semantics (diamond joins, one-time hand-out, blocked-as-cycle, generic node types).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| config    | Defaults (incl. `commitErrors`, `nonPackageScopes`, `tagFormat`), JSON+YAML loading, flag precedence, optional scripts, scalar-or-array script references, login/hook/run-hook resolution and their unknown- and empty-reference errors, changelog/github objects, initials parsing, per-space tag formats and their validation, versioning-mode normalization and rejection, runScripts validation and case-insensitive lookup, the parser object (defaults, every option mapped onto ccme.Config, invalid values rejected at load), discovery errors (and discovery carrying versioning + runScripts onto the Space).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| plan      | Propagation is opt-in; caret/`^^`/`+N` depths; `^none`; `Propagate-Scope`; edge kinds; `max()` merging; scope resolution (derived, longest prefix, globs incl. the matcher's backtracking table, `*`, exclusions, unknown includes vs excludes); baselines and initials; catch-up (stale, never-released, discharge-once, no widening) and the staleness-audit duality; cancellation under all three ancestry sources (git-native, parent-pointer BFS, history rank); holds, resume and exact pins with every guard and the rejected-pin fallback; channels, trains, graduation, propagated-transition graduation, suppression and convergence; error blast radius; tag formats; the reporting accessors (Reason, counters, outputs, PossiblyBehind); fixed versioning groups (rides and W210, shared version over the max baseline, sparse members staying behind, the single shared train, space-wide pins and per-member holds, laggard alignment and its absence under fixedSparse, group isolation between two fixed spaces, propagation into a fixed space).                                                                                                                                                                                                                                   |
+| release   | Ordering under both `isBuildWaitingPublish` values, version-task placement, failed/skipped provider filtering, publish- and build-failure cascades, skip cascades and blocked reporting, held packages excluded, channel-only releases executed, per-stage budgets, script envs (incl. channel variables and workspace versions), the once-per-space login gate (single run, per-space not per-script, failure failing every space publish), hook ordering/environment/gating (incl. warn-only postPublish), the announce frame (order, warn-only failures, skipped on a failed publish), the onFail/onSkip outcome scripts (fired once with the failure/skip specifics, silent on success), the release-notes environment, fail-fast vs warn-only sequences, the run-outcome environment, script-less releases, recorder failures, revertOnFail at every stage, space tag formats, the DISPAT_OUTPUT exports (accumulation across scripts and hooks, both name spellings, re-export override incl. source, flow into onFail even from a failed sequence, empty listing, the NAME=value grammar with its reserved DISPAT_ names and gating-failure semantics, DISPAT_OUTPUT_SOURCE_* provenance, space-wide login exports incl. their gating parse failures, the DISPAT_EXPORT_GITHUB pass-through). |
+| changelog | Section/entry rendering, custom formats, file prepend, custom file/title, the fixed-ride "no changes" entry (and content beating the placeholder).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| github    | Request shape (path, auth, payload) via httptest, custom format, prerelease marking, the DISPAT_EXPORT_GITHUB gate (no export, no release, no API call), its asset uploads through the advertised upload_url (multi-file lists, names, content type, bytes, failure propagation, invalid entries skipped with a warning, empty creation bodies tolerated), API and connection errors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| script    | Default and custom shells, env injection, failure propagation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| gitx      | Against a real temporary git repo: tag round trips, baseline vs stable baseline, peeled tag commits, ancestry, commit logs carrying SHAs/parents/multi-paragraph messages, tag format render/parse/glob and custom-format resolution, scoped RevertDir, CommitDirs (incl. empty-stage no-op), VerifyRemote and pushes to a bare remote.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| app       | Unit tests of its helpers (commit-message templating, github repository/token resolution) plus its own end-to-end suite against real git repositories, driving App directly as any non-CLI front end would: status/release/convergence, commitErrors=error refusal, initials baselines, disabled changelog, the gating beforeAll abort, release-commit finalize with GitHub (hook order, tag placement, release body), push-mode fail-fast verification, RunScript with both policies and the --on-error validator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| cli       | End-to-end against a real temporary git repo (driving app underneath): status/release commands, disabled changelog, revertOnFail restoration, initials with a broken tag, release commit + push to a bare remote, fail-fast remote verification, three-run catch-up scenario (provider published, consumer failed, next run heals), the commit-error policy under both settings, the release-commit scope not poisoning the next run, run-level hook order and environment (incl. no-op without a publish, warn-only failures and the gating beforeAll abort), once-per-space login end to end, the run command (execution inside changed packages with the full environment, the unknown-word shorthand, unknown-script/flag/usage exits), exit codes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+The planner's two formulations of staleness — walking down from a provider and up from a consumer — are asserted to
+agree, which is a cheap and effective conformance check on the propagation rules.

@@ -7,7 +7,7 @@ package integration
 // being exercised.
 //
 // Configs are authored as typed models from the CLI's public package
-// (services/cli/pkg/config) and marshalled to JSON by WriteConfigModel; only
+// (services/dispat/pkg/config) and marshalled to JSON by WriteConfigModel; only
 // shapes the model cannot express — an unknown key, a legacy schema — fall
 // back to a raw map[string]any.
 

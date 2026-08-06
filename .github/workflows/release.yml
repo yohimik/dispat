@@ -50,8 +50,8 @@ jobs:
         run: |
           mkdir -p dist
           OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -C services/cli -trimpath \
-            -ldflags="-s -w -X github.com/yohimik/dispat/services/cli/internal/cli.Version=${DISPAT_VERSION#v}" \
+          go build -C services/dispat -trimpath \
+            -ldflags="-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${DISPAT_VERSION#v}" \
             -o "${PWD}/dist/${OUT_NAME}" .
           echo "Built dist/${OUT_NAME} (version ${DISPAT_VERSION#v})"
 

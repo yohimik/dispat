@@ -3,6 +3,6 @@ go 1.26
 use (
 	pkg/models
 	pkg/ccme
-	services/cli
+	services/dispat
 	tests/integration
 )

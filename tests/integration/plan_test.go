@@ -1,7 +1,7 @@
 package integration
 
 // Area 3: plan logic. Most tests here are flowing multi-run scenarios in
-// the style of services/cli/internal/cli's own end-to-end suite: several
+// the style of services/dispat/internal/cli's own end-to-end suite: several
 // related cases packed into one narrative, because each additional run of
 // an existing repository is far cheaper than a fresh fixture — and because
 // the property most worth checking usually *is* the relation between runs
