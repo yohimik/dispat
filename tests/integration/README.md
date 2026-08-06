@@ -2,19 +2,19 @@
 
 The black-box integration suite for the dispat CLI. It is a separate Go module that structurally *cannot* import
 `services/cli/internal/*` (Go's `internal` rule): it compiles the **real binary** from
-[`services/cli`](../../services/cli), drives it against disposable git repositories exactly as a user's shell would,
-and asserts on the three outputs a release run actually has:
+[`services/cli`](../../services/cli), drives it against disposable git repositories exactly as a user's shell would, and
+asserts on the three outputs a release run actually has:
 
 - **git state** — tags (their objects, messages and targets), commits, changelog files;
 - **JSON log events** — `--log-format json`, the machine-readable contract CI ingests;
 - **execution timelines** — nanosecond-resolution intervals recorded by the purpose-built `tsmark` probe, wherever
   *timing* rather than mere ordering is the claim.
 
-Configs are authored as typed models from the public [`pkg/models`](../../pkg/models) module and marshalled to JSON,
-so a test that compiles is a test whose config loads.
+Configs are authored as typed models from the public [`pkg/models`](../../pkg/models) module and marshalled to JSON, so
+a test that compiles is a test whose config loads.
 
-The full design — goals, architecture, the coverage matrix per test, flakiness posture and conventions for new
-tests — lives in the **[test plan](./docs/test-plan.md)**.
+The full design — goals, architecture, the coverage matrix per test, flakiness posture and conventions for new tests —
+lives in the **[test plan](./docs/test-plan.md)**.
 
 ## Setup
 
@@ -40,7 +40,6 @@ go test ./... -count 5           # stability check: repeated runs pass
 
 ## Results
 
-The suite's current status and per-area coverage summary live in
-**[test results](./docs/test-results.md)**: what passes (including `-race` and repeated `-count` runs), what each
-test file covers, and the behavioural findings the suite turned up (both since fixed, with the fences flipped into
-tests guarding the corrected behaviour).
+The suite's current status and per-area coverage summary live in **[test results](./docs/test-results.md)**: what passes
+(including `-race` and repeated `-count` runs), what each test file covers, and the behavioural findings the suite
+turned up (both since fixed, with the fences flipped into tests guarding the corrected behaviour).

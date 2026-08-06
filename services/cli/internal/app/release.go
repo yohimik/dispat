@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/services/cli/internal/changelog"
 	"github.com/yohimik/dispat/services/cli/internal/config"
 	"github.com/yohimik/dispat/services/cli/internal/github"
@@ -41,7 +43,7 @@ func (a *App) Release(ctx context.Context) error {
 	var gh *github.Releaser
 	if a.cfg.GitHub.IsEnabled() {
 		var ghErr error
-		if gh, ghErr = githubReleaser(a.cfg.GitHub); ghErr != nil {
+		if gh, ghErr = githubReleaser(a.cfg.GitHub, a.log); ghErr != nil {
 			a.log.Warn().Err(ghErr).Msg("github releases disabled")
 		}
 	} else {
@@ -133,7 +135,7 @@ func (a *App) recorders() []release.ReleaseRecorder {
 // githubReleaser resolves repository and token for the GitHub recorder. The
 // repository comes from config or $GITHUB_REPOSITORY ("owner/repo"), the
 // token from the configured env var (default $GITHUB_TOKEN).
-func githubReleaser(gc config.GitHubConfig) (*github.Releaser, error) {
+func githubReleaser(gc config.GitHubConfig, log zerolog.Logger) (*github.Releaser, error) {
 	owner, repo := gc.Owner, gc.Repo
 	if owner == "" || repo == "" {
 		if env := os.Getenv("GITHUB_REPOSITORY"); env != "" {
@@ -165,6 +167,7 @@ func githubReleaser(gc config.GitHubConfig) (*github.Releaser, error) {
 		Repo:   repo,
 		Token:  token,
 		Format: entryFormat(gc.EntryFormatConfig),
+		Log:    log,
 	}, nil
 }
 

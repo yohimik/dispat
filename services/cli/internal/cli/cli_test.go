@@ -72,6 +72,25 @@ func initRepo(t *testing.T, cfg string) string {
 	return root
 }
 
+func TestVersionFlag(t *testing.T) {
+	// --version answers before anything else — no config file is read, so it
+	// works outside a monorepo. The default "dev" marks a local build;
+	// releases override Version at build time from the release tag.
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--version"}, &stdout, &stderr)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, "dispat dev\n", stdout.String())
+	assert.Empty(t, stderr.String())
+
+	old := Version
+	t.Cleanup(func() { Version = old })
+	Version = "1.2.3"
+	stdout.Reset()
+	code = Run([]string{"--version"}, &stdout, &stderr)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, "dispat 1.2.3\n", stdout.String())
+}
+
 func TestStatusCommand(t *testing.T) {
 	root := initRepo(t, testConfig)
 	var stdout, stderr bytes.Buffer
@@ -282,7 +301,8 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
 	defer srv.Close()
 
 	cfg := `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
+  "scripts": {"build": "echo building",
+              "publish": "echo \"DISPAT_EXPORT_GITHUB=\" >> \"$DISPAT_OUTPUT\""},
   "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "concurrency": 1,
   "logLevel": "info",

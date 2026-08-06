@@ -44,11 +44,16 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
+          # The version baked into `dispat --version`: the release tag without
+          # its v prefix (v1.2.3 -> 1.2.3). Local builds default to "dev".
+          DISPAT_VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist
           OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -C services/cli -trimpath -ldflags="-s -w" -o "${PWD}/dist/${OUT_NAME}" .
-          echo "Built dist/${OUT_NAME}"
+          go build -C services/cli -trimpath \
+            -ldflags="-s -w -X github.com/yohimik/dispat/services/cli/internal/cli.Version=${DISPAT_VERSION#v}" \
+            -o "${PWD}/dist/${OUT_NAME}" .
+          echo "Built dist/${OUT_NAME} (version ${DISPAT_VERSION#v})"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

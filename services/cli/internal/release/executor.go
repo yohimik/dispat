@@ -151,6 +151,13 @@ type task struct {
 type spaceLogin struct {
 	once sync.Once
 	err  error
+	// outputs is what the login script exported through its DISPAT_OUTPUT
+	// file. Written only inside once.Do and read only after Do returned, so
+	// Do's happens-before is all the synchronization it needs. The exports are
+	// space-scoped: each package of the space merges them at its publish (the
+	// one stage that gates on the login), so they reach the publish stage and
+	// everything after it.
+	outputs []plan.Output
 }
 
 // RunSequence executes commands in order inside dir.
@@ -386,13 +393,22 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 			sl.once.Do(func() {
 				lg := e.Log.With().Str("space", space.Name).Str("stage", "login").Logger()
 				lg.Info().Msg("login started")
-				sl.err = RunSequence(ctx, e.Runner, rel.Pkg.Dir, "login",
-					space.LoginScript, e.loginEnv(space.Name, wsVars), lg, true)
+				// The login exports like any other script; a malformed export
+				// fails the login (it is a gating sequence), and what it did
+				// export becomes part of every space package's outputs below.
+				outs, seqErr, parseErr := runSequenceCapturing(ctx, e.Runner, rel.Pkg.Dir, "login",
+					space.Name+":login", space.LoginScript, e.loginEnv(space.Name, wsVars), lg, true)
+				sl.outputs = outs
+				if sl.err = seqErr; sl.err == nil {
+					sl.err = parseErr
+				}
 			})
 			if sl.err != nil {
 				fail(fmt.Errorf("space login: %w", sl.err), "login failed")
 				return
 			}
+			// Safe: only this package's current task touches rel.Outputs.
+			MergeOutputs(rel, sl.outputs)
 		}
 	}
 

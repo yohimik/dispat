@@ -337,10 +337,15 @@ func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 }
 
 // githubConfig returns a config whose GitHub recorder points at the given
-// fake API server, with the token read from DISPAT_IT_TOKEN.
+// fake API server, with the token read from DISPAT_IT_TOKEN. The publish
+// script exports an empty DISPAT_EXPORT_GITHUB — the recorder acts only on
+// packages that opted in.
 func githubConfig(apiURL string) models.File {
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]string{
+		"build":   "echo building",
+		"publish": `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`,
+	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Run: models.SpaceRunConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}}}}
 	cfg.GitHub = models.GitHubConfig{
@@ -395,9 +400,10 @@ func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 
 // TestConfigGithubReleaseAttachments exercises the whole script-output and
 // attachment path through the real binary: the build script exports
-// GITHUB_ATTACHMENTS (two files) plus an ordinary output into
-// $DISPAT_OUTPUT, the publish and announce scripts must see them as
-// DISPAT_OUTPUT_* variables, and the created GitHub release must receive
+// DISPAT_EXPORT_GITHUB (two files) — opting the package into a GitHub
+// release — plus an ordinary output into $DISPAT_OUTPUT, the publish and
+// announce scripts must see them again (the export under its full name, the
+// output as DISPAT_OUTPUT_*), and the created GitHub release must receive
 // both files as assets at the endpoint the release itself advertised
 // (upload_url).
 func TestConfigGithubReleaseAttachments(t *testing.T) {
@@ -429,9 +435,9 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 	cfg := githubConfig(srv.URL)
 	cfg.Scripts = map[string]string{
 		"build": `echo binary-bytes > app.bin && echo docs-bytes > docs.txt` +
-			` && echo "GITHUB_ATTACHMENTS=$PWD/app.bin $PWD/docs.txt" >> "$DISPAT_OUTPUT"` +
+			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin $PWD/docs.txt" >> "$DISPAT_OUTPUT"` +
 			` && echo "BUILD_FLAVOUR=release" >> "$DISPAT_OUTPUT"`,
-		"publish":  `echo "publish: $DISPAT_OUTPUTS / $DISPAT_OUTPUT_GITHUB_ATTACHMENTS" > ../../publish-env.txt`,
+		"publish":  `echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`,
 		"announce": `echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Run: models.SpaceRunConfig{
@@ -443,10 +449,12 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 
 	r.ReleaseOK()
 
-	// The exported outputs reached the later stages as DISPAT_OUTPUT_*.
+	// The ordinary output reached the later stages as DISPAT_OUTPUT_*; the
+	// GitHub export travelled under its full name and stayed out of the
+	// DISPAT_OUTPUTS listing.
 	pubEnv, err := os.ReadFile(r.Path("publish-env.txt"))
 	require.NoError(t, err)
-	assert.Contains(t, string(pubEnv), "publish: GITHUB_ATTACHMENTS BUILD_FLAVOUR / ")
+	assert.Contains(t, string(pubEnv), "publish: BUILD_FLAVOUR / ")
 	assert.Contains(t, string(pubEnv), "/app.bin")
 	assert.Contains(t, string(pubEnv), "/docs.txt")
 	annEnv, err := os.ReadFile(r.Path("announce-env.txt"))

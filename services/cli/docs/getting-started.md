@@ -110,8 +110,11 @@ dispat run lint             # run the "lint" runScripts entry inside each change
 dispat lint                 # the same — an unknown command word means "run <word>"
 dispat run lint --on-error continue   # keep running dependents of a failed package
 dispat --concurrency 4,2    # override build/publish parallelism
+dispat run lint --concurrency 8       # dispat run uses the build (first) value as its budget
 dispat --log-format json    # machine-readable logs for CI
 dispat --log-level debug    # more verbose output
+dispat --version            # print the dispat version (release binaries carry
+                            # the release tag's version; local builds say dev)
 ```
 
 ## Running in CI (GitHub Actions example)
@@ -144,13 +147,16 @@ Notes:
   a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work starts.
 - Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent dispat runs on the
   same checkout are not guarded by a lock — serialize release jobs in CI.
-- GitHub releases are created via the API (enabled by default). In release-commit mode their body always documents the
-  release commit SHA and tag. With `commit.push` enabled they are created after the push and pinned to the release
-  commit via `target_commitish`; without it, GitHub creates the tag ref at the default branch head until you push (the
-  true commit/tag stay recorded in the body) — or disable releases with `"github": {"enabled": false}`.
-- Any script can export values for the package's later scripts `GITHUB_OUTPUT`-style through `$DISPAT_OUTPUT`; the
-  special `GITHUB_ATTACHMENTS` output (a list of absolute paths) attaches files to the package's GitHub release:
-  `echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"`. See
+- GitHub releases are created via the API for every published package whose scripts exported `DISPAT_EXPORT_GITHUB` —
+  the export is the per-package opt-in, and its value (a list of absolute paths) names the files attached as release
+  assets: `echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"` (an empty value releases without assets;
+  an invalid path is skipped with a warning). In release-commit mode the release body always documents the release
+  commit SHA and tag. With `commit.push` enabled releases are created after the push and pinned to the release commit
+  via `target_commitish`; without it, GitHub creates the tag ref at the default branch head until you push (the true
+  commit/tag stay recorded in the body) — or disable releases entirely with `"github": {"enabled": false}`.
+- Any script — the login included — can export values for the later scripts `GITHUB_OUTPUT`-style through
+  `$DISPAT_OUTPUT`: append `DISPAT_OUTPUT_<NAME>=value` lines and later scripts read `$DISPAT_OUTPUT_<NAME>`, with
+  `$DISPAT_OUTPUT_SOURCE_<NAME>` naming the script that exported it. See
   [Script outputs](configuration.md#script-outputs).
 - Exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
 - Run `dispat status` on pull requests to review the plan before it is a release: it prints the diagnostics, the graph

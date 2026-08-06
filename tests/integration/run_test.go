@@ -247,16 +247,18 @@ func TestRunGraphOrderingUnderConcurrency(t *testing.T) {
 }
 
 // TestRunCarriesOutputsAcrossPackages: a provider's run script exports
-// through $DISPAT_OUTPUT and its consumers read the export as
-// DISPAT_OUTPUT_<NAME> — transitively, and through a middle package whose
-// space does not even define the script (its no-op still carries).
+// through $DISPAT_OUTPUT — here with the DISPAT_OUTPUT_-prefixed spelling —
+// and its consumers read the export as DISPAT_OUTPUT_<NAME>, with
+// DISPAT_OUTPUT_SOURCE_<NAME> naming the exporting script — transitively,
+// and through a middle package whose space does not even define the script
+// (its no-op still carries).
 func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	carry := `if [ "$DISPAT_PACKAGE" = "base" ]; then` +
-		` echo "FROM_BASE=hello-from-base" >> "$DISPAT_OUTPUT";` +
-		` else echo "$DISPAT_PACKAGE sees $DISPAT_OUTPUT_FROM_BASE" >> ../../carry.txt; fi`
+		` echo "DISPAT_OUTPUT_FROM_BASE=hello-from-base" >> "$DISPAT_OUTPUT";` +
+		` else echo "$DISPAT_PACKAGE sees $DISPAT_OUTPUT_FROM_BASE from $DISPAT_OUTPUT_SOURCE_FROM_BASE" >> ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"outer":  {Path: "packages", Run: buildPublish(), RunScripts: map[string]string{"carry": carry}},
 		"middle": {Path: "middle", Run: buildPublish()}, // no run scripts: a silent carrier
@@ -274,8 +276,8 @@ func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 	r.RunScriptOK("carry")
 	data, err := os.ReadFile(r.Path("carry.txt"))
 	require.NoError(t, err)
-	assert.Equal(t, "top sees hello-from-base\n", string(data),
-		"the export travels base -> mid (script-less) -> top")
+	assert.Equal(t, "top sees hello-from-base from base:run:carry\n", string(data),
+		"the export travels base -> mid (script-less) -> top, provenance included")
 }
 
 // TestRunCarriesOutputsFromAFailedProvider: under --on-error=continue a

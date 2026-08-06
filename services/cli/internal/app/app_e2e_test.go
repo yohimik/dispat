@@ -164,7 +164,8 @@ func TestAppCommitModeFinalizeWithGithub(t *testing.T) {
 	t.Setenv("DISPAT_APP_TOKEN", "tkn")
 
 	cfg := `{
-  "scripts": {"build": "echo building", "publish": "echo publishing",
+  "scripts": {"build": "echo building",
+              "publish": "echo \"DISPAT_EXPORT_GITHUB=\" >> \"$DISPAT_OUTPUT\"",
               "hook": "echo $DISPAT_STAGE >> hooks.log"},
   "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
   "run": {"beforeAll": "hook", "postAll": "hook", "beforeCommit": "hook", "afterCommit": "hook", "postCommit": "hook"},
@@ -194,6 +195,39 @@ func TestAppCommitModeFinalizeWithGithub(t *testing.T) {
 	require.Len(t, releases, 1)
 	assert.Equal(t, "core@0.1.0", releases[0].TagName)
 	assert.Contains(t, releases[0].Body, "- commit: "+head, "the release documents the release commit")
+}
+
+func TestAppGithubReleaseSkippedWithoutExport(t *testing.T) {
+	// The GitHub recorder is opt-in per package: a publish that exports no
+	// DISPAT_EXPORT_GITHUB releases everything else — tag, changelog — but
+	// creates no GitHub release.
+	var posts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet { // upfront verification
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		posts++
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	t.Setenv("DISPAT_APP_TOKEN", "tkn")
+
+	cfg := `{
+  "scripts": {"build": "echo building", "publish": "echo publishing"},
+  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
+  "concurrency": 1,
+  "logFormat": "json",
+  "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "DISPAT_APP_TOKEN"}
+}`
+	a, root, buf := appRepo(t, cfg)
+	appGit(t, root, "add", "-A")
+	appGit(t, root, "commit", "-qm", "feat(core): released without a github release")
+
+	require.NoError(t, a.Release(context.Background()))
+	assert.Equal(t, []string{"core@0.1.0"}, appTags(t, root), "the release itself goes through")
+	assert.Zero(t, posts, "no GitHub release may be created without the export")
+	assert.Contains(t, buf.String(), "github release skipped")
 }
 
 func TestAppPushModeFailsFastWithoutARemote(t *testing.T) {

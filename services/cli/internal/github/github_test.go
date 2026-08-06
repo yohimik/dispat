@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -19,6 +21,8 @@ import (
 	"github.com/yohimik/dispat/services/cli/internal/plan"
 )
 
+// testRelease returns a release whose scripts opted into a GitHub release:
+// the recorder acts only on packages that exported plan.GitHubExport.
 func testRelease() *plan.Release {
 	return &plan.Release{
 		Pkg:  &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
@@ -34,7 +38,23 @@ func testRelease() *plan.Release {
 			From: ccme.Version{Major: 2},
 			To:   ccme.Version{Major: 2, Patch: 1},
 		}},
+		Outputs: []plan.Output{{Name: plan.GitHubExport, Value: "", Source: "core:build"}},
 	}
+}
+
+func TestRecordSkipsWithoutExport(t *testing.T) {
+	// A package that exported no DISPAT_EXPORT_GITHUB gets no GitHub release
+	// — the recorder must not even reach the API.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected API call %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Outputs = nil
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	assert.NoError(t, r.Record(context.Background(), rel))
 }
 
 func TestRecordCreatesRelease(t *testing.T) {
@@ -246,9 +266,9 @@ func TestRecordUploadsAttachments(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// The output value is a whitespace-separated path list under one name.
+	// The export's value is a whitespace-separated path list.
 	rel := testRelease()
-	rel.Outputs = []plan.Output{{Name: AttachmentsOutput, Value: asset + " " + notes}}
+	rel.Outputs = []plan.Output{{Name: plan.GitHubExport, Value: asset + " " + notes}}
 
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
 	require.NoError(t, r.Record(context.Background(), rel))
@@ -279,7 +299,7 @@ func TestRecordUploadFailureIsAnError(t *testing.T) {
 	defer srv.Close()
 
 	rel := testRelease()
-	rel.Outputs = []plan.Output{{Name: AttachmentsOutput, Value: asset}}
+	rel.Outputs = []plan.Output{{Name: plan.GitHubExport, Value: asset}}
 
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
 	err := r.Record(context.Background(), rel)
@@ -287,15 +307,27 @@ func TestRecordUploadFailureIsAnError(t *testing.T) {
 	assert.Contains(t, err.Error(), "asset rejected")
 }
 
-func TestRecordAttachmentValidation(t *testing.T) {
-	// A bad GITHUB_ATTACHMENTS entry is an error, not a skip: a typo would
-	// otherwise surface as a silently missing asset.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestRecordInvalidAttachmentsAreSkippedWithAWarning(t *testing.T) {
+	// A bad DISPAT_EXPORT_GITHUB entry — a relative path, a missing file, a
+	// directory — is skipped with a warning while the release itself and the
+	// sound entries go through: the release is already out, and one typo must
+	// not lose the rest of the assets.
+	dir := t.TempDir()
+	sound := filepath.Join(dir, "app.tgz")
+	require.NoError(t, os.WriteFile(sound, []byte("archive-bytes"), 0o644))
+
+	var uploads []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/acme/mono/releases" {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
+			return
+		}
+		uploads = append(uploads, r.URL.Query().Get("name"))
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"upload_url": "unused{?name,label}"}`))
 	}))
 	defer srv.Close()
-	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
 
 	for name, value := range map[string]string{
 		"relative_path": "dist/app.tgz",
@@ -303,11 +335,19 @@ func TestRecordAttachmentValidation(t *testing.T) {
 		"directory":     t.TempDir(),
 	} {
 		t.Run(name, func(t *testing.T) {
+			uploads = nil
+			var logs strings.Builder
+			r := &Releaser{
+				APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+				Log: zerolog.New(&logs),
+			}
 			rel := testRelease()
-			rel.Outputs = []plan.Output{{Name: AttachmentsOutput, Value: value}}
-			err := r.Record(context.Background(), rel)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), AttachmentsOutput)
+			rel.Outputs = []plan.Output{{Name: plan.GitHubExport, Value: value + " " + sound}}
+
+			require.NoError(t, r.Record(context.Background(), rel), "an invalid entry must not fail the recording")
+			assert.Equal(t, []string{"app.tgz"}, uploads, "the sound entry is still uploaded")
+			assert.Contains(t, logs.String(), "asset skipped")
+			assert.Contains(t, logs.String(), plan.GitHubExport)
 		})
 	}
 }

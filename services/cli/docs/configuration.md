@@ -20,6 +20,7 @@ dispat [command] [flags]
 | `--on-error`    | `skip`        | `run` only: what a failing script does to the failed package's dependents — `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure. |
 | `--log-level`   | from config   | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                |
 | `--log-format`  | from config   | Override: `pretty` or `json`.                                                                                                                                                       |
+| `--version`     |               | Print the dispat version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                              |
 | `--help`        |               | Print usage.                                                                                                                                                                        |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
@@ -124,8 +125,9 @@ spaces, n logins — because credentials and registries belong to the space. A f
 **every**
 package in the space (none of them could have succeeded without it); other spaces are unaffected. The login runs in the
 folder of the package whose publish happened to trigger it and gets the space-scoped environment: `DISPAT_SPACE`,
-`DISPAT_STAGE=login` and the [workspace listing](#workspace-data) — no package variables, since which package triggered
-it is a scheduling accident.
+`DISPAT_STAGE=login`, the [workspace listing](#workspace-data) and `DISPAT_OUTPUT` — no package variables, since which
+package triggered it is a scheduling accident. What it [exports](#script-outputs) is space-scoped too: every package
+of the space receives the login's exports from its publish stage onward, sourced `<space>:login`.
 
 #### `run.announce`
 
@@ -220,7 +222,8 @@ tagged or written. Names are matched case-insensitively (viper lowercases map ke
 Run scripts take part in [script outputs](#script-outputs) too, with one extra rule: outputs carry **across packages,
 down the dependency graph**. Each run script gets `$DISPAT_OUTPUT` to export through, and a package's script receives
 the exports of its changed providers' scripts (transitively — a script-less package in the middle still carries them
-through) as `DISPAT_OUTPUT_<NAME>`. Providers merge in name order, the package's own re-export overrides, and under
+through) as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` still naming the original exporter
+(`base:run:lint`). Providers merge in name order, the package's own re-export overrides, and under
 `--on-error continue` a failed provider's exports still reach its dependents — mirroring what the pipeline's `onFail`
 hooks receive.
 
@@ -328,21 +331,25 @@ New entries are prepended below the title, newest first.
 
 | Key        | Default                   | Description                                                                                                                                                                                                                                                                    |
 |------------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `enabled`  | `true`                    | Create a GitHub release per published package.                                                                                                                                                                                                                                 |
+| `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](#script-outputs).                                                                                                                                                                                                                                 |
 | `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                              |
 | `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                               |
 | `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                                                                                                                                                                                                                                      |
 | `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                                                                                                                                                                                                                        |
 | *format*   |                           | All entry format options above. The release body contains only the sections — the `## pkg@version (date)` header line used in changelog files is omitted, since the release title is already the tag and GitHub shows its own date; `dateFormat` therefore has no effect here. |
 
-The release is named after the tag (`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no
-repository or token can be resolved at runtime, GitHub releases are skipped with a warning instead of failing the run.
-If the tag has not been pushed yet, GitHub creates it at the default branch head.
+The release is **opt-in per package and per run**: it is created exactly when one of the package's scripts exported
+[`DISPAT_EXPORT_GITHUB`](#script-outputs); a published package without the export is skipped (with an info-level
+notice), so a script decides at run time which packages get a GitHub release. The release is named after the tag
+(`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no repository or token can be resolved
+at runtime, GitHub releases are skipped with a warning instead of failing the run. If the tag has not been pushed
+yet, GitHub creates it at the default branch head.
 
-Files a package's scripts exported through the [`GITHUB_ATTACHMENTS` output](#script-outputs) are uploaded as **release
-assets** (named after the file, `application/octet-stream`) right after the release is created — in
-`commit` mode too, where the release itself moves to the finalize phase. A failed upload — or an invalid path in the
-list — fails the package like any other recording failure.
+The export's value names the **release assets**: a whitespace-separated list of absolute paths to existing files,
+each uploaded (named after the file, `application/octet-stream`) right after the release is created — in `commit`
+mode too, where the release itself moves to the finalize phase. An invalid entry — a relative path, a missing file, a
+directory — is skipped with a warning while the release and the remaining files go through; a failed upload of a
+valid file still fails the package like any other recording failure.
 
 ### `initials`
 
@@ -585,8 +592,10 @@ Every script receives, on top of the parent environment:
 | `DISPAT_TAG`             | `core@v1.3.0-beta4`  | Tag that will be created on success: name + version + channel + counter, rendered with the space's `tagFormat`.                                                                                                                                                                              |
 | `DISPAT_SEMVER_TAG`      | `core@1.3.0-beta.4`  | The same name + version + channel + counter under the normative `{name}@{version}` SemVer format, whatever `tagFormat` encodes — the spelling a script can rely on across spaces.                                                                                                            |
 | `DISPAT_STAGE`           | `build`              | `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`, `postPublish`, `postAll`, …) for a hook; `login` for the login; `run:<name>` for a [run script](#runscripts-and-dispat-run).                                                                 |
-| `DISPAT_OUTPUT`          | *(a temp file path)* | Where the script appends `NAME=value` lines to [export outputs](#script-outputs) for everything that runs after it.                                                                                                                                                                          |
-| `DISPAT_OUTPUT_<NAME>`   | *(exported value)*   | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty). `DISPAT_OUTPUT_GITHUB_ATTACHMENTS` is the GitHub release asset list.                                                                                         |
+| `DISPAT_OUTPUT`          | *(a temp file path)* | Where the script appends `NAME=value` (or `DISPAT_OUTPUT_NAME=value` — the same output) lines to [export outputs](#script-outputs) for everything that runs after it.                                                                                                                        |
+| `DISPAT_OUTPUT_<NAME>`   | *(exported value)*   | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty).                                                                                                                                                              |
+| `DISPAT_OUTPUT_SOURCE_<NAME>` | `core:build`    | The script that exported (or last re-exported) `<NAME>`: `<package>:<stage>`, or `<space>:login` for a login export.                                                                                                                                                                        |
+| `DISPAT_EXPORT_GITHUB`   | `/pkg/dist/app.tgz`  | Set once a script [exported it](#script-outputs): the opt-in for the package's GitHub release, its value the asset list. Travels under its full name and stays out of `DISPAT_OUTPUTS`.                                                                                                      |
 
 `DISPAT_OLD_VERSION` and `DISPAT_STABLE_BASELINE` differ only on a prerelease train: a package on `1.3.0-beta.1` whose
 last stable release was `1.2.3` reports both, because the first is what it shipped and the second is what the next
@@ -673,30 +682,41 @@ keeping scripts movable.
 
 ### Script outputs
 
-Every per-package script and hook — the stages, their hooks, the announce frame, `onFail`/`onSkip` — receives
-`DISPAT_OUTPUT`: the path of a file it may append `NAME=value` lines to, `GITHUB_OUTPUT`-style, to export values for
-everything that runs after it:
+Every per-package script and hook — the stages, their hooks, the announce frame, `onFail`/`onSkip`, the space's
+`login` — receives `DISPAT_OUTPUT`: the path of a file it may append `NAME=value` lines to, `GITHUB_OUTPUT`-style, to
+export values for everything that runs after it. The name may be written bare or already carrying the
+`DISPAT_OUTPUT_` prefix — both spellings address the same output:
 
 ```sh
-echo "IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' img)" >> "$DISPAT_OUTPUT"
-echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz $PWD/dist/SHA256SUMS" >> "$DISPAT_OUTPUT"
+echo "DISPAT_OUTPUT_IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' img)" >> "$DISPAT_OUTPUT"
+echo "IMAGE_DIGEST=..." >> "$DISPAT_OUTPUT"     # the same output, bare spelling
+echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz $PWD/dist/SHA256SUMS" >> "$DISPAT_OUTPUT"
 ```
 
-Outputs accumulate across the package's pipeline: every later script and hook of the package — the outcome scripts
-`onFail`/`onSkip` included, so a notifier can report with them — receives each export as `DISPAT_OUTPUT_<NAME>`, plus
-`DISPAT_OUTPUTS` listing the exported names (space-separated; set but empty when nothing was exported). Hooks export
-exactly like stage scripts: a `beforeBuild` export reaches the build, the publish and everything after. In
-[`dispat run`](#runscripts-and-dispat-run) outputs additionally carry across packages, from a provider's run script to
-its consumers'. Re-exporting a name overrides its earlier value, like a shell re-assignment. The name must be a valid
-environment variable name; a malformed line fails a release-gating sequence (and only warns in a warn-only one). A
-sequence that fails still surrenders whatever it exported before failing, which is how `onFail` gets to see it.
+Outputs accumulate across the package's pipeline into one store: every later script and hook of the package — the
+outcome scripts `onFail`/`onSkip` included, so a notifier can report with them — receives each export as
+`DISPAT_OUTPUT_<NAME>`, plus `DISPAT_OUTPUTS` listing the exported names (space-separated; set but empty when nothing
+was exported) and `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script each export came from, as `<package>:<stage>`
+(`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage scripts: a
+`beforeBuild` export reaches the build, the publish and everything after. The **login script's** exports are
+space-scoped: they reach every package of the space from its publish stage (the stage that waits for the login)
+onward. In [`dispat run`](#runscripts-and-dispat-run) outputs additionally carry across packages, from a provider's
+run script to its consumers'. Re-exporting a name overrides its earlier value and source, like a shell re-assignment.
 
-One output is special to the [GitHub recorder](#github): **`GITHUB_ATTACHMENTS`**, a whitespace-separated list of
-absolute paths to existing files (`$PWD` inside a script resolves to the package folder, which makes absolute paths
-easy). Each listed file is uploaded as an asset of the package's GitHub release, named after the file; an invalid entry
-fails the release recording rather than silently dropping an asset. Scripts naturally read the current list back as
-`$DISPAT_OUTPUT_GITHUB_ATTACHMENTS`, so appending is
-`echo "GITHUB_ATTACHMENTS=$DISPAT_OUTPUT_GITHUB_ATTACHMENTS $PWD/more.tgz" >> "$DISPAT_OUTPUT"`.
+The name must be a valid environment variable name; other `DISPAT_`-prefixed names are reserved (an export cannot
+shadow the `DISPAT_*` environment), and a malformed line fails a release-gating sequence (and only warns in a
+warn-only one). A sequence that fails still surrenders whatever it exported before failing, which is how `onFail`
+gets to see it.
+
+One export is a directive to the [GitHub recorder](#github): **`DISPAT_EXPORT_GITHUB`**. A package whose scripts
+exported it gets a GitHub release; a package that never exported it is skipped by the recorder. Its value is a
+whitespace-separated list of absolute paths to existing files (`$PWD` inside a script resolves to the package folder,
+which makes absolute paths easy), each uploaded as an asset of the release, named after the file; an empty value
+creates the release with no assets. An invalid entry — a relative path, a missing file, a directory — is skipped with
+a warning while the release and the sound entries go through. Unlike ordinary outputs the export travels to later
+scripts under its full name, so appending is
+`echo "DISPAT_EXPORT_GITHUB=$DISPAT_EXPORT_GITHUB $PWD/more.tgz" >> "$DISPAT_OUTPUT"`, and it does not appear in
+`DISPAT_OUTPUTS`.
 
 ### Run outcome data
 

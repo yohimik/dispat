@@ -27,6 +27,16 @@ const (
 	cmdRun     = "run"     // run a space run script inside each changed package
 )
 
+// Version is the dispat version `--version` reports. The default marks a
+// local build; releases override it at build time from the release tag:
+//
+//	go build -ldflags "-X github.com/yohimik/dispat/services/cli/internal/cli.Version=$DISPAT_VERSION"
+//
+// It is a flag, not a command, because a bare word after `dispat` is the run
+// shorthand — a `version` command would shadow a run script named after the
+// version stage.
+var Version = "dev"
+
 // Run is the program entry point; it returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
@@ -38,6 +48,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs.String("log-format", "", "override the configured logFormat (pretty, json)")
 	onError := fs.String("on-error", app.OnErrorSkip,
 		"run command: what a failing script does to the failed package's dependents (skip or continue)")
+	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `usage: dispat [command] [flags]
 
@@ -60,6 +71,11 @@ flags:
 		fmt.Fprintf(stderr, "dispat: %v\n\n", err)
 		fs.Usage()
 		return 2
+	}
+	if *showVersion {
+		// Before anything else: the version must print without a config file.
+		fmt.Fprintln(stdout, "dispat "+Version)
+		return 0
 	}
 
 	// Config errors are reported with a bootstrap logger since the configured

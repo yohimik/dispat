@@ -55,13 +55,15 @@ project release need — you fill in shell commands, dispat supplies the orchest
   change releases every member, one prerelease train, riders get a "no changes" changelog entry) or `fixedSparse`
   (the shared version, but unchanged packages stay at their previous versions until they change).
 - **Run scripts over the plan** — `dispat run lint` (or just `dispat lint`) executes a space-defined shell command
-  inside each *changed* package, honouring the dependency graph with the build concurrency budget, with the same
+  inside each *changed* package, honouring the dependency graph with configurable concurrency budget, with the same
   `DISPAT_*` environment the release stages get, releasing nothing; `--on-error` picks whether a failure skips the
   failed package's dependents or lets them run.
-- **Script outputs & release assets** — every script and hook can export values `GITHUB_OUTPUT`-style through
-  `$DISPAT_OUTPUT`; they reach all later scripts of the package (onFail/onSkip included) as `DISPAT_OUTPUT_*` — and in
-  `dispat run` they carry across packages, provider to consumer. The special `GITHUB_ATTACHMENTS` output
-  (`echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"`) uploads files as GitHub release assets.
+- **Script outputs & release assets** — every script and hook (the login included) can export `DISPAT_OUTPUT_*`
+  variables `GITHUB_OUTPUT`-style through `$DISPAT_OUTPUT`; each lands in the package's store and reaches all later
+  scripts (onFail/onSkip included) as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script that
+  exported it — and in `dispat run` they carry across packages, provider to consumer. Exporting
+  `DISPAT_EXPORT_GITHUB` (`echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"`) opts the package into a
+  GitHub release and uploads the listed files as its assets; without the export the recorder skips the package.
 - **Polyglot & infra-agnostic** — any language, any registry: scripts are shell commands fed context via `DISPAT_*`
   env vars, and versions live purely in git tags. No version files, no lockstep, no framework buy-in.
 - **One config file** — spaces, dependencies, scripts, hooks, tag formats, concurrency, changelog/GitHub behavior in a
@@ -133,9 +135,9 @@ single-pass. A commit may hold several `---`-separated units, each with its own 
 | `cancel(core): …`       | —        | discards `core`'s unreleased metadata       |
 | `release(core)@beta: …` | —        | moves `core` onto the beta line             |
 
-Scopes must name discovered packages; `*` mean the whole workspace, a term with `*` is a glob, `.` is the
-file-derived set, and a leading `-` excludes. A typo in an *include* is an error, because it would otherwise silently
-drop a release; excluding a package that no longer exists is only a warning.
+Scopes must name discovered packages; `*` mean the whole workspace, a term with `*` is a glob, `.` is the file-derived
+set, and a leading `-` excludes. A typo in an *include* is an error, because it would otherwise silently drop a release;
+excluding a package that no longer exists is only a warning.
 
 **Propagation is opt-in.** A plain `feat(core): …` releases `core` and nothing else. Reach is stated per commit with
 `^` (one edge), `^^` (all edges) or `+N`, and the bump dependants take defaults to `patch` — `^minor` or a
@@ -205,14 +207,16 @@ Acting on the provider does nothing: its version is already public, and cancella
 1. **version** — only when the package is bumped due to provider updates; runs exactly before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with `false`
    it waits for the provider's *build* only.
-2. **build** — the package's build command. Like every script it may export outputs by appending `NAME=value` lines to
-   the file `$DISPAT_OUTPUT` points at: each value travels to every later script of the package as
-   `DISPAT_OUTPUT_<NAME>`, and the `GITHUB_ATTACHMENTS` output (absolute file paths) becomes the GitHub release's
-   assets.
+2. **build** — the package's build command. Like every script it may export outputs by appending
+   `DISPAT_OUTPUT_NAME=value` (or bare `NAME=value`) lines to the file `$DISPAT_OUTPUT` points at: each value travels to
+   every later script of the package as `DISPAT_OUTPUT_<NAME>` (with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the exporter),
+   and the `DISPAT_EXPORT_GITHUB` export (absolute file paths) opts the package into a GitHub release with those files
+   as assets.
 3. **publish** — waits for the package's own build and always for its providers' publishes. A space with a
    `run.login` authenticates **once per space** before its first publish (every other publish of the space waits for it;
-   a login failure fails them all). On success: release recorders run (changelog file, GitHub release), then the
-   annotated tag is created (pushing is left to CI by default).
+   a login failure fails them all); the login's exports reach every package of the space from its publish onward. On
+   success: release recorders run (changelog file, GitHub release for packages that exported `DISPAT_EXPORT_GITHUB`),
+   then the annotated tag is created (pushing is left to CI by default).
 4. **announce** — after the publish frame, for pushing the release out to update channels (a Slack message, a webhook, a
    docs feed). It gets the release notes as `DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` — the same
    grouped data the changelog and GitHub release render — and the whole frame (its `run.beforeAnnounce` /
@@ -243,8 +247,9 @@ just executes no shell command.
 
 Outside the release pipeline, `dispat run <name>` — or just `dispat <name>` — executes a space-defined
 [`runScripts`](./services/cli/docs/configuration.md#runscripts-and-dispat-run) command inside each changed package,
-honouring the dependency graph within the build concurrency budget (`--on-error` decides whether a failure skips the
-dependents) — same `DISPAT_*` environment, nothing released or tagged.
+honouring the dependency graph within the build concurrency budget — the configured value, or `--concurrency`'s first
+value when given (`--on-error` decides whether a failure skips the dependents) — same `DISPAT_*` environment, nothing
+released or tagged.
 
 ## Quick start
 

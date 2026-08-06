@@ -329,18 +329,31 @@ type Release struct {
 	// DISPAT_OUTPUT files, in first-export order with later re-exports
 	// overriding earlier values. They are produced at run time (by the
 	// executor) rather than by planning; each entry reaches every later
-	// script and hook of the package as DISPAT_OUTPUT_<NAME>=<value>. The
-	// GitHub recorder reads the GITHUB_ATTACHMENTS output for release assets.
+	// script and hook of the package as DISPAT_OUTPUT_<NAME>=<value>, with
+	// DISPAT_OUTPUT_SOURCE_<NAME> naming the script it came from. The
+	// GitHub recorder reads the GitHubExport entry to decide whether to
+	// create a release and which files to attach.
 	Outputs []Output
 
 	Diagnostics []Diagnostic
 }
+
+// GitHubExport is the one output with a consumer inside dispat: a package
+// that exports it gets a GitHub release (when the recorder is enabled), with
+// the value read as a whitespace-separated list of files to attach; a package
+// that does not is skipped by the recorder. Unlike ordinary outputs it is
+// exported under — and travels to later scripts as — this full name.
+const GitHubExport = "DISPAT_EXPORT_GITHUB"
 
 // Output is one NAME=value pair a script exported through its DISPAT_OUTPUT
 // file.
 type Output struct {
 	Name  string
 	Value string
+	// Source names the script that exported (or last re-exported) the value,
+	// as "<package>:<stage>" — "core:build", "base:run:lint" — or
+	// "<space>:login" for the space-level login script.
+	Source string
 }
 
 // Output returns the value of the named script output, if exported.

@@ -1,6 +1,7 @@
-// Package github creates a GitHub release for every published package. It is
-// the same changelog data as the file writer, delivered through a different
-// release.ReleaseRecorder implementation.
+// Package github creates a GitHub release for every published package that
+// opted in by exporting DISPAT_EXPORT_GITHUB. It is the same changelog data
+// as the file writer, delivered through a different release.ReleaseRecorder
+// implementation.
 package github
 
 import (
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/services/cli/internal/changelog"
 	"github.com/yohimik/dispat/services/cli/internal/plan"
 )
@@ -25,11 +28,13 @@ import (
 const DefaultAPIURL = "https://api.github.com"
 
 // Releaser creates a release named after the package tag via the GitHub REST
-// API (POST /repos/{owner}/{repo}/releases). The release body is the rendered
-// changelog sections, plus a "### Release" section documenting the release
-// commit and tag when CommitSHA is set. If the tag has not been pushed yet,
-// GitHub creates it at TargetCommitish when set, otherwise at the default
-// branch head.
+// API (POST /repos/{owner}/{repo}/releases) — but only for packages whose
+// scripts exported plan.GitHubExport (DISPAT_EXPORT_GITHUB); a package
+// without the export is skipped. The release body is the rendered changelog
+// sections, plus a "### Release" section documenting the release commit and
+// tag when CommitSHA is set. If the tag has not been pushed yet, GitHub
+// creates it at TargetCommitish when set, otherwise at the default branch
+// head.
 type Releaser struct {
 	APIURL string // default DefaultAPIURL; set for GitHub Enterprise
 	Owner  string
@@ -37,6 +42,9 @@ type Releaser struct {
 	Token  string
 	Format changelog.Format
 	Client *http.Client // default: 30s-timeout client
+	// Log carries the skip notices and the invalid-attachment warnings. The
+	// zero value discards them.
+	Log zerolog.Logger
 
 	// CommitSHA, when set (release-commit mode), is recorded in the release
 	// body together with the tag, so the release documents the exact commit
@@ -118,9 +126,17 @@ func (r *Releaser) Verify(ctx context.Context) error {
 	return err
 }
 
-// Record implements release.ReleaseRecorder.
+// Record implements release.ReleaseRecorder. A package whose scripts did not
+// export plan.GitHubExport gets no GitHub release: the export is the opt-in,
+// per package and per run, and its value names the files to attach.
 func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	tag := rel.TagName()
+	export, ok := rel.Output(plan.GitHubExport)
+	if !ok {
+		r.Log.Info().Str("package", rel.Pkg.Name).Str("tag", tag).
+			Msgf("github release skipped: no script exported %s", plan.GitHubExport)
+		return nil
+	}
 	body := changelog.RenderSections(rel, r.Format)
 	if r.CommitSHA != "" {
 		if body != "" {
@@ -144,10 +160,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	if err != nil {
 		return err
 	}
-	paths, err := attachmentPaths(rel)
-	if err != nil {
-		return fmt.Errorf("github: release %s: %w", tag, err)
-	}
+	paths := r.attachmentPaths(export, tag)
 	if len(paths) == 0 {
 		return nil
 	}
@@ -163,34 +176,30 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	return nil
 }
 
-// AttachmentsOutput is the script output the recorder reads release assets
-// from: a whitespace-separated list of absolute file paths a script exported
-// under this name (so scripts see it as DISPAT_OUTPUT_GITHUB_ATTACHMENTS).
-const AttachmentsOutput = "GITHUB_ATTACHMENTS"
-
-// attachmentPaths resolves and validates the GITHUB_ATTACHMENTS output. An
-// invalid entry — a relative path, a missing file, a directory — is an error
-// rather than a skip: a typo would otherwise surface as a silently missing
-// asset on the release.
-func attachmentPaths(rel *plan.Release) ([]string, error) {
-	raw, ok := rel.Output(AttachmentsOutput)
-	if !ok {
-		return nil, nil
+// attachmentPaths resolves the plan.GitHubExport value: a whitespace-separated
+// list of absolute paths to existing files. An invalid entry — a relative
+// path, a missing file, a directory — is skipped with a warning rather than
+// failing the release: the release itself is out, and the sound files still
+// deserve to be attached.
+func (r *Releaser) attachmentPaths(export, tag string) []string {
+	var paths []string
+	for _, p := range strings.Fields(export) {
+		reason := ""
+		switch fi, err := os.Stat(p); {
+		case !filepath.IsAbs(p):
+			reason = "not an absolute path"
+		case err != nil:
+			reason = err.Error()
+		case fi.IsDir():
+			reason = "names a directory, want a file"
+		default:
+			paths = append(paths, p)
+			continue
+		}
+		r.Log.Warn().Str("tag", tag).Str("path", p).Str("reason", reason).
+			Msgf("github release asset skipped: invalid %s entry", plan.GitHubExport)
 	}
-	paths := strings.Fields(raw)
-	for _, p := range paths {
-		if !filepath.IsAbs(p) {
-			return nil, fmt.Errorf("%s: not an absolute path: %q", AttachmentsOutput, p)
-		}
-		fi, err := os.Stat(p)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", AttachmentsOutput, err)
-		}
-		if fi.IsDir() {
-			return nil, fmt.Errorf("%s: %q names a directory, want a file", AttachmentsOutput, p)
-		}
-	}
-	return paths, nil
+	return paths
 }
 
 // assetUploadURL extracts the asset endpoint from a created release: the

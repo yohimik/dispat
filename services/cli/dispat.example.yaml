@@ -172,13 +172,16 @@ commit:
 #   limits: { unitsPerMessage: 64, scopeTermsPerUnit: 256, messageBytes: 1048576 }
 #   allowedChannels: [beta, rc]
 
-# GitHub release per published package; enabled by default (needs a repo and
-# token: owner/repo here or $GITHUB_REPOSITORY, token in $GITHUB_TOKEN or the
-# env var named by tokenEnv). Same format fields as changelog. Any script may
-# export values GITHUB_OUTPUT-style through $DISPAT_OUTPUT (they reach later
-# scripts as DISPAT_OUTPUT_*); the GITHUB_ATTACHMENTS output — echo
-# "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT" — lists absolute
-# file paths uploaded as release assets.
+# GitHub release per published package that exported DISPAT_EXPORT_GITHUB;
+# the recorder is enabled by default (needs a repo and token: owner/repo here
+# or $GITHUB_REPOSITORY, token in $GITHUB_TOKEN or the env var named by
+# tokenEnv) but skips packages without the export. Same format fields as
+# changelog. Any script may export values GITHUB_OUTPUT-style through
+# $DISPAT_OUTPUT (they reach later scripts as DISPAT_OUTPUT_*, with
+# DISPAT_OUTPUT_SOURCE_* naming the exporter); the DISPAT_EXPORT_GITHUB
+# export — echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"
+# — opts the package in, its absolute file paths uploaded as release assets
+# (invalid entries skipped with a warning).
 github:
   enabled: true
   owner: acme

@@ -40,14 +40,17 @@ func shellPlan(t *testing.T, space *model.Space) (*plan.Plan, string) {
 }
 
 func TestScriptOutputsFlowDownstream(t *testing.T) {
-	// Every script and hook can export; each export reaches everything that
-	// runs later as DISPAT_OUTPUT_<NAME>, accumulating across the pipeline,
-	// with a later re-export overriding the earlier value.
+	// Every script and hook can export — bare NAME=value and the
+	// DISPAT_OUTPUT_-prefixed spelling address the same output; each export
+	// reaches everything that runs later as DISPAT_OUTPUT_<NAME> together
+	// with DISPAT_OUTPUT_SOURCE_<NAME> naming the exporting script,
+	// accumulating across the pipeline, with a later re-export overriding
+	// the earlier value (and its source).
 	space := &model.Space{
 		Name:            "libs",
 		BuildScript:     []string{`echo "FROM_BUILD=one" >> "$DISPAT_OUTPUT"`},
-		PostBuildScript: []string{`env > postbuild.env && echo "FROM_HOOK=two" >> "$DISPAT_OUTPUT"`},
-		PublishScript:   []string{`env > publish.env && echo "FROM_BUILD=three" >> "$DISPAT_OUTPUT"`},
+		PostBuildScript: []string{`env > postbuild.env && echo "DISPAT_OUTPUT_FROM_HOOK=two" >> "$DISPAT_OUTPUT"`},
+		PublishScript:   []string{`env > publish.env && echo "DISPAT_OUTPUT_FROM_BUILD=three" >> "$DISPAT_OUTPUT"`},
 		AnnounceScript:  []string{`env > announce.env`},
 	}
 	p, dir := shellPlan(t, space)
@@ -63,19 +66,24 @@ func TestScriptOutputsFlowDownstream(t *testing.T) {
 	}
 	post := read("postbuild.env")
 	assert.Contains(t, post, "DISPAT_OUTPUT_FROM_BUILD=one\n", "the build's export reaches its own postBuild hook")
+	assert.Contains(t, post, "DISPAT_OUTPUT_SOURCE_FROM_BUILD=core:build\n", "the provenance travels alongside")
 	assert.Contains(t, post, "DISPAT_OUTPUTS=FROM_BUILD\n")
 
 	pub := read("publish.env")
 	assert.Contains(t, pub, "DISPAT_OUTPUT_FROM_BUILD=one\n")
-	assert.Contains(t, pub, "DISPAT_OUTPUT_FROM_HOOK=two\n", "hook exports accumulate too")
+	assert.Contains(t, pub, "DISPAT_OUTPUT_FROM_HOOK=two\n", "hook exports accumulate too, prefixed spelling included")
+	assert.Contains(t, pub, "DISPAT_OUTPUT_SOURCE_FROM_HOOK=core:postBuild\n")
 	assert.Contains(t, pub, "DISPAT_OUTPUTS=FROM_BUILD FROM_HOOK\n")
 
 	ann := read("announce.env")
 	assert.Contains(t, ann, "DISPAT_OUTPUT_FROM_BUILD=three\n", "a re-export overrides, like a shell re-assignment")
+	assert.Contains(t, ann, "DISPAT_OUTPUT_SOURCE_FROM_BUILD=core:publish\n", "the source follows the override")
 	assert.Contains(t, ann, "DISPAT_OUTPUT_FROM_HOOK=two\n")
 
-	assert.Equal(t, []plan.Output{{Name: "FROM_BUILD", Value: "three"}, {Name: "FROM_HOOK", Value: "two"}},
-		p.Releases["core"].Outputs)
+	assert.Equal(t, []plan.Output{
+		{Name: "FROM_BUILD", Value: "three", Source: "core:publish"},
+		{Name: "FROM_HOOK", Value: "two", Source: "core:postBuild"},
+	}, p.Releases["core"].Outputs)
 }
 
 func TestScriptOutputsReachOnFail(t *testing.T) {
@@ -139,23 +147,115 @@ func TestParseOutputs(t *testing.T) {
 	}
 
 	t.Run("values_kept_verbatim_blank_lines_skipped", func(t *testing.T) {
-		outs, err := parseOutputs(write("A=one two three", "", "B=with=equals"))
+		outs, err := parseOutputs(write("A=one two three", "", "B=with=equals"), "core:build")
 		require.NoError(t, err)
-		assert.Equal(t, []plan.Output{{Name: "A", Value: "one two three"}, {Name: "B", Value: "with=equals"}}, outs)
+		assert.Equal(t, []plan.Output{
+			{Name: "A", Value: "one two three", Source: "core:build"},
+			{Name: "B", Value: "with=equals", Source: "core:build"},
+		}, outs)
+	})
+	t.Run("prefixed_spelling_addresses_the_same_output", func(t *testing.T) {
+		outs, err := parseOutputs(write("DISPAT_OUTPUT_A=1", "A=2"), "core:build")
+		require.NoError(t, err)
+		assert.Equal(t, []plan.Output{{Name: "A", Value: "2", Source: "core:build"}}, outs,
+			"DISPAT_OUTPUT_A and A are one output, the prefix is stripped on parse")
+	})
+	t.Run("github_export_kept_under_its_full_name", func(t *testing.T) {
+		outs, err := parseOutputs(write("DISPAT_EXPORT_GITHUB=/a /b"), "core:publish")
+		require.NoError(t, err)
+		assert.Equal(t, []plan.Output{{Name: plan.GitHubExport, Value: "/a /b", Source: "core:publish"}}, outs)
 	})
 	t.Run("reexport_overrides_in_place", func(t *testing.T) {
-		outs, err := parseOutputs(write("A=1", "B=2", "A=3"))
+		outs, err := parseOutputs(write("A=1", "B=2", "A=3"), "core:build")
 		require.NoError(t, err)
-		assert.Equal(t, []plan.Output{{Name: "A", Value: "3"}, {Name: "B", Value: "2"}}, outs)
+		assert.Equal(t, []plan.Output{
+			{Name: "A", Value: "3", Source: "core:build"},
+			{Name: "B", Value: "2", Source: "core:build"},
+		}, outs)
 	})
 	t.Run("malformed_line", func(t *testing.T) {
-		_, err := parseOutputs(write("just some text"))
+		_, err := parseOutputs(write("just some text"), "core:build")
 		assert.ErrorContains(t, err, "NAME=value")
 	})
 	t.Run("bad_variable_name", func(t *testing.T) {
-		_, err := parseOutputs(write("1BAD=x"))
+		_, err := parseOutputs(write("1BAD=x"), "core:build")
 		assert.ErrorContains(t, err, "NAME=value")
 	})
+	t.Run("reserved_dispat_names_rejected", func(t *testing.T) {
+		// Anything else DISPAT_-prefixed would override a real DISPAT_*
+		// variable in every later script's environment.
+		for _, line := range []string{"DISPAT_PACKAGE=evil", "DISPAT_EXPORT_NPM=x", "DISPAT_OUTPUT_=empty"} {
+			_, err := parseOutputs(write(line), "core:build")
+			assert.ErrorContains(t, err, "NAME=value", line)
+		}
+	})
+}
+
+func TestLoginExportsReachTheSpacePublishes(t *testing.T) {
+	// The login script exports like any other script; its exports are
+	// space-scoped and merged into each package at its publish — the one
+	// stage that gates on the login — so they reach the publish and
+	// everything after it, stamped with the space-level source.
+	space := &model.Space{
+		Name:          "libs",
+		LoginScript:   []string{`echo "DISPAT_OUTPUT_REGISTRY_TOKEN=tkn-123" >> "$DISPAT_OUTPUT"`},
+		PublishScript: []string{`env > publish.env`},
+	}
+	p, dir := shellPlan(t, space)
+
+	exec := &Executor{Runner: &script.ShellRunner{}, Log: zerolog.Nop()}
+	results := exec.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, results["core"].Status, "err: %v", results["core"].Err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "publish.env"))
+	require.NoError(t, err)
+	env := string(data)
+	assert.Contains(t, env, "DISPAT_OUTPUT_REGISTRY_TOKEN=tkn-123\n")
+	assert.Contains(t, env, "DISPAT_OUTPUT_SOURCE_REGISTRY_TOKEN=libs:login\n",
+		"the login's exports carry the space-level source")
+	assert.Equal(t, []plan.Output{{Name: "REGISTRY_TOKEN", Value: "tkn-123", Source: "libs:login"}},
+		p.Releases["core"].Outputs)
+}
+
+func TestLoginMalformedExportFailsThePublish(t *testing.T) {
+	// The login is a gating sequence: a malformed export fails it — and with
+	// it every publish of the space — exactly like a failing login command.
+	space := &model.Space{
+		Name:          "libs",
+		LoginScript:   []string{`echo "not a key value line" >> "$DISPAT_OUTPUT"`},
+		PublishScript: []string{`echo publishing`},
+	}
+	p, _ := shellPlan(t, space)
+
+	exec := &Executor{Runner: &script.ShellRunner{}, Log: zerolog.Nop()}
+	results := exec.Run(context.Background(), p)
+	require.Equal(t, StatusFailed, results["core"].Status)
+	assert.Contains(t, results["core"].Err.Error(), "NAME=value")
+}
+
+func TestGitHubExportTravelsUnderItsFullName(t *testing.T) {
+	// DISPAT_EXPORT_GITHUB is a directive, not an ordinary output: later
+	// scripts read it back under its full name, and the DISPAT_OUTPUTS
+	// listing does not carry it.
+	space := &model.Space{
+		Name:          "libs",
+		BuildScript:   []string{`echo "DISPAT_EXPORT_GITHUB=/dist/app.tgz" >> "$DISPAT_OUTPUT"`},
+		PublishScript: []string{`env > publish.env`},
+	}
+	p, dir := shellPlan(t, space)
+
+	exec := &Executor{Runner: &script.ShellRunner{}, Log: zerolog.Nop()}
+	results := exec.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, results["core"].Status, "err: %v", results["core"].Err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "publish.env"))
+	require.NoError(t, err)
+	env := string(data)
+	assert.Contains(t, env, "DISPAT_EXPORT_GITHUB=/dist/app.tgz\n")
+	assert.Contains(t, env, "DISPAT_OUTPUTS=\n", "the directive is not an ordinary output")
+	value, ok := p.Releases["core"].Output(plan.GitHubExport)
+	require.True(t, ok, "the recorder reads the export from the release")
+	assert.Equal(t, "/dist/app.tgz", value)
 }
 
 func TestCommandEnv(t *testing.T) {
