@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run unit tests with coverage
+        run: |
+          go test -C pkg/ccme     ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
+          go test -C pkg/models   ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-models.out"
+          go test -C services/cli ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
+
+      - name: Compute total coverage
+        run: |
+          # One merged profile across all three modules (go.work resolves the
+          # import paths), so the badge reports the workspace as a whole.
+          { head -n 1 cover-ccme.out
+            tail -q -n +2 cover-ccme.out cover-models.out cover-cli.out
+          } > coverage.out
+          TOTAL=$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}')
+          PCT=${TOTAL%\%}
+          echo "Total statement coverage: ${TOTAL}"
+          {
+            echo "### Unit test coverage"
+            echo ""
+            echo "**Total: ${TOTAL}**"
+            echo ""
+            echo '| Package | Coverage |'
+            echo '|---|---|'
+            go tool cover -func=coverage.out | tail -n 1 | awk '{print "| total | " $3 " |"}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # The coverage band -> badge color.
+          COLOR=red
+          BAND=$(printf '%.0f' "$PCT")
+          if   [ "$BAND" -ge 92 ]; then COLOR=brightgreen
+          elif [ "$BAND" -ge 85 ]; then COLOR=green
+          elif [ "$BAND" -ge 75 ]; then COLOR=yellowgreen
+          elif [ "$BAND" -ge 60 ]; then COLOR=yellow
+          elif [ "$BAND" -ge 40 ]; then COLOR=orange
+          fi
+          printf '{"schemaVersion": 1, "label": "coverage", "message": "%s", "color": "%s"}\n' \
+            "$TOTAL" "$COLOR" > coverage.json
+          cat coverage.json
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.json
+          retention-days: 7
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run integration tests
+        run: go test -C tests/integration ./... -count=1
+
+      - name: Run integration tests under the race detector
+        run: go test -C tests/integration . -count=1 -race
+
+  coverage-badge:
+    name: Publish coverage badge
+    needs: [unit, integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+
+      - name: Push badge JSON to the badges branch
+        # A single-commit orphan branch, force-pushed on every main build, so
+        # the badge data carries no history. README references it through the
+        # shields.io endpoint URL.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir badge && cp coverage.json badge/
+          cd badge
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage.json
+          git commit -qm "chore: update coverage badge"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

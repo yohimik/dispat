@@ -101,6 +101,23 @@ var validLevels = map[string]bool{
 	"trace": true, "debug": true, "info": true, "warn": true, "error": true,
 }
 
+// checkScriptRefs verifies that every labelled script reference is non-empty
+// and resolves, so validation and Commands resolution can never disagree
+// about a list. prefix locates the owner in the error ("space \"libs\": ").
+func checkScriptRefs(c *File, refs map[string][]string, prefix string) error {
+	for field, list := range refs {
+		for _, ref := range list {
+			if ref == "" {
+				return fmt.Errorf("%s%s contains an empty script reference", prefix, field)
+			}
+			if _, ok := c.Script(ref); !ok {
+				return fmt.Errorf("%s%s references unknown script %q", prefix, field, ref)
+			}
+		}
+	}
+	return nil
+}
+
 // Load reads and validates the configuration file. When flags is non-nil the
 // "concurrency", "log-level" and "log-format" flags are bound through viper,
 // so explicitly set flags override file values (and file values override flag
@@ -309,26 +326,12 @@ func validate(c *File) error {
 				return fmt.Errorf("space %q: runScripts[%q] is empty", name, scriptName)
 			}
 		}
-		for field, refs := range scriptRefs(&s) {
-			for _, ref := range refs {
-				if ref == "" {
-					return fmt.Errorf("space %q: %s contains an empty script reference", name, field)
-				}
-				if _, ok := c.Script(ref); !ok {
-					return fmt.Errorf("space %q: %s references unknown script %q", name, field, ref)
-				}
-			}
+		if err := checkScriptRefs(c, scriptRefs(&s), fmt.Sprintf("space %q: ", name)); err != nil {
+			return err
 		}
 	}
-	for field, refs := range runHookRefs(c) {
-		for _, ref := range refs {
-			if ref == "" {
-				return fmt.Errorf("%s contains an empty script reference", field)
-			}
-			if _, ok := c.Script(ref); !ok {
-				return fmt.Errorf("%s references unknown script %q", field, ref)
-			}
-		}
+	if err := checkScriptRefs(c, runHookRefs(c), ""); err != nil {
+		return err
 	}
 	for i, d := range c.Dependencies {
 		if d.Consumer == "" || d.Provider == "" {

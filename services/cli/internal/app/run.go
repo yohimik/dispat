@@ -152,25 +152,11 @@ func (a *App) RunScript(ctx context.Context, name, onError string) error {
 		res.ran = true
 	}
 
-	conc := max(1, a.cfg.BuildConcurrency)
-	doneCh := make(chan string)
-	ready := sched.Ready()
-	inFlight, finished, total := 0, 0, sched.Len()
-	for finished < total {
-		for len(ready) > 0 && inFlight < conc {
-			pkg := ready[len(ready)-1]
-			ready = ready[:len(ready)-1]
-			inFlight++
-			go func(p string) {
-				execute(p)
-				doneCh <- p
-			}(pkg)
-		}
-		pkg := <-doneCh
-		inFlight--
-		finished++
-		ready = append(ready, sched.Done(pkg)...)
-	}
+	// One class, one budget: the run command reuses the executor's pump.
+	graph.Drain(sched,
+		func(string) struct{} { return struct{}{} },
+		func(struct{}) int { return a.cfg.BuildConcurrency },
+		execute)
 
 	ran, failed, skipped := 0, 0, 0
 	for _, res := range results {

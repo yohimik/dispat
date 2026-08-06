@@ -8,7 +8,7 @@ ordering is the claim — **nanosecond-resolution execution timelines** recorded
 
 ## Goals
 
-The suite was designed against six goals, one test file each:
+The suite was designed against seven goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`) — stable tests *guaranteeing* the budgets work: with concurrency 4 and
    five packages, the fifth's work starts exactly after one of the first four finishes; independent packages are
@@ -28,6 +28,9 @@ The suite was designed against six goals, one test file each:
    dependency graph with the full environment, the `dispat <script>` shorthand, the `--on-error` skip/continue
    policies, the concurrency budget (including graph ordering *under* concurrency), cross-package output carrying,
    skipping and error cases.
+7. **Release records** (`records_test.go`) — the durable artefacts themselves: changelog files accumulating across
+   releases above pre-dispat content, annotated tags with their messages and targets, and commit mode's release
+   commit, tag placement and push against a real bare remote.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to
 JSON by `harness.WriteConfigModel` — the schema lives in one place, and a test that compiles is a test whose config
@@ -80,6 +83,7 @@ tests/integration/
   config_test.go            goal 4
   versioning_test.go        goal 5
   run_test.go               goal 6
+  records_test.go           goal 7
   docs/test-plan.md         this document
 ```
 
@@ -190,6 +194,15 @@ sleeps (100–400 ms) one to two orders of magnitude above process-launch jitter
 | `TestRunCarriesOutputsFromAFailedProvider` | Under `--on-error continue` a failed provider's dependents still run and still receive what the failed script exported before dying. |
 | `TestRunSkipsUnchangedPackages` | After a release nothing is changed and the script runs zero times; a fresh change narrows the run to exactly the changed package. |
 | `TestRunInFixedSpaceIncludesRides` | In a fixed space a ride is a changed package, so the run script executes in every member. |
+
+### Goal 7 — release records (`records_test.go`)
+
+| Test | Claim proven |
+|---|---|
+| `TestRecordsChangelogAccumulatesAcrossReleases` | Entries prepend newest first under one never-duplicated title; a changelog that predated dispat keeps its content below every generated entry; a multi-unit commit groups its sections by bump (Breaking Changes above Fixes, run 1's unit staying in its own entry); a consumer's entry carries the provider's version *movement* (`- core: 0.1.0 -> 1.0.0`). |
+| `TestRecordsChangelogCustomFileTitleAndSections` | `changelog.file`, `changelog.title` and the section-title options change the artefact on disk, and the default `CHANGELOG.md` is not written next to the configured file. |
+| `TestRecordsTagsAreAnnotatedWithReleaseMessages` | A release tag is an annotated tag *object* (`cat-file -t` = `tag`), its message is `release <tag>`, and it peels to the commit that was released. |
+| `TestRecordsReleaseCommitTagsAndPush` | Commit mode against a real bare remote: one `chore(release): ...` commit carrying every published changelog, tags placed on that commit (not the source commit), branch + tags actually on the remote after the push, and a re-run converging because the release-commit scope is exempt by default. |
 
 ## Findings
 

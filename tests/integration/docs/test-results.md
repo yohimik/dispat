@@ -23,6 +23,7 @@ One test file per goal:
 | `config_test.go`      | Config validation and precedence, parser options (custom types, default propagation depth, strictTypes), custom shells, login scripts, outcome scripts, revertOnFail, tag-format round trips, GitHub releases, script-output accumulation across stages and hooks (onFail included) and release attachments. |
 | `versioning_test.go`  | The three space versioning modes side by side: fixed rides, sparse alignment, one shared train, failed-ride catch-up, holds and pins under a shared version. |
 | `run_test.go`         | The `dispat run` command: graph-ordered execution (also under concurrency), the command shorthand, both `--on-error` policies, the concurrency budget, cross-package output carrying, skipping. |
+| `records_test.go`     | The release records as artefacts: changelog accumulation above pre-dispat content, custom file/title/sections, annotated tags (object type, message, target), and commit mode's release commit + tag placement + push to a bare remote. |
 
 ## Findings
 

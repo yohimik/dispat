@@ -196,7 +196,7 @@ func DefaultConfig() Config {
 		Lenient:              false,
 		MaxDescriptionLength: DefaultMaxDescriptionLength,
 		Propagation: PropagationConfig{
-			Bump:    DefaultPropagate,
+			Bump:         DefaultPropagate,
 			Depth:        DefaultDepth,
 			ChannelDepth: DefaultChannelDepth,
 			Kinds:        DefaultPropagateKinds(),

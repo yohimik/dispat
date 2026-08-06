@@ -260,60 +260,23 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			sched.AddEdge(task{prov, taskPublish}, pub)
 		}
 	}
-	total := sched.Len()
 
 	var mu sync.Mutex
 	started := make(map[string]time.Time)
 
-	// Separate ready queues per stage, so a stalled stage never blocks the
-	// other stage's budget. Version tasks share the build budget: they are
-	// short local manifest updates leading straight into the build.
-	var readyBuild, readyPublish []task
-	push := func(t task) {
-		if t.kind == taskPublish {
-			readyPublish = append(readyPublish, t)
-		} else {
-			readyBuild = append(readyBuild, t)
-		}
-	}
-	for _, t := range sched.Ready() {
-		push(t)
-	}
-
-	buildConc := max(1, e.BuildConcurrency)
-	publishConc := max(1, e.PublishConcurrency)
-	doneCh := make(chan task)
-	launch := func(t task) {
-		go func() {
-			e.execute(ctx, t, p, wsVars, logins, results, &mu, started)
-			doneCh <- t
-		}()
-	}
-	inBuild, inPublish, finished := 0, 0, 0
-	for finished < total {
-		for len(readyBuild) > 0 && inBuild < buildConc {
-			t := readyBuild[len(readyBuild)-1]
-			readyBuild = readyBuild[:len(readyBuild)-1]
-			inBuild++
-			launch(t)
-		}
-		for len(readyPublish) > 0 && inPublish < publishConc {
-			t := readyPublish[len(readyPublish)-1]
-			readyPublish = readyPublish[:len(readyPublish)-1]
-			inPublish++
-			launch(t)
-		}
-		t := <-doneCh
-		if t.kind == taskPublish {
-			inPublish--
-		} else {
-			inBuild--
-		}
-		finished++
-		for _, dep := range sched.Done(t) {
-			push(dep)
-		}
-	}
+	// Version tasks share the build budget: they are short local manifest
+	// updates leading straight into the build. Draining per class keeps the
+	// two budgets independent, so a stalled stage never blocks the other's.
+	budgets := map[taskKind]int{taskBuild: e.BuildConcurrency, taskPublish: e.PublishConcurrency}
+	graph.Drain(sched,
+		func(t task) taskKind {
+			if t.kind == taskPublish {
+				return taskPublish
+			}
+			return taskBuild
+		},
+		func(k taskKind) int { return budgets[k] },
+		func(t task) { e.execute(ctx, t, p, wsVars, logins, results, &mu, started) })
 	return results
 }
 

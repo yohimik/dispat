@@ -392,14 +392,27 @@ func TestGlobMatchingNothingWarns(t *testing.T) {
 	assert.False(t, p.HasErrors(), "a glob that matches nothing is not the E130 typo")
 }
 
-func TestGlobalIsAnAliasForStar(t *testing.T) {
+func TestGlobalIsAnOrdinaryScopeName(t *testing.T) {
+	// "global" used to alias "*". It is now an ordinary name like any other,
+	// so writing it where no package carries it is exactly the E130 typo the
+	// unknown-include error exists to catch — and "*" stays the one way to
+	// address the whole workspace.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(global): workspace-wide"},
+		commit{sha: "c1", message: "feat(global): no longer workspace-wide"},
 	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
+	assert.True(t, hasCode(p, CodeUnknownInclude), "E130, got %v", codes(p))
 	for _, name := range []string{"core", "utils", "app"} {
-		assert.True(t, p.Releases[name].Changed(), "%s must be addressed by 'global'", name)
+		assert.False(t, p.Releases[name].Changed(), "%s must not be addressed by 'global'", name)
+	}
+
+	git = newFakeGit(
+		commit{sha: "c1", message: "feat(*): workspace-wide"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+	p = compute(t, git, nil)
+	for _, name := range []string{"core", "utils", "app"} {
+		assert.True(t, p.Releases[name].Changed(), "%s must be addressed by '*'", name)
 	}
 }
 

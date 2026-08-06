@@ -15,8 +15,8 @@ const (
 	FooterPropagateChannelDepth = "Propagate-Channel-Depth"
 	FooterPropagateChannelScope = "Propagate-Channel-Scope"
 	FooterChannel               = "Channel"
-	FooterReleaseAs        = "Release-As"
-	FooterReverts          = "Reverts"
+	FooterReleaseAs             = "Release-As"
+	FooterReverts               = "Reverts"
 )
 
 // footerBreakingHyphen is the hyphenated alias of BREAKING CHANGE, accepted by

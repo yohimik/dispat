@@ -92,3 +92,58 @@ func (s *Scheduler[N]) Blocked() []N {
 	}
 	return out
 }
+
+// Drain consumes the scheduler with bounded parallelism: every node runs
+// exactly once in a goroutine of its own, edges respected, with at most
+// budget(class(n)) nodes of one class in flight at a time (a budget below 1
+// is treated as 1). Classes exist because budgets can be independent — the
+// executor caps its build and publish stages separately — and each class
+// keeps its own ready queue, so a stalled class never blocks another class's
+// budget. Drain returns when every node has completed.
+//
+// This is the one scheduling pump in the program: the executor drains
+// (package, stage) tasks over two budgets, the run command drains package
+// names over one. run is responsible for its own synchronisation; Drain
+// guarantees only the ordering the edges state, plus the happens-before
+// between a node's completion and its dependents' starts that the completion
+// channel provides.
+func Drain[N comparable, C comparable](s *Scheduler[N], class func(N) C, budget func(C) int, run func(N)) {
+	ready := make(map[C][]N)
+	var classes []C // first-seen order, so launch scanning is deterministic
+	push := func(n N) {
+		c := class(n)
+		if _, ok := ready[c]; !ok {
+			classes = append(classes, c)
+		}
+		ready[c] = append(ready[c], n)
+	}
+	for _, n := range s.Ready() {
+		push(n)
+	}
+
+	inFlight := make(map[C]int)
+	done := make(chan N)
+	finished, total := 0, s.Len()
+	for finished < total {
+		for _, c := range classes {
+			queue := ready[c]
+			limit := max(1, budget(c))
+			for len(queue) > 0 && inFlight[c] < limit {
+				n := queue[len(queue)-1]
+				queue = queue[:len(queue)-1]
+				inFlight[c]++
+				go func(n N) {
+					run(n)
+					done <- n
+				}(n)
+			}
+			ready[c] = queue
+		}
+		n := <-done
+		inFlight[class(n)]--
+		finished++
+		for _, next := range s.Done(n) {
+			push(next)
+		}
+	}
+}

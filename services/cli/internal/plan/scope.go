@@ -37,7 +37,7 @@ func (r scopeResult) inert() bool { return r.empty() && len(r.nonPackage) == 0 }
 //	includes -> base (or the file-derived set when none was written)
 //	excludes -> removed from base, always last, always winning
 //
-// Term forms: "." is the derived set, "*" and "global" are the whole
+// Term forms: "." is the derived set, "*" are the whole
 // workspace, a term containing "*" is a glob, anything else is a package name.
 func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *commitRec) scopeResult {
 	res := scopeResult{packages: make(map[string]bool)}
@@ -76,7 +76,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		}
 		res.derived = true
 
-	case t.IsAll(): // "*" or its alias "global"
+	case t.IsAll(): // "*"
 		for _, p := range cp.pkgs {
 			out[p.Name] = true
 		}

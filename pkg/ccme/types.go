@@ -249,8 +249,7 @@ func newScopeTerm(raw string, pos Position) ScopeTerm {
 func (t ScopeTerm) IsGlob() bool { return strings.ContainsRune(t.Name, '*') }
 
 // IsAll reports whether the term addresses every package in the workspace,
-// i.e. "*" or its reserved alias "global" (§5.2).
-func (t ScopeTerm) IsAll() bool { return t.Name == "*" || t.Name == "global" }
+func (t ScopeTerm) IsAll() bool { return t.Name == "*" }
 
 // IsDerived reports whether the term is ".", the file-derived set (§6.2).
 func (t ScopeTerm) IsDerived() bool { return t.Name == "." }

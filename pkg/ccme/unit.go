@@ -513,7 +513,6 @@ func (p *Parser) applyBumps(b *unitBuilder) {
 	// between a hold and a cancel (§8.6.2).
 }
 
-
 // parseScopeSetValue parses a scope-set written as a footer value, applying
 // the scope-term charset of §5.2.
 func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {

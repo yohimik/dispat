@@ -5,7 +5,7 @@ The black-box integration suite for the dispat CLI. It is a separate Go module t
 [`services/cli`](../../services/cli), drives it against disposable git repositories exactly as a user's shell would,
 and asserts on the three outputs a release run actually has:
 
-- **git state** — tags, commits, file contents;
+- **git state** — tags (their objects, messages and targets), commits, changelog files;
 - **JSON log events** — `--log-format json`, the machine-readable contract CI ingests;
 - **execution timelines** — nanosecond-resolution intervals recorded by the purpose-built `tsmark` probe, wherever
   *timing* rather than mere ordering is the claim.

@@ -6,21 +6,21 @@
 dispat [command] [flags]
 ```
 
-| Command             | Effect                                                                                                                                                          |
-|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `release` (default) | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.                                                          |
-| `status`            | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.                                                        |
+| Command             | Effect                                                                                                                                                                                                                                          |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `release` (default) | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.                                                                                                                                          |
+| `status`            | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.                                                                                                                                        |
 | `run <script>`      | Plan, then execute the named [space run script](#runscripts-and-dispat-run) inside each changed package, honouring the dependency graph. Nothing is released or tagged. `dispat <script>` is a shorthand when `<script>` is not a command name. |
 
-| Flag            | Default       | Effect                                                                |
-|-----------------|---------------|-----------------------------------------------------------------------|
-| `--root`        | `.`           | Monorepo root folder (git repo root).                                 |
-| `--config`      | `dispat.json` | Config file name, relative to `--root`.                               |
-| `--concurrency` | from config   | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget. |
+| Flag            | Default       | Effect                                                                                                                                                                              |
+|-----------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--root`        | `.`           | Monorepo root folder (git repo root).                                                                                                                                               |
+| `--config`      | `dispat.json` | Config file name, relative to `--root`.                                                                                                                                             |
+| `--concurrency` | from config   | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                              |
 | `--on-error`    | `skip`        | `run` only: what a failing script does to the failed package's dependents — `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure. |
-| `--log-level`   | from config   | Override: `trace`, `debug`, `info`, `warn`, `error`.                  |
-| `--log-format`  | from config   | Override: `pretty` or `json`.                                         |
-| `--help`        |               | Print usage.                                                          |
+| `--log-level`   | from config   | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                |
+| `--log-format`  | from config   | Override: `pretty` or `json`.                                                                                                                                                       |
+| `--help`        |               | Print usage.                                                                                                                                                                        |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
 
@@ -39,24 +39,24 @@ script and space names are effectively case-insensitive.
 
 ### Top level
 
-| Key                  | Type                           | Required  | Description                                                                                                                      |
-|----------------------|--------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------|
-| `scripts`            | map name → shell command       | no        | Named shell commands, like package.json scripts. Referenced by spaces.                                                           |
-| `spaces`             | map name → space               | yes (≥ 1) | Package groups sharing build/publish behaviour.                                                                                  |
-| `dependencies`       | list of `{consumer, provider}` | no        | Package-level consumer → provider relations. Both must exist; self-dependencies and cycles are rejected; duplicates are ignored. |
-| `concurrency`        | int or `[int, int]`            | no        | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.       |
-| `logLevel`           | string                         | no        | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                        |
-| `logFormat`          | string                         | no        | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                   |
-| `tagFormat`          | string                         | no        | Release tag template, overridable per space. Default `{name}@{version}`; see below.                                              |
-| `commitErrors`       | string                         | no        | What an error in a commit message does to the run: `warn` (default) or `error`; see below.                                       |
-| `nonPackageScopes`   | array of strings               | no        | Scope names that are deliberately not packages. Default `["release"]`; see below.                                                |
-| `changelog`          | object                         | no        | Per-package changelog file options; see below.                                                                                   |
-| `github`             | object                         | no        | GitHub release options; see below.                                                                                               |
-| `initials`           | map package → version          | no        | Baseline versions used when a package's latest tag is missing or unparseable; see below.                                         |
-| `commit`             | object                         | no        | End-of-run release commit, tagging and push; see below. Disabled by default.                                                     |
-| `shell`              | array of strings               | no        | Command prefix scripts are appended to, e.g. `["bash", "-c"]` or `["cmd", "/C"]`. Default `["/bin/sh", "-c"]`.                   |
-| `run`                | object                         | no        | The run-level hooks (`beforeAll` … `afterPush`), keyed by hook name; see [Run-level hooks](#run-level-hooks).                    |
-| `parser`             | object                         | no        | Commit-message parser options; see [`parser`](#parser). Everything unset keeps the specification default.                        |
+| Key                | Type                           | Required  | Description                                                                                                                      |
+|--------------------|--------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------|
+| `scripts`          | map name → shell command       | no        | Named shell commands, like package.json scripts. Referenced by spaces.                                                           |
+| `spaces`           | map name → space               | yes (≥ 1) | Package groups sharing build/publish behaviour.                                                                                  |
+| `dependencies`     | list of `{consumer, provider}` | no        | Package-level consumer → provider relations. Both must exist; self-dependencies and cycles are rejected; duplicates are ignored. |
+| `concurrency`      | int or `[int, int]`            | no        | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.       |
+| `logLevel`         | string                         | no        | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                        |
+| `logFormat`        | string                         | no        | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                   |
+| `tagFormat`        | string                         | no        | Release tag template, overridable per space. Default `{name}@{version}`; see below.                                              |
+| `commitErrors`     | string                         | no        | What an error in a commit message does to the run: `warn` (default) or `error`; see below.                                       |
+| `nonPackageScopes` | array of strings               | no        | Scope names that are deliberately not packages. Default `["release"]`; see below.                                                |
+| `changelog`        | object                         | no        | Per-package changelog file options; see below.                                                                                   |
+| `github`           | object                         | no        | GitHub release options; see below.                                                                                               |
+| `initials`         | map package → version          | no        | Baseline versions used when a package's latest tag is missing or unparseable; see below.                                         |
+| `commit`           | object                         | no        | End-of-run release commit, tagging and push; see below. Disabled by default.                                                     |
+| `shell`            | array of strings               | no        | Command prefix scripts are appended to, e.g. `["bash", "-c"]` or `["cmd", "/C"]`. Default `["/bin/sh", "-c"]`.                   |
+| `run`              | object                         | no        | The run-level hooks (`beforeAll` … `afterPush`), keyed by hook name; see [Run-level hooks](#run-level-hooks).                    |
+| `parser`           | object                         | no        | Commit-message parser options; see [`parser`](#parser). Everything unset keeps the specification default.                        |
 
 `scripts` defines named commands; the `run` objects — this one and each space's — say **what runs when**, referencing
 those names. Every entry of a `run` object accepts either a single script name or an array of names executed
@@ -64,29 +64,29 @@ those names. Every entry of a `run` object accepts either a single script name o
 on what the sequence gates:
 
 - **Release-gating scripts** (the stage scripts, the login, every hook up to `beforePublish`, and the run-level
-  `beforeAll`) are fail-fast: the first failing command stops the sequence and fails the package's release — or, for
-  the run-level `beforeAll`, the whole run.
+  `beforeAll`) are fail-fast: the first failing command stops the sequence and fails the package's release — or, for the
+  run-level `beforeAll`, the whole run.
 - **Warn-only scripts** (`postPublish`, the whole announce frame — `beforeAnnounce`, `announce`, `postAnnounce` — the
-  outcome scripts `onFail` / `onSkip`, and every other run-level hook) never fail anything: a failing command is
-  logged as a warning and **the remaining commands of the sequence still run** — these hooks observe work that has
-  already happened, so stopping the sequence could not undo it.
+  outcome scripts `onFail` / `onSkip`, and every other run-level hook) never fail anything: a failing command is logged
+  as a warning and **the remaining commands of the sequence still run** — these hooks observe work that has already
+  happened, so stopping the sequence could not undo it.
 
 ### Space options
 
-| Key                     | Type           | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
-|-------------------------|----------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`                  | string         | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped). Package names must be unique across all spaces.                                                                                                                                                                                                                  |
-| `isBuildWaitingPublish` | bool           | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
-| `revertOnFail`          | bool           | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage — or is skipped after its version stage already modified files.                                                                                                                                                  |
-| `run`                   | object      | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
-| `tagFormat`             | string         | no         | Overrides the repository-wide `tagFormat` for this space; see below.                                                                                                                                                                                                                                                                                                                    |
-| `versioning`            | string         | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning).                                                                                                                                                                                                                                                    |
-| `runScripts`            | map name → shell command | no | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
+| Key                     | Type                     | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
+|-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped). Package names must be unique across all spaces.                                                                                                                                                                                                                  |
+| `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
+| `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage — or is skipped after its version stage already modified files.                                                                                                                                                  |
+| `run`                   | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
+| `tagFormat`             | string                   | no         | Overrides the repository-wide `tagFormat` for this space; see below.                                                                                                                                                                                                                                                                                                                    |
+| `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning).                                                                                                                                                                                                                                                    |
+| `runScripts`            | map name → shell command | no         | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
 
 The space's `run` object, keyed by stage or hook name (every entry a script name or an array of names):
 
 | Key              | Kind    | Description                                                                                                                                                            |
-|------------------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|------------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `build`          | stage   | Build stage command(s).                                                                                                                                                |
 | `publish`        | stage   | Publish stage command(s).                                                                                                                                              |
 | `version`        | stage   | Manifest-sync stage command(s); runs exactly before the build, only for packages bumped due to provider updates.                                                       |
@@ -111,9 +111,9 @@ through the configured `shell` (default `/bin/sh -c`) with the package folder as
 The hooks bracket the stages of every package of the space, each with the full stage environment (`DISPAT_STAGE`
 carries the hook's name). Everything up to `run.beforePublish` exists to *gate* the release, so a failure there fails
 the package exactly like a failing stage script — the pipeline stops, nothing is published or tagged, `revertOnFail`
-applies. `run.postPublish` and the announce hooks run after the package's status has settled and only warn: failing
-the package then would report an unpublished release for a published one. The version hooks share the version stage's
-skip rule — when every provider a package was bumped for failed, neither the version script nor its hooks run.
+applies. `run.postPublish` and the announce hooks run after the package's status has settled and only warn: failing the
+package then would report an unpublished release for a published one. The version hooks share the version stage's skip
+rule — when every provider a package was bumped for failed, neither the version script nor its hooks run.
 
 #### `run.login`
 
@@ -134,25 +134,25 @@ A fourth per-package stage, run after the publish frame completes (publish scrip
 docs feed — so alongside the full stage environment it is the natural consumer of the
 [release-notes variables](#release-notes-data) (`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES`, `DISPAT_FIXES`) and the
 channel variables (`DISPAT_CHANNEL`, `DISPAT_OLD_CHANNEL`, `DISPAT_IS_PRERELEASE`) for choosing where and how to
-announce. It has the same hook structure as the other stages (`run.beforeAnnounce` / `run.postAnnounce`) but none
-of their authority: the release is already out, so an error in the stage **or either hook** only warns, the package
-stays published, and no failure among the three sequences stops the others from running. The frame is skipped entirely
-when the publish failed — there is nothing to announce.
+announce. It has the same hook structure as the other stages (`run.beforeAnnounce` / `run.postAnnounce`) but none of
+their authority: the release is already out, so an error in the stage **or either hook** only warns, the package stays
+published, and no failure among the three sequences stops the others from running. The frame is skipped entirely when
+the publish failed — there is nothing to announce.
 
 #### `run.onFail` and `run.onSkip`
 
-Two outcome scripts, the failure-side counterparts of the announce stage. `run.onFail` runs once when a package of
-the space **fails** — at any stage, a failing gating hook, release recorder or tag included — after its status has
-settled and after `revertOnFail`'s rollback, so the script sees the folder's final state. `run.onSkip` runs once when
-the package is **skipped** because a provider failed or was skipped. Both observe an outcome that has already happened,
-so an error in either only warns; both receive the full package environment (`DISPAT_STAGE` is `onFail` / `onSkip`)
+Two outcome scripts, the failure-side counterparts of the announce stage. `run.onFail` runs once when a package of the
+space **fails** — at any stage, a failing gating hook, release recorder or tag included — after its status has settled
+and after `revertOnFail`'s rollback, so the script sees the folder's final state. `run.onSkip` runs once when the
+package is **skipped** because a provider failed or was skipped. Both observe an outcome that has already happened, so
+an error in either only warns; both receive the full package environment (`DISPAT_STAGE` is `onFail` / `onSkip`)
 plus the specifics:
 
-| Variable              | Set for  | Meaning                                                          |
-|-----------------------|----------|------------------------------------------------------------------|
-| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `version`, `build` or `publish`.          |
-| `DISPAT_ERROR`        | `onFail` | The error message of the failing command or operation.           |
-| `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.                      |
+| Variable              | Set for  | Meaning                                                 |
+|-----------------------|----------|---------------------------------------------------------|
+| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `version`, `build` or `publish`. |
+| `DISPAT_ERROR`        | `onFail` | The error message of the failing command or operation.  |
+| `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.             |
 
 Neither runs for a package that published — that is `run.postPublish` and the announce frame — and the run-level
 [run outcome listing](#run-outcome-data) carries the same information for every package at once.
@@ -161,31 +161,29 @@ Neither runs for a package that published — that is `run.postPublish` and the 
 
 How the versions of a space's packages relate to each other.
 
-| Value                     | Effect                                                                                                                                                                                                                                                                     |
-|---------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `independent` *(default)* | Every package's version is computed from its own history alone — the behaviour described everywhere else in this document.                                                                                                                                                 |
-| `fixed`                   | One shared version for the whole space: a change to **any** member (by commit scope or changed files) releases **every** member at the same next version.                                                                                                                  |
-| `fixedSparse`             | The shared version is computed exactly like `fixed`, but a member with no changes of its own keeps its previous version and is not released; changed members release at the shared version, aligning to it the moment they change.                                          |
+| Value                     | Effect                                                                                                                                                                                                                             |
+|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `independent` *(default)* | Every package's version is computed from its own history alone — the behaviour described everywhere else in this document.                                                                                                         |
+| `fixed`                   | One shared version for the whole space: a change to **any** member (by commit scope or changed files) releases **every** member at the same next version.                                                                          |
+| `fixedSparse`             | The shared version is computed exactly like `fixed`, but a member with no changes of its own keeps its previous version and is not released; changed members release at the shared version, aligning to it the moment they change. |
 
 Under `fixed` and `fixedSparse` the space versions **as if it were one package**: the shared next version is computed
 over the space's highest baseline with the max bump across all members, the space runs a **single prerelease train**
 (a channel directive on one member moves the whole space; a graduation ends the train for all of it), and an exact
 `Release-As` naming one member pins the space's single version — with the usual pin guards applied to it. A
-`Release-As: none` hold still applies to the member it names: the held member stays behind and catches up when
-resumed.
+`Release-As: none` hold still applies to the member it names: the held member stays behind and catches up when resumed.
 
-Scopes — commit scope-sets and changed files — keep exactly one job in a fixed space: deciding **which changelog
-entries a package receives** (and what its GitHub release announces). A member released only because of the shared
-version gets a single "no changes — version bump" entry instead of borrowing its neighbour's notes, and its presence
-in the plan is reported as `W210` (non-suppressible, like the catch-up codes: nothing in the commit log alone explains
-it). Such a ride is a full release at the execution level — its version/build/publish scripts, hooks, tag and records
-all run.
+Scopes — commit scope-sets and changed files — keep exactly one job in a fixed space: deciding **which changelog entries
+a package receives** (and what its GitHub release announces). A member released only because of the shared version gets
+a single "no changes — version bump" entry instead of borrowing its neighbour's notes, and its presence in the plan is
+reported as `W210` (non-suppressible, like the catch-up codes: nothing in the commit log alone explains it). Such a ride
+is a full release at the execution level — its version/build/publish scripts, hooks, tag and records all run.
 
-Two convergence properties are worth knowing. A fixed space whose members all carry the shared version releases
-nothing on a quiet run, exactly like independent packages. And a `fixed` member left *behind* the space's published
-baseline — its ride failed in an earlier run, or the space adopted `fixed` with unequal versions — is caught up at
-exactly that baseline on the next run (also `W210`), restoring the one-version invariant; `fixedSparse` deliberately
-never does this, since staying behind is its point.
+Two convergence properties are worth knowing. A fixed space whose members all carry the shared version releases nothing
+on a quiet run, exactly like independent packages. And a `fixed` member left *behind* the space's published baseline —
+its ride failed in an earlier run, or the space adopted `fixed` with unequal versions — is caught up at exactly that
+baseline on the next run (also `W210`), restoring the one-version invariant; `fixedSparse` deliberately never does this,
+since staying behind is its point.
 
 Dependency edges stay package-scoped either way: a provider propagating into one member bumps that member (which then
 carries its space along under `fixed`), and only the member with provider updates runs a version task.
@@ -206,25 +204,25 @@ spaces:
 ```
 
 Unlike the stage entries, the values are **shell commands themselves**, not references into `scripts`. `dispat run
-<name>` — or the shorthand `dispat <name>`, whenever `<name>` is not a command name — computes the plan and executes
-the named script inside each **changed** package (the packages a release would process), **honouring the dependency
-graph**: a package's script starts only after every changed provider's finished, and independent packages run
-concurrently within the build concurrency budget (`--concurrency`'s first value). Each script gets the package's full
-[DISPAT_* environment](#script-environment-variables) (`DISPAT_STAGE` is `run:<name>`), so a script moves freely
-between a stage and a run script. A changed package whose space does not define the name completes as a no-op; a name
-**no** space defines is an error (running nothing silently is how a typo hides).
+<name>` — or the shorthand `dispat <name>`, whenever `<name>` is not a command name — computes the plan and executes the
+named script inside each **changed** package (the packages a release would process), **honouring the dependency graph**:
+a package's script starts only after every changed provider's finished, and independent packages run concurrently within
+the build concurrency budget (`--concurrency`'s first value). Each script gets the package's full
+[DISPAT_* environment](#script-environment-variables) (`DISPAT_STAGE` is `run:<name>`), so a script moves freely between
+a stage and a run script. A changed package whose space does not define the name completes as a no-op; a name **no**
+space defines is an error (running nothing silently is how a typo hides).
 
 What a failure does is the `--on-error` flag: under `skip` (the default) the failed package's changed dependents are
 skipped, transitively — the same shape a release gives a failed provider — while independent packages keep running;
 under `continue` the dependents run anyway. Any failure makes the command exit `1` either way. Nothing is released,
 tagged or written. Names are matched case-insensitively (viper lowercases map keys).
 
-Run scripts take part in [script outputs](#script-outputs) too, with one extra rule: outputs carry **across
-packages, down the dependency graph**. Each run script gets `$DISPAT_OUTPUT` to export through, and a package's
-script receives the exports of its changed providers' scripts (transitively — a script-less package in the middle
-still carries them through) as `DISPAT_OUTPUT_<NAME>`. Providers merge in name order, the package's own re-export
-overrides, and under `--on-error continue` a failed provider's exports still reach its dependents — mirroring what
-the pipeline's `onFail` hooks receive.
+Run scripts take part in [script outputs](#script-outputs) too, with one extra rule: outputs carry **across packages,
+down the dependency graph**. Each run script gets `$DISPAT_OUTPUT` to export through, and a package's script receives
+the exports of its changed providers' scripts (transitively — a script-less package in the middle still carries them
+through) as `DISPAT_OUTPUT_<NAME>`. Providers merge in name order, the package's own re-export overrides, and under
+`--on-error continue` a failed provider's exports still reach its dependents — mirroring what the pipeline's `onFail`
+hooks receive.
 
 ### `tagFormat`
 
@@ -341,8 +339,8 @@ The release is named after the tag (`pkg@1.3.0`); its body is the rendered chang
 repository or token can be resolved at runtime, GitHub releases are skipped with a warning instead of failing the run.
 If the tag has not been pushed yet, GitHub creates it at the default branch head.
 
-Files a package's scripts exported through the [`GITHUB_ATTACHMENTS` output](#script-outputs) are uploaded as
-**release assets** (named after the file, `application/octet-stream`) right after the release is created — in
+Files a package's scripts exported through the [`GITHUB_ATTACHMENTS` output](#script-outputs) are uploaded as **release
+assets** (named after the file, `application/octet-stream`) right after the release is created — in
 `commit` mode too, where the release itself moves to the finalize phase. A failed upload — or an invalid path in the
 list — fails the package like any other recording failure.
 
@@ -389,27 +387,27 @@ exits 1, but already-published registry artifacts stay published.
 ### `parser`
 
 The commit-message parser options, previously fixed at the specification defaults. Everything is optional: an absent
-`parser` object (or any unset field) keeps the default, so existing configurations parse exactly as before. An
-invalid value fails the config load, before any planning.
+`parser` object (or any unset field) keeps the default, so existing configurations parse exactly as before. An invalid
+value fails the config load, before any planning.
 
-| Key                    | Default                       | Description                                                                                                                                                        |
-|------------------------|-------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `separator`            | `---`                         | The unit separator line. At least three ASCII-printable characters, no whitespace, must not begin like a type. Repositories exchanging patches by mail often use `%%%`. |
-| `types`                | the standard table            | Map of commit type → bump (`none`, `patch`, `minor`, `major`). A non-empty map **replaces** the standard table (`feat`=minor, `fix`/`perf`/`revert`=patch, the rest none) wholesale — list every type you keep. Names are a–z only (viper lowercases keys anyway). |
-| `strictTypes`          | `false`                       | Turn an unknown commit type into an error (E140) instead of a warning; the [`commitErrors`](#commiterrors) policy decides whether that stops the run.              |
-| `lenient`              | `false`                       | Downgrade selected authoring errors to warnings: an uppercase type is lowercased, a missing space after `:` is accepted, a footer contradicting an inline directive wins. |
-| `maxDescriptionLength` | `100`                         | The long-description warning threshold, in Unicode scalar values; negative disables it.                                                                            |
-| `propagation.bump`     | `patch`                       | The bump consumers take when a unit propagates without saying which: `none`, `patch`, `minor`, `major` or `inherit` (copy the unit's own bump).                     |
-| `propagation.depth`    | `0`                           | The default propagation depth: a number of edges or `all`. **This is the knob that changes propagation from opt-in to on-by-default** — with `1`, a plain `feat(core):` reaches core's direct consumers with no caret written. A directive on the unit always wins. |
-| `propagation.channelDepth` | `0`                       | The channel-axis counterpart: how far a channel travels by default.                                                                                                |
-| `propagation.kinds`    | all but `devDependencies`     | The dependency edges propagation follows: `dependencies`, `peerDependencies`, `optionalDependencies`, `devDependencies` or `all`.                                  |
-| `propagation.channel`  | `inherit`                     | The default propagated channel value.                                                                                                                              |
-| `limits.unitsPerMessage` | `64`                        | Always-enforced parser bounds; exceeding one voids the whole message (E158). Negative disables a bound — trusted input only.                                        |
-| `limits.scopeTermsPerUnit` | `256`                     |                                                                                                                                                                    |
-| `limits.messageBytes`  | `1048576`                     |                                                                                                                                                                    |
-| `allowedChannels`      | unrestricted                  | Restrict prerelease channel names (E181 outside the list); `stable` is always accepted.                                                                            |
-| `messageLevelTrailers` | Signed-off-by, Co-authored-by, … | Authorship/review trailers ignored wherever they appear. Setting the key replaces the list.                                                                     |
-| `issueTrailers`        | Closes, Fixes, Refs, Resolves | Issue-reference trailers, ignored for versioning but surfaced for changelogs. Setting the key replaces the list.                                                   |
+| Key                        | Default                          | Description                                                                                                                                                                                                                                                         |
+|----------------------------|----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `separator`                | `---`                            | The unit separator line. At least three ASCII-printable characters, no whitespace, must not begin like a type. Repositories exchanging patches by mail often use `%%%`.                                                                                             |
+| `types`                    | the standard table               | Map of commit type → bump (`none`, `patch`, `minor`, `major`). A non-empty map **replaces** the standard table (`feat`=minor, `fix`/`perf`/`revert`=patch, the rest none) wholesale — list every type you keep. Names are a–z only (viper lowercases keys anyway).  |
+| `strictTypes`              | `false`                          | Turn an unknown commit type into an error (E140) instead of a warning; the [`commitErrors`](#commiterrors) policy decides whether that stops the run.                                                                                                               |
+| `lenient`                  | `false`                          | Downgrade selected authoring errors to warnings: an uppercase type is lowercased, a missing space after `:` is accepted, a footer contradicting an inline directive wins.                                                                                           |
+| `maxDescriptionLength`     | `100`                            | The long-description warning threshold, in Unicode scalar values; negative disables it.                                                                                                                                                                             |
+| `propagation.bump`         | `patch`                          | The bump consumers take when a unit propagates without saying which: `none`, `patch`, `minor`, `major` or `inherit` (copy the unit's own bump).                                                                                                                     |
+| `propagation.depth`        | `0`                              | The default propagation depth: a number of edges or `all`. **This is the knob that changes propagation from opt-in to on-by-default** — with `1`, a plain `feat(core):` reaches core's direct consumers with no caret written. A directive on the unit always wins. |
+| `propagation.channelDepth` | `0`                              | The channel-axis counterpart: how far a channel travels by default.                                                                                                                                                                                                 |
+| `propagation.kinds`        | all but `devDependencies`        | The dependency edges propagation follows: `dependencies`, `peerDependencies`, `optionalDependencies`, `devDependencies` or `all`.                                                                                                                                   |
+| `propagation.channel`      | `inherit`                        | The default propagated channel value.                                                                                                                                                                                                                               |
+| `limits.unitsPerMessage`   | `64`                             | Always-enforced parser bounds; exceeding one voids the whole message (E158). Negative disables a bound — trusted input only.                                                                                                                                        |
+| `limits.scopeTermsPerUnit` | `256`                            |                                                                                                                                                                                                                                                                     |
+| `limits.messageBytes`      | `1048576`                        |                                                                                                                                                                                                                                                                     |
+| `allowedChannels`          | unrestricted                     | Restrict prerelease channel names (E181 outside the list); `stable` is always accepted.                                                                                                                                                                             |
+| `messageLevelTrailers`     | Signed-off-by, Co-authored-by, … | Authorship/review trailers ignored wherever they appear. Setting the key replaces the list.                                                                                                                                                                         |
+| `issueTrailers`            | Closes, Fixes, Refs, Resolves    | Issue-reference trailers, ignored for versioning but surfaced for changelogs. Setting the key replaces the list.                                                                                                                                                    |
 
 ```yaml
 parser:
@@ -421,8 +419,8 @@ parser:
 
 ### Run-level hooks
 
-Seven hooks observe the run as a whole rather than any one package. They live in the **top-level `run` object**, run
-in the **monorepo root**, and each is a no-op when not configured:
+Seven hooks observe the run as a whole rather than any one package. They live in the **top-level `run` object**, run in
+the **monorepo root**, and each is a no-op when not configured:
 
 ```yaml
 run:
@@ -430,8 +428,8 @@ run:
   postAll: notify
 ```
 
-| Hook                 | Runs                                                                              |
-|----------------------|-----------------------------------------------------------------------------------|
+| Hook               | Runs                                                                              |
+|--------------------|-----------------------------------------------------------------------------------|
 | `run.beforeAll`    | Once, after planning and verification, before the task graph starts.              |
 | `run.postAll`      | Once, after the whole task graph finishes — even when nothing released.           |
 | `run.beforeCommit` | Before the release commit. `commit` mode only, and only when something published. |
@@ -465,14 +463,14 @@ Messages are parsed by [`pkg/ccme`](../../../pkg/ccme). A message holds one or m
 
 ### Scope sets
 
-| Term          | Resolves to                                       | Unknown name                  |
-|---------------|---------------------------------------------------|-------------------------------|
-| `core`        | that package                                      | error                         |
-| `core,ui`     | both                                              | error                         |
-| `*`, `global` | every package in the workspace                    | —                             |
-| `@acme/*`     | every package matching the glob                   | warning if it matches nothing |
-| `.`           | the packages owning the commit's changed files    | —                             |
-| `-app`        | removes `app` from the set; exclusions always win | warning                       |
+| Term      | Resolves to                                       | Unknown name                  |
+|-----------|---------------------------------------------------|-------------------------------|
+| `core`    | that package                                      | error                         |
+| `core,ui` | both                                              | error                         |
+| `*`       | every package in the workspace                    | —                             |
+| `@acme/*` | every package matching the glob                   | warning if it matches nothing |
+| `.`       | the packages owning the commit's changed files    | —                             |
+| `-app`    | removes `app` from the set; exclusions always win | warning                       |
 
 With no parentheses at all the set is file-derived, by longest matching path prefix — a file under a package nested
 inside another belongs to the inner one only. A unit resolving to no package is inert and reported as such.
@@ -540,8 +538,8 @@ shipped in `beta.0` keeps the target at the next major — but with no new commi
 finds nothing to do, a `Release-As` consumed by a prerelease is no longer in force, and a `cancel` cannot retract
 train-published work (a *live* cancel aimed at published work warns `W170`). Convergence is quiet: the directive that
 started the train is contained in the tag it produced, so it is not re-reported as "already on beta" (`W199`) on later
-runs — that warning is reserved for a *fresh* directive pointing where the package already is — and a spent cancel
-(one every package it names has released past) is not re-reported either.
+runs — that warning is reserved for a *fresh* directive pointing where the package already is — and a spent cancel (one
+every package it names has released past) is not re-reported either.
 
 ### Release control
 
@@ -555,9 +553,9 @@ runs — that warning is reserved for a *fresh* directive pointing where the pac
 A pin is rejected if it does not move the package forward, if it is below what the pending commits require, or if it
 raises the major version more than one above the computed version. A rejected pin has the unit-scoped blast radius of
 any other commit error: the error is reported (and, under `commitErrors: "error"`, stops the run), the bad directive
-contributes nothing, and the package falls back to its ordinarily computed version — a `feat` sharing the commit with
-a bad pin still releases at its computed bump, and a lone rejected pin releases nothing. A pin sets the version, never
-the bump — how large a change is, is declared by the type. The version also decides the channel, so
+contributes nothing, and the package falls back to its ordinarily computed version — a `feat` sharing the commit with a
+bad pin still releases at its computed bump, and a lone rejected pin releases nothing. A pin sets the version, never the
+bump — how large a change is, is declared by the type. The version also decides the channel, so
 `Release-As: 2.0.0-rc.0` enters the rc line and `Release-As: 2.0.0` graduates.
 
 `cancel` only reaches backwards: it discards contributions from commits that are ancestors of the cancel, and work
@@ -568,27 +566,27 @@ the version is public, and the right target for stopping a pending catch-up is t
 
 Every script receives, on top of the parent environment:
 
-| Variable                 | Example             | Meaning                                                                                                                                             |
-|--------------------------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `DISPAT_PACKAGE`         | `core`              | Package name.                                                                                                                                       |
-| `DISPAT_SPACE`           | `libs`              | Space name.                                                                                                                                         |
-| `DISPAT_OLD_VERSION`     | `1.2.3`             | The version the package last published (`0.0.0` for a first release).                                                                               |
-| `DISPAT_NEW_VERSION`     | `1.3.0-beta.4`      | Version being released: version + channel + counter, SemVer spelling.                                                                               |
-| `DISPAT_VERSION`         | `1.3.0`             | The core version alone — `MAJOR.MINOR.PATCH`, channel and counter stripped.                                                                         |
-| `DISPAT_TAG_VERSION`     | `1.3.0-beta4`       | Version + channel + counter as the space's `tagFormat` spells them: the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no path). Equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`. |
-| `DISPAT_STABLE_BASELINE` | `1.2.3`             | The last release with no prerelease component — what versions are computed from.                                                                    |
-| `DISPAT_BASELINE`        | `1.3.0-beta.3`      | The latest baseline: the newest tag of any kind, prereleases included — what the computed version must exceed and where the channel is read from. **Unset** when the package has never released, so `${DISPAT_BASELINE+x}` detects a first release; when set it equals `DISPAT_OLD_VERSION`. |
-| `DISPAT_BUMP`            | `minor`             | `none`, `patch`, `minor` or `major`. `none` on a channel-only release.                                                                              |
-| `DISPAT_CHANNEL`         | `beta`              | Channel being released on: `stable` or a prerelease identifier.                                                                                     |
-| `DISPAT_OLD_CHANNEL`     | `stable`            | Channel of the previous release, so a graduation is distinguishable from an ordinary release.                                                       |
-| `DISPAT_COUNTER`         | `4`                 | Prerelease counter of the version being released. **Unset** on a stable release.                                                                    |
-| `DISPAT_OLD_COUNTER`     | `3`                 | Prerelease counter of the previous release. **Unset** when the previous release was stable.                                                         |
-| `DISPAT_IS_PRERELEASE`   | `true`              | `true` when `DISPAT_NEW_VERSION` carries a prerelease component. Handy for choosing a dist-tag.                                                     |
-| `DISPAT_TAG`             | `core@v1.3.0-beta4` | Tag that will be created on success: name + version + channel + counter, rendered with the space's `tagFormat`.                                     |
-| `DISPAT_SEMVER_TAG`      | `core@1.3.0-beta.4` | The same name + version + channel + counter under the normative `{name}@{version}` SemVer format, whatever `tagFormat` encodes — the spelling a script can rely on across spaces. |
-| `DISPAT_STAGE`           | `build`             | `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`, `postPublish`, `postAll`, …) for a hook; `login` for the login; `run:<name>` for a [run script](#runscripts-and-dispat-run). |
-| `DISPAT_OUTPUT`          | *(a temp file path)* | Where the script appends `NAME=value` lines to [export outputs](#script-outputs) for everything that runs after it.  |
-| `DISPAT_OUTPUT_<NAME>`   | *(exported value)*  | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty). `DISPAT_OUTPUT_GITHUB_ATTACHMENTS` is the GitHub release asset list. |
+| Variable                 | Example              | Meaning                                                                                                                                                                                                                                                                                      |
+|--------------------------|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `DISPAT_PACKAGE`         | `core`               | Package name.                                                                                                                                                                                                                                                                                |
+| `DISPAT_SPACE`           | `libs`               | Space name.                                                                                                                                                                                                                                                                                  |
+| `DISPAT_OLD_VERSION`     | `1.2.3`              | The version the package last published (`0.0.0` for a first release).                                                                                                                                                                                                                        |
+| `DISPAT_NEW_VERSION`     | `1.3.0-beta.4`       | Version being released: version + channel + counter, SemVer spelling.                                                                                                                                                                                                                        |
+| `DISPAT_VERSION`         | `1.3.0`              | The core version alone — `MAJOR.MINOR.PATCH`, channel and counter stripped.                                                                                                                                                                                                                  |
+| `DISPAT_TAG_VERSION`     | `1.3.0-beta4`        | Version + channel + counter as the space's `tagFormat` spells them: the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no path). Equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.                                |
+| `DISPAT_STABLE_BASELINE` | `1.2.3`              | The last release with no prerelease component — what versions are computed from.                                                                                                                                                                                                             |
+| `DISPAT_BASELINE`        | `1.3.0-beta.3`       | The latest baseline: the newest tag of any kind, prereleases included — what the computed version must exceed and where the channel is read from. **Unset** when the package has never released, so `${DISPAT_BASELINE+x}` detects a first release; when set it equals `DISPAT_OLD_VERSION`. |
+| `DISPAT_BUMP`            | `minor`              | `none`, `patch`, `minor` or `major`. `none` on a channel-only release.                                                                                                                                                                                                                       |
+| `DISPAT_CHANNEL`         | `beta`               | Channel being released on: `stable` or a prerelease identifier.                                                                                                                                                                                                                              |
+| `DISPAT_OLD_CHANNEL`     | `stable`             | Channel of the previous release, so a graduation is distinguishable from an ordinary release.                                                                                                                                                                                                |
+| `DISPAT_COUNTER`         | `4`                  | Prerelease counter of the version being released. **Unset** on a stable release.                                                                                                                                                                                                             |
+| `DISPAT_OLD_COUNTER`     | `3`                  | Prerelease counter of the previous release. **Unset** when the previous release was stable.                                                                                                                                                                                                  |
+| `DISPAT_IS_PRERELEASE`   | `true`               | `true` when `DISPAT_NEW_VERSION` carries a prerelease component. Handy for choosing a dist-tag.                                                                                                                                                                                              |
+| `DISPAT_TAG`             | `core@v1.3.0-beta4`  | Tag that will be created on success: name + version + channel + counter, rendered with the space's `tagFormat`.                                                                                                                                                                              |
+| `DISPAT_SEMVER_TAG`      | `core@1.3.0-beta.4`  | The same name + version + channel + counter under the normative `{name}@{version}` SemVer format, whatever `tagFormat` encodes — the spelling a script can rely on across spaces.                                                                                                            |
+| `DISPAT_STAGE`           | `build`              | `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`, `postPublish`, `postAll`, …) for a hook; `login` for the login; `run:<name>` for a [run script](#runscripts-and-dispat-run).                                                                 |
+| `DISPAT_OUTPUT`          | *(a temp file path)* | Where the script appends `NAME=value` lines to [export outputs](#script-outputs) for everything that runs after it.                                                                                                                                                                          |
+| `DISPAT_OUTPUT_<NAME>`   | *(exported value)*   | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty). `DISPAT_OUTPUT_GITHUB_ATTACHMENTS` is the GitHub release asset list.                                                                                         |
 
 `DISPAT_OLD_VERSION` and `DISPAT_STABLE_BASELINE` differ only on a prerelease train: a package on `1.3.0-beta.1` whose
 last stable release was `1.2.3` reports both, because the first is what it shipped and the second is what the next
@@ -670,8 +668,8 @@ DISPAT_DEPENDENCIES="core: 1.2.3 -> 1.3.0"    # one "name: old -> new" line per 
 
 matching the changelog's rendering (`From` equals `To` on a catch-up, whose provider version is already out); the
 `DISPAT_UPDATED_*` listing carries the same data field by field for scripts that want it addressable. The
-[`run.announce`](#runannounce) stage is the natural consumer, but like every listing the variables reach every
-stage, keeping scripts movable.
+[`run.announce`](#runannounce) stage is the natural consumer, but like every listing the variables reach every stage,
+keeping scripts movable.
 
 ### Script outputs
 
@@ -685,20 +683,19 @@ echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz $PWD/dist/SHA256SUMS" >> "$DISPAT_OUT
 ```
 
 Outputs accumulate across the package's pipeline: every later script and hook of the package — the outcome scripts
-`onFail`/`onSkip` included, so a notifier can report with them — receives each export as `DISPAT_OUTPUT_<NAME>`,
-plus `DISPAT_OUTPUTS` listing the exported names (space-separated; set but empty when nothing was exported). Hooks
-export exactly like stage scripts: a `beforeBuild` export reaches the build, the publish and everything after. In
-[`dispat run`](#runscripts-and-dispat-run) outputs additionally carry across packages, from a provider's run script
-to its consumers'.
-Re-exporting a name overrides its earlier value, like a shell re-assignment. The name must be a valid environment
-variable name; a malformed line fails a release-gating sequence (and only warns in a warn-only one). A sequence that
-fails still surrenders whatever it exported before failing, which is how `onFail` gets to see it.
+`onFail`/`onSkip` included, so a notifier can report with them — receives each export as `DISPAT_OUTPUT_<NAME>`, plus
+`DISPAT_OUTPUTS` listing the exported names (space-separated; set but empty when nothing was exported). Hooks export
+exactly like stage scripts: a `beforeBuild` export reaches the build, the publish and everything after. In
+[`dispat run`](#runscripts-and-dispat-run) outputs additionally carry across packages, from a provider's run script to
+its consumers'. Re-exporting a name overrides its earlier value, like a shell re-assignment. The name must be a valid
+environment variable name; a malformed line fails a release-gating sequence (and only warns in a warn-only one). A
+sequence that fails still surrenders whatever it exported before failing, which is how `onFail` gets to see it.
 
 One output is special to the [GitHub recorder](#github): **`GITHUB_ATTACHMENTS`**, a whitespace-separated list of
 absolute paths to existing files (`$PWD` inside a script resolves to the package folder, which makes absolute paths
-easy). Each listed file is uploaded as an asset of the package's GitHub release, named after the file; an invalid
-entry fails the release recording rather than silently dropping an asset. Scripts naturally read the current list
-back as `$DISPAT_OUTPUT_GITHUB_ATTACHMENTS`, so appending is
+easy). Each listed file is uploaded as an asset of the package's GitHub release, named after the file; an invalid entry
+fails the release recording rather than silently dropping an asset. Scripts naturally read the current list back as
+`$DISPAT_OUTPUT_GITHUB_ATTACHMENTS`, so appending is
 `echo "GITHUB_ATTACHMENTS=$DISPAT_OUTPUT_GITHUB_ATTACHMENTS $PWD/more.tgz" >> "$DISPAT_OUTPUT"`.
 
 ### Run outcome data

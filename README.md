@@ -1,5 +1,8 @@
 # dispat
 
+[![CI](https://github.com/yohimik/dispat/actions/workflows/ci.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/ci.yml)
+
 **dispat** releases monorepos: it detects which packages changed from conventional commits, computes their next semantic
 versions (propagating bumps to dependants), and builds + publishes them in the right order — in parallel, with
 changelogs, git tags and GitHub releases on the way out.
@@ -56,8 +59,8 @@ project release need — you fill in shell commands, dispat supplies the orchest
   `DISPAT_*` environment the release stages get, releasing nothing; `--on-error` picks whether a failure skips the
   failed package's dependents or lets them run.
 - **Script outputs & release assets** — every script and hook can export values `GITHUB_OUTPUT`-style through
-  `$DISPAT_OUTPUT`; they reach all later scripts of the package (onFail/onSkip included) as `DISPAT_OUTPUT_*` — and
-  in `dispat run` they carry across packages, provider to consumer. The special `GITHUB_ATTACHMENTS` output
+  `$DISPAT_OUTPUT`; they reach all later scripts of the package (onFail/onSkip included) as `DISPAT_OUTPUT_*` — and in
+  `dispat run` they carry across packages, provider to consumer. The special `GITHUB_ATTACHMENTS` output
   (`echo "GITHUB_ATTACHMENTS=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"`) uploads files as GitHub release assets.
 - **Polyglot & infra-agnostic** — any language, any registry: scripts are shell commands fed context via `DISPAT_*`
   env vars, and versions live purely in git tags. No version files, no lockstep, no framework buy-in.
@@ -130,7 +133,7 @@ single-pass. A commit may hold several `---`-separated units, each with its own 
 | `cancel(core): …`       | —        | discards `core`'s unreleased metadata       |
 | `release(core)@beta: …` | —        | moves `core` onto the beta line             |
 
-Scopes must name discovered packages; `*` and `global` mean the whole workspace, a term with `*` is a glob, `.` is the
+Scopes must name discovered packages; `*` mean the whole workspace, a term with `*` is a glob, `.` is the
 file-derived set, and a leading `-` excludes. A typo in an *include* is an error, because it would otherwise silently
 drop a release; excluding a package that no longer exists is only a warning.
 
@@ -150,14 +153,14 @@ consumers along, put them on the line too: `feat(core)^@beta++1`. Trains converg
 
 **Space versioning modes.** A space may declare how its packages' versions relate:
 [`versioning`](./services/cli/docs/configuration.md#versioning) is `independent` (default — everything above),
-`fixed` or `fixedSparse`. Under `fixed` the space versions as one package: a change to any member releases every
-member at one shared next version (computed over the space's highest baseline with the max bump), the space runs a
-single prerelease train, an exact `Release-As` on one member pins the space, and a member released with nothing of its
-own gets one "no changes — version bump" changelog entry, labelled `W210` in the plan. A member left behind (a failed
-ride) is re-aligned to the space's published version on the next run. `fixedSparse` computes the same shared version
-but releases only changed members — the rest keep their previous versions until they change, at which point they jump
-to the shared version. Commit and file scopes keep exactly one job in these modes: deciding which changelog entries
-(and GitHub release notes) each package receives.
+`fixed` or `fixedSparse`. Under `fixed` the space versions as one package: a change to any member releases every member
+at one shared next version (computed over the space's highest baseline with the max bump), the space runs a single
+prerelease train, an exact `Release-As` on one member pins the space, and a member released with nothing of its own gets
+one "no changes — version bump" changelog entry, labelled `W210` in the plan. A member left behind (a failed ride) is
+re-aligned to the space's published version on the next run. `fixedSparse` computes the same shared version but releases
+only changed members — the rest keep their previous versions until they change, at which point they jump to the shared
+version. Commit and file scopes keep exactly one job in these modes: deciding which changelog entries (and GitHub
+release notes) each package receives.
 
 **Release control.** `Release-As: none` holds a package — its bump is retained and reported, not released, until a later
 `Release-As: auto` resumes it at the `max()` of everything accumulated. `Release-As: <version>` pins an exact version,
@@ -202,8 +205,8 @@ Acting on the provider does nothing: its version is already public, and cancella
 1. **version** — only when the package is bumped due to provider updates; runs exactly before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with `false`
    it waits for the provider's *build* only.
-2. **build** — the package's build command. Like every script it may export outputs by appending `NAME=value` lines
-   to the file `$DISPAT_OUTPUT` points at: each value travels to every later script of the package as
+2. **build** — the package's build command. Like every script it may export outputs by appending `NAME=value` lines to
+   the file `$DISPAT_OUTPUT` points at: each value travels to every later script of the package as
    `DISPAT_OUTPUT_<NAME>`, and the `GITHUB_ATTACHMENTS` output (absolute file paths) becomes the GitHub release's
    assets.
 3. **publish** — waits for the package's own build and always for its providers' publishes. A space with a
@@ -258,7 +261,10 @@ See [./services/cli/docs/getting-started.md](./services/cli/docs/getting-started
 ## Testing
 
 dispat's failure semantics are its main promise, so they are tested at two independent layers — over 450 test functions
-plus fuzzing across the workspace, all runnable with `go test ./...` in each module.
+plus fuzzing across the workspace, all runnable with `go test ./...` in each module. CI ([
+`ci.yml`](.github/workflows/ci.yml)) runs both layers as separate jobs on every push and pull request, recomputes the
+workspace-wide coverage from the merged profiles, and publishes it as the badge above — the badge value always comes
+from the latest `main` build, never from this file.
 
 **Unit tests** (testify, in-memory fakes; `gitx`, `app` and `cli` against real temporary git repositories):
 
@@ -284,9 +290,9 @@ agree, a cheap conformance check on the propagation rules. The full per-package 
 
 **Integration tests** ([`tests/integration`](./tests/integration)) are a separate Go module that structurally *cannot*
 import dispat's internals: it compiles the real binary and drives it against disposable git repositories exactly as a
-user's shell would, asserting on git state, JSON log events and nanosecond-resolution execution timelines. Setup and
-how to run are in the [integration tests README](./tests/integration/README.md); the current status and coverage are
-in the [test results](./tests/integration/docs/test-results.md), with the claim-by-claim matrix in the
+user's shell would, asserting on git state, JSON log events and nanosecond-resolution execution timelines. Setup and how
+to run are in the [integration tests README](./tests/integration/README.md); the current status and coverage are in
+the [test results](./tests/integration/docs/test-results.md), with the claim-by-claim matrix in the
 [integration test plan](./tests/integration/docs/test-plan.md).
 
 ## Planned features

@@ -61,21 +61,36 @@ type releaseRequest struct {
 	Prerelease bool `json:"prerelease"`
 }
 
-// Verify checks that the repository is reachable with the configured token
-// (GET /repos/{owner}/{repo} must return 200). Meant to run before any
-// release work so misconfigured credentials fail fast.
-func (r *Releaser) Verify(ctx context.Context) error {
+// endpoint joins a path onto the configured API base (DefaultAPIURL when
+// unset).
+func (r *Releaser) endpoint(path string) string {
 	api := r.APIURL
 	if api == "" {
 		api = DefaultAPIURL
 	}
-	url := fmt.Sprintf("%s/repos/%s/%s", strings.TrimSuffix(api, "/"), r.Owner, r.Repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	return strings.TrimSuffix(api, "/") + path
+}
+
+// do performs one authenticated API call and enforces the expected status.
+// Every error is prefixed with what the call was doing, so a failure reads as
+// an operation ("creating release core@1.3.0: ...") rather than a URL. The
+// response body is returned (bounded) because a created release carries the
+// asset endpoint the caller needs. contentLength must be given for bodies the
+// http package cannot measure itself (a file stream) — GitHub's upload
+// endpoint rejects chunked requests; 0 leaves it to the package.
+func (r *Releaser) do(ctx context.Context, method, url string, body io.Reader, contentType string, contentLength int64, wantStatus int, what string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		return fmt.Errorf("github: %w", err)
+		return nil, fmt.Errorf("github: %w", err)
+	}
+	if contentLength > 0 {
+		req.ContentLength = contentLength
 	}
 	req.Header.Set("Authorization", "Bearer "+r.Token)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 
 	client := r.Client
 	if client == nil {
@@ -83,15 +98,24 @@ func (r *Releaser) Verify(ctx context.Context) error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("github: verifying %s/%s: %w", r.Owner, r.Repo, err)
+		return nil, fmt.Errorf("github: %s: %w", what, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("github: verifying %s/%s: unexpected status %s: %s",
-			r.Owner, r.Repo, resp.Status, strings.TrimSpace(string(body)))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != wantStatus {
+		return nil, fmt.Errorf("github: %s: unexpected status %s: %s",
+			what, resp.Status, strings.TrimSpace(string(data)))
 	}
-	return nil
+	return data, nil
+}
+
+// Verify checks that the repository is reachable with the configured token
+// (GET /repos/{owner}/{repo} must return 200). Meant to run before any
+// release work so misconfigured credentials fail fast.
+func (r *Releaser) Verify(ctx context.Context) error {
+	_, err := r.do(ctx, http.MethodGet, r.endpoint("/repos/"+r.Owner+"/"+r.Repo), nil, "", 0,
+		http.StatusOK, fmt.Sprintf("verifying %s/%s", r.Owner, r.Repo))
+	return err
 }
 
 // Record implements release.ReleaseRecorder.
@@ -115,32 +139,10 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		return fmt.Errorf("github: %w", err)
 	}
 
-	api := r.APIURL
-	if api == "" {
-		api = DefaultAPIURL
-	}
-	url := fmt.Sprintf("%s/repos/%s/%s/releases", strings.TrimSuffix(api, "/"), r.Owner, r.Repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	respBody, err := r.do(ctx, http.MethodPost, r.endpoint("/repos/"+r.Owner+"/"+r.Repo+"/releases"),
+		bytes.NewReader(payload), "application/json", 0, http.StatusCreated, "creating release "+tag)
 	if err != nil {
-		return fmt.Errorf("github: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+r.Token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
-
-	client := r.Client
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("github: creating release %s: %w", tag, err)
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("github: creating release %s: unexpected status %s: %s",
-			tag, resp.Status, strings.TrimSpace(string(respBody)))
+		return err
 	}
 	paths, err := attachmentPaths(rel)
 	if err != nil {
@@ -154,7 +156,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		return fmt.Errorf("github: release %s: %w", tag, err)
 	}
 	for _, p := range paths {
-		if err := r.uploadAsset(ctx, client, uploadURL, tag, p); err != nil {
+		if err := r.uploadAsset(ctx, uploadURL, tag, p); err != nil {
 			return err
 		}
 	}
@@ -212,37 +214,20 @@ func assetUploadURL(created []byte) (string, error) {
 // uploadAsset attaches one file to a release through the endpoint the release
 // itself advertised (uploads.github.com on the public API). The asset is
 // named after the file.
-func (r *Releaser) uploadAsset(ctx context.Context, client *http.Client, uploadURL, tag, path string) error {
+func (r *Releaser) uploadAsset(ctx context.Context, uploadURL, tag, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("github: release %s asset: %w", tag, err)
 	}
 	defer f.Close()
+
 	fi, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("github: release %s asset: %w", tag, err)
 	}
-
 	name := filepath.Base(path)
-	url := uploadURL + "?name=" + neturl.QueryEscape(name)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
-	if err != nil {
-		return fmt.Errorf("github: %w", err)
-	}
-	req.ContentLength = fi.Size()
-	req.Header.Set("Authorization", "Bearer "+r.Token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/octet-stream")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("github: uploading asset %s to release %s: %w", name, tag, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("github: uploading asset %s to release %s: unexpected status %s: %s",
-			name, tag, resp.Status, strings.TrimSpace(string(body)))
-	}
-	return nil
+	_, err = r.do(ctx, http.MethodPost, uploadURL+"?name="+neturl.QueryEscape(name), f,
+		"application/octet-stream", fi.Size(), http.StatusCreated,
+		fmt.Sprintf("uploading asset %s to release %s", name, tag))
+	return err
 }

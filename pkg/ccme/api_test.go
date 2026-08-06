@@ -143,19 +143,19 @@ func TestScopeTermAndSetHelpers(t *testing.T) {
 	t.Parallel()
 
 	p := DefaultParser()
-	res, err := p.ParseSubject("feat(core,-docs,@acme/*,.,global): x")
+	res, err := p.ParseSubject("feat(core,-docs,@acme/*,.): x")
 	if err != nil {
 		t.Fatal(err)
 	}
 	scopes := res.Units[0].Scopes()
 
-	if got, want := scopes.String(), "core,-docs,@acme/*,.,global"; got != want {
+	if got, want := scopes.String(), "core,-docs,@acme/*,."; got != want {
 		t.Errorf("ScopeSet.String() = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(scopes.Names(), "|"), "core|docs|@acme/*|.|global"; got != want {
+	if got, want := strings.Join(scopes.Names(), "|"), "core|docs|@acme/*|."; got != want {
 		t.Errorf("ScopeSet.Names() = %q, want %q", got, want)
 	}
-	if got, want := scopes.Includes().String(), "core,@acme/*,.,global"; got != want {
+	if got, want := scopes.Includes().String(), "core,@acme/*,."; got != want {
 		t.Errorf("Includes() = %q, want %q", got, want)
 	}
 	if got, want := scopes.Excludes().String(), "-docs"; got != want {

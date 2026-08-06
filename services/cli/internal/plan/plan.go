@@ -1331,11 +1331,7 @@ func (cp *computation) finalise() {
 		if shared[name] {
 			continue // versioned by its group below
 		}
-		if pin, ok := cp.pinned[name]; ok {
-			cp.applyPin(rel, pin)
-			continue
-		}
-		cp.computeVersion(rel)
+		cp.versionOne(name, rel)
 	}
 
 	spaceNames := make([]string, 0, len(groups))
@@ -1513,12 +1509,7 @@ func (cp *computation) applyFixedGroup(spaceName string, members []string) {
 		// graduating while the max baseline is already stable. Fall back to
 		// per-member computation so such a member still releases correctly.
 		for _, name := range members {
-			rel := cp.rel[name]
-			if p, ok := cp.pinned[name]; ok {
-				cp.applyPin(rel, p)
-				continue
-			}
-			cp.computeVersion(rel)
+			cp.versionOne(name, cp.rel[name])
 		}
 		if mode == model.VersioningFixed {
 			// The alignment catch-up: a fixed space promises one version for
@@ -1585,6 +1576,18 @@ func (cp *computation) alignFixedLaggards(spaceName string, g *Release, members 
 			"released at %s with no changes of its own, catching up to space %q's published version",
 			versionString(g.Baseline), spaceName))
 	}
+}
+
+// versionOne applies the §13.9 computation to a single package: its pin when
+// one is in force, the ordinary computation otherwise. The single call path
+// is what keeps the independent loop and the fixed-group fallback agreeing
+// about pin precedence.
+func (cp *computation) versionOne(name string, rel *Release) {
+	if p, ok := cp.pinned[name]; ok {
+		cp.applyPin(rel, p)
+		return
+	}
+	cp.computeVersion(rel)
 }
 
 // computeVersion implements §13.9 for a package with no exact Release-As.

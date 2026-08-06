@@ -246,7 +246,7 @@ func TestReleaseAsExactOnMultiPackageScope(t *testing.T) {
 	t.Parallel()
 
 	p := DefaultParser()
-	for _, header := range []string{"release(core,cli): x", "release(*): x", "release(global): x"} {
+	for _, header := range []string{"release(core,cli): x", "release(*): x"} {
 		res, err := p.Parse(header + "\n\nRelease-As: 4.0.0")
 		if err == nil || firstError(res) != CodeE154 {
 			t.Errorf("%q = %v (%s), want E154", header, err, codesOf(res))

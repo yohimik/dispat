@@ -36,7 +36,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'   # adjust to your project's Go version
+          go-version: '1.26'
           cache: true
 
       - name: Build binary
@@ -47,7 +47,7 @@ jobs:
         run: |
           mkdir -p dist
           OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/${OUT_NAME}" .
+          go build -C services/cli -trimpath -ldflags="-s -w" -o "${PWD}/dist/${OUT_NAME}" .
           echo "Built dist/${OUT_NAME}"
 
       - name: Upload build artifact

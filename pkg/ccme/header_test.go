@@ -326,7 +326,7 @@ func TestDepthValues(t *testing.T) {
 		{"1024", 1024, false},
 		{"1025", DepthAll, false},   // saturates
 		{"999999", DepthAll, false}, // saturates
-		{"01", 0, true},   // §5.3: a leading zero is E111, only "0" may start with one
+		{"01", 0, true},             // §5.3: a leading zero is E111, only "0" may start with one
 		{"00", 0, true},
 		{"007", 0, true},
 		{"0*", 0, true},
@@ -548,30 +548,30 @@ func TestScopeTermClassification(t *testing.T) {
 	t.Parallel()
 
 	p := DefaultParser()
-	res, err := p.ParseSubject("feat(*,global,.,-legacy,@acme/*,plain): x")
+	res, err := p.ParseSubject("feat(*,.,-legacy,@acme/*,plain): x")
 	if err != nil {
 		t.Fatal(err)
 	}
 	scopes := res.Units[0].Scopes()
-	if len(scopes) != 6 {
-		t.Fatalf("got %d terms, want 6", len(scopes))
+	if len(scopes) != 5 {
+		t.Fatalf("got %d terms, want 5", len(scopes))
 	}
-	if !scopes[0].IsAll() || !scopes[1].IsAll() {
-		t.Errorf("'*' and 'global' must both be workspace-wide")
+	if !scopes[0].IsAll() {
+		t.Errorf("'*' must be workspace-wide")
 	}
-	if !scopes[2].IsDerived() {
+	if !scopes[1].IsDerived() {
 		t.Errorf("'.' must be the derived set")
 	}
-	if !scopes[3].Exclude || scopes[3].Name != "legacy" {
-		t.Errorf("'-legacy' = %+v, want an exclusion of legacy", scopes[3])
+	if !scopes[2].Exclude || scopes[2].Name != "legacy" {
+		t.Errorf("'-legacy' = %+v, want an exclusion of legacy", scopes[2])
 	}
-	if !scopes[4].IsGlob() {
+	if !scopes[3].IsGlob() {
 		t.Errorf("'@acme/*' must be a glob")
 	}
-	if scopes[5].IsGlob() || scopes[5].IsAll() || scopes[5].IsDerived() || scopes[5].Exclude {
+	if scopes[4].IsGlob() || scopes[4].IsAll() || scopes[4].IsDerived() || scopes[4].Exclude {
 		t.Errorf("'plain' must be an ordinary include")
 	}
-	if got, want := len(scopes.Includes()), 5; got != want {
+	if got, want := len(scopes.Includes()), 4; got != want {
 		t.Errorf("includes = %d, want %d", got, want)
 	}
 	if got, want := len(scopes.Excludes()), 1; got != want {
