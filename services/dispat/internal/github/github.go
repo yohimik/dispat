@@ -137,18 +137,25 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 			Msgf("github release skipped: no script exported %s", plan.GitHubExport)
 		return nil
 	}
+	// A PACKAGE_<KEY> export overrides both the documented commit and the
+	// target_commitish for this one package: its scripts produced the commit
+	// the release should hang off, wherever the run's own commit is.
+	sha, commitish := r.CommitSHA, r.TargetCommitish
+	if exported := rel.ExportedCommit(); exported != "" {
+		sha, commitish = exported, exported
+	}
 	body := changelog.RenderSections(rel, r.Format)
-	if r.CommitSHA != "" {
+	if sha != "" {
 		if body != "" {
 			body += "\n"
 		}
-		body += "### Release\n\n- commit: " + r.CommitSHA + "\n- tag: " + tag + "\n"
+		body += "### Release\n\n- commit: " + sha + "\n- tag: " + tag + "\n"
 	}
 	payload, err := json.Marshal(releaseRequest{
 		TagName:         tag,
 		Name:            tag,
 		Body:            body,
-		TargetCommitish: r.TargetCommitish,
+		TargetCommitish: commitish,
 		Prerelease:      rel.IsPrerelease(),
 	})
 	if err != nil {

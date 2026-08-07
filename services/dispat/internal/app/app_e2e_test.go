@@ -37,7 +37,7 @@ func appBaseConfig() config.File {
 	return config.File{
 		Scripts: map[string]string{"build": "echo building", "publish": "echo publishing"},
 		Spaces: map[string]config.SpaceConfig{
-			"libs": {Path: "packages", Run: config.SpaceRunConfig{
+			"libs": {Path: "packages", Flow: config.SpaceFlowConfig{
 				Build: []string{"build"}, Publish: []string{"publish"}}},
 		},
 		Concurrency: []int{1},
@@ -197,6 +197,8 @@ func TestAppCommitModeFinalizeWithGithub(t *testing.T) {
 
 	subject := appGit(t, root, "log", "-1", "--format=%s")
 	assert.Equal(t, "chore(release): core@0.1.0", subject, "the finalize phase created the release commit")
+	assert.Equal(t, "2", appGit(t, root, "rev-list", "--count", "HEAD"),
+		"exactly one release commit on top of the source commit")
 	tagTarget := appGit(t, root, "rev-list", "-n1", "core@0.1.0")
 	head := appGit(t, root, "rev-parse", "HEAD")
 	assert.Equal(t, head, tagTarget, "the tag points at the release commit")
@@ -209,6 +211,57 @@ func TestAppCommitModeFinalizeWithGithub(t *testing.T) {
 	require.Len(t, releases, 1)
 	assert.Equal(t, "core@0.1.0", releases[0].TagName)
 	assert.Contains(t, releases[0].Body, "- commit: "+head, "the release documents the release commit")
+}
+
+func TestAppCommitModeExportedPackageCommit(t *testing.T) {
+	// A release script may export PACKAGE_<KEY>=<commitHash>: the package's
+	// tag is then created at that commit instead of the release commit, and
+	// its GitHub release documents and targets the exported hash.
+	type ghRelease struct {
+		TagName         string `json:"tag_name"`
+		Body            string `json:"body"`
+		TargetCommitish string `json:"target_commitish"`
+	}
+	var releases []ghRelease
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet { // upfront verification
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		var rel ghRelease
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&rel))
+		releases = append(releases, rel)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	t.Setenv("DISPAT_APP_TOKEN", "tkn")
+
+	cfg := appBaseConfig()
+	// The publish runs before the release commit exists, so HEAD here is the
+	// source commit: the script pins the tag and the GitHub release to it.
+	cfg.Scripts["publish"] = `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"` +
+		` && echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"`
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true)}
+	cfg.GitHub = config.GitHubConfig{
+		Enabled: boolPtr(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_APP_TOKEN",
+	}
+	a, root, _ := appRepo(t, cfg)
+	appGit(t, root, "add", "-A")
+	appGit(t, root, "commit", "-qm", "feat(core): first release")
+	source := appGit(t, root, "rev-parse", "HEAD")
+
+	require.NoError(t, a.Release(context.Background()))
+
+	head := appGit(t, root, "rev-parse", "HEAD")
+	assert.NotEqual(t, source, head, "the release commit exists on top of the source commit")
+	assert.Equal(t, "chore(release): core@0.1.0", appGit(t, root, "log", "-1", "--format=%s"))
+	assert.Equal(t, source, appGit(t, root, "rev-list", "-n1", "core@0.1.0"),
+		"the tag is excluded from the release commit and pinned to the exported hash")
+
+	require.Len(t, releases, 1)
+	assert.Equal(t, source, releases[0].TargetCommitish, "the exported hash is the target_commitish")
+	assert.Contains(t, releases[0].Body, "- commit: "+source, "the body documents the exported hash")
 }
 
 func TestAppGithubReleaseSkippedWithoutExport(t *testing.T) {
@@ -251,6 +304,82 @@ func TestAppPushModeFailsFastWithoutARemote(t *testing.T) {
 
 	require.Error(t, a.Release(context.Background()), "remote verification fails before any work")
 	assert.Empty(t, appTags(t, root))
+}
+
+func TestAppPushVerifyDisabledSkipsTheUpfrontCheck(t *testing.T) {
+	// commit.verify=false switches the fail-fast ls-remote check off: the run
+	// does its release work and only the push itself fails. The published
+	// tag and the release commit prove the check was skipped.
+	cfg := appBaseConfig()
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true), Push: true, Verify: boolPtr(false)}
+	a, root, _ := appRepo(t, cfg)
+	appGit(t, root, "add", "-A")
+	appGit(t, root, "commit", "-qm", "feat(core): released, push fails later")
+
+	require.Error(t, a.Release(context.Background()), "the push itself still fails without a remote")
+	assert.Equal(t, []string{"core@0.1.0"}, appTags(t, root),
+		"release work must have happened before the failing push")
+	subject := appGit(t, root, "log", "-1", "--format=%s")
+	assert.Equal(t, "chore(release): core@0.1.0", subject, "the release commit exists")
+}
+
+func TestAppCommitModeCreatesNoCommitWhenNothingPublished(t *testing.T) {
+	// The release commit is created at the end of the run, only when
+	// something published: a run where every package fails leaves the
+	// history exactly as it was.
+	cfg := appBaseConfig()
+	cfg.Scripts["build"] = "exit 1"
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true)}
+	a, root, _ := appRepo(t, cfg)
+	appGit(t, root, "add", "-A")
+	appGit(t, root, "commit", "-qm", "feat(core): will fail its build")
+	base := appGit(t, root, "rev-parse", "HEAD")
+
+	require.Error(t, a.Release(context.Background()), "the failing package fails the run")
+	assert.Equal(t, base, appGit(t, root, "rev-parse", "HEAD"),
+		"no release commit may exist when nothing published")
+	assert.NotContains(t, appGit(t, root, "log", "-1", "--format=%s"), "chore(release)")
+	assert.Empty(t, appTags(t, root))
+}
+
+func TestAppPushSkipsTagsAlreadyOnTheRemote(t *testing.T) {
+	// A tag that already exists on the remote (e.g. left by a partially
+	// pushed earlier run) must be skipped while the commit and the remaining
+	// tags still arrive, so re-running converges instead of dying on
+	// "tag already exists".
+	cfg := appBaseConfig()
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true), Push: true}
+	a, root, _ := appRepo(t, cfg)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "extra"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "extra", "main.txt"), []byte("x"), 0o644))
+	appGit(t, root, "add", "-A")
+	appGit(t, root, "commit", "-qm", "feat(core,extra): both release")
+
+	bare := t.TempDir()
+	out, err := exec.Command("git", "init", "-q", "--bare", bare).CombinedOutput()
+	require.NoError(t, err, "git init --bare: %s", out)
+	appGit(t, root, "remote", "add", "origin", bare)
+
+	// Plant core's future tag on the remote only: create it at the current
+	// commit, push it, then delete it locally so the planner still plans
+	// core@0.1.0 and the run recreates it.
+	appGit(t, root, "tag", "-a", "core@0.1.0", "-m", "left by an earlier partial push")
+	appGit(t, root, "push", "-q", "origin", "core@0.1.0")
+	remoteTarget := appGit(t, root, "rev-list", "-n1", "core@0.1.0")
+	appGit(t, root, "tag", "-d", "core@0.1.0")
+
+	require.NoError(t, a.Release(context.Background()), "an existing remote tag must not fail the push")
+	assert.ElementsMatch(t, []string{"core@0.1.0", "extra@0.1.0"}, appTags(t, root))
+
+	remoteTags := appGit(t, root, "ls-remote", "--tags", "origin")
+	assert.Contains(t, remoteTags, "refs/tags/extra@0.1.0", "the new tag arrives")
+	// The pre-existing remote tag is untouched: still pointing where it did.
+	stillAt := strings.Split(appGit(t, root, "ls-remote", "origin", "refs/tags/core@0.1.0^{}"), "\t")[0]
+	assert.Equal(t, remoteTarget, stillAt, "the existing remote tag is skipped, not overwritten")
+	// The release commit itself was pushed.
+	remoteLog, err := exec.Command("git", "-C", bare, "log", "--format=%s", "--all").Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(remoteLog), "chore(release): core@0.1.0, extra@0.1.0")
 }
 
 func TestAppRunScriptDirect(t *testing.T) {

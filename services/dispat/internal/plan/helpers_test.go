@@ -150,8 +150,8 @@ func (g *plainGit) Subjects(ctx context.Context, sinceTag string) ([]string, err
 	return g.inner.Subjects(ctx, sinceTag)
 }
 
-func (g *plainGit) CreateTag(ctx context.Context, name, msg string) error {
-	return g.inner.CreateTag(ctx, name, msg)
+func (g *plainGit) CreateTag(ctx context.Context, name, msg, target string) error {
+	return g.inner.CreateTag(ctx, name, msg, target)
 }
 
 func TestCancellationWithoutAncestryChecker(t *testing.T) {

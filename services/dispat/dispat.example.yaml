@@ -14,7 +14,7 @@ scripts:
   publish-go: "./scripts/release.sh"
   notify: "./scripts/notify.sh"
 
-# A space's `run` object says what runs at which stage, referencing the named
+# A space's `flow` object says what runs at which stage, referencing the named
 # scripts above. Every entry is optional (a stage without a script still runs,
 # keeping ordering, tags, changelogs and github releases; it just executes no shell
 # command) and accepts one name or an array of names run in order.
@@ -41,7 +41,7 @@ spaces:
     # a failed package; --concurrency's build value bounds the parallelism.
     runScripts:
       lint: "npm run lint"
-    run:
+    flow:
       build: [install, build]
       publish: publish
       version: sync-deps
@@ -62,7 +62,7 @@ spaces:
   apps:
     path: packages/apps
     isBuildWaitingPublish: false
-    run:
+    flow:
       build: build-go
       publish: publish-go
     # Overrides the repository-wide tagFormat for this space only.
@@ -147,6 +147,7 @@ commit:
   messageFormat: "chore(release): {tags}"  # {tags}, {packages}
   push: false
   remote: origin
+  verify: true   # ls-remote check before any work when push is enabled
 
 # Shell used for all scripts; default /bin/sh -c.
 # shell: ["bash", "-c"]

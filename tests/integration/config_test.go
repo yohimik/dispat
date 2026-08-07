@@ -34,17 +34,17 @@ import (
 // TestConfigUnknownKeyIsRejected: viper's UnmarshalExact rejects unknown
 // keys rather than silently ignoring them — the one config mistake that is
 // otherwise invisible until a script that should have run never does. The
-// legacy case matters as much as the typo: the space script keys moved into
-// the nested `run` object, so a config still written in the old flat shape
-// (`buildScript` on the space) must fail loudly instead of releasing with
-// no scripts at all. These are exactly the shapes the typed model cannot
-// express, so they are authored as raw map[string]any.
+// legacy cases matter as much as the typo: the space script keys moved into
+// the nested object (once flat `buildScript`, then `run`, now `flow`), so a
+// config still written in an old shape must fail loudly instead of releasing
+// with no scripts at all. These are exactly the shapes the typed model
+// cannot express, so they are authored as raw map[string]any.
 func TestConfigUnknownKeyIsRejected(t *testing.T) {
 	for name, cfg := range map[string]map[string]any{
 		"top_level_typo": {
 			"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
 			"spaces": map[string]any{
-				"libs": map[string]any{"path": "packages", "run": map[string]any{"build": "build", "publish": "publish"}},
+				"libs": map[string]any{"path": "packages", "flow": map[string]any{"build": "build", "publish": "publish"}},
 			},
 			"conncurrency": 4,
 		},
@@ -52,6 +52,12 @@ func TestConfigUnknownKeyIsRejected(t *testing.T) {
 			"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
 			"spaces": map[string]any{
 				"libs": map[string]any{"path": "packages", "buildScript": "build", "publishScript": "publish"},
+			},
+		},
+		"legacy_space_run_key": {
+			"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
+			"spaces": map[string]any{
+				"libs": map[string]any{"path": "packages", "run": map[string]any{"build": "build", "publish": "publish"}},
 			},
 		},
 	} {
@@ -144,10 +150,10 @@ func TestConfigLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 		"publish": "echo publishing",
 		"login":   r.TsmarkScript("login.log", "$DISPAT_SPACE", 0),
 	}
-	withLogin := models.SpaceRunConfig{Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
+	withLogin := models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"spaceA": {Path: "packages/a", Run: withLogin},
-		"spaceB": {Path: "packages/b", Run: withLogin},
+		"spaceA": {Path: "packages/a", Flow: withLogin},
+		"spaceB": {Path: "packages/b", Flow: withLogin},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages/a", "a1")
@@ -181,9 +187,9 @@ func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
 		"good-login": "echo ok",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"broken": {Path: "packages/broken", Run: models.SpaceRunConfig{
+		"broken": {Path: "packages/broken", Flow: models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"bad-login"}}},
-		"fine": {Path: "packages/fine", Run: models.SpaceRunConfig{
+		"fine": {Path: "packages/fine", Flow: models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"good-login"}}},
 	}
 	r.WriteConfigModel(cfg)
@@ -219,7 +225,7 @@ func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 		"record-skip": `env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: models.SpaceRunConfig{
+		"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
 			Build:   []string{"build"},
 			Publish: []string{"publish"},
 			OnFail:  []string{"boom", "record-fail"},
@@ -336,9 +342,9 @@ func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 		"publish":      "echo publishing",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"provider": {Path: "packages/provider", Run: models.SpaceRunConfig{
+		"provider": {Path: "packages/provider", Flow: models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"fail-publish"}}},
-		"consumer": {Path: "packages/consumer", RevertOnFail: true, Run: models.SpaceRunConfig{
+		"consumer": {Path: "packages/consumer", RevertOnFail: true, Flow: models.SpaceFlowConfig{
 			Version: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
@@ -370,7 +376,7 @@ func githubConfig(apiURL string) models.File {
 		"build":   "echo building",
 		"publish": `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`,
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Run: models.SpaceRunConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}}}}
 	cfg.GitHub = models.GitHubConfig{
 		Enabled: harness.Bool(true), Owner: "acme", Repo: "mono",
@@ -464,7 +470,7 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 		"publish":  `echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`,
 		"announce": `echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`,
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Run: models.SpaceRunConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
 	r.WriteConfigModel(cfg)
 	t.Setenv("DISPAT_IT_TOKEN", "tkn")
@@ -515,7 +521,7 @@ func TestConfigScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 		"record-fail": `env | grep '^DISPAT_OUTPUT' | sort > "../../onfail-$DISPAT_PACKAGE.env"`,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: models.SpaceRunConfig{
+		"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
 			BeforeBuild: []string{"hook-export"},
 			Build:       []string{"build"},
 			Publish:     []string{"publish"},

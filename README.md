@@ -52,6 +52,10 @@ dispat stands on the shoulders of two things:
 
 - **[dispat](./services/dispat)**: the CLI itself. A terminal tour, key features and the full documentation (getting
   started, concepts, CLI, configuration, commit messages, script environment, architecture, coverage).
+- **[ccme](./pkg/ccme)**: dispat's Conventional Commits extension as a standalone Go parser: the vendored
+  specification, the two-axis propagation grammar, performance notes and fuzzing.
+- **[models](./pkg/models)**: the public configuration model, so external tooling can author dispat configs as typed
+  values and marshal them to loadable files.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 

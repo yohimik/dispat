@@ -20,7 +20,7 @@
       "runScripts": {
         "lint": "npm run lint"
       },
-      "run": {
+      "flow": {
         "build": ["install", "build"],
         "publish": "publish",
         "version": "sync-deps",
@@ -32,7 +32,7 @@
     "apps": {
       "path": "packages/apps",
       "isBuildWaitingPublish": false,
-      "run": {
+      "flow": {
         "build": "build-go",
         "publish": "publish-go"
       },
@@ -53,6 +53,10 @@
   "concurrency": [4, 2],
   "logLevel": "info",
   "logFormat": "pretty",
+  "shell": ["/bin/sh", "-c"],
+  "parser": {
+    "propagation": { "depth": 0 }
+  },
   "changelog": {
     "enabled": true,
     "file": "CHANGELOG.md",
@@ -67,7 +71,8 @@
     "enabled": false,
     "messageFormat": "chore(release): {tags}",
     "push": false,
-    "remote": "origin"
+    "remote": "origin",
+    "verify": true
   },
   "github": {
     "enabled": true,

@@ -39,7 +39,7 @@ func TestOrderChainRunsInTopologicalOrder(t *testing.T) {
 		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish()},
+		"libs": {Path: "packages", Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "mid", Provider: "base"},
@@ -83,9 +83,9 @@ func providerConsumerRepo(t *testing.T, isBuildWaitingPublish bool, providerPubl
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: "packages/provider", IsBuildWaitingPublish: isBuildWaitingPublish,
-			Run: models.SpaceRunConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
+			Flow: models.SpaceFlowConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
 		"consumer": {Path: "packages/consumer",
-			Run: models.SpaceRunConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
+			Flow: models.SpaceFlowConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
 	r.WriteConfigModel(cfg)
@@ -151,7 +151,7 @@ func TestOrderDiamondDependencyConverges(t *testing.T) {
 		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish()},
+		"libs": {Path: "packages", Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "b", Provider: "a"},
@@ -203,7 +203,7 @@ func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 		"sync":    "env | grep '^DISPAT_' | sort > " + envFile,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: models.SpaceRunConfig{
+		"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
 			Version: []string{"sync"}, Build: []string{"build"}, Publish: []string{"publish"},
 		}},
 	}

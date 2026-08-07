@@ -35,12 +35,12 @@ func runScriptsRepo(t *testing.T) *harness.Repo {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish(), RunScripts: map[string]string{
+		"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{
 			"lint":   "echo $DISPAT_PACKAGE >> ../../run.log",
 			"record": `env | grep '^DISPAT_' | sort > run-env.txt`,
 			"fail":   `[ "$DISPAT_PACKAGE" != "core" ] && echo $DISPAT_PACKAGE >> ../../run.log`,
 		}},
-		"tools": {Path: "tools", Run: buildPublish()},
+		"tools": {Path: "tools", Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -143,7 +143,7 @@ func TestRunConcurrencyBudget(t *testing.T) {
 		cfg := harness.BaseFile(1)
 		cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 		cfg.Spaces = map[string]models.SpaceConfig{
-			"libs": {Path: "packages", Run: buildPublish(), RunScripts: map[string]string{
+			"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{
 				"mark": r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 200*time.Millisecond),
 			}},
 		}
@@ -192,7 +192,7 @@ func TestRunInFixedSpaceIncludesRides(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Run: buildPublish(),
+		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish(),
 			RunScripts: map[string]string{"lint": "echo $DISPAT_PACKAGE >> ../../run.log"}},
 	}
 	r.WriteConfigModel(cfg)
@@ -216,7 +216,7 @@ func TestRunGraphOrderingUnderConcurrency(t *testing.T) {
 	cfg := harness.BaseFile(3)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish(), RunScripts: map[string]string{
+		"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{
 			"mark": r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 150*time.Millisecond),
 		}},
 	}
@@ -260,8 +260,8 @@ func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 		` echo "DISPAT_OUTPUT_FROM_BASE=hello-from-base" >> "$DISPAT_OUTPUT";` +
 		` else echo "$DISPAT_PACKAGE sees $DISPAT_OUTPUT_FROM_BASE from $DISPAT_OUTPUT_SOURCE_FROM_BASE" >> ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"outer":  {Path: "packages", Run: buildPublish(), RunScripts: map[string]string{"carry": carry}},
-		"middle": {Path: "middle", Run: buildPublish()}, // no run scripts: a silent carrier
+		"outer":  {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{"carry": carry}},
+		"middle": {Path: "middle", Flow: buildPublish()}, // no run scripts: a silent carrier
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "mid", Provider: "base"},
@@ -292,7 +292,7 @@ func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 		` echo "MARK=exported-before-failing" >> "$DISPAT_OUTPUT"; exit 1;` +
 		` else echo "app sees $DISPAT_OUTPUT_MARK" > ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish(), RunScripts: map[string]string{"failcarry": failCarry}},
+		"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{"failcarry": failCarry}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)

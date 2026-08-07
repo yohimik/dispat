@@ -166,3 +166,99 @@ func TestRecordsReleaseCommitTagsAndPush(t *testing.T) {
 	assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "no second release commit")
 	assert.Equal(t, 2, len(r.TagList()), "no new tags on a quiet run")
 }
+
+// TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished: the
+// release commit is created at the end of the run, only when something
+// published, so a run where every package fails leaves the history exactly
+// as it was: no commit, no tags.
+func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig("exit 1", 1)
+	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true)}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): will fail its build")
+	base := r.Git("rev-parse", "HEAD")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "the failing package must fail the run\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, base, r.Git("rev-parse", "HEAD"),
+		"no release commit may exist when nothing published")
+	assert.NotContains(t, r.Git("log", "-1", "--format=%s"), "chore(release)")
+	assert.Empty(t, r.TagList())
+}
+
+// TestRecordsPushSkipsExistingRemoteTags: a tag already present on the remote
+// (left by a partially pushed earlier run) is skipped with the rest of the
+// push going through — the branch, the release commit and every new tag —
+// and the pre-existing remote tag keeps its original target.
+func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+
+	bare := t.TempDir()
+	r.Git("init", "-q", "--bare", bare)
+	r.Git("remote", "add", "origin", bare)
+	r.Commit("feat(a,b): first release of both")
+
+	// Plant a's future tag on the remote only: create it at the source
+	// commit, push it, delete it locally, so the planner still plans a@0.1.0.
+	r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier partial push")
+	r.Git("push", "-q", "origin", "a@0.1.0")
+	remoteTarget := r.Git("rev-list", "-n1", "a@0.1.0")
+	r.Git("tag", "-d", "a@0.1.0")
+
+	r.ReleaseOK()
+	head := r.Git("rev-parse", "HEAD")
+
+	remoteRefs := r.Git("ls-remote", "origin")
+	assert.Contains(t, remoteRefs, "refs/tags/b@0.1.0", "the new tag arrives")
+	assert.Contains(t, remoteRefs, head, "the release commit arrives")
+	stillAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
+	assert.Equal(t, remoteTarget, stillAt, "the existing remote tag is skipped, not overwritten")
+}
+
+// TestRecordsExportedPackageCommitPinsTheTag: a release script exporting
+// PACKAGE_<KEY>=<commitHash> pins its package's tag to that commit, so in
+// commit mode the tag lands on the exported (source) commit while the
+// release commit still carries the changelog on top.
+func TestRecordsExportedPackageCommitPinsTheTag(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["publish"] = `echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"`
+	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true)}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+	source := r.Git("rev-parse", "HEAD")
+
+	r.ReleaseOK()
+
+	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
+		"the release commit still exists")
+	assert.NotEqual(t, source, r.Git("rev-parse", "HEAD"))
+	assert.Equal(t, source, r.Git("rev-list", "-n1", "core@0.1.0"),
+		"the tag is pinned to the exported commit, not the release commit")
+}
+
+// TestRecordsPushVerifyDisabled: commit.verify=false switches the upfront
+// ls-remote check off, so the release work happens and only the push itself
+// fails — where the default (verify on) fails fast before any work.
+func TestRecordsPushVerifyDisabled(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true), Push: true, Verify: harness.Bool(false)}
+	r.WriteConfigModel(cfg) // note: no remote configured at all
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): released, push fails later")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "the push itself still fails\nstdout:\n%s", res.Stdout)
+	assert.True(t, r.HasTag("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
+	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
+		"the release commit exists")
+}

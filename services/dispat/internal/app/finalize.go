@@ -52,9 +52,10 @@ func (h *runHooks) exec(ctx context.Context, name string, refs []string, failFas
 }
 
 // finalize runs the end-of-run release-commit phase: one commit staging every
-// published package's folder, tags on that commit, the push (when enabled),
-// and the GitHub releases — created last, so that with push enabled they
-// reference commits and tags that already exist on the remote.
+// published package's folder — created here, at the end of the run, right
+// before tagging and the push — then tags on that commit, the push (when
+// enabled), and the GitHub releases, created last so that with push enabled
+// they reference commits and tags that already exist on the remote.
 //
 // The commit and push hooks bracket their phases — beforeCommit / afterCommit
 // around the release commit, postCommit after commit and tags, beforePush /
@@ -93,8 +94,11 @@ func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, 
 		a.log.Info().Str("message", msg).Msg("created release commit")
 	}
 	hooks.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
-	for _, tag := range tags {
-		if err := a.git.CreateTag(ctx, tag, "release "+tag); err != nil {
+	for _, rel := range rels {
+		tag := rel.TagName()
+		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
+		// its tag to that commit instead of the release commit.
+		if err := a.git.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit()); err != nil {
 			a.log.Error().Err(err).Str("tag", tag).Msg("tagging failed")
 			return err
 		}
@@ -102,9 +106,14 @@ func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, 
 	hooks.run(ctx, "postCommit", a.cfg.Run.PostCommit)
 	if a.cfg.Commit.PushEnabled() {
 		hooks.run(ctx, "beforePush", a.cfg.Run.BeforePush)
-		if err := a.git.Push(ctx, remote); err != nil { // branch + tags
+		skipped, err := a.git.Push(ctx, remote, tags)
+		if err != nil {
 			a.log.Error().Err(err).Str("remote", remote).Msg("push failed")
 			return err
+		}
+		for _, tag := range skipped {
+			a.log.Warn().Str("tag", tag).Str("remote", remote).
+				Msg("tag already exists on the remote, skipped")
 		}
 		a.log.Info().Str("remote", remote).Strs("tags", tags).Msg("pushed release commit and tags")
 		hooks.run(ctx, "afterPush", a.cfg.Run.AfterPush)

@@ -19,7 +19,7 @@ const (
   "spaces": {
     "packages": {
       "path": "packages",
-      "run": {
+      "flow": {
         "build": "build",
         "publish": "publish"
       }
@@ -35,7 +35,7 @@ scripts:
 spaces:
   packages:
     path: packages
-    run:
+    flow:
       build: build
       publish: publish
 `
@@ -48,7 +48,7 @@ publish = "echo publish $DISPAT_PACKAGE@$DISPAT_NEW_VERSION"
 [spaces.packages]
 path = "packages"
 
-[spaces.packages.run]
+[spaces.packages.flow]
 build = "build"
 publish = "publish"
 `

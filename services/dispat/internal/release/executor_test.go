@@ -114,14 +114,19 @@ func (r *fakeRunner) envPrefix(t *testing.T, command string) []string {
 }
 
 type fakeTagger struct {
-	mu   sync.Mutex
-	tags []string
+	mu      sync.Mutex
+	tags    []string
+	targets map[string]string // tag name -> requested target ("" = HEAD)
 }
 
-func (f *fakeTagger) CreateTag(_ context.Context, name, _ string) error {
+func (f *fakeTagger) CreateTag(_ context.Context, name, _ string, target string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tags = append(f.tags, name)
+	if f.targets == nil {
+		f.targets = map[string]string{}
+	}
+	f.targets[name] = target
 	return nil
 }
 
@@ -224,6 +229,22 @@ func TestRunSuccessOrder(t *testing.T) {
 	assert.ElementsMatch(t, []string{"a@1.0.1", "b@1.0.1"}, tg.tags)
 	assert.ElementsMatch(t, []string{"a", "b"}, cl.entries)
 	assert.Equal(t, ccme.Version{Major: 1, Patch: 1}, res["a"].To)
+}
+
+func TestRunTagTargetFromPackageCommitExport(t *testing.T) {
+	// A PACKAGE_<KEY> output pins the package's tag to the exported commit;
+	// packages without the export keep tagging HEAD (empty target).
+	p := mkPlan(false, nil, nil, "a", "b")
+	p.Releases["a"].Outputs = []plan.Output{{
+		Name: plan.PackageCommitExportPrefix + plan.EnvKey("a"), Value: "abc1234", Source: "a:build"}}
+	r := &fakeRunner{}
+	tg := &fakeTagger{}
+	res := newExecutor(r, tg, &fakeChangelog{}, 2, 2).Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, res["a"].Status)
+	require.Equal(t, StatusPublished, res["b"].Status)
+	assert.Equal(t, "abc1234", tg.targets["a@1.0.1"], "the exported commit becomes the tag target")
+	assert.Equal(t, "", tg.targets["b@1.0.1"], "no export means tagging HEAD")
 }
 
 func TestRunBuildWaitsPublish(t *testing.T) {

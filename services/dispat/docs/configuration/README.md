@@ -46,8 +46,8 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 
 ## Script sequences
 
-`scripts` defines named commands; the `run` objects (the top-level one and each space's) say **what runs when**,
-referencing those names. Every entry of a `run` object accepts either a single script name or an array of names executed
+`scripts` defines named commands; the top-level `run` object and each space's `flow` object say **what runs when**,
+referencing those names. Every entry of either object accepts a single script name or an array of names executed
 **sequentially, in order**; a scalar is simply a one-element sequence. How a failure inside a sequence behaves depends
 on what the sequence gates:
 

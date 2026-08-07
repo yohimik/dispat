@@ -95,9 +95,9 @@ func TestTagRoundTrip(t *testing.T) {
 	_, found := tagsOf(t, cli, ctx, "core", "").Baseline()
 	assert.False(t, found, "no tags yet")
 
-	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0"))
-	require.NoError(t, cli.CreateTag(ctx, "core@0.2.0", "release core@0.2.0"))
-	require.NoError(t, cli.CreateTag(ctx, "core-utils@9.9.9", "other package"))
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
+	require.NoError(t, cli.CreateTag(ctx, "core@0.2.0", "release core@0.2.0", ""))
+	require.NoError(t, cli.CreateTag(ctx, "core-utils@9.9.9", "other package", ""))
 
 	tag, found := tagsOf(t, cli, ctx, "core", "").Baseline()
 	require.True(t, found)
@@ -177,7 +177,7 @@ func TestStableBaselineAbsent(t *testing.T) {
 func TestTagCommitIsPeeled(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
-	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release"))
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release", ""))
 
 	tag, found := tagsOf(t, cli, ctx, "core", "").Baseline()
 	require.True(t, found)
@@ -278,7 +278,7 @@ func TestTagFormatValidateAgreesWithGit(t *testing.T) {
 	} {
 		require.NoError(t, f.Validate(), "%q", f)
 		name := f.Render("core", ccme.Version{Major: 1, Minor: 2, Patch: 3})
-		assert.NoError(t, cli.CreateTag(ctx, name, "release "+name),
+		assert.NoError(t, cli.CreateTag(ctx, name, "release "+name, ""),
 			"git must accept %q, which Validate allowed", name)
 	}
 }
@@ -444,8 +444,10 @@ func TestVerifyRemoteAndPush(t *testing.T) {
 	committed, err := cli.CommitDirs(ctx, []string{pkg}, "chore(release): core@0.1.0")
 	require.NoError(t, err)
 	require.True(t, committed)
-	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0"))
-	require.NoError(t, cli.Push(ctx, "origin"))
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
+	skipped, err := cli.Push(ctx, "origin", []string{"core@0.1.0"})
+	require.NoError(t, err)
+	assert.Empty(t, skipped, "a fresh tag is pushed, not skipped")
 
 	out, err := exec.Command("git", "-C", bare, "tag").Output()
 	require.NoError(t, err)
@@ -453,6 +455,42 @@ func TestVerifyRemoteAndPush(t *testing.T) {
 	out, err = exec.Command("git", "-C", bare, "log", "--format=%s", "--all").Output()
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "chore(release): core@0.1.0", "commit must arrive on the remote")
+}
+
+func TestPushSkipsTagsAlreadyOnTheRemote(t *testing.T) {
+	// A partially pushed release means some tags already exist on the remote;
+	// a later push must skip exactly those and still deliver the rest, rather
+	// than dying on "tag already exists".
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
+	skipped, err := cli.Push(ctx, "origin", []string{"core@0.1.0"})
+	require.NoError(t, err)
+	require.Empty(t, skipped)
+
+	// RemoteTags sees the pushed tag under its plain name (annotated tags
+	// list twice on the wire; the peeled duplicate must not leak through).
+	remoteTags, err := cli.RemoteTags(ctx, "origin")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"core@0.1.0": true}, remoteTags)
+
+	// A second run's push carries one existing and one new tag.
+	pkg := filepath.Join(root, "packages", "core")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "CHANGELOG.md"), []byte("# Changelog\n"), 0o644))
+	committed, err := cli.CommitDirs(ctx, []string{pkg}, "chore(release): core@0.2.0")
+	require.NoError(t, err)
+	require.True(t, committed)
+	require.NoError(t, cli.CreateTag(ctx, "core@0.2.0", "release core@0.2.0", ""))
+
+	skipped, err = cli.Push(ctx, "origin", []string{"core@0.1.0", "core@0.2.0"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core@0.1.0"}, skipped, "the existing tag is skipped, not an error")
+
+	out, err := exec.Command("git", "-C", bare, "tag").Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "core@0.2.0", "the new tag still arrives")
 }
 
 func TestTagNameNormativeForm(t *testing.T) {

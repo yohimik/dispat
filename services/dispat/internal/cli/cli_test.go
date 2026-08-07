@@ -32,7 +32,7 @@ func testConfig() config.File {
 	return config.File{
 		Scripts: map[string]string{"build": "echo building", "publish": "echo publishing"},
 		Spaces: map[string]config.SpaceConfig{
-			"libs": {Path: "packages", Run: config.SpaceRunConfig{
+			"libs": {Path: "packages", Flow: config.SpaceFlowConfig{
 				Build: []string{"build"}, Publish: []string{"publish"}}},
 		},
 		Concurrency: []int{1},
@@ -178,7 +178,7 @@ func testConfigRevert() config.File {
 	}
 	cfg.Spaces = map[string]config.SpaceConfig{
 		"libs": {Path: "packages", RevertOnFail: true,
-			Run: config.SpaceRunConfig{Build: []string{"bad-build"}}},
+			Flow: config.SpaceFlowConfig{Build: []string{"bad-build"}}},
 	}
 	return cfg
 }
@@ -636,7 +636,7 @@ func testConfigLogin() config.File {
 	cfg := testConfig()
 	cfg.Scripts["login"] = "echo login >> ../../login.log"
 	cfg.Scripts["hook"] = "echo $DISPAT_STAGE-$DISPAT_PACKAGE >> ../../pkg-hooks.log"
-	cfg.Spaces["libs"] = config.SpaceConfig{Path: "packages", Run: config.SpaceRunConfig{
+	cfg.Spaces["libs"] = config.SpaceConfig{Path: "packages", Flow: config.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"},
 		BeforePublish: []string{"hook"}, Announce: []string{"hook"},
 	}}

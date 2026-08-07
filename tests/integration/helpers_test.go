@@ -24,8 +24,8 @@ import (
 
 // buildPublish is the standard space run object: a build and a publish stage
 // referencing the "build" and "publish" scripts.
-func buildPublish() models.SpaceRunConfig {
-	return models.SpaceRunConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+func buildPublish() models.SpaceFlowConfig {
+	return models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
 }
 
 // libsConfig returns the canonical one-space config: a "libs" space at
@@ -35,7 +35,7 @@ func libsConfig(buildScript string, concurrency ...int) models.File {
 	f := harness.BaseFile(concurrency...)
 	f.Scripts = map[string]string{"build": buildScript, "publish": "echo publishing"}
 	f.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish()},
+		"libs": {Path: "packages", Flow: buildPublish()},
 	}
 	return f
 }

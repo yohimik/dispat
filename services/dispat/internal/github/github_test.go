@@ -42,6 +42,29 @@ func testRelease() *plan.Release {
 	}
 }
 
+func TestRecordUsesExportedCommit(t *testing.T) {
+	// A PACKAGE_<KEY> export overrides the release's commit for this one
+	// package: it becomes the target_commitish and the documented commit,
+	// even over the finalize phase's own values.
+	var gotBody releaseRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Outputs = append(rel.Outputs, plan.Output{
+		Name: plan.PackageCommitExportPrefix + plan.EnvKey("core"), Value: "deadbeef", Source: "core:publish"})
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		CommitSHA: "aaaa", TargetCommitish: "aaaa"}
+	require.NoError(t, r.Record(context.Background(), rel))
+	assert.Equal(t, "deadbeef", gotBody.TargetCommitish)
+	assert.Contains(t, gotBody.Body, "- commit: deadbeef")
+	assert.NotContains(t, gotBody.Body, "aaaa")
+}
+
 func TestRecordSkipsWithoutExport(t *testing.T) {
 	// A package that exported no DISPAT_EXPORT_GITHUB gets no GitHub release
 	// — the recorder must not even reach the API.

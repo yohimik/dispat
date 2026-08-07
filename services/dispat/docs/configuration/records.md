@@ -67,9 +67,11 @@ marks; if not, GitHub creates the tag ref at the **default branch head**. What t
 - [`commit`](#commit) **enabled**: GitHub releases move to the end of the run, and every release body documents the
   release commit SHA and the tag in a `### Release` section, whether or not they were pushed. With `commit.push` on,
   releases are created **after** the push and the tag is additionally pinned to the release commit via
-  `target_commitish`. Without `push`, the SHA cannot be sent to GitHub (it does not exist on the remote yet), so GitHub
-  creates the tag ref at the default branch head until you push; the true commit and tag remain recorded in the release
-  body.
+  `target_commitish`. Without `push`, the SHA cannot be sent to GitHub (it does not exist on the remote yet), so
+  GitHub creates the tag ref at the default branch head until you push; the true commit and tag remain recorded in
+  the release body.
+- A package whose scripts exported [`PACKAGE_<KEY>`](../environment.md#script-outputs) overrides both modes: its
+  release documents the exported hash and sends it as `target_commitish`.
 
 The export's value names the **release assets**: a whitespace-separated list of absolute paths to existing files, each
 uploaded (named after the file, `application/octet-stream`) right after the release is created, in `commit`
@@ -83,8 +85,9 @@ file still fails the package like any other recording failure.
 |-----------------|--------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `enabled`       | `false`                  | Create one release commit at the end of a successful run.                                                       |
 | `messageFormat` | `chore(release): {tags}` | Template; `{tags}` and `{packages}` become comma-separated lists.                                               |
-| `push`          | `false`                  | Push the release commit and tags (`git push --follow-tags <remote> HEAD`). Only applies when `enabled` is true. |
+| `push`          | `false`                  | Push the release commit and tags. Tags that already exist on the remote are skipped with a warning; the rest are pushed. Only applies when `enabled` is true. |
 | `remote`        | `origin`                 | Remote to push to.                                                                                              |
+| `verify`        | `true`                   | Verify remote access (`git ls-remote`) before any release work when `push` is enabled. Set `false` to skip the check, e.g. for a remote that rejects ls-remote but accepts pushes. |
 
 **Disabled** (the default), dispat creates no commit at all. Each package's annotated tag is created right after its
 publish succeeds and points at the commit the run released from: `HEAD` of the checkout, which stays put for the whole
@@ -94,12 +97,16 @@ left in the worktree, and pushing the tags is left to CI (`git push origin --tag
 When **enabled**, the run instead finishes with a *finalize phase*: all published packages' folders are staged and
 committed in a single commit (changelog files, version-script manifest changes; add build outputs to your
 `.gitignore` or they get committed too), and the release tags are created **on that commit** instead of during each
-publish. If nothing changed on disk (e.g. changelogs disabled), no empty commit is created but tags are still placed.
+publish. A package whose scripts exported [`PACKAGE_<KEY>`](../environment.md#script-outputs) is the exception: its
+tag is excluded from the release commit and created at the exported commit hash instead. If nothing changed on disk
+(e.g. changelogs disabled), no empty commit is created but tags are still placed.
 GitHub releases move to the end of the run and document the release commit in their body; what the GitHub side does in
 each mode is described under [`github`](#github).
 
-Pushing requires a checked-out branch (not a detached HEAD; use `actions/checkout` with a `ref`). When `push` is
-enabled, remote access is **verified before any release work starts** (`git ls-remote`), so a misconfigured remote fails
-the run before anything is built; an enabled GitHub configuration is likewise verified up front, push or not (see [
+Pushing pushes the branch first and the run's tags after it, skipping any tag that already exists on the remote
+(with a warning naming it), so a re-run after a partially pushed release converges instead of dying on "tag already
+exists". It requires a checked-out branch (not a detached HEAD; use `actions/checkout` with a `ref`). When `push` is
+enabled, remote access is **verified before any release work starts** (`git ls-remote`, switched off by
+`verify: false`), so a misconfigured remote fails the run before anything is built; an enabled GitHub configuration is likewise verified up front, push or not (see [
 `github`](#github)). A failure during the finalize phase itself (commit, tag, push, GitHub release) exits 1, but
 already-published registry artifacts stay published.

@@ -39,7 +39,7 @@ type (
 	GitHubConfig      = public.GitHubConfig
 	CommitConfig      = public.CommitConfig
 	SpaceConfig       = public.SpaceConfig
-	SpaceRunConfig    = public.SpaceRunConfig
+	SpaceFlowConfig   = public.SpaceFlowConfig
 	DependencyConfig  = public.DependencyConfig
 )
 
@@ -64,22 +64,22 @@ func DefaultNonPackageScopes() []string { return public.DefaultNonPackageScopes(
 // error messages, so validation and resolution never disagree about the list.
 func scriptRefs(s *SpaceConfig) map[string][]string {
 	return map[string][]string{
-		"run.build":          s.Run.Build,
-		"run.publish":        s.Run.Publish,
-		"run.version":        s.Run.Version,
-		"run.login":          s.Run.Login,
-		"run.announce":       s.Run.Announce,
-		"run.beforeAll":      s.Run.BeforeAll,
-		"run.beforeVersion":  s.Run.BeforeVersion,
-		"run.postVersion":    s.Run.PostVersion,
-		"run.beforeBuild":    s.Run.BeforeBuild,
-		"run.postBuild":      s.Run.PostBuild,
-		"run.beforePublish":  s.Run.BeforePublish,
-		"run.postPublish":    s.Run.PostPublish,
-		"run.beforeAnnounce": s.Run.BeforeAnnounce,
-		"run.postAnnounce":   s.Run.PostAnnounce,
-		"run.onFail":         s.Run.OnFail,
-		"run.onSkip":         s.Run.OnSkip,
+		"flow.build":          s.Flow.Build,
+		"flow.publish":        s.Flow.Publish,
+		"flow.version":        s.Flow.Version,
+		"flow.login":          s.Flow.Login,
+		"flow.announce":       s.Flow.Announce,
+		"flow.beforeAll":      s.Flow.BeforeAll,
+		"flow.beforeVersion":  s.Flow.BeforeVersion,
+		"flow.postVersion":    s.Flow.PostVersion,
+		"flow.beforeBuild":    s.Flow.BeforeBuild,
+		"flow.postBuild":      s.Flow.PostBuild,
+		"flow.beforePublish":  s.Flow.BeforePublish,
+		"flow.postPublish":    s.Flow.PostPublish,
+		"flow.beforeAnnounce": s.Flow.BeforeAnnounce,
+		"flow.postAnnounce":   s.Flow.PostAnnounce,
+		"flow.onFail":         s.Flow.OnFail,
+		"flow.onSkip":         s.Flow.OnSkip,
 	}
 }
 
@@ -411,22 +411,22 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 			RevertOnFail:         sc.RevertOnFail,
 			Versioning:           model.Versioning(sc.Versioning),
 			RunScripts:           sc.RunScripts,
-			BuildScript:          c.Commands(sc.Run.Build),
-			PublishScript:        c.Commands(sc.Run.Publish),
-			VersionScript:        c.Commands(sc.Run.Version),
-			LoginScript:          c.Commands(sc.Run.Login),
-			AnnounceScript:       c.Commands(sc.Run.Announce),
-			BeforeAllScript:      c.Commands(sc.Run.BeforeAll),
-			BeforeVersionScript:  c.Commands(sc.Run.BeforeVersion),
-			PostVersionScript:    c.Commands(sc.Run.PostVersion),
-			BeforeBuildScript:    c.Commands(sc.Run.BeforeBuild),
-			PostBuildScript:      c.Commands(sc.Run.PostBuild),
-			BeforePublishScript:  c.Commands(sc.Run.BeforePublish),
-			PostPublishScript:    c.Commands(sc.Run.PostPublish),
-			BeforeAnnounceScript: c.Commands(sc.Run.BeforeAnnounce),
-			PostAnnounceScript:   c.Commands(sc.Run.PostAnnounce),
-			OnFailScript:         c.Commands(sc.Run.OnFail),
-			OnSkipScript:         c.Commands(sc.Run.OnSkip),
+			BuildScript:          c.Commands(sc.Flow.Build),
+			PublishScript:        c.Commands(sc.Flow.Publish),
+			VersionScript:        c.Commands(sc.Flow.Version),
+			LoginScript:          c.Commands(sc.Flow.Login),
+			AnnounceScript:       c.Commands(sc.Flow.Announce),
+			BeforeAllScript:      c.Commands(sc.Flow.BeforeAll),
+			BeforeVersionScript:  c.Commands(sc.Flow.BeforeVersion),
+			PostVersionScript:    c.Commands(sc.Flow.PostVersion),
+			BeforeBuildScript:    c.Commands(sc.Flow.BeforeBuild),
+			PostBuildScript:      c.Commands(sc.Flow.PostBuild),
+			BeforePublishScript:  c.Commands(sc.Flow.BeforePublish),
+			PostPublishScript:    c.Commands(sc.Flow.PostPublish),
+			BeforeAnnounceScript: c.Commands(sc.Flow.BeforeAnnounce),
+			PostAnnounceScript:   c.Commands(sc.Flow.PostAnnounce),
+			OnFailScript:         c.Commands(sc.Flow.OnFail),
+			OnSkipScript:         c.Commands(sc.Flow.OnSkip),
 			TagFormat:            tagFormat,
 		}
 		dir := filepath.Join(root, sc.Path)

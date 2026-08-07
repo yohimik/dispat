@@ -10,14 +10,14 @@ package named after the folder.
 | `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped). Package names must be unique across all spaces.                                                                                                                                                                                                                  |
 | `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
 | `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage, or is skipped after its version stage already modified files.                                                                                                                                                   |
-| `run`                   | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
+| `flow`                  | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning).                                                                                                                                                                                                                                                    |
 | `runScripts`            | map name → shell command | no         | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
 
 ## Stages and hooks
 
-The space's `run` object, keyed by stage or hook name (every entry a script name or an array of names; see the
+The space's `flow` object, keyed by stage or hook name (every entry a script name or an array of names; see the
 [sequence rules](./README.md#script-sequences)):
 
 | Key              | Kind    | Description                                                                                                                                                            |
@@ -44,13 +44,13 @@ release records are fully preserved); it just executes no shell command. An unco
 through the configured `shell` (default `/bin/sh -c`) with the package folder as the working directory.
 
 The hooks bracket the stages of every package of the space, each with the full stage environment (`DISPAT_STAGE`
-carries the hook's name). Everything up to `run.beforePublish` exists to *gate* the release, so a failure there fails
+carries the hook's name). Everything up to `flow.beforePublish` exists to *gate* the release, so a failure there fails
 the package exactly like a failing stage script: the pipeline stops, nothing is published or tagged, `revertOnFail`
-applies. `run.postPublish` and the announce hooks run after the package's status has settled and only warn: failing the
+applies. `flow.postPublish` and the announce hooks run after the package's status has settled and only warn: failing the
 package then would report an unpublished release for a published one. The version hooks share the version stage's skip
 rule: when every provider a package was bumped for failed, neither the version script nor its hooks run.
 
-### `run.login`
+### `flow.login`
 
 Authentication (`npm login`, `docker login`, ...) is a property of the space, not of any one package, so the login runs
 **once per space and run**: the space's first publish triggers it, every other publish of the space **waits**
@@ -63,23 +63,23 @@ package variables, since which package triggered it is a scheduling accident. Wh
 [exports](../environment.md#script-outputs) is space-scoped too: every package of the space receives the login's exports
 from its publish stage onward, sourced `<space>:login`.
 
-### `run.announce`
+### `flow.announce`
 
 A fourth per-package stage, run after the publish frame completes (publish script, release records, tag,
-`run.postPublish`). Its job is pushing the release out to update channels (a Slack or Discord message, a webhook, a docs
+`flow.postPublish`). Its job is pushing the release out to update channels (a Slack or Discord message, a webhook, a docs
 feed), so alongside the full stage environment it is the natural consumer of the
 [release-notes variables](../environment.md#release-notes-data) (`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES`,
 `DISPAT_FIXES`) and the channel variables (`DISPAT_CHANNEL`, `DISPAT_OLD_CHANNEL`, `DISPAT_IS_PRERELEASE`) for choosing
-where and how to announce. It has the same hook structure as the other stages (`run.beforeAnnounce` /
-`run.postAnnounce`) but none of their authority: the release is already out, so an error in the stage **or either hook**
+where and how to announce. It has the same hook structure as the other stages (`flow.beforeAnnounce` /
+`flow.postAnnounce`) but none of their authority: the release is already out, so an error in the stage **or either hook**
 only warns, the package stays published, and no failure among the three sequences stops the others from running. The
 frame is skipped entirely when the publish failed; there is nothing to announce.
 
-### `run.onFail` and `run.onSkip`
+### `flow.onFail` and `flow.onSkip`
 
-Two outcome scripts, the failure-side counterparts of the announce stage. `run.onFail` runs once when a package of the
+Two outcome scripts, the failure-side counterparts of the announce stage. `flow.onFail` runs once when a package of the
 space **fails** at any stage (a failing gating hook, release recorder or tag included), after its status has settled and
-after `revertOnFail`'s rollback, so the script sees the folder's final state. `run.onSkip` runs once when the package is
+after `revertOnFail`'s rollback, so the script sees the folder's final state. `flow.onSkip` runs once when the package is
 **skipped** because a provider failed or was skipped. Both observe an outcome that has already happened, so an error in
 either only warns; both receive the full package environment (`DISPAT_STAGE` is `onFail` /
 `onSkip`) plus the specifics:
@@ -90,7 +90,7 @@ either only warns; both receive the full package environment (`DISPAT_STAGE` is 
 | `DISPAT_ERROR`        | `onFail` | The error message of the failing command or operation.  |
 | `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.             |
 
-Neither runs for a package that published (that is `run.postPublish` and the announce frame), and the run-level
+Neither runs for a package that published (that is `flow.postPublish` and the announce frame), and the run-level
 [run outcome listing](../environment.md#run-outcome-data) carries the same information for every package at once.
 
 ## `versioning`
@@ -133,7 +133,7 @@ linting what is about to ship, printing diffs, or smoke-checking artefacts.
 spaces:
   libs:
     path: packages
-    run: { build: build, publish: publish }
+    flow: { build: build, publish: publish }
     runScripts:
       lint: "npm run lint"
       preview: "echo \"$DISPAT_PACKAGE -> $DISPAT_NEW_VERSION\""

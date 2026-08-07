@@ -125,7 +125,7 @@ func (f *fakeGit) Subjects(_ context.Context, sinceTag string) ([]string, error)
 	return out, nil
 }
 
-func (f *fakeGit) CreateTag(context.Context, string, string) error { return nil }
+func (f *fakeGit) CreateTag(context.Context, string, string, string) error { return nil }
 
 // countingGit records how many git queries planning makes per package.
 type countingGit struct {

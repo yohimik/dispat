@@ -21,12 +21,12 @@ spaces:
     path: packages/libs
     isBuildWaitingPublish: true
     revertOnFail: true
-    run:
+    flow:
       build: build
       publish: publish
   apps:
     path: packages/apps
-    run:
+    flow:
       build: build
       publish: publish
 dependencies:
@@ -63,7 +63,7 @@ func TestLoadConcurrencyPair(t *testing.T) {
 	yml := `
 scripts: {build: "echo b", publish: "echo p"}
 spaces:
-  libs: {path: pkgs, run: {build: build, publish: publish}}
+  libs: {path: pkgs, flow: {build: build, publish: publish}}
 concurrency: [4, 2]
 `
 	root := writeRepo(t, yml, "pkgs/core")
@@ -77,7 +77,7 @@ func TestLoadDefaults(t *testing.T) {
 	yml := `
 scripts: {build: "echo b", publish: "echo p"}
 spaces:
-  libs: {path: pkgs, run: {build: build, publish: publish}}
+  libs: {path: pkgs, flow: {build: build, publish: publish}}
 `
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -97,7 +97,7 @@ func TestLoadCommitErrors(t *testing.T) {
 	base := `
 scripts: {build: "echo b"}
 spaces:
-  libs: {path: pkgs, run: {build: build}}
+  libs: {path: pkgs, flow: {build: build}}
 commitErrors: %s
 `
 	for _, tc := range []struct {
@@ -125,7 +125,7 @@ func TestLoadNonPackageScopes(t *testing.T) {
 	yml := `
 scripts: {build: "echo b"}
 spaces:
-  libs: {path: pkgs, run: {build: build}}
+  libs: {path: pkgs, flow: {build: build}}
 nonPackageScopes: [release, deps]
 `
 	root := writeRepo(t, yml, "pkgs/core")
@@ -139,8 +139,8 @@ func TestLoadTagFormatPerSpace(t *testing.T) {
 scripts: {build: "echo b"}
 tagFormat: "{name}@v{version}"
 spaces:
-  libs: {path: pkgs, run: {build: build}}
-  services: {path: svc, run: {build: build}, tagFormat: "services/{name}@v{version}"}
+  libs: {path: pkgs, flow: {build: build}}
+  services: {path: svc, flow: {build: build}, tagFormat: "services/{name}@v{version}"}
 `
 	root := writeRepo(t, yml, "pkgs/core", "svc/api")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -163,12 +163,12 @@ func TestLoadTagFormatInvalid(t *testing.T) {
 scripts: {build: "echo b"}
 tagFormat: "{name}"
 spaces:
-  libs: {path: pkgs, run: {build: build}}
+  libs: {path: pkgs, flow: {build: build}}
 `,
 		`
 scripts: {build: "echo b"}
 spaces:
-  libs: {path: pkgs, run: {build: build}, tagFormat: "{name}@{version}-{version}"}
+  libs: {path: pkgs, flow: {build: build}, tagFormat: "{name}@{version}-{version}"}
 `,
 	} {
 		root := writeRepo(t, yml, "pkgs/core")
@@ -202,7 +202,7 @@ func TestLoadFlagOverrides(t *testing.T) {
 func TestLoadLogFormatJSON(t *testing.T) {
 	yml := `
 scripts: {b: x}
-spaces: {a: {path: p, run: {build: b, publish: b}}}
+spaces: {a: {path: p, flow: {build: b, publish: b}}}
 logFormat: json
 `
 	root := writeRepo(t, yml)
@@ -234,7 +234,7 @@ func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 	yml := `
 scripts: {buildAll: "echo b", publishAll: "echo p"}
 spaces:
-  libs: {path: pkgs, run: {build: buildAll, publish: publishAll}}
+  libs: {path: pkgs, flow: {build: buildAll, publish: publishAll}}
 `
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -251,7 +251,7 @@ func TestLoadOptionalScripts(t *testing.T) {
 	yml := `
 scripts: {sync: "npm install"}
 spaces:
-  libs: {path: pkgs, run: {version: sync}}
+  libs: {path: pkgs, flow: {version: sync}}
 `
 	root := writeRepo(t, yml, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -415,7 +415,7 @@ shell: ["", "-c"]
 func TestLoadJSONConfig(t *testing.T) {
 	jsonCfg := `{
   "scripts": {"build": "echo b", "publish": "echo p"},
-  "spaces": {"libs": {"path": "pkgs", "run": {"build": "build", "publish": "publish"}}},
+  "spaces": {"libs": {"path": "pkgs", "flow": {"build": "build", "publish": "publish"}}},
   "concurrency": [4, 2],
   "github": {"enabled": false}
 }`
@@ -438,16 +438,16 @@ func TestLoadErrors(t *testing.T) {
 	cases := []struct {
 		name, yml, wantErr string
 	}{
-		{"unknown field", "scripts: {b: x}\nspaces: {a: {path: p, typo: 1, run: {build: b, publish: b}}}", "invalid format"},
+		{"unknown field", "scripts: {b: x}\nspaces: {a: {path: p, typo: 1, flow: {build: b, publish: b}}}", "invalid format"},
 		{"no spaces", "scripts: {b: x}", "at least one space"},
-		{"unknown script", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: nope, publish: b}}}", "unknown script"},
-		{"unknown version script", "scripts: {b: x}\nspaces: {a: {path: p, run: {version: nope}}}", "unknown script"},
-		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nconcurrency: -1", "concurrency"},
-		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nconcurrency: [1, 2, 3]", "at most two"},
-		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nlogLevel: loud", "logLevel"},
-		{"pretty is not a level", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nlogLevel: pretty", "logLevel"},
-		{"bad format", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\nlogFormat: fancy", "logFormat"},
-		{"self dependency", "scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, publish: b}}}\ndependencies: [{consumer: x, provider: x}]", "itself"},
+		{"unknown script", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: nope, publish: b}}}", "unknown script"},
+		{"unknown version script", "scripts: {b: x}\nspaces: {a: {path: p, flow: {version: nope}}}", "unknown script"},
+		{"negative concurrency", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, publish: b}}}\nconcurrency: -1", "concurrency"},
+		{"too many concurrency values", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, publish: b}}}\nconcurrency: [1, 2, 3]", "at most two"},
+		{"bad level", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, publish: b}}}\nlogLevel: loud", "logLevel"},
+		{"pretty is not a level", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, publish: b}}}\nlogLevel: pretty", "logLevel"},
+		{"bad format", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, publish: b}}}\nlogFormat: fancy", "logFormat"},
+		{"self dependency", "scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, publish: b}}}\ndependencies: [{consumer: x, provider: x}]", "itself"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -551,7 +551,7 @@ scripts: {clean: "echo clean", compile: "echo compile", pub: "echo pub"}
 spaces:
   libs:
     path: pkgs
-    run:
+    flow:
       build: [clean, compile]
       publish: pub
 `
@@ -576,7 +576,7 @@ scripts:
 spaces:
   libs:
     path: pkgs
-    run:
+    flow:
       build: build
       login: auth
       announce: [hook, build]
@@ -618,7 +618,7 @@ func TestLoadRunHooks(t *testing.T) {
 	yml := `
 scripts: {build: "echo b", notify: "echo notify", lint: "echo lint"}
 spaces:
-  libs: {path: pkgs, run: {build: build}}
+  libs: {path: pkgs, flow: {build: build}}
 run:
   beforeAll: lint
   postAll: notify
@@ -644,25 +644,25 @@ func TestLoadScriptReferenceErrors(t *testing.T) {
 		name, yml, wantErr string
 	}{
 		{"unknown login script",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, login: nope}}}",
-			"run.login references unknown script"},
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, login: nope}}}",
+			"flow.login references unknown script"},
 		{"unknown hook script",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b, beforeBuild: nope}}}",
-			"run.beforeBuild references unknown script"},
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b, beforeBuild: nope}}}",
+			"flow.beforeBuild references unknown script"},
 		{"unknown run hook script",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b}}}\nrun: {postAll: nope}",
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b}}}\nrun: {postAll: nope}",
 			"run.postAll references unknown script"},
 		{"unknown beforeAll run hook script",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b}}}\nrun: {beforeAll: nope}",
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b}}}\nrun: {beforeAll: nope}",
 			"run.beforeAll references unknown script"},
 		{"unknown script in an array",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: [b, nope]}}}",
-			"run.build references unknown script"},
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: [b, nope]}}}",
+			"flow.build references unknown script"},
 		{"empty space script reference",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: [\"\"]}}}",
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: [\"\"]}}}",
 			"empty script reference"},
 		{"empty run hook reference",
-			"scripts: {b: x}\nspaces: {a: {path: p, run: {build: b}}}\nrun: {beforePush: [\"\"]}",
+			"scripts: {b: x}\nspaces: {a: {path: p, flow: {build: b}}}\nrun: {beforePush: [\"\"]}",
 			"empty script reference"},
 	}
 	for _, c := range cases {
@@ -697,7 +697,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs`+line+`
-    run:
+    flow:
       build: build
 `, "packages/libs/core")
 		return Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -732,7 +732,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
     runScripts:
       Lint: "echo linting"
@@ -753,7 +753,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
     runScripts:
       lint: "  "
@@ -771,7 +771,7 @@ spaces:
   libs:
     path: packages/libs
     versioning: fixed
-    run:
+    flow:
       build: build
     runScripts:
       lint: "echo linting"
@@ -792,7 +792,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
     runScripts:
       "": "echo nameless"
@@ -809,7 +809,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
 dependencies:
   - consumer: core
@@ -827,7 +827,7 @@ scripts:
 spaces:
   libs:
     path: does/not/exist
-    run:
+    flow:
       build: build
 `)
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -844,7 +844,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
 `, "packages/libs/core", "packages/libs/.hidden")
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "libs", "notes.txt"), []byte("x"), 0o644))
@@ -864,7 +864,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
 dependencies:
   - consumer: core
@@ -887,7 +887,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
 `, "packages/libs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.yaml"), nil)
@@ -904,7 +904,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
 parser:
   separator: "%%%"
@@ -953,7 +953,7 @@ scripts:
 spaces:
   libs:
     path: packages/libs
-    run:
+    flow:
       build: build
 parser:
 `+parserYAML, "packages/libs/core")

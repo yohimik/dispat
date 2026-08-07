@@ -65,9 +65,10 @@ type Result struct {
 
 // Tagger creates release tags; *gitx.CLI satisfies it. A nil Tagger on the
 // Executor defers tagging to a later phase (release-commit mode, where tags
-// must point at the end-of-run commit).
+// must point at the end-of-run commit). target is the commit the tag points
+// at; empty means HEAD.
 type Tagger interface {
-	CreateTag(ctx context.Context, name, message string) error
+	CreateTag(ctx context.Context, name, message, target string) error
 }
 
 // ReleaseRecorder records a successful release somewhere: a changelog file
@@ -449,7 +450,9 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 	}
 	tag := rel.TagName()
 	if e.Tagger != nil { // nil: tagging deferred to the release-commit phase
-		if err := e.Tagger.CreateTag(ctx, tag, "release "+tag); err != nil {
+		// A PACKAGE_<KEY> export pins the tag to the exported commit
+		// instead of HEAD.
+		if err := e.Tagger.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit()); err != nil {
 			fail(err, "tagging failed")
 			return
 		}
@@ -573,20 +576,10 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 }
 
 // envKey turns a package name into the fragment it occupies inside a
-// DISPAT_WORKSPACE_* / DISPAT_UPDATED_* variable name. Environment variable
-// names admit far less than package names do — "@acme/ui" is a fine package
-// and an impossible variable — so anything outside [A-Z0-9] becomes "_" and
-// letters are uppercased. The raw name always travels alongside in the _NAME
-// field; the key only has to be addressable, not reversible.
-func envKey(name string) string {
-	b := []byte(strings.ToUpper(name))
-	for i, c := range b {
-		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
-			b[i] = '_'
-		}
-	}
-	return string(b)
-}
+// DISPAT_WORKSPACE_* / DISPAT_UPDATED_* variable name; see plan.EnvKey. The
+// raw name always travels alongside in the _NAME field; the key only has to
+// be addressable, not reversible.
+func envKey(name string) string { return plan.EnvKey(name) }
 
 // WorkspaceEnv renders the workspace listing as plain variables, one set per
 // package, readable from any shell without a parser:

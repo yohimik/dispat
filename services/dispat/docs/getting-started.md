@@ -24,7 +24,7 @@ for the other formats). No flag is needed afterwards: every command finds the fi
   "spaces": {
     "libs": {
       "path": "packages/libs",
-      "run": {
+      "flow": {
         "build": "build",
         "publish": "publish"
       }
@@ -148,8 +148,8 @@ Notes:
 - By default dispat creates tags locally; push them after a successful run (as above). Alternatively enable
   `"commit": {"enabled": true, "push": true}` in the config: dispat then creates one release commit (changelogs +
   manifest changes), places the tags on it and pushes everything itself, so the manual `git push` step can go. This
-  requires a checked-out branch (`actions/checkout` with a `ref`), and remote access is verified before any work
-  starts.
+  requires a checked-out branch (`actions/checkout` with a `ref`), remote access is verified before any work starts
+  (`commit.verify: false` skips the check), and tags already on the remote are skipped rather than failing the push.
 - Known limitations: shallow clones are not detected (always use `fetch-depth: 0`), and concurrent dispat runs on
   the same checkout are not guarded by a lock, so serialize release jobs in CI.
 - GitHub releases are created via the API for every published package whose scripts exported `DISPAT_EXPORT_GITHUB`.

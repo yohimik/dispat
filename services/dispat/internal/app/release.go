@@ -51,7 +51,9 @@ func (a *App) Release(ctx context.Context) error {
 	}
 
 	// Verify external access up front, before any release work starts.
-	if pushMode {
+	// commit.verify (default true) can switch the git check off for remotes
+	// that reject ls-remote but accept pushes.
+	if pushMode && a.cfg.Commit.VerifyEnabled() {
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
 			a.log.Error().Err(err).Str("remote", remote).Msg("git remote verification failed")
 			return err

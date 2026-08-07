@@ -40,6 +40,15 @@ func TestEnabledDefaults(t *testing.T) {
 	if (CommitConfig{Push: true}).PushEnabled() {
 		t.Error("push without commit is inert")
 	}
+	if !(CommitConfig{}).VerifyEnabled() {
+		t.Error("push verification defaults to enabled")
+	}
+	if !(CommitConfig{Verify: boolPtr(true)}).VerifyEnabled() {
+		t.Error("verification can be stated explicitly")
+	}
+	if (CommitConfig{Verify: boolPtr(false)}).VerifyEnabled() {
+		t.Error("verification can be disabled")
+	}
 }
 
 func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
@@ -87,7 +96,7 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 		Scripts: map[string]string{"build": "make"},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "packages", Versioning: VersioningFixed,
-				Run:        SpaceRunConfig{Build: []string{"build"}},
+				Flow:       SpaceFlowConfig{Build: []string{"build"}},
 				RunScripts: map[string]string{"lint": "make lint"}},
 		},
 		Dependencies:     []DependencyConfig{{Consumer: "app", Provider: "core"}},
@@ -102,7 +111,7 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	space := raw["spaces"].(map[string]any)["libs"].(map[string]any)
-	for _, key := range []string{"path", "versioning", "run", "runScripts"} {
+	for _, key := range []string{"path", "versioning", "flow", "runScripts"} {
 		if _, ok := space[key]; !ok {
 			t.Errorf("space is missing key %q: %v", key, space)
 		}

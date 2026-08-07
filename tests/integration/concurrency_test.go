@@ -36,7 +36,7 @@ func budgetRepo(t *testing.T, buildConc, publishConc int, buildSleep, publishSle
 		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", publishSleep),
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish()},
+		"libs": {Path: "packages", Flow: buildPublish()},
 	}
 	r.WriteConfigModel(cfg)
 	return r
@@ -102,7 +102,7 @@ func TestConcurrencyIndependentPickedUpConcurrentlyDependantAwaited(t *testing.T
 		"publish": "echo publishing",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Run: buildPublish()},
+		"libs": {Path: "packages", Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "downstream", Provider: "a"},

@@ -156,9 +156,9 @@ type ParserLimitsConfig struct {
 
 // RunConfig is the top-level `run` object: the hooks that observe the run as
 // a whole, keyed by hook name. Every value is a script name or an array of
-// names, exactly like the space stages — the two objects share one shape, and
-// `run` is deliberately not called `scripts`: `scripts` defines named
-// commands, `run` says what runs when.
+// names, exactly like a space's `flow` entries — the objects share one
+// shape, and neither is called `scripts`: `scripts` defines named commands,
+// `run` and `flow` say what runs when.
 //
 // BeforeAll is the one gating run hook: it runs once before the task graph
 // starts, when nothing has happened yet, so its failure can honestly stop the
@@ -228,10 +228,15 @@ type CommitConfig struct {
 	// MessageFormat supports {tags} and {packages} placeholders (comma-
 	// separated lists). Default: "chore(release): {tags}".
 	MessageFormat string `mapstructure:"messageFormat" json:"messageFormat,omitempty"`
-	// Push pushes the release commit and tags (git push --follow-tags).
-	// Remote access is verified before any release work starts.
+	// Push pushes the release commit and tags. Tags that already exist on
+	// the remote are skipped with a warning; the rest are pushed.
 	Push   bool   `mapstructure:"push" json:"push,omitempty"`     // default false
 	Remote string `mapstructure:"remote" json:"remote,omitempty"` // default "origin"
+	// Verify controls the upfront remote-access check (git ls-remote) run
+	// before any release work when Push is enabled. Default true; set false
+	// to skip it, e.g. for a remote that rejects ls-remote but accepts
+	// pushes.
+	Verify *bool `mapstructure:"verify" json:"verify,omitempty"` // default true
 }
 
 // IsEnabled reports whether the release commit is created (default false).
@@ -240,6 +245,10 @@ func (c CommitConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enabled }
 // PushEnabled reports whether the release commit and tags are pushed; only
 // meaningful with the commit enabled.
 func (c CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
+
+// VerifyEnabled reports whether remote access is verified before any release
+// work when pushing (default true).
+func (c CommitConfig) VerifyEnabled() bool { return c.Verify == nil || *c.Verify }
 
 // Versioning values of a space (the `versioning` key).
 const (
@@ -260,12 +269,12 @@ const (
 )
 
 // SpaceConfig is the raw configuration of one space. Everything the space
-// runs — stages, hooks, outcome scripts — lives in its `run` object.
+// runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
-	Path                  string         `mapstructure:"path" json:"path,omitempty"`
-	IsBuildWaitingPublish bool           `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          bool           `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
-	Run                   SpaceRunConfig `mapstructure:"run" json:"run,omitempty"`
+	Path                  string          `mapstructure:"path" json:"path,omitempty"`
+	IsBuildWaitingPublish bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	Flow                  SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
@@ -280,13 +289,13 @@ type SpaceConfig struct {
 	RunScripts map[string]string `mapstructure:"runScripts" json:"runScripts,omitempty"`
 }
 
-// SpaceRunConfig is a space's `run` object: what runs at which stage, keyed
+// SpaceFlowConfig is a space's `flow` object: what runs at which stage, keyed
 // by stage or hook name with no decoration. All entries are optional — a
 // stage with no script still runs, an unset hook is a no-op — and every one
 // accepts a single script name or an array of names run in order (weak
 // decoding lifts the scalar into a one-element slice, the same way a scalar
 // concurrency becomes a pair).
-type SpaceRunConfig struct {
+type SpaceFlowConfig struct {
 	Build   []string `mapstructure:"build" json:"build,omitempty"`
 	Publish []string `mapstructure:"publish" json:"publish,omitempty"`
 	Version []string `mapstructure:"version" json:"version,omitempty"`

@@ -331,8 +331,9 @@ type Git interface {
 	// When sinceTag is non-empty only commits after that tag are listed;
 	// otherwise the whole history down to the first commit is used.
 	Commits(ctx context.Context, sinceTag string) ([]Commit, error)
-	// CreateTag creates an annotated tag at HEAD.
-	CreateTag(ctx context.Context, name, message string) error
+	// CreateTag creates an annotated tag at target, or at HEAD when target
+	// is empty.
+	CreateTag(ctx context.Context, name, message, target string) error
 }
 
 // CLI is the Git implementation backed by the git executable.
@@ -524,8 +525,14 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 	return commits, nil
 }
 
-func (c *CLI) CreateTag(ctx context.Context, name, message string) error {
-	_, err := c.run(ctx, "tag", "-a", name, "-m", message)
+// CreateTag creates an annotated tag at target (any commit-ish), or at HEAD
+// when target is empty.
+func (c *CLI) CreateTag(ctx context.Context, name, message, target string) error {
+	args := []string{"tag", "-a", name, "-m", message}
+	if target != "" {
+		args = append(args, target)
+	}
+	_, err := c.run(ctx, args...)
 	return err
 }
 
@@ -589,9 +596,55 @@ func (c *CLI) VerifyRemote(ctx context.Context, remote string) error {
 	return err
 }
 
-// Push pushes the current branch (HEAD) together with reachable annotated
-// tags to the remote. Requires a checked-out branch (not a detached HEAD).
-func (c *CLI) Push(ctx context.Context, remote string) error {
-	_, err := c.run(ctx, "push", "--follow-tags", remote, "HEAD")
-	return err
+// RemoteTags returns the names of the tags that exist on the remote.
+func (c *CLI) RemoteTags(ctx context.Context, remote string) (map[string]bool, error) {
+	out, err := c.run(ctx, "ls-remote", "--tags", remote)
+	if err != nil {
+		return nil, err
+	}
+	tags := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		_, ref, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		// Annotated tags list twice: refs/tags/x and the peeled refs/tags/x^{}.
+		name := strings.TrimSuffix(strings.TrimPrefix(ref, "refs/tags/"), "^{}")
+		if name != "" && name != ref {
+			tags[name] = true
+		}
+	}
+	return tags, nil
+}
+
+// Push pushes the current branch (HEAD) and then the given tags to the
+// remote. Tags that already exist on the remote are skipped rather than
+// failing the push and returned for reporting, so a re-run after a partially
+// pushed release converges instead of dying on "tag already exists".
+// Requires a checked-out branch (not a detached HEAD).
+func (c *CLI) Push(ctx context.Context, remote string, tags []string) (skipped []string, err error) {
+	if _, err := c.run(ctx, "push", remote, "HEAD"); err != nil {
+		return nil, err
+	}
+	if len(tags) == 0 {
+		return nil, nil
+	}
+	existing, err := c.RemoteTags(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	var toPush []string
+	for _, t := range tags {
+		if existing[t] {
+			skipped = append(skipped, t)
+			continue
+		}
+		toPush = append(toPush, "refs/tags/"+t)
+	}
+	if len(toPush) > 0 {
+		if _, err := c.run(ctx, append([]string{"push", remote}, toPush...)...); err != nil {
+			return skipped, err
+		}
+	}
+	return skipped, nil
 }

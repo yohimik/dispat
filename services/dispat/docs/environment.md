@@ -108,7 +108,7 @@ DISPAT_DEPENDENCIES="core: 1.2.3 -> 1.3.0"    # one "name: old -> new" line per 
 
 matching the changelog's rendering (`From` equals `To` on a catch-up, whose provider version is already out); the
 `DISPAT_UPDATED_*` listing carries the same data field by field for scripts that want it addressable. The
-[`run.announce`](./configuration/spaces.md#runannounce) stage is the natural consumer, but like every listing the
+[`flow.announce`](./configuration/spaces.md#flowannounce) stage is the natural consumer, but like every listing the
 variables reach every stage, keeping scripts movable.
 
 ## Script outputs
