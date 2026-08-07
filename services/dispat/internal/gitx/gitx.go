@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -24,10 +23,6 @@ type Tag struct {
 	Name    string
 	Version ccme.Version
 	Parsed  bool
-	// Created is the tag's creation time (unix seconds). Reporting only: no
-	// release decision may depend on it, because tag creation order is not
-	// stable under merges, rebases or equal timestamps (§10.4).
-	Created int64
 	// Commit is the commit the tag points at, annotated tags peeled. For a
 	// stable tag this is stableCommit(P) of §12.3, which is the origin of the
 	// package's pending window (§13.3) and the operand of the ancestry screen
@@ -371,7 +366,7 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 	// space, and %(*objectname) is empty for a lightweight tag.
 	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
 		"--sort=-v:refname", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(creatordate:unix)\t%(objectname)\t%(*objectname)",
+		"--format=%(refname:short)\t%(objectname)\t%(*objectname)",
 		format.Glob(pkg))
 	if err != nil {
 		return nil, err
@@ -382,7 +377,7 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 			continue
 		}
 		f := strings.Split(line, "\t")
-		if len(f) < 3 {
+		if len(f) < 2 {
 			continue
 		}
 		name := strings.TrimSpace(f[0])
@@ -394,14 +389,11 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 		if !format.Matches(pkg, name) {
 			continue
 		}
-		t := Tag{Name: name, Commit: strings.TrimSpace(f[2])}
-		if ts, terr := strconv.ParseInt(strings.TrimSpace(f[1]), 10, 64); terr == nil {
-			t.Created = ts
-		}
+		t := Tag{Name: name, Commit: strings.TrimSpace(f[1])}
 		// An annotated tag's %(objectname) is the tag object; the commit is
 		// the peeled %(*objectname). Lightweight tags leave it empty.
-		if len(f) > 3 {
-			if peeled := strings.TrimSpace(f[3]); peeled != "" {
+		if len(f) > 2 {
+			if peeled := strings.TrimSpace(f[2]); peeled != "" {
 				t.Commit = peeled
 			}
 		}

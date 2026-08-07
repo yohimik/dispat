@@ -127,16 +127,20 @@ const (
 	taskPublish
 )
 
-func (k taskKind) String() string {
-	switch k {
-	case taskVersion:
-		return "version"
-	case taskBuild:
-		return "build"
-	default:
-		return "publish"
-	}
+// stageNames maps each task kind onto its lowercase stage name and the
+// TitleCase fragment hook names embed ("beforeBuild", "postVersion") — one
+// table, so the two spellings cannot drift apart.
+var stageNames = [...]struct{ name, title string }{
+	taskVersion: {"version", "Version"},
+	taskBuild:   {"build", "Build"},
+	taskPublish: {"publish", "Publish"},
 }
+
+func (k taskKind) String() string { return stageNames[k].name }
+
+// stageTitle renders the stage name as it appears inside a hook name:
+// "beforeBuild", "postVersion".
+func stageTitle(k taskKind) string { return stageNames[k].title }
 
 type task struct {
 	pkg  string
@@ -161,43 +165,43 @@ type spaceLogin struct {
 	outputs []plan.Output
 }
 
-// RunSequence executes commands in order inside dir.
+// Sequence is one command sequence together with everything it runs under —
+// the runner, the working directory, the environment and the failure mode —
+// so the run helpers take one value instead of a positional parameter list.
 //
-// The two modes are the two failure semantics scripts have. failFast is the
-// release-gating mode: the first error stops the sequence and is returned, so
-// a stage or hook that exists to gate a release gates it at the first refusal.
-// With failFast false every command runs regardless and errors are only
+// FailFast selects between the two failure semantics scripts have: true is
+// the release-gating mode, where the first error stops the sequence and is
+// returned, so a stage or hook that exists to gate a release gates it at the
+// first refusal. With false every command runs regardless and errors are only
 // warned about — the mode of hooks that run after the thing they observe has
 // already happened, where stopping the sequence could not un-happen it.
-func RunSequence(ctx context.Context, runner script.Runner, dir, stage string, commands, env []string, log zerolog.Logger, failFast bool) error {
-	for _, command := range commands {
-		stdout := newLineWriter(log, zerolog.InfoLevel)
-		stderr := newLineWriter(log, zerolog.WarnLevel)
-		err := runner.Run(ctx, dir, command, env, stdout, stderr)
+type Sequence struct {
+	Runner   script.Runner
+	Dir      string   // working directory (the package folder, or the repo root)
+	Stage    string   // what DISPAT_STAGE carries; also the log label
+	Commands []string // the commands, run in order
+	Env      []string // the full environment the commands receive
+	Log      zerolog.Logger
+	FailFast bool
+}
+
+// Run executes the sequence's commands in order inside its directory.
+func (s Sequence) Run(ctx context.Context) error {
+	for _, command := range s.Commands {
+		stdout := newLineWriter(s.Log, zerolog.InfoLevel)
+		stderr := newLineWriter(s.Log, zerolog.WarnLevel)
+		err := s.Runner.Run(ctx, s.Dir, command, s.Env, stdout, stderr)
 		stdout.Flush()
 		stderr.Flush()
 		if err == nil {
 			continue
 		}
-		if failFast {
+		if s.FailFast {
 			return err
 		}
-		log.Warn().Err(err).Str("stage", stage).Msg(stage + " script failed (not fatal)")
+		s.Log.Warn().Err(err).Str("stage", s.Stage).Msg(s.Stage + " script failed (not fatal)")
 	}
 	return nil
-}
-
-// hook runs one per-package hook sequence with the package's full environment
-// and DISPAT_STAGE naming the hook. extra entries ("KEY=value") are appended
-// on top — the outcome scripts use them for the failure and skip specifics.
-func (e *Executor) hook(ctx context.Context, t task, p *plan.Plan, wsVars []string, updates []providerUpdate, name string, commands []string, log zerolog.Logger, failFast bool, extra ...string) error {
-	if len(commands) == 0 {
-		return nil
-	}
-	log.Debug().Str("hook", name).Msg("hook started")
-	rel := p.Releases[t.pkg]
-	env := append(e.scriptEnv(t, p, wsVars, updates, name), extra...)
-	return RunSequenceWithOutputs(ctx, e.Runner, rel, rel.Pkg.Dir, name, commands, env, log, failFast)
 }
 
 // Run executes the plan and returns one Result per changed package. Unchanged
@@ -269,8 +273,8 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		}
 	}
 
-	var mu sync.Mutex
-	started := make(map[string]time.Time)
+	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins,
+		results: results, started: make(map[string]time.Time)}
 
 	// Version tasks share the build budget: they are short local manifest
 	// updates leading straight into the build. Draining per class keeps the
@@ -284,47 +288,99 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			return taskBuild
 		},
 		func(k taskKind) int { return budgets[k] },
-		func(t task) { e.execute(ctx, t, p, wsVars, logins, results, &mu, started) })
+		func(t task) { r.execute(ctx, t) })
 	return results
 }
 
+// run is the shared state of one Executor.Run invocation. Every task
+// goroutine works against the same value, so what used to travel through
+// every helper's parameter list — the plan, the workspace variables, the
+// login gates, the result map with its mutex — lives here instead. mu guards
+// results and started; everything else is read-only once Run has built it.
+type run struct {
+	*Executor
+	plan    *plan.Plan
+	wsVars  []string
+	logins  map[string]*spaceLogin
+	results map[string]*Result
+	mu      sync.Mutex
+	started map[string]time.Time
+}
+
+// taskCtx is one task's execution context: the task, the release it belongs
+// to, its live provider updates and its logger — the values every hook and
+// environment of the task shares.
+type taskCtx struct {
+	*run
+	t       task
+	rel     *plan.Release
+	updates []providerUpdate
+	log     zerolog.Logger
+}
+
+// env builds the DISPAT_* environment of the task's scripts and hooks; stage
+// is what DISPAT_STAGE carries.
+func (tc *taskCtx) env(stage string) []string {
+	return packageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, stage)
+}
+
+// sequence assembles the task's command sequence in its package folder.
+func (tc *taskCtx) sequence(stage string, commands []string, failFast bool) Sequence {
+	return Sequence{Runner: tc.Runner, Dir: tc.rel.Pkg.Dir, Stage: stage,
+		Commands: commands, Env: tc.env(stage), Log: tc.log, FailFast: failFast}
+}
+
+// hook runs one per-package hook sequence with the package's full environment
+// and DISPAT_STAGE naming the hook. extra entries ("KEY=value") are appended
+// on top — the outcome scripts use them for the failure and skip specifics.
+func (tc *taskCtx) hook(ctx context.Context, name string, commands []string, failFast bool, extra ...string) error {
+	if len(commands) == 0 {
+		return nil
+	}
+	tc.log.Debug().Str("hook", name).Msg("hook started")
+	seq := tc.sequence(name, commands, failFast)
+	seq.Env = append(seq.Env, extra...)
+	return seq.RunMergingOutputs(ctx, tc.rel)
+}
+
 // execute runs a single version, build or publish task to completion.
-func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []string, logins map[string]*spaceLogin, results map[string]*Result, mu *sync.Mutex, started map[string]time.Time) {
-	rel := p.Releases[t.pkg]
-	res := results[t.pkg]
-	log := e.Log.With().
+func (r *run) execute(ctx context.Context, t task) {
+	rel := r.plan.Releases[t.pkg]
+	res := r.results[t.pkg]
+	log := r.Log.With().
 		Str("package", t.pkg).
 		Str("stage", t.kind.String()).
 		Str("version", rel.Next.String()).
 		Logger()
+	tc := &taskCtx{run: r, t: t, rel: rel, log: log}
 
-	mu.Lock()
+	r.mu.Lock()
 	if res.Status != StatusPending { // failed or skipped at an earlier stage
-		mu.Unlock()
+		r.mu.Unlock()
 		return
 	}
-	if skip, blocker := shouldSkip(t.pkg, p, results); skip {
+	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results); skip {
 		res.Status = StatusSkipped
 		res.Blocked, res.BlockedBy = true, blocker
 		reason := "provider " + blocker + " failed or was skipped, and the package has no changes of its own"
-		_, ran := started[t.pkg] // earlier stages already modified the folder?
-		skipUpdates := liveProviderUpdates(t.pkg, p, results)
-		mu.Unlock()
+		_, ran := r.started[t.pkg] // earlier stages already modified the folder?
+		tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
+		r.mu.Unlock()
 		// Planned, but not attempted because a dependency failed to publish.
 		// Non-suppressible (§16) — a package that was in the plan and produced
 		// nothing must be accounted for.
 		log.Warn().Str("code", plan.CodeBlocked).Str("reason", reason).Msg("skipped")
 		if ran && rel.Pkg.Space.RevertOnFail {
-			e.revert(ctx, rel, log)
+			r.revert(ctx, rel, log)
 		}
 		// onSkip observes a skip that has already settled, so it only warns;
 		// DISPAT_BLOCKED_BY names the provider responsible.
-		_ = e.hook(ctx, t, p, wsVars, skipUpdates, "onSkip", rel.Pkg.Space.OnSkipScript, log, false,
+		_ = tc.hook(ctx, "onSkip", rel.Pkg.Space.OnSkipScript, false,
 			"DISPAT_BLOCKED_BY="+blocker)
 		return
 	}
-	if _, ok := started[t.pkg]; !ok {
-		started[t.pkg] = time.Now()
+	if _, ok := r.started[t.pkg]; !ok {
+		r.started[t.pkg] = time.Now()
 	}
 	// Resolve which provider updates are still live at this moment: providers
 	// that failed or were skipped never got their new version out, so
@@ -333,25 +389,25 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 	// it as much as the version script that synced manifests — and it is
 	// per-task on purpose: a provider can fail between this package's build
 	// and its publish, and each stage must see the truth of its own moment.
-	updates := liveProviderUpdates(t.pkg, p, results)
-	mu.Unlock()
+	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
+	r.mu.Unlock()
 
 	fail := func(err error, msg string) {
-		mu.Lock()
+		r.mu.Lock()
 		res.Status = StatusFailed
 		res.FailedStage = t.kind.String()
 		res.Err = fmt.Errorf("%s: %w", t.kind, err)
-		res.Duration = time.Since(started[t.pkg])
-		mu.Unlock()
+		res.Duration = time.Since(r.started[t.pkg])
+		r.mu.Unlock()
 		log.Error().Err(err).Msg(msg)
 		if rel.Pkg.Space.RevertOnFail {
-			e.revert(ctx, rel, log)
+			r.revert(ctx, rel, log)
 		}
 		// onFail observes a failure that has already settled — it runs after
 		// the status and the revert, in the folder's final state, and only
 		// warns. It fires once: later tasks of a failed package return before
 		// reaching any script.
-		_ = e.hook(ctx, t, p, wsVars, updates, "onFail", rel.Pkg.Space.OnFailScript, log, false,
+		_ = tc.hook(ctx, "onFail", rel.Pkg.Space.OnFailScript, false,
 			"DISPAT_FAILED_STAGE="+t.kind.String(), "DISPAT_ERROR="+err.Error())
 	}
 
@@ -359,7 +415,7 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 	// one (it exists exactly when DueTo is non-empty), build otherwise.
 	first := t.kind == taskVersion || (t.kind == taskBuild && len(rel.DueTo) == 0)
 	if first {
-		if err := e.hook(ctx, t, p, wsVars, updates, "beforeAll", rel.Pkg.Space.BeforeAllScript, log, true); err != nil {
+		if err := tc.hook(ctx, "beforeAll", rel.Pkg.Space.BeforeAllScript, true); err != nil {
 			fail(err, "beforeAll hook failed")
 			return
 		}
@@ -377,7 +433,7 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 		// package is fully published, further down.
 		commands, before, after = space.PublishScript, space.BeforePublishScript, nil
 	}
-	if t.kind == taskVersion && len(updates) == 0 {
+	if t.kind == taskVersion && len(tc.updates) == 0 {
 		// Every provider this package was bumped for failed or was skipped
 		// (the package itself proceeds on its own changes): there is nothing
 		// to sync manifests to, so the version scripts — hooks included —
@@ -387,119 +443,136 @@ func (e *Executor) execute(ctx context.Context, t task, p *plan.Plan, wsVars []s
 	}
 
 	if t.kind == taskPublish {
-		// Log in before the space's first publish; everyone else waits inside
-		// the gate. A login failure fails every publish of the space — none of
-		// them could have succeeded without it.
-		if sl := logins[space.Name]; sl != nil {
-			sl.once.Do(func() {
-				lg := e.Log.With().Str("space", space.Name).Str("stage", "login").Logger()
-				lg.Info().Msg("login started")
-				// The login exports like any other script; a malformed export
-				// fails the login (it is a gating sequence), and what it did
-				// export becomes part of every space package's outputs below.
-				outs, seqErr, parseErr := runSequenceCapturing(ctx, e.Runner, rel.Pkg.Dir, "login",
-					space.Name+":login", space.LoginScript, e.loginEnv(space.Name, wsVars), lg, true)
-				sl.outputs = outs
-				if sl.err = seqErr; sl.err == nil {
-					sl.err = parseErr
-				}
-			})
-			if sl.err != nil {
-				fail(fmt.Errorf("space login: %w", sl.err), "login failed")
-				return
-			}
-			// Safe: only this package's current task touches rel.Outputs.
-			MergeOutputs(rel, sl.outputs)
-		}
-	}
-
-	// The gating frame: before hook, stage scripts, after hook — each
-	// sequence fail-fast, every failure failing the release, because all
-	// three exist to decide whether the release happens.
-	if err := e.hook(ctx, t, p, wsVars, updates, "before"+stageTitle(t.kind), before, log, true); err != nil {
-		fail(err, "before"+stageTitle(t.kind)+" hook failed")
-		return
-	}
-	if len(commands) == 0 {
-		// No script configured: the stage completes without running anything.
-		log.Debug().Msg(t.kind.String() + ": no script configured, nothing to execute")
-	} else {
-		log.Info().Msg(t.kind.String() + " started")
-		env := e.scriptEnv(t, p, wsVars, updates, t.kind.String())
-		if err := RunSequenceWithOutputs(ctx, e.Runner, rel, rel.Pkg.Dir, t.kind.String(), commands, env, log, true); err != nil {
-			fail(err, t.kind.String()+" script failed")
+		if err := tc.loginGate(ctx); err != nil {
+			fail(err, "login failed")
 			return
 		}
 	}
-	if err := e.hook(ctx, t, p, wsVars, updates, "post"+stageTitle(t.kind), after, log, true); err != nil {
-		fail(err, "post"+stageTitle(t.kind)+" hook failed")
+
+	if what, err := tc.stageFrame(ctx, before, commands, after); err != nil {
+		fail(err, what)
 		return
 	}
 	if t.kind != taskPublish {
 		log.Info().Msg(t.kind.String() + " succeeded")
 		return
 	}
+	tc.publishTail(ctx, res, fail)
+}
 
-	// Publish succeeded: record the release (changelog file, GitHub release,
-	// ...) and tag it.
-	for _, rec := range e.Recorders {
+// loginGate runs the space's once-per-space login before its first publish;
+// every other publish of the space waits inside the gate. A login failure
+// fails every publish of the space — none of them could have succeeded
+// without it. On success the login's exports are merged onto the release
+// (safe: only this package's current task touches rel.Outputs).
+func (tc *taskCtx) loginGate(ctx context.Context) error {
+	space := tc.rel.Pkg.Space
+	sl := tc.logins[space.Name]
+	if sl == nil {
+		return nil
+	}
+	sl.once.Do(func() {
+		lg := tc.Log.With().Str("space", space.Name).Str("stage", "login").Logger()
+		lg.Info().Msg("login started")
+		// The login exports like any other script; a malformed export fails
+		// the login (it is a gating sequence), and what it did export becomes
+		// part of every space package's outputs.
+		seq := Sequence{Runner: tc.Runner, Dir: tc.rel.Pkg.Dir, Stage: "login",
+			Commands: space.LoginScript, Env: loginEnv(space.Name, tc.wsVars),
+			Log: lg, FailFast: true}
+		outs, seqErr, parseErr := seq.capture(ctx, space.Name+":login")
+		sl.outputs = outs
+		if sl.err = seqErr; sl.err == nil {
+			sl.err = parseErr
+		}
+	})
+	if sl.err != nil {
+		return fmt.Errorf("space login: %w", sl.err)
+	}
+	MergeOutputs(tc.rel, sl.outputs)
+	return nil
+}
+
+// stageFrame runs the task's gating frame: before hook, stage scripts, after
+// hook — each sequence fail-fast, every failure failing the release, because
+// all three exist to decide whether the release happens. what labels the
+// failing piece for the log ("beforeBuild hook failed", "build script
+// failed").
+func (tc *taskCtx) stageFrame(ctx context.Context, before, commands, after []string) (what string, err error) {
+	kind := tc.t.kind
+	if err := tc.hook(ctx, "before"+stageTitle(kind), before, true); err != nil {
+		return "before" + stageTitle(kind) + " hook failed", err
+	}
+	if len(commands) == 0 {
+		// No script configured: the stage completes without running anything.
+		tc.log.Debug().Msg(kind.String() + ": no script configured, nothing to execute")
+	} else {
+		tc.log.Info().Msg(kind.String() + " started")
+		if err := tc.sequence(kind.String(), commands, true).RunMergingOutputs(ctx, tc.rel); err != nil {
+			return kind.String() + " script failed", err
+		}
+	}
+	if err := tc.hook(ctx, "post"+stageTitle(kind), after, true); err != nil {
+		return "post" + stageTitle(kind) + " hook failed", err
+	}
+	return "", nil
+}
+
+// publishTail finishes a successful publish: the release recorders (changelog
+// file, GitHub release, ...), the tag, the status flip, then the warn-only
+// postPublish hook and the announce frame.
+func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error, string)) {
+	rel, space := tc.rel, tc.rel.Pkg.Space
+	for _, rec := range tc.Recorders {
 		if err := rec.Record(ctx, rel); err != nil {
 			fail(err, "release recording failed")
 			return
 		}
 	}
-	tag := rel.TagName()
-	if e.Tagger != nil { // nil: tagging deferred to the release-commit phase
-		// A PACKAGE_<KEY> export pins the tag to the exported commit
-		// instead of HEAD.
-		if err := e.Tagger.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit()); err != nil {
+	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
+		if err := CreateReleaseTag(ctx, tc.Tagger, rel); err != nil {
 			fail(err, "tagging failed")
 			return
 		}
 	}
-	mu.Lock()
+	tc.mu.Lock()
 	res.Status = StatusPublished
-	res.Duration = time.Since(started[t.pkg])
-	mu.Unlock()
-	log.Info().Str("tag", tag).Msg("published")
+	res.Duration = time.Since(tc.started[tc.t.pkg])
+	tc.mu.Unlock()
+	tc.log.Info().Str("tag", rel.TagName()).Msg("published")
 
 	// postPublish observes a release that is already out, which is why it
 	// runs after the status settles and only warns: failing the package now
 	// would report an unpublished release for a published one.
-	_ = e.hook(ctx, t, p, wsVars, updates, "postPublish", space.PostPublishScript, log, false)
+	_ = tc.hook(ctx, "postPublish", space.PostPublishScript, false)
 
 	// The announce frame: a fourth stage after the publish, for pushing the
 	// release out to update channels (a Slack message, a webhook, a docs
 	// feed). It has the gating stages' hook structure but none of their
 	// authority — the release is out, so the stage and both hooks only warn,
 	// and no failure among them stops the others from running.
-	_ = e.hook(ctx, t, p, wsVars, updates, "beforeAnnounce", space.BeforeAnnounceScript, log, false)
+	_ = tc.hook(ctx, "beforeAnnounce", space.BeforeAnnounceScript, false)
 	if len(space.AnnounceScript) > 0 {
-		log.Info().Msg("announce started")
-		env := e.scriptEnv(t, p, wsVars, updates, "announce")
-		_ = RunSequenceWithOutputs(ctx, e.Runner, rel, rel.Pkg.Dir, "announce", space.AnnounceScript, env, log, false)
+		tc.log.Info().Msg("announce started")
+		_ = tc.sequence("announce", space.AnnounceScript, false).RunMergingOutputs(ctx, rel)
 	}
-	_ = e.hook(ctx, t, p, wsVars, updates, "postAnnounce", space.PostAnnounceScript, log, false)
+	_ = tc.hook(ctx, "postAnnounce", space.PostAnnounceScript, false)
 }
 
-// stageTitle renders the stage name as it appears inside a hook name:
-// "beforeBuild", "postVersion".
-func stageTitle(k taskKind) string {
-	switch k {
-	case taskVersion:
-		return "Version"
-	case taskBuild:
-		return "Build"
-	default:
-		return "Publish"
-	}
+// CreateReleaseTag creates rel's annotated release tag — the one place the
+// tag message is rendered and the PACKAGE_<KEY> export is honoured, shared by
+// the in-run tagging above and the finalize phase's deferred tagging: an
+// exported commit pins the tag there instead of HEAD (or the release commit).
+func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release) error {
+	tag := rel.TagName()
+	return tagger.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit())
 }
 
 // loginEnv is the space-scoped environment of a login script. Login is a
 // space affair — which package's publish happens to trigger it is a scheduling
 // accident — so it deliberately carries no package variables: only the space,
 // the stage and the workspace listing.
-func (e *Executor) loginEnv(space string, wsVars []string) []string {
+func loginEnv(space string, wsVars []string) []string {
 	env := []string{"DISPAT_SPACE=" + space, "DISPAT_STAGE=login"}
 	return append(env, wsVars...)
 }
@@ -575,12 +648,6 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 	return updates
 }
 
-// envKey turns a package name into the fragment it occupies inside a
-// DISPAT_WORKSPACE_* / DISPAT_UPDATED_* variable name; see plan.EnvKey. The
-// raw name always travels alongside in the _NAME field; the key only has to
-// be addressable, not reversible.
-func envKey(name string) string { return plan.EnvKey(name) }
-
 // WorkspaceEnv renders the workspace listing as plain variables, one set per
 // package, readable from any shell without a parser:
 //
@@ -600,7 +667,7 @@ func WorkspaceEnv(p *plan.Plan, log zerolog.Logger) []string {
 	taken := make(map[string]string, len(entries))
 	out := make([]string, 0, len(entries)*4+1)
 	for _, e := range entries {
-		k := envKey(e.Package)
+		k := plan.EnvKey(e.Package)
 		if prev, dup := taken[k]; dup {
 			log.Warn().Str("package", e.Package).Str("key", k).
 				Msgf("workspace env: key collides with %q, package omitted from DISPAT_WORKSPACE_* variables", prev)
@@ -626,7 +693,7 @@ func updatedEnv(updates []providerUpdate) []string {
 	taken := make(map[string]bool, len(updates))
 	out := make([]string, 0, len(updates)*5+1)
 	for _, u := range updates {
-		k := envKey(u.Package)
+		k := plan.EnvKey(u.Package)
 		if taken[k] {
 			continue // same first-come rule as WorkspaceEnv, already warned there
 		}
@@ -670,7 +737,7 @@ func RunEnv(p *plan.Plan, results map[string]*Result, log zerolog.Logger) []stri
 	var published, failed, skipped, unplanned []string
 	taken := make(map[string]bool, len(p.Order))
 	for _, name := range p.Order {
-		k := envKey(name)
+		k := plan.EnvKey(name)
 		if taken[k] {
 			continue // collision already warned about by WorkspaceEnv
 		}
@@ -783,7 +850,7 @@ func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpd
 		//	                    "{name}@v{version}-{channel}{counter}" — the
 		//	                    version section of DISPAT_TAG without the name
 		//	                    and its decoration
-		"DISPAT_VERSION=" + coreVersion(rel.Next).String(),
+		"DISPAT_VERSION=" + rel.Next.Core().String(),
 		"DISPAT_TAG_VERSION=" + rel.TagFormat().RenderVersion(rel.Next),
 	}
 	// The baseline — the newest tag of any kind, prereleases included — is
@@ -841,11 +908,6 @@ func dependencyLines(updates []providerUpdate) string {
 		lines = append(lines, u.Package+": "+u.OldVersion+" -> "+u.NewVersion)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// coreVersion strips the prerelease component: 1.0.1-beta.4 -> 1.0.1.
-func coreVersion(v ccme.Version) ccme.Version {
-	return ccme.Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
 }
 
 // unitLines returns the descriptions of the release's notes units carrying

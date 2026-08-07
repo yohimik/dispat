@@ -379,16 +379,17 @@ func (t *tagTemplate) parseVersion(pkg, tag string) (ccme.Version, bool) {
 
 func (t *tagTemplate) matchShape(pkg, tag string, sh shape) (ccme.Version, bool) {
 	core := t.spellsPrerelease()
-	caps := map[segKind]string{}
+	m := &segMatcher{pkg: pkg, core: core, caps: map[segKind]string{}}
 	var out ccme.Version
-	ok := matchSegments(t.reduce(sh), pkg, tag, core, caps, func() bool {
-		v, err := ccme.ParseVersion(assemble(caps, core))
+	m.accept = func() bool {
+		v, err := ccme.ParseVersion(assemble(m.caps, core))
 		if err != nil {
 			return false
 		}
 		out = v
 		return true
-	})
+	}
+	ok := m.match(t.reduce(sh), tag)
 	return out, ok
 }
 
@@ -410,14 +411,24 @@ func assemble(caps map[segKind]string, core bool) string {
 	return v
 }
 
-// matchSegments walks the segments against the tag, backtracking over the
-// possible extents of each placeholder and calling accept once the whole tag is
+// segMatcher holds what stays fixed across the backtracking recursion — the
+// package name, the byte-class mode, the capture map and the accept test —
+// so the recursive step only threads the values that actually change.
+type segMatcher struct {
+	pkg    string
+	core   bool
+	caps   map[segKind]string
+	accept func() bool
+}
+
+// match walks the segments against the tag, backtracking over the possible
+// extents of each placeholder and calling accept once the whole tag is
 // consumed. accept rejecting a split resumes the search, which is what lets an
 // ambiguous-looking format like "{version}{channel}{counter}" still resolve:
 // the only split whose pieces form a version wins.
-func matchSegments(segs []segment, pkg, s string, core bool, caps map[segKind]string, accept func() bool) bool {
+func (mt *segMatcher) match(segs []segment, s string) bool {
 	if len(segs) == 0 {
-		return s == "" && accept()
+		return s == "" && mt.accept()
 	}
 	seg := segs[0]
 	switch seg.kind {
@@ -425,14 +436,14 @@ func matchSegments(segs []segment, pkg, s string, core bool, caps map[segKind]st
 		if !strings.HasPrefix(s, seg.text) {
 			return false
 		}
-		return matchSegments(segs[1:], pkg, s[len(seg.text):], core, caps, accept)
+		return mt.match(segs[1:], s[len(seg.text):])
 	case segName:
-		if !strings.HasPrefix(s, pkg) {
+		if !strings.HasPrefix(s, mt.pkg) {
 			return false
 		}
-		return matchSegments(segs[1:], pkg, s[len(pkg):], core, caps, accept)
+		return mt.match(segs[1:], s[len(mt.pkg):])
 	default:
-		in := classOf(seg.kind, core)
+		in := classOf(seg.kind, mt.core)
 		m := 0
 		for m < len(s) && in(s[m]) {
 			m++
@@ -441,11 +452,11 @@ func matchSegments(segs []segment, pkg, s string, core bool, caps map[segKind]st
 		// searcher's problem — "beta10" under "{channel}{counter}" — and the
 		// candidate order is what resolves it the way render fused it.
 		for _, n := range captureLengths(seg.kind, s, m) {
-			caps[seg.kind] = s[:n]
-			if matchSegments(segs[1:], pkg, s[n:], core, caps, accept) {
+			mt.caps[seg.kind] = s[:n]
+			if mt.match(segs[1:], s[n:]) {
 				return true
 			}
-			delete(caps, seg.kind)
+			delete(mt.caps, seg.kind)
 		}
 		return false
 	}

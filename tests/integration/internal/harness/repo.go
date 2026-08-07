@@ -83,6 +83,17 @@ func (r *Repo) SeedPackage(spacePath, name string) {
 	r.WriteFile(filepath.Join(spacePath, name, "main.txt"), name+"\n")
 }
 
+// AddBareRemote creates a bare repository in a fresh temp directory and
+// registers it as "origin", returning its path — the fixture of every push
+// scenario.
+func (r *Repo) AddBareRemote() string {
+	r.T.Helper()
+	bare := r.T.TempDir()
+	r.Git("init", "-q", "--bare", bare)
+	r.Git("remote", "add", "origin", bare)
+	return bare
+}
+
 // Commit stages every change and commits it with msg.
 func (r *Repo) Commit(msg string) {
 	r.T.Helper()
@@ -181,6 +192,22 @@ func (r *Repo) RunScriptOK(name string, flags ...string) RunResult {
 	return r.requireOK(r.RunScript(name, flags...))
 }
 
+// Command runs an arbitrary dispat invocation — "init", "test", "preview", a
+// bare run-script word — for the commands the named helpers above do not
+// cover. --root is appended like everywhere else.
+func (r *Repo) Command(args ...string) RunResult {
+	return r.run(args...)
+}
+
+// CommandAt runs an arbitrary dispat invocation with --root pointing at a
+// folder *inside* the repository (relPath, relative to its root) instead of
+// the root itself — how a user standing in a package folder invokes the CLI,
+// which is what the config ascent and the run shorthand's package narrowing
+// exist for.
+func (r *Repo) CommandAt(relPath string, args ...string) RunResult {
+	return r.runAt(r.Path(relPath), args...)
+}
+
 // ReleaseOK runs `dispat release` and requires exit code 0, with the run's
 // output in the failure message. Scenarios expecting a non-zero exit — a
 // failing package, a refused release — use plain Release and assert the code
@@ -201,7 +228,13 @@ func (r *Repo) requireOK(res RunResult) RunResult {
 // all — a non-zero exit is a normal outcome most scenarios assert on.
 func (r *Repo) run(args ...string) RunResult {
 	r.T.Helper()
-	full := append(append([]string{}, args...), "--root", r.Root)
+	return r.runAt(r.Root, args...)
+}
+
+// runAt is run with an explicit --root value.
+func (r *Repo) runAt(root string, args ...string) RunResult {
+	r.T.Helper()
+	full := append(append([]string{}, args...), "--root", root)
 	cmd := exec.Command(r.dispatBin, full...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

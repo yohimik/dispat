@@ -40,6 +40,12 @@ func (v Version) String() string {
 // IsPrerelease reports whether the version carries a prerelease component.
 func (v Version) IsPrerelease() bool { return len(v.Prerelease) > 0 }
 
+// Core strips the prerelease and build components, leaving the
+// MAJOR.MINOR.PATCH triple: 1.0.1-beta.4 -> 1.0.1.
+func (v Version) Core() Version {
+	return Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
+}
+
 // Bumped returns the version incremented by b.
 func (v Version) Bumped(b Bump) Version {
 	switch b {

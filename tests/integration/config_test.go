@@ -26,52 +26,31 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	models "github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
 // TestConfigUnknownKeyIsRejected: viper's UnmarshalExact rejects unknown
 // keys rather than silently ignoring them — the one config mistake that is
-// otherwise invisible until a script that should have run never does. The
-// legacy cases matter as much as the typo: the space script keys moved into
-// the nested object (once flat `buildScript`, then `run`, now `flow`), so a
-// config still written in an old shape must fail loudly instead of releasing
-// with no scripts at all. These are exactly the shapes the typed model
-// cannot express, so they are authored as raw map[string]any.
+// otherwise invisible until a script that should have run never does. An
+// unknown key is exactly the shape the typed model cannot express, so this
+// one config is authored as a raw map[string]any.
 func TestConfigUnknownKeyIsRejected(t *testing.T) {
-	for name, cfg := range map[string]map[string]any{
-		"top_level_typo": {
-			"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
-			"spaces": map[string]any{
-				"libs": map[string]any{"path": "packages", "flow": map[string]any{"build": "build", "publish": "publish"}},
-			},
-			"conncurrency": 4,
+	r := harness.New(t)
+	r.WriteConfigRaw(map[string]any{
+		"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "packages", "flow": map[string]any{"build": "build", "publish": "publish"}},
 		},
-		"legacy_flat_space_keys": {
-			"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
-			"spaces": map[string]any{
-				"libs": map[string]any{"path": "packages", "buildScript": "build", "publishScript": "publish"},
-			},
-		},
-		"legacy_space_run_key": {
-			"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
-			"spaces": map[string]any{
-				"libs": map[string]any{"path": "packages", "run": map[string]any{"build": "build", "publish": "publish"}},
-			},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := harness.New(t)
-			r.WriteConfigRaw(cfg)
-			r.SeedPackage("packages", "core")
-			r.Commit("feat(core): first release")
+		"conncurrency": 4,
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
 
-			res := r.Status()
-			assert.Equal(t, 1, res.Code,
-				"an unknown key must fail config loading, not be silently ignored\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		})
-	}
+	res := r.Status()
+	assert.Equal(t, 1, res.Code,
+		"an unknown key must fail config loading, not be silently ignored\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 }
 
 // TestConfigFileFallbackResolution: without --config the binary resolves the
@@ -301,27 +280,36 @@ func TestConfigNonPackageScopesReplacesDefault(t *testing.T) {
 // channel and counter with no separator — configuration.md documents the
 // split at the letter/digit boundary ("beta0" -> "beta"/"0") — across three
 // runs, so later runs must *read back* what earlier ones wrote rather than
-// merely render it once.
+// merely render it once. A second space overriding the repository format
+// with the normative one pins that a tag format is a per-space property: the
+// fused spelling must not bleed onto the other space's tags.
 func TestConfigFusedPrereleaseTagFormatRoundTrips(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.TagFormat = "{name}@v{version}-{channel}{counter}"
+	cfg.Spaces["apps"] = models.SpaceConfig{Path: "apps", Flow: buildPublish(),
+		TagFormat: "{name}@{version}"}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
-	r.Commit("feat(core)@beta: start the train")
+	r.SeedPackage("apps", "web")
+	r.Commit("feat(core)@beta: start the train\n---\nfeat(web)@beta: ride along in the other space")
 	r.ReleaseOK()
 	require.True(t, r.HasTag("core@v0.1.0-beta0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("web@0.1.0-beta.0"),
+		"the space override keeps the normative spelling; tags: %v", r.TagList())
 
 	// A run with no new commits must read v0.1.0-beta0 back and find
 	// nothing pending — the format round-trips, not just renders.
 	r.ReleaseOK()
 	assert.Equal(t, 1, r.TagCount("core@"), "a released prerelease must not re-release itself")
+	assert.Equal(t, 1, r.TagCount("web@"), "both formats must round-trip")
 
 	// A new commit continues the counter, which only works if the previous
 	// run parsed "beta0" back into channel "beta", counter "0".
 	r.CommitEmpty("fix(core): tweak")
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("core@v0.1.0-beta1"), "tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("web@"), "the other space had no new work")
 }
 
 // TestConfigRevertOnFailAppliesAfterVersionStageOnSkip covers the
@@ -379,7 +367,7 @@ func githubConfig(apiURL string) models.File {
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}}}}
 	cfg.GitHub = models.GitHubConfig{
-		Enabled: harness.Bool(true), Owner: "acme", Repo: "mono",
+		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
 		APIURL: apiURL, TokenEnv: "DISPAT_IT_TOKEN",
 	}
 	return cfg
@@ -394,22 +382,7 @@ func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 		TagName    string `json:"tag_name"`
 		Prerelease bool   `json:"prerelease"`
 	}
-	var mu sync.Mutex
-	var releases []ghRelease
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		switch req.Method {
-		case http.MethodGet: // upfront verification
-			w.WriteHeader(http.StatusOK)
-		case http.MethodPost:
-			var rel ghRelease
-			require.NoError(t, json.NewDecoder(req.Body).Decode(&rel))
-			mu.Lock()
-			releases = append(releases, rel)
-			mu.Unlock()
-			w.WriteHeader(http.StatusCreated)
-		}
-	}))
-	defer srv.Close()
+	srv, bodies := githubFake(t)
 
 	r := harness.New(t)
 	r.WriteConfigModel(githubConfig(srv.URL))
@@ -421,6 +394,7 @@ func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 	r.CommitEmpty("release(core)@stable: graduate")
 	r.ReleaseOK()
 
+	releases := decodeAll[ghRelease](t, bodies())
 	require.Len(t, releases, 2)
 	assert.Equal(t, "core@0.1.0-beta.0", releases[0].TagName)
 	assert.True(t, releases[0].Prerelease, "the beta release must be marked a prerelease")
@@ -596,4 +570,229 @@ func TestConfigParserOptions(t *testing.T) {
 	badRes := r.Status()
 	assert.Equal(t, 1, badRes.Code, "an invalid parser option must fail the load\nstdout:\n%s\nstderr:\n%s",
 		badRes.Stdout, badRes.Stderr)
+}
+
+// TestConfigCommitErrorsPolicy: a commit whose scope names no package is a
+// unit-scoped error (§16). Under the default "warn" the unit contributes
+// nothing and the run releases the rest; under "error" the release is
+// refused outright — while `status` still exits 0 either way, because seeing
+// the plan is the point of the operation.
+func TestConfigCommitErrorsPolicy(t *testing.T) {
+	t.Run("warn", func(t *testing.T) {
+		r := singlePackageRepo(t, echoBuild)
+		r.Commit("feat(core): real work")
+		r.CommitEmpty("fix(nosuch): typo in the scope")
+
+		res := r.ReleaseOK()
+		assert.True(t, harness.HasCode(res.Events, "E130"), "the diagnostic is reported even when tolerated")
+		assert.True(t, r.HasTag("core@0.1.0"), "the sibling work still releases; tags: %v", r.TagList())
+	})
+	t.Run("error", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.CommitErrors = "error"
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): real work")
+		r.CommitEmpty("fix(nosuch): typo in the scope")
+
+		status := r.StatusOK()
+		assert.True(t, harness.HasCode(status.Events, "E130"), "status reports the plan it would refuse")
+
+		res := r.Release()
+		require.Equal(t, 1, res.Code, "commitErrors=error must refuse the release\nstdout:\n%s", res.Stdout)
+		assert.True(t, harness.HasCode(res.Events, "E130"))
+		assert.Empty(t, r.TagList(), "nothing may be released under a refused plan")
+	})
+}
+
+// TestConfigInitialsBaselines: the initials map seeds the baseline of a
+// package whose latest tag is missing or unparseable. The unparseable-tag
+// half is the subtle one: the pre-last tag must NOT be used — the version
+// comes from initials while the pending window is still measured from the
+// broken tag, so already released commits are not counted twice — and an
+// initials key naming no discovered package only warns.
+func TestConfigInitialsBaselines(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Initials = map[string]string{"core": "1.0.0", "ghost": "5.0.0"}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+
+	// A feat, then an unparseable tag over it, then a fix: only the fix is
+	// pending, and it bumps on top of the configured 1.0.0.
+	r.Commit("feat(core): released under the broken tag")
+	r.Git("tag", "-a", "core@0.1.0.broken", "-m", "broken tag")
+	r.CommitEmpty("fix(core): repair")
+
+	res := r.ReleaseOK()
+	assert.True(t, r.HasTag("core@1.0.1"),
+		"initials 1.0.0 + only the fix since the unparseable tag; tags: %v", r.TagList())
+	assert.Contains(t, res.Stdout, "baselineFromInitials")
+	assert.Contains(t, res.Stdout, "initials entry matches no discovered package",
+		"the ghost key warns instead of failing the run")
+
+	// Converged: the new tag is parseable, initials no longer apply to core.
+	r.CommitEmpty("fix(core): once more")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("core@1.0.2"), "the next bump reads the real tag back; tags: %v", r.TagList())
+}
+
+// TestConfigRunLevelHooks: the run-level hook frame end to end against a
+// real remote — every hook fires in phase order in the monorepo root, postAll
+// sees the run outcome and the workspace listing, and a quiet second run
+// keeps the commit and push hooks off because their phases never happen.
+func TestConfigRunLevelHooks(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Scripts["dump"] = "env | grep '^DISPAT_' > postall.env"
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Run = models.RunConfig{
+		BeforeAll:    []string{"hook"},
+		PostAll:      []string{"hook", "dump"},
+		BeforeCommit: []string{"hook"},
+		AfterCommit:  []string{"hook"},
+		PostCommit:   []string{"hook"},
+		BeforePush:   []string{"hook"},
+		AfterPush:    []string{"hook"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+
+	r.AddBareRemote()
+	r.Commit("feat(core): first release")
+
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("hooks.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "beforeAll\npostAll\nbeforeCommit\nafterCommit\npostCommit\nbeforePush\nafterPush\n",
+		string(data), "the hooks bracket their phases in order")
+
+	env, err := os.ReadFile(r.Path("postall.env"))
+	require.NoError(t, err)
+	assert.Contains(t, string(env), "DISPAT_PUBLISHED_PACKAGES=CORE")
+	assert.Contains(t, string(env), "DISPAT_RESULT_CORE_STATUS=published")
+	assert.Contains(t, string(env), "DISPAT_RESULT_CORE_NEW_VERSION=0.1.0")
+	assert.Contains(t, string(env), "DISPAT_WORKSPACE_CORE_VERSION=0.1.0")
+	assert.Contains(t, string(env), "DISPAT_FAILED_PACKAGES=\n")
+	assert.Contains(t, string(env), "DISPAT_STAGE=postAll")
+
+	// A second run releases nothing: postAll still reports the (empty) run,
+	// but the commit and push hooks are no-ops without a publish.
+	r.Remove("hooks.log")
+	r.ReleaseOK()
+	data, err = os.ReadFile(r.Path("hooks.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "beforeAll\npostAll\n", string(data),
+		"commit and push hooks must not run when nothing published")
+	env, err = os.ReadFile(r.Path("postall.env"))
+	require.NoError(t, err)
+	assert.Contains(t, string(env), "DISPAT_UNPLANNED_PACKAGES=CORE",
+		"a package with nothing to release is reported as unplanned")
+}
+
+// TestConfigRunLevelHookFailureSemantics: one flowing scenario for the two
+// failure modes of the run-level hooks. A failing warn-only hook (postAll)
+// does not fail the run and the rest of its sequence still executes; the
+// gating beforeAll, by contrast, aborts the run before any release work.
+func TestConfigRunLevelHookFailureSemantics(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["boom"] = "exit 1"
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Run = models.RunConfig{PostAll: []string{"boom", "hook"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.ReleaseOK() // a failing run hook must not fail the run
+	assert.Contains(t, res.Stdout, "postAll script failed (not fatal)")
+	assert.True(t, r.HasTag("core@0.1.0"), "the release went out regardless; tags: %v", r.TagList())
+	data, err := os.ReadFile(r.Path("hooks.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "postAll\n", string(data), "the sequence continued past the failure")
+
+	// Rewire beforeAll to the failing script: the next release must abort
+	// before any work, leaving the pending fix unreleased and untagged.
+	cfg.Run = models.RunConfig{BeforeAll: []string{"boom"}}
+	r.WriteConfigModel(cfg)
+	r.Commit("fix(core): never released")
+
+	res = r.Release()
+	require.Equal(t, 1, res.Code, "a failing beforeAll must abort the run\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "beforeAll hook failed")
+	assert.False(t, r.HasTag("core@0.1.1"), "nothing may be tagged after the gate refused; tags: %v", r.TagList())
+}
+
+// TestConfigFormatsSmoke: one minimal end-to-end smoke per supported config
+// format — the same monorepo releases through the binary under a
+// dispat.json, a dispat.yaml and a dispat.toml (the binary's own starter).
+// The json leg also pins that `status` reports without tagging. Everything
+// deeper about the formats is the config loader's unit territory
+// (TestLoadFormats there); resolution order is TestConfigFileFallbackResolution.
+func TestConfigFormatsSmoke(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
+		r := singlePackageRepo(t, echoBuild)
+		r.Commit("feat(core): first release")
+		r.StatusOK()
+		assert.Empty(t, r.TagList(), "status must not tag")
+		r.ReleaseOK()
+		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	})
+	t.Run("yaml", func(t *testing.T) {
+		r := harness.New(t)
+		data, err := json.MarshalIndent(libsConfig(echoBuild, 1), "", "  ")
+		require.NoError(t, err)
+		r.WriteFile("dispat.yaml", string(data)) // JSON is valid YAML
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): first release")
+		r.ReleaseOK()
+		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	})
+	t.Run("toml", func(t *testing.T) {
+		// The starter leaves GitHub at its enabled default; blank the env so
+		// a CI runner's GITHUB_* variables can never reach the real API.
+		t.Setenv("GITHUB_REPOSITORY", "")
+		t.Setenv("GITHUB_TOKEN", "")
+		r := harness.New(t)
+		res := r.Command("init", "--format", "toml") // the binary's own TOML starter
+		require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): first release")
+		r.ReleaseOK()
+		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	})
+}
+
+// TestConfigResolutionAscendsToTheMonorepoRoot: without --config, resolution
+// climbs from --root through its parents until a config file is found, and
+// the config's own directory becomes the effective monorepo root — so the
+// CLI works from inside a package folder. The release invoked from
+// packages/core must behave exactly as one invoked from the top: same tags,
+// same changelog placement, converging second run included.
+func TestConfigResolutionAscendsToTheMonorepoRoot(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): first release")
+
+	res := r.CommandAt("packages/core", "status")
+	require.Equal(t, 0, res.Code,
+		"status must find the root config from inside the package\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Empty(t, r.TagList(), "status must not tag")
+
+	res = r.CommandAt("packages/core", "release")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, r.HasTag("core@0.1.0"),
+		"the tag lands in the monorepo's repository, not a nested one; tags: %v", r.TagList())
+	assert.FileExists(t, r.Path("packages", "core", "CHANGELOG.md"),
+		"the changelog lands under the resolved root")
+
+	res = r.CommandAt("packages/core", "release")
+	require.Equal(t, 0, res.Code, "a converged release from the subfolder is a clean no-op")
+	assert.Equal(t, 1, r.TagCount("core@"))
+
+	// An explicit --config stays anchored to --root: it must not ascend.
+	res = r.CommandAt("packages/core", "status", "--config", "dispat.json")
+	assert.Equal(t, 1, res.Code, "an explicit --config must fail from the subfolder, not fall back")
 }

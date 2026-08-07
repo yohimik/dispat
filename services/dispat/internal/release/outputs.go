@@ -6,10 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/rs/zerolog"
-
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
-	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // OutputEnvVar is the variable every per-package script and hook receives:
@@ -158,13 +155,13 @@ func validEnvName(s string) bool {
 	return true
 }
 
-// runSequenceCapturing runs a command sequence with an output file attached —
-// env is extended with DISPAT_OUTPUT pointing at a fresh temp file — and
-// returns whatever the sequence exported, each output stamped with source.
-// The outputs are returned even when the sequence failed, so the caller can
-// hand the outcome scripts what was exported before the failure; a malformed
+// capture runs the sequence with an output file attached — the environment is
+// extended with DISPAT_OUTPUT pointing at a fresh temp file — and returns
+// whatever the sequence exported, each output stamped with source. The
+// outputs are returned even when the sequence failed, so the caller can hand
+// the outcome scripts what was exported before the failure; a malformed
 // export is returned as parseErr, separate from the sequence's own error.
-func runSequenceCapturing(ctx context.Context, runner script.Runner, dir, stage, source string, commands, env []string, log zerolog.Logger, failFast bool) (outs []plan.Output, seqErr, parseErr error) {
+func (s Sequence) capture(ctx context.Context, source string) (outs []plan.Output, seqErr, parseErr error) {
 	f, err := os.CreateTemp("", "dispat-output-*")
 	if err != nil {
 		return nil, fmt.Errorf("creating the %s file: %w", OutputEnvVar, err), nil
@@ -173,32 +170,32 @@ func runSequenceCapturing(ctx context.Context, runner script.Runner, dir, stage,
 	_ = f.Close()
 	defer os.Remove(file)
 
-	seqErr = RunSequence(ctx, runner, dir, stage, commands, append(env, OutputEnvVar+"="+file), log, failFast)
+	s.Env = append(s.Env, OutputEnvVar+"="+file)
+	seqErr = s.Run(ctx)
 	// parseOutputs is all-or-nothing: on a malformed line nothing is returned.
 	outs, parseErr = parseOutputs(file, source)
 	return outs, seqErr, parseErr
 }
 
-// RunSequenceWithOutputs runs a command sequence with an output file
-// attached and merges everything the sequence exported onto the release —
-// even when the sequence failed, so the outcome scripts see what was
-// exported before the failure. A malformed export is an error of its own
-// (surfaced like a failing command; warn-only callers warn).
-func RunSequenceWithOutputs(ctx context.Context, runner script.Runner, rel *plan.Release, dir, stage string, commands, env []string, log zerolog.Logger, failFast bool) error {
-	if len(commands) == 0 {
+// RunMergingOutputs runs the sequence with an output file attached and merges
+// everything it exported onto the release — even when the sequence failed, so
+// the outcome scripts see what was exported before the failure. A malformed
+// export is an error of its own (surfaced like a failing command; warn-only
+// sequences warn).
+func (s Sequence) RunMergingOutputs(ctx context.Context, rel *plan.Release) error {
+	if len(s.Commands) == 0 {
 		return nil
 	}
-	outs, seqErr, parseErr := runSequenceCapturing(ctx, runner, dir, stage,
-		rel.Pkg.Name+":"+stage, commands, env, log, failFast)
+	outs, seqErr, parseErr := s.capture(ctx, rel.Pkg.Name+":"+s.Stage)
 	MergeOutputs(rel, outs)
 	if seqErr != nil {
 		return seqErr
 	}
 	if parseErr != nil {
-		if failFast {
+		if s.FailFast {
 			return parseErr
 		}
-		log.Warn().Err(parseErr).Str("stage", stage).Msg("script outputs invalid (not fatal)")
+		s.Log.Warn().Err(parseErr).Str("stage", s.Stage).Msg("script outputs invalid (not fatal)")
 	}
 	return nil
 }

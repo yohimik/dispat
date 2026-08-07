@@ -17,23 +17,32 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	models "github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+// budgets describes one budgetRepo fixture: the per-stage concurrency limits
+// and the per-stage sleeps. Sleeps exist to make overlap observable: a
+// zero-sleep script's start and end sit microseconds apart, too narrow for
+// even genuinely concurrent processes to reliably straddle.
+type budgets struct {
+	Build        int
+	Publish      int
+	BuildSleep   time.Duration
+	PublishSleep time.Duration
+}
+
 // budgetRepo writes a one-space config whose build and publish stages are
 // wired to tsmark (per-package labels, the given sleeps) under the given
-// stage budgets. Sleeps exist to make overlap observable: a zero-sleep
-// script's start and end sit microseconds apart, too narrow for even
-// genuinely concurrent processes to reliably straddle.
-func budgetRepo(t *testing.T, buildConc, publishConc int, buildSleep, publishSleep time.Duration) *harness.Repo {
+// stage budgets.
+func budgetRepo(t *testing.T, b budgets) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
-	cfg := harness.BaseFile(buildConc, publishConc)
+	cfg := harness.BaseFile(b.Build, b.Publish)
 	cfg.Scripts = map[string]string{
-		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", buildSleep),
-		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", publishSleep),
+		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", b.BuildSleep),
+		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", b.PublishSleep),
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -52,7 +61,7 @@ func budgetRepo(t *testing.T, buildConc, publishConc int, buildSleep, publishSle
 func TestConcurrencyBuildBudgetEnforced(t *testing.T) {
 	const budget = 4
 	names := packageNames(5, "pkg")
-	r := budgetRepo(t, budget, len(names), 200*time.Millisecond, 0)
+	r := budgetRepo(t, budgets{Build: budget, Publish: len(names), BuildSleep: 200 * time.Millisecond})
 	seedIndependentPackages(r, names)
 
 	r.ReleaseOK()
@@ -71,7 +80,8 @@ func TestConcurrencyBuildBudgetEnforced(t *testing.T) {
 func TestConcurrencyPublishBudgetIsIndependentOfBuild(t *testing.T) {
 	const publishBudget = 2
 	names := packageNames(5, "pkg")
-	r := budgetRepo(t, len(names), publishBudget, 20*time.Millisecond, 200*time.Millisecond)
+	r := budgetRepo(t, budgets{Build: len(names), Publish: publishBudget,
+		BuildSleep: 20 * time.Millisecond, PublishSleep: 200 * time.Millisecond})
 	seedIndependentPackages(r, names)
 
 	r.ReleaseOK()

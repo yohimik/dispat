@@ -32,15 +32,18 @@ import (
 // The configuration model, aliased from the public package so the rest of the
 // CLI keeps importing internal/config alone.
 type (
-	File              = public.File
-	RunConfig         = public.RunConfig
-	EntryFormatConfig = public.EntryFormatConfig
-	ChangelogConfig   = public.ChangelogConfig
-	GitHubConfig      = public.GitHubConfig
-	CommitConfig      = public.CommitConfig
-	SpaceConfig       = public.SpaceConfig
-	SpaceFlowConfig   = public.SpaceFlowConfig
-	DependencyConfig  = public.DependencyConfig
+	File                    = public.File
+	RunConfig               = public.RunConfig
+	EntryFormatConfig       = public.EntryFormatConfig
+	ChangelogConfig         = public.ChangelogConfig
+	GitHubConfig            = public.GitHubConfig
+	CommitConfig            = public.CommitConfig
+	SpaceConfig             = public.SpaceConfig
+	SpaceFlowConfig         = public.SpaceFlowConfig
+	DependencyConfig        = public.DependencyConfig
+	ParserConfig            = public.ParserConfig
+	ParserPropagationConfig = public.ParserPropagationConfig
+	ParserLimitsConfig      = public.ParserLimitsConfig
 )
 
 // Values of the commitErrors key; see the public package for semantics.
@@ -128,22 +131,42 @@ func checkScriptRefs(c *File, refs map[string][]string, prefix string) error {
 // each of its formats. The first that exists wins.
 var DefaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dispat.toml"}
 
-// ResolveFile returns the path of the configuration file to load. An
-// explicitly named file is used as-is — a typo there must fail loudly, not
-// fall back to a different file — while the default resolves to the first of
-// DefaultFileNames that exists in root. When none does, the error says so and
+// ResolveFile returns the path of the configuration file to load and the
+// monorepo root it establishes. An explicitly named file is used as-is,
+// relative to root — a typo there must fail loudly, not fall back to a
+// different file — while the default resolves to the first of
+// DefaultFileNames that exists in root or, failing that, in any parent
+// directory up to the filesystem root: the ascent is what lets the CLI run
+// from inside a package folder, with the config's own directory becoming the
+// effective monorepo root. When nothing is found, the error says so and
 // names every candidate tried.
-func ResolveFile(root, name string, explicit bool) (string, error) {
+func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
 	if explicit {
-		return filepath.Join(root, name), nil
+		return filepath.Join(root, name), root, nil
 	}
 	for _, cand := range DefaultFileNames {
-		path := filepath.Join(root, cand)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+		p := filepath.Join(root, cand)
+		if _, err := os.Stat(p); err == nil {
+			return p, root, nil
 		}
 	}
-	return "", fmt.Errorf("config: no dispat config file found in %s (tried %s); run `dispat init` to create one",
+	// Not in root itself: ascend. Absolute paths make the parent walk
+	// well-defined wherever the relative root pointed.
+	if abs, absErr := filepath.Abs(root); absErr == nil {
+		for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
+			for _, cand := range DefaultFileNames {
+				p := filepath.Join(dir, cand)
+				if _, err := os.Stat(p); err == nil {
+					return p, dir, nil
+				}
+			}
+			if dir == filepath.Dir(dir) { // filesystem root
+				break
+			}
+		}
+	}
+	return "", "", fmt.Errorf(
+		"config: no dispat config file found in %s or any parent directory (tried %s); run `dispat init` to create one",
 		root, strings.Join(DefaultFileNames, ", "))
 }
 
@@ -274,10 +297,70 @@ func normalizeVersioning(raw string) (string, bool) {
 	return "", false
 }
 
+// validate checks the loaded configuration and resolves its defaulted values
+// in place. Each concern lives in its own helper; the order only matters in
+// that everything is validated before Discover consumes any of it.
 func validate(c *File) error {
 	if len(c.Spaces) == 0 {
 		return errors.New("at least one space is required")
 	}
+	if err := validateConcurrency(c); err != nil {
+		return err
+	}
+	if err := validateLogging(c); err != nil {
+		return err
+	}
+	if c.CommitErrors == "" {
+		c.CommitErrors = CommitErrorsWarn
+	}
+	if c.CommitErrors != CommitErrorsWarn && c.CommitErrors != CommitErrorsError {
+		return fmt.Errorf("unknown commitErrors %q (want %q or %q)",
+			c.CommitErrors, CommitErrorsWarn, CommitErrorsError)
+	}
+	if c.NonPackageScopes == nil {
+		c.NonPackageScopes = DefaultNonPackageScopes()
+	}
+	if c.TagFormat == "" {
+		c.TagFormat = string(gitx.DefaultTagFormat)
+	}
+	if err := gitx.TagFormat(c.TagFormat).Validate(); err != nil {
+		return err
+	}
+	for name, s := range c.Spaces {
+		validated, err := validateSpace(c, name, s)
+		if err != nil {
+			return err
+		}
+		c.Spaces[name] = validated
+	}
+	if err := checkScriptRefs(c, runHookRefs(c), ""); err != nil {
+		return err
+	}
+	for i, d := range c.Dependencies {
+		if d.Consumer == "" || d.Provider == "" {
+			return fmt.Errorf("dependencies[%d]: consumer and provider are required", i)
+		}
+		if d.Consumer == d.Provider {
+			return fmt.Errorf("dependencies[%d]: package %q cannot depend on itself", i, d.Consumer)
+		}
+	}
+	if len(c.Shell) > 0 && c.Shell[0] == "" {
+		return errors.New("shell: first element (the interpreter) must not be empty")
+	}
+	if err := resolveInitials(c); err != nil {
+		return err
+	}
+	parserCfg, err := resolveParser(c.Parser)
+	if err != nil {
+		return err
+	}
+	c.ParserConfig = parserCfg
+	return nil
+}
+
+// validateConcurrency resolves the scalar-or-pair concurrency value onto the
+// two stage budgets, defaulting 0 (and absence) to the number of CPUs.
+func validateConcurrency(c *File) error {
 	var build, publish int
 	switch len(c.Concurrency) {
 	case 0: // not configured: default both
@@ -298,6 +381,11 @@ func validate(c *File) error {
 		publish = runtime.NumCPU()
 	}
 	c.BuildConcurrency, c.PublishConcurrency = build, publish
+	return nil
+}
+
+// validateLogging defaults and checks logLevel and logFormat.
+func validateLogging(c *File) error {
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
@@ -310,79 +398,54 @@ func validate(c *File) error {
 	if c.LogFormat != "pretty" && c.LogFormat != "json" {
 		return fmt.Errorf("unknown logFormat %q (want pretty or json)", c.LogFormat)
 	}
-	if c.CommitErrors == "" {
-		c.CommitErrors = CommitErrorsWarn
+	return nil
+}
+
+// validateSpace checks one space — path, tag format, versioning mode,
+// runScripts, script references — and returns it with its versioning value
+// normalized.
+func validateSpace(c *File, name string, s SpaceConfig) (SpaceConfig, error) {
+	if s.Path == "" {
+		return s, fmt.Errorf("space %q: path is required", name)
 	}
-	if c.CommitErrors != CommitErrorsWarn && c.CommitErrors != CommitErrorsError {
-		return fmt.Errorf("unknown commitErrors %q (want %q or %q)",
-			c.CommitErrors, CommitErrorsWarn, CommitErrorsError)
-	}
-	if c.NonPackageScopes == nil {
-		c.NonPackageScopes = DefaultNonPackageScopes()
-	}
-	if c.TagFormat == "" {
-		c.TagFormat = string(gitx.DefaultTagFormat)
-	}
-	if err := gitx.TagFormat(c.TagFormat).Validate(); err != nil {
-		return err
-	}
-	for name, s := range c.Spaces {
-		if s.Path == "" {
-			return fmt.Errorf("space %q: path is required", name)
-		}
-		if s.TagFormat != "" {
-			if err := gitx.TagFormat(s.TagFormat).Validate(); err != nil {
-				return fmt.Errorf("space %q: %w", name, err)
-			}
-		}
-		versioning, ok := normalizeVersioning(s.Versioning)
-		if !ok {
-			return fmt.Errorf("space %q: unknown versioning %q (want %q, %q or %q)",
-				name, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
-		}
-		s.Versioning = versioning
-		c.Spaces[name] = s
-		for scriptName, cmd := range s.RunScripts {
-			if scriptName == "" {
-				return fmt.Errorf("space %q: runScripts contains an empty script name", name)
-			}
-			if strings.TrimSpace(cmd) == "" {
-				return fmt.Errorf("space %q: runScripts[%q] is empty", name, scriptName)
-			}
-		}
-		if err := checkScriptRefs(c, scriptRefs(&s), fmt.Sprintf("space %q: ", name)); err != nil {
-			return err
+	if s.TagFormat != "" {
+		if err := gitx.TagFormat(s.TagFormat).Validate(); err != nil {
+			return s, fmt.Errorf("space %q: %w", name, err)
 		}
 	}
-	if err := checkScriptRefs(c, runHookRefs(c), ""); err != nil {
-		return err
+	versioning, ok := normalizeVersioning(s.Versioning)
+	if !ok {
+		return s, fmt.Errorf("space %q: unknown versioning %q (want %q, %q or %q)",
+			name, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
 	}
-	for i, d := range c.Dependencies {
-		if d.Consumer == "" || d.Provider == "" {
-			return fmt.Errorf("dependencies[%d]: consumer and provider are required", i)
+	s.Versioning = versioning
+	for scriptName, cmd := range s.RunScripts {
+		if scriptName == "" {
+			return s, fmt.Errorf("space %q: runScripts contains an empty script name", name)
 		}
-		if d.Consumer == d.Provider {
-			return fmt.Errorf("dependencies[%d]: package %q cannot depend on itself", i, d.Consumer)
-		}
-	}
-	if len(c.Shell) > 0 && c.Shell[0] == "" {
-		return errors.New("shell: first element (the interpreter) must not be empty")
-	}
-	if len(c.Initials) > 0 {
-		c.InitialVersions = make(map[string]ccme.Version, len(c.Initials))
-		for name, raw := range c.Initials {
-			v, err := ccme.ParseVersion(raw)
-			if err != nil {
-				return fmt.Errorf("initials[%q]: invalid version %q: %w", name, raw, err)
-			}
-			c.InitialVersions[name] = v
+		if strings.TrimSpace(cmd) == "" {
+			return s, fmt.Errorf("space %q: runScripts[%q] is empty", name, scriptName)
 		}
 	}
-	parserCfg, err := resolveParser(c.Parser)
-	if err != nil {
-		return err
+	if err := checkScriptRefs(c, scriptRefs(&s), fmt.Sprintf("space %q: ", name)); err != nil {
+		return s, err
 	}
-	c.ParserConfig = parserCfg
+	return s, nil
+}
+
+// resolveInitials parses the initials map into versions.
+func resolveInitials(c *File) error {
+	if len(c.Initials) == 0 {
+		return nil
+	}
+	c.InitialVersions = make(map[string]ccme.Version, len(c.Initials))
+	for name, raw := range c.Initials {
+		v, err := ccme.ParseVersion(raw)
+		if err != nil {
+			return fmt.Errorf("initials[%q]: invalid version %q: %w", name, raw, err)
+		}
+		c.InitialVersions[name] = v
+	}
 	return nil
 }
 

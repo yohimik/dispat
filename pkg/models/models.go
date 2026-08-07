@@ -346,6 +346,11 @@ const (
 // error by default. "release" is dispat's own release-commit scope.
 func DefaultNonPackageScopes() []string { return []string{"release"} }
 
+// Bool returns a pointer to b — the helper for the tri-state *bool option
+// fields (Changelog.Enabled, GitHub.Enabled, Commit.Enabled, Commit.Verify),
+// whose nil means "use the default".
+func Bool(b bool) *bool { return &b }
+
 // Script resolves a script reference case-insensitively, because viper
 // lowercases the keys of the scripts map.
 func (c *File) Script(ref string) (string, bool) {

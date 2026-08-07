@@ -35,7 +35,6 @@ func shellPlan(t *testing.T, space *model.Space) (*plan.Plan, string) {
 		Order:     []string{"core"},
 		Releases:  map[string]*plan.Release{"core": rel},
 		Providers: map[string][]string{},
-		Consumers: map[string][]string{},
 	}, dir
 }
 
@@ -279,7 +278,6 @@ func TestCommandEnv(t *testing.T) {
 		Order:     []string{"core", "app"},
 		Releases:  map[string]*plan.Release{"core": provider, "app": consumer},
 		Providers: map[string][]string{"app": {"core"}},
-		Consumers: map[string][]string{"core": {"app"}},
 	}
 
 	env := CommandEnv(p, "app", "run:lint", zerolog.Nop())

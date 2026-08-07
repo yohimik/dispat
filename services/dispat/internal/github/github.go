@@ -27,6 +27,14 @@ import (
 // DefaultAPIURL is the public GitHub REST API endpoint.
 const DefaultAPIURL = "https://api.github.com"
 
+const (
+	// maxErrorBody bounds how much of a response body is read back — enough
+	// for any error message and the created release's asset endpoint.
+	maxErrorBody = 64 << 10
+	// defaultTimeout is the request timeout of the default HTTP client.
+	defaultTimeout = 30 * time.Second
+)
+
 // Releaser creates a release named after the package tag via the GitHub REST
 // API (POST /repos/{owner}/{repo}/releases) — but only for packages whose
 // scripts exported plan.GitHubExport (DISPAT_EXPORT_GITHUB); a package
@@ -79,40 +87,54 @@ func (r *Releaser) endpoint(path string) string {
 	return strings.TrimSuffix(api, "/") + path
 }
 
+// apiCall is one authenticated API request: the HTTP essentials plus What,
+// the operation label every error is prefixed with, so a failure reads as an
+// operation ("creating release core@1.3.0: ...") rather than a URL.
+type apiCall struct {
+	Method string
+	URL    string
+	Body   io.Reader
+	// ContentType is sent when non-empty.
+	ContentType string
+	// ContentLength must be given for bodies the http package cannot measure
+	// itself (a file stream) — GitHub's upload endpoint rejects chunked
+	// requests; 0 leaves it to the package.
+	ContentLength int64
+	// WantStatus is the only status code accepted as success.
+	WantStatus int
+	What       string
+}
+
 // do performs one authenticated API call and enforces the expected status.
-// Every error is prefixed with what the call was doing, so a failure reads as
-// an operation ("creating release core@1.3.0: ...") rather than a URL. The
-// response body is returned (bounded) because a created release carries the
-// asset endpoint the caller needs. contentLength must be given for bodies the
-// http package cannot measure itself (a file stream) — GitHub's upload
-// endpoint rejects chunked requests; 0 leaves it to the package.
-func (r *Releaser) do(ctx context.Context, method, url string, body io.Reader, contentType string, contentLength int64, wantStatus int, what string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+// The response body is returned (bounded) because a created release carries
+// the asset endpoint the caller needs.
+func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, call.Method, call.URL, call.Body)
 	if err != nil {
 		return nil, fmt.Errorf("github: %w", err)
 	}
-	if contentLength > 0 {
-		req.ContentLength = contentLength
+	if call.ContentLength > 0 {
+		req.ContentLength = call.ContentLength
 	}
 	req.Header.Set("Authorization", "Bearer "+r.Token)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	if call.ContentType != "" {
+		req.Header.Set("Content-Type", call.ContentType)
 	}
 
 	client := r.Client
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: defaultTimeout}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("github: %s: %w", what, err)
+		return nil, fmt.Errorf("github: %s: %w", call.What, err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode != wantStatus {
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	if resp.StatusCode != call.WantStatus {
 		return nil, fmt.Errorf("github: %s: unexpected status %s: %s",
-			what, resp.Status, strings.TrimSpace(string(data)))
+			call.What, resp.Status, strings.TrimSpace(string(data)))
 	}
 	return data, nil
 }
@@ -121,8 +143,12 @@ func (r *Releaser) do(ctx context.Context, method, url string, body io.Reader, c
 // (GET /repos/{owner}/{repo} must return 200). Meant to run before any
 // release work so misconfigured credentials fail fast.
 func (r *Releaser) Verify(ctx context.Context) error {
-	_, err := r.do(ctx, http.MethodGet, r.endpoint("/repos/"+r.Owner+"/"+r.Repo), nil, "", 0,
-		http.StatusOK, fmt.Sprintf("verifying %s/%s", r.Owner, r.Repo))
+	_, err := r.do(ctx, apiCall{
+		Method:     http.MethodGet,
+		URL:        r.endpoint("/repos/" + r.Owner + "/" + r.Repo),
+		WantStatus: http.StatusOK,
+		What:       fmt.Sprintf("verifying %s/%s", r.Owner, r.Repo),
+	})
 	return err
 }
 
@@ -162,8 +188,14 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		return fmt.Errorf("github: %w", err)
 	}
 
-	respBody, err := r.do(ctx, http.MethodPost, r.endpoint("/repos/"+r.Owner+"/"+r.Repo+"/releases"),
-		bytes.NewReader(payload), "application/json", 0, http.StatusCreated, "creating release "+tag)
+	respBody, err := r.do(ctx, apiCall{
+		Method:      http.MethodPost,
+		URL:         r.endpoint("/repos/" + r.Owner + "/" + r.Repo + "/releases"),
+		Body:        bytes.NewReader(payload),
+		ContentType: "application/json",
+		WantStatus:  http.StatusCreated,
+		What:        "creating release " + tag,
+	})
 	if err != nil {
 		return err
 	}
@@ -242,8 +274,14 @@ func (r *Releaser) uploadAsset(ctx context.Context, uploadURL, tag, path string)
 		return fmt.Errorf("github: release %s asset: %w", tag, err)
 	}
 	name := filepath.Base(path)
-	_, err = r.do(ctx, http.MethodPost, uploadURL+"?name="+neturl.QueryEscape(name), f,
-		"application/octet-stream", fi.Size(), http.StatusCreated,
-		fmt.Sprintf("uploading asset %s to release %s", name, tag))
+	_, err = r.do(ctx, apiCall{
+		Method:        http.MethodPost,
+		URL:           uploadURL + "?name=" + neturl.QueryEscape(name),
+		Body:          f,
+		ContentType:   "application/octet-stream",
+		ContentLength: fi.Size(),
+		WantStatus:    http.StatusCreated,
+		What:          fmt.Sprintf("uploading asset %s to release %s", name, tag),
+	})
 	return err
 }

@@ -1,0 +1,131 @@
+package integration
+
+// Area 8: the init, test and preview commands through the compiled binary.
+// Each is a small command with an observable artefact — a starter config the
+// very next status can load, a script run inside a package folder with the
+// full DISPAT_* environment, pending release notes on stdout — and this file
+// pins exactly those artefacts plus the commands' exit codes over the
+// process boundary.
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/tests/integration/internal/harness"
+)
+
+// TestCommandsInitThenStatusCompose: `dispat init --format toml` followed by
+// a plain `dispat status` — the config file fallback finds dispat.toml with
+// no --config anywhere, closing the loop between the two commands (and
+// exercising the TOML starter end to end; the JSON and YAML starters load
+// through the same fallback names).
+func TestCommandsInitThenStatusCompose(t *testing.T) {
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Command("init", "--format", "toml")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "created dispat.toml")
+
+	status := r.StatusOK()
+	assert.Contains(t, status.Stdout, "core", "the starter config must load and discover the package")
+
+	res = r.Command("init", "--format", "toml")
+	assert.Equal(t, 1, res.Code, "an existing config must never be overwritten")
+}
+
+// TestCommandsTestScript: `dispat test <script> <package>` runs one
+// top-level script inside the package's folder with the package's full
+// DISPAT_* environment and releases nothing; unknown names and failing
+// scripts map onto exit 1.
+func TestCommandsTestScript(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["probe"] = `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`
+	cfg.Scripts["boom"] = "exit 7"
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Command("test", "probe", "core")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err := os.ReadFile(r.Path("packages", "core", "probe.txt"))
+	require.NoError(t, err, "the script must run inside the package folder")
+	assert.Equal(t, "core@0.1.0 test:probe\n", string(data),
+		"the script receives the package's planned version and the test stage name")
+	assert.Empty(t, r.TagList(), "test releases nothing")
+
+	assert.Equal(t, 1, r.Command("test", "nope", "core").Code, "an unknown script name is an error")
+	assert.Equal(t, 1, r.Command("test", "probe", "ghost").Code, "an unknown package is an error")
+	assert.Equal(t, 1, r.Command("test", "boom", "core").Code, "a failing script fails the command")
+}
+
+// TestCommandsPreviewNotesWindowing: `dispat preview <package>` prints the
+// package's pending release notes, and across a prerelease train the notes
+// narrow to the fresh changeset — each prerelease's preview and changelog
+// entry documents only its own changes, while the graduation collects the
+// whole train into one entry. The version is still computed over the whole
+// window: beta.1 stays 0.2.0-based even though its entry only shows a fix.
+func TestCommandsPreviewNotesWindowing(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): first release")
+
+	res := r.Command("preview", "core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "## core@0.1.0", "the header names the pending tag")
+	assert.Contains(t, res.Stdout, "### Features")
+	assert.Contains(t, res.Stdout, "- first release")
+
+	// Release, then preview again: the window is empty.
+	r.ReleaseOK()
+	res = r.Command("preview", "core")
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "no pending changes for core")
+	assert.Equal(t, 1, r.Command("preview", "ghost").Code, "an unknown package is an error")
+
+	// entry returns the changelog entry for the given tag: the text between
+	// its "## <tag> " header and the next entry header.
+	entry := func(tag string) string {
+		t.Helper()
+		data, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+		require.NoError(t, err)
+		text := string(data)
+		start := strings.Index(text, "## "+tag+" ")
+		require.GreaterOrEqual(t, start, 0, "no changelog entry for %s:\n%s", tag, text)
+		rest := text[start+3:]
+		if next := strings.Index(rest, "\n## "); next >= 0 {
+			rest = rest[:next]
+		}
+		return rest
+	}
+
+	r.CommitEmpty("feat(core)@beta: feature A")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.2.0-beta.0"), "tags: %v", r.TagList())
+	assert.Contains(t, entry("core@0.2.0-beta.0"), "feature A")
+
+	r.CommitEmpty("fix(core): fix B")
+	// The preview of beta.1 already narrows to the fresh changeset.
+	res = r.Command("preview", "core")
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "fix B")
+	assert.NotContains(t, res.Stdout, "feature A",
+		"the preview of a prerelease must not repeat the train's published notes")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.2.0-beta.1"), "tags: %v", r.TagList())
+	beta1 := entry("core@0.2.0-beta.1")
+	assert.Contains(t, beta1, "fix B")
+	assert.NotContains(t, beta1, "feature A", "a prerelease entry contains only its own changeset")
+
+	r.CommitEmpty("release(core)@stable: graduate")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
+	graduated := entry("core@0.2.0")
+	assert.Contains(t, graduated, "feature A", "the graduation collects the whole train")
+	assert.Contains(t, graduated, "fix B")
+}

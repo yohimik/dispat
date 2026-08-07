@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -29,16 +30,34 @@ const (
 // ValidOnError reports whether the value is a known run error policy.
 func ValidOnError(v string) bool { return v == OnErrorSkip || v == OnErrorContinue }
 
+// RunOptions selects what RunScript runs over, beyond the script name.
+type RunOptions struct {
+	// OnError is the failure policy for the failed package's dependents:
+	// OnErrorSkip (the default when empty) or OnErrorContinue.
+	OnError string
+	// Package, when set, targets exactly one package: the script runs there
+	// whether or not the package changed, and the dependency graph plays no
+	// part. Naming an unknown package is an error, as is a target whose space
+	// does not define the script — a targeted run that runs nothing would be
+	// how a typo hides.
+	Package string
+	// Dir, when set (the `dispat <script>` shorthand), narrows the run the
+	// same way when it points inside a package's folder; anywhere else — the
+	// monorepo root itself, or outside every package — the run covers the
+	// changed packages as usual.
+	Dir string
+}
+
 // RunScript computes the plan and executes the named space run script inside
 // each changed package with the package's full DISPAT_* environment,
 // honouring the dependency graph: a package's script starts only after every
 // changed provider's has finished, and independent packages run concurrently
 // within the build concurrency budget. A changed package whose space does not
 // define the script completes as a no-op; a name no space defines at all is
-// an error, because running nothing silently is how a typo hides. onError
-// decides what a failure does to the failed package's dependents (OnErrorSkip
-// or OnErrorContinue); any failure makes the whole command fail.
-func (a *App) RunScript(ctx context.Context, name, onError string) error {
+// an error, because running nothing silently is how a typo hides. opts can
+// narrow the run to one package (see RunOptions); any failure makes the
+// whole command fail.
+func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error {
 	defined := false
 	for _, sc := range a.cfg.Spaces {
 		if _, ok := sc.RunScript(name); ok {
@@ -55,6 +74,7 @@ func (a *App) RunScript(ctx context.Context, name, onError string) error {
 		a.log.Error().Err(err).Msg("unknown run script")
 		return err
 	}
+	onError := opts.OnError
 	if onError == "" {
 		onError = OnErrorSkip
 	}
@@ -67,99 +87,50 @@ func (a *App) RunScript(ctx context.Context, name, onError string) error {
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return errors.New("no correct plan exists")
 	}
-
-	runner := &script.ShellRunner{Shell: a.cfg.Shell}
-	stage := "run:" + name
+	target, err := a.runTarget(pl, name, opts)
+	if err != nil {
+		a.log.Error().Err(err).Msg("cannot run the script")
+		return err
+	}
 
 	// The task graph: one node per changed package, edges from every changed
 	// provider — the same shape the release executor schedules, at package
-	// rather than stage granularity.
+	// rather than stage granularity. A targeted run replaces the graph with
+	// the one named package, changed or not: naming it (or standing in its
+	// folder) is the instruction to run it.
 	changed := make(map[string]*plan.Release)
 	sched := graph.NewScheduler[string]()
-	for _, rel := range pl.Releasing() {
-		changed[rel.Pkg.Name] = rel
-		sched.Add(rel.Pkg.Name)
-	}
-	for pkg := range changed {
-		for _, prov := range pl.Providers[pkg] {
-			if _, ok := changed[prov]; ok {
-				sched.AddEdge(prov, pkg)
-			}
+	if target != "" {
+		changed[target] = pl.Releases[target]
+		sched.Add(target)
+	} else {
+		for _, rel := range pl.Releasing() {
+			changed[rel.Pkg.Name] = rel
+			sched.Add(rel.Pkg.Name)
 		}
-	}
-
-	type outcome struct{ failed, skipped, ran bool }
-	results := make(map[string]*outcome, len(changed))
-	var mu sync.Mutex
-
-	execute := func(pkg string) {
-		rel := changed[pkg]
-		res := &outcome{}
-		defer func() {
-			mu.Lock()
-			results[pkg] = res
-			mu.Unlock()
-		}()
-
-		// Carry the changed providers' exports in before anything of this
-		// package runs: the run-command counterpart of the pipeline's
-		// per-package accumulation, transitive by construction (each provider
-		// carried its own providers' exports before exporting). Providers
-		// merge in name order, so a name two of them export resolves
-		// deterministically; the package's own later export overrides either.
-		provs := append([]string(nil), pl.Providers[pkg]...)
-		sort.Strings(provs)
-		for _, prov := range provs {
-			if pr, ok := changed[prov]; ok {
-				release.MergeOutputs(rel, pr.Outputs)
-			}
-		}
-
-		if onError == OnErrorSkip {
-			// Providers finished before this package was handed out, so their
-			// outcomes are final; a skipped provider cascades the skip.
-			mu.Lock()
-			blocker := ""
+		for pkg := range changed {
 			for _, prov := range pl.Providers[pkg] {
-				if r, ok := results[prov]; ok && (r.failed || r.skipped) {
-					blocker = prov
-					break
+				if _, ok := changed[prov]; ok {
+					sched.AddEdge(prov, pkg)
 				}
 			}
-			mu.Unlock()
-			if blocker != "" {
-				res.skipped = true
-				a.log.Warn().Str("package", pkg).Str("stage", stage).Str("blockedBy", blocker).
-					Msg("run script skipped: a dependency's script failed or was skipped")
-				return
-			}
 		}
-
-		cmd, ok := rel.Pkg.Space.RunScripts[strings.ToLower(name)]
-		if !ok {
-			a.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
-				Msgf("space does not define run script %q, skipping", name)
-			return
-		}
-		log := a.log.With().Str("package", pkg).Str("stage", stage).Logger()
-		log.Info().Msg("run script started")
-		env := release.CommandEnv(pl, pkg, stage, a.log)
-		if err := release.RunSequenceWithOutputs(ctx, runner, rel, rel.Pkg.Dir, stage, []string{cmd}, env, log, true); err != nil {
-			res.failed = true
-			log.Error().Err(err).Msg("run script failed")
-			return
-		}
-		res.ran = true
 	}
 
+	run := &scriptRun{
+		app: a, pl: pl, changed: changed,
+		results: make(map[string]*runOutcome, len(changed)),
+		name:    name, stage: "run:" + name, onError: onError,
+		runner: &script.ShellRunner{Shell: a.cfg.Shell},
+	}
 	// One class, one budget: the run command reuses the executor's pump.
 	graph.Drain(sched,
 		func(string) struct{} { return struct{}{} },
 		func(struct{}) int { return a.cfg.BuildConcurrency },
-		execute)
+		func(pkg string) { run.execute(ctx, pkg) })
 
 	ran, failed, skipped := 0, 0, 0
-	for _, res := range results {
+	for _, res := range run.results {
 		switch {
 		case res.failed:
 			failed++
@@ -175,4 +146,138 @@ func (a *App) RunScript(ctx context.Context, name, onError string) error {
 		return fmt.Errorf("%d run script(s) failed", failed)
 	}
 	return nil
+}
+
+// runTarget resolves the single package a run is narrowed to, or "" for the
+// ordinary changed-packages run. An explicit RunOptions.Package must exist
+// and its space must define the script; RunOptions.Dir narrows only when it
+// points inside some package's folder, and silently does not when it points
+// anywhere else (the monorepo root, a space folder, outside the tree).
+func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, error) {
+	target := opts.Package
+	if target == "" && opts.Dir != "" {
+		target = a.packageAt(pl, opts.Dir)
+	}
+	if target == "" {
+		return "", nil
+	}
+	rel := pl.Releases[target]
+	if rel == nil {
+		return "", fmt.Errorf("unknown package %q (discovered: %s)", target, strings.Join(pl.Order, ", "))
+	}
+	if _, ok := rel.Pkg.Space.RunScripts[strings.ToLower(name)]; !ok {
+		return "", fmt.Errorf("space %q of package %q does not define run script %q",
+			rel.Pkg.Space.Name, target, name)
+	}
+	return target, nil
+}
+
+// packageAt returns the package whose folder contains dir, or "" when dir is
+// not inside any package (the root itself included). Both sides are compared
+// absolute, so the relative --root default and absolute package dirs meet on
+// equal terms.
+func (a *App) packageAt(pl *plan.Plan, dir string) string {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for _, name := range pl.Order {
+		rel := pl.Releases[name]
+		if rel == nil {
+			continue
+		}
+		pkgDir, err := filepath.Abs(rel.Pkg.Dir)
+		if err != nil {
+			continue
+		}
+		if absDir == pkgDir || strings.HasPrefix(absDir, pkgDir+string(filepath.Separator)) {
+			return name
+		}
+	}
+	return ""
+}
+
+// runOutcome is one package's terminal state within a `dispat run`.
+type runOutcome struct{ failed, skipped, ran bool }
+
+// scriptRun is the shared state of one RunScript invocation: the plan, the
+// changed packages, the per-package outcomes (mu guards results; everything
+// else is read-only once built) and the run's own parameters.
+type scriptRun struct {
+	app     *App
+	pl      *plan.Plan
+	changed map[string]*plan.Release
+	results map[string]*runOutcome
+	mu      sync.Mutex
+	name    string
+	stage   string
+	onError string
+	runner  script.Runner
+}
+
+// blocker returns — with mu held by the caller — the first provider whose
+// script failed or was skipped, or "".
+func (s *scriptRun) blocker(pkg string) string {
+	for _, prov := range s.pl.Providers[pkg] {
+		if r, ok := s.results[prov]; ok && (r.failed || r.skipped) {
+			return prov
+		}
+	}
+	return ""
+}
+
+// execute runs the named script for one package to completion.
+func (s *scriptRun) execute(ctx context.Context, pkg string) {
+	rel := s.changed[pkg]
+	res := &runOutcome{}
+	defer func() {
+		s.mu.Lock()
+		s.results[pkg] = res
+		s.mu.Unlock()
+	}()
+
+	// Carry the changed providers' exports in before anything of this
+	// package runs: the run-command counterpart of the pipeline's
+	// per-package accumulation, transitive by construction (each provider
+	// carried its own providers' exports before exporting). Providers
+	// merge in name order, so a name two of them export resolves
+	// deterministically; the package's own later export overrides either.
+	provs := append([]string(nil), s.pl.Providers[pkg]...)
+	sort.Strings(provs)
+	for _, prov := range provs {
+		if pr, ok := s.changed[prov]; ok {
+			release.MergeOutputs(rel, pr.Outputs)
+		}
+	}
+
+	if s.onError == OnErrorSkip {
+		// Providers finished before this package was handed out, so their
+		// outcomes are final; a skipped provider cascades the skip.
+		s.mu.Lock()
+		blocker := s.blocker(pkg)
+		s.mu.Unlock()
+		if blocker != "" {
+			res.skipped = true
+			s.app.log.Warn().Str("package", pkg).Str("stage", s.stage).Str("blockedBy", blocker).
+				Msg("run script skipped: a dependency's script failed or was skipped")
+			return
+		}
+	}
+
+	cmd, ok := rel.Pkg.Space.RunScripts[strings.ToLower(s.name)]
+	if !ok {
+		s.app.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
+			Msgf("space does not define run script %q, skipping", s.name)
+		return
+	}
+	log := s.app.log.With().Str("package", pkg).Str("stage", s.stage).Logger()
+	log.Info().Msg("run script started")
+	seq := release.Sequence{Runner: s.runner, Dir: rel.Pkg.Dir, Stage: s.stage, Commands: []string{cmd},
+		Env: release.CommandEnv(s.pl, pkg, s.stage, s.app.log), Log: log, FailFast: true}
+	if err := seq.RunMergingOutputs(ctx, rel); err != nil {
+		res.failed = true
+		log.Error().Err(err).Msg("run script failed")
+		return
+	}
+	res.ran = true
 }

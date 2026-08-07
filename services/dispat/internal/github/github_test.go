@@ -42,16 +42,27 @@ func testRelease() *plan.Release {
 	}
 }
 
+// captureServer serves the one call these tests care about — the
+// create-release POST — by decoding its payload and replying 201. It is for
+// the tests whose only interest is what the recorder sent; servers that
+// assert on paths, headers or uploads, or inject errors, stay bespoke next
+// to their tests.
+func captureServer(t *testing.T) (*httptest.Server, *releaseRequest) {
+	t.Helper()
+	got := &releaseRequest{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(got))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, got
+}
+
 func TestRecordUsesExportedCommit(t *testing.T) {
 	// A PACKAGE_<KEY> export overrides the release's commit for this one
 	// package: it becomes the target_commitish and the documented commit,
 	// even over the finalize phase's own values.
-	var gotBody releaseRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	defer srv.Close()
+	srv, gotBody := captureServer(t)
 
 	rel := testRelease()
 	rel.Outputs = append(rel.Outputs, plan.Output{
@@ -112,12 +123,7 @@ func TestRecordCreatesRelease(t *testing.T) {
 func TestRecordMarksPrereleases(t *testing.T) {
 	// GitHub presents the newest non-prerelease as "Latest"; a beta shipped
 	// without the flag would take that slot.
-	var gotBody releaseRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	defer srv.Close()
+	srv, gotBody := captureServer(t)
 
 	rel := testRelease()
 	rel.Next = ccme.Version{Major: 1, Minor: 3, Prerelease: []string{"beta", "0"}}
@@ -130,12 +136,7 @@ func TestRecordMarksPrereleases(t *testing.T) {
 }
 
 func TestRecordUsesTheSpaceTagFormat(t *testing.T) {
-	var gotBody releaseRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	defer srv.Close()
+	srv, gotBody := captureServer(t)
 
 	rel := testRelease()
 	rel.Pkg.Space.TagFormat = "services/{name}@v{version}"
@@ -148,12 +149,7 @@ func TestRecordUsesTheSpaceTagFormat(t *testing.T) {
 }
 
 func TestRecordCustomFormat(t *testing.T) {
-	var gotBody releaseRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	defer srv.Close()
+	srv, gotBody := captureServer(t)
 
 	rel := &Releaser{
 		APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
@@ -164,12 +160,7 @@ func TestRecordCustomFormat(t *testing.T) {
 }
 
 func TestRecordWithCommitSHA(t *testing.T) {
-	var gotBody releaseRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	defer srv.Close()
+	srv, gotBody := captureServer(t)
 
 	// Push disabled: the commit SHA is documented in the body, but
 	// target_commitish must NOT be sent (the SHA is not on the remote).
@@ -185,12 +176,7 @@ func TestRecordWithCommitSHA(t *testing.T) {
 }
 
 func TestRecordWithTargetCommitish(t *testing.T) {
-	var gotBody releaseRequest
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	defer srv.Close()
+	srv, gotBody := captureServer(t)
 
 	// Push enabled: the tag is additionally pinned to the pushed commit.
 	rel := &Releaser{

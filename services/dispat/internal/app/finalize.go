@@ -47,8 +47,19 @@ func (h *runHooks) exec(ctx context.Context, name string, refs []string, failFas
 	}
 	log := h.log.With().Str("stage", name).Logger()
 	log.Debug().Msg("hook started")
-	env := append(append([]string{}, h.env...), "DISPAT_STAGE="+name)
-	return release.RunSequence(ctx, h.runner, h.root, name, commands, env, log, failFast)
+	seq := release.Sequence{Runner: h.runner, Dir: h.root, Stage: name, Commands: commands,
+		Env: append(append([]string{}, h.env...), "DISPAT_STAGE="+name), Log: log, FailFast: failFast}
+	return seq.Run(ctx)
+}
+
+// finalizer bundles what the finalize phase needs from the surrounding
+// Release call — the resolved GitHub releaser (nil when disabled), the push
+// remote and the run-level hooks — so finalize does not take each of them as
+// a positional parameter.
+type finalizer struct {
+	gh     *github.Releaser
+	remote string
+	hooks  *runHooks
 }
 
 // finalize runs the end-of-run release-commit phase: one commit staging every
@@ -63,7 +74,7 @@ func (h *runHooks) exec(ctx context.Context, name string, refs []string, failFas
 // disabled or nothing published, and the "after" hooks only run when the
 // bracketed operation succeeded: a hook observing a commit or push that never
 // happened would be reporting a lie.
-func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, pl *plan.Plan, results map[string]*release.Result, hooks *runHooks) error {
+func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, results map[string]*release.Result) error {
 	if !a.cfg.Commit.IsEnabled() {
 		return nil
 	}
@@ -84,7 +95,7 @@ func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, 
 	}
 
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
-	hooks.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
+	fin.hooks.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
 	committed, err := a.git.CommitDirs(ctx, dirs, msg)
 	if err != nil {
 		a.log.Error().Err(err).Msg("release commit failed")
@@ -93,32 +104,31 @@ func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, 
 	if committed {
 		a.log.Info().Str("message", msg).Msg("created release commit")
 	}
-	hooks.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
+	fin.hooks.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
 	for _, rel := range rels {
-		tag := rel.TagName()
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
-		if err := a.git.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit()); err != nil {
-			a.log.Error().Err(err).Str("tag", tag).Msg("tagging failed")
+		if err := release.CreateReleaseTag(ctx, a.git, rel); err != nil {
+			a.log.Error().Err(err).Str("tag", rel.TagName()).Msg("tagging failed")
 			return err
 		}
 	}
-	hooks.run(ctx, "postCommit", a.cfg.Run.PostCommit)
+	fin.hooks.run(ctx, "postCommit", a.cfg.Run.PostCommit)
 	if a.cfg.Commit.PushEnabled() {
-		hooks.run(ctx, "beforePush", a.cfg.Run.BeforePush)
-		skipped, err := a.git.Push(ctx, remote, tags)
+		fin.hooks.run(ctx, "beforePush", a.cfg.Run.BeforePush)
+		skipped, err := a.git.Push(ctx, fin.remote, tags)
 		if err != nil {
-			a.log.Error().Err(err).Str("remote", remote).Msg("push failed")
+			a.log.Error().Err(err).Str("remote", fin.remote).Msg("push failed")
 			return err
 		}
 		for _, tag := range skipped {
-			a.log.Warn().Str("tag", tag).Str("remote", remote).
+			a.log.Warn().Str("tag", tag).Str("remote", fin.remote).
 				Msg("tag already exists on the remote, skipped")
 		}
-		a.log.Info().Str("remote", remote).Strs("tags", tags).Msg("pushed release commit and tags")
-		hooks.run(ctx, "afterPush", a.cfg.Run.AfterPush)
+		a.log.Info().Str("remote", fin.remote).Strs("tags", tags).Msg("pushed release commit and tags")
+		fin.hooks.run(ctx, "afterPush", a.cfg.Run.AfterPush)
 	}
-	if gh != nil {
+	if fin.gh != nil {
 		// The releases document the exact release commit and tag in their
 		// body, whether or not they were pushed; with push enabled the tag is
 		// additionally pinned to the commit via target_commitish (only then
@@ -126,13 +136,13 @@ func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, 
 		if sha, err := a.git.HeadSHA(ctx); err != nil {
 			a.log.Warn().Err(err).Msg("cannot resolve HEAD, github releases will omit the commit")
 		} else {
-			gh.CommitSHA = sha
+			fin.gh.CommitSHA = sha
 			if a.cfg.Commit.PushEnabled() {
-				gh.TargetCommitish = sha
+				fin.gh.TargetCommitish = sha
 			}
 		}
 		for _, rel := range rels {
-			if err := gh.Record(ctx, rel); err != nil {
+			if err := fin.gh.Record(ctx, rel); err != nil {
 				a.log.Error().Err(err).Str("package", rel.Pkg.Name).Msg("github release failed")
 				return err
 			}
@@ -141,10 +151,15 @@ func (a *App) finalize(ctx context.Context, gh *github.Releaser, remote string, 
 	return nil
 }
 
+// defaultCommitMessageFormat is the release commit's message template when
+// commit.messageFormat is unset. Its "release" scope is what nonPackageScopes
+// exempts by default, so the commit does not poison the next run.
+const defaultCommitMessageFormat = "chore(release): {tags}"
+
 // renderCommitMessage substitutes {tags} and {packages} placeholders.
 func renderCommitMessage(format string, pkgs, tags []string) string {
 	if format == "" {
-		format = "chore(release): {tags}"
+		format = defaultCommitMessageFormat
 	}
 	msg := strings.ReplaceAll(format, "{tags}", strings.Join(tags, ", "))
 	return strings.ReplaceAll(msg, "{packages}", strings.Join(pkgs, ", "))

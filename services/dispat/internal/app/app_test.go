@@ -1,18 +1,46 @@
 package app
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
 // The end-to-end behaviour of App — status, release, hooks, finalize, exit
-// semantics — is exercised through the cli package's tests against real git
-// repositories; here live the unit tests of App's own helpers.
+// semantics — is exercised by the black-box suite in tests/integration
+// against the compiled binary; here live the unit tests of App's own
+// helpers.
+
+func TestValidOnError(t *testing.T) {
+	assert.True(t, ValidOnError(OnErrorSkip))
+	assert.True(t, ValidOnError(OnErrorContinue))
+	assert.False(t, ValidOnError(""))
+	assert.False(t, ValidOnError("explode"))
+}
+
+func TestInitialVersionsMapping(t *testing.T) {
+	// Viper lowercases map keys, so matching is case-insensitive; a key that
+	// names no discovered package is warned about and ignored.
+	var buf bytes.Buffer
+	a := New(t.TempDir(), &config.File{
+		InitialVersions: map[string]ccme.Version{
+			"core":  {Major: 1, Minor: 2},
+			"ghost": {Major: 9},
+		},
+	}, zerolog.New(&buf))
+
+	out := a.initialVersions([]*model.Package{{Name: "Core"}})
+	require.Len(t, out, 1)
+	assert.Equal(t, "1.2.0", out["Core"].String(), "initials key matched case-insensitively")
+	assert.Contains(t, buf.String(), "initials entry matches no discovered package")
+}
 
 func TestRenderCommitMessage(t *testing.T) {
 	pkgs := []string{"core", "utils"}

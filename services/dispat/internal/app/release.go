@@ -66,15 +66,11 @@ func (a *App) Release(ctx context.Context) error {
 		}
 	}
 
-	// In release-commit mode, tagging and GitHub releases move to the
-	// finalize phase so they reference the end-of-run commit.
+	// In release-commit mode, tagging moves to the finalize phase so the tags
+	// reference the end-of-run commit.
 	var tagger release.Tagger = a.git
 	if commitMode {
 		tagger = nil
-	}
-	recs := a.recorders()
-	if gh != nil && !commitMode {
-		recs = append(recs, gh)
 	}
 
 	runner := &script.ShellRunner{Shell: a.cfg.Shell}
@@ -95,7 +91,7 @@ func (a *App) Release(ctx context.Context) error {
 		PublishConcurrency: a.cfg.PublishConcurrency,
 		Runner:             runner,
 		Tagger:             tagger,
-		Recorders:          recs,
+		Recorders:          a.recorders(gh, commitMode),
 		Reverter:           a.git,
 		Log:                a.log,
 	}
@@ -106,7 +102,7 @@ func (a *App) Release(ctx context.Context) error {
 	// postAll runs once the whole task graph has finished, releases or not —
 	// "nothing published" is an outcome a notification script wants to see too.
 	hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
-	finErr := a.finalize(ctx, gh, remote, pl, results, hooks)
+	finErr := a.finalize(ctx, finalizer{gh: gh, remote: remote, hooks: hooks}, pl, results)
 	failed := a.summarize(pl, results, time.Since(start))
 	if finErr != nil {
 		return finErr
@@ -117,10 +113,12 @@ func (a *App) Release(ctx context.Context) error {
 	return nil
 }
 
-// recorders assembles the per-publish release recorders enabled by the
-// configuration (currently the changelog file writer; the GitHub releaser is
-// appended by Release depending on the release-commit mode).
-func (a *App) recorders() []release.ReleaseRecorder {
+// recorders assembles every per-publish release recorder this run records
+// through: the changelog file writer when enabled, and the resolved GitHub
+// releaser (nil when disabled or unresolvable) — except in release-commit
+// mode, where GitHub recording moves to the finalize phase so the releases
+// reference the end-of-run commit.
+func (a *App) recorders(gh *github.Releaser, commitMode bool) []release.ReleaseRecorder {
 	var recs []release.ReleaseRecorder
 	if a.cfg.Changelog.IsEnabled() {
 		recs = append(recs, &changelog.FileWriter{
@@ -130,6 +128,9 @@ func (a *App) recorders() []release.ReleaseRecorder {
 		})
 	} else {
 		a.log.Debug().Msg("changelog files disabled by config")
+	}
+	if gh != nil && !commitMode {
+		recs = append(recs, gh)
 	}
 	return recs
 }

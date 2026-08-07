@@ -66,12 +66,13 @@ from its publish stage onward, sourced `<space>:login`.
 ### `flow.announce`
 
 A fourth per-package stage, run after the publish frame completes (publish script, release records, tag,
-`flow.postPublish`). Its job is pushing the release out to update channels (a Slack or Discord message, a webhook, a docs
-feed), so alongside the full stage environment it is the natural consumer of the
+`flow.postPublish`). Its job is pushing the release out to update channels (a Slack or Discord message, a webhook, a
+docs feed), so alongside the full stage environment it is the natural consumer of the
 [release-notes variables](../environment.md#release-notes-data) (`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES`,
 `DISPAT_FIXES`) and the channel variables (`DISPAT_CHANNEL`, `DISPAT_OLD_CHANNEL`, `DISPAT_IS_PRERELEASE`) for choosing
 where and how to announce. It has the same hook structure as the other stages (`flow.beforeAnnounce` /
-`flow.postAnnounce`) but none of their authority: the release is already out, so an error in the stage **or either hook**
+`flow.postAnnounce`) but none of their authority: the release is already out, so an error in the stage **or either
+hook**
 only warns, the package stays published, and no failure among the three sequences stops the others from running. The
 frame is skipped entirely when the publish failed; there is nothing to announce.
 
@@ -79,9 +80,9 @@ frame is skipped entirely when the publish failed; there is nothing to announce.
 
 Two outcome scripts, the failure-side counterparts of the announce stage. `flow.onFail` runs once when a package of the
 space **fails** at any stage (a failing gating hook, release recorder or tag included), after its status has settled and
-after `revertOnFail`'s rollback, so the script sees the folder's final state. `flow.onSkip` runs once when the package is
-**skipped** because a provider failed or was skipped. Both observe an outcome that has already happened, so an error in
-either only warns; both receive the full package environment (`DISPAT_STAGE` is `onFail` /
+after `revertOnFail`'s rollback, so the script sees the folder's final state. `flow.onSkip` runs once when the package
+is **skipped** because a provider failed or was skipped. Both observe an outcome that has already happened, so an error
+in either only warns; both receive the full package environment (`DISPAT_STAGE` is `onFail` /
 `onSkip`) plus the specifics:
 
 | Variable              | Set for  | Meaning                                                 |
@@ -147,6 +148,13 @@ the build concurrency budget (`--concurrency`'s first value). Each script gets t
 [DISPAT_* environment](../environment.md) (`DISPAT_STAGE` is `run:<name>`), so a script moves freely between a stage and
 a run script. A changed package whose space does not define the name completes as a no-op; a name **no** space defines
 is an error (running nothing silently is how a typo hides).
+
+The run can also be narrowed to a single package, in two ways. `dispat run <name> <package>` runs the script in exactly
+that package — changed or not, with no graph — and errors on an unknown package or on one whose space does not define
+the script, because a *targeted* run that runs nothing would be a typo hiding. And the shorthand, invoked from inside a
+package's folder (or any subdirectory of it), narrows to that package the same way — config resolution finds the
+monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just works — while from the monorepo
+top it covers every changed package as usual. The shorthand takes no package argument.
 
 What a failure does is the `--on-error` flag: under `skip` (the default) the failed package's changed dependents are
 skipped, transitively (the same shape a release gives a failed provider), while independent packages keep running; under

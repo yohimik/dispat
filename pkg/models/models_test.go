@@ -10,31 +10,29 @@ import (
 // loadable config (keys match the mapstructure names — the CLI's own config
 // tests load marshalled models end to end).
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestEnabledDefaults(t *testing.T) {
 	if !(ChangelogConfig{}).IsEnabled() {
 		t.Error("changelog defaults to enabled")
 	}
-	if (ChangelogConfig{Enabled: boolPtr(false)}).IsEnabled() {
+	if (ChangelogConfig{Enabled: Bool(false)}).IsEnabled() {
 		t.Error("changelog can be disabled")
 	}
 	if !(GitHubConfig{}).IsEnabled() {
 		t.Error("github defaults to enabled")
 	}
-	if (GitHubConfig{Enabled: boolPtr(false)}).IsEnabled() {
+	if (GitHubConfig{Enabled: Bool(false)}).IsEnabled() {
 		t.Error("github can be disabled")
 	}
 	if (CommitConfig{}).IsEnabled() {
 		t.Error("the release commit defaults to disabled")
 	}
-	if !(CommitConfig{Enabled: boolPtr(true)}).IsEnabled() {
+	if !(CommitConfig{Enabled: Bool(true)}).IsEnabled() {
 		t.Error("the release commit can be enabled")
 	}
-	if (CommitConfig{Enabled: boolPtr(true)}).PushEnabled() {
+	if (CommitConfig{Enabled: Bool(true)}).PushEnabled() {
 		t.Error("push needs its own flag")
 	}
-	if !(CommitConfig{Enabled: boolPtr(true), Push: true}).PushEnabled() {
+	if !(CommitConfig{Enabled: Bool(true), Push: true}).PushEnabled() {
 		t.Error("push follows commit")
 	}
 	if (CommitConfig{Push: true}).PushEnabled() {
@@ -43,10 +41,10 @@ func TestEnabledDefaults(t *testing.T) {
 	if !(CommitConfig{}).VerifyEnabled() {
 		t.Error("push verification defaults to enabled")
 	}
-	if !(CommitConfig{Verify: boolPtr(true)}).VerifyEnabled() {
+	if !(CommitConfig{Verify: Bool(true)}).VerifyEnabled() {
 		t.Error("verification can be stated explicitly")
 	}
-	if (CommitConfig{Verify: boolPtr(false)}).VerifyEnabled() {
+	if (CommitConfig{Verify: Bool(false)}).VerifyEnabled() {
 		t.Error("verification can be disabled")
 	}
 }

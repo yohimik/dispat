@@ -146,7 +146,7 @@ func withPrerelease(core ccme.Version, channel string, counter uint64) ccme.Vers
 // the content. Continuing an existing counter requires all three of: a
 // prerelease baseline, the same channel, and the same core.
 func nextPrerelease(stable, baseline ccme.Version, hasBaseline bool, channel string, e ccme.Bump) (ccme.Version, bool) {
-	target := coreOf(stable.Bumped(e))
+	target := stable.Bumped(e).Core()
 
 	if !hasBaseline || !baseline.IsPrerelease() {
 		return withPrerelease(target, channel, 0), true

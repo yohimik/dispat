@@ -38,25 +38,11 @@ func commitKey(c gitx.Commit) string {
 	return "msg:" + c.Message
 }
 
-func commitParents(c gitx.Commit) []string { return c.Parents }
-
-func tagCommit(t gitx.Tag) string { return t.Commit }
-
-func dependencyKind(d model.Dependency) model.DepKind { return d.Kind }
-
 // ---------------------------------------------------------------------------
 // versions
 // ---------------------------------------------------------------------------
 
-func versionString(v ccme.Version) string { return v.String() }
-
 func versionLess(a, b ccme.Version) bool { return a.Compare(b) < 0 }
-
-// coreOf strips the prerelease and build components, leaving the
-// MAJOR.MINOR.PATCH triple §11.4 calls the train's target.
-func coreOf(v ccme.Version) ccme.Version {
-	return ccme.Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
-}
 
 func sameCore(a, b ccme.Version) bool {
 	return a.Major == b.Major && a.Minor == b.Minor && a.Patch == b.Patch
@@ -65,13 +51,6 @@ func sameCore(a, b ccme.Version) bool {
 // ---------------------------------------------------------------------------
 // unit accessors
 // ---------------------------------------------------------------------------
-
-func unitIsCancel(u *ccme.Unit) bool { return u.IsCancel() }
-
-// unitBump is bumpOf(unit) from §13.6: the type mapping and "!" alone. No
-// footer overrides it — Release-As acts on the release, not on the size of the
-// change — and ccme has already applied that rule.
-func unitBump(u *ccme.Unit) ccme.Bump { return u.Bump }
 
 // unitScopes returns the unit's scope-set and whether one was written at all.
 // An unwritten set is resolved from the commit's changed files (§6.2), which
@@ -176,7 +155,7 @@ func kindSet(kinds []ccme.DependencyKind) map[model.DepKind]bool {
 func (cp *computation) unitPropagation(u *ccme.Unit, rec *commitRec) propagation {
 	d := u.Directives
 	p := propagation{
-		Bump:  d.Propagate.Bump(unitBump(u)),
+		Bump:  d.Propagate.Bump(u.Bump),
 		Depth: int(d.Depth),
 		kinds: kindSet(d.Kinds),
 	}

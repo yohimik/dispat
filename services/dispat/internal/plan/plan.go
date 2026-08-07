@@ -195,12 +195,6 @@ var repositoryScoped = map[string]bool{
 // the configured error policy (§16).
 func IsRepositoryScoped(code string) bool { return repositoryScoped[code] }
 
-// NonSuppressible lists the codes §14.2 and §17.1 forbid an implementation to
-// silence. Each reports a release outcome that a reader of the commit log
-// alone cannot account for: W193 and W202 explain a package's *presence* in a
-// plan, W194 and W208 explain an *absence*.
-var NonSuppressible = []string{CodeCatchUp, CodeBlocked, CodeChannelOnly, CodeBumpSuppressed, CodeFixedAlign}
-
 // Level separates advisory diagnostics from ones that must fail the run.
 type Level int
 
@@ -258,10 +252,9 @@ type Release struct {
 	Baseline ccme.Version
 	// HasBaseline reports whether any parseable tag exists.
 	HasBaseline bool
-	// Latest is an alias of Baseline kept for reporting.
-	Latest       ccme.Version
-	Tagged       bool   // whether a previous parseable release tag exists
-	TagCreated   int64  // creation time (unix) of the stable tag; reporting only
+	// Tagged reports whether a parseable *stable* release tag exists — the
+	// counterpart of HasBaseline for the stable baseline Current comes from.
+	Tagged       bool
 	StableCommit string // commit of the stable baseline tag; "" when untagged
 	// BaselineCommit is the commit of the baseline tag — the newest tag of any
 	// kind. On a prerelease train it is ahead of StableCommit, and everything
@@ -567,7 +560,6 @@ type Plan struct {
 	Order       []string            // topological order, providers before consumers
 	Releases    map[string]*Release // one entry per package
 	Providers   map[string][]string // consumer -> its providers
-	Consumers   map[string][]string // provider -> its consumers
 	Diagnostics []Diagnostic
 
 	// ancestor answers "is a an ancestor-or-self of b" over the commits the
@@ -732,7 +724,6 @@ type computation struct {
 	byName    map[string]*model.Package
 	order     []string
 	providers map[string][]string
-	consumers map[string][]string
 	edges     map[string][]edge
 
 	parser *ccme.Parser
@@ -837,7 +828,6 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		Order:       cp.order,
 		Releases:    cp.rel,
 		Providers:   cp.providers,
-		Consumers:   cp.consumers,
 		Diagnostics: cp.diags,
 		ancestor:    cp.ancestorOrSelf,
 	}, nil
@@ -854,7 +844,6 @@ func (cp *computation) loadWorkspace(deps []model.Dependency) error {
 		g.AddNode(p.Name)
 	}
 	cp.providers = make(map[string][]string)
-	cp.consumers = make(map[string][]string)
 	cp.edges = make(map[string][]edge)
 
 	seen := make(map[model.Dependency]bool)
@@ -867,8 +856,7 @@ func (cp *computation) loadWorkspace(deps []model.Dependency) error {
 			return err
 		}
 		cp.providers[d.Consumer] = append(cp.providers[d.Consumer], d.Provider)
-		cp.consumers[d.Provider] = append(cp.consumers[d.Provider], d.Consumer)
-		cp.edges[d.Provider] = append(cp.edges[d.Provider], edge{to: d.Consumer, kind: dependencyKind(d)})
+		cp.edges[d.Provider] = append(cp.edges[d.Provider], edge{to: d.Consumer, kind: d.Kind})
 	}
 	// Deterministic traversal order (§17.2): the BFS of §9.2 marks each
 	// package seen once, so the order it meets them must not depend on map
@@ -907,8 +895,7 @@ func (cp *computation) loadTagsAndWindows() error {
 		newest, hasNewest := tags.Baseline()
 		if hasNewest && newest.Parsed {
 			rel.Baseline, rel.HasBaseline = newest.Version, true
-			rel.Latest = newest.Version
-			rel.BaselineCommit = tagCommit(newest)
+			rel.BaselineCommit = newest.Commit
 		}
 		// §11.1: a package with no baseline is on the stable channel, so a
 		// never-released package is graduated by nothing and entered onto a
@@ -927,12 +914,10 @@ func (cp *computation) loadTagsAndWindows() error {
 		switch {
 		case hasStable && stable.Parsed:
 			rel.Current, rel.Tagged, since = stable.Version, true, stable.Name
-			rel.TagCreated = stable.Created
-			rel.StableCommit = tagCommit(stable)
+			rel.StableCommit = stable.Commit
 		case hasStable:
 			since = stable.Name
-			rel.TagCreated = stable.Created
-			rel.StableCommit = tagCommit(stable)
+			rel.StableCommit = stable.Commit
 			if init, ok := cp.initials[p.Name]; ok {
 				rel.Current, rel.FromInitials = init, true
 			}
@@ -1017,7 +1002,7 @@ func (cp *computation) buildUnion(lists [][]gitx.Commit) {
 			rec := &commitRec{commit: c, key: key, rank: len(cp.commits)}
 			cp.byKey[key] = rec
 			cp.commits = append(cp.commits, rec)
-			if ps := commitParents(c); len(ps) > 0 {
+			if ps := c.Parents; len(ps) > 0 {
 				cp.parents[key] = ps
 				cp.linked = true
 			}
@@ -1127,7 +1112,7 @@ func (cp *computation) liftDiagnostics(res *ccme.Result, commit string) {
 func (cp *computation) collectCancels() {
 	for _, rec := range cp.commits {
 		for i, u := range rec.units {
-			if !unitIsCancel(u) {
+			if !u.IsCancel() {
 				continue
 			}
 			c := &cancelRec{
@@ -1321,10 +1306,14 @@ func (cp *computation) resolveHolds() {
 func (cp *computation) directBumps() {
 	for _, rec := range cp.commits {
 		for i, u := range rec.units {
-			if unitIsCancel(u) { // cancel units are dropped after §13.5
+			if u.IsCancel() { // cancel units are dropped after §13.5
 				continue
 			}
-			bump := unitBump(u)
+			// u.Bump is bumpOf(unit) from §13.6: the type mapping and "!"
+			// alone. No footer overrides it — Release-As acts on the release,
+			// not on the size of the change — and ccme has already applied
+			// that rule.
+			bump := u.Bump
 			if bump == ccme.BumpNone {
 				continue
 			}
@@ -1492,84 +1481,9 @@ func (cp *computation) applyFixedGroup(spaceName string, members []string) {
 	if len(members) == 0 {
 		return
 	}
-	first := cp.rel[members[0]]
-	mode := first.Pkg.Space.Versioning
-
-	// The synthetic release the group computation runs on. Its Pkg exists so
-	// diagnostics raised against the group name the space rather than an
-	// arbitrary member.
-	g := &Release{Pkg: &model.Package{Name: "space:" + spaceName, Space: first.Pkg.Space}}
-	for _, name := range members {
-		rel := cp.rel[name]
-		if rel.HasBaseline && (!g.HasBaseline || versionLess(g.Baseline, rel.Baseline)) {
-			g.Baseline, g.HasBaseline = rel.Baseline, true
-		}
-		if versionLess(g.Current, rel.Current) {
-			g.Current = rel.Current
-		}
-	}
-	g.Latest = g.Baseline
-	g.BaselineChannel = channelOf(g.Baseline, g.HasBaseline)
-	g.Channel = g.BaselineChannel
-	g.Next = g.Current
-	if g.HasBaseline {
-		g.Next = g.Baseline
-	}
-
-	var channelCands []string // distinct member channels departing from the group baseline
-	seenChan := make(map[string]bool)
-	for _, name := range members {
-		rel := cp.rel[name]
-		if rel.Held {
-			continue
-		}
-		g.OwnBump = ccme.MaxBump(g.OwnBump, rel.OwnBump)
-		g.PropagatedBump = ccme.MaxBump(g.PropagatedBump, rel.PropagatedBump)
-		if rel.NewWork {
-			g.NewWork = true
-		}
-		if rel.Channel != "" && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
-			seenChan[rel.Channel] = true
-			channelCands = append(channelCands, rel.Channel)
-		}
-	}
-	g.Bump = ccme.MaxBump(g.OwnBump, g.PropagatedBump)
-	if len(channelCands) > 0 {
-		if len(channelCands) > 1 {
-			cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
-				fmt.Sprintf("members of fixed space %q resolve to different channels %v; the space moves as one, using %q",
-					spaceName, channelCands, channelCands[0]))
-		}
-		g.Channel = channelCands[0]
-	}
-
-	// The newest exact pin among the members pins the space: with one shared
-	// version there is nothing narrower for it to name. Its scope breadth is
-	// deliberately reset to one package — the space is one version, so E154's
-	// "an exact version can name only one" is satisfied by construction here;
-	// packages outside the space that the same pin scoped still go through
-	// their own applyPin and its guards.
-	var groupPin pin
-	pinnedVersions := make(map[string]bool)
-	hasPin := false
-	for _, name := range members {
-		p, ok := cp.pinned[name]
-		if !ok {
-			continue
-		}
-		pinnedVersions[versionString(p.version)] = true
-		if !hasPin || cp.newerCommit(p.commit, groupPin.commit) {
-			groupPin = p
-			hasPin = true
-		}
-	}
-	if hasPin {
-		groupPin.packages = 1
-		if len(pinnedVersions) > 1 {
-			cp.warn(CodeFixedPinConflict, g.Pkg.Name, groupPin.commit,
-				fmt.Sprintf("%d exact Release-As pins compete for fixed space %q; the newest (%s) wins",
-					len(pinnedVersions), spaceName, versionString(groupPin.version)))
-		}
+	mode := cp.rel[members[0]].Pkg.Space.Versioning
+	g := cp.fixedGroupAggregate(spaceName, members)
+	if groupPin, ok := cp.fixedGroupPin(g, spaceName, members); ok {
 		cp.applyPin(g, groupPin)
 	} else {
 		cp.computeVersion(g)
@@ -1620,7 +1534,7 @@ func (cp *computation) applyFixedGroup(spaceName string, members []string) {
 			rel.FixedRide = true
 			cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
 				"released at %s with no changes of its own, to keep space %q on one version",
-				versionString(g.Next), spaceName))
+				g.Next.String(), spaceName))
 		}
 		rel.Next = g.Next
 		rel.Bump = g.Bump
@@ -1628,6 +1542,95 @@ func (cp *computation) applyFixedGroup(spaceName string, members []string) {
 		rel.Channel = g.Channel
 		rel.Pinned = rel.Pinned || g.Pinned
 	}
+}
+
+// fixedGroupAggregate builds the synthetic release the group computation runs
+// on. Its Pkg exists so diagnostics raised against the group name the space
+// rather than an arbitrary member. The aggregate collects every member's
+// baseline (held ones included) and the bumps, new work and channel movements
+// of the members that would release; members resolving to different channels
+// are reduced to one deterministic winner (W212), because the space can only
+// move as one.
+func (cp *computation) fixedGroupAggregate(spaceName string, members []string) *Release {
+	first := cp.rel[members[0]]
+	g := &Release{Pkg: &model.Package{Name: "space:" + spaceName, Space: first.Pkg.Space}}
+	for _, name := range members {
+		rel := cp.rel[name]
+		if rel.HasBaseline && (!g.HasBaseline || versionLess(g.Baseline, rel.Baseline)) {
+			g.Baseline, g.HasBaseline = rel.Baseline, true
+		}
+		if versionLess(g.Current, rel.Current) {
+			g.Current = rel.Current
+		}
+	}
+	g.BaselineChannel = channelOf(g.Baseline, g.HasBaseline)
+	g.Channel = g.BaselineChannel
+	g.Next = g.Current
+	if g.HasBaseline {
+		g.Next = g.Baseline
+	}
+
+	var channelCands []string // distinct member channels departing from the group baseline
+	seenChan := make(map[string]bool)
+	for _, name := range members {
+		rel := cp.rel[name]
+		if rel.Held {
+			continue
+		}
+		g.OwnBump = ccme.MaxBump(g.OwnBump, rel.OwnBump)
+		g.PropagatedBump = ccme.MaxBump(g.PropagatedBump, rel.PropagatedBump)
+		if rel.NewWork {
+			g.NewWork = true
+		}
+		if rel.Channel != "" && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
+			seenChan[rel.Channel] = true
+			channelCands = append(channelCands, rel.Channel)
+		}
+	}
+	g.Bump = ccme.MaxBump(g.OwnBump, g.PropagatedBump)
+	if len(channelCands) > 0 {
+		if len(channelCands) > 1 {
+			cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
+				fmt.Sprintf("members of fixed space %q resolve to different channels %v; the space moves as one, using %q",
+					spaceName, channelCands, channelCands[0]))
+		}
+		g.Channel = channelCands[0]
+	}
+	return g
+}
+
+// fixedGroupPin selects the pin that applies to the space, if any: the newest
+// exact pin among the members pins the space, because with one shared version
+// there is nothing narrower for it to name. Its scope breadth is deliberately
+// reset to one package — the space is one version, so E154's "an exact
+// version can name only one" is satisfied by construction here; packages
+// outside the space that the same pin scoped still go through their own
+// applyPin and its guards. Competing pins warn (W211) and the newest wins.
+func (cp *computation) fixedGroupPin(g *Release, spaceName string, members []string) (pin, bool) {
+	var groupPin pin
+	pinnedVersions := make(map[string]bool)
+	hasPin := false
+	for _, name := range members {
+		p, ok := cp.pinned[name]
+		if !ok {
+			continue
+		}
+		pinnedVersions[p.version.String()] = true
+		if !hasPin || cp.newerCommit(p.commit, groupPin.commit) {
+			groupPin = p
+			hasPin = true
+		}
+	}
+	if !hasPin {
+		return pin{}, false
+	}
+	groupPin.packages = 1
+	if len(pinnedVersions) > 1 {
+		cp.warn(CodeFixedPinConflict, g.Pkg.Name, groupPin.commit,
+			fmt.Sprintf("%d exact Release-As pins compete for fixed space %q; the newest (%s) wins",
+				len(pinnedVersions), spaceName, groupPin.version.String()))
+	}
+	return groupPin, true
 }
 
 // alignFixedLaggards releases every non-held, not-otherwise-releasing member
@@ -1651,7 +1654,7 @@ func (cp *computation) alignFixedLaggards(spaceName string, g *Release, members 
 		rel.Channel = g.BaselineChannel
 		cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
 			"released at %s with no changes of its own, catching up to space %q's published version",
-			versionString(g.Baseline), spaceName))
+			g.Baseline.String(), spaceName))
 	}
 }
 
@@ -1683,11 +1686,11 @@ func (cp *computation) computeVersion(rel *Release) {
 		// Graduation and the ordinary stable release are the same
 		// computation: applyBump over the stable baseline, no suffix (§11.5).
 		next := rel.Current.Bumped(rel.Bump)
-		if rel.BaselineChannel != ccme.ChannelStable && versionLess(next, coreOf(rel.Baseline)) {
+		if rel.BaselineChannel != ccme.ChannelStable && versionLess(next, rel.Baseline.Core()) {
 			// Only reachable from hand-edited tags (§11.5).
 			cp.pkgErr(rel, CodeGraduateNoIncrease,
 				fmt.Sprintf("graduating to %s would go backwards from the %s baseline %s",
-					versionString(next), rel.BaselineChannel, versionString(rel.Baseline)))
+					next.String(), rel.BaselineChannel, rel.Baseline.String()))
 			return
 		}
 		rel.Next = next
@@ -1699,7 +1702,7 @@ func (cp *computation) computeVersion(rel *Release) {
 	if !ok {
 		cp.pkgErr(rel, CodeBadPrereleaseTag,
 			fmt.Sprintf("baseline %s has no numeric prerelease counter, so the train cannot be continued (§11.3)",
-				versionString(rel.Baseline)))
+				rel.Baseline.String()))
 		return
 	}
 
@@ -1714,7 +1717,7 @@ func (cp *computation) computeVersion(rel *Release) {
 		if okPatch {
 			cp.pkgWarn(rel, CodeChannelEntryPatch, "",
 				fmt.Sprintf("channel-entry patch applied: %s would not have exceeded the baseline %s, so %s is released instead",
-					versionString(next), versionString(rel.Baseline), versionString(bumped)))
+					next.String(), rel.Baseline.String(), bumped.String()))
 			next = bumped
 		}
 	}
@@ -1734,7 +1737,7 @@ func (cp *computation) checkGreater(rel *Release) {
 	}
 	cp.pkgErr(rel, CodeVersionNotGreater,
 		fmt.Sprintf("computed version %s is not greater than the baseline %s",
-			versionString(rel.Next), versionString(rel.Baseline)))
+			rel.Next.String(), rel.Baseline.String()))
 }
 
 // applyPin implements `Release-As: <ver>` and its guards (§8.6, §14.1).
@@ -1763,21 +1766,21 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 	if p.packages > 1 {
 		cp.pkgErr(rel, CodePinMultiPackage,
 			fmt.Sprintf("Release-As: %s applies to %d packages; an exact version can name only one",
-				versionString(p.version), p.packages))
+				p.version.String(), p.packages))
 		rejected()
 		return
 	}
 	if !versionLess(baseline, p.version) {
 		cp.pkgErr(rel, CodePinNotGreater,
 			fmt.Sprintf("Release-As: %s does not move %s forward from %s",
-				versionString(p.version), rel.Pkg.Name, versionString(baseline)))
+				p.version.String(), rel.Pkg.Name, baseline.String()))
 		rejected()
 		return
 	}
 	if rel.Bump != ccme.BumpNone && versionLess(p.version, computed) {
 		cp.pkgErr(rel, CodePinBelowBump,
 			fmt.Sprintf("Release-As: %s is below %s, which the pending commits require",
-				versionString(p.version), versionString(computed)))
+				p.version.String(), computed.String()))
 		rejected()
 		return
 	}
@@ -1786,7 +1789,7 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 	if jump := int64(p.version.Major) - int64(computed.Major); jump > MaxMajorJump {
 		cp.pkgErr(rel, CodePinMajorJump,
 			fmt.Sprintf("Release-As: %s raises the major version %d above the computed %s, more than the limit of %d",
-				versionString(p.version), jump, versionString(computed), MaxMajorJump))
+				p.version.String(), jump, computed.String(), MaxMajorJump))
 		rejected()
 		return
 	}
@@ -1839,13 +1842,13 @@ func (cp *computation) reportCatchUp() {
 		for _, provider := range rel.DueTo {
 			published := "untagged"
 			if pr := cp.rel[provider]; pr != nil && pr.HasBaseline {
-				published = versionString(pr.Baseline)
+				published = pr.Baseline.String()
 			}
 			origins = append(origins, provider+"@"+published)
 		}
 		cp.pkgWarn(rel, CodeCatchUp, "",
 			fmt.Sprintf("catch-up release at %s: discharging work already published by %s",
-				versionString(rel.Next), strings.Join(origins, ", ")))
+				rel.Next.String(), strings.Join(origins, ", ")))
 	}
 }
 
@@ -1868,7 +1871,7 @@ func (cp *computation) reportChannelOnly() {
 		rel.ChannelOnly = true
 		cp.pkgWarn(rel, CodeChannelOnly, "",
 			fmt.Sprintf("channel-only release at %s: %s",
-				versionString(rel.Next), rel.ChannelTransition()))
+				rel.Next.String(), rel.ChannelTransition()))
 	}
 }
 
@@ -1883,7 +1886,7 @@ func (cp *computation) reportHeld() {
 			continue
 		}
 		cp.pkgWarn(rel, CodeHeldVersion, "",
-			fmt.Sprintf("held by Release-As: none; would release %s", versionString(rel.Next)))
+			fmt.Sprintf("held by Release-As: none; would release %s", rel.Next.String()))
 	}
 }
 

@@ -8,16 +8,23 @@ package integration
 //
 // Configs are authored as typed models from the public pkg/models module and
 // marshalled to JSON by WriteConfigModel; only shapes the model cannot
-// express — an unknown key, a legacy schema — fall back to a raw
-// map[string]any through WriteConfigRaw.
+// express — an unknown key — fall back to a raw map[string]any through
+// WriteConfigRaw.
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
-	models "github.com/yohimik/dispat/pkg/models"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -118,4 +125,44 @@ func buildRuns(r *harness.Repo) int {
 		return 0
 	}
 	return len(strings.Split(trimmed, "\n"))
+}
+
+// githubFake serves the two calls the GitHub recorder makes — the upfront
+// verification GET (200) and the create-release POST (201) — recording every
+// POST body. Each test decodes the bodies into whatever shape it asserts on,
+// so one fake serves tests with different views of the payload; the
+// attachment test keeps its own server (it also serves the upload endpoint).
+func githubFake(t *testing.T) (srv *httptest.Server, bodies func() [][]byte) {
+	t.Helper()
+	var mu sync.Mutex
+	var recorded [][]byte
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.Method {
+		case http.MethodGet: // upfront verification
+			w.WriteHeader(http.StatusOK)
+		case http.MethodPost:
+			data, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			mu.Lock()
+			recorded = append(recorded, data)
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() [][]byte {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([][]byte(nil), recorded...)
+	}
+}
+
+// decodeAll unmarshals every recorded body into T, in call order.
+func decodeAll[T any](t *testing.T, bodies [][]byte) []T {
+	t.Helper()
+	out := make([]T, len(bodies))
+	for i, b := range bodies {
+		require.NoError(t, json.Unmarshal(b, &out[i]))
+	}
+	return out
 }

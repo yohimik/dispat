@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	models "github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -129,14 +129,12 @@ func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 func TestRecordsReleaseCommitTagsAndPush(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true), Push: true}
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
 
-	bare := t.TempDir()
-	r.Git("init", "-q", "--bare", bare)
-	r.Git("remote", "add", "origin", bare)
+	r.AddBareRemote()
 
 	r.Commit("feat(a,b): first release of both")
 	r.ReleaseOK()
@@ -174,7 +172,7 @@ func TestRecordsReleaseCommitTagsAndPush(t *testing.T) {
 func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig("exit 1", 1)
-	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true)}
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): will fail its build")
@@ -195,14 +193,12 @@ func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.
 func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true), Push: true}
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
 
-	bare := t.TempDir()
-	r.Git("init", "-q", "--bare", bare)
-	r.Git("remote", "add", "origin", bare)
+	r.AddBareRemote()
 	r.Commit("feat(a,b): first release of both")
 
 	// Plant a's future tag on the remote only: create it at the source
@@ -230,7 +226,7 @@ func TestRecordsExportedPackageCommitPinsTheTag(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["publish"] = `echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"`
-	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true)}
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first release")
@@ -245,13 +241,74 @@ func TestRecordsExportedPackageCommitPinsTheTag(t *testing.T) {
 		"the tag is pinned to the exported commit, not the release commit")
 }
 
+// TestRecordsExportedCommitExcludesTagFromReleaseCommitAndPushes: in a mixed
+// run only the exporting package's tag moves to the exported commit — no tag
+// for it is created on the release commit — while its space mate keeps the
+// normal placement, and the push delivers both tags with their respective
+// targets intact.
+func TestRecordsExportedCommitExcludesTagFromReleaseCommitAndPushes(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["publish"] = `if [ "$DISPAT_PACKAGE" = "a" ]; then` +
+		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+
+	r.AddBareRemote()
+
+	r.Commit("feat(a,b): first release of both")
+	source := r.Git("rev-parse", "HEAD")
+
+	r.ReleaseOK()
+	head := r.Git("rev-parse", "HEAD")
+	require.NotEqual(t, source, head, "the release commit exists on top of the source commit")
+
+	// The exporting package's tag is pinned to the exported commit and is
+	// NOT created on the release commit; the other package's tag is.
+	assert.Equal(t, source, r.Git("rev-list", "-n1", "a@0.1.0"))
+	assert.Equal(t, head, r.Git("rev-list", "-n1", "b@0.1.0"))
+	assert.Equal(t, "b@0.1.0", r.Git("tag", "--points-at", head),
+		"only the non-exporting package's tag sits on the release commit")
+
+	// Both tags arrive on the remote with their targets intact.
+	aAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
+	bAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/b@0.1.0^{}"), "\t", 2)[0]
+	assert.Equal(t, source, aAt, "the pinned tag points at the exported commit on the remote too")
+	assert.Equal(t, head, bAt)
+}
+
+// TestRecordsExportedCommitPinsTagOutsideCommitMode: without the release
+// commit, tags normally land on HEAD; the PACKAGE_<KEY> export redirects the
+// tag to the exported commit and no tag is created at HEAD for that package.
+func TestRecordsExportedCommitPinsTagOutsideCommitMode(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["publish"] = `echo "PACKAGE_CORE=$(git rev-parse HEAD~1)" >> "$DISPAT_OUTPUT"`
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first change")
+	older := r.Git("rev-parse", "HEAD")
+	r.CommitEmpty("fix(core): second change")
+	head := r.Git("rev-parse", "HEAD")
+
+	r.ReleaseOK()
+
+	assert.Equal(t, older, r.Git("rev-list", "-n1", "core@0.1.0"),
+		"the tag lands on the exported commit, not on HEAD")
+	assert.Empty(t, r.Git("tag", "--points-at", head),
+		"no tag is created at HEAD for the pinned package")
+	assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "no commit mode: HEAD does not move")
+}
+
 // TestRecordsPushVerifyDisabled: commit.verify=false switches the upfront
 // ls-remote check off, so the release work happens and only the push itself
 // fails — where the default (verify on) fails fast before any work.
 func TestRecordsPushVerifyDisabled(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: harness.Bool(true), Push: true, Verify: harness.Bool(false)}
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true, Verify: models.Bool(false)}
 	r.WriteConfigModel(cfg) // note: no remote configured at all
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): released, push fails later")
@@ -261,4 +318,88 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 	assert.True(t, r.HasTag("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
 	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
 		"the release commit exists")
+
+	// The contrast: with verify at its default the same misconfiguration
+	// fails fast, before any release work at all.
+	rd := harness.New(t)
+	cfg = libsConfig(echoBuild, 1)
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	rd.WriteConfigModel(cfg) // again no remote configured
+	rd.SeedPackage("packages", "core")
+	rd.Commit("feat(core): never released")
+
+	res = rd.Release()
+	require.Equal(t, 1, res.Code, "remote verification must fail the run\nstdout:\n%s", res.Stdout)
+	assert.Empty(t, rd.TagList(), "the default fails fast before any work")
+	assert.NoFileExists(t, rd.Path("packages", "core", "CHANGELOG.md"),
+		"no release work may run before verification passes")
+}
+
+// TestRecordsChangelogDisabled: changelog.enabled=false switches the file
+// recorder off without touching anything else — the release still publishes
+// and tags, and no changelog appears.
+func TestRecordsChangelogDisabled(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = models.ChangelogConfig{Enabled: models.Bool(false)}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): no changelog wanted")
+
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("core@0.1.0"), "tagging is independent of the changelog; tags: %v", r.TagList())
+	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+}
+
+// TestRecordsCommitModeGithubFinalize: in release-commit mode the GitHub
+// releases move to the finalize phase, created after the release commit
+// exists so their body documents the exact commit and tag. The recorder
+// stays opt-in per package (no DISPAT_EXPORT_GITHUB, no release), a
+// PACKAGE_<KEY> export overrides both the documented commit and the
+// target_commitish, and with push disabled no run-level SHA is sent as
+// target_commitish. commit.messageFormat is exercised alongside: the release
+// commit renders the {packages} and {tags} placeholders.
+func TestRecordsCommitModeGithubFinalize(t *testing.T) {
+	type ghRelease struct {
+		TagName         string `json:"tag_name"`
+		Body            string `json:"body"`
+		TargetCommitish string `json:"target_commitish"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	// Only a opts into a GitHub release; it also pins its record to the
+	// commit its publish ran at (the source commit — the release commit does
+	// not exist yet at publish time).
+	cfg.Scripts["publish"] = `if [ "$DISPAT_PACKAGE" = "a" ]; then` +
+		` echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT";` +
+		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`
+	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true),
+		MessageFormat: "chore(release): publish {packages} as {tags}"}
+	cfg.GitHub = models.GitHubConfig{
+		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+	r.Commit("feat(a,b): first release of both")
+	source := r.Git("rev-parse", "HEAD")
+
+	r.ReleaseOK()
+
+	assert.Equal(t, "chore(release): publish a, b as a@0.1.0, b@0.1.0",
+		r.Git("log", "-1", "--format=%s"), "messageFormat renders both placeholders")
+
+	releases := decodeAll[ghRelease](t, bodies())
+	require.Len(t, releases, 1, "no export, no GitHub release: b must be skipped")
+	assert.Equal(t, "a@0.1.0", releases[0].TagName)
+	assert.Contains(t, releases[0].Body, "### Release")
+	assert.Contains(t, releases[0].Body, "- commit: "+source,
+		"the body documents the exported commit, not the release commit")
+	assert.Contains(t, releases[0].Body, "- tag: a@0.1.0")
+	assert.Equal(t, source, releases[0].TargetCommitish,
+		"the exported hash is the target_commitish even without a push")
 }

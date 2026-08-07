@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 
 	"github.com/stretchr/testify/require"
-	models "github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models"
 )
 
 // Bool returns a pointer to b, for the enable/disable *bool config fields
 // (GitHub.Enabled, Changelog.Enabled, Commit.Enabled).
-func Bool(b bool) *bool { return &b }
 
 // BaseFile returns the config every test starts from: the given concurrency
 // (one shared value or a [build, publish] pair), JSON logging so the run
@@ -23,7 +22,7 @@ func BaseFile(concurrency ...int) models.File {
 		Concurrency: concurrency,
 		LogLevel:    "info",
 		LogFormat:   "json",
-		GitHub:      models.GitHubConfig{Enabled: Bool(false)},
+		GitHub:      models.GitHubConfig{Enabled: models.Bool(false)},
 	}
 }
 
@@ -40,7 +39,7 @@ func (r *Repo) WriteConfigModel(cfg models.File) {
 
 // WriteConfigRaw marshals a raw map to JSON and writes it as the repository's
 // dispat.json — reserved for the shapes the typed model cannot express and
-// the loader must reject (an unknown key, a legacy schema).
+// the loader must reject (an unknown key).
 func (r *Repo) WriteConfigRaw(cfg map[string]any) {
 	r.T.Helper()
 	data, err := json.MarshalIndent(cfg, "", "  ")

@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	models "github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -305,4 +305,81 @@ func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 	data, err := os.ReadFile(r.Path("carry.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "app sees exported-before-failing\n", string(data))
+}
+
+// TestRunTargetsANamedPackage: `dispat run <script> <package>` narrows the
+// run to exactly that package — changed or not, the graph plays no part —
+// while naming an unknown package or one whose space does not define the
+// script fails instead of silently running nothing.
+func TestRunTargetsANamedPackage(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish(),
+			RunScripts: map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}},
+		"apps": {Path: "apps", Flow: buildPublish()}, // defines no lint
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+	r.SeedPackage("apps", "web")
+	r.Commit("feat(a,b,web): all three change")
+
+	// Both a and b changed; the target narrows the run to b alone.
+	res := r.Command("run", "lint", "b")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err := os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "b\n", string(data), "only the named package runs")
+
+	assert.Equal(t, 1, r.Command("run", "lint", "ghost").Code, "an unknown package is an error")
+	assert.Equal(t, 1, r.Command("run", "lint", "web").Code,
+		"a target whose space does not define the script is an error, not a silent no-op")
+
+	// A targeted run does not require the package to be changed.
+	r.ReleaseOK() // consume every pending change
+	res = r.Command("run", "lint", "a")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err = os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "b\na\n", string(data), "the unchanged target still runs")
+}
+
+// TestRunShorthandNarrowsToTheInvokedPackage: `dispat <script>` invoked from
+// inside a package folder (or any subdirectory of it) runs the script for
+// that package alone — riding the config ascent to find the root — while the
+// same shorthand from the monorepo top still covers every changed package.
+func TestRunShorthandNarrowsToTheInvokedPackage(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	withRunScript := cfg.Spaces["libs"]
+	withRunScript.RunScripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
+	cfg.Spaces["libs"] = withRunScript
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+	r.Commit("feat(a,b): both change")
+
+	// From inside a: only a runs, even though b changed too.
+	res := r.CommandAt("packages/a", "lint")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err := os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "a\n", string(data), "the shorthand narrows to the invoked package")
+
+	// From a nested subdirectory of the package: still a.
+	r.WriteFile("packages/a/internal/keep.txt", "x")
+	res = r.CommandAt("packages/a/internal", "lint")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err = os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "a\na\n", string(data))
+
+	// From the monorepo top the shorthand still covers every changed package.
+	r.Remove("lint.log")
+	r.Command("lint")
+	data, err = os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"a", "b"}, strings.Fields(string(data)))
 }

@@ -102,7 +102,7 @@ func (cp *computation) propagateChannels() {
 		// first and the first proposal recorded for a package is the winner.
 		for i := len(rec.units) - 1; i >= 0; i-- {
 			u := rec.units[i]
-			if unitIsCancel(u) {
+			if u.IsCancel() {
 				continue
 			}
 			cprop := cp.unitChannelPropagation(u, rec)
@@ -244,7 +244,7 @@ func (cp *computation) resolveChannels() {
 	for _, rec := range cp.commits { // newest commit first
 		for i := len(rec.units) - 1; i >= 0; i-- { // last unit within it first
 			u := rec.units[i]
-			if unitIsCancel(u) || !u.Directives.ChannelSet {
+			if u.IsCancel() || !u.Directives.ChannelSet {
 				continue
 			}
 			for _, name := range sortedKeys(rec.scope[i]) {
@@ -343,7 +343,7 @@ func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, ba
 func (cp *computation) propagateBumps() {
 	for _, rec := range cp.commits {
 		for i, u := range rec.units {
-			if unitIsCancel(u) || unitBump(u) == ccme.BumpNone {
+			if u.IsCancel() || u.Bump == ccme.BumpNone {
 				// The bump axis requires a bump: a unit whose type maps to
 				// none propagates no bump at any depth. The channel axis does
 				// not, which is what makes `release` usable for graduation.

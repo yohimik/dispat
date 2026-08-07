@@ -159,16 +159,24 @@ func (f *fakeReverter) RevertDir(_ context.Context, dir string) error {
 	return f.err
 }
 
-// mkPlan builds a plan of changed packages. waitPublish applies to the "libs"
-// space that every package lives in. ownBump marks packages with own commits.
-// Consumers listed in deps get DueTo set, mirroring plan.Compute (every listed
-// package is changed).
-func mkPlan(waitPublish bool, ownBump map[string]ccme.Bump, deps map[string][]string, names ...string) *plan.Plan {
+// planSpec describes the plan mkPlan builds: Names are the changed packages,
+// WaitPublish applies to the "libs" space every package lives in, OwnBump
+// marks packages with own commits, and consumers listed in Deps get DueTo
+// set, mirroring plan.Compute (every listed package is changed).
+type planSpec struct {
+	WaitPublish bool
+	OwnBump     map[string]ccme.Bump
+	Deps        map[string][]string
+	Names       []string
+}
+
+// mkPlan builds a plan of changed packages from its spec.
+func mkPlan(spec planSpec) *plan.Plan {
+	waitPublish, ownBump, deps, names := spec.WaitPublish, spec.OwnBump, spec.Deps, spec.Names
 	libs := &model.Space{Name: "libs", BuildWaitsPublish: waitPublish, BuildScript: []string{"build"}, PublishScript: []string{"publish"}}
 	p := &plan.Plan{
 		Releases:  map[string]*plan.Release{},
 		Providers: map[string][]string{},
-		Consumers: map[string][]string{},
 	}
 	for _, n := range names {
 		own := ownBump[n]
@@ -194,31 +202,43 @@ func mkPlan(waitPublish bool, ownBump map[string]ccme.Bump, deps map[string][]st
 	for consumer, provs := range deps {
 		p.Providers[consumer] = provs
 		p.Releases[consumer].DueTo = provs
-		for _, prov := range provs {
-			p.Consumers[prov] = append(p.Consumers[prov], consumer)
-		}
 	}
 	return p
 }
 
-func newExecutor(r *fakeRunner, tg *fakeTagger, cl *fakeChangelog, buildConc, publishConc int) *Executor {
-	return &Executor{
-		BuildConcurrency:   buildConc,
-		PublishConcurrency: publishConc,
-		Runner:             r,
-		Tagger:             tg,
-		Recorders:          []ReleaseRecorder{cl},
+// execSpec is what a test's Executor is assembled from: the fakes it records
+// through and the two stage budgets.
+type execSpec struct {
+	Runner    *fakeRunner
+	Tagger    *fakeTagger
+	Changelog *fakeChangelog
+	Build     int
+	Publish   int
+}
+
+func newExecutor(spec execSpec) *Executor {
+	e := &Executor{
+		BuildConcurrency:   spec.Build,
+		PublishConcurrency: spec.Publish,
+		Runner:             spec.Runner,
 		Log:                zerolog.Nop(),
 	}
+	if spec.Tagger != nil {
+		e.Tagger = spec.Tagger
+	}
+	if spec.Changelog != nil {
+		e.Recorders = []ReleaseRecorder{spec.Changelog}
+	}
+	return e
 }
 
 func TestRunSuccessOrder(t *testing.T) {
 	// b consumes a; waitPublish=true gives the strictest ordering guarantees.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	r := &fakeRunner{}
 	tg := &fakeTagger{}
 	cl := &fakeChangelog{}
-	res := newExecutor(r, tg, cl, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: cl, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	for _, n := range []string{"a", "b"} {
 		require.Equal(t, StatusPublished, res[n].Status, "%s: %v", n, res[n].Err)
@@ -234,12 +254,12 @@ func TestRunSuccessOrder(t *testing.T) {
 func TestRunTagTargetFromPackageCommitExport(t *testing.T) {
 	// A PACKAGE_<KEY> output pins the package's tag to the exported commit;
 	// packages without the export keep tagging HEAD (empty target).
-	p := mkPlan(false, nil, nil, "a", "b")
+	p := mkPlan(planSpec{Names: []string{"a", "b"}})
 	p.Releases["a"].Outputs = []plan.Output{{
 		Name: plan.PackageCommitExportPrefix + plan.EnvKey("a"), Value: "abc1234", Source: "a:build"}}
 	r := &fakeRunner{}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 2, 2).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 2, Publish: 2}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status)
 	require.Equal(t, StatusPublished, res["b"].Status)
@@ -248,9 +268,9 @@ func TestRunTagTargetFromPackageCommitExport(t *testing.T) {
 }
 
 func TestRunBuildWaitsPublish(t *testing.T) {
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["b"].Status)
 	assert.Less(t, r.indexOf("publish a"), r.indexOf("build b"),
@@ -262,11 +282,11 @@ func TestRunNoWaitProviderPublishFailureSkipsConsumers(t *testing.T) {
 	// a's PUBLISH fails. b may already have built (that is the trade-off the
 	// flag opts into), but its publish always waits for a's publish: seeing
 	// the failure, b is skipped, and c cascades to skipped the same way.
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}, "c": {"b"}}, "a", "b", "c")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}, "c": {"b"}}, Names: []string{"a", "b", "c"}})
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
 	tg := &fakeTagger{}
 	cl := &fakeChangelog{}
-	res := newExecutor(r, tg, cl, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: cl, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Equal(t, "publish", res["a"].FailedStage)
@@ -285,9 +305,9 @@ func TestRunNoWaitConsumerOwnBuildFailureCascades(t *testing.T) {
 	// isBuildWaitingPublish=false, chain a -> b -> c. b's own BUILD fails:
 	// b is failed and c is skipped — a broken build gates consumers in both
 	// modes.
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}, "c": {"b"}}, "a", "b", "c")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}, "c": {"b"}}, Names: []string{"a", "b", "c"}})
 	r := &fakeRunner{fail: map[string]bool{"build b": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status)
 	require.Equal(t, StatusFailed, res["b"].Status)
@@ -300,9 +320,9 @@ func TestRunNoWaitConsumerPublishFailureDownstreamSkipped(t *testing.T) {
 	// isBuildWaitingPublish=false, chain a -> b -> c. b's own PUBLISH fails:
 	// a is unaffected, b is failed, and c — whose publish always waits for
 	// b's — is skipped (no changes of its own).
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}, "c": {"b"}}, "a", "b", "c")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}, "c": {"b"}}, Names: []string{"a", "b", "c"}})
 	r := &fakeRunner{fail: map[string]bool{"publish b": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status)
 	require.Equal(t, StatusFailed, res["b"].Status)
@@ -315,11 +335,11 @@ func TestRunFailureSkipsConsumer(t *testing.T) {
 	// isBuildWaitingPublish=true: the provider's PUBLISH failure is final
 	// before the consumer's version stage (which waits for provider builds
 	// AND publishes), so the skip decision is deterministic.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Error(t, res["a"].Err)
@@ -338,13 +358,13 @@ func TestRunFailureSkipsConsumer(t *testing.T) {
 func TestRunChannelChangeIsItsOwnReason(t *testing.T) {
 	// A package moving between channels is being released for something a
 	// failed provider cannot invalidate, so it proceeds rather than skipping.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	b := p.Releases["b"]
 	b.OwnBump, b.Bump = ccme.BumpNone, ccme.BumpNone
 	b.BaselineChannel, b.Channel = "stable", "beta"
 
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Equal(t, StatusPublished, res["b"].Status,
@@ -353,10 +373,9 @@ func TestRunChannelChangeIsItsOwnReason(t *testing.T) {
 }
 
 func TestRunFailureConsumerWithOwnChangesProceeds(t *testing.T) {
-	p := mkPlan(true, map[string]ccme.Bump{"b": ccme.BumpPatch},
-		map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusPublished, res["b"].Status,
@@ -366,10 +385,10 @@ func TestRunFailureConsumerWithOwnChangesProceeds(t *testing.T) {
 func TestRunSkipCascades(t *testing.T) {
 	// chain a -> b -> c: a fails, b skipped, c skipped too; no version
 	// script may run anywhere down the chain.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}, "c": {"b"}}, "a", "b", "c")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}, "c": {"b"}}, Names: []string{"a", "b", "c"}})
 	p.Releases["a"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	assert.Equal(t, StatusSkipped, res["b"].Status)
 	assert.Equal(t, StatusSkipped, res["c"].Status)
@@ -379,9 +398,9 @@ func TestRunSkipCascades(t *testing.T) {
 
 func TestRunConcurrencyLimits(t *testing.T) {
 	names := []string{"p1", "p2", "p3", "p4", "p5", "p6"}
-	p := mkPlan(false, nil, nil, names...)
+	p := mkPlan(planSpec{Names: names})
 	r := &fakeRunner{delay: 10 * time.Millisecond}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 2, 2).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 2, Publish: 2}).Run(context.Background(), p)
 
 	for _, n := range names {
 		require.Equal(t, StatusPublished, res[n].Status, n)
@@ -392,9 +411,9 @@ func TestRunConcurrencyLimits(t *testing.T) {
 
 func TestRunSeparateStageBudgets(t *testing.T) {
 	names := []string{"p1", "p2", "p3", "p4"}
-	p := mkPlan(false, nil, nil, names...)
+	p := mkPlan(planSpec{Names: names})
 	r := &fakeRunner{delay: 10 * time.Millisecond}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 3, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 3, Publish: 1}).Run(context.Background(), p)
 
 	for _, n := range names {
 		require.Equal(t, StatusPublished, res[n].Status, n)
@@ -411,11 +430,11 @@ func TestRunHeldPackageIsNotExecuted(t *testing.T) {
 	// both are reported (W154) — but §13.6a excludes it from the plan, so it
 	// must not be built, published or tagged. Gating on Changed() instead of
 	// Releasing() releases it anyway, which is the whole point of the hold.
-	p := mkPlan(false, nil, nil, "a", "held")
+	p := mkPlan(planSpec{Names: []string{"a", "held"}})
 	p.Releases["held"].Held = true
 
 	r, tg := &fakeRunner{}, &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.NotContains(t, res, "held", "a held package produces no result")
 	assert.Equal(t, -1, r.indexOf("build held"), "and runs no script")
@@ -425,7 +444,7 @@ func TestRunHeldPackageIsNotExecuted(t *testing.T) {
 func TestRunChannelOnlyReleaseIsExecuted(t *testing.T) {
 	// The mirror image: no bump at all, but a channel change is a reason to
 	// release like any other (§13.9), so the pipeline must run.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	rel := p.Releases["a"]
 	rel.OwnBump, rel.Bump = ccme.BumpNone, ccme.BumpNone
 	rel.BaselineChannel, rel.Channel = "stable", "beta"
@@ -433,7 +452,7 @@ func TestRunChannelOnlyReleaseIsExecuted(t *testing.T) {
 	rel.Next = ccme.Version{Major: 1, Patch: 1, Prerelease: []string{"beta", "0"}}
 
 	r, tg := &fakeRunner{}, &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Contains(t, res, "a")
 	assert.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
@@ -442,18 +461,18 @@ func TestRunChannelOnlyReleaseIsExecuted(t *testing.T) {
 }
 
 func TestRunTagsUseTheSpaceFormat(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.TagFormat = "services/{name}@v{version}"
 
 	r, tg := &fakeRunner{}, &fakeTagger{}
-	newExecutor(r, tg, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	assert.Equal(t, []string{"services/a@v1.0.1"}, tg.tags)
 	assert.Equal(t, "services/a@v1.0.1", envValue(t, r.envs["publish a"], "DISPAT_TAG"))
 }
 
 func TestRunChannelEnvironment(t *testing.T) {
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 
 	// a graduates off a beta line; b rides along on stable.
 	a := p.Releases["a"]
@@ -462,7 +481,7 @@ func TestRunChannelEnvironment(t *testing.T) {
 	a.Next = ccme.Version{Major: 1}
 
 	r := &fakeRunner{}
-	newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	env := r.envs["build a"]
 	assert.Equal(t, "stable", envValue(t, env, "DISPAT_CHANNEL"))
@@ -486,14 +505,14 @@ func TestRunPrereleaseEnvironmentUnderCustomFormat(t *testing.T) {
 	// the environment: DISPAT_TAG the local convention, DISPAT_SEMVER_TAG the
 	// normative one, and the channel and counter broken out so a script never
 	// re-parses either.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	rel := p.Releases["a"]
 	rel.Pkg.Space.TagFormat = "{name}@v{version}-{channel}{counter}"
 	rel.BaselineChannel, rel.Channel = "stable", "beta"
 	rel.Next = ccme.Version{Major: 1, Patch: 1, Prerelease: []string{"beta", "4"}}
 
 	r, tg := &fakeRunner{}, &fakeTagger{}
-	newExecutor(r, tg, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	env := r.envs["publish a"]
 	assert.Equal(t, "a@v1.0.1-beta4", envValue(t, env, "DISPAT_TAG"),
@@ -531,7 +550,6 @@ func TestRunVersionStageWorkspaceVersions(t *testing.T) {
 		Order:     []string{"a", "quiet", "b"},
 		Releases:  map[string]*plan.Release{},
 		Providers: map[string][]string{"b": {"a"}},
-		Consumers: map[string][]string{"a": {"b"}},
 	}
 	stable := func(r *plan.Release) *plan.Release {
 		// Both must be set, or ChannelChanged() reads "" != "stable" and the
@@ -556,7 +574,7 @@ func TestRunVersionStageWorkspaceVersions(t *testing.T) {
 	})
 
 	r := &fakeRunner{}
-	newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	env := r.envs["version b"]
 	assert.Equal(t, "A QUIET B", envValue(t, env, "DISPAT_WORKSPACE_PACKAGES"),
@@ -608,11 +626,10 @@ func TestWorkspaceEnvKeySanitisation(t *testing.T) {
 		Order:     []string{"@acme/ui", "core-utils", "core.utils"},
 		Releases:  map[string]*plan.Release{"@acme/ui": mk("@acme/ui"), "core-utils": mk("core-utils"), "core.utils": mk("core.utils")},
 		Providers: map[string][]string{},
-		Consumers: map[string][]string{},
 	}
 
 	r := &fakeRunner{}
-	newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	env := r.envs["build @acme/ui"]
 	assert.Equal(t, "_ACME_UI CORE_UTILS", envValue(t, env, "DISPAT_WORKSPACE_PACKAGES"),
@@ -622,7 +639,7 @@ func TestWorkspaceEnvKeySanitisation(t *testing.T) {
 }
 
 func TestRunUnchangedExcluded(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	// add an unchanged package to the plan
 	p.Releases["quiet"] = &plan.Release{
 		Pkg:     &model.Package{Name: "quiet", Dir: "quiet", Space: p.Releases["a"].Pkg.Space},
@@ -630,7 +647,7 @@ func TestRunUnchangedExcluded(t *testing.T) {
 		Next:    ccme.Version{Major: 3},
 	}
 	p.Order = append(p.Order, "quiet")
-	res := newExecutor(&fakeRunner{}, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	assert.NotContains(t, res, "quiet", "unchanged package must not appear in results")
 	assert.Len(t, res, 1)
@@ -650,10 +667,10 @@ func envValue(t *testing.T, env []string, key string) string {
 
 func TestRunVersionTaskOrderingAndEnv(t *testing.T) {
 	// b consumes a; the space has a version script.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["a"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
 	// Only the provider-bumped package runs the version stage.
@@ -682,10 +699,10 @@ func TestRunVersionTaskOrderingAndEnv(t *testing.T) {
 func TestRunVersionOrderingNoWaitPublish(t *testing.T) {
 	// isBuildWaitingPublish=false: the version stage only waits for provider
 	// builds, not their publishes.
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
 	require.NotEqual(t, -1, r.indexOf("version b"))
@@ -701,10 +718,10 @@ func TestRunVersionSkippedOnProviderBuildFailureNoWait(t *testing.T) {
 	// isBuildWaitingPublish=false: the provider's BUILD failure is final
 	// before the consumer's version stage, so the consumer (no own changes)
 	// is skipped and neither version nor build run.
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusSkipped, res["b"].Status)
@@ -713,10 +730,10 @@ func TestRunVersionSkippedOnProviderBuildFailureNoWait(t *testing.T) {
 }
 
 func TestRunVersionScriptFailureFailsPackage(t *testing.T) {
-	p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["a"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"version b": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status)
 	require.Equal(t, StatusFailed, res["b"].Status)
@@ -727,11 +744,10 @@ func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {
 	// b has its own bump AND a provider bump; the provider fails. b still
 	// releases (own changes), but the version script must NOT run: there is
 	// no successfully updated provider to sync manifests to.
-	p := mkPlan(true, map[string]ccme.Bump{"b": ccme.BumpPatch},
-		map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["a"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
@@ -742,11 +758,10 @@ func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {
 func TestRunVersionFiltersFailedProviders(t *testing.T) {
 	// b consumes a1 (fails) and a2 (succeeds) and has its own bump: the
 	// version script runs, but only a2 appears in DISPAT_UPDATED_*.
-	p := mkPlan(true, map[string]ccme.Bump{"b": ccme.BumpPatch},
-		map[string][]string{"b": {"a1", "a2"}}, "a1", "a2", "b")
+	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a1", "a2"}}, Names: []string{"a1", "a2", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"publish a1": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a1"].Status)
 	require.Equal(t, StatusPublished, res["a2"].Status)
@@ -761,9 +776,9 @@ func TestRunVersionFiltersFailedProviders(t *testing.T) {
 }
 
 func TestRunScriptEnv(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 	require.Equal(t, StatusPublished, res["a"].Status)
 
 	env := r.envs["build a"]
@@ -786,13 +801,13 @@ func TestRunScriptEnv(t *testing.T) {
 func TestRunWithoutScripts(t *testing.T) {
 	// No scripts at all: the release must still run every task, tag and
 	// record changelogs — it just executes nothing.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	space := p.Releases["a"].Pkg.Space
 	space.BuildScript, space.PublishScript, space.VersionScript = nil, nil, nil
 	r := &fakeRunner{}
 	tg := &fakeTagger{}
 	cl := &fakeChangelog{}
-	res := newExecutor(r, tg, cl, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: cl, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status)
 	require.Equal(t, StatusPublished, res["b"].Status)
@@ -804,7 +819,7 @@ func TestRunWithoutScripts(t *testing.T) {
 func TestRunRevertOnFail(t *testing.T) {
 	for _, stage := range []string{"version", "build", "publish"} {
 		t.Run(stage, func(t *testing.T) {
-			p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+			p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 			space := p.Releases["a"].Pkg.Space
 			space.RevertOnFail = true
 			space.VersionScript = []string{"version"}
@@ -816,7 +831,7 @@ func TestRunRevertOnFail(t *testing.T) {
 			}
 			rv := &fakeReverter{}
 			r := &fakeRunner{fail: map[string]bool{stage + " " + failPkg: true}}
-			ex := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4)
+			ex := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4})
 			ex.Reverter = rv
 			res := ex.Run(context.Background(), p)
 
@@ -827,9 +842,9 @@ func TestRunRevertOnFail(t *testing.T) {
 }
 
 func TestRunRevertDisabledByDefault(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a") // RevertOnFail stays false
+	p := mkPlan(planSpec{Names: []string{"a"}}) // RevertOnFail stays false
 	rv := &fakeReverter{}
-	ex := newExecutor(&fakeRunner{fail: map[string]bool{"build a": true}}, &fakeTagger{}, &fakeChangelog{}, 1, 1)
+	ex := newExecutor(execSpec{Runner: &fakeRunner{fail: map[string]bool{"build a": true}}, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
 	ex.Reverter = rv
 	res := ex.Run(context.Background(), p)
 
@@ -838,10 +853,10 @@ func TestRunRevertDisabledByDefault(t *testing.T) {
 }
 
 func TestRunRevertOnRecorderFailure(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.RevertOnFail = true
 	rv := &fakeReverter{}
-	ex := newExecutor(&fakeRunner{}, &fakeTagger{}, &fakeChangelog{fail: true}, 1, 1)
+	ex := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{fail: true}, Build: 1, Publish: 1})
 	ex.Reverter = rv
 	res := ex.Run(context.Background(), p)
 
@@ -850,10 +865,10 @@ func TestRunRevertOnRecorderFailure(t *testing.T) {
 }
 
 func TestRunRevertErrorKeepsFailedStatus(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.RevertOnFail = true
 	rv := &fakeReverter{err: errors.New("revert boom")}
-	ex := newExecutor(&fakeRunner{fail: map[string]bool{"build a": true}}, &fakeTagger{}, &fakeChangelog{}, 1, 1)
+	ex := newExecutor(execSpec{Runner: &fakeRunner{fail: map[string]bool{"build a": true}}, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
 	ex.Reverter = rv
 	res := ex.Run(context.Background(), p)
 
@@ -864,10 +879,10 @@ func TestRunRevertErrorKeepsFailedStatus(t *testing.T) {
 
 func TestRunNoRevertOnPlainSkip(t *testing.T) {
 	// b is skipped before anything ran in its folder: nothing to revert.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["a"].Pkg.Space.RevertOnFail = true
 	rv := &fakeReverter{}
-	ex := newExecutor(&fakeRunner{fail: map[string]bool{"build a": true}}, &fakeTagger{}, &fakeChangelog{}, 4, 4)
+	ex := newExecutor(execSpec{Runner: &fakeRunner{fail: map[string]bool{"build a": true}}, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4})
 	ex.Reverter = rv
 	res := ex.Run(context.Background(), p)
 
@@ -876,9 +891,9 @@ func TestRunNoRevertOnPlainSkip(t *testing.T) {
 }
 
 func TestRunRecorderFailureFailsPackage(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	tg := &fakeTagger{}
-	res := newExecutor(&fakeRunner{}, tg, &fakeChangelog{fail: true}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: tg, Changelog: &fakeChangelog{fail: true}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.ErrorContains(t, res["a"].Err, "recorder boom")
@@ -886,9 +901,9 @@ func TestRunRecorderFailureFailsPackage(t *testing.T) {
 }
 
 func TestRunMultipleRecorders(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	first, second := &fakeChangelog{}, &fakeChangelog{}
-	ex := newExecutor(&fakeRunner{}, &fakeTagger{}, first, 1, 1)
+	ex := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Changelog: first, Build: 1, Publish: 1})
 	ex.Recorders = append(ex.Recorders, second)
 	res := ex.Run(context.Background(), p)
 
@@ -922,11 +937,10 @@ func TestRunCatchUpConsumerWithUnchangedProvider(t *testing.T) {
 			},
 		},
 		Providers: map[string][]string{"b": {"a"}},
-		Consumers: map[string][]string{"a": {"b"}},
 	}
 	r := &fakeRunner{}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Len(t, res, 1, "only b is processed")
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
@@ -943,7 +957,7 @@ func TestRunCatchUpConsumerWithUnchangedProvider(t *testing.T) {
 
 func TestRunNilTaggerDefersTagging(t *testing.T) {
 	// A nil Tagger (release-commit mode) publishes without tagging.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	cl := &fakeChangelog{}
 	ex := &Executor{
 		BuildConcurrency:   1,
@@ -989,10 +1003,10 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 func TestRunLoginOncePerSpace(t *testing.T) {
 	// Three packages of one space race to publish; the login runs exactly once
 	// and every publish waits for it.
-	p := mkPlan(false, nil, nil, "a", "b", "c")
+	p := mkPlan(planSpec{Names: []string{"a", "b", "c"}})
 	p.Releases["a"].Pkg.Space.LoginScript = []string{"login"} // space shared by all three
 	r := &fakeRunner{delay: 5 * time.Millisecond}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	for _, n := range []string{"a", "b", "c"} {
 		require.Equal(t, StatusPublished, res[n].Status, "%s: %v", n, res[n].Err)
@@ -1014,7 +1028,6 @@ func TestRunLoginIsPerSpaceNotPerScript(t *testing.T) {
 	p := &plan.Plan{
 		Releases:  map[string]*plan.Release{},
 		Providers: map[string][]string{},
-		Consumers: map[string][]string{},
 	}
 	for name, sp := range map[string]*model.Space{"a": mkSpace("s1"), "b": mkSpace("s2")} {
 		p.Releases[name] = &plan.Release{
@@ -1027,7 +1040,7 @@ func TestRunLoginIsPerSpaceNotPerScript(t *testing.T) {
 		p.Order = append(p.Order, name)
 	}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 2, 2).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 2, Publish: 2}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
@@ -1035,10 +1048,10 @@ func TestRunLoginIsPerSpaceNotPerScript(t *testing.T) {
 }
 
 func TestRunLoginEnvIsSpaceScoped(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.LoginScript = []string{"login"}
 	r := &fakeRunner{}
-	newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	env := r.envPrefix(t, "login")
 	assert.Equal(t, "libs", envValue(t, env, "DISPAT_SPACE"))
@@ -1059,7 +1072,6 @@ func TestRunLoginFailureFailsEverySpacePublish(t *testing.T) {
 	p := &plan.Plan{
 		Releases:  map[string]*plan.Release{},
 		Providers: map[string][]string{},
-		Consumers: map[string][]string{},
 	}
 	for name, sp := range map[string]*model.Space{"a": libs, "b": libs, "c": other} {
 		p.Releases[name] = &plan.Release{
@@ -1074,7 +1086,7 @@ func TestRunLoginFailureFailsEverySpacePublish(t *testing.T) {
 	// The login runs in the folder of whichever publish reaches the gate first.
 	r := &fakeRunner{fail: map[string]bool{"login a": true, "login b": true}}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 2, 2).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 2, Publish: 2}).Run(context.Background(), p)
 
 	for _, n := range []string{"a", "b"} {
 		require.Equal(t, StatusFailed, res[n].Status, n)
@@ -1089,7 +1101,7 @@ func TestRunLoginFailureFailsEverySpacePublish(t *testing.T) {
 }
 
 func TestRunHooksOrderAndEnvironment(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.BeforeAllScript = []string{"h-all"}
 	sp.BeforeBuildScript = []string{"h-bb"}
@@ -1097,7 +1109,7 @@ func TestRunHooksOrderAndEnvironment(t *testing.T) {
 	sp.BeforePublishScript = []string{"h-bp"}
 	sp.PostPublishScript = []string{"h-pp"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	order := []string{"h-all a", "h-bb a", "build a", "h-pb a", "h-bp a", "publish a", "h-pp a"}
@@ -1119,14 +1131,14 @@ func TestRunHooksOrderAndEnvironment(t *testing.T) {
 func TestRunVersionHooksAndBeforeAllAtVersionTask(t *testing.T) {
 	// b consumes a, so b has a version task; a does not. beforeAll runs at each
 	// package's first task: the version task for b, the build for a.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	sp := p.Releases["b"].Pkg.Space // shared by a and b
 	sp.VersionScript = []string{"version"}
 	sp.BeforeAllScript = []string{"h-all"}
 	sp.BeforeVersionScript = []string{"h-bv"}
 	sp.PostVersionScript = []string{"h-pv"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
 	assert.Less(t, r.indexOf("h-all a"), r.indexOf("build a"), "a's first task is its build")
@@ -1154,12 +1166,12 @@ func TestRunGatingHookFailuresFailTheRelease(t *testing.T) {
 		{"beforePublish", func(sp *model.Space) { sp.BeforePublishScript = []string{"hook"} }, "publish a"},
 	} {
 		t.Run(tc.hook, func(t *testing.T) {
-			p := mkPlan(false, nil, nil, "a")
+			p := mkPlan(planSpec{Names: []string{"a"}})
 			tc.set(p.Releases["a"].Pkg.Space)
 			r := &fakeRunner{fail: map[string]bool{"hook a": true}}
 			tg := &fakeTagger{}
 			cl := &fakeChangelog{}
-			res := newExecutor(r, tg, cl, 1, 1).Run(context.Background(), p)
+			res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: cl, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 			require.Equal(t, StatusFailed, res["a"].Status)
 			assert.ErrorContains(t, res["a"].Err, "boom")
@@ -1181,12 +1193,12 @@ func TestRunVersionHookFailuresFailTheConsumer(t *testing.T) {
 		{"postVersion", func(sp *model.Space) { sp.PostVersionScript = []string{"hook"} }, "build b"},
 	} {
 		t.Run(tc.hook, func(t *testing.T) {
-			p := mkPlan(false, nil, map[string][]string{"b": {"a"}}, "a", "b")
+			p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 			sp := p.Releases["b"].Pkg.Space
 			sp.VersionScript = []string{"version"}
 			tc.set(sp)
 			r := &fakeRunner{fail: map[string]bool{"hook b": true}}
-			res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+			res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 			require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 			require.Equal(t, StatusFailed, res["b"].Status)
@@ -1200,11 +1212,11 @@ func TestRunVersionHookFailuresFailTheConsumer(t *testing.T) {
 func TestRunPostPublishHookOnlyWarns(t *testing.T) {
 	// postPublish observes a release that is already out: its failure must not
 	// re-label a published package as failed, and the tag stays.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.PostPublishScript = []string{"hook"}
 	r := &fakeRunner{fail: map[string]bool{"hook a": true}}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	assert.NoError(t, res["a"].Err)
@@ -1213,11 +1225,11 @@ func TestRunPostPublishHookOnlyWarns(t *testing.T) {
 }
 
 func TestRunScriptSequenceRunsInOrder(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.BuildScript = []string{"b1", "b2"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	assert.Less(t, r.indexOf("b1 a"), r.indexOf("b2 a"), "sequence order is configuration order")
@@ -1227,10 +1239,10 @@ func TestRunScriptSequenceRunsInOrder(t *testing.T) {
 func TestRunScriptSequenceFailFast(t *testing.T) {
 	// A gating sequence stops at the first failure: the remaining commands
 	// must not run, and the package fails.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.BuildScript = []string{"b1", "b2"}
 	r := &fakeRunner{fail: map[string]bool{"b1 a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Equal(t, "build", res["a"].FailedStage)
@@ -1241,10 +1253,10 @@ func TestRunScriptSequenceFailFast(t *testing.T) {
 func TestRunWarnOnlySequenceRunsEveryCommand(t *testing.T) {
 	// A warn-only sequence (postPublish) keeps going: one command failing does
 	// not stop the others, and the package stays published.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.PostPublishScript = []string{"p1", "p2"}
 	r := &fakeRunner{fail: map[string]bool{"p1 a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	assert.NotEqual(t, -1, r.indexOf("p2 a"),
@@ -1254,7 +1266,7 @@ func TestRunWarnOnlySequenceRunsEveryCommand(t *testing.T) {
 func TestRunEnvOutcomeListing(t *testing.T) {
 	// a publishes, b (consuming a) fails its build, c (consuming b) is
 	// blocked, quiet is in the workspace but not planned to release.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}, "c": {"b"}}, "a", "b", "c")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}, "c": {"b"}}, Names: []string{"a", "b", "c"}})
 	p.Releases["quiet"] = &plan.Release{
 		Pkg:     &model.Package{Name: "quiet", Dir: "quiet", Space: p.Releases["a"].Pkg.Space},
 		Current: ccme.Version{Major: 3},
@@ -1262,7 +1274,7 @@ func TestRunEnvOutcomeListing(t *testing.T) {
 	}
 	p.Order = append(p.Order, "quiet")
 	r := &fakeRunner{fail: map[string]bool{"build b": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	env := RunEnv(p, res, zerolog.Nop())
 	assert.Equal(t, "A", envValue(t, env, "DISPAT_PUBLISHED_PACKAGES"))
@@ -1289,14 +1301,14 @@ func TestRunEnvOutcomeListing(t *testing.T) {
 func TestRunAnnounceStageOrderAndEnvironment(t *testing.T) {
 	// announce is a fourth stage after the publish frame: postPublish first,
 	// then beforeAnnounce, the announce script, postAnnounce.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.PostPublishScript = []string{"h-pp"}
 	sp.AnnounceScript = []string{"announce"}
 	sp.BeforeAnnounceScript = []string{"h-ba"}
 	sp.PostAnnounceScript = []string{"h-pa"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	order := []string{"publish a", "h-pp a", "h-ba a", "announce a", "h-pa a"}
@@ -1314,14 +1326,14 @@ func TestRunAnnounceStageOrderAndEnvironment(t *testing.T) {
 func TestRunAnnounceFailuresOnlyWarn(t *testing.T) {
 	// The whole announce frame observes a release that is already out: the
 	// stage and both hooks only warn, and no failure stops the others.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.AnnounceScript = []string{"announce"}
 	sp.BeforeAnnounceScript = []string{"h-ba"}
 	sp.PostAnnounceScript = []string{"h-pa"}
 	r := &fakeRunner{fail: map[string]bool{"h-ba a": true, "announce a": true}}
 	tg := &fakeTagger{}
-	res := newExecutor(r, tg, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	assert.NoError(t, res["a"].Err)
@@ -1335,13 +1347,13 @@ func TestRunAnnounceFailuresOnlyWarn(t *testing.T) {
 func TestRunAnnounceSkippedWhenPublishFails(t *testing.T) {
 	// No release, nothing to announce: a failed publish must keep the whole
 	// announce frame off.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.AnnounceScript = []string{"announce"}
 	sp.BeforeAnnounceScript = []string{"h-ba"}
 	sp.PostAnnounceScript = []string{"h-pa"}
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	for _, ev := range []string{"h-ba a", "announce a", "h-pa a"} {
@@ -1353,7 +1365,7 @@ func TestRunReleaseNotesEnvironment(t *testing.T) {
 	// The notes variables carry the same grouping the changelog and the GitHub
 	// release render as sections: major units are breaking changes, minor
 	// features, patch fixes — headlines only, newline-separated.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	rel := p.Releases["a"]
 	rel.Units = []*ccme.Unit{
 		{Header: ccme.Header{Type: "feat", Description: "drop the old API"}, Bump: ccme.BumpMajor, Valid: true},
@@ -1363,7 +1375,7 @@ func TestRunReleaseNotesEnvironment(t *testing.T) {
 	}
 	rel.Pkg.Space.AnnounceScript = []string{"announce"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	env := r.envs["announce a"]
@@ -1375,9 +1387,9 @@ func TestRunReleaseNotesEnvironment(t *testing.T) {
 	// Like every listing they reach every stage, and an empty group is empty
 	// text, not an unset variable.
 	assert.Equal(t, "drop the old API", envValue(t, r.envs["build a"], "DISPAT_BREAKING_CHANGES"))
-	quiet := mkPlan(false, map[string]ccme.Bump{"b": ccme.BumpPatch}, nil, "b")
+	quiet := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Names: []string{"b"}})
 	r2 := &fakeRunner{}
-	newExecutor(r2, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), quiet)
+	newExecutor(execSpec{Runner: r2, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), quiet)
 	assert.Equal(t, "", envValue(t, r2.envs["build b"], "DISPAT_BREAKING_CHANGES"))
 	assert.Equal(t, "own change", envValue(t, r2.envs["build b"], "DISPAT_FIXES"),
 		"mkPlan's own-change unit is a patch fix")
@@ -1387,12 +1399,12 @@ func TestRunOnFailScript(t *testing.T) {
 	// onFail fires once when the package fails, after the status settles,
 	// with the failure specifics in the environment — and its own failure
 	// only warns: the package cannot fail any harder.
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.OnFailScript = []string{"on-fail"}
 	sp.OnSkipScript = []string{"on-skip"}
 	r := &fakeRunner{fail: map[string]bool{"build a": true, "on-fail a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Equal(t, "build", res["a"].FailedStage)
@@ -1409,12 +1421,12 @@ func TestRunOnFailScript(t *testing.T) {
 func TestRunOnSkipScript(t *testing.T) {
 	// b is skipped because its provider a failed: onSkip fires for b with the
 	// blocking provider named; onFail fires for a and only a.
-	p := mkPlan(true, nil, map[string][]string{"b": {"a"}}, "a", "b")
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	sp := p.Releases["a"].Pkg.Space // shared by both packages
 	sp.OnFailScript = []string{"on-fail"}
 	sp.OnSkipScript = []string{"on-skip"}
 	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 4, 4).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusSkipped, res["b"].Status)
@@ -1430,12 +1442,12 @@ func TestRunOnSkipScript(t *testing.T) {
 }
 
 func TestRunOutcomeScriptsSilentOnSuccess(t *testing.T) {
-	p := mkPlan(false, nil, nil, "a")
+	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space
 	sp.OnFailScript = []string{"on-fail"}
 	sp.OnSkipScript = []string{"on-skip"}
 	r := &fakeRunner{}
-	res := newExecutor(r, &fakeTagger{}, &fakeChangelog{}, 1, 1).Run(context.Background(), p)
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	assert.Equal(t, 0, r.countPrefix("on-fail"))

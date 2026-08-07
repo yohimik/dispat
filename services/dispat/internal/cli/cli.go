@@ -60,9 +60,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 commands:
   release                  build and publish changed packages (default)
   status                   print the project graph and new versions, without building
-  run <script>             run the named space run script inside each changed package,
-                           honouring the dependency graph; "dispat <script>" is a
-                           shorthand when <script> is not a command name
+  run <script> [package]   run the named space run script inside each changed package,
+                           honouring the dependency graph — or inside the one named
+                           package only, changed or not; "dispat <script>" is a
+                           shorthand when <script> is not a command name, narrowing to
+                           the package it is invoked from inside a package folder
   init                     write a starter config file (--format json, yaml or toml)
                            unless one already exists; needs no config or git
   test <script> <package>  run the named top-level script inside the package's
@@ -94,51 +96,11 @@ flags:
 	bootLog := zerolog.New(zerolog.ConsoleWriter{Out: stderr, TimeFormat: "15:04:05"}).
 		With().Timestamp().Logger()
 
-	cmd := cmdRelease
-	runScript := "" // run: the script name; test: the script; preview unused
-	testPkg := ""   // test/preview: the package name
-	if rest := fs.Args(); len(rest) > 0 {
-		cmd = rest[0]
-		switch cmd {
-		case cmdRelease, cmdStatus, cmdInit:
-			if len(rest) > 1 {
-				bootLog.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
-				return 2
-			}
-		case cmdRun:
-			if len(rest) != 2 {
-				bootLog.Error().Msg("run requires exactly one argument: the run script name")
-				fs.Usage()
-				return 2
-			}
-			runScript = rest[1]
-		case cmdTest:
-			if len(rest) != 3 {
-				bootLog.Error().Msg("test requires exactly two arguments: the script name and the package")
-				fs.Usage()
-				return 2
-			}
-			runScript, testPkg = rest[1], rest[2]
-		case cmdPreview:
-			if len(rest) != 2 {
-				bootLog.Error().Msg("preview requires exactly one argument: the package name")
-				fs.Usage()
-				return 2
-			}
-			testPkg = rest[1]
-		default:
-			// Not a command name: treat the word as a run script, so
-			// `dispat lint` is `dispat run lint`. A name no space defines
-			// still fails cleanly below, which also catches command typos.
-			if len(rest) > 1 {
-				bootLog.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
-				fs.Usage()
-				return 2
-			}
-			runScript = cmd
-			cmd = cmdRun
-		}
+	inv, badArgs := parseInvocation(fs.Args(), fs.Usage, bootLog)
+	if badArgs {
+		return 2
 	}
+	cmd, runScript, testPkg := inv.cmd, inv.script, inv.pkg
 	if cmd == cmdRun && !app.ValidOnError(*onError) {
 		bootLog.Error().Str("on-error", *onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
@@ -157,9 +119,11 @@ flags:
 	}
 
 	// An explicit --config is used as-is; the default falls back through the
-	// known config file names, so `dispat init --format yaml` and a plain
-	// `dispat status` compose without flags.
-	cfgPath, err := config.ResolveFile(*root, *cfgName, fs.Changed("config"))
+	// known config file names — in --root first, then ascending its parents,
+	// so the CLI works from inside a package folder with the config's own
+	// directory as the effective monorepo root. `dispat init --format yaml`
+	// and a plain `dispat status` compose without flags either way.
+	cfgPath, resolvedRoot, err := config.ResolveFile(*root, *cfgName, fs.Changed("config"))
 	if err != nil {
 		bootLog.Error().Err(err).Msg("config file not found")
 		return 1
@@ -176,14 +140,21 @@ flags:
 
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.
-	a := app.New(*root, cfg, log)
+	a := app.New(resolvedRoot, cfg, log)
 	switch cmd {
 	case cmdStatus:
 		if a.Status(ctx) != nil {
 			return 1
 		}
 	case cmdRun:
-		if a.RunScript(ctx, runScript, *onError) != nil {
+		opts := app.RunOptions{OnError: *onError, Package: inv.pkg}
+		if inv.shorthand {
+			// The shorthand narrows to the package the command was invoked
+			// from: --root (default ".") is where the user stood, and the
+			// ascent just told us where the monorepo root actually is.
+			opts.Dir = *root
+		}
+		if a.RunScript(ctx, runScript, opts) != nil {
 			return 1
 		}
 	case cmdTest:
@@ -206,6 +177,71 @@ flags:
 		}
 	}
 	return 0
+}
+
+// invocation is the parsed command line: which command runs and its
+// positional arguments.
+type invocation struct {
+	cmd    string
+	script string // run: the script name; test: the script
+	pkg    string // run: the optional target package; test/preview: the package
+	// shorthand marks the `dispat <script>` spelling of the run command; only
+	// it narrows to the package the command was invoked from.
+	shorthand bool
+}
+
+// parseInvocation maps the positional arguments onto a command, validating
+// each command's arity — all before any config is loaded, so a usage mistake
+// costs nothing. bad reports an unusable command line (the usage exit, 2),
+// already logged and, where it helps, followed by the usage text.
+func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invocation, bad bool) {
+	inv = invocation{cmd: cmdRelease}
+	if len(rest) == 0 {
+		return inv, false
+	}
+	inv.cmd = rest[0]
+	switch inv.cmd {
+	case cmdRelease, cmdStatus, cmdInit:
+		if len(rest) > 1 {
+			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
+			return inv, true
+		}
+	case cmdRun:
+		if len(rest) < 2 || len(rest) > 3 {
+			log.Error().Msg("run requires the run script name, optionally followed by one package")
+			usage()
+			return inv, true
+		}
+		inv.script = rest[1]
+		if len(rest) == 3 {
+			inv.pkg = rest[2]
+		}
+	case cmdTest:
+		if len(rest) != 3 {
+			log.Error().Msg("test requires exactly two arguments: the script name and the package")
+			usage()
+			return inv, true
+		}
+		inv.script, inv.pkg = rest[1], rest[2]
+	case cmdPreview:
+		if len(rest) != 2 {
+			log.Error().Msg("preview requires exactly one argument: the package name")
+			usage()
+			return inv, true
+		}
+		inv.pkg = rest[1]
+	default:
+		// Not a command name: treat the word as a run script, so
+		// `dispat lint` is `dispat run lint`. A name no space defines
+		// still fails cleanly later, which also catches command typos.
+		if len(rest) > 1 {
+			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
+			usage()
+			return inv, true
+		}
+		inv.script, inv.cmd, inv.shorthand = inv.cmd, cmdRun, true
+	}
+	return inv, false
 }
 
 // newLogger builds the run logger at the configured level. Format "pretty"
