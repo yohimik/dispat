@@ -156,6 +156,15 @@ package's folder (or any subdirectory of it), narrows to that package the same w
 monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just works — while from the monorepo
 top it covers every changed package as usual. The shorthand takes no package argument.
 
+A third selection axis is `--since <rev>` (`-s`): instead of the release window, select the packages **the commits in
+`rev..HEAD` address** — `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),
+`-s origin/main` over this branch's own commits (PR pipelines; the base moving on does not widen the set),
+`-s <tag>` since a release, and the reserved `-s all` selects every package. Selection follows the same scope semantics
+as planning: a commit's written scopes are authoritative — globs, exclusions and `nonPackageScopes`
+included — and only a unit with **no scope-set falls back to the files it changed** (§6.2, longest path prefix).
+Ordering, concurrency and output carrying apply to the selected set exactly as to the changed one. `--since` is mutually
+exclusive with an explicit `<package>` and overrides the shorthand's folder inference.
+
 What a failure does is the `--on-error` flag: under `skip` (the default) the failed package's changed dependents are
 skipped, transitively (the same shape a release gives a failed provider), while independent packages keep running; under
 `continue` the dependents run anyway. Any failure makes the command exit `1` either way. Nothing is released, tagged or

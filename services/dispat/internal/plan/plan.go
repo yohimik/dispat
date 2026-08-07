@@ -833,6 +833,63 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	}, nil
 }
 
+// PackagesChangedSince resolves which packages the commits in rev..HEAD
+// address, under exactly the scope semantics planning uses (§6): a unit's
+// written scope-set is authoritative — globs, exclusions and non-package
+// scopes included — and only a unit with no scope-set falls back to the
+// commit's changed files (§6.2, longest path prefix). It is the selection
+// behind `dispat run --since`: scope-first, files only where scopes are not
+// specified. Scope diagnostics are deliberately not raised — this selects
+// packages to run a script over, it does not plan a release — and the names
+// come back in dependency order.
+func PackagesChangedSince(ctx context.Context, git gitx.Git, opts Options, rev string) ([]string, error) {
+	cp := &computation{
+		ctx:        ctx,
+		git:        git,
+		root:       opts.Root,
+		nonPackage: make(map[string]bool, len(opts.NonPackageScopes)),
+		pkgs:       opts.Packages,
+		byName:     make(map[string]*model.Package, len(opts.Packages)),
+	}
+	for _, s := range opts.NonPackageScopes {
+		cp.nonPackage[s] = true
+	}
+	if err := cp.loadWorkspace(opts.Dependencies); err != nil {
+		return nil, err
+	}
+	parser, err := ccme.NewParser(opts.ParserConfig)
+	if err != nil {
+		return nil, err
+	}
+	cp.parser = parser
+
+	commits, err := git.Commits(ctx, rev)
+	if err != nil {
+		return nil, fmt.Errorf("plan: resolving commits since %q: %w", rev, err)
+	}
+	selected := make(map[string]bool)
+	for _, c := range commits {
+		rec := &commitRec{commit: c, key: commitKey(c)}
+		data, err := cp.parser.Parse(c.Message)
+		if data == nil {
+			return nil, fmt.Errorf("plan: %s: %w", rec.key, err)
+		}
+		for _, u := range data.ValidUnits() {
+			scopes, written := unitScopes(u)
+			for name := range cp.resolveScopeSet(scopes, written, rec).packages {
+				selected[name] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(selected))
+	for _, name := range cp.order {
+		if selected[name] {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 // §13.1 workspace
 // ---------------------------------------------------------------------------

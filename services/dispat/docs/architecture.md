@@ -12,9 +12,10 @@ callable without a command line.
    that is not a git repository root. The run command computes the plan, then executes the named space run script inside
    each changed package over the dependency graph (build concurrency budget; `--on-error` decides whether a failure
    skips the failed package's dependents) and stops; with an explicit `[package]` — or, for the shorthand, when invoked
-   from inside a package's folder — the run narrows to that one package, changed or not, with no graph. Nothing below
-   step 6 applies to it. `test` and `preview` compute the plan quietly (diagnostics, no graph), then run one top-level
-   script in one package's folder with its full
+   from inside a package's folder — the run narrows to that one package, changed or not, with no graph; `--since <rev>`
+   (or `all`) instead selects what the commits since a revision address — scopes first, changed files for scopeless
+   units (§6.2). Nothing below step 6 applies to it. `test` and `preview` compute the plan quietly (diagnostics, no
+   graph), then run one top-level script in one package's folder with its full
    `DISPAT_*` environment / print one package's pending release notes, and stop.
 2. Resolve the config file — in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root — then load and validate it (viper; unknown keys rejected; flag bindings applied).

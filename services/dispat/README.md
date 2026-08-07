@@ -1,8 +1,7 @@
 # dispat <img alt="dispat logo" align="right" width="128" height="128" src="../../imgs/logo.png" />
 
-The dispat command line tool: a single Go binary that plans and runs monorepo releases from your conventional
-commits. What the tool is and why it exists is in the [repository README](../../README.md); this page is about using
-it.
+The dispat command line tool: a single Go binary that plans and runs monorepo releases from your conventional commits.
+What the tool is and why it exists is in the [repository README](../../README.md); this page is about using it.
 
 ## In the terminal
 
@@ -34,8 +33,8 @@ done  published=0  unchanged=4
 ```
 
 (Output abridged.) If `api`'s build had failed, `core` and `utils` would still have shipped, the run would exit
-non-zero, and the next run would release `api` at the exact version it was owed. Runs are self-healing, and that
-failure model is the point of the tool; [Concepts](./docs/concepts.md) explains it.
+non-zero, and the next run would release `api` at the exact version it was owed. Runs are self-healing, and that failure
+model is the point of the tool; [Concepts](./docs/concepts.md) explains it.
 
 A few more moves:
 
@@ -50,57 +49,61 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 ## Key features
 
 - **Releases the graph, not a list.** Consumer/provider ordering, parallel builds and publishes with separate
-  concurrency budgets, and `isBuildWaitingPublish` for ecosystems (like Docker) where a consumer can only build
-  after its provider is published.
+  concurrency budgets, and `isBuildWaitingPublish` for ecosystems (like Docker) where a consumer can only build after
+  its provider is published.
 - **Blast radius written in the commit.** `feat(core):` releases `core` alone; `^` reaches direct consumers, `^^`
   the transitive closure, `+N` exactly N edges. Nothing is released on a guess.
 - **Self-healing runs.** Failures don't stop the world and are never lost: a broken package skips only its true
-  dependants while the rest keeps releasing, and the next run catches the skipped ones up at the exact version they
-  were owed. No state files, no double releases, no repair scripts: re-running *is* the recovery.
+  dependants while the rest keeps releasing, and the next run catches the skipped ones up at the exact version they were
+  owed. No state files, no double releases, no repair scripts: re-running *is* the recovery.
 - **Prerelease trains.** `@beta` starts a line, `@beta>stable` graduates it; channels live in the tags, so trains
   survive a fresh clone.
-- **Release control from commits.** `Release-As: none` holds a package: work keeps accumulating but nothing ships
-  until `Release-As: auto` resumes it at everything it is owed. `Release-As: 2.0.0` pins an exact version (guarded
-  against going backwards or overshooting), and `cancel(pkg)` discards pending work for good. It is all written in
-  commits, so release decisions are reviewed and versioned like code. [Details](./docs/commits.md#release-control).
-- **Any language, any registry.** Stages are shell commands fed a rich [`DISPAT_*` environment](./docs/environment.md);
-  scripts pass values to each other through `$DISPAT_OUTPUT`, up to attaching build artefacts to GitHub releases.
+- **Release control from commits.** `Release-As: none` holds a package: work keeps accumulating but nothing ships until
+  `Release-As: auto` resumes it at everything it is owed. `Release-As: 2.0.0` pins an exact version (guarded against
+  going backwards or overshooting), and `cancel(pkg)` discards pending work for good. It is all written in commits, so
+  release decisions are reviewed and versioned like code. [Details](./docs/commits.md#release-control).
+- **Any language, any registry, any tooling.** Stages are shell commands fed a rich
+  [`DISPAT_*` environment](./docs/environment.md); scripts pass values to each other through `$DISPAT_OUTPUT`, up to
+  attaching build artefacts to GitHub releases. Because release state lives in git tags — each package's tag is the
+  transaction record of its completed release, written only after the publish succeeded — every build system, CI and
+  caching layer (BuildKit, remote task caches, compiler caches) works from inside a script unchanged, and none of it can
+  confuse the release computation.
 - **Release records built in.** Per-package changelogs, annotated tags, GitHub releases, an optional single release
   commit plus push; all customisable or disableable.
-- **Safe by design.** `dispat status` dry-runs the whole plan; credentials are verified before any work; failed
-  packages can roll their folders back (`revertOnFail`); nothing is ever published against an unpublished
-  dependency.
-- **Built for scale.** One static binary whose only runtime dependency is git; O((V+E) log V) planning and exactly
-  one bounded `git tag`/`git log` query pair per package, deterministic everywhere.
+- **Safe by design.** `dispat status` dry-runs the whole plan; credentials are verified before any work; failed packages
+  can roll their folders back (`revertOnFail`); nothing is ever published against an unpublished dependency.
+- **Built for scale.** One static binary whose only runtime dependency is git; O ((V+E) log V) planning and exactly one
+  bounded `git tag`/`git log` query pair per package, deterministic everywhere.
 
 ## Documentation
 
 Start with [Getting started](./docs/getting-started.md), then dip into the references as needed:
 
-| Document                                                  | Contents                                                                     |
-|-----------------------------------------------------------|-------------------------------------------------------------------------------|
-| [Getting started](./docs/getting-started.md)              | Install, first config, commit convention, commands, CI setup.                |
-| [Concepts](./docs/concepts.md)                            | The mental model: baselines, propagation, trains, catch-up, the pipeline.    |
-| [CLI](./docs/cli.md)                                      | Every command, flag and exit code.                                           |
-| [Configuration file](./docs/configuration/README.md)      | Top-level options, script sequences, run-level hooks; links the pages below. |
-| [Spaces](./docs/configuration/spaces.md)                  | Space options, stages and hooks, versioning modes, run scripts.              |
-| [Tags and baselines](./docs/configuration/versions.md)    | `tagFormat` and `initials`.                                                  |
-| [Release records](./docs/configuration/records.md)        | Changelogs, GitHub releases, the release commit.                             |
-| [Commit parsing options](./docs/configuration/parser.md)  | `commitErrors`, `nonPackageScopes`, the `parser` object.                     |
-| [Commit messages](./docs/commits.md)                      | Scope sets, directives, footers, channels, release control.                  |
-| [Script environment](./docs/environment.md)               | Every `DISPAT_*` variable, the listings, script outputs.                     |
-| [Architecture](./docs/architecture.md)                    | Modules, algorithms, execution model, design decisions, testing.             |
-| [Unit test coverage](./docs/coverage.md)                  | The per-package statement coverage table and how to reproduce it.            |
-| [Integration tests](../../tests/integration)              | The black-box suite: setup, running, results; links the test plan.           |
+| Document                                                 | Contents                                                                     |
+|----------------------------------------------------------|------------------------------------------------------------------------------|
+| [Getting started](./docs/getting-started.md)             | Install, first config, commit convention, commands, CI setup.                |
+| [Concepts](./docs/concepts.md)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.    |
+| [CLI](./docs/cli.md)                                     | Every command, flag and exit code.                                           |
+| [Configuration file](./docs/configuration/README.md)     | Top-level options, script sequences, run-level hooks; links the pages below. |
+| [Spaces](./docs/configuration/spaces.md)                 | Space options, stages and hooks, versioning modes, run scripts.              |
+| [Tags and baselines](./docs/configuration/versions.md)   | `tagFormat` and `initials`.                                                  |
+| [Release records](./docs/configuration/records.md)       | Changelogs, GitHub releases, the release commit.                             |
+| [Commit parsing options](./docs/configuration/parser.md) | `commitErrors`, `nonPackageScopes`, the `parser` object.                     |
+| [Commit messages](./docs/commits.md)                     | Scope sets, directives, footers, channels, release control.                  |
+| [Script environment](./docs/environment.md)              | Every `DISPAT_*` variable, the listings, script outputs.                     |
+| [Architecture](./docs/architecture.md)                   | Modules, algorithms, execution model, design decisions, testing.             |
+| [Test coverage](./docs/coverage.md)                      | The per-package statement coverage table and how to reproduce it.            |
+| [Integration tests](../../tests/integration)             | The black-box suite: setup, running, results; links the test plan.           |
 
-[`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) show every option
-in one annotated file.
+[`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) show every option in
+one annotated file.
 
 ## Testing
 
-The failure semantics above are the tool's main promise, so they are tested at two independent layers (about 500
-test functions plus fuzzing, run by [CI](../../.github/workflows/ci.yml) on every push): unit tests holding **94.8%**
-workspace statement coverage ([per-package table](./docs/coverage.md), [test inventory](./docs/architecture.md#testing)),
-and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
+The failure semantics above are the tool's main promise, so they are tested at two independent layers (about 500 test
+functions plus fuzzing, run by [CI](../../.github/workflows/tests.yml) on every push): unit tests against in-memory
+fakes, and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
 disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
+Together they hold **95.3%** workspace statement coverage
+([per-package table](./docs/coverage.md), [test inventory](./docs/architecture.md#testing)).

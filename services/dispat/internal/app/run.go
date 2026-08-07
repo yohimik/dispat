@@ -30,6 +30,10 @@ const (
 // ValidOnError reports whether the value is a known run error policy.
 func ValidOnError(v string) bool { return v == OnErrorSkip || v == OnErrorContinue }
 
+// SinceAll is the reserved --since value selecting every package, changed or
+// not — "run this everywhere".
+const SinceAll = "all"
+
 // RunOptions selects what RunScript runs over, beyond the script name.
 type RunOptions struct {
 	// OnError is the failure policy for the failed package's dependents:
@@ -46,6 +50,22 @@ type RunOptions struct {
 	// monorepo root itself, or outside every package — the run covers the
 	// changed packages as usual.
 	Dir string
+	// Since replaces the "changed since the last release" selection with
+	// "what the commits since this git revision address" (rev..HEAD, so a
+	// branch base counts only this branch's own commits). Selection follows
+	// the planner's scope semantics: a commit's written scopes are
+	// authoritative, and only scopeless units fall back to the files the
+	// commit changed (§6.2):
+	//
+	//	HEAD~1        what the last commit addressed (per-commit CI)
+	//	origin/main   what this branch addressed (PR pipelines)
+	//	core@1.2.0    everything since a release tag
+	//	all           every package, changed or not (SinceAll)
+	//
+	// Graph ordering and output carrying still apply within the selected set.
+	// Since is mutually exclusive with Package (the CLI rejects the pair) and
+	// overrides Dir's implicit narrowing — an explicit flag beats inference.
+	Since string
 }
 
 // RunScript computes the plan and executes the named space run script inside
@@ -93,26 +113,36 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		return err
 	}
 
-	// The task graph: one node per changed package, edges from every changed
-	// provider — the same shape the release executor schedules, at package
-	// rather than stage granularity. A targeted run replaces the graph with
-	// the one named package, changed or not: naming it (or standing in its
-	// folder) is the instruction to run it.
+	// What the run covers: one named package (targeted, changed or not), the
+	// packages --since selects, or the packages a release would touch.
+	var selected []string
+	switch {
+	case target != "":
+		selected = []string{target}
+	case opts.Since != "":
+		if selected, err = a.sincePackages(ctx, pl, opts.Since); err != nil {
+			a.log.Error().Err(err).Msg("cannot run the script")
+			return err
+		}
+	default:
+		for _, rel := range pl.Releasing() {
+			selected = append(selected, rel.Pkg.Name)
+		}
+	}
+
+	// The task graph: one node per selected package, edges from every
+	// selected provider — the same shape the release executor schedules, at
+	// package rather than stage granularity.
 	changed := make(map[string]*plan.Release)
 	sched := graph.NewScheduler[string]()
-	if target != "" {
-		changed[target] = pl.Releases[target]
-		sched.Add(target)
-	} else {
-		for _, rel := range pl.Releasing() {
-			changed[rel.Pkg.Name] = rel
-			sched.Add(rel.Pkg.Name)
-		}
-		for pkg := range changed {
-			for _, prov := range pl.Providers[pkg] {
-				if _, ok := changed[prov]; ok {
-					sched.AddEdge(prov, pkg)
-				}
+	for _, name := range selected {
+		changed[name] = pl.Releases[name]
+		sched.Add(name)
+	}
+	for pkg := range changed {
+		for _, prov := range pl.Providers[pkg] {
+			if _, ok := changed[prov]; ok {
+				sched.AddEdge(prov, pkg)
 			}
 		}
 	}
@@ -152,10 +182,11 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 // ordinary changed-packages run. An explicit RunOptions.Package must exist
 // and its space must define the script; RunOptions.Dir narrows only when it
 // points inside some package's folder, and silently does not when it points
-// anywhere else (the monorepo root, a space folder, outside the tree).
+// anywhere else (the monorepo root, a space folder, outside the tree) — or
+// when --since is in play, because an explicit flag beats inference.
 func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, error) {
 	target := opts.Package
-	if target == "" && opts.Dir != "" {
+	if target == "" && opts.Dir != "" && opts.Since == "" {
 		target = a.packageAt(pl, opts.Dir)
 	}
 	if target == "" {
@@ -170,6 +201,25 @@ func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, er
 			rel.Pkg.Space.Name, target, name)
 	}
 	return target, nil
+}
+
+// sincePackages resolves --since onto package names: every package for
+// SinceAll, otherwise the packages the commits in rev..HEAD address under the
+// planner's own scope semantics — a written scope-set is authoritative, and
+// only scopeless units fall back to the commit's changed files (§6.2).
+func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]string, error) {
+	if rev == SinceAll {
+		return append([]string(nil), pl.Order...), nil
+	}
+	opts, err := a.planOptions()
+	if err != nil {
+		return nil, err
+	}
+	selected, err := plan.PackagesChangedSince(ctx, a.git, opts, rev)
+	if err != nil {
+		return nil, fmt.Errorf("resolving --since %q: %w", rev, err)
+	}
+	return selected, nil
 }
 
 // packageAt returns the package whose folder contains dir, or "" when dir is

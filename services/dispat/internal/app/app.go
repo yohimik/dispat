@@ -86,6 +86,25 @@ func (a *App) checkGit() error {
 	return nil
 }
 
+// planOptions discovers the workspace and assembles the planner inputs — for
+// Compute, and for every other plan-package entry point that needs the same
+// workspace view (PackagesChangedSince).
+func (a *App) planOptions() (plan.Options, error) {
+	pkgs, deps, err := config.Discover(a.cfg, a.root)
+	if err != nil {
+		a.log.Error().Err(err).Msg("package discovery failed")
+		return plan.Options{}, err
+	}
+	return plan.Options{
+		Packages:         pkgs,
+		Dependencies:     deps,
+		Initials:         a.initialVersions(pkgs),
+		Root:             a.root,
+		NonPackageScopes: a.cfg.NonPackageScopes,
+		ParserConfig:     a.cfg.ParserConfig,
+	}, nil
+}
+
 // plan discovers the workspace and computes the release plan without
 // reporting it — for the commands whose output is not the graph (`test`,
 // `preview`), which print the diagnostics alone.
@@ -94,19 +113,11 @@ func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
 		a.log.Error().Err(err).Msg("git prerequisites missing")
 		return nil, err
 	}
-	pkgs, deps, err := config.Discover(a.cfg, a.root)
+	opts, err := a.planOptions()
 	if err != nil {
-		a.log.Error().Err(err).Msg("package discovery failed")
 		return nil, err
 	}
-	pl, err := plan.Compute(ctx, a.git, plan.Options{
-		Packages:         pkgs,
-		Dependencies:     deps,
-		Initials:         a.initialVersions(pkgs),
-		Root:             a.root,
-		NonPackageScopes: a.cfg.NonPackageScopes,
-		ParserConfig:     a.cfg.ParserConfig,
-	})
+	pl, err := plan.Compute(ctx, a.git, opts)
 	if err != nil {
 		a.log.Error().Err(err).Msg("planning failed")
 		return nil, err

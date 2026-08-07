@@ -383,3 +383,67 @@ func TestRunShorthandNarrowsToTheInvokedPackage(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"a", "b"}, strings.Fields(string(data)))
 }
+
+// TestRunSinceSelectsByCommitScopes: --since re-scopes the run from the
+// release window to what the commits since a revision address, under the
+// planner's own scope semantics — a written scope is authoritative even when
+// the files say otherwise, and only a scopeless unit falls back to the files
+// it changed (§6.2). "all" selects every package, an unknown revision fails
+// loudly, and the flag refuses to combine with an explicit package target.
+func TestRunSinceSelectsByCommitScopes(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	withRunScript := cfg.Spaces["libs"]
+	withRunScript.RunScripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
+	cfg.Spaces["libs"] = withRunScript
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+	r.SeedPackage("packages", "c")
+	r.Commit("feat(a,b,c): bootstrap all three")
+	// A second commit touching only b's folder.
+	r.WriteFile("packages/b/extra.txt", "x")
+	r.Commit("chore(b): touch b alone")
+
+	lintLog := func() []string {
+		t.Helper()
+		data, err := os.ReadFile(r.Path("lint.log"))
+		require.NoError(t, err)
+		return strings.Fields(string(data))
+	}
+
+	// The whole release window still covers all three...
+	r.RunScriptOK("lint")
+	assert.ElementsMatch(t, []string{"a", "b", "c"}, lintLog())
+
+	// ...while --since HEAD~1 narrows to what the last commit touched.
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "--since", "HEAD~1")
+	assert.Equal(t, []string{"b"}, lintLog(), "only the package the commit touched")
+
+	// The short spelling and the reserved "all" value.
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "-s", "all")
+	assert.ElementsMatch(t, []string{"a", "b", "c"}, lintLog(), "'all' selects every package")
+
+	res := r.RunScript("lint", "--since", "no-such-rev")
+	assert.Equal(t, 1, res.Code, "an unknown revision must fail, not silently select nothing")
+
+	res = r.Command("run", "lint", "b", "--since", "HEAD~1")
+	assert.Equal(t, 2, res.Code, "--since and an explicit package are mutually exclusive")
+
+	// Scopes are authoritative: a commit whose files sit under c but whose
+	// scope names a selects a, not c.
+	r.WriteFile("packages/c/scoped-elsewhere.txt", "x")
+	r.Commit("fix(a): scoped to a, files under c")
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "-s", "HEAD~1")
+	assert.Equal(t, []string{"a"}, lintLog(), "the written scope wins over the changed files")
+
+	// A scopeless unit falls back to the files it changed (§6.2).
+	r.WriteFile("packages/c/derived.txt", "x")
+	r.Commit("fix: no scope written, files under c")
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "-s", "HEAD~1")
+	assert.Equal(t, []string{"c"}, lintLog(), "a scopeless unit derives its packages from its files")
+}
