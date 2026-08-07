@@ -236,6 +236,10 @@ func (r *Repo) runAt(root string, args ...string) RunResult {
 	r.T.Helper()
 	full := append(append([]string{}, args...), "--root", root)
 	cmd := exec.Command(r.dispatBin, full...)
+	if dir := coverDir(); dir != "" {
+		// The instrumented binary (see binary.go) writes its counters here.
+		cmd.Env = append(os.Environ(), "GOCOVERDIR="+dir)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()

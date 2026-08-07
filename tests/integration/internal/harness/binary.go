@@ -43,6 +43,16 @@ func Build(t testing.TB) (dispatBin, tsmarkBin string) {
 	return binaries.dispat, binaries.tsmark
 }
 
+// coverDir is the value of DISPAT_COVERDIR: when set, the dispat binary is
+// built with coverage instrumentation and every invocation writes its
+// counters there (via GOCOVERDIR), so the black-box suite contributes to the
+// repository's coverage profile — the flows only this suite exercises would
+// otherwise count for nothing. Empty (the default) means a plain build.
+// Convert the counters afterwards with
+//
+//	go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=cover-integration.out
+func coverDir() string { return os.Getenv("DISPAT_COVERDIR") }
+
 func build() (dispat, tsmark string, err error) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
@@ -57,8 +67,14 @@ func build() (dispat, tsmark string, err error) {
 		return "", "", err
 	}
 
+	// atomic matches the unit profiles, so the text profiles concatenate into
+	// one; -coverpkg=./... mirrors the unit job's scope for the CLI module.
+	var coverArgs []string
+	if coverDir() != "" {
+		coverArgs = []string{"-cover", "-covermode=atomic", "-coverpkg=./..."}
+	}
 	dispat = filepath.Join(dir, "dispat")
-	if err := goBuild(goBin, dispat, filepath.Join(root, "services", "dispat")); err != nil {
+	if err := goBuild(goBin, dispat, filepath.Join(root, "services", "dispat"), coverArgs...); err != nil {
 		return "", "", fmt.Errorf("building dispat: %w", err)
 	}
 	tsmark = filepath.Join(dir, "tsmark")
@@ -68,8 +84,9 @@ func build() (dispat, tsmark string, err error) {
 	return dispat, tsmark, nil
 }
 
-func goBuild(goBin, out, dir string) error {
-	cmd := exec.Command(goBin, "build", "-o", out, ".")
+func goBuild(goBin, out, dir string, extraArgs ...string) error {
+	args := append(append([]string{"build"}, extraArgs...), "-o", out, ".")
+	cmd := exec.Command(goBin, args...)
 	cmd.Dir = dir
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go build in %s: %w\n%s", dir, err, b)

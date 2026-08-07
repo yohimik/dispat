@@ -1,0 +1,181 @@
+# The workflow is the repository's test suite — unit, integration, and the
+# coverage badge derived from them — so both the file and its name (what the
+# README badge renders) say "tests" rather than the generic "CI".
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run unit tests with coverage
+        run: |
+          go test -C pkg/ccme     ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
+          go test -C pkg/models   ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-models.out"
+          go test -C services/dispat ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
+
+      - name: Upload unit coverage profiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: |
+            cover-ccme.out
+            cover-models.out
+            cover-cli.out
+          retention-days: 7
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run integration tests with binary coverage
+        # DISPAT_COVERDIR makes the harness build the dispat binary with
+        # -cover and point every invocation's GOCOVERDIR at the directory, so
+        # the black-box suite's flows count toward the coverage badge — they
+        # are the only coverage of much of the app and cli packages.
+        run: |
+          export DISPAT_COVERDIR="$RUNNER_TEMP/dispat-covdata"
+          mkdir -p "$DISPAT_COVERDIR"
+          go test -C tests/integration ./... -count=1
+          go tool covdata textfmt -i="$DISPAT_COVERDIR" -o="$PWD/cover-integration.out"
+
+      - name: Run integration tests under the race detector
+        run: go test -C tests/integration . -count=1 -race
+
+      - name: Upload integration coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: cover-integration.out
+          retention-days: 7
+
+  coverage:
+    name: Coverage report
+    needs: [unit, integration]
+    runs-on: ubuntu-latest
+    steps:
+      # go tool cover -func resolves the profiles' import paths through the
+      # workspace, so the sources must be present.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Download coverage profiles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-coverage'
+          merge-multiple: true
+
+      - name: Compute coverage totals
+        run: |
+          # Three views of the suite, one badge each: the unit layer (the
+          # three modules' own tests), the integration layer (the black-box
+          # suite's instrumented binary — CLI module scope, since that is the
+          # binary), and the combined total across all four profiles (go tool
+          # cover merges the overlapping blocks).
+          merge() { out=$1; shift; { head -n 1 "$1"; tail -q -n +2 "$@"; } > "$out"; }
+          pct() { go tool cover -func="$1" | tail -n 1 | awk '{print $3}'; }
+          badge() { # <label> <percentage> <file>: shields.io endpoint JSON
+            COLOR=red
+            BAND=$(printf '%.0f' "${2%\%}")
+            if   [ "$BAND" -ge 92 ]; then COLOR=brightgreen
+            elif [ "$BAND" -ge 85 ]; then COLOR=green
+            elif [ "$BAND" -ge 75 ]; then COLOR=yellowgreen
+            elif [ "$BAND" -ge 60 ]; then COLOR=yellow
+            elif [ "$BAND" -ge 40 ]; then COLOR=orange
+            fi
+            printf '{"schemaVersion": 1, "label": "%s", "message": "%s", "color": "%s"}\n' \
+              "$1" "$2" "$COLOR" > "$3"
+            cat "$3"
+          }
+
+          merge coverage-unit.out cover-ccme.out cover-models.out cover-cli.out
+          merge coverage.out      cover-ccme.out cover-models.out cover-cli.out cover-integration.out
+          UNIT=$(pct coverage-unit.out)
+          INTEGRATION=$(pct cover-integration.out)
+          TOTAL=$(pct coverage.out)
+          echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
+
+          {
+            echo "### Test coverage"
+            echo ""
+            echo '| Layer | Statement coverage |'
+            echo '|---|---|'
+            echo "| unit (all modules) | ${UNIT} |"
+            echo "| integration (CLI module, via the instrumented binary) | ${INTEGRATION} |"
+            echo "| **combined total** | **${TOTAL}** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          badge "coverage"    "$TOTAL"       coverage.json
+          badge "unit"        "$UNIT"        coverage-unit.json
+          badge "integration" "$INTEGRATION" coverage-integration.json
+
+      - name: Upload merged coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.json
+            coverage-unit.json
+            coverage-integration.json
+          retention-days: 7
+
+  coverage-badge:
+    name: Publish coverage badge
+    needs: [coverage]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+
+      - name: Push badge JSON to the badges branch
+        # A single-commit orphan branch, force-pushed on every main build, so
+        # the badge data carries no history. README references it through the
+        # shields.io endpoint URL.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir badge && cp coverage.json coverage-unit.json coverage-integration.json badge/
+          cd badge
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage.json coverage-unit.json coverage-integration.json
+          git commit -qm "chore: update coverage badges"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

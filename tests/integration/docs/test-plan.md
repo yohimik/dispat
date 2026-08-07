@@ -69,7 +69,10 @@ tests/integration/
   go.mod                    separate module: github.com/yohimik/dispat/tests/integration
   cmd/tsmark/               the timing probe (see below)
   internal/harness/
-    binary.go               builds dispat + tsmark once per test run (sync.Once cache)
+    binary.go               builds dispat + tsmark once per test run (sync.Once
+                            cache); with DISPAT_COVERDIR set, dispat is built
+                            with -cover and every invocation's GOCOVERDIR points
+                            there, folding the suite into the coverage badge
     repo.go                 Repo: git fixture (init, seed packages, commit, tags), config
                             writing, Release/ReleaseOK/Status/StatusOK/RunScript/
                             RunScriptOK/Command/CommandAt -> RunResult
