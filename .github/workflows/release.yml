@@ -13,8 +13,31 @@ env:
   APP_NAME: dispat
 
 jobs:
+  tests:
+    # A tag push does not trigger tests.yml, so the release re-runs the suite
+    # against the tagged commit: no binary ships from a commit that fails.
+    name: Test the tagged commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run the full suite
+        run: |
+          go test -C pkg/ccme         ./... -count=1 -timeout 10m
+          go test -C pkg/models       ./... -count=1 -timeout 10m
+          go test -C services/dispat  ./... -count=1 -timeout 10m
+          go test -C tests/integration ./... -count=1 -timeout 20m
+
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: tests
     runs-on: ubuntu-latest
     strategy:
       matrix:

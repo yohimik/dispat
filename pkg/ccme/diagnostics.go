@@ -54,14 +54,23 @@ const (
 	CodeW207 = "W207" // a channel transition whose from equals its to; inert
 )
 
-// SilentFailureCodes are the warnings §16 singles out as silent-wrong-answer
-// warnings rather than style notes: each one means the message says something
-// different from what its author meant, with no error to stop it.
+// silentFailureCodes backs SilentFailureCodes; an array so the policy set
+// cannot be mutated even from inside the package.
+var silentFailureCodes = [...]string{CodeW155, CodeW156}
+
+// SilentFailureCodes returns the warnings §16 singles out as
+// silent-wrong-answer warnings rather than style notes: each one means the
+// message says something different from what its author meant, with no error
+// to stop it. The returned slice is a copy; callers may modify it freely.
 //
 // Commit-lint implementations SHOULD reject a commit carrying any of them.
 // W172 belongs to this set too but requires git history, so it is not emitted
 // by this package.
-var SilentFailureCodes = []string{CodeW155, CodeW156}
+func SilentFailureCodes() []string {
+	out := make([]string, len(silentFailureCodes))
+	copy(out, silentFailureCodes[:])
+	return out
+}
 
 // Severity classifies a Diagnostic. Errors make the offending unit's
 // contribution undefined; warnings never block a release (§16).

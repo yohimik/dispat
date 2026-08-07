@@ -248,7 +248,7 @@ cleanly and ships a major change as a minor one. The package refuses to let that
 | `BREAKING CHANGE:` with no value                         | breaking: `W157`                                |
 | `BREAKING CHANGE: x` as the header line                  | `E100`, with a message saying so                |
 
-`W155` and `W156` are exposed as `ccme.SilentFailureCodes`: they mean the message says something other than what its
+`W155` and `W156` are exposed as `ccme.SilentFailureCodes()`: they mean the message says something other than what its
 author meant, and commit-lint tooling should reject them even though the release engine tolerates them.
 
 ### Inert directives: `W152` vs `W201`

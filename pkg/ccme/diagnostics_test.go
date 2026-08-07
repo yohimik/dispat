@@ -377,7 +377,7 @@ func TestDiagnosticsAreDeterministic(t *testing.T) {
 func TestSilentFailureCodesAreWarnings(t *testing.T) {
 	t.Parallel()
 
-	for _, c := range SilentFailureCodes {
+	for _, c := range SilentFailureCodes() {
 		if c[0] != 'W' {
 			t.Errorf("%s is in SilentFailureCodes but is not a warning", c)
 		}
