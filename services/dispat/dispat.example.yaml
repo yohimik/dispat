@@ -15,8 +15,8 @@ scripts:
   notify: "./scripts/notify.sh"
 
 # A space's `run` object says what runs at which stage, referencing the named
-# scripts above. Every entry is optional (a stage without a script still runs —
-# ordering, tags, changelogs, github releases — it just executes no shell
+# scripts above. Every entry is optional (a stage without a script still runs,
+# keeping ordering, tags, changelogs and github releases; it just executes no shell
 # command) and accepts one name or an array of names run in order.
 spaces:
   libs:
@@ -28,7 +28,7 @@ spaces:
     revertOnFail: true
     # How versions relate across the space's packages:
     #   independent (default)  every package versions from its own history
-    #   fixed                  one shared version — any change releases every
+    #   fixed                  one shared version: any change releases every
     #                          member; single prerelease train; riders get a
     #                          "no changes" changelog entry (W210)
     #   fixedSparse            the shared version, but unchanged members keep
@@ -51,7 +51,7 @@ spaces:
       # Hooks around the package stages (beforeAll, beforeVersion,
       # postVersion, beforeBuild, postBuild, beforePublish, postPublish,
       # beforeAnnounce, postAnnounce). Everything up to beforePublish gates
-      # the release — a failure fails the package; postPublish and the
+      # the release, so a failure fails the package; postPublish and the
       # announce hooks warn. onFail / onSkip run when a package fails or is
       # skipped, warn-only.
       postBuild: smoke-test
@@ -69,7 +69,7 @@ spaces:
     tagFormat: "packages/apps/{name}@v{version}"
 
 # The top-level `run` object holds the run-level hooks, executed in the
-# monorepo root. beforeAll is the one gating run hook — it runs once before
+# monorepo root. beforeAll is the one gating run hook: it runs once before
 # the task graph starts and its failure aborts the run. All the others only
 # warn on failure. postAll runs once after the whole task graph finishes with
 # the run outcome in DISPAT_PUBLISHED/FAILED/SKIPPED/UNPLANNED_PACKAGES and
@@ -95,7 +95,7 @@ initials:
 # Release tag template, overridable per space above. Placeholders are {name},
 # {version}, and optionally {channel} with {counter} to spell prereleases your
 # own way ("{name}@v{version}-{channel}{counter}" tags core@v1.2.3-beta4, and
-# core@v1.2.3 when stable — the prerelease section and its glued literals are
+# core@v1.2.3 when stable; the prerelease section and its glued literals are
 # dropped). Every other byte is literal, so "v" prefixes and path prefixes
 # both work. A tag that matches the shape but whose version cannot be parsed
 # puts the package on the `initials` fallback, exactly as before.
@@ -106,8 +106,8 @@ tagFormat: "{name}@{version}"
 #                   continues, which is the blast radius the spec assigns to
 #                   unit-scoped errors
 #   error           any commit error stops the run before anything is released
-# Repository-scoped failures — an unreadable tag, a version that would go
-# backwards, a dependency cycle — abort under either setting.
+# Repository-scoped failures (an unreadable tag, a version that would go
+# backwards, a dependency cycle) abort under either setting.
 commitErrors: warn
 
 # Scope names that are deliberately not packages, so naming one is not the
@@ -179,8 +179,8 @@ commit:
 # changelog. Any script may export values GITHUB_OUTPUT-style through
 # $DISPAT_OUTPUT (they reach later scripts as DISPAT_OUTPUT_*, with
 # DISPAT_OUTPUT_SOURCE_* naming the exporter); the DISPAT_EXPORT_GITHUB
-# export — echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"
-# — opts the package in, its absolute file paths uploaded as release assets
+# export (echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT")
+# opts the package in, its absolute file paths uploaded as release assets
 # (invalid entries skipped with a warning).
 github:
   enabled: true

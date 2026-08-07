@@ -1,0 +1,41 @@
+# CLI reference
+
+```
+dispat [command] [flags]
+```
+
+## Commands
+
+| Command                   | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.                                                                                                                                                                                                                                                                                                                                                             |
+| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.                                                                                                                                                                                                                                                                                                                                                           |
+| `run <script>`            | Plan, then execute the named [space run script](./configuration/spaces.md#runscripts-and-dispat-run) inside each changed package, honouring the dependency graph. Nothing is released or tagged. `dispat <script>` is a shorthand when `<script>` is not a command name.                                                                                                                                                                                           |
+| `init`                    | Write a starter config file into `--root` (`dispat.json`, or `dispat.yaml` / `dispat.toml` with `--format`) and exit. An existing file is never overwritten; that is an error. Needs no config file and no git repository.                                                                                                                                                                                                                                         |
+| `test <script> <package>` | Plan, then run the named **top-level** script (a key of `scripts`) once, inside the package's folder, with the package's full [`DISPAT_*` environment](./environment.md) (`DISPAT_STAGE` is `test:<script>`). Nothing is released, tagged or written; it is a way to try a script under exactly the input a stage would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as both the old and new version. |
+| `preview <package>`       | Plan, then print the package's pending release notes (the breaking-changes/features/fixes sections plus provider updates its next release's changelog entry and GitHub release body would carry) and exit. Follows the [release-notes windowing](./configuration/records.md#changelog): a pending prerelease previews only its own changeset. Prints `no pending changes` when the window is empty.                                                                |
+
+## Flags
+
+| Flag            | Default     | Effect                                                                                                                                                                                          |
+|-----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--root`        | `.`         | Monorepo root folder (git repo root).                                                                                                                                                           |
+| `--config`      | auto        | Config file name, relative to `--root`. When not set, the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists is used; an explicit name is used as-is (no fallback). |
+| `--concurrency` | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                          |
+| `--on-error`    | `skip`      | `run` only: what a failing script does to the failed package's dependents. `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure.              |
+| `--log-level`   | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                            |
+| `--log-format`  | from config | Override: `pretty` or `json`.                                                                                                                                                                   |
+| `--format`      | `json`      | `init` only: the config file format to write (`json`, `yaml` or `toml`).                                                                                                                        |
+| `--version`     |             | Print the dispat version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                          |
+| `--help`        |             | Print usage.                                                                                                                                                                                    |
+
+Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
+
+## Exit codes
+
+Exit codes: `0` success (including "nothing changed"), `1` configuration/planning error, a refused release (see
+[`commitErrors`](./configuration/parser.md#commiterrors)) or at least one package failed, `2` bad command line.
+
+Both `release` and `status` print the plan's diagnostics before the graph. `status` exits `1` only for a
+repository-scoped failure (an unreadable tag, a version that would go backwards, a dependency cycle), because for
+anything else the plan it just printed is the plan a release would use.

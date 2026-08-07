@@ -1,0 +1,182 @@
+# Script environment variables
+
+Every script receives, on top of the parent environment:
+
+| Variable                      | Example              | Meaning                                                                                                                                                                                                                                                                                     |
+|-------------------------------|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `DISPAT_PACKAGE`              | `core`               | Package name.                                                                                                                                                                                                                                                                               |
+| `DISPAT_SPACE`                | `libs`               | Space name.                                                                                                                                                                                                                                                                                 |
+| `DISPAT_OLD_VERSION`          | `1.2.3`              | The version the package last published (`0.0.0` for a first release).                                                                                                                                                                                                                       |
+| `DISPAT_NEW_VERSION`          | `1.3.0-beta.4`       | Version being released: version + channel + counter, SemVer spelling.                                                                                                                                                                                                                       |
+| `DISPAT_VERSION`              | `1.3.0`              | The core version alone: `MAJOR.MINOR.PATCH`, channel and counter stripped.                                                                                                                                                                                                                  |
+| `DISPAT_TAG_VERSION`          | `1.3.0-beta4`        | Version + channel + counter as the space's `tagFormat` spells them: the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no path). Equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.                               |
+| `DISPAT_STABLE_BASELINE`      | `1.2.3`              | The last release with no prerelease component: what versions are computed from.                                                                                                                                                                                                             |
+| `DISPAT_BASELINE`             | `1.3.0-beta.3`       | The latest baseline: the newest tag of any kind, prereleases included; what the computed version must exceed and where the channel is read from. **Unset** when the package has never released, so `${DISPAT_BASELINE+x}` detects a first release; when set it equals `DISPAT_OLD_VERSION`. |
+| `DISPAT_BUMP`                 | `minor`              | `none`, `patch`, `minor` or `major`. `none` on a channel-only release.                                                                                                                                                                                                                      |
+| `DISPAT_CHANNEL`              | `beta`               | Channel being released on: `stable` or a prerelease identifier.                                                                                                                                                                                                                             |
+| `DISPAT_OLD_CHANNEL`          | `stable`             | Channel of the previous release, so a graduation is distinguishable from an ordinary release.                                                                                                                                                                                               |
+| `DISPAT_COUNTER`              | `4`                  | Prerelease counter of the version being released. **Unset** on a stable release.                                                                                                                                                                                                            |
+| `DISPAT_OLD_COUNTER`          | `3`                  | Prerelease counter of the previous release. **Unset** when the previous release was stable.                                                                                                                                                                                                 |
+| `DISPAT_IS_PRERELEASE`        | `true`               | `true` when `DISPAT_NEW_VERSION` carries a prerelease component. Handy for choosing a dist-tag.                                                                                                                                                                                             |
+| `DISPAT_TAG`                  | `core@v1.3.0-beta4`  | Tag that will be created on success: name + version + channel + counter, rendered with the space's `tagFormat`.                                                                                                                                                                             |
+| `DISPAT_SEMVER_TAG`           | `core@1.3.0-beta.4`  | The same name + version + channel + counter under the normative `{name}@{version}` SemVer format, whatever `tagFormat` encodes: the spelling a script can rely on across spaces.                                                                                                            |
+| `DISPAT_STAGE`                | `build`              | `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`, `postPublish`, `postAll`, ...) for a hook; `login` for the login; `run:<name>` for a [run script](./configuration/spaces.md#runscripts-and-dispat-run); `test:<name>` for `dispat test`.    |
+| `DISPAT_OUTPUT`               | *(a temp file path)* | Where the script appends `NAME=value` (or `DISPAT_OUTPUT_NAME=value`, the same output) lines to [export outputs](#script-outputs) for everything that runs after it.                                                                                                                        |
+| `DISPAT_OUTPUT_<NAME>`        | *(exported value)*   | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty).                                                                                                                                                             |
+| `DISPAT_OUTPUT_SOURCE_<NAME>` | `core:build`         | The script that exported (or last re-exported) `<NAME>`: `<package>:<stage>`, or `<space>:login` for a login export.                                                                                                                                                                        |
+| `DISPAT_EXPORT_GITHUB`        | `/pkg/dist/app.tgz`  | Set once a script [exported it](#script-outputs): the opt-in for the package's GitHub release, its value the asset list. Travels under its full name and stays out of `DISPAT_OUTPUTS`.                                                                                                     |
+
+`DISPAT_OLD_VERSION` and `DISPAT_STABLE_BASELINE` differ only on a prerelease train: a package on `1.3.0-beta.1`
+whose last stable release was `1.2.3` reports both, because the first is what it shipped and the second is what the next
+version is computed from.
+
+The counters are left **unset** (not empty) when there is nothing to report, so a shell's `${DISPAT_COUNTER+x}`
+distinguishes "a stable release" from "a prerelease whose counter happens to be empty text", which an empty string
+cannot. An exact `Release-As` may carry more than the bare number: `2.0.0-rc.1.hotfix` reports a counter of
+`1.hotfix`, since the counter is everything after the channel.
+
+## Workspace data
+
+Every stage additionally receives two per-package listings, readable from any shell without a parser. The version stage
+is where manifests are reconciled, but a build baking versions into artefacts and a publish choosing dist-tags read the
+same state, and identical environments keep a script movable between stages.
+
+The **workspace listing** covers **every** workspace package with the version it will carry at the end of the run:
+its planned version where it is releasing, its baseline otherwise.
+
+```sh
+DISPAT_WORKSPACE_PACKAGES="CORE UTILS"        # keys in plan order: for k in $DISPAT_WORKSPACE_PACKAGES
+DISPAT_WORKSPACE_CORE_NAME="core"             # the raw package name
+DISPAT_WORKSPACE_CORE_VERSION="1.3.0"
+DISPAT_WORKSPACE_CORE_CHANNEL="stable"
+DISPAT_WORKSPACE_CORE_RELEASING="true"
+```
+
+The breadth matters. dispat has no manifest model (reconciling declared dependency ranges is the version script's job),
+and a correct reconciliation cannot be restricted to "released in the same run": a dependency may have been published by
+an *earlier* run whose dependent leg failed, which is exactly the catch-up case. `_RELEASING=false`
+with a version newer than the range you declared is that situation. Reconciling against every workspace dependency
+closes it, and is a no-op whenever the narrow rule would already have been right.
+
+The **updated-provider listing** covers the providers this package was bumped for:
+
+```sh
+DISPAT_UPDATED_PACKAGES="CORE"                # empty (not unset) when nothing was updated
+DISPAT_UPDATED_CORE_NAME="core"
+DISPAT_UPDATED_CORE_SPACE="libs"
+DISPAT_UPDATED_CORE_OLD_VERSION="1.2.3"
+DISPAT_UPDATED_CORE_NEW_VERSION="1.3.0"
+DISPAT_UPDATED_CORE_CHANNEL="stable"
+```
+
+Providers that failed or were skipped are filtered out (their versions were never released), and the listing is resolved
+per stage: a provider can fail between this package's build and its publish, and each stage sees the truth of its own
+moment. If no successfully updated provider remains for a package bumped only by providers (it proceeds on its own
+commits), the *version* script specifically is not executed at all: there is nothing to sync manifests to.
+
+The `<KEY>` is the package name uppercased with everything outside `[A-Z0-9]` replaced by `_` (`@acme/ui` becomes
+`_ACME_UI`), because a package name may contain bytes a variable name cannot. The raw name always travels in the
+`_NAME` field; a lookup by name is `for k in $DISPAT_WORKSPACE_PACKAGES`, compare `_NAME`, read the fields. Should two
+names sanitise to the same key (`core-utils` / `core.utils`), the first in plan order keeps it and the loser is omitted
+from the listings with a warning; rename one of the pair if you hit this.
+
+A package released on `stable` whose dependency currently carries a prerelease version is the one case no range can make
+honest; the remedy is to graduate the provider too, or not to graduate the consumer yet.
+
+## Release notes data
+
+Every stage and hook of a package also receives its release notes, grouped exactly as the changelog file and the GitHub
+release group their sections: units bumping major are breaking changes, minor are features, patch are fixes:
+
+```sh
+DISPAT_BREAKING_CHANGES="drop the old API"    # one headline per line
+DISPAT_FEATURES="add streaming
+add retries"
+DISPAT_FIXES="close a leak"
+```
+
+Entries are the unit descriptions, newline-separated, in history order; a group with no entries is empty text (set, not
+unset), so a line-wise loop iterates zero times. Bodies are omitted (they are multiline prose that would destroy the
+line-per-entry contract) and stay in the changelog and the GitHub release. The groups follow the
+[release-notes windowing](./configuration/records.md#changelog): on a prerelease they carry only the release's own
+changeset, on a stable release (a graduation included) the whole pending window. The dependencies section travels the
+same way:
+
+```sh
+DISPAT_DEPENDENCIES="core: 1.2.3 -> 1.3.0"    # one "name: old -> new" line per live provider update
+```
+
+matching the changelog's rendering (`From` equals `To` on a catch-up, whose provider version is already out); the
+`DISPAT_UPDATED_*` listing carries the same data field by field for scripts that want it addressable. The
+[`run.announce`](./configuration/spaces.md#runannounce) stage is the natural consumer, but like every listing the
+variables reach every stage, keeping scripts movable.
+
+## Script outputs
+
+Every per-package script and hook (the stages, their hooks, the announce frame, `onFail`/`onSkip`, the space's
+`login`) receives `DISPAT_OUTPUT`: the path of a file it may append `NAME=value` lines to, `GITHUB_OUTPUT`-style, to
+export values for everything that runs after it. The name may be written bare or already carrying the
+`DISPAT_OUTPUT_` prefix; both spellings address the same output:
+
+```sh
+echo "DISPAT_OUTPUT_IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' img)" >> "$DISPAT_OUTPUT"
+echo "IMAGE_DIGEST=..." >> "$DISPAT_OUTPUT"     # the same output, bare spelling
+echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz $PWD/dist/SHA256SUMS" >> "$DISPAT_OUTPUT"
+```
+
+Outputs accumulate across the package's pipeline into one store: every later script and hook of the package (the outcome
+scripts `onFail`/`onSkip` included, so a notifier can report with them) receives each export as
+`DISPAT_OUTPUT_<NAME>`, plus `DISPAT_OUTPUTS` listing the exported names (space-separated; set but empty when nothing
+was exported) and `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script each export came from, as
+`<package>:<stage>` (`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage
+scripts: a `beforeBuild` export reaches the build, the publish and everything after. The **login script's**
+exports are space-scoped: they reach every package of the space from its publish stage (the stage that waits for the
+login) onward. In [`dispat run`](./configuration/spaces.md#runscripts-and-dispat-run) outputs additionally carry across
+packages, from a provider's run script to its consumers'. Re-exporting a name overrides its earlier value and source,
+like a shell re-assignment.
+
+The name must be a valid environment variable name; other `DISPAT_`-prefixed names are reserved (an export cannot shadow
+the `DISPAT_*` environment), and a malformed line fails a release-gating sequence (and only warns in a warn-only one). A
+sequence that fails still surrenders whatever it exported before failing, which is how `onFail`
+gets to see it.
+
+One export is a directive to the [GitHub recorder](./configuration/records.md#github): **`DISPAT_EXPORT_GITHUB`**. A
+package whose scripts exported it gets a GitHub release; a package that never exported it is skipped by the recorder.
+Its value is a whitespace-separated list of absolute paths to existing files (`$PWD` inside a script resolves to the
+package folder, which makes absolute paths easy), each uploaded as an asset of the release, named after the file; an
+empty value creates the release with no assets. An invalid entry (a relative path, a missing file, a directory) is
+skipped with a warning while the release and the sound entries go through. Unlike ordinary outputs the export travels to
+later scripts under its full name, so appending is
+`echo "DISPAT_EXPORT_GITHUB=$DISPAT_EXPORT_GITHUB $PWD/more.tgz" >> "$DISPAT_OUTPUT"`, and it does not appear in
+`DISPAT_OUTPUTS`.
+
+## Run outcome data
+
+The [run-level hooks](./configuration/README.md#run-level-hooks) additionally receive the run's outcome, rendered with
+the same `<KEY>` scheme:
+
+```sh
+DISPAT_PUBLISHED_PACKAGES="CORE"              # keys of published packages
+DISPAT_FAILED_PACKAGES="UI"                   # keys of failed packages
+DISPAT_SKIPPED_PACKAGES="APP"                 # keys of packages skipped because a provider failed
+DISPAT_UNPLANNED_PACKAGES="UTILS"             # keys of packages the plan did not release
+                                              # (unchanged, or held by Release-As: none)
+DISPAT_RESULT_CORE_NAME="core"                # one block per planned package
+DISPAT_RESULT_CORE_STATUS="published"         # published / failed / skipped
+DISPAT_RESULT_CORE_OLD_VERSION="1.2.3"
+DISPAT_RESULT_CORE_NEW_VERSION="1.3.0"
+DISPAT_RESULT_CORE_CHANNEL="stable"
+DISPAT_RESULT_UI_FAILED_STAGE="build"         # failed packages only
+DISPAT_RESULT_APP_BLOCKED_BY="ui"             # skipped packages only: the provider to blame
+```
+
+The four list variables are set even when empty, so a shell for-loop iterates zero times instead of reading an unset
+variable; `_FAILED_STAGE` and `_BLOCKED_BY`, conversely, are **unset** when there is nothing to report. Unplanned
+packages carry no `DISPAT_RESULT_*` block; their state is the workspace listing's baseline entry.
+
+## Size
+
+One package costs ~250 bytes across its listing variables, so a 500-package monorepo puts roughly 125 KB into each
+script's environment. Each individual variable is tiny, so the ceiling is total environment size (~2 MiB on Linux, 1 MiB
+on macOS), good for a few thousand packages, far beyond the size at which one dispat workspace has usually become
+several.
