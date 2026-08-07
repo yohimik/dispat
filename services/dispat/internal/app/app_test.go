@@ -2,6 +2,9 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -17,6 +20,29 @@ import (
 // semantics — is exercised by the black-box suite in tests/integration
 // against the compiled binary; here live the unit tests of App's own
 // helpers.
+
+func TestGitPrerequisitesGuard(t *testing.T) {
+	// The guard fires before any git command or discovery, so both cases are
+	// plain unit tests: no repository, no fakes.
+	cfg := &config.File{}
+
+	t.Run("no repository root", func(t *testing.T) {
+		a := New(t.TempDir(), cfg, zerolog.Nop()) // no .git
+		err := a.Status(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a git repository root")
+	})
+
+	t.Run("no git executable", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(root, ".git"), 0o755))
+		t.Setenv("PATH", t.TempDir()) // an empty PATH entry: no git anywhere
+		a := New(root, cfg, zerolog.Nop())
+		err := a.Status(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "git executable not found")
+	})
+}
 
 func TestValidOnError(t *testing.T) {
 	assert.True(t, ValidOnError(OnErrorSkip))

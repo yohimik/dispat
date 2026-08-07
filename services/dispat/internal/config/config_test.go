@@ -349,14 +349,14 @@ func TestLoadOptionalScripts(t *testing.T) {
 
 func TestLoadInitials(t *testing.T) {
 	cfg := validConfig()
-	cfg.Initials = map[string]string{"core": "1.2.3", "legacy-pkg": "0.9.0"}
+	cfg.Initials = map[string]string{"core": "1.2.3", "scoped-pkg": "0.9.0"}
 	loaded, err := loadModel(t, cfg)
 	require.NoError(t, err)
 	require.Len(t, loaded.InitialVersions, 2)
 	// Compare rendered versions: the fields are uint64, and an untyped
 	// constant in an interface argument arrives as int.
 	assert.Equal(t, "1.2.3", loaded.InitialVersions["core"].String())
-	assert.Equal(t, "0.9.0", loaded.InitialVersions["legacy-pkg"].String())
+	assert.Equal(t, "0.9.0", loaded.InitialVersions["scoped-pkg"].String())
 }
 
 func TestLoadInitialsInvalidVersion(t *testing.T) {

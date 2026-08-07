@@ -66,7 +66,7 @@ commands:
                            shorthand when <script> is not a command name, narrowing to
                            the package it is invoked from inside a package folder
   init                     write a starter config file (--format json, yaml or toml)
-                           unless one already exists; needs no config or git
+                           at the git repository root, unless one already exists
   test <script> <package>  run the named top-level script inside the package's
                            folder with its full DISPAT_* environment; releases nothing
   preview <package>        print the package's pending release notes (breaking

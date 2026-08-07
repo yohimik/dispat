@@ -8,6 +8,10 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -67,10 +71,29 @@ func (a *App) computePlan(ctx context.Context) (*plan.Plan, error) {
 	return pl, nil
 }
 
+// checkGit verifies the two prerequisites every command dies without — the
+// git executable and the repository — before any real work, so a missing
+// prerequisite reads as one clear error instead of a raw git failure halfway
+// through planning. The .git entry may be a directory or, for worktrees and
+// submodules, a file; existing is all that is checked.
+func (a *App) checkGit() error {
+	if _, err := exec.LookPath("git"); err != nil {
+		return errors.New("git executable not found in PATH (dispat shells out to git)")
+	}
+	if _, err := os.Stat(filepath.Join(a.root, ".git")); err != nil {
+		return fmt.Errorf("%s is not a git repository root (no .git); the dispat config belongs at the repository root", a.root)
+	}
+	return nil
+}
+
 // plan discovers the workspace and computes the release plan without
 // reporting it — for the commands whose output is not the graph (`test`,
 // `preview`), which print the diagnostics alone.
 func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
+	if err := a.checkGit(); err != nil {
+		a.log.Error().Err(err).Msg("git prerequisites missing")
+		return nil, err
+	}
 	pkgs, deps, err := config.Discover(a.cfg, a.root)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")

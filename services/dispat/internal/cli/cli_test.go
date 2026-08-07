@@ -2,7 +2,9 @@ package cli
 
 // Unit tests of the command-line controller itself: flag and argument
 // parsing, usage and exit-code mapping, the init command (which needs no
-// config or git), and the logger constructor. Everything the controller only
+// config, only a .git entry marking the repository root — faked here with a
+// bare directory, so these stay unit tests), and the logger constructor.
+// Everything the controller only
 // composes — release flows, hooks, records, the run/test/preview commands
 // against real repositories — is pinned by the black-box suite in
 // tests/integration, driving the compiled binary.
@@ -80,6 +82,7 @@ func TestInitCommand(t *testing.T) {
 	for _, format := range []string{"json", "yaml", "toml"} {
 		t.Run(format, func(t *testing.T) {
 			root := t.TempDir()
+			require.NoError(t, os.Mkdir(filepath.Join(root, ".git"), 0o755))
 			args := []string{"init", "--root", root}
 			if format != "json" {
 				args = append(args, "--format", format)
@@ -99,6 +102,7 @@ func TestInitCommand(t *testing.T) {
 
 func TestInitCommandRefusesToOverwrite(t *testing.T) {
 	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, ".git"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte("{}"), 0o644))
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"init", "--root", root}, &stdout, &stderr)
@@ -109,6 +113,16 @@ func TestInitCommandRefusesToOverwrite(t *testing.T) {
 
 	code = Run([]string{"init", "--root", root, "--format", "ini"}, &stdout, &stderr)
 	assert.Equal(t, 1, code, "an unknown format is an error")
+}
+
+func TestInitCommandRequiresAGitRepositoryRoot(t *testing.T) {
+	// The config establishes the effective monorepo root for every later
+	// command, so init refuses to plant one outside a git repository root.
+	root := t.TempDir() // no .git
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"init", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code)
+	assert.NoFileExists(t, filepath.Join(root, "dispat.json"), "nothing may be written")
 }
 
 func TestNewLoggerFallsBackOnUnknownLevel(t *testing.T) {

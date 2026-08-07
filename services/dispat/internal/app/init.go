@@ -56,10 +56,13 @@ publish = "publish"
 
 // InitConfig writes a starter configuration file into dir. format selects
 // "json" (the default when empty), "yaml" or "toml"; the file is named
-// dispat.<format>. An existing file is never overwritten — that is an error,
-// so a typo cannot silently discard a real configuration. It returns the
-// name of the file written and needs neither a loaded config nor a git
-// repository.
+// dispat.<format>. It returns the name of the file written and needs no
+// loaded config, but it does insist on dir being a git repository *root*
+// (holding a .git entry — a directory, or a file for worktrees): the config
+// establishes the effective monorepo root for every later command, so writing
+// it anywhere else would plant a config that plans against the wrong tree.
+// An existing config file is never overwritten either — that is an error, so
+// a typo cannot silently discard a real configuration.
 func InitConfig(dir, format string) (string, error) {
 	var content string
 	switch format {
@@ -71,6 +74,9 @@ func InitConfig(dir, format string) (string, error) {
 		content = initTOML
 	default:
 		return "", fmt.Errorf("unknown config format %q (want json, yaml or toml)", format)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return "", fmt.Errorf("%s is not a git repository root (no .git); run `git init` first, or run `dispat init` at the repository root", dir)
 	}
 	name := "dispat." + format
 	path := filepath.Join(dir, name)

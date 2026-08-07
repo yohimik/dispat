@@ -1,9 +1,9 @@
 # dispat <img alt="dispat logo" align="right" width="128" height="128" src="./imgs/logo.png" />
 
 [![tests](https://github.com/yohimik/dispat/actions/workflows/tests.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
-[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
-[![unit](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage-unit.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
-[![integration](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage-integration.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
+[![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
+[![unit](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage-unit.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
+[![integration](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage-integration.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
 **dispat** releases monorepos. It reads conventional commits to track changed packages, computes their next semantic
 versions (propagating bumps to dependants), and builds and publishes them in the right order, in parallel, with
@@ -54,8 +54,8 @@ dispat stands on the shoulders of two things:
 
 - **[dispat](./services/dispat)**: the CLI itself. A terminal tour, key features and the full documentation (getting
   started, concepts, CLI, configuration, commit messages, script environment, architecture, coverage).
-- **[ccme](./pkg/ccme)**: dispat's Conventional Commits extension as a standalone Go parser: the vendored
-  specification, the two-axis propagation grammar, performance notes and fuzzing.
+- **[ccme](./pkg/ccme)**: dispat's Conventional Commits extension as a standalone Go parser: the vendored specification,
+  the two-axis propagation grammar, performance notes and fuzzing.
 - **[models](./pkg/models)**: the public configuration model, so external tooling can author dispat configs as typed
   values and marshal them to loadable files.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against

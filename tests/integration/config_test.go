@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -795,4 +796,27 @@ func TestConfigResolutionAscendsToTheMonorepoRoot(t *testing.T) {
 	// An explicit --config stays anchored to --root: it must not ascend.
 	res = r.CommandAt("packages/core", "status", "--config", "dispat.json")
 	assert.Equal(t, 1, res.Code, "an explicit --config must fail from the subfolder, not fall back")
+}
+
+// TestConfigGitRepositoryGuard: a config without a git repository around it —
+// and an `init` pointed outside one — both fail with one clear error before
+// any work, instead of a raw git failure halfway through planning. This is
+// the one test that must not use harness.New, which git-inits its repository;
+// it drives the built binary against a bare temp directory instead.
+func TestConfigGitRepositoryGuard(t *testing.T) {
+	dispat, _ := harness.Build(t)
+	root := t.TempDir() // a config, packages, but no .git
+	data, err := json.MarshalIndent(libsConfig(echoBuild, 1), "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "core"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), data, 0o644))
+
+	out, runErr := exec.Command(dispat, "status", "--root", root).CombinedOutput()
+	require.Error(t, runErr, "status without a repository must fail\n%s", out)
+	assert.Contains(t, string(out), "not a git repository root",
+		"the guard names the problem instead of surfacing a raw git error")
+
+	out, runErr = exec.Command(dispat, "init", "--root", t.TempDir()).CombinedOutput()
+	require.Error(t, runErr, "init outside a repository root must fail\n%s", out)
+	assert.Contains(t, string(out), "not a git repository root")
 }
