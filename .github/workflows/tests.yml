@@ -98,11 +98,12 @@ jobs:
 
       - name: Compute coverage totals
         run: |
-          # Three views of the suite, one badge each: the unit layer (the
-          # three modules' own tests), the integration layer (the black-box
-          # suite's instrumented binary — CLI module scope, since that is the
-          # binary), and the combined total across all four profiles (go tool
-          # cover merges the overlapping blocks).
+          # Three views of the suite for the job summary — the unit layer
+          # (the three modules' own tests), the integration layer (the
+          # black-box suite's instrumented binary — CLI module scope, since
+          # that is the binary) — with only the combined total across all
+          # four profiles (go tool cover merges the overlapping blocks)
+          # becoming the README badge.
           merge() { out=$1; shift; { head -n 1 "$1"; tail -q -n +2 "$@"; } > "$out"; }
           pct() { go tool cover -func="$1" | tail -n 1 | awk '{print $3}'; }
           badge() { # <label> <percentage> <file>: shields.io endpoint JSON
@@ -136,9 +137,7 @@ jobs:
             echo "| **combined total** | **${TOTAL}** |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          badge "coverage"    "$TOTAL"       coverage.json
-          badge "unit"        "$UNIT"        coverage-unit.json
-          badge "integration" "$INTEGRATION" coverage-integration.json
+          badge "coverage" "$TOTAL" coverage.json
 
       - name: Upload merged coverage
         uses: actions/upload-artifact@v4
@@ -147,8 +146,6 @@ jobs:
           path: |
             coverage.out
             coverage.json
-            coverage-unit.json
-            coverage-integration.json
           retention-days: 7
 
   coverage-badge:
@@ -171,11 +168,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir badge && cp coverage.json coverage-unit.json coverage-integration.json badge/
+          mkdir badge && cp coverage.json badge/
           cd badge
           git init -q -b badges
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add coverage.json coverage-unit.json coverage-integration.json
-          git commit -qm "chore: update coverage badges"
+          git add coverage.json
+          git commit -qm "chore: update coverage badge"
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

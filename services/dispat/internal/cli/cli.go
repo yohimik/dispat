@@ -39,6 +39,22 @@ const (
 // version stage.
 var Version = "dev"
 
+// logo is the dispat mark rendered for terminals — the block twin of
+// imgs/logo.png (mirrored in imgs/logo.txt): two same-size 6×6 squares,
+// frame 1 thick, the filled square overlapping a quarter of the frame's
+// inner area. Each logical pixel is a double `█`, which is what keeps the
+// squares square in a terminal's ~1:2 character cells.
+const logo = `
+████████████
+██        ██
+██        ██
+██    ████████████
+██    ████████████
+██████████████████
+      ████████████
+      ████████████
+      ████████████`
+
 // Run is the program entry point; it returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
@@ -55,7 +71,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"init command: config file format (json, yaml or toml)")
 	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, `usage: dispat [command] [flags]
+		fmt.Fprintf(stderr, `%s
+
+usage: dispat [command] [flags]
 
 commands:
   release                  build and publish changed packages (default)
@@ -73,7 +91,7 @@ commands:
                            changes, features, fixes) for the current window
 
 flags:
-%s`, fs.FlagUsages())
+%s`, logo, fs.FlagUsages())
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, pflag.ErrHelp) {
@@ -87,7 +105,8 @@ flags:
 	}
 	if *showVersion {
 		// Before anything else: the version must print without a config file.
-		fmt.Fprintln(stdout, "dispat "+Version)
+		fmt.Fprintln(stdout, logo)
+		fmt.Fprintln(stdout, "\ndispat "+Version)
 		return 0
 	}
 

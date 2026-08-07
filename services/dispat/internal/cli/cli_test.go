@@ -23,12 +23,13 @@ import (
 
 func TestVersionFlag(t *testing.T) {
 	// --version answers before anything else — no config file is read, so it
-	// works outside a monorepo. The default "dev" marks a local build;
-	// releases override Version at build time from the release tag.
+	// works outside a monorepo. The output is the terminal logo followed by
+	// the version line; the default "dev" marks a local build, releases
+	// override Version at build time from the release tag.
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--version"}, &stdout, &stderr)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, "dispat dev\n", stdout.String())
+	assert.Equal(t, logo+"\n\ndispat dev\n", stdout.String())
 	assert.Empty(t, stderr.String())
 
 	old := Version
@@ -37,7 +38,7 @@ func TestVersionFlag(t *testing.T) {
 	stdout.Reset()
 	code = Run([]string{"--version"}, &stdout, &stderr)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, "dispat 1.2.3\n", stdout.String())
+	assert.Equal(t, logo+"\n\ndispat 1.2.3\n", stdout.String())
 }
 
 func TestUnknownFlagPrintsUsage(t *testing.T) {

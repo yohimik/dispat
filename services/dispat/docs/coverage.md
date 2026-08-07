@@ -5,9 +5,9 @@ Statement coverage of the **whole test suite**, measured the way CI computes the
 integration suite's profile — its harness builds the real dispat binary with `-cover` when `DISPAT_COVERDIR` is set and
 points every invocation's `GOCOVERDIR` there, so the flows only that suite exercises (the app/cli composition, the
 finalize phase, the commands) count too. All four text profiles concatenate into one (`go tool cover` merges the
-overlapping blocks). The README carries one badge per layer — `unit` (all modules, **86.1%**), `integration` (the CLI
-module through the instrumented binary, **83.7%**) — combining into the `coverage` badge's workspace total. Every badge
-reflects the latest `main` build; the numbers here are a local snapshot, regenerated on **2026-08-08** with Go 1.26.
+overlapping blocks) — the workspace total the README's `coverage` badge shows, always for the latest `main` build; the
+per-layer numbers (unit: all modules, **86.1%**; integration: the CLI module through the instrumented binary, **83.7%**)
+appear in CI's job summary. The table below is a local snapshot, regenerated on **2026-08-08** with Go 1.26.
 
 | Module / package                 | Statement coverage                                                                       |
 |----------------------------------|------------------------------------------------------------------------------------------|
@@ -53,12 +53,12 @@ Per-package numbers come from grouping the merged profile's statement blocks by 
 
 ## What each layer contributes
 
-The unit layer covers every package against in-memory fakes; on its own it reaches ~86%, because the composition —
-the compiled binary, the finalize phase, the run/test/preview commands, real git over a process boundary — lives
-exclusively in the [black-box integration suite](../../../tests/integration/README.md), which asserts behaviour (git
-state, JSON log events, execution timelines) rather than statements. Instrumenting the binary it drives is what folds
-that behaviour back into the statement numbers above without compromising the suite's black-box design: the harness
-only sets two environment knobs, and with `DISPAT_COVERDIR` unset (the default, and every local `go test`) the binary
-is built exactly as released. The suite's status and per-area summary live in
+The unit layer covers every package against in-memory fakes; on its own it reaches ~86%, because the composition — the
+compiled binary, the finalize phase, the run/test/preview commands, real git over a process boundary — lives exclusively
+in the [black-box integration suite](../../../tests/integration/README.md), which asserts behaviour (git state, JSON log
+events, execution timelines) rather than statements. Instrumenting the binary it drives is what folds that behaviour
+back into the statement numbers above without compromising the suite's black-box design: the harness only sets two
+environment knobs, and with `DISPAT_COVERDIR` unset (the default, and every local `go test`) the binary is built exactly
+as released. The suite's status and per-area summary live in
 [test results](../../../tests/integration/docs/test-results.md), with the claim-by-claim matrix in the
 [test plan](../../../tests/integration/docs/test-plan.md).
