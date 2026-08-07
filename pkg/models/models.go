@@ -44,9 +44,10 @@ type File struct {
 	// Keys are matched case-insensitively against discovered packages.
 	Initials map[string]string `mapstructure:"initials" json:"initials,omitempty"`
 	// TagFormat is the repository-wide release tag template, overridable per
-	// space. Placeholders are {name} and {version}; every other byte is
-	// literal, so "{name}@v{version}" and "services/{name}@v{version}" both
-	// work. Default: "{name}@{version}", the form §14 makes normative.
+	// space. Placeholders are {name}, {version} and the optional prerelease
+	// pair {channel}/{counter}; every other byte is literal, so
+	// "{name}@v{version}" and "services/{name}@v{version}" both work.
+	// Default: "{name}@{version}", the form §14 makes normative.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
 	// CommitErrors decides what an error in a commit message does to the run
 	// (§16):

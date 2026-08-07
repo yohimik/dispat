@@ -27,10 +27,21 @@ func BaseFile(concurrency ...int) models.File {
 	}
 }
 
-// WriteConfigModel marshals cfg — a config.File, or a map[string]any when the
-// test needs a shape the model cannot express (an unknown key, a legacy
-// schema) — to JSON and writes it as the repository's dispat.json.
-func (r *Repo) WriteConfigModel(cfg any) {
+// WriteConfigModel marshals the typed config model to JSON and writes it as
+// the repository's dispat.json. This is the way every test authors its
+// config — a config that compiles is a config that loads; only shapes the
+// model deliberately cannot express go through WriteConfigRaw.
+func (r *Repo) WriteConfigModel(cfg models.File) {
+	r.T.Helper()
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(r.T, err)
+	r.WriteConfig(string(data))
+}
+
+// WriteConfigRaw marshals a raw map to JSON and writes it as the repository's
+// dispat.json — reserved for the shapes the typed model cannot express and
+// the loader must reject (an unknown key, a legacy schema).
+func (r *Repo) WriteConfigRaw(cfg map[string]any) {
 	r.T.Helper()
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(r.T, err)

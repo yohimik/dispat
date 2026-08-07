@@ -126,8 +126,8 @@ spaces, n logins — because credentials and registries belong to the space. A f
 package in the space (none of them could have succeeded without it); other spaces are unaffected. The login runs in the
 folder of the package whose publish happened to trigger it and gets the space-scoped environment: `DISPAT_SPACE`,
 `DISPAT_STAGE=login`, the [workspace listing](#workspace-data) and `DISPAT_OUTPUT` — no package variables, since which
-package triggered it is a scheduling accident. What it [exports](#script-outputs) is space-scoped too: every package
-of the space receives the login's exports from its publish stage onward, sourced `<space>:login`.
+package triggered it is a scheduling accident. What it [exports](#script-outputs) is space-scoped too: every package of
+the space receives the login's exports from its publish stage onward, sourced `<space>:login`.
 
 #### `run.announce`
 
@@ -331,7 +331,7 @@ New entries are prepended below the title, newest first.
 
 | Key        | Default                   | Description                                                                                                                                                                                                                                                                    |
 |------------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](#script-outputs).                                                                                                                                                                                                                                 |
+| `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](#script-outputs).                                                                                                                                                                         |
 | `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                              |
 | `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                               |
 | `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                                                                                                                                                                                                                                      |
@@ -341,15 +341,31 @@ New entries are prepended below the title, newest first.
 The release is **opt-in per package and per run**: it is created exactly when one of the package's scripts exported
 [`DISPAT_EXPORT_GITHUB`](#script-outputs); a published package without the export is skipped (with an info-level
 notice), so a script decides at run time which packages get a GitHub release. The release is named after the tag
-(`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no repository or token can be resolved
-at runtime, GitHub releases are skipped with a warning instead of failing the run. If the tag has not been pushed
-yet, GitHub creates it at the default branch head.
+(`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no repository or token can be resolved at
+runtime, GitHub releases are skipped with a warning instead of failing the run. A configuration that *does*
+resolve is **verified against the API before any release work starts** (`GET /repos/{owner}/{repo}`) — with the release
+commit enabled or disabled alike — so misconfigured credentials fail the run before anything is built.
 
-The export's value names the **release assets**: a whitespace-separated list of absolute paths to existing files,
-each uploaded (named after the file, `application/octet-stream`) right after the release is created — in `commit`
+**Which commit the release points at.** A GitHub release hangs off its tag, and GitHub resolves the tag by name on the
+*remote*: if the tag already exists there when the release is created, the release attaches to exactly the commit it
+marks; if not, GitHub creates the tag ref at the **default branch head**. What that means per mode:
+
+- [`commit`](#commit) **disabled** (the default): the release is created right after the package publishes. The tag
+  exists only locally at that point — on the commit the run released from, with pushing left to CI — so GitHub creates
+  its tag ref at the default branch head. In the usual CI setup (a job on the default branch, tags pushed right after
+  the run) the two coincide; they can differ if the run released another branch or the push never happened.
+- [`commit`](#commit) **enabled**: GitHub releases move to the end of the run, and every release body documents the
+  release commit SHA and the tag in a `### Release` section — whether or not they were pushed. With `commit.push` on,
+  releases are created **after** the push and the tag is additionally pinned to the release commit via
+  `target_commitish`. Without `push`, the SHA cannot be sent to GitHub (it does not exist on the remote yet), so GitHub
+  creates the tag ref at the default branch head until you push — the true commit and tag remain recorded in the release
+  body.
+
+The export's value names the **release assets**: a whitespace-separated list of absolute paths to existing files, each
+uploaded (named after the file, `application/octet-stream`) right after the release is created — in `commit`
 mode too, where the release itself moves to the finalize phase. An invalid entry — a relative path, a missing file, a
-directory — is skipped with a warning while the release and the remaining files go through; a failed upload of a
-valid file still fails the package like any other recording failure.
+directory — is skipped with a warning while the release and the remaining files go through; a failed upload of a valid
+file still fails the package like any other recording failure.
 
 ### `initials`
 
@@ -375,21 +391,23 @@ are warned about and ignored.
 | `push`          | `false`                  | Push the release commit and tags (`git push --follow-tags <remote> HEAD`). Only applies when `enabled` is true. |
 | `remote`        | `origin`                 | Remote to push to.                                                                                              |
 
-When enabled, the run finishes with a *finalize phase*: all published packages' folders are staged and committed in a
-single commit (changelog files, version-script manifest changes — add build outputs to `../../../.gitignore` or they get
-committed too), release tags are created **on that commit** instead of during each publish, and GitHub releases move to
-the end of the run. Every GitHub release body then documents the release commit SHA and the tag in a `### Release`
-section — whether or not they were pushed. With `push` on, releases are created after the push and the tag is
-additionally pinned to the release commit via `target_commitish`; without `push`, the SHA cannot be sent to GitHub (it
-does not exist on the remote yet), so GitHub creates the tag ref at the default branch head until you push — the true
-commit and tag remain recorded in the release body. If nothing changed on disk (e.g. changelogs disabled), no empty
-commit is created but tags are still placed.
+**Disabled** (the default), dispat creates no commit at all. Each package's annotated tag is created right after its
+publish succeeds and points at the commit the run released from — `HEAD` of the checkout, which stays put for the whole
+run since nothing is committed. Whatever the release changed on disk (changelog files, version-script manifest edits) is
+left in the worktree, and pushing the tags is left to CI (`git push origin --tags`).
+
+When **enabled**, the run instead finishes with a *finalize phase*: all published packages' folders are staged and
+committed in a single commit (changelog files, version-script manifest changes — add build outputs to your
+`.gitignore` or they get committed too), and the release tags are created **on that commit** instead of during each
+publish. If nothing changed on disk (e.g. changelogs disabled), no empty commit is created but tags are still placed.
+GitHub releases move to the end of the run and document the release commit in their body — what the GitHub side does in
+each mode is described under [`github`](#github).
 
 Pushing requires a checked-out branch (not a detached HEAD — use `actions/checkout` with a `ref`). When `push` is
-enabled, remote access is **verified before any release work starts** (`git ls-remote`), and likewise an enabled GitHub
-configuration is verified against the API (`GET /repos/{owner}/{repo}`) — misconfigured credentials fail the run
-immediately, before anything is built. A failure during the finalize phase itself (commit, tag, push, GitHub release)
-exits 1, but already-published registry artifacts stay published.
+enabled, remote access is **verified before any release work starts** (`git ls-remote`), so a misconfigured remote fails
+the run before anything is built; an enabled GitHub configuration is likewise verified up front, push or not (see [
+`github`](#github)). A failure during the finalize phase itself (commit, tag, push, GitHub release) exits 1, but
+already-published registry artifacts stay published.
 
 ### `parser`
 
@@ -573,29 +591,29 @@ the version is public, and the right target for stopping a pending catch-up is t
 
 Every script receives, on top of the parent environment:
 
-| Variable                 | Example              | Meaning                                                                                                                                                                                                                                                                                      |
-|--------------------------|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `DISPAT_PACKAGE`         | `core`               | Package name.                                                                                                                                                                                                                                                                                |
-| `DISPAT_SPACE`           | `libs`               | Space name.                                                                                                                                                                                                                                                                                  |
-| `DISPAT_OLD_VERSION`     | `1.2.3`              | The version the package last published (`0.0.0` for a first release).                                                                                                                                                                                                                        |
-| `DISPAT_NEW_VERSION`     | `1.3.0-beta.4`       | Version being released: version + channel + counter, SemVer spelling.                                                                                                                                                                                                                        |
-| `DISPAT_VERSION`         | `1.3.0`              | The core version alone — `MAJOR.MINOR.PATCH`, channel and counter stripped.                                                                                                                                                                                                                  |
-| `DISPAT_TAG_VERSION`     | `1.3.0-beta4`        | Version + channel + counter as the space's `tagFormat` spells them: the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no path). Equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.                                |
-| `DISPAT_STABLE_BASELINE` | `1.2.3`              | The last release with no prerelease component — what versions are computed from.                                                                                                                                                                                                             |
-| `DISPAT_BASELINE`        | `1.3.0-beta.3`       | The latest baseline: the newest tag of any kind, prereleases included — what the computed version must exceed and where the channel is read from. **Unset** when the package has never released, so `${DISPAT_BASELINE+x}` detects a first release; when set it equals `DISPAT_OLD_VERSION`. |
-| `DISPAT_BUMP`            | `minor`              | `none`, `patch`, `minor` or `major`. `none` on a channel-only release.                                                                                                                                                                                                                       |
-| `DISPAT_CHANNEL`         | `beta`               | Channel being released on: `stable` or a prerelease identifier.                                                                                                                                                                                                                              |
-| `DISPAT_OLD_CHANNEL`     | `stable`             | Channel of the previous release, so a graduation is distinguishable from an ordinary release.                                                                                                                                                                                                |
-| `DISPAT_COUNTER`         | `4`                  | Prerelease counter of the version being released. **Unset** on a stable release.                                                                                                                                                                                                             |
-| `DISPAT_OLD_COUNTER`     | `3`                  | Prerelease counter of the previous release. **Unset** when the previous release was stable.                                                                                                                                                                                                  |
-| `DISPAT_IS_PRERELEASE`   | `true`               | `true` when `DISPAT_NEW_VERSION` carries a prerelease component. Handy for choosing a dist-tag.                                                                                                                                                                                              |
-| `DISPAT_TAG`             | `core@v1.3.0-beta4`  | Tag that will be created on success: name + version + channel + counter, rendered with the space's `tagFormat`.                                                                                                                                                                              |
-| `DISPAT_SEMVER_TAG`      | `core@1.3.0-beta.4`  | The same name + version + channel + counter under the normative `{name}@{version}` SemVer format, whatever `tagFormat` encodes — the spelling a script can rely on across spaces.                                                                                                            |
-| `DISPAT_STAGE`           | `build`              | `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`, `postPublish`, `postAll`, …) for a hook; `login` for the login; `run:<name>` for a [run script](#runscripts-and-dispat-run).                                                                 |
-| `DISPAT_OUTPUT`          | *(a temp file path)* | Where the script appends `NAME=value` (or `DISPAT_OUTPUT_NAME=value` — the same output) lines to [export outputs](#script-outputs) for everything that runs after it.                                                                                                                        |
-| `DISPAT_OUTPUT_<NAME>`   | *(exported value)*   | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty).                                                                                                                                                              |
-| `DISPAT_OUTPUT_SOURCE_<NAME>` | `core:build`    | The script that exported (or last re-exported) `<NAME>`: `<package>:<stage>`, or `<space>:login` for a login export.                                                                                                                                                                        |
-| `DISPAT_EXPORT_GITHUB`   | `/pkg/dist/app.tgz`  | Set once a script [exported it](#script-outputs): the opt-in for the package's GitHub release, its value the asset list. Travels under its full name and stays out of `DISPAT_OUTPUTS`.                                                                                                      |
+| Variable                      | Example              | Meaning                                                                                                                                                                                                                                                                                      |
+|-------------------------------|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `DISPAT_PACKAGE`              | `core`               | Package name.                                                                                                                                                                                                                                                                                |
+| `DISPAT_SPACE`                | `libs`               | Space name.                                                                                                                                                                                                                                                                                  |
+| `DISPAT_OLD_VERSION`          | `1.2.3`              | The version the package last published (`0.0.0` for a first release).                                                                                                                                                                                                                        |
+| `DISPAT_NEW_VERSION`          | `1.3.0-beta.4`       | Version being released: version + channel + counter, SemVer spelling.                                                                                                                                                                                                                        |
+| `DISPAT_VERSION`              | `1.3.0`              | The core version alone — `MAJOR.MINOR.PATCH`, channel and counter stripped.                                                                                                                                                                                                                  |
+| `DISPAT_TAG_VERSION`          | `1.3.0-beta4`        | Version + channel + counter as the space's `tagFormat` spells them: the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no path). Equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.                                |
+| `DISPAT_STABLE_BASELINE`      | `1.2.3`              | The last release with no prerelease component — what versions are computed from.                                                                                                                                                                                                             |
+| `DISPAT_BASELINE`             | `1.3.0-beta.3`       | The latest baseline: the newest tag of any kind, prereleases included — what the computed version must exceed and where the channel is read from. **Unset** when the package has never released, so `${DISPAT_BASELINE+x}` detects a first release; when set it equals `DISPAT_OLD_VERSION`. |
+| `DISPAT_BUMP`                 | `minor`              | `none`, `patch`, `minor` or `major`. `none` on a channel-only release.                                                                                                                                                                                                                       |
+| `DISPAT_CHANNEL`              | `beta`               | Channel being released on: `stable` or a prerelease identifier.                                                                                                                                                                                                                              |
+| `DISPAT_OLD_CHANNEL`          | `stable`             | Channel of the previous release, so a graduation is distinguishable from an ordinary release.                                                                                                                                                                                                |
+| `DISPAT_COUNTER`              | `4`                  | Prerelease counter of the version being released. **Unset** on a stable release.                                                                                                                                                                                                             |
+| `DISPAT_OLD_COUNTER`          | `3`                  | Prerelease counter of the previous release. **Unset** when the previous release was stable.                                                                                                                                                                                                  |
+| `DISPAT_IS_PRERELEASE`        | `true`               | `true` when `DISPAT_NEW_VERSION` carries a prerelease component. Handy for choosing a dist-tag.                                                                                                                                                                                              |
+| `DISPAT_TAG`                  | `core@v1.3.0-beta4`  | Tag that will be created on success: name + version + channel + counter, rendered with the space's `tagFormat`.                                                                                                                                                                              |
+| `DISPAT_SEMVER_TAG`           | `core@1.3.0-beta.4`  | The same name + version + channel + counter under the normative `{name}@{version}` SemVer format, whatever `tagFormat` encodes — the spelling a script can rely on across spaces.                                                                                                            |
+| `DISPAT_STAGE`                | `build`              | `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`, `postPublish`, `postAll`, …) for a hook; `login` for the login; `run:<name>` for a [run script](#runscripts-and-dispat-run).                                                                 |
+| `DISPAT_OUTPUT`               | *(a temp file path)* | Where the script appends `NAME=value` (or `DISPAT_OUTPUT_NAME=value` — the same output) lines to [export outputs](#script-outputs) for everything that runs after it.                                                                                                                        |
+| `DISPAT_OUTPUT_<NAME>`        | *(exported value)*   | One variable per accumulated [script output](#script-outputs); `DISPAT_OUTPUTS` lists the exported names (set even when empty).                                                                                                                                                              |
+| `DISPAT_OUTPUT_SOURCE_<NAME>` | `core:build`         | The script that exported (or last re-exported) `<NAME>`: `<package>:<stage>`, or `<space>:login` for a login export.                                                                                                                                                                         |
+| `DISPAT_EXPORT_GITHUB`        | `/pkg/dist/app.tgz`  | Set once a script [exported it](#script-outputs): the opt-in for the package's GitHub release, its value the asset list. Travels under its full name and stays out of `DISPAT_OUTPUTS`.                                                                                                      |
 
 `DISPAT_OLD_VERSION` and `DISPAT_STABLE_BASELINE` differ only on a prerelease train: a package on `1.3.0-beta.1` whose
 last stable release was `1.2.3` reports both, because the first is what it shipped and the second is what the next
@@ -700,21 +718,21 @@ was exported) and `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script each export ca
 (`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage scripts: a
 `beforeBuild` export reaches the build, the publish and everything after. The **login script's** exports are
 space-scoped: they reach every package of the space from its publish stage (the stage that waits for the login)
-onward. In [`dispat run`](#runscripts-and-dispat-run) outputs additionally carry across packages, from a provider's
-run script to its consumers'. Re-exporting a name overrides its earlier value and source, like a shell re-assignment.
+onward. In [`dispat run`](#runscripts-and-dispat-run) outputs additionally carry across packages, from a provider's run
+script to its consumers'. Re-exporting a name overrides its earlier value and source, like a shell re-assignment.
 
-The name must be a valid environment variable name; other `DISPAT_`-prefixed names are reserved (an export cannot
-shadow the `DISPAT_*` environment), and a malformed line fails a release-gating sequence (and only warns in a
-warn-only one). A sequence that fails still surrenders whatever it exported before failing, which is how `onFail`
+The name must be a valid environment variable name; other `DISPAT_`-prefixed names are reserved (an export cannot shadow
+the `DISPAT_*` environment), and a malformed line fails a release-gating sequence (and only warns in a warn-only one). A
+sequence that fails still surrenders whatever it exported before failing, which is how `onFail`
 gets to see it.
 
 One export is a directive to the [GitHub recorder](#github): **`DISPAT_EXPORT_GITHUB`**. A package whose scripts
 exported it gets a GitHub release; a package that never exported it is skipped by the recorder. Its value is a
 whitespace-separated list of absolute paths to existing files (`$PWD` inside a script resolves to the package folder,
-which makes absolute paths easy), each uploaded as an asset of the release, named after the file; an empty value
-creates the release with no assets. An invalid entry — a relative path, a missing file, a directory — is skipped with
-a warning while the release and the sound entries go through. Unlike ordinary outputs the export travels to later
-scripts under its full name, so appending is
+which makes absolute paths easy), each uploaded as an asset of the release, named after the file; an empty value creates
+the release with no assets. An invalid entry — a relative path, a missing file, a directory — is skipped with a warning
+while the release and the sound entries go through. Unlike ordinary outputs the export travels to later scripts under
+its full name, so appending is
 `echo "DISPAT_EXPORT_GITHUB=$DISPAT_EXPORT_GITHUB $PWD/more.tgz" >> "$DISPAT_OUTPUT"`, and it does not appear in
 `DISPAT_OUTPUTS`.
 

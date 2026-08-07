@@ -91,12 +91,12 @@ dispat stands on the shoulders of two things:
 
 ## Documentation
 
-| Document                                                    | Contents                                                                |
-|-------------------------------------------------------------|-------------------------------------------------------------------------|
+| Document                                                       | Contents                                                                |
+|----------------------------------------------------------------|-------------------------------------------------------------------------|
 | [Getting started](./services/dispat/docs/getting-started.md)   | Install, first config, commands, CI setup.                              |
 | [Configuration & CLI](./services/dispat/docs/configuration.md) | Every config option, CLI flag, script environment variable, exit codes. |
 | [Architecture](./services/dispat/docs/architecture.md)         | Modules, algorithms, execution model, design decisions, testing.        |
-| [Integration tests](./tests/integration/README.md)          | The black-box suite: setup, running, coverage; links the test plan.     |
+| [Integration tests](./tests/integration/README.md)             | The black-box suite: setup, running, coverage; links the test plan.     |
 
 ## Versioning flow
 
@@ -260,8 +260,8 @@ dispat          # release: run the full pipeline
 ```
 
 See [./services/dispat/docs/getting-started.md](./services/dispat/docs/getting-started.md) for the full walkthrough, and
-`dispat.example.json` /
-`dispat.example.yaml` for annotated configs.
+[`dispat.example.json`](./services/dispat/dispat.example.json) /
+[`dispat.example.yaml`](./services/dispat/dispat.example.yaml) for annotated configs.
 
 ## Testing
 
@@ -271,26 +271,10 @@ plus fuzzing across the workspace, all runnable with `go test ./...` in each mod
 workspace-wide coverage from the merged profiles, and publishes it as the badge above — the badge value always comes
 from the latest `main` build, never from this file.
 
-**Unit tests** (testify, in-memory fakes; `gitx`, `app` and `cli` against real temporary git repositories):
-
-| Module / package                 | Statement coverage                                                                        |
-|----------------------------------|-------------------------------------------------------------------------------------------|
-| `pkg/ccme` (commit parser)       | **96.9%** — plus fuzz tests, allocation tests and the specification's conformance vectors |
-| `pkg/models` (public config)     | 100%                                                                                      |
-| `services/dispat` (all packages)    | **93.4%** aggregate                                                                       |
-| — `script`, `model`              | 100%                                                                                      |
-| — `graph` (scheduler)            | 98.5%                                                                                     |
-| — `config`                       | 97.7%                                                                                     |
-| — `changelog`                    | 96.7%                                                                                     |
-| — `release` (executor)           | 96.7%                                                                                     |
-| — `plan` (planner)               | 94.3%                                                                                     |
-| — `gitx`                         | 91.0%                                                                                     |
-| — `github`                       | 90.6%                                                                                     |
-| — `cli` (end-to-end, in-process) | 88.5%                                                                                     |
-| — `app` (end-to-end, in-process) | 81.6% — plus everything the `cli` layer drives through it                                 |
-
-The planner's two formulations of staleness — walking down from a provider and up from a consumer — are asserted to
-agree, a cheap conformance check on the propagation rules. The full per-package test inventory is in
+**Unit tests** (testify, in-memory fakes; `gitx`, `app` and `cli` against real temporary git repositories) hold
+**94.8%** workspace statement coverage — `pkg/ccme` 96.9% (plus fuzzing and the specification's conformance vectors),
+`pkg/models` 100%, `services/dispat` 93.7% aggregate. The per-package table and how to reproduce it are in
+[coverage results](./tests/integration/docs/coverage.md); the full per-package test inventory is in
 [Architecture → Testing](./services/dispat/docs/architecture.md#testing).
 
 **Integration tests** ([`tests/integration`](./tests/integration)) are a separate Go module that structurally *cannot*

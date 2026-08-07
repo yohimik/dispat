@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,47 +14,55 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 )
 
-// github is disabled in test configs so runs never touch the real API even
-// when GITHUB_TOKEN / GITHUB_REPOSITORY are present (e.g. in CI).
-const testConfig = `{
-  "scripts": {
-    "build": "echo building",
-    "publish": "echo publishing"
-  },
-  "spaces": {
-    "libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}
-  },
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+// Configs are authored as typed models (config aliases the public pkg/models
+// structs) and marshalled to JSON, so a config that compiles is a config that
+// loads.
 
-const testConfigNoChangelog = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "changelog": {"enabled": false},
-  "github": {"enabled": false}
-}`
+func boolPtr(b bool) *bool { return &b }
+
+// testConfig returns the config every cli test starts from: one "libs" space
+// at packages/ with echo build/publish scripts, serial, JSON logging. GitHub
+// is disabled so runs never touch the real API even when GITHUB_TOKEN /
+// GITHUB_REPOSITORY are present (e.g. in CI).
+func testConfig() config.File {
+	return config.File{
+		Scripts: map[string]string{"build": "echo building", "publish": "echo publishing"},
+		Spaces: map[string]config.SpaceConfig{
+			"libs": {Path: "packages", Run: config.SpaceRunConfig{
+				Build: []string{"build"}, Publish: []string{"publish"}}},
+		},
+		Concurrency: []int{1},
+		LogLevel:    "info",
+		LogFormat:   "json",
+		GitHub:      config.GitHubConfig{Enabled: boolPtr(false)},
+	}
+}
+
+func testConfigNoChangelog() config.File {
+	cfg := testConfig()
+	cfg.Changelog = config.ChangelogConfig{Enabled: boolPtr(false)}
+	return cfg
+}
 
 // initRepo creates a git monorepo with one package and one feat commit.
 //
 // The commit carries a caret. propagation.depth defaults to 0 (§14), so a
 // caret-less feat reaches no consumer at all; every end-to-end test here that
 // exercises a dependency edge needs the unit to opt in to propagation.
-func initRepo(t *testing.T, cfg string) string {
+func initRepo(t *testing.T, cfg config.File) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	cfgJSON, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "core"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(cfg), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), cfgJSON, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "main.txt"), []byte("hi"), 0o644))
 
 	git := func(args ...string) {
@@ -92,7 +99,7 @@ func TestVersionFlag(t *testing.T) {
 }
 
 func TestStatusCommand(t *testing.T) {
-	root := initRepo(t, testConfig)
+	root := initRepo(t, testConfig())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"status", "--root", root}, &stdout, &stderr)
@@ -109,7 +116,7 @@ func TestStatusCommand(t *testing.T) {
 }
 
 func TestReleaseCommand(t *testing.T) {
-	root := initRepo(t, testConfig)
+	root := initRepo(t, testConfig())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--root", root}, &stdout, &stderr)
@@ -122,7 +129,7 @@ func TestReleaseCommand(t *testing.T) {
 }
 
 func TestReleaseCommandChangelogDisabled(t *testing.T) {
-	root := initRepo(t, testConfigNoChangelog)
+	root := initRepo(t, testConfigNoChangelog())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--root", root}, &stdout, &stderr)
@@ -134,18 +141,14 @@ func TestReleaseCommandChangelogDisabled(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(root, "packages", "core", "CHANGELOG.md"))
 }
 
-const testConfigInitials = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "initials": {"core": "1.0.0", "ghost": "5.0.0"},
-  "github": {"enabled": false}
-}`
+func testConfigInitials() config.File {
+	cfg := testConfig()
+	cfg.Initials = map[string]string{"core": "1.0.0", "ghost": "5.0.0"}
+	return cfg
+}
 
 func TestStatusInitialsWithUnparseableTag(t *testing.T) {
-	root := initRepo(t, testConfigInitials)
+	root := initRepo(t, testConfigInitials())
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
@@ -168,21 +171,20 @@ func TestStatusInitialsWithUnparseableTag(t *testing.T) {
 	assert.Contains(t, out, "ghost", "unknown initials key must be warned about")
 }
 
-const testConfigRevert = `{
-  "scripts": {
-    "bad-build": "echo dirty > main.txt && echo junk > generated.txt && exit 1"
-  },
-  "spaces": {
-    "libs": {"path": "packages", "revertOnFail": true, "run": {"build": "bad-build"}}
-  },
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+func testConfigRevert() config.File {
+	cfg := testConfig()
+	cfg.Scripts = map[string]string{
+		"bad-build": "echo dirty > main.txt && echo junk > generated.txt && exit 1",
+	}
+	cfg.Spaces = map[string]config.SpaceConfig{
+		"libs": {Path: "packages", RevertOnFail: true,
+			Run: config.SpaceRunConfig{Build: []string{"bad-build"}}},
+	}
+	return cfg
+}
 
 func TestReleaseRevertOnFail(t *testing.T) {
-	root := initRepo(t, testConfigRevert)
+	root := initRepo(t, testConfigRevert())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--root", root}, &stdout, &stderr)
@@ -201,25 +203,19 @@ func TestReleaseRevertOnFail(t *testing.T) {
 
 // testConfigCommit enables the release commit without pushing, so a run leaves
 // a `chore(release): ...` commit in the history the next run must read.
-const testConfigCommit = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "commit": {"enabled": true},
-  "github": {"enabled": false}
-}`
+func testConfigCommit() config.File {
+	cfg := testConfig()
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true)}
+	return cfg
+}
 
-const testConfigCommitPush = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "commit": {"enabled": true, "messageFormat": "release: {packages} -> {tags}", "push": true},
-  "github": {"enabled": false}
-}`
+func testConfigCommitPush() config.File {
+	cfg := testConfig()
+	cfg.Commit = config.CommitConfig{
+		Enabled: boolPtr(true), MessageFormat: "release: {packages} -> {tags}", Push: true,
+	}
+	return cfg
+}
 
 // addBareRemote creates a bare repository and registers it as "origin".
 func addBareRemote(t *testing.T, root string) string {
@@ -233,7 +229,7 @@ func addBareRemote(t *testing.T, root string) string {
 }
 
 func TestReleaseCommitAndPush(t *testing.T) {
-	root := initRepo(t, testConfigCommitPush)
+	root := initRepo(t, testConfigCommitPush())
 	bare := addBareRemote(t, root)
 	var stdout, stderr bytes.Buffer
 
@@ -262,7 +258,7 @@ func TestReleaseCommitAndPush(t *testing.T) {
 func TestReleaseVerifyRemoteFailsFast(t *testing.T) {
 	// push enabled but no remote configured: the run must fail before any
 	// release work happens.
-	root := initRepo(t, testConfigCommitPush)
+	root := initRepo(t, testConfigCommitPush())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--root", root}, &stdout, &stderr)
@@ -300,16 +296,12 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := `{
-  "scripts": {"build": "echo building",
-              "publish": "echo \"DISPAT_EXPORT_GITHUB=\" >> \"$DISPAT_OUTPUT\""},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "commit": {"enabled": true},
-  "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "DISPAT_TEST_TOKEN"}
-}`
+	cfg := testConfigCommit()
+	cfg.Scripts["publish"] = `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`
+	cfg.GitHub = config.GitHubConfig{
+		Enabled: boolPtr(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_TEST_TOKEN",
+	}
 	t.Setenv("DISPAT_TEST_TOKEN", "tkn")
 	root := initRepo(t, cfg)
 	var stdout, stderr bytes.Buffer
@@ -329,21 +321,18 @@ func TestReleaseCommitGithubReleaseIncludesCommitAndTag(t *testing.T) {
 	assert.Empty(t, releases[0].TargetCommitish, "unpushed SHA must not be sent as target_commitish")
 }
 
-const testConfigCatchUp = `{
-  "scripts": {"build": "[ ! -f FAIL ]", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "dependencies": [{"consumer": "app", "provider": "core"}],
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+func testConfigCatchUp() config.File {
+	cfg := testConfig()
+	cfg.Scripts["build"] = "[ ! -f FAIL ]"
+	cfg.Dependencies = []config.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	return cfg
+}
 
 func TestReleaseCatchUpAfterConsumerFailure(t *testing.T) {
 	// The orphaned-consumer scenario end to end. Run 1: core publishes and
 	// is tagged, app's build fails (FAIL marker). Run 2, with no new
 	// commits: app must be caught up and released; core must not re-release.
-	root := initRepo(t, testConfigCatchUp)
+	root := initRepo(t, testConfigCatchUp())
 	git := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
@@ -384,16 +373,6 @@ func TestReleaseCatchUpAfterConsumerFailure(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(tags, "app@"), "no repeat release once caught up")
 }
 
-const testConfigCommitErrors = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "commitErrors": "%s",
-  "github": {"enabled": false}
-}`
-
 func TestCommitErrorPolicy(t *testing.T) {
 	// A commit naming a package that does not exist is a unit-scoped error
 	// (§16): under the default policy the unit contributes nothing and the run
@@ -406,7 +385,9 @@ func TestCommitErrorPolicy(t *testing.T) {
 		{"warn", 0, true},
 		{"error", 1, false},
 	} {
-		root := initRepo(t, fmt.Sprintf(testConfigCommitErrors, tc.policy))
+		cfg := testConfig()
+		cfg.CommitErrors = tc.policy
+		root := initRepo(t, cfg)
 		git := func(args ...string) string {
 			t.Helper()
 			out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
@@ -431,7 +412,7 @@ func TestReleaseCommitScopeDoesNotPoisonTheNextRun(t *testing.T) {
 	// not a package. Without the nonPackageScopes exemption the tool would
 	// leave an unknown-package error behind on every run for the next run to
 	// trip over.
-	root := initRepo(t, testConfigCommit) // commit mode: writes chore(release)
+	root := initRepo(t, testConfigCommit()) // commit mode: writes chore(release)
 	var out1, err1 bytes.Buffer
 	require.Equal(t, 0, Run([]string{"--root", root}, &out1, &err1),
 		"first run: %s", out1.String())
@@ -446,20 +427,12 @@ func TestReleaseCommitScopeDoesNotPoisonTheNextRun(t *testing.T) {
 	assert.NotContains(t, out2.String(), "E130")
 }
 
-const testConfigTagFormat = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "tagFormat": "{name}@v{version}",
-  "github": {"enabled": false}
-}`
-
 func TestReleaseWithCustomTagFormat(t *testing.T) {
 	// The tag name is what the *next* run reads the baseline from, so a custom
 	// format has to round-trip: released under it, then read back under it.
-	root := initRepo(t, testConfigTagFormat)
+	cfg := testConfig()
+	cfg.TagFormat = "{name}@v{version}"
+	root := initRepo(t, cfg)
 	tags := func() string {
 		out, err := exec.Command("git", "-C", root, "tag").Output()
 		require.NoError(t, err)
@@ -487,7 +460,7 @@ func TestUnknownCommandFallsBackToRunScript(t *testing.T) {
 	// A word that is not a command name is treated as `run <word>`, so
 	// `dispat lint` works — and a name no space defines (a command typo
 	// included) fails with exit 1 from the run script check.
-	root := initRepo(t, testConfigRunScripts)
+	root := initRepo(t, testConfigRunScripts())
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"lint", "--root", root}, &stdout, &stderr)
 	require.Equal(t, 0, code, "stdout: %s\nstderr: %s", stdout.String(), stderr.String())
@@ -517,24 +490,25 @@ func TestInvalidConfig(t *testing.T) {
 
 // testConfigRunHooks wires every run-level hook to a script that records the
 // stage it ran as, plus a postAll script dumping the run environment.
-const testConfigRunHooks = `{
-  "scripts": {
-    "build": "echo building",
-    "publish": "echo publishing",
-    "hook": "echo $DISPAT_STAGE >> hooks.log",
-    "dump": "env | grep '^DISPAT_' > postall.env"
-  },
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "commit": {"enabled": true, "push": true},
-  "github": {"enabled": false},
-  "run": {"beforeAll": "hook", "postAll": ["hook", "dump"], "beforeCommit": "hook", "afterCommit": "hook", "postCommit": "hook", "beforePush": "hook", "afterPush": "hook"}
-}`
+func testConfigRunHooks() config.File {
+	cfg := testConfig()
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Scripts["dump"] = "env | grep '^DISPAT_' > postall.env"
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true), Push: true}
+	cfg.Run = config.RunConfig{
+		BeforeAll:    []string{"hook"},
+		PostAll:      []string{"hook", "dump"},
+		BeforeCommit: []string{"hook"},
+		AfterCommit:  []string{"hook"},
+		PostCommit:   []string{"hook"},
+		BeforePush:   []string{"hook"},
+		AfterPush:    []string{"hook"},
+	}
+	return cfg
+}
 
 func TestReleaseRunHooksOrderAndEnvironment(t *testing.T) {
-	root := initRepo(t, testConfigRunHooks)
+	root := initRepo(t, testConfigRunHooks())
 	addBareRemote(t, root)
 	var stdout, stderr bytes.Buffer
 
@@ -572,26 +546,15 @@ func TestReleaseRunHooksOrderAndEnvironment(t *testing.T) {
 		"a package with nothing to release is reported as unplanned")
 }
 
-const testConfigFailingRunHook = `{
-  "scripts": {
-    "build": "echo building",
-    "publish": "echo publishing",
-    "boom": "exit 1",
-    "hook": "echo $DISPAT_STAGE >> hooks.log"
-  },
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false},
-  "run": {"postAll": ["boom", "hook"], "beforeCommit": "hook"}
-}`
-
 func TestReleaseRunHookFailureOnlyWarns(t *testing.T) {
 	// A failing run hook warns and the rest of its sequence still runs; the
 	// release itself stays successful. With the commit disabled, the commit
 	// hooks never fire at all.
-	root := initRepo(t, testConfigFailingRunHook)
+	cfg := testConfig()
+	cfg.Scripts["boom"] = "exit 1"
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Run = config.RunConfig{PostAll: []string{"boom", "hook"}, BeforeCommit: []string{"hook"}}
+	root := initRepo(t, cfg)
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--root", root}, &stdout, &stderr)
@@ -611,24 +574,19 @@ func TestReleaseRunHookFailureOnlyWarns(t *testing.T) {
 // testConfigLogin exercises the config -> executor plumbing of run.login and
 // the per-package hooks end to end. Package scripts run inside the package
 // folder, so the markers land two levels up, in the monorepo root.
-const testConfigLogin = `{
-  "scripts": {
-    "build": "echo building",
-    "publish": "echo publishing",
-    "login": "echo login >> ../../login.log",
-    "hook": "echo $DISPAT_STAGE-$DISPAT_PACKAGE >> ../../pkg-hooks.log"
-  },
-  "spaces": {
-    "libs": {"path": "packages", "run": {"build": "build", "publish": "publish", "login": "login", "beforePublish": "hook", "announce": "hook"}}
-  },
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+func testConfigLogin() config.File {
+	cfg := testConfig()
+	cfg.Scripts["login"] = "echo login >> ../../login.log"
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE-$DISPAT_PACKAGE >> ../../pkg-hooks.log"
+	cfg.Spaces["libs"] = config.SpaceConfig{Path: "packages", Run: config.SpaceRunConfig{
+		Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"},
+		BeforePublish: []string{"hook"}, Announce: []string{"hook"},
+	}}
+	return cfg
+}
 
 func TestReleaseLoginOncePerSpaceEndToEnd(t *testing.T) {
-	root := initRepo(t, testConfigLogin)
+	root := initRepo(t, testConfigLogin())
 	// A second package, so two publishes share the space's one login.
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "extra"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "extra", "main.txt"), []byte("x"), 0o644))
@@ -654,25 +612,14 @@ func TestReleaseLoginOncePerSpaceEndToEnd(t *testing.T) {
 	}, lines, "the announce stage runs after each publish")
 }
 
-const testConfigFailingBeforeAll = `{
-  "scripts": {
-    "build": "echo building",
-    "publish": "echo publishing",
-    "boom": "exit 1"
-  },
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false},
-  "run": {"beforeAll": "boom"}
-}`
-
 func TestReleaseBeforeAllHookFailureAbortsTheRun(t *testing.T) {
 	// beforeAll is the one gating run hook: it fires before any release work,
 	// so its failure stops the run before anything is built, published or
 	// tagged.
-	root := initRepo(t, testConfigFailingBeforeAll)
+	cfg := testConfig()
+	cfg.Scripts["boom"] = "exit 1"
+	cfg.Run = config.RunConfig{BeforeAll: []string{"boom"}}
+	root := initRepo(t, cfg)
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--root", root}, &stdout, &stderr)
@@ -690,7 +637,7 @@ func TestReleasePrereleaseTrainConvergesEndToEnd(t *testing.T) {
 	// The reported bug, end to end: release a beta, then run again with no
 	// new commits — the second run must find nothing to release. Then a new
 	// fix continues the train, and a graduation ends it.
-	root := initRepo(t, testConfig)
+	root := initRepo(t, testConfig())
 	git := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
@@ -735,20 +682,18 @@ func TestReleasePrereleaseTrainConvergesEndToEnd(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(git("tag"), "core@"), "no repeat release after graduation")
 }
 
-const testConfigRunScripts = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {
-    "libs": {"path": "packages", "run": {"build": "build", "publish": "publish"},
-             "runScripts": {"lint": "echo \"linted $DISPAT_PACKAGE at $DISPAT_NEW_VERSION\" > lint.txt"}}
-  },
-  "concurrency": 1,
-  "logLevel": "info",
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+func testConfigRunScripts() config.File {
+	cfg := testConfig()
+	libs := cfg.Spaces["libs"]
+	libs.RunScripts = map[string]string{
+		"lint": `echo "linted $DISPAT_PACKAGE at $DISPAT_NEW_VERSION" > lint.txt`,
+	}
+	cfg.Spaces["libs"] = libs
+	return cfg
+}
 
 func TestRunCommand(t *testing.T) {
-	root := initRepo(t, testConfigRunScripts)
+	root := initRepo(t, testConfigRunScripts())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"run", "lint", "--root", root}, &stdout, &stderr)
@@ -761,7 +706,7 @@ func TestRunCommand(t *testing.T) {
 }
 
 func TestRunCommandUnknownScript(t *testing.T) {
-	root := initRepo(t, testConfigRunScripts)
+	root := initRepo(t, testConfigRunScripts())
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"run", "nope", "--root", root}, &stdout, &stderr)
@@ -769,7 +714,7 @@ func TestRunCommandUnknownScript(t *testing.T) {
 }
 
 func TestRunCommandRequiresAName(t *testing.T) {
-	root := initRepo(t, testConfigRunScripts)
+	root := initRepo(t, testConfigRunScripts())
 	var stdout, stderr bytes.Buffer
 
 	assert.Equal(t, 2, Run([]string{"run", "--root", root}, &stdout, &stderr))

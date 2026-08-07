@@ -57,7 +57,7 @@ func TestConfigUnknownKeyIsRejected(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := harness.New(t)
-			r.WriteConfigModel(cfg)
+			r.WriteConfigRaw(cfg)
 			r.SeedPackage("packages", "core")
 			r.Commit("feat(core): first release")
 

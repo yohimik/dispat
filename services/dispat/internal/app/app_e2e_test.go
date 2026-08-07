@@ -22,17 +22,42 @@ import (
 // App-level end-to-end tests against real git repositories. The cli package
 // covers the same flows through the command line; these drive App directly,
 // which is the contract any other front end would use.
+//
+// Configs are authored as typed models (config aliases the public pkg/models
+// structs) and marshalled to JSON, so a config that compiles is a config that
+// loads.
 
-// appRepo creates a git monorepo with one "core" package, writes cfgJSON as
-// dispat.json, and returns an App logging into the returned buffer.
-func appRepo(t *testing.T, cfgJSON string) (*App, string, *bytes.Buffer) {
+func boolPtr(b bool) *bool { return &b }
+
+// appBaseConfig returns the config every test starts from: one "libs" space
+// at packages/ with echo build/publish scripts, serial, JSON logging, and
+// GitHub disabled so a run never reaches the real API even when GITHUB_TOKEN
+// / GITHUB_REPOSITORY happen to be set (e.g. in CI).
+func appBaseConfig() config.File {
+	return config.File{
+		Scripts: map[string]string{"build": "echo building", "publish": "echo publishing"},
+		Spaces: map[string]config.SpaceConfig{
+			"libs": {Path: "packages", Run: config.SpaceRunConfig{
+				Build: []string{"build"}, Publish: []string{"publish"}}},
+		},
+		Concurrency: []int{1},
+		LogFormat:   "json",
+		GitHub:      config.GitHubConfig{Enabled: boolPtr(false)},
+	}
+}
+
+// appRepo creates a git monorepo with one "core" package, writes the config
+// model as dispat.json, and returns an App logging into the returned buffer.
+func appRepo(t *testing.T, cfgModel config.File) (*App, string, *bytes.Buffer) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	cfgJSON, err := json.MarshalIndent(cfgModel, "", "  ")
+	require.NoError(t, err)
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "core"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(cfgJSON), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), cfgJSON, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "main.txt"), []byte("hi"), 0o644))
 	appGit(t, root, "init", "-q")
 	appGit(t, root, "config", "user.email", "app@test")
@@ -60,16 +85,8 @@ func appTags(t *testing.T, root string) []string {
 	return strings.Split(out, "\n")
 }
 
-const appBaseConfig = `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
-
 func TestAppStatusAndReleaseEndToEnd(t *testing.T) {
-	a, root, _ := appRepo(t, appBaseConfig)
+	a, root, _ := appRepo(t, appBaseConfig())
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): first release")
 
@@ -87,7 +104,8 @@ func TestAppStatusAndReleaseEndToEnd(t *testing.T) {
 }
 
 func TestAppReleaseRefusedUnderCommitErrorsError(t *testing.T) {
-	cfg := strings.Replace(appBaseConfig, `"concurrency": 1,`, `"concurrency": 1, "commitErrors": "error",`, 1)
+	cfg := appBaseConfig()
+	cfg.CommitErrors = config.CommitErrorsError
 	a, root, _ := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(ghost): scope names no package")
@@ -99,8 +117,8 @@ func TestAppReleaseRefusedUnderCommitErrorsError(t *testing.T) {
 }
 
 func TestAppInitialVersionsBaseline(t *testing.T) {
-	cfg := strings.Replace(appBaseConfig, `"concurrency": 1,`,
-		`"concurrency": 1, "initials": {"core": "1.2.0", "ghost": "9.9.9"},`, 1)
+	cfg := appBaseConfig()
+	cfg.Initials = map[string]string{"core": "1.2.0", "ghost": "9.9.9"}
 	a, root, buf := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "fix(core): first release from the configured baseline")
@@ -112,8 +130,8 @@ func TestAppInitialVersionsBaseline(t *testing.T) {
 }
 
 func TestAppChangelogDisabled(t *testing.T) {
-	cfg := strings.Replace(appBaseConfig, `"github": {"enabled": false}`,
-		`"github": {"enabled": false}, "changelog": {"enabled": false}`, 1)
+	cfg := appBaseConfig()
+	cfg.Changelog = config.ChangelogConfig{Enabled: boolPtr(false)}
 	a, root, _ := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): no changelog wanted")
@@ -124,14 +142,9 @@ func TestAppChangelogDisabled(t *testing.T) {
 }
 
 func TestAppGatingBeforeAllHookAbortsTheRelease(t *testing.T) {
-	cfg := `{
-  "scripts": {"build": "echo building", "publish": "echo publishing", "no": "exit 1"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "run": {"beforeAll": "no"},
-  "concurrency": 1,
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+	cfg := appBaseConfig()
+	cfg.Scripts["no"] = "exit 1"
+	cfg.Run = config.RunConfig{BeforeAll: []string{"no"}}
 	a, root, _ := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): never released")
@@ -163,17 +176,18 @@ func TestAppCommitModeFinalizeWithGithub(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("DISPAT_APP_TOKEN", "tkn")
 
-	cfg := `{
-  "scripts": {"build": "echo building",
-              "publish": "echo \"DISPAT_EXPORT_GITHUB=\" >> \"$DISPAT_OUTPUT\"",
-              "hook": "echo $DISPAT_STAGE >> hooks.log"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "run": {"beforeAll": "hook", "postAll": "hook", "beforeCommit": "hook", "afterCommit": "hook", "postCommit": "hook"},
-  "commit": {"enabled": true},
-  "concurrency": 1,
-  "logFormat": "json",
-  "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "DISPAT_APP_TOKEN"}
-}`
+	cfg := appBaseConfig()
+	cfg.Scripts["publish"] = `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Run = config.RunConfig{
+		BeforeAll: []string{"hook"}, PostAll: []string{"hook"},
+		BeforeCommit: []string{"hook"}, AfterCommit: []string{"hook"}, PostCommit: []string{"hook"},
+	}
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true)}
+	cfg.GitHub = config.GitHubConfig{
+		Enabled: boolPtr(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_APP_TOKEN",
+	}
 	a, root, _ := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): first release")
@@ -213,13 +227,11 @@ func TestAppGithubReleaseSkippedWithoutExport(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("DISPAT_APP_TOKEN", "tkn")
 
-	cfg := `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages", "run": {"build": "build", "publish": "publish"}}},
-  "concurrency": 1,
-  "logFormat": "json",
-  "github": {"enabled": true, "owner": "acme", "repo": "mono", "apiUrl": "` + srv.URL + `", "tokenEnv": "DISPAT_APP_TOKEN"}
-}`
+	cfg := appBaseConfig()
+	cfg.GitHub = config.GitHubConfig{
+		Enabled: boolPtr(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_APP_TOKEN",
+	}
 	a, root, buf := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): released without a github release")
@@ -231,8 +243,8 @@ func TestAppGithubReleaseSkippedWithoutExport(t *testing.T) {
 }
 
 func TestAppPushModeFailsFastWithoutARemote(t *testing.T) {
-	cfg := strings.Replace(appBaseConfig, `"concurrency": 1,`,
-		`"concurrency": 1, "commit": {"enabled": true, "push": true},`, 1)
+	cfg := appBaseConfig()
+	cfg.Commit = config.CommitConfig{Enabled: boolPtr(true), Push: true}
 	a, root, _ := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): never released")
@@ -242,15 +254,10 @@ func TestAppPushModeFailsFastWithoutARemote(t *testing.T) {
 }
 
 func TestAppRunScriptDirect(t *testing.T) {
-	cfg := `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages",
-    "run": {"build": "build", "publish": "publish"},
-    "runScripts": {"lint": "echo linted > lint.txt", "boom": "exit 1"}}},
-  "concurrency": 1,
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+	cfg := appBaseConfig()
+	libs := cfg.Spaces["libs"]
+	libs.RunScripts = map[string]string{"lint": "echo linted > lint.txt", "boom": "exit 1"}
+	cfg.Spaces["libs"] = libs
 	a, root, _ := appRepo(t, cfg)
 	appGit(t, root, "add", "-A")
 	appGit(t, root, "commit", "-qm", "feat(core): a change to run over")
@@ -276,16 +283,13 @@ func TestAppRunScriptCarriesProviderOutputs(t *testing.T) {
 	// A provider's run script exports through DISPAT_OUTPUT; its consumer's
 	// script receives the export as DISPAT_OUTPUT_<NAME> — the run command's
 	// counterpart of the pipeline's per-package accumulation.
-	cfg := `{
-  "scripts": {"build": "echo building", "publish": "echo publishing"},
-  "spaces": {"libs": {"path": "packages",
-    "run": {"build": "build", "publish": "publish"},
-    "runScripts": {"carry": "if [ \"$DISPAT_PACKAGE\" = \"base\" ]; then echo \"MARK=carried\" >> \"$DISPAT_OUTPUT\"; else echo \"$DISPAT_OUTPUT_MARK\" > got.txt; fi"}}},
-  "dependencies": [{"consumer": "core", "provider": "base"}],
-  "concurrency": 1,
-  "logFormat": "json",
-  "github": {"enabled": false}
-}`
+	cfg := appBaseConfig()
+	libs := cfg.Spaces["libs"]
+	libs.RunScripts = map[string]string{
+		"carry": `if [ "$DISPAT_PACKAGE" = "base" ]; then echo "MARK=carried" >> "$DISPAT_OUTPUT"; else echo "$DISPAT_OUTPUT_MARK" > got.txt; fi`,
+	}
+	cfg.Spaces["libs"] = libs
+	cfg.Dependencies = []config.DependencyConfig{{Consumer: "core", Provider: "base"}}
 	a, root, _ := appRepo(t, cfg)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "base"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "base", "main.txt"), []byte("base"), 0o644))

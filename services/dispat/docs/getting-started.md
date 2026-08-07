@@ -55,9 +55,8 @@ the outcome scripts (`run.onFail` / `run.onSkip`, run when a package fails or is
 commands for `dispat run <name>`) and `tagFormat` — plus the top-level `parser` object (custom commit types, a default
 propagation depth, strict types, parser limits; unset fields keep the specification defaults). Every script option takes
 one script name or an array run in order. All are covered in
-[Configuration & CLI](configuration.md). Annotated full examples: [
-`../../../dispat.example.json`](../../../dispat.example.json),
-[`../../../dispat.example.yaml`](../../../dispat.example.yaml).
+[Configuration & CLI](configuration.md). Annotated full examples:
+[`dispat.example.json`](../dispat.example.json), [`dispat.example.yaml`](../dispat.example.yaml).
 
 ## Commit convention
 

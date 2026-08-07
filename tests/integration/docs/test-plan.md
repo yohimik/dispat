@@ -1,8 +1,8 @@
 # Integration test plan
 
 This module (`tests/integration`) is the black-box integration suite for the dispat CLI. It compiles the real binary
-from `services/dispat`, drives it against disposable git repositories exactly as a user's shell would, and asserts on the
-three outputs a release run actually has: **git state** (tags, commits, file contents), **JSON log events**
+from `services/dispat`, drives it against disposable git repositories exactly as a user's shell would, and asserts on
+the three outputs a release run actually has: **git state** (tags, commits, file contents), **JSON log events**
 (`--log-format json`, the machine-readable contract CI ingests), and — where *timing* rather than mere ordering is the
 claim — **nanosecond-resolution execution timelines** recorded by a purpose-built probe.
 
@@ -39,11 +39,11 @@ Shapes the model deliberately cannot express — an unknown key, the legacy flat
 on a space) must be *rejected* at load, not silently ignored into a script-less release.
 
 It deliberately duplicates as little as possible of the unit suites listed in
-[`services/dispat/docs/architecture.md`](../../../services/dispat/docs/architecture.md#testing): those already cover each
-package against in-memory fakes, and `internal/cli`'s own tests cover the end-to-end happy paths in-process. What only
-this module can check is the composition — the compiled binary, a real scheduler racing real processes, a config file
-read from disk, exit codes over a process boundary — so every test here earns its place by asserting something a fake
-cannot witness.
+[`services/dispat/docs/architecture.md`](../../../services/dispat/docs/architecture.md#testing): those already cover
+each package against in-memory fakes, and `internal/cli`'s own tests cover the end-to-end happy paths in-process. What
+only this module can check is the composition — the compiled binary, a real scheduler racing real processes, a config
+file read from disk, exit codes over a process boundary — so every test here earns its place by asserting something a
+fake cannot witness.
 
 ## Why a separate Go module
 

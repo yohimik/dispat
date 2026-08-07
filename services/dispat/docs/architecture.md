@@ -2,7 +2,7 @@
 
 ## Runtime steps
 
-Steps 1–2 are the `cli` package — the command-line controller; everything from discovery on is the `app` package's
+Steps 1–2 are the `dispat` package — the command-line controller; everything from discovery on is the `app` package's
 `Status` (steps 3–6) and `Release` (all of them), so the same operations are callable without a command line.
 
 1. Parse the command line (pflag); dispatch `release`, `status` or `run <script>` — an unknown command word is

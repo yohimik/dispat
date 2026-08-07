@@ -6,10 +6,10 @@ package integration
 // *is* the test input and hiding it behind a builder would obscure what is
 // being exercised.
 //
-// Configs are authored as typed models from the CLI's public package
-// (services/dispat/pkg/config) and marshalled to JSON by WriteConfigModel; only
-// shapes the model cannot express — an unknown key, a legacy schema — fall
-// back to a raw map[string]any.
+// Configs are authored as typed models from the public pkg/models module and
+// marshalled to JSON by WriteConfigModel; only shapes the model cannot
+// express — an unknown key, a legacy schema — fall back to a raw
+// map[string]any through WriteConfigRaw.
 
 import (
 	"fmt"
