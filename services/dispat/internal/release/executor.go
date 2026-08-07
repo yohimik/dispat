@@ -855,12 +855,14 @@ func coreVersion(v ccme.Version) ccme.Version {
 	return ccme.Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
 }
 
-// unitLines returns the descriptions of the release's units carrying the
-// given bump, newline-separated — the grouping changelog.RenderSections uses
-// for its breaking/features/fixes sections.
+// unitLines returns the descriptions of the release's notes units carrying
+// the given bump, newline-separated — the grouping changelog.RenderSections
+// uses for its breaking/features/fixes sections. NotesUnits keeps the
+// variables aligned with the changelog entry: a prerelease reports only its
+// own changeset, a stable release the whole pending window.
 func unitLines(rel *plan.Release, kind ccme.Bump) string {
 	var lines []string
-	for _, c := range rel.Units {
+	for _, c := range rel.NotesUnits() {
 		if c.Bump == kind {
 			lines = append(lines, c.Header.Description)
 		}

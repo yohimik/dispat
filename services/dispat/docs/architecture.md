@@ -5,10 +5,13 @@
 Steps 1–2 are the `dispat` package — the command-line controller; everything from discovery on is the `app` package's
 `Status` (steps 3–6) and `Release` (all of them), so the same operations are callable without a command line.
 
-1. Parse the command line (pflag); dispatch `release`, `status` or `run <script>` — an unknown command word is
-   `run`'s shorthand (`dispat lint`). The run command computes the plan, then executes the named space run script inside
-   each changed package over the dependency graph (build concurrency budget; `--on-error` decides whether a failure
-   skips the failed package's dependents) and stops — nothing below step 6 applies to it.
+1. Parse the command line (pflag); dispatch `release`, `status`, `run <script>`, `init`, `test <script> <package>` or
+   `preview <package>` — an unknown command word is `run`'s shorthand (`dispat lint`). `init` writes a starter config
+   and exits before anything else (there is no config to load yet). The run command computes the plan, then executes the
+   named space run script inside each changed package over the dependency graph (build concurrency budget;
+   `--on-error` decides whether a failure skips the failed package's dependents) and stops — nothing below step 6
+   applies to it. `test` and `preview` compute the plan quietly (diagnostics, no graph), then run one top-level script
+   in one package's folder with its full `DISPAT_*` environment / print one package's pending release notes, and stop.
 2. Load and validate `dispat.json` (viper; unknown keys rejected; flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path, names unique across spaces.
 4. Build the dependency graph from configured relations; topologically sort it (cycles abort with the members named).

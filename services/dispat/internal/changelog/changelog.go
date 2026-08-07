@@ -53,9 +53,12 @@ func RenderSections(rel *plan.Release, f Format) string {
 		return "No changes — version bump to keep the space's fixed versioning.\n"
 	}
 	var parts []string
+	// NotesUnits, not Units: a prerelease's entry contains only its own
+	// changeset, while a stable release (a graduation included) collects the
+	// whole pending window since the last stable tag.
 	collect := func(title string, kind ccme.Bump) {
 		var lines []string
-		for _, c := range rel.Units {
+		for _, c := range rel.NotesUnits() {
 			if c.Bump == kind {
 				lines = append(lines, "- "+c.Header.Description+"\n"+c.Body)
 			}

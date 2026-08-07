@@ -67,7 +67,8 @@ project release need — you fill in shell commands, dispat supplies the orchest
 - **Polyglot & infra-agnostic** — any language, any registry: scripts are shell commands fed context via `DISPAT_*`
   env vars, and versions live purely in git tags. No version files, no lockstep, no framework buy-in.
 - **One config file** — spaces, dependencies, scripts, hooks, tag formats, concurrency, changelog/GitHub behavior in a
-  single `dispat.json` (YAML/TOML work too).
+  single `dispat.json` (YAML/TOML work too, discovered automatically: the first of `dispat.json`, `dispat.yaml`,
+  `dispat.yml`, `dispat.toml` that exists).
 - **Dry-run first** — `dispat status` prints the whole plan — versions, channels, diagnostics — without touching
   anything. Run it on every pull request.
 - **Release records built in** — per-package changelogs, annotated tags, GitHub releases, optional single release
@@ -151,7 +152,10 @@ received — the originating commit's own depth is the only control, so blast ra
 transition that graduates whatever still matches. A stable consumer is *not* dragged into a release by a provider's
 prerelease (it could not resolve it anyway) — `feat(core)^@beta` releases `core` alone and reports why; to take the
 consumers along, put them on the line too: `feat(core)^@beta++1`. Trains converge on their own: once a package is on
-`beta`, a directive saying `beta` proposes nothing.
+`beta`, a directive saying `beta` proposes nothing. Release notes follow the train's shape: each prerelease's changelog
+entry and GitHub release document only its own changeset (`beta.1` does not repeat `beta.0`'s notes), and the graduation
+collects the whole train into the one entry the stable line's readers see — while the version is always computed over
+the whole train.
 
 **Space versioning modes.** A space may declare how its packages' versions relate:
 [`versioning`](./services/dispat/docs/configuration.md#versioning) is `independent` (default — everything above),
@@ -255,6 +259,7 @@ released or tagged.
 
 ```sh
 go install github.com/yohimik/dispat@latest
+dispat init     # write a starter dispat.json (--format yaml/toml)
 dispat status   # print the graph and planned versions, change nothing
 dispat          # release: run the full pipeline
 ```

@@ -173,3 +173,30 @@ func TestRenderFixedMemberWithOwnUnitsIsOrdinary(t *testing.T) {
 	assert.Contains(t, sections, "### Features")
 	assert.NotContains(t, sections, "No changes")
 }
+
+func TestRenderSectionsPrereleaseUsesOnlyItsChangeset(t *testing.T) {
+	// On a prerelease train the window spans the whole train (Units), but the
+	// entry of the *next* prerelease documents only what its baseline has not
+	// published (FreshUnits) — beta.1 does not repeat beta.0's notes. A stable
+	// version at the same window — the graduation — collects everything.
+	units := []*ccme.Unit{
+		testUnit("feat", ccme.BumpMinor, "feature shipped in beta.0"),
+		testUnit("fix", ccme.BumpPatch, "fix new in beta.1"),
+	}
+	rel := &plan.Release{
+		Pkg:        &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
+		Next:       ccme.Version{Minor: 2, Prerelease: []string{"beta", "1"}},
+		Units:      units,
+		FreshUnits: units[1:],
+	}
+	sections := RenderSections(rel, Format{})
+	assert.Contains(t, sections, "fix new in beta.1")
+	assert.NotContains(t, sections, "feature shipped in beta.0",
+		"a prerelease entry must not repeat what the train already published")
+
+	rel.Next = ccme.Version{Minor: 2} // the graduation of the same window
+	sections = RenderSections(rel, Format{})
+	assert.Contains(t, sections, "feature shipped in beta.0",
+		"a graduation collects every prerelease's changes")
+	assert.Contains(t, sections, "fix new in beta.1")
+}

@@ -58,6 +58,19 @@ func (a *App) Status(ctx context.Context) error {
 // computePlan discovers the workspace, computes the release plan and reports
 // it (diagnostics, then the graph).
 func (a *App) computePlan(ctx context.Context) (*plan.Plan, error) {
+	pl, err := a.plan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	a.printDiagnostics(pl)
+	a.printGraph(pl)
+	return pl, nil
+}
+
+// plan discovers the workspace and computes the release plan without
+// reporting it — for the commands whose output is not the graph (`test`,
+// `preview`), which print the diagnostics alone.
+func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
 	pkgs, deps, err := config.Discover(a.cfg, a.root)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")
@@ -75,8 +88,6 @@ func (a *App) computePlan(ctx context.Context) (*plan.Plan, error) {
 		a.log.Error().Err(err).Msg("planning failed")
 		return nil, err
 	}
-	a.printDiagnostics(pl)
-	a.printGraph(pl)
 	return pl, nil
 }
 

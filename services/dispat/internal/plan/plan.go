@@ -297,6 +297,13 @@ type Release struct {
 
 	Next  ccme.Version // version to release; equals Current when unchanged
 	Units []*ccme.Unit // the package's own surviving units
+	// FreshUnits are the units of Units whose commits are NOT contained in
+	// the baseline tag: the changeset the baseline has not published yet. For
+	// a stable package the window already excludes released commits, so the
+	// two slices are equal; they differ only on a prerelease train, where
+	// Units spans the whole train (§11.4 recomputes the target over it) and
+	// FreshUnits is what the next prerelease actually adds.
+	FreshUnits []*ccme.Unit
 
 	DueTo   []string      // providers that forced (at least) part of the bump
 	Sources []StaleSource // the same, with commit and depth detail
@@ -404,6 +411,24 @@ func (r *Release) ChannelTransition() string {
 // every run.
 func (r *Release) Changed() bool {
 	return (r.Bump != ccme.BumpNone && r.NewWork) || r.ChannelChanged() || r.Pinned || r.FixedRide
+}
+
+// NotesUnits returns the units the release's *notes* — the changelog entry,
+// the GitHub release body and the DISPAT_BREAKING_CHANGES / DISPAT_FEATURES /
+// DISPAT_FIXES variables — are built from.
+//
+// A prerelease documents only its own changeset: the units its train's
+// earlier prereleases have not already published (FreshUnits) — beta.1's
+// entry does not repeat beta.0's. A stable release documents the whole
+// pending window since the last stable tag (Units) — for a graduation that
+// is every prerelease's changes collected into the one entry readers of the
+// stable line will actually see. The bump and version are always computed
+// over the whole window either way (§11.4); only the notes narrow.
+func (r *Release) NotesUnits() []*ccme.Unit {
+	if r.Next.IsPrerelease() {
+		return r.FreshUnits
+	}
+	return r.Units
 }
 
 // NoChanges reports whether the release carries no content of its own — no
@@ -1277,6 +1302,7 @@ func (cp *computation) directBumps() {
 				rel.OwnBump = ccme.MaxBump(rel.OwnBump, bump)
 				if !cp.containedInBaseline(name, rec.key) {
 					rel.NewWork = true
+					rel.FreshUnits = append(rel.FreshUnits, u)
 				}
 			}
 		}

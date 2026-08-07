@@ -464,6 +464,43 @@ func TestLoadMissingFile(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestResolveFile(t *testing.T) {
+	root := t.TempDir()
+	touch := func(name string) {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("{}"), 0o644))
+	}
+
+	// No candidate exists: the error says so and names every name tried.
+	_, err := ResolveFile(root, "dispat.json", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no dispat config file found")
+	for _, name := range DefaultFileNames {
+		assert.Contains(t, err.Error(), name, "the error must name every candidate")
+	}
+
+	// The fallback order is json, yaml, yml, toml: creating an earlier name
+	// takes precedence over every later one already present.
+	touch("dispat.toml")
+	path, err := ResolveFile(root, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "dispat.toml"), path)
+	touch("dispat.yml")
+	path, _ = ResolveFile(root, "dispat.json", false)
+	assert.Equal(t, filepath.Join(root, "dispat.yml"), path)
+	touch("dispat.yaml")
+	path, _ = ResolveFile(root, "dispat.json", false)
+	assert.Equal(t, filepath.Join(root, "dispat.yaml"), path)
+	touch("dispat.json")
+	path, _ = ResolveFile(root, "dispat.json", false)
+	assert.Equal(t, filepath.Join(root, "dispat.json"), path)
+
+	// An explicit name is used as-is — no existence check, no fallback — so a
+	// typo fails at load instead of silently loading a different file.
+	path, err = ResolveFile(root, "custom.yaml", true)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "custom.yaml"), path)
+}
+
 func TestDiscover(t *testing.T) {
 	root := writeRepo(t, validYAML,
 		"packages/libs/core", "packages/libs/utils", "packages/apps/app")

@@ -8,7 +8,9 @@ go install github.com/yohimik/dispat@latest
 
 ## First configuration
 
-Create `dispat.json` at your monorepo root (YAML or TOML work too — pass `--config dispat.yaml`). Minimal example:
+Create `dispat.json` at your monorepo root — `dispat init` writes a starter one (`--format yaml` / `--format toml`
+for the other formats). No flag is needed afterwards: every command finds the first of `dispat.json`, `dispat.yaml`,
+`dispat.yml`, `dispat.toml` that exists (`--config` names a different file explicitly). Minimal example:
 
 ```json
 {
@@ -101,6 +103,8 @@ Scopes that are deliberately not packages (like `release`) go in `nonPackageScop
 ## Commands
 
 ```sh
+dispat init                 # write a starter dispat.json (--format yaml/toml for the others);
+                            # never overwrites an existing file
 dispat status               # print the project graph and planned versions; changes nothing
 dispat                      # release (default command): full pipeline
 dispat release --root path  # same, explicit
@@ -108,6 +112,10 @@ dispat run lint             # run the "lint" runScripts entry inside each change
                             # package, honouring the dependency graph; releases nothing
 dispat lint                 # the same — an unknown command word means "run <word>"
 dispat run lint --on-error continue   # keep running dependents of a failed package
+dispat test build core      # run the top-level "build" script once inside packages/core
+                            # with core's full DISPAT_* environment; releases nothing
+dispat preview core         # print core's pending release notes (breaking changes,
+                            # features, fixes) — what its next changelog entry would say
 dispat --concurrency 4,2    # override build/publish parallelism
 dispat run lint --concurrency 8       # dispat run uses the build (first) value as its budget
 dispat --log-format json    # machine-readable logs for CI

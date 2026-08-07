@@ -123,6 +123,30 @@ func checkScriptRefs(c *File, refs map[string][]string, prefix string) error {
 // so explicitly set flags override file values (and file values override flag
 // defaults). Defaults applied afterwards: concurrency 0 means the number of
 // CPUs, logLevel defaults to "info", logFormat to "pretty".
+// DefaultFileNames are the config file names the CLI looks for, in order,
+// when --config is not explicitly set: the file `dispat init` writes under
+// each of its formats. The first that exists wins.
+var DefaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dispat.toml"}
+
+// ResolveFile returns the path of the configuration file to load. An
+// explicitly named file is used as-is — a typo there must fail loudly, not
+// fall back to a different file — while the default resolves to the first of
+// DefaultFileNames that exists in root. When none does, the error says so and
+// names every candidate tried.
+func ResolveFile(root, name string, explicit bool) (string, error) {
+	if explicit {
+		return filepath.Join(root, name), nil
+	}
+	for _, cand := range DefaultFileNames {
+		path := filepath.Join(root, cand)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("config: no dispat config file found in %s (tried %s); run `dispat init` to create one",
+		root, strings.Join(DefaultFileNames, ", "))
+}
+
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	v := viper.New()
 	v.SetConfigFile(path)

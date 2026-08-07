@@ -482,10 +482,68 @@ func TestUnknownFlagPrintsUsage(t *testing.T) {
 }
 
 func TestInvalidConfig(t *testing.T) {
-	root := t.TempDir() // no dispat.json
+	root := t.TempDir() // no config file at all
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"status", "--root", root}, &stdout, &stderr)
 	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "no dispat config file found",
+		"the not-found error must be reported, naming what was tried")
+}
+
+func TestConfigFileFallbackResolution(t *testing.T) {
+	// The default --config falls back through dispat.json, dispat.yaml,
+	// dispat.yml, dispat.toml, so a YAML-configured monorepo needs no flag.
+	// JSON is valid YAML, so renaming the file exercises the fallback and
+	// viper's extension-driven format inference at once.
+	root := initRepo(t, testConfig())
+	require.NoError(t, os.Rename(filepath.Join(root, "dispat.json"), filepath.Join(root, "dispat.yaml")))
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"status", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "dispat.yaml must be found without --config\nstderr: %s", stderr.String())
+	assert.Contains(t, stdout.String(), "core", "the resolved config must actually be used")
+
+	// An explicit --config is used as-is: no fallback to the yaml next to it.
+	stderr.Reset()
+	code = Run([]string{"status", "--root", root, "--config", "dispat.json"}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "an explicit --config must fail, not fall back")
+
+	// The later names resolve too, in order.
+	require.NoError(t, os.Rename(filepath.Join(root, "dispat.yaml"), filepath.Join(root, "dispat.yml")))
+	require.Equal(t, 0, Run([]string{"status", "--root", root}, &stdout, &stderr))
+	require.NoError(t, os.Rename(filepath.Join(root, "dispat.yml"), filepath.Join(root, "dispat.json")))
+	require.Equal(t, 0, Run([]string{"status", "--root", root}, &stdout, &stderr))
+}
+
+func TestInitThenStatusComposeWithoutFlags(t *testing.T) {
+	// `dispat init --format toml` followed by a plain `dispat status`: the
+	// fallback finds dispat.toml with no --config anywhere, closing the loop
+	// between the two commands (and exercising the TOML starter end to end —
+	// the yaml fallbacks are covered by renaming, but JSON is not valid TOML).
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "core"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "main.txt"), []byte("hi"), 0o644))
+	git := func(args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	git("init", "-q")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "Test")
+	git("add", ".")
+	git("commit", "-qm", "feat(core): first release")
+
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 0, Run([]string{"init", "--root", root, "--format", "toml"}, &stdout, &stderr),
+		"stderr: %s", stderr.String())
+	stdout.Reset()
+	code := Run([]string{"status", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "status must find dispat.toml without --config\nstderr: %s", stderr.String())
+	assert.Contains(t, stdout.String(), "core")
 }
 
 // testConfigRunHooks wires every run-level hook to a script that records the
@@ -719,6 +777,167 @@ func TestRunCommandRequiresAName(t *testing.T) {
 
 	assert.Equal(t, 2, Run([]string{"run", "--root", root}, &stdout, &stderr))
 	assert.Equal(t, 2, Run([]string{"run", "a", "b", "--root", root}, &stdout, &stderr))
+}
+
+func TestInitCommand(t *testing.T) {
+	// dispat init writes a starter config that must itself load — a generated
+	// config nobody can run is worse than none — in each supported format.
+	for _, format := range []string{"json", "yaml", "toml"} {
+		t.Run(format, func(t *testing.T) {
+			root := t.TempDir()
+			args := []string{"init", "--root", root}
+			if format != "json" {
+				args = append(args, "--format", format)
+			}
+			var stdout, stderr bytes.Buffer
+			code := Run(args, &stdout, &stderr)
+			require.Equal(t, 0, code, "stderr: %s", stderr.String())
+			assert.Contains(t, stdout.String(), "created dispat."+format)
+
+			file := filepath.Join(root, "dispat."+format)
+			require.FileExists(t, file)
+			_, err := config.Load(file, nil)
+			require.NoError(t, err, "the starter config must load as written")
+		})
+	}
+}
+
+func TestInitCommandRefusesToOverwrite(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte("{}"), 0o644))
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"init", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "an existing config must never be overwritten")
+	data, err := os.ReadFile(filepath.Join(root, "dispat.json"))
+	require.NoError(t, err)
+	assert.Equal(t, "{}", string(data), "the existing file must be untouched")
+
+	code = Run([]string{"init", "--root", root, "--format", "ini"}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "an unknown format is an error")
+}
+
+func TestTestCommand(t *testing.T) {
+	// dispat test runs one top-level script inside one package's folder with
+	// the package's full DISPAT_* environment, releasing nothing.
+	cfg := testConfig()
+	cfg.Scripts["probe"] = `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`
+	root := initRepo(t, cfg)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"test", "probe", "core", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+	data, err := os.ReadFile(filepath.Join(root, "packages", "core", "probe.txt"))
+	require.NoError(t, err, "the script must run inside the package folder")
+	assert.Equal(t, "core@0.1.0 test:probe\n", string(data),
+		"the script receives the package's planned version and the test stage name")
+	tags, err := exec.Command("git", "-C", root, "tag").Output()
+	require.NoError(t, err)
+	assert.Empty(t, bytes.TrimSpace(tags), "test releases nothing")
+
+	code = Run([]string{"test", "nope", "core", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "an unknown script name is an error")
+	code = Run([]string{"test", "probe", "ghost", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code, "an unknown package is an error")
+	assert.Equal(t, 2, Run([]string{"test", "probe", "--root", root}, &stdout, &stderr),
+		"test requires both the script and the package")
+}
+
+func TestTestCommandFailingScript(t *testing.T) {
+	cfg := testConfig()
+	cfg.Scripts["boom"] = "exit 7"
+	root := initRepo(t, cfg)
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 1, Run([]string{"test", "boom", "core", "--root", root}, &stdout, &stderr),
+		"a failing script fails the command")
+}
+
+func TestPreviewCommand(t *testing.T) {
+	root := initRepo(t, testConfig()) // one pending feat(core)
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"preview", "core", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code, "stderr: %s", stderr.String())
+	out := stdout.String()
+	assert.Contains(t, out, "## core@0.1.0", "the header names the pending tag")
+	assert.Contains(t, out, "### Features")
+	assert.Contains(t, out, "- first release")
+
+	// Release, then preview again: the window is empty.
+	var relOut, relErr bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--root", root}, &relOut, &relErr), "%s", relOut.String())
+	stdout.Reset()
+	code = Run([]string{"preview", "core", "--root", root}, &stdout, &stderr)
+	require.Equal(t, 0, code)
+	assert.Contains(t, stdout.String(), "no pending changes for core")
+
+	assert.Equal(t, 1, Run([]string{"preview", "ghost", "--root", root}, &stdout, &stderr),
+		"an unknown package is an error")
+	assert.Equal(t, 2, Run([]string{"preview", "--root", root}, &stdout, &stderr),
+		"preview requires the package name")
+}
+
+func TestPrereleaseNotesWindowing(t *testing.T) {
+	// The release-notes windowing across a whole train, end to end: each
+	// prerelease's changelog entry documents only its own changeset, and the
+	// graduation collects every prerelease's changes into one entry. The
+	// version is still computed over the whole train — beta.1 stays 0.2.0-
+	// based even though its entry only shows a fix.
+	root := initRepo(t, testConfig())
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return string(bytes.TrimSpace(out))
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		require.Equal(t, 0, Run(append(args, "--root", root), &stdout, &stderr),
+			"stdout: %s\nstderr: %s", stdout.String(), stderr.String())
+		return stdout.String()
+	}
+	// entry returns the changelog entry for the given tag: the text between
+	// its "## <tag> " header and the next entry header.
+	entry := func(tag string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(root, "packages", "core", "CHANGELOG.md"))
+		require.NoError(t, err)
+		text := string(data)
+		start := strings.Index(text, "## "+tag+" ")
+		require.GreaterOrEqual(t, start, 0, "no changelog entry for %s:\n%s", tag, text)
+		rest := text[start+3:]
+		if next := strings.Index(rest, "\n## "); next >= 0 {
+			rest = rest[:next]
+		}
+		return rest
+	}
+
+	run() // core@0.1.0: flushes the initial feat, so the train starts clean
+
+	git("commit", "-q", "--allow-empty", "-m", "feat(core)@beta: feature A")
+	run()
+	require.Contains(t, git("tag"), "core@0.2.0-beta.0")
+	assert.Contains(t, entry("core@0.2.0-beta.0"), "feature A")
+
+	git("commit", "-q", "--allow-empty", "-m", "fix(core): fix B")
+	// The preview of beta.1 already narrows to the fresh changeset.
+	preview := run("preview", "core")
+	assert.Contains(t, preview, "fix B")
+	assert.NotContains(t, preview, "feature A",
+		"the preview of a prerelease must not repeat the train's published notes")
+	run()
+	require.Contains(t, git("tag"), "core@0.2.0-beta.1")
+	beta1 := entry("core@0.2.0-beta.1")
+	assert.Contains(t, beta1, "fix B")
+	assert.NotContains(t, beta1, "feature A",
+		"a prerelease entry contains only its own changeset")
+
+	git("commit", "-q", "--allow-empty", "-m", "release(core)@stable: graduate")
+	run()
+	require.Contains(t, git("tag"), "core@0.2.0")
+	graduated := entry("core@0.2.0")
+	assert.Contains(t, graduated, "feature A", "the graduation collects the whole train")
+	assert.Contains(t, graduated, "fix B")
 }
 
 func TestNewLoggerFallsBackOnUnknownLevel(t *testing.T) {

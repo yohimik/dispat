@@ -6,22 +6,26 @@
 dispat [command] [flags]
 ```
 
-| Command             | Effect                                                                                                                                                                                                                                          |
-|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `release` (default) | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.                                                                                                                                          |
-| `status`            | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.                                                                                                                                        |
-| `run <script>`      | Plan, then execute the named [space run script](#runscripts-and-dispat-run) inside each changed package, honouring the dependency graph. Nothing is released or tagged. `dispat <script>` is a shorthand when `<script>` is not a command name. |
+| Command                   | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.                                                                                                                                                                                                                                                                                                                                                                         |
+| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.                                                                                                                                                                                                                                                                                                                                                                       |
+| `run <script>`            | Plan, then execute the named [space run script](#runscripts-and-dispat-run) inside each changed package, honouring the dependency graph. Nothing is released or tagged. `dispat <script>` is a shorthand when `<script>` is not a command name.                                                                                                                                                                                                                                |
+| `init`                    | Write a starter config file into `--root` — `dispat.json`, or `dispat.yaml` / `dispat.toml` with `--format` — and exit. An existing file is never overwritten (that is an error). Needs no config file and no git repository.                                                                                                                                                                                                                                                  |
+| `test <script> <package>` | Plan, then run the named **top-level** script (a key of `scripts`) once, inside the package's folder, with the package's full [`DISPAT_*` environment](#script-environment-variables) (`DISPAT_STAGE` is `test:<script>`). Nothing is released, tagged or written — a way to try a script under exactly the input a stage would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as both the old and the new version. |
+| `preview <package>`       | Plan, then print the package's pending release notes — the breaking-changes/features/fixes sections (plus provider updates) its next release's changelog entry and GitHub release body would carry — and exit. Follows the [release-notes windowing](#changelog): a pending prerelease previews only its own changeset. Prints `no pending changes` when the window is empty.                                                                                                  |
 
-| Flag            | Default       | Effect                                                                                                                                                                              |
-|-----------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--root`        | `.`           | Monorepo root folder (git repo root).                                                                                                                                               |
-| `--config`      | `dispat.json` | Config file name, relative to `--root`.                                                                                                                                             |
-| `--concurrency` | from config   | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                              |
-| `--on-error`    | `skip`        | `run` only: what a failing script does to the failed package's dependents — `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure. |
-| `--log-level`   | from config   | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                |
-| `--log-format`  | from config   | Override: `pretty` or `json`.                                                                                                                                                       |
-| `--version`     |               | Print the dispat version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                              |
-| `--help`        |               | Print usage.                                                                                                                                                                        |
+| Flag            | Default     | Effect                                                                                                                                                                                          |
+|-----------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--root`        | `.`         | Monorepo root folder (git repo root).                                                                                                                                                           |
+| `--config`      | auto        | Config file name, relative to `--root`. When not set, the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists is used; an explicit name is used as-is (no fallback). |
+| `--concurrency` | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                          |
+| `--on-error`    | `skip`      | `run` only: what a failing script does to the failed package's dependents — `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure.             |
+| `--log-level`   | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                            |
+| `--log-format`  | from config | Override: `pretty` or `json`.                                                                                                                                                                   |
+| `--format`      | `json`      | `init` only: the config file format to write — `json`, `yaml` or `toml`.                                                                                                                        |
+| `--version`     |             | Print the dispat version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                          |
+| `--help`        |             | Print usage.                                                                                                                                                                                    |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
 
@@ -34,9 +38,12 @@ printed is the plan a release would use.
 
 ## Configuration file
 
-Loaded with viper: the format is inferred from the file extension, so JSON (default `dispat.json`), YAML or TOML all
-work. Unknown keys are rejected (typo protection). Viper matches keys case-insensitively and lowercases map keys, so
-script and space names are effectively case-insensitive.
+Loaded with viper: the format is inferred from the file extension, so JSON, YAML or TOML all work. With no `--config`
+flag the file is **discovered**: the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in
+the root is used — the names [`dispat init`](#cli) writes under its formats — and when none exists the run fails with an
+error naming every candidate tried. An explicitly passed `--config` is used as-is, with no fallback, so a typo there
+fails loudly instead of silently loading a different file. Unknown keys are rejected (typo protection). Viper matches
+keys case-insensitively and lowercases map keys, so script and space names are effectively case-insensitive.
 
 ### Top level
 
@@ -327,6 +334,17 @@ own conventions (`deps`, `ci`, …) as needed; setting it to `[]` disables the e
 
 New entries are prepended below the title, newest first.
 
+**What an entry contains — the release-notes windowing.** An entry holds the release's notes grouped by bump (breaking
+changes, features, fixes) plus the provider-updates section. On the stable channel that is every pending commit since
+the package's last release. On a prerelease train each prerelease's entry contains **only its own changeset** — the
+commits the train's earlier prereleases have not already published — so `beta.1` does not repeat
+`beta.0`'s notes; the **graduation** then collects the whole train (everything since the last stable tag) into its one
+entry, which is what readers of the stable line actually see. The version is still computed over the whole train either
+way (a breaking change shipped in `beta.0` keeps the graduation at the next major) — only the notes narrow. The same
+windowing drives the [GitHub release body](#github) and the
+[`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](#release-notes-data), and
+[`dispat preview`](#cli) shows exactly what the next entry would contain.
+
 ### `github`
 
 | Key        | Default                   | Description                                                                                                                                                                                                                                                                    |
@@ -341,8 +359,10 @@ New entries are prepended below the title, newest first.
 The release is **opt-in per package and per run**: it is created exactly when one of the package's scripts exported
 [`DISPAT_EXPORT_GITHUB`](#script-outputs); a published package without the export is skipped (with an info-level
 notice), so a script decides at run time which packages get a GitHub release. The release is named after the tag
-(`pkg@1.3.0`); its body is the rendered changelog sections. When `enabled` but no repository or token can be resolved at
-runtime, GitHub releases are skipped with a warning instead of failing the run. A configuration that *does*
+(`pkg@1.3.0`); its body is the rendered changelog sections, under the same
+[release-notes windowing](#changelog) — a prerelease's release documents only its own changeset, a graduation the whole
+train. When `enabled` but no repository or token can be resolved at runtime, GitHub releases are skipped with a warning
+instead of failing the run. A configuration that *does*
 resolve is **verified against the API before any release work starts** (`GET /repos/{owner}/{repo}`) — with the release
 commit enabled or disabled alike — so misconfigured credentials fail the run before anything is built.
 
@@ -686,8 +706,9 @@ DISPAT_FIXES="close a leak"
 
 Entries are the unit descriptions, newline-separated, in history order; a group with no entries is empty text (set, not
 unset), so a line-wise loop iterates zero times. Bodies are omitted — they are multiline prose that would destroy the
-line-per-entry contract — and stay in the changelog and the GitHub release. The dependencies section travels the same
-way:
+line-per-entry contract — and stay in the changelog and the GitHub release. The groups follow the
+[release-notes windowing](#changelog): on a prerelease they carry only the release's own changeset, on a stable release
+(a graduation included) the whole pending window. The dependencies section travels the same way:
 
 ```sh
 DISPAT_DEPENDENCIES="core: 1.2.3 -> 1.3.0"    # one "name: old -> new" line per live provider update

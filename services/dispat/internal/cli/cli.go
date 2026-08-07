@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/rs/zerolog"
@@ -25,6 +24,9 @@ const (
 	cmdRelease = "release" // build and publish changed packages (default)
 	cmdStatus  = "status"  // only print the graph and new versions
 	cmdRun     = "run"     // run a space run script inside each changed package
+	cmdInit    = "init"    // write a starter config file; needs no config or git
+	cmdTest    = "test"    // run one top-level script inside one package
+	cmdPreview = "preview" // print one package's pending release notes
 )
 
 // Version is the dispat version `--version` reports. The default marks a
@@ -42,22 +44,31 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "monorepo root folder")
-	cfgName := fs.String("config", "dispat.json", "config file name, relative to --root")
+	cfgName := fs.String("config", "dispat.json",
+		"config file name, relative to --root; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")
 	fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
 	fs.String("log-format", "", "override the configured logFormat (pretty, json)")
 	onError := fs.String("on-error", app.OnErrorSkip,
 		"run command: what a failing script does to the failed package's dependents (skip or continue)")
+	initFormat := fs.String("format", "json",
+		"init command: config file format (json, yaml or toml)")
 	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `usage: dispat [command] [flags]
 
 commands:
-  release       build and publish changed packages (default)
-  status        print the project graph and new versions, without building
-  run <script>  run the named space run script inside each changed package,
-                honouring the dependency graph; "dispat <script>" is a
-                shorthand when <script> is not a command name
+  release                  build and publish changed packages (default)
+  status                   print the project graph and new versions, without building
+  run <script>             run the named space run script inside each changed package,
+                           honouring the dependency graph; "dispat <script>" is a
+                           shorthand when <script> is not a command name
+  init                     write a starter config file (--format json, yaml or toml)
+                           unless one already exists; needs no config or git
+  test <script> <package>  run the named top-level script inside the package's
+                           folder with its full DISPAT_* environment; releases nothing
+  preview <package>        print the package's pending release notes (breaking
+                           changes, features, fixes) for the current window
 
 flags:
 %s`, fs.FlagUsages())
@@ -84,11 +95,12 @@ flags:
 		With().Timestamp().Logger()
 
 	cmd := cmdRelease
-	runScript := ""
+	runScript := "" // run: the script name; test: the script; preview unused
+	testPkg := ""   // test/preview: the package name
 	if rest := fs.Args(); len(rest) > 0 {
 		cmd = rest[0]
 		switch cmd {
-		case cmdRelease, cmdStatus:
+		case cmdRelease, cmdStatus, cmdInit:
 			if len(rest) > 1 {
 				bootLog.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 				return 2
@@ -100,6 +112,20 @@ flags:
 				return 2
 			}
 			runScript = rest[1]
+		case cmdTest:
+			if len(rest) != 3 {
+				bootLog.Error().Msg("test requires exactly two arguments: the script name and the package")
+				fs.Usage()
+				return 2
+			}
+			runScript, testPkg = rest[1], rest[2]
+		case cmdPreview:
+			if len(rest) != 2 {
+				bootLog.Error().Msg("preview requires exactly one argument: the package name")
+				fs.Usage()
+				return 2
+			}
+			testPkg = rest[1]
 		default:
 			// Not a command name: treat the word as a run script, so
 			// `dispat lint` is `dispat run lint`. A name no space defines
@@ -118,8 +144,27 @@ flags:
 			app.OnErrorSkip, app.OnErrorContinue)
 		return 2
 	}
+	if cmd == cmdInit {
+		// Before config loading: init is what creates the config, so there is
+		// nothing to load yet (and no git repository is needed either).
+		name, err := app.InitConfig(*root, *initFormat)
+		if err != nil {
+			bootLog.Error().Err(err).Msg("init failed")
+			return 1
+		}
+		fmt.Fprintf(stdout, "created %s\n", name)
+		return 0
+	}
 
-	cfg, err := config.Load(filepath.Join(*root, *cfgName), fs)
+	// An explicit --config is used as-is; the default falls back through the
+	// known config file names, so `dispat init --format yaml` and a plain
+	// `dispat status` compose without flags.
+	cfgPath, err := config.ResolveFile(*root, *cfgName, fs.Changed("config"))
+	if err != nil {
+		bootLog.Error().Err(err).Msg("config file not found")
+		return 1
+	}
+	cfg, err := config.Load(cfgPath, fs)
 	if err != nil {
 		bootLog.Error().Err(err).Msg("invalid configuration")
 		return 1
@@ -140,6 +185,20 @@ flags:
 	case cmdRun:
 		if a.RunScript(ctx, runScript, *onError) != nil {
 			return 1
+		}
+	case cmdTest:
+		if a.TestScript(ctx, runScript, testPkg) != nil {
+			return 1
+		}
+	case cmdPreview:
+		notes, err := a.Preview(ctx, testPkg)
+		if err != nil {
+			return 1
+		}
+		if notes == "" {
+			fmt.Fprintf(stdout, "no pending changes for %s\n", testPkg)
+		} else {
+			fmt.Fprint(stdout, notes)
 		}
 	default:
 		if a.Release(ctx) != nil {

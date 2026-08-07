@@ -68,6 +68,30 @@ func TestConfigUnknownKeyIsRejected(t *testing.T) {
 	}
 }
 
+// TestConfigFileFallbackResolution: without --config the binary resolves the
+// first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists —
+// the names `dispat init` writes under its formats — and with none present it
+// fails with an error naming what it tried. JSON is valid YAML, so the typed
+// model marshalled to JSON serves as the yaml-named config.
+func TestConfigFileFallbackResolution(t *testing.T) {
+	r := harness.New(t)
+	data, err := json.MarshalIndent(libsConfig(echoBuild, 1), "", "  ")
+	require.NoError(t, err)
+	r.WriteFile("dispat.yaml", string(data))
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Status()
+	assert.Equal(t, 0, res.Code,
+		"dispat.yaml must be found without --config\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	require.NoError(t, os.Remove(r.Path("dispat.yaml")))
+	res = r.Status()
+	assert.Equal(t, 1, res.Code, "no config file at all must fail the run")
+	assert.Contains(t, res.Stderr, "no dispat config file found",
+		"the error must say what is missing rather than fail obscurely")
+}
+
 // TestConfigConcurrencyFlagOverridesFile proves flag precedence at runtime,
 // not just at parse time: the file pins a serial budget, --concurrency
 // raises it, and only a real measured overlap tells the two apart.
