@@ -93,10 +93,7 @@ func npmSpans(data []byte, edits []Edit) (map[int]span, *span, error) {
 	wanted := make(map[target]int, len(edits))
 	fields := make(map[string]bool, len(edits))
 	for i, e := range edits {
-		f := e.Kind
-		if f == "" {
-			f = "dependencies"
-		}
+		f := e.Kind.String() // spells the zero kind out as "dependencies"
 		wanted[target{f, e.Name}] = i
 		fields[f] = true
 	}

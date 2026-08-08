@@ -34,8 +34,11 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/yohimik/dispat/pkg/manifest v0.0.0-00010101000000-000000000000 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 )
+
+replace github.com/yohimik/dispat/pkg/manifest => ../../pkg/manifest

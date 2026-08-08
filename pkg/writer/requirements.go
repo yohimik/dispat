@@ -3,6 +3,8 @@ package writer
 import (
 	"os"
 	"strings"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // The line-by-line manifest shape: one "name specifier" per line, which
@@ -10,20 +12,9 @@ import (
 // surrounding spacing and trailing comment all survive, only the specifier
 // text changes.
 
-// isRequirementsFile mirrors the scanner's recognition of pip requirements
-// files, and must stay byte-for-byte in step with pkg/scanner's copy (the
-// two modules deliberately share no code): a .txt whose base name starts or
-// ends with the word "requirements".
-func isRequirementsFile(name string) bool {
-	lower := strings.ToLower(name)
-	if !strings.HasSuffix(lower, ".txt") {
-		return false
-	}
-	words := strings.FieldsFunc(strings.TrimSuffix(lower, ".txt"), func(r rune) bool {
-		return r == '-' || r == '_' || r == '.'
-	})
-	return len(words) > 0 && (words[0] == "requirements" || words[len(words)-1] == "requirements")
-}
+// isRequirementsFile is pkg/manifest's rule, shared verbatim with the
+// scanner.
+func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(name) }
 
 // rewriteRequirements edits a requirements file line by line: a line whose
 // requirement name matches an edit (PEP 503-normalised, so "Acme_Core"
@@ -126,20 +117,4 @@ func requirementSpans(line string) (name string, nameEnd, specEnd int, ok bool) 
 
 // normalizePyName applies PEP 503, mirroring the scanner: lowercase, runs of
 // -, _ and . collapse to a single -.
-func normalizePyName(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	run := false
-	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
-		if r == '-' || r == '_' || r == '.' {
-			run = true
-			continue
-		}
-		if run && b.Len() > 0 {
-			b.WriteByte('-')
-		}
-		run = false
-		b.WriteRune(r)
-	}
-	return b.String()
-}
+func normalizePyName(name string) string { return manifest.NormalizePyName(name) }

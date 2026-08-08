@@ -16,6 +16,7 @@ until someone regenerates it.
 | **workspace total**              | **93.0%**                                                                                |
 | `pkg/ccme` (commit parser)       | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)     | 100%                                                                                     |
+| `pkg/manifest` (shared vocabulary) | 100%                                                                                   |
 | `pkg/scanner` (manifest reader)  | **86.3%**, plus two fuzz targets over every registered parser                            |
 | `pkg/writer` (manifest writer)   | **85.6%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
 | `services/dispat` (all packages) | **92.8%** aggregate, `main.go` included (the integration suite runs the real binary)     |
@@ -39,6 +40,7 @@ From the monorepo root (the `go.work` workspace resolves the cross-module depend
 
 ```sh
 go test -C pkg/ccme        ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
+go test -C pkg/manifest    ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-manifest.out"
 go test -C pkg/models      ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-models.out"
 go test -C pkg/scanner     ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-scanner.out"
 go test -C pkg/writer      ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-writer.out"
@@ -49,7 +51,7 @@ go test -C tests/integration ./... -count=1
 go tool covdata textfmt -i="$DISPAT_COVERDIR" -o="$PWD/cover-integration.out"
 
 { head -n 1 cover-ccme.out
-  tail -q -n +2 cover-ccme.out cover-models.out cover-scanner.out cover-writer.out cover-cli.out cover-integration.out
+  tail -q -n +2 cover-ccme.out cover-manifest.out cover-models.out cover-scanner.out cover-writer.out cover-cli.out cover-integration.out
 } > coverage.out
 go tool cover -func=coverage.out | tail -n 1   # the workspace total
 ```

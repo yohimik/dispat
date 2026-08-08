@@ -10,5 +10,8 @@ require (
 
 require (
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/yohimik/dispat/pkg/manifest v0.0.0-00010101000000-000000000000
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )
+
+replace github.com/yohimik/dispat/pkg/manifest => ../manifest

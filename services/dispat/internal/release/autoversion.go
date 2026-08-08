@@ -201,7 +201,7 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 				Str("providerVersion", version).
 				Msg("stable release now ranges over a prerelease provider")
 		}
-		edits = append(edits, writer.Edit{Name: d.Name, Kind: string(d.Kind), Range: next})
+		edits = append(edits, writer.Edit{Name: d.Name, Kind: d.Kind, Range: next})
 	}
 	return edits
 }

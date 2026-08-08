@@ -126,6 +126,13 @@ pkg/models               the PUBLIC configuration model (its own module): the
                          loadable JSON. Models and pure helpers only;
                          loading, validation and discovery stay internal to
                          the CLI.
+pkg/manifest             the SHARED manifest vocabulary (its own module):
+                         dependency kinds spelled like the manifest fields,
+                         the requirements-file name rule and PEP 503 name
+                         normalisation — the definitions the scanner and the
+                         writer must apply identically, held in one place so
+                         the reading and writing halves cannot drift. Models
+                         and pure functions only; no I/O, no dependencies.
 pkg/scanner              manifest READER (its own module). Two manifest
                          shapes: structured documents — package.json, go.mod,
                          Cargo.toml, pyproject.toml (PEP 621 + Poetry, PEP
@@ -156,8 +163,10 @@ pkg/writer               manifest WRITER (its own module): format-preserving
                          requirements*.txt via per-line specifier splicing —
                          replacing only the version text being changed.
                          Atomic same-folder rename; reports applied and
-                         missing edits. Other ecosystems are read-only until
-                         they gain a writer here.
+                         missing edits. Ecosystems without a writer are
+                         read-only here; their reconciliation belongs to a
+                         flow.version script. Shares pkg/manifest's kinds
+                         and file-name rules with the scanner.
 services/dispat/
   main.go                thin entry point: os.Exit(cli.Run(...))
   internal/

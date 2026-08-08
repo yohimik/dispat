@@ -19,28 +19,22 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
-// Kind is the manifest dependency field a declaration came from. The zero
-// value is the plain `dependencies` field, mirroring the config model's
-// dependency kinds, so the two convert by a cast.
-type Kind string
+// Kind is the manifest dependency field a declaration came from — the shared
+// pkg/manifest vocabulary, aliased so the reader and the writer can never
+// disagree on what a kind is called.
+type Kind = manifest.Kind
 
-// Dependency kinds, spelled exactly like the manifest fields they stand for.
+// Dependency kinds, re-exported from pkg/manifest.
 const (
-	KindDependencies         Kind = ""
-	KindDevDependencies      Kind = "devDependencies"
-	KindPeerDependencies     Kind = "peerDependencies"
-	KindOptionalDependencies Kind = "optionalDependencies"
+	KindDependencies         = manifest.KindDependencies
+	KindDevDependencies      = manifest.KindDevDependencies
+	KindPeerDependencies     = manifest.KindPeerDependencies
+	KindOptionalDependencies = manifest.KindOptionalDependencies
 )
-
-// String implements fmt.Stringer, spelling the zero value out.
-func (k Kind) String() string {
-	if k == KindDependencies {
-		return "dependencies"
-	}
-	return string(k)
-}
 
 // kindRank orders kinds the way manifests conventionally list them; used only
 // to keep a manifest's dependency slice deterministic.

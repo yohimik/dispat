@@ -3,6 +3,8 @@ package scanner
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // The second manifest shape: not a structured document but packages written
@@ -10,26 +12,15 @@ import (
 // canonical case; the line loop is kept separate from the PEP 508 parsing so
 // further line formats can reuse it.
 
-// isRequirementsFile reports a pip requirements file: a .txt whose base name
-// starts or ends with the word "requirements" (requirements.txt,
-// requirements-dev.txt, dev-requirements.txt). A name merely *containing* the
-// word somewhere in the middle (OLD-REQUIREMENTS-NOTES.txt) is prose, not a
-// manifest.
-func isRequirementsFile(name string) bool {
-	lower := strings.ToLower(name)
-	if !strings.HasSuffix(lower, ".txt") {
-		return false
-	}
-	words := nameWords(strings.TrimSuffix(lower, ".txt"))
-	return len(words) > 0 && (words[0] == "requirements" || words[len(words)-1] == "requirements")
-}
+// isRequirementsFile is pkg/manifest's rule, shared verbatim with the writer.
+func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(name) }
 
 // requirementsKind maps the file name onto the dependency field it stands
 // for: a dev/test requirements file installs for contributors, not consumers.
 // Whole words only — "requirements-latest.txt" contains the letters of
 // "test" but is not a test file.
 func requirementsKind(name string) Kind {
-	words := nameWords(strings.TrimSuffix(strings.ToLower(name), ".txt"))
+	words := manifest.NameWords(strings.TrimSuffix(strings.ToLower(name), ".txt"))
 	for _, w := range words {
 		switch w {
 		case "dev", "development", "test", "tests", "testing":
@@ -37,13 +28,6 @@ func requirementsKind(name string) Kind {
 		}
 	}
 	return KindDependencies
-}
-
-// nameWords splits a file's base name into its separator-delimited words.
-func nameWords(base string) []string {
-	return strings.FieldsFunc(base, func(r rune) bool {
-		return r == '-' || r == '_' || r == '.'
-	})
 }
 
 // parseRequirements reads a requirements file: each non-empty line that is

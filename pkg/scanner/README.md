@@ -1,9 +1,13 @@
 # scanner
 
-Reads dependency manifests into one ecosystem-neutral shape: the package's declared identity (name, version)
-and its declared dependencies with their ranges, manifest fields and local-path signals. It only reads;
-rewriting is [`pkg/writer`](../writer)'s job. This is the library behind `dispat compute` (deriving a
-monorepo's dependency graph from its manifests) and the executor's native auto-versioning.
+A deliberately lightweight manifest reader: thin per-format parsers turning dependency manifests into one
+ecosystem-neutral shape — the package's declared identity (name, version) and its declared dependencies
+with their ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no
+network. The goal is to support **all package managers**; the shared vocabulary (dependency kinds, the
+file-name rules) lives in [`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can
+never drift apart. It only reads; rewriting is the writer's job. This is the library behind
+`dispat compute` (deriving a monorepo's dependency graph from its manifests) and the executor's native
+auto-versioning.
 
 ```go
 sc := scanner.New()
@@ -34,9 +38,10 @@ Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning
 first, ambiguous names reported instead of guessed) and `ResolveLocalDir` (declared local path → owning
 package folder).
 
-## Deliberately out of scope
+## Not read today
 
-Deliberately not read, listed so nobody discovers it in production: npm `workspaces`, `overrides` and
+The goal is full coverage of every package manager; these known gaps are listed so nobody discovers them in
+production: npm `workspaces`, `overrides` and
 `resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and target-specific tables; Maven
 `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and `<modules>`; Poetry
 multi-constraint dependency lists; PEP 735 `include-group`; NuGet Central Package Management

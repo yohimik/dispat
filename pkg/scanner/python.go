@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"github.com/yohimik/dispat/pkg/manifest"
+
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -149,23 +151,7 @@ func pep508Dep(req string, kind Kind) DeclaredDep {
 
 // normalizePyName applies PEP 503: names compare case-insensitively with
 // runs of -, _ and . collapsed to a single -.
-func normalizePyName(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	run := false
-	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
-		if r == '-' || r == '_' || r == '.' {
-			run = true
-			continue
-		}
-		if run && b.Len() > 0 {
-			b.WriteByte('-')
-		}
-		run = false
-		b.WriteRune(r)
-	}
-	return b.String()
-}
+func normalizePyName(name string) string { return manifest.NormalizePyName(name) }
 
 // dedupeDeps drops exact duplicates — a package listed both in [project]
 // and a Poetry table during a migration should not become two declarations.

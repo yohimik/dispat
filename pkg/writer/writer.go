@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // Edit is one requested change inside a manifest: set the named dependency's
@@ -22,11 +24,11 @@ import (
 type Edit struct {
 	// Name of the dependency as the manifest declares it.
 	Name string
-	// Kind is the manifest field holding the declaration, spelled like the
-	// field ("" means `dependencies`), matching the scanner's kinds. Only the
-	// four dependency fields are valid; Rewrite rejects anything else rather
+	// Kind is the manifest field holding the declaration — the shared
+	// pkg/manifest vocabulary, the same type the scanner reports. Only the
+	// four dependency kinds are valid; Rewrite rejects anything else rather
 	// than descend into an arbitrary part of the manifest.
-	Kind string
+	Kind manifest.Kind
 	// Range is the new version text to write, verbatim: "1.2.3", "^1.2.3",
 	// "workspace:*", "v1.2.3".
 	Range string
@@ -74,12 +76,6 @@ func dispatch(base string) (rewriteFunc, bool) {
 	return nil, false
 }
 
-// validKinds are the dependency fields an Edit may target.
-var validKinds = map[string]bool{
-	"": true, "dependencies": true, "devDependencies": true,
-	"peerDependencies": true, "optionalDependencies": true,
-}
-
 // Rewrite applies the edits to the manifest file at path, dispatching on the
 // file name (package.json, go.mod, requirements*.txt). version, when
 // non-empty, also rewrites the manifest's own version field where the format
@@ -88,8 +84,10 @@ var validKinds = map[string]bool{
 // when something changed.
 func Rewrite(path, version string, edits []Edit) (Result, error) {
 	for _, e := range edits {
-		if !validKinds[e.Kind] {
-			return Result{}, fmt.Errorf("writer: edit %q: unknown dependency kind %q", e.Name, e.Kind)
+		// The long spelling "dependencies" is accepted as a convenience for
+		// the zero kind; anything else outside the four fields is refused.
+		if k := e.Kind; !k.Valid() && k != "dependencies" {
+			return Result{}, fmt.Errorf("writer: edit %q: unknown dependency kind %q", e.Name, k)
 		}
 	}
 	rewrite, ok := dispatch(filepath.Base(path))

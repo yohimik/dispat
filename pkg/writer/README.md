@@ -1,8 +1,10 @@
 # writer
 
-Rewrites dependency manifests in place, format-preserving: only the version text being changed is replaced,
-and every other byte of the file — indentation, key order, comments — survives verbatim. The writing
-counterpart of [`pkg/scanner`](../scanner), and the library behind dispat's native auto-versioning.
+A deliberately lightweight manifest writer: format-preserving in-place edits where only the version text
+being changed is replaced, and every other byte of the file — indentation, key order, comments — survives
+verbatim. The writing counterpart of [`pkg/scanner`](../scanner), sharing its vocabulary through
+[`pkg/manifest`](../manifest), and the library behind dispat's native auto-versioning. The goal is to
+support **all package managers**; each ecosystem gains a writer once its rewrite can be made byte-precise.
 
 ```go
 res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
@@ -23,15 +25,15 @@ rewritten `package.json` is re-validated as JSON before a single byte lands on d
 | `go.mod` | yes (`golang.org/x/mod/modfile`) | no such field |
 | `requirements*.txt` | yes (per-line splice, comments and CRLF preserved) | no such field |
 
-## Deliberately out of scope
+## Not written today
 
-The other ecosystems the scanner reads — Cargo, pyproject, composer, Maven, NuGet, pub — are read-only:
-their reconciliation belongs to a `flow.version` script. Only `package.json` has a writable own-version
-field.
+The goal is a writer per scanner-supported ecosystem; the ones without one — Cargo, pyproject, composer,
+Maven, NuGet, pub — are read-only, and their reconciliation belongs to a `flow.version` script. Only
+`package.json` has a writable own-version field.
 
 ## Requirements
 
-Go 1.25 or later. One dependency: `golang.org/x/mod`.
+Go 1.25 or later. Dependencies: `golang.org/x/mod` and the workspace's own `pkg/manifest`.
 
 ## Licence
 

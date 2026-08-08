@@ -31,6 +31,7 @@ jobs:
       - name: Run the full suite
         run: |
           go test -C pkg/ccme         ./... -count=1 -timeout 10m
+          go test -C pkg/manifest     ./... -count=1 -timeout 10m
           go test -C pkg/models       ./... -count=1 -timeout 10m
           go test -C pkg/scanner      ./... -count=1 -timeout 10m
           go test -C pkg/writer       ./... -count=1 -timeout 10m
