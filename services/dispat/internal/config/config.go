@@ -208,7 +208,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 // specification default" — an absent parser object is exactly the parser
 // dispat always built. The result is validated by actually constructing a
 // parser, so a bad value fails the load rather than the first release.
-func resolveParser(p public.ParserConfig) (ccme.Config, error) {
+func resolveParser(p *public.ParserConfig) (ccme.Config, error) {
 	cfg := ccme.Config{
 		Separator:            p.Separator,
 		StrictTypes:          p.StrictTypes,
@@ -297,10 +297,45 @@ func normalizeVersioning(raw string) (string, bool) {
 	return "", false
 }
 
+// fillOptional replaces nil optional sub-objects with their zero values. The
+// pointers exist for marshalling — an unset object is an absent key rather
+// than "{}" — not for behaviour: nil and the zero struct mean the same thing,
+// so filling them lets validation and everything after it dereference freely.
+func fillOptional(c *File) {
+	if c.Changelog == nil {
+		c.Changelog = &ChangelogConfig{}
+	}
+	if c.GitHub == nil {
+		c.GitHub = &GitHubConfig{}
+	}
+	if c.Commit == nil {
+		c.Commit = &CommitConfig{}
+	}
+	if c.Run == nil {
+		c.Run = &RunConfig{}
+	}
+	if c.Parser == nil {
+		c.Parser = &ParserConfig{}
+	}
+	if c.Parser.Propagation == nil {
+		c.Parser.Propagation = &ParserPropagationConfig{}
+	}
+	if c.Parser.Limits == nil {
+		c.Parser.Limits = &ParserLimitsConfig{}
+	}
+	for name, s := range c.Spaces {
+		if s.Flow == nil {
+			s.Flow = &SpaceFlowConfig{}
+			c.Spaces[name] = s
+		}
+	}
+}
+
 // validate checks the loaded configuration and resolves its defaulted values
 // in place. Each concern lives in its own helper; the order only matters in
 // that everything is validated before Discover consumes any of it.
 func validate(c *File) error {
+	fillOptional(c)
 	if len(c.Spaces) == 0 {
 		return errors.New("at least one space is required")
 	}
@@ -354,7 +389,7 @@ func validate(c *File) error {
 	if err != nil {
 		return err
 	}
-	c.ParserConfig = parserCfg
+	c.ResolvedParser = parserCfg
 	return nil
 }
 

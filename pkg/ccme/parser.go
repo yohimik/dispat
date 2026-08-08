@@ -101,6 +101,9 @@ type Parser struct {
 	allowedChannels []string
 	messageTrailers []string
 	issueTrailers   []string
+	// escapedSep is "\" + the configured separator, precomputed so splitUnits
+	// does not concatenate it once per parsed message.
+	escapedSep string
 }
 
 // NewParser builds a Parser from a single configuration struct. Every
@@ -120,6 +123,7 @@ func NewParser(cfg Config) (*Parser, error) {
 		allowedChannels: full.AllowedChannels,
 		messageTrailers: full.MessageLevelTrailers,
 		issueTrailers:   full.IssueTrailers,
+		escapedSep:      "\\" + full.Separator,
 	}, nil
 }
 
@@ -268,7 +272,7 @@ func (p *Parser) Parse(message string) (*Result, error) {
 	// point is to bound the work (§18.3).
 	if n := p.cfg.Limits.MessageBytes; n > 0 && len(message) > n {
 		return fatalResult("", CodeE158,
-			formatMessage("message is %d bytes, over the limit of %d", []interface{}{len(message), n}))
+			formatMessage("message is %d bytes, over the limit of %d", []any{len(message), n}))
 	}
 
 	normalised := Normalize(message)
@@ -279,12 +283,12 @@ func (p *Parser) Parse(message string) (*Result, error) {
 	}
 
 	lines := splitLines(normalised)
-	sources, dropped := splitUnits(normalised, lines, p.cfg.Separator)
+	sources, dropped := splitUnits(normalised, lines, p.cfg.Separator, p.escapedSep)
 
 	if n := p.cfg.Limits.UnitsPerMessage; n > 0 && len(sources) > n {
 		return fatalResult(normalised, CodeE158,
 			formatMessage("message has %d units, over the limit of %d",
-				[]interface{}{len(sources), n}))
+				[]any{len(sources), n}))
 	}
 
 	var res *Result
@@ -378,7 +382,7 @@ func (p *Parser) ParseSubject(subject string) (*Result, error) {
 	if n := p.cfg.Limits.MessageBytes; n > 0 && len(subject) > n {
 		return fatalResult("", CodeE158,
 			formatMessage("subject is %d bytes, over the limit of %d",
-				[]interface{}{len(subject), n}))
+				[]any{len(subject), n}))
 	}
 
 	normalised := Normalize(subject)
@@ -579,8 +583,21 @@ func (u *Unit) checkStrandedBreakingChange(lines []string, from, to, startLine i
 // checkMiscasedBreakingChange emits W155 for the spelling that is not a footer
 // at all: "Breaking change: ..." halts the generic key loop at the space, so
 // nothing downstream will ever see it (§20.5).
+//
+// A BREAKING CHANGE footer's value is free text that may span the following
+// lines, so a line inside such a value is part of the breaking change already
+// in force, not a failed attempt to declare one — the walk mirrors
+// isFooterBlock's and skips those lines.
 func (u *Unit) checkMiscasedBreakingChange(lines []string, startLine int) {
+	prevBreaking := false
 	for i, l := range lines {
+		if end := footerKeyEnd(l); end >= 0 {
+			prevBreaking = isBreakingKey(l[:end])
+			continue
+		}
+		if prevBreaking {
+			continue // free-form BREAKING CHANGE value, not a miscasing
+		}
 		if !miscasedBreakingPrefix(l) {
 			continue
 		}

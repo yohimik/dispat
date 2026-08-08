@@ -30,9 +30,9 @@ func validConfig() File {
 		Scripts: map[string]string{"build": "echo build", "publish": "echo publish"},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "packages/libs", IsBuildWaitingPublish: true, RevertOnFail: true,
-				Flow: SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
+				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 			"apps": {Path: "packages/apps",
-				Flow: SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
+				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 		},
 		Dependencies: []DependencyConfig{{Consumer: "app", Provider: "core"}},
 		Concurrency:  []int{3},
@@ -42,12 +42,15 @@ func validConfig() File {
 }
 
 // minimalConfig is the smallest valid configuration: one space, one script.
+// Run is pre-allocated so tests can set hooks on it directly; an empty object
+// loads the same as an absent one.
 func minimalConfig() File {
 	return File{
 		Scripts: map[string]string{"build": "echo b"},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: SpaceFlowConfig{Build: []string{"build"}}},
+			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
+		Run: &RunConfig{},
 	}
 }
 
@@ -228,8 +231,8 @@ func TestLoadTagFormatPerSpace(t *testing.T) {
 		Scripts:   map[string]string{"build": "echo b"},
 		TagFormat: "{name}@v{version}",
 		Spaces: map[string]SpaceConfig{
-			"libs":     {Path: "pkgs", Flow: SpaceFlowConfig{Build: []string{"build"}}},
-			"services": {Path: "svc", Flow: SpaceFlowConfig{Build: []string{"build"}}, TagFormat: "services/{name}@v{version}"},
+			"libs":     {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
+			"services": {Path: "svc", Flow: &SpaceFlowConfig{Build: []string{"build"}}, TagFormat: "services/{name}@v{version}"},
 		},
 	}
 	root := writeModelRepo(t, cfg, "pkgs/core", "svc/api")
@@ -314,7 +317,7 @@ func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]string{"buildAll": "echo b", "publishAll": "echo p"},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: SpaceFlowConfig{
+			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{
 				Build: []string{"buildAll"}, Publish: []string{"publishAll"}}},
 		},
 	}
@@ -333,7 +336,7 @@ func TestLoadOptionalScripts(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]string{"sync": "npm install"},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: SpaceFlowConfig{Version: []string{"sync"}}},
+			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Version: []string{"sync"}}},
 		},
 	}
 	root := writeModelRepo(t, cfg, "pkgs/core")
@@ -385,7 +388,7 @@ func TestLoadChangelogGitHubDefaults(t *testing.T) {
 
 func TestLoadChangelogOptions(t *testing.T) {
 	cfg := validConfig()
-	cfg.Changelog = ChangelogConfig{
+	cfg.Changelog = &ChangelogConfig{
 		Enabled: models.Bool(false),
 		File:    "HISTORY.md",
 		Title:   "# History",
@@ -411,7 +414,7 @@ func TestLoadChangelogOptions(t *testing.T) {
 
 func TestLoadGitHubOptions(t *testing.T) {
 	cfg := validConfig()
-	cfg.GitHub = GitHubConfig{
+	cfg.GitHub = &GitHubConfig{
 		Enabled: models.Bool(false), Owner: "acme", Repo: "mono",
 		APIURL: "https://ghe.example.com/api/v3", TokenEnv: "GH_RELEASE_TOKEN",
 		EntryFormatConfig: EntryFormatConfig{FeaturesTitle: "New"},
@@ -436,7 +439,7 @@ func TestLoadCommitDefaults(t *testing.T) {
 
 func TestLoadCommitOptions(t *testing.T) {
 	cfg := validConfig()
-	cfg.Commit = CommitConfig{
+	cfg.Commit = &CommitConfig{
 		Enabled:       models.Bool(true),
 		MessageFormat: "release: {packages} ({tags})",
 		Push:          true,
@@ -452,7 +455,7 @@ func TestLoadCommitOptions(t *testing.T) {
 
 func TestLoadCommitPushWithoutCommitDisabled(t *testing.T) {
 	cfg := validConfig()
-	cfg.Commit = CommitConfig{Push: true}
+	cfg.Commit = &CommitConfig{Push: true}
 	loaded, err := loadModel(t, cfg)
 	require.NoError(t, err)
 	assert.False(t, loaded.Commit.PushEnabled(), "push only applies when the commit is enabled")
@@ -681,7 +684,7 @@ func TestLoadLoginAndHookScripts(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]string{"auth": "npm login", "hook": "echo hook", "build": "echo build"},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: SpaceFlowConfig{
+			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{
 				Build:          []string{"build"},
 				Login:          []string{"auth"},
 				Announce:       []string{"hook", "build"},
@@ -725,9 +728,9 @@ func TestLoadRunHooks(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]string{"build": "echo b", "notify": "echo notify", "lint": "echo lint"},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: SpaceFlowConfig{Build: []string{"build"}}},
+			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
-		Run: RunConfig{
+		Run: &RunConfig{
 			BeforeAll:    []string{"lint"},
 			PostAll:      []string{"notify"},
 			BeforeCommit: []string{"lint", "notify"},
@@ -926,33 +929,33 @@ func TestLoadParserDefaults(t *testing.T) {
 	// built.
 	cfg, err := loadModel(t, minimalConfig(), "pkgs/core")
 	require.NoError(t, err)
-	assert.Equal(t, ccme.Config{}, cfg.ParserConfig)
+	assert.Equal(t, ccme.Config{}, cfg.ResolvedParser)
 }
 
 func TestLoadParserOptions(t *testing.T) {
 	// Every knob maps onto the ccme configuration, with weak decoding letting
 	// a numeric depth stand next to "all".
 	cfg := minimalConfig()
-	cfg.Parser = ParserConfig{
+	cfg.Parser = &ParserConfig{
 		Separator:            "%%%",
 		Types:                map[string]string{"feat": "minor", "fix": "patch", "docs": "patch"},
 		StrictTypes:          true,
 		Lenient:              true,
 		MaxDescriptionLength: 72,
-		Propagation: ParserPropagationConfig{
+		Propagation: &ParserPropagationConfig{
 			Bump:         "minor",
 			Depth:        "1",
 			ChannelDepth: "all",
 			Kinds:        []string{"dependencies", "peerDependencies"},
 			Channel:      "inherit",
 		},
-		Limits:          ParserLimitsConfig{UnitsPerMessage: 8, ScopeTermsPerUnit: 16, MessageBytes: 65536},
+		Limits:          &ParserLimitsConfig{UnitsPerMessage: 8, ScopeTermsPerUnit: 16, MessageBytes: 65536},
 		AllowedChannels: []string{"beta", "rc"},
 	}
 	loaded, err := loadModel(t, cfg, "pkgs/core")
 	require.NoError(t, err)
 
-	pc := loaded.ParserConfig
+	pc := loaded.ResolvedParser
 	assert.Equal(t, "%%%", pc.Separator)
 	assert.Equal(t, map[string]ccme.Bump{"feat": ccme.BumpMinor, "fix": ccme.BumpPatch, "docs": ccme.BumpPatch}, pc.Types)
 	assert.True(t, pc.StrictTypes)
@@ -979,11 +982,11 @@ func TestLoadParserInvalidValues(t *testing.T) {
 		// survives lowercasing and must be rejected.
 		{"bad_type_name", ParserConfig{Types: map[string]string{"docs2": "patch"}},
 			"must consist of a-z only"},
-		{"bad_prop_bump", ParserConfig{Propagation: ParserPropagationConfig{Bump: "massive"}},
+		{"bad_prop_bump", ParserConfig{Propagation: &ParserPropagationConfig{Bump: "massive"}},
 			"propagation.bump"},
-		{"bad_depth", ParserConfig{Propagation: ParserPropagationConfig{Depth: "-2"}},
+		{"bad_depth", ParserConfig{Propagation: &ParserPropagationConfig{Depth: "-2"}},
 			"propagation.depth"},
-		{"bad_kind", ParserConfig{Propagation: ParserPropagationConfig{Kinds: []string{"imports"}}},
+		{"bad_kind", ParserConfig{Propagation: &ParserPropagationConfig{Kinds: []string{"imports"}}},
 			`unknown kind "imports"`},
 		{"bad_separator", ParserConfig{Separator: "--"}, "at least three characters"},
 		{"bad_channel", ParserConfig{AllowedChannels: []string{"latest"}}, "reserved"},
@@ -991,7 +994,7 @@ func TestLoadParserInvalidValues(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := minimalConfig()
-			cfg.Parser = c.parser
+			cfg.Parser = &c.parser
 			_, err := loadModel(t, cfg, "pkgs/core")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)

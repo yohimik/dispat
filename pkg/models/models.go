@@ -31,10 +31,14 @@ type File struct {
 	LogLevel string `mapstructure:"logLevel" json:"logLevel,omitempty"`
 	// LogFormat selects the logger output: "pretty" (human console output)
 	// or "json" (machine-readable lines for CI ingestion).
-	LogFormat string          `mapstructure:"logFormat" json:"logFormat,omitempty"`
-	Changelog ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
-	GitHub    GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
-	Commit    CommitConfig    `mapstructure:"commit" json:"commit,omitempty"`
+	LogFormat string `mapstructure:"logFormat" json:"logFormat,omitempty"`
+	// The optional sub-objects are pointers so that an unset object marshals
+	// as an absent key rather than as "{}" — omitempty has no effect on a
+	// struct value. nil means "all defaults"; the CLI's config loader fills
+	// the pointers in after decoding, so code past validation never sees nil.
+	Changelog *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
+	GitHub    *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
+	Commit    *CommitConfig    `mapstructure:"commit" json:"commit,omitempty"`
 	// Shell is the command prefix scripts are appended to, e.g.
 	// ["bash", "-c"] or ["cmd", "/C"]. Default: ["/bin/sh", "-c"].
 	Shell []string `mapstructure:"shell" json:"shell,omitempty"`
@@ -69,17 +73,20 @@ type File struct {
 	NonPackageScopes []string `mapstructure:"nonPackageScopes" json:"nonPackageScopes,omitempty"`
 
 	// Run is the run-level hooks object; see RunConfig.
-	Run RunConfig `mapstructure:"run" json:"run,omitempty"`
+	Run *RunConfig `mapstructure:"run" json:"run,omitempty"`
 
 	// Parser holds the commit-message parser options; see ParserConfig. Every
 	// field is optional and defaults to the specification value.
-	Parser ParserConfig `mapstructure:"parser" json:"parser,omitempty"`
+	Parser *ParserConfig `mapstructure:"parser" json:"parser,omitempty"`
 
 	// Resolved values, populated by validation.
 	BuildConcurrency   int                     `mapstructure:"-" json:"-"`
 	PublishConcurrency int                     `mapstructure:"-" json:"-"`
 	InitialVersions    map[string]ccme.Version `mapstructure:"-" json:"-"`
-	ParserConfig       ccme.Config             `mapstructure:"-" json:"-"`
+	// ResolvedParser is the ccme parser configuration the `parser` object
+	// resolves to. (Its type is deliberately not ParserConfig: that struct is
+	// the file's raw shape, this is the parser's.)
+	ResolvedParser ccme.Config `mapstructure:"-" json:"-"`
 }
 
 // ParserConfig is the top-level `parser` object: the commit-message parser
@@ -106,11 +113,12 @@ type ParserConfig struct {
 	// Unicode scalar values. Default 100; negative disables the check.
 	MaxDescriptionLength int `mapstructure:"maxDescriptionLength" json:"maxDescriptionLength,omitempty"`
 	// Propagation holds the propagation defaults units inherit when they
-	// carry no directive of their own.
-	Propagation ParserPropagationConfig `mapstructure:"propagation" json:"propagation,omitempty"`
+	// carry no directive of their own. nil means all defaults.
+	Propagation *ParserPropagationConfig `mapstructure:"propagation" json:"propagation,omitempty"`
 	// Limits are the always-enforced parser bounds; exceeding one voids the
-	// whole message. Defaults: 64 units, 256 scope terms, 1 MiB.
-	Limits ParserLimitsConfig `mapstructure:"limits" json:"limits,omitempty"`
+	// whole message. Defaults: 64 units, 256 scope terms, 1 MiB. nil keeps
+	// every default.
+	Limits *ParserLimitsConfig `mapstructure:"limits" json:"limits,omitempty"`
 	// AllowedChannels restricts prerelease channel names; empty means
 	// unrestricted. "stable" is always accepted.
 	AllowedChannels []string `mapstructure:"allowedChannels" json:"allowedChannels,omitempty"`
@@ -199,8 +207,9 @@ type ChangelogConfig struct {
 	EntryFormatConfig `mapstructure:",squash"`
 }
 
-// IsEnabled reports whether the changelog file is written (default true).
-func (c ChangelogConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+// IsEnabled reports whether the changelog file is written (default true). It
+// is nil-safe: an absent changelog object means all defaults.
+func (c *ChangelogConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
 
 // GitHubConfig customises (or disables) GitHub release creation.
 type GitHubConfig struct {
@@ -213,8 +222,8 @@ type GitHubConfig struct {
 }
 
 // IsEnabled reports whether GitHub releases are created (default true; still
-// requires a resolvable repository and token at runtime).
-func (c GitHubConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+// requires a resolvable repository and token at runtime). Nil-safe.
+func (c *GitHubConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
 
 // CommitConfig customises the finalize phase: a single release commit created
 // at the end of a successful run, capturing changelog and version-script
@@ -240,15 +249,16 @@ type CommitConfig struct {
 }
 
 // IsEnabled reports whether the release commit is created (default false).
-func (c CommitConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enabled }
+// Nil-safe.
+func (c *CommitConfig) IsEnabled() bool { return c != nil && c.Enabled != nil && *c.Enabled }
 
 // PushEnabled reports whether the release commit and tags are pushed; only
-// meaningful with the commit enabled.
-func (c CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
+// meaningful with the commit enabled. Nil-safe.
+func (c *CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
 
 // VerifyEnabled reports whether remote access is verified before any release
-// work when pushing (default true).
-func (c CommitConfig) VerifyEnabled() bool { return c.Verify == nil || *c.Verify }
+// work when pushing (default true). Nil-safe.
+func (c *CommitConfig) VerifyEnabled() bool { return c == nil || c.Verify == nil || *c.Verify }
 
 // Versioning values of a space (the `versioning` key).
 const (
@@ -271,10 +281,10 @@ const (
 // SpaceConfig is the raw configuration of one space. Everything the space
 // runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
-	Path                  string          `mapstructure:"path" json:"path,omitempty"`
-	IsBuildWaitingPublish bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
-	Flow                  SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
+	Path                  string           `mapstructure:"path" json:"path,omitempty"`
+	IsBuildWaitingPublish bool             `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          bool             `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
 	// Versioning selects how versions relate across the space's packages:

@@ -83,9 +83,9 @@ func providerConsumerRepo(t *testing.T, isBuildWaitingPublish bool, providerPubl
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: "packages/provider", IsBuildWaitingPublish: isBuildWaitingPublish,
-			Flow: models.SpaceFlowConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
+			Flow: &models.SpaceFlowConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
 		"consumer": {Path: "packages/consumer",
-			Flow: models.SpaceFlowConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
+			Flow: &models.SpaceFlowConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
 	r.WriteConfigModel(cfg)
@@ -203,7 +203,7 @@ func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 		"sync":    "env | grep '^DISPAT_' | sort > " + envFile,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
+		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 			Version: []string{"sync"}, Build: []string{"build"}, Publish: []string{"publish"},
 		}},
 	}

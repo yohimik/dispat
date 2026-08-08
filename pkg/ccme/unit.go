@@ -79,7 +79,7 @@ type unitBuilder struct {
 	u *Unit
 }
 
-func (b *unitBuilder) errf(code string, pos Position, format string, args ...interface{}) {
+func (b *unitBuilder) errf(code string, pos Position, format string, args ...any) {
 	b.u.addError(Diagnostic{
 		Code:     code,
 		Severity: SeverityError,
@@ -88,7 +88,7 @@ func (b *unitBuilder) errf(code string, pos Position, format string, args ...int
 	})
 }
 
-func (b *unitBuilder) warnf(code string, pos Position, format string, args ...interface{}) {
+func (b *unitBuilder) warnf(code string, pos Position, format string, args ...any) {
 	d := warn(code, pos, format, args...)
 	d.UnitIndex = b.u.Index
 	b.u.Diagnostics = append(b.u.Diagnostics, d)
@@ -279,7 +279,7 @@ func (p *Parser) reconcile(b *unitBuilder, fd footerDirectives) {
 		u.Directives.Propagate, u.Directives.PropagateSet = *v, true
 	}
 	if v := p.reconcileDepth(b, FooterPropagateDepth, in.Depth, fd.depth, pos,
-		in.DepthWasImplied(), in.DepthFromDoubleCaret()); v != nil {
+		in.depthWasImplied(), in.depthFromDoubleCaretSigil()); v != nil {
 		u.Directives.Depth, u.Directives.DepthSet = *v, true
 	}
 	if v := reconcileDirective(b, FooterChannel, in.Channel, fd.channel, pos); v != nil {
@@ -289,7 +289,7 @@ func (p *Parser) reconcile(b *unitBuilder, fd footerDirectives) {
 		u.Directives.PropagateChannel, u.Directives.PropagateChannelSet = *v, true
 	}
 	if v := p.reconcileDepth(b, FooterPropagateChannelDepth, in.ChannelDepth, fd.channelDepth, pos,
-		in.ChannelDepthWasImplied(), false); v != nil {
+		in.channelDepthWasImplied(), false); v != nil {
 		u.Directives.ChannelDepth, u.Directives.ChannelDepthSet = *v, true
 	}
 	if fd.scopeSet {
@@ -513,6 +513,14 @@ func (p *Parser) applyBumps(b *unitBuilder) {
 	// between a hold and a cancel (§8.6.2).
 }
 
+// isScopeChar reports whether c may appear inside a scope term: §5.2's
+// scope-char, any byte above US-ASCII space except "(", ")", "," and ":".
+// High bytes pass — scope names may be UTF-8 — but ASCII control characters
+// do not.
+func isScopeChar(c byte) bool {
+	return c > 0x20 && c != '(' && c != ')' && c != ',' && c != ':'
+}
+
 // parseScopeSetValue parses a scope-set written as a footer value, applying
 // the scope-term charset of §5.2.
 func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
@@ -533,8 +541,7 @@ func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
 			return nil, errEmptyScopeSet
 		}
 		for j := 0; j < len(trimmed); j++ {
-			switch trimmed[j] {
-			case ' ', '\t', '(', ')', ',', ':':
+			if !isScopeChar(trimmed[j]) {
 				return nil, errIllegalScopeChar
 			}
 		}

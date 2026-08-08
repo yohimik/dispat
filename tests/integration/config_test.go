@@ -130,7 +130,7 @@ func TestConfigLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 		"publish": "echo publishing",
 		"login":   r.TsmarkScript("login.log", "$DISPAT_SPACE", 0),
 	}
-	withLogin := models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
+	withLogin := &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"spaceA": {Path: "packages/a", Flow: withLogin},
 		"spaceB": {Path: "packages/b", Flow: withLogin},
@@ -167,9 +167,9 @@ func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
 		"good-login": "echo ok",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"broken": {Path: "packages/broken", Flow: models.SpaceFlowConfig{
+		"broken": {Path: "packages/broken", Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"bad-login"}}},
-		"fine": {Path: "packages/fine", Flow: models.SpaceFlowConfig{
+		"fine": {Path: "packages/fine", Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"good-login"}}},
 	}
 	r.WriteConfigModel(cfg)
@@ -205,7 +205,7 @@ func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 		"record-skip": `env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
+		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 			Build:   []string{"build"},
 			Publish: []string{"publish"},
 			OnFail:  []string{"boom", "record-fail"},
@@ -331,9 +331,9 @@ func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 		"publish":      "echo publishing",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"provider": {Path: "packages/provider", Flow: models.SpaceFlowConfig{
+		"provider": {Path: "packages/provider", Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"fail-publish"}}},
-		"consumer": {Path: "packages/consumer", RevertOnFail: true, Flow: models.SpaceFlowConfig{
+		"consumer": {Path: "packages/consumer", RevertOnFail: true, Flow: &models.SpaceFlowConfig{
 			Version: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
@@ -365,9 +365,9 @@ func githubConfig(apiURL string) models.File {
 		"build":   "echo building",
 		"publish": `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`,
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}}}}
-	cfg.GitHub = models.GitHubConfig{
+	cfg.GitHub = &models.GitHubConfig{
 		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
 		APIURL: apiURL, TokenEnv: "DISPAT_IT_TOKEN",
 	}
@@ -445,7 +445,7 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 		"publish":  `echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`,
 		"announce": `echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`,
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
 	r.WriteConfigModel(cfg)
 	t.Setenv("DISPAT_IT_TOKEN", "tkn")
@@ -496,7 +496,7 @@ func TestConfigScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 		"record-fail": `env | grep '^DISPAT_OUTPUT' | sort > "../../onfail-$DISPAT_PACKAGE.env"`,
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: models.SpaceFlowConfig{
+		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 			BeforeBuild: []string{"hook-export"},
 			Build:       []string{"build"},
 			Publish:     []string{"publish"},
@@ -539,10 +539,10 @@ func TestConfigParserOptions(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
-	cfg.Parser = models.ParserConfig{
+	cfg.Parser = &models.ParserConfig{
 		Types:       map[string]string{"feat": "minor", "fix": "patch", "docs": "patch"},
 		StrictTypes: true,
-		Propagation: models.ParserPropagationConfig{Depth: "1"},
+		Propagation: &models.ParserPropagationConfig{Depth: "1"},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -566,7 +566,7 @@ func TestConfigParserOptions(t *testing.T) {
 
 	// A bad parser value is a load error: exit 1 before any planning.
 	bad := libsConfig(echoBuild, 1)
-	bad.Parser = models.ParserConfig{Types: map[string]string{"docs": "huge"}}
+	bad.Parser = &models.ParserConfig{Types: map[string]string{"docs": "huge"}}
 	r.WriteConfigModel(bad)
 	badRes := r.Status()
 	assert.Equal(t, 1, badRes.Code, "an invalid parser option must fail the load\nstdout:\n%s\nstderr:\n%s",
@@ -648,8 +648,8 @@ func TestConfigRunLevelHooks(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
 	cfg.Scripts["dump"] = "env | grep '^DISPAT_' > postall.env"
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
-	cfg.Run = models.RunConfig{
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Run = &models.RunConfig{
 		BeforeAll:    []string{"hook"},
 		PostAll:      []string{"hook", "dump"},
 		BeforeCommit: []string{"hook"},
@@ -703,7 +703,7 @@ func TestConfigRunLevelHookFailureSemantics(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["boom"] = "exit 1"
 	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
-	cfg.Run = models.RunConfig{PostAll: []string{"boom", "hook"}}
+	cfg.Run = &models.RunConfig{PostAll: []string{"boom", "hook"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first release")
@@ -717,7 +717,7 @@ func TestConfigRunLevelHookFailureSemantics(t *testing.T) {
 
 	// Rewire beforeAll to the failing script: the next release must abort
 	// before any work, leaving the pending fix unreleased and untagged.
-	cfg.Run = models.RunConfig{BeforeAll: []string{"boom"}}
+	cfg.Run = &models.RunConfig{BeforeAll: []string{"boom"}}
 	r.WriteConfigModel(cfg)
 	r.Commit("fix(core): never released")
 

@@ -251,7 +251,7 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"core": {Path: "core", Flow: buildPublish()},
-		"ui": {Path: "ui", Versioning: models.VersioningFixed, Flow: models.SpaceFlowConfig{
+		"ui": {Path: "ui", Versioning: models.VersioningFixed, Flow: &models.SpaceFlowConfig{
 			Version: []string{"sync"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "widgets", Provider: "core"}}

@@ -22,7 +22,7 @@ func BaseFile(concurrency ...int) models.File {
 		Concurrency: concurrency,
 		LogLevel:    "info",
 		LogFormat:   "json",
-		GitHub:      models.GitHubConfig{Enabled: models.Bool(false)},
+		GitHub:      &models.GitHubConfig{Enabled: models.Bool(false)},
 	}
 }
 

@@ -11,40 +11,40 @@ import (
 // tests load marshalled models end to end).
 
 func TestEnabledDefaults(t *testing.T) {
-	if !(ChangelogConfig{}).IsEnabled() {
+	if !(&ChangelogConfig{}).IsEnabled() {
 		t.Error("changelog defaults to enabled")
 	}
-	if (ChangelogConfig{Enabled: Bool(false)}).IsEnabled() {
+	if (&ChangelogConfig{Enabled: Bool(false)}).IsEnabled() {
 		t.Error("changelog can be disabled")
 	}
-	if !(GitHubConfig{}).IsEnabled() {
+	if !(&GitHubConfig{}).IsEnabled() {
 		t.Error("github defaults to enabled")
 	}
-	if (GitHubConfig{Enabled: Bool(false)}).IsEnabled() {
+	if (&GitHubConfig{Enabled: Bool(false)}).IsEnabled() {
 		t.Error("github can be disabled")
 	}
-	if (CommitConfig{}).IsEnabled() {
+	if (&CommitConfig{}).IsEnabled() {
 		t.Error("the release commit defaults to disabled")
 	}
-	if !(CommitConfig{Enabled: Bool(true)}).IsEnabled() {
+	if !(&CommitConfig{Enabled: Bool(true)}).IsEnabled() {
 		t.Error("the release commit can be enabled")
 	}
-	if (CommitConfig{Enabled: Bool(true)}).PushEnabled() {
+	if (&CommitConfig{Enabled: Bool(true)}).PushEnabled() {
 		t.Error("push needs its own flag")
 	}
-	if !(CommitConfig{Enabled: Bool(true), Push: true}).PushEnabled() {
+	if !(&CommitConfig{Enabled: Bool(true), Push: true}).PushEnabled() {
 		t.Error("push follows commit")
 	}
-	if (CommitConfig{Push: true}).PushEnabled() {
+	if (&CommitConfig{Push: true}).PushEnabled() {
 		t.Error("push without commit is inert")
 	}
-	if !(CommitConfig{}).VerifyEnabled() {
+	if !(&CommitConfig{}).VerifyEnabled() {
 		t.Error("push verification defaults to enabled")
 	}
-	if !(CommitConfig{Verify: Bool(true)}).VerifyEnabled() {
+	if !(&CommitConfig{Verify: Bool(true)}).VerifyEnabled() {
 		t.Error("verification can be stated explicitly")
 	}
-	if (CommitConfig{Verify: Bool(false)}).VerifyEnabled() {
+	if (&CommitConfig{Verify: Bool(false)}).VerifyEnabled() {
 		t.Error("verification can be disabled")
 	}
 }
@@ -94,7 +94,7 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 		Scripts: map[string]string{"build": "make"},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "packages", Versioning: VersioningFixed,
-				Flow:       SpaceFlowConfig{Build: []string{"build"}},
+				Flow:       &SpaceFlowConfig{Build: []string{"build"}},
 				RunScripts: map[string]string{"lint": "make lint"}},
 		},
 		Dependencies:     []DependencyConfig{{Consumer: "app", Provider: "core"}},
@@ -116,6 +116,13 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	}
 	if _, ok := raw["BuildConcurrency"]; ok {
 		t.Error("resolved fields must not marshal")
+	}
+	// The optional sub-objects are pointers precisely so that a model that
+	// never set them marshals without the keys at all — not as "{}" noise.
+	for _, key := range []string{"changelog", "github", "commit", "run", "parser"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("unset optional object %q must not marshal", key)
+		}
 	}
 	if string(data) != "" && json.Valid(data) != true {
 		t.Error("marshalled config must be valid JSON")

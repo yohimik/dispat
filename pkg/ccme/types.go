@@ -186,7 +186,6 @@ func (c ChannelValue) IsWord() bool { return c.Word != "" }
 // IsZero reports whether no channel value was given at all.
 func (c ChannelValue) IsZero() bool { return c.Word == "" && c.From == "" && c.To == "" }
 
-// String renders the value as it would be written.
 // configChannelValue lifts a configured channel string into a ChannelValue.
 // Configuration cannot express a transition, so the result is either one of
 // the two words or a plain target.
@@ -201,6 +200,7 @@ func configChannelValue(ch string) ChannelValue {
 	}
 }
 
+// String renders the value as it would be written.
 func (c ChannelValue) String() string {
 	switch {
 	case c.Word != "":
@@ -397,24 +397,24 @@ func (d InlineDirectives) IsEmpty() bool {
 		d.PropagateChannel == nil && d.ChannelDepth == nil
 }
 
-// DepthFromDoubleCaret reports whether an inline depth came from "^^" rather
-// than an explicit "+N". It is what separates the redundant "^^minor+*" (W110)
-// from the contradictory "^^minor+2" (E113).
-func (d InlineDirectives) DepthFromDoubleCaret() bool {
+// depthFromDoubleCaretSigil reports whether an inline depth came from "^^"
+// rather than an explicit "+N". It is what separates the redundant "^^minor+*"
+// (W110) from the contradictory "^^minor+2" (E113).
+func (d InlineDirectives) depthFromDoubleCaretSigil() bool {
 	return d.depthFrom == depthFromDoubleCaret
 }
 
-// DepthWasImplied reports whether an inline depth was merely implied by "^"
+// depthWasImplied reports whether an inline depth was merely implied by "^"
 // rather than stated. An implied depth is a default and yields silently to an
 // explicit "+N" or a Propagate-Depth footer; "^^" is not implied but asserted,
-// which is what DepthFromDoubleCaret separates out.
-func (d InlineDirectives) DepthWasImplied() bool {
+// which is what depthFromDoubleCaretSigil separates out.
+func (d InlineDirectives) depthWasImplied() bool {
 	return d.depthFrom == depthFromCaret
 }
 
-// ChannelDepthWasImplied reports whether the inline channel depth came from
+// channelDepthWasImplied reports whether the inline channel depth came from
 // "@@" rather than an explicit "++N".
-func (d InlineDirectives) ChannelDepthWasImplied() bool {
+func (d InlineDirectives) channelDepthWasImplied() bool {
 	return d.channelDepthFrom == depthFromDoubleAt
 }
 

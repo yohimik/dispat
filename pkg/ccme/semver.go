@@ -40,13 +40,35 @@ func (v Version) String() string {
 // IsPrerelease reports whether the version carries a prerelease component.
 func (v Version) IsPrerelease() bool { return len(v.Prerelease) > 0 }
 
+// MarshalText implements encoding.TextMarshaler, rendering the version the
+// way String does (build metadata dropped), so a Version crossing a module
+// boundary — a config model's initial versions, say — serialises as "1.2.3"
+// rather than as a struct.
+func (v Version) MarshalText() ([]byte, error) { return []byte(v.String()), nil }
+
+// UnmarshalText implements encoding.TextUnmarshaler via ParseVersion.
+func (v *Version) UnmarshalText(text []byte) error {
+	parsed, err := ParseVersion(string(text))
+	if err != nil {
+		return err
+	}
+	*v = parsed
+	return nil
+}
+
 // Core strips the prerelease and build components, leaving the
 // MAJOR.MINOR.PATCH triple: 1.0.1-beta.4 -> 1.0.1.
 func (v Version) Core() Version {
 	return Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
 }
 
-// Bumped returns the version incremented by b.
+// Bumped returns the version incremented by b: the next major, minor or patch
+// core above v's, with prerelease and build dropped. Bumping a *prerelease*
+// baseline therefore both graduates it and moves the core — 1.2.0-beta.1
+// bumped minor is 1.3.0, not 1.2.0; whether the train should instead graduate
+// to its own target is the release engine's §11 decision, made against the
+// stable baseline, never through this helper. BumpNone returns v unchanged,
+// Raw and build metadata included.
 func (v Version) Bumped(b Bump) Version {
 	switch b {
 	case BumpMajor:
@@ -171,10 +193,11 @@ func readNumericCore(sc *scanner) (uint64, error) {
 	}
 	var n uint64
 	for i := 0; i < len(digits); i++ {
-		if n > (1<<63)/10 {
+		d := uint64(digits[i] - '0')
+		if n > (^uint64(0)-d)/10 {
 			return 0, fmt.Errorf("%w: %q overflows", ErrInvalidVersion, digits)
 		}
-		n = n*10 + uint64(digits[i]-'0')
+		n = n*10 + d
 	}
 	return n, nil
 }
@@ -182,9 +205,10 @@ func readNumericCore(sc *scanner) (uint64, error) {
 // readIdentifiers reads dot-separated identifiers, stopping at any byte in
 // stop or at eof.
 func readIdentifiers(sc *scanner, stop string) ([]string, error) {
+	stops := "." + stop // hoisted: one concat per call, not per identifier
 	var out []string
 	for {
-		id := sc.readUntilAny("." + stop)
+		id := sc.readUntilAny(stops)
 		if id == "" {
 			return nil, errors.New("empty identifier")
 		}

@@ -82,7 +82,7 @@ func TestRecordsChangelogAccumulatesAcrossReleases(t *testing.T) {
 func TestRecordsChangelogCustomFileTitleAndSections(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Changelog = models.ChangelogConfig{
+	cfg.Changelog = &models.ChangelogConfig{
 		File:  "HISTORY.md",
 		Title: "# History",
 		EntryFormatConfig: models.EntryFormatConfig{
@@ -129,7 +129,7 @@ func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 func TestRecordsReleaseCommitTagsAndPush(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -172,7 +172,7 @@ func TestRecordsReleaseCommitTagsAndPush(t *testing.T) {
 func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig("exit 1", 1)
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true)}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): will fail its build")
@@ -193,7 +193,7 @@ func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.
 func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -226,7 +226,7 @@ func TestRecordsExportedPackageCommitPinsTheTag(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["publish"] = `echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"`
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true)}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first release")
@@ -251,7 +251,7 @@ func TestRecordsExportedCommitExcludesTagFromReleaseCommitAndPushes(t *testing.T
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["publish"] = `if [ "$DISPAT_PACKAGE" = "a" ]; then` +
 		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -308,7 +308,7 @@ func TestRecordsExportedCommitPinsTagOutsideCommitMode(t *testing.T) {
 func TestRecordsPushVerifyDisabled(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true, Verify: models.Bool(false)}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true, Verify: models.Bool(false)}
 	r.WriteConfigModel(cfg) // note: no remote configured at all
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): released, push fails later")
@@ -323,7 +323,7 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 	// fails fast, before any release work at all.
 	rd := harness.New(t)
 	cfg = libsConfig(echoBuild, 1)
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	rd.WriteConfigModel(cfg) // again no remote configured
 	rd.SeedPackage("packages", "core")
 	rd.Commit("feat(core): never released")
@@ -341,7 +341,7 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 func TestRecordsChangelogDisabled(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Changelog = models.ChangelogConfig{Enabled: models.Bool(false)}
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(false)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): no changelog wanted")
@@ -375,9 +375,9 @@ func TestRecordsCommitModeGithubFinalize(t *testing.T) {
 	cfg.Scripts["publish"] = `if [ "$DISPAT_PACKAGE" = "a" ]; then` +
 		` echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT";` +
 		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`
-	cfg.Commit = models.CommitConfig{Enabled: models.Bool(true),
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
 		MessageFormat: "chore(release): publish {packages} as {tags}"}
-	cfg.GitHub = models.GitHubConfig{
+	cfg.GitHub = &models.GitHubConfig{
 		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
 		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
 	}

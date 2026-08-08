@@ -83,23 +83,23 @@ func TestGithubReleaserResolution(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "envtoken")
 	t.Setenv("CUSTOM_TOKEN", "customtoken")
 
-	gh, err := githubReleaser(config.GitHubConfig{}, zerolog.Nop())
+	gh, err := githubReleaser(&config.GitHubConfig{}, zerolog.Nop())
 	require.NoError(t, err)
 	assert.Equal(t, "envowner", gh.Owner)
 	assert.Equal(t, "envrepo", gh.Repo)
 	assert.Equal(t, "envtoken", gh.Token)
 
-	gh, err = githubReleaser(config.GitHubConfig{Owner: "acme", Repo: "mono", TokenEnv: "CUSTOM_TOKEN"}, zerolog.Nop())
+	gh, err = githubReleaser(&config.GitHubConfig{Owner: "acme", Repo: "mono", TokenEnv: "CUSTOM_TOKEN"}, zerolog.Nop())
 	require.NoError(t, err)
 	assert.Equal(t, "acme", gh.Owner)
 	assert.Equal(t, "mono", gh.Repo)
 	assert.Equal(t, "customtoken", gh.Token)
 
 	t.Setenv("GITHUB_REPOSITORY", "")
-	_, err = githubReleaser(config.GitHubConfig{}, zerolog.Nop())
+	_, err = githubReleaser(&config.GitHubConfig{}, zerolog.Nop())
 	assert.ErrorContains(t, err, "no repository")
 
 	t.Setenv("GITHUB_TOKEN", "")
-	_, err = githubReleaser(config.GitHubConfig{Owner: "acme", Repo: "mono"}, zerolog.Nop())
+	_, err = githubReleaser(&config.GitHubConfig{Owner: "acme", Repo: "mono"}, zerolog.Nop())
 	assert.ErrorContains(t, err, "GITHUB_TOKEN")
 }

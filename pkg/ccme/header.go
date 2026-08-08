@@ -123,6 +123,13 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			case ':':
 				return h, warns, fail(CodeE103, at(ci),
 					"unbalanced scope-set: ':' reached before ')'")
+			default:
+				// §5.2's scope-char excludes the ASCII control range as a
+				// whole, not just space and tab.
+				if !isScopeChar(line[ci]) {
+					return h, warns, fail(CodeE102, at(ci),
+						"control character inside a scope-set")
+				}
 			}
 		}
 	}

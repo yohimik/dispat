@@ -103,8 +103,10 @@ type Position struct {
 	Column int
 }
 
-// String implements fmt.Stringer, rendering "line:column".
-func (p Position) String() string { return fmt.Sprintf("%d:%d", p.Line, p.Column) }
+// String implements fmt.Stringer, rendering "line:column". Like every other
+// String in the package it avoids fmt, so rendering diagnostics stays off the
+// allocator's hot path.
+func (p Position) String() string { return itoa(p.Line) + ":" + itoa(p.Column) }
 
 // shift returns the position n bytes to the right on the same line.
 func (p Position) shift(n int) Position {
@@ -138,7 +140,7 @@ func (e *fatalError) Error() string { return e.diag.String() }
 
 // formatMessage renders a diagnostic message, skipping the formatting
 // machinery for the many call sites whose format string is already complete.
-func formatMessage(format string, args []interface{}) string {
+func formatMessage(format string, args []any) string {
 	if len(args) == 0 {
 		return format
 	}
@@ -146,7 +148,7 @@ func formatMessage(format string, args []interface{}) string {
 }
 
 // fail builds an error-severity diagnostic wrapped as an error.
-func fail(code string, pos Position, format string, args ...interface{}) error {
+func fail(code string, pos Position, format string, args ...any) error {
 	return &fatalError{diag: Diagnostic{
 		Code:      code,
 		Severity:  SeverityError,
@@ -157,7 +159,7 @@ func fail(code string, pos Position, format string, args ...interface{}) error {
 }
 
 // warn builds a warning-severity diagnostic.
-func warn(code string, pos Position, format string, args ...interface{}) Diagnostic {
+func warn(code string, pos Position, format string, args ...any) Diagnostic {
 	return Diagnostic{
 		Code:      code,
 		Severity:  SeverityWarning,
@@ -168,17 +170,16 @@ func warn(code string, pos Position, format string, args ...interface{}) Diagnos
 }
 
 // asDiagnostic converts an error produced by this package back into a
-// Diagnostic. It panics on foreign errors, which cannot occur.
+// Diagnostic. It panics on foreign errors, which cannot occur: every error
+// funnelled here was built by fail. The panic is deliberate — the silent
+// alternative would fabricate a diagnostic with a zero Position, violating
+// the Line >= 1 invariant every real diagnostic holds.
 func asDiagnostic(err error) Diagnostic {
-	if fe, ok := err.(*fatalError); ok {
-		return fe.diag
+	fe, ok := err.(*fatalError)
+	if !ok {
+		panic("ccme: internal error: foreign error reached asDiagnostic: " + err.Error())
 	}
-	return Diagnostic{
-		Code:      CodeE100,
-		Severity:  SeverityError,
-		Message:   err.Error(),
-		UnitIndex: -1,
-	}
+	return fe.diag
 }
 
 // ParseError aggregates every error-severity diagnostic produced by a parse.

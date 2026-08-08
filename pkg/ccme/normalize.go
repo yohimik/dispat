@@ -147,9 +147,9 @@ func splitLines(s string) []string {
 // The returned unit sources share both the line slice and the message string;
 // nothing is copied unless a unit contains an escaped separator, which is the
 // one case where a unit's text is not a contiguous substring of the message.
-func splitUnits(msg string, lines []string, separator string) ([]unitSource, []Diagnostic) {
-	escapedSep := "\\" + separator
-
+// escapedSep is the separator with its backslash escape prefix, precomputed on
+// the Parser so the hot path does not rebuild the string on every message.
+func splitUnits(msg string, lines []string, separator, escapedSep string) ([]unitSource, []Diagnostic) {
 	var (
 		out       []unitSource
 		diags     []Diagnostic

@@ -31,8 +31,8 @@ import (
 
 // buildPublish is the standard space run object: a build and a publish stage
 // referencing the "build" and "publish" scripts.
-func buildPublish() models.SpaceFlowConfig {
-	return models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+func buildPublish() *models.SpaceFlowConfig {
+	return &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
 }
 
 // libsConfig returns the canonical one-space config: a "libs" space at

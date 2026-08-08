@@ -161,7 +161,7 @@ func (a *App) recorders(gh *github.Releaser, commitMode bool) []release.ReleaseR
 // githubReleaser resolves repository and token for the GitHub recorder. The
 // repository comes from config or $GITHUB_REPOSITORY ("owner/repo"), the
 // token from the configured env var (default $GITHUB_TOKEN).
-func githubReleaser(gc config.GitHubConfig, log zerolog.Logger) (*github.Releaser, error) {
+func githubReleaser(gc *config.GitHubConfig, log zerolog.Logger) (*github.Releaser, error) {
 	owner, repo := gc.Owner, gc.Repo
 	if owner == "" || repo == "" {
 		if env := os.Getenv("GITHUB_REPOSITORY"); env != "" {

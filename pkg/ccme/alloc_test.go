@@ -40,13 +40,8 @@ func TestAllocationBudget(t *testing.T) {
 			run:    func() { allocSink, _ = p.Parse(benchSimple) },
 		},
 		{
-			name: "Parse/directives",
-			// Measured 15 before the two-axis grammar; benchDirectives has
-			// gained a footer since, so this is deliberately loose. Re-pin it
-			// from a real `go test -bench . -benchmem` run — the shape it
-			// guards (nothing proportional to the body, nothing per unit) is
-			// unaffected either way.
-			budget: 18,
+			name:   "Parse/directives",
+			budget: 17, // measured 16 (go1.26, two-axis grammar with a footer)
 			run:    func() { allocSink, _ = p.Parse(benchDirectives) },
 		},
 		{
@@ -59,6 +54,38 @@ func TestAllocationBudget(t *testing.T) {
 	for _, tc := range cases {
 		if got := testing.AllocsPerRun(200, tc.run); got > tc.budget {
 			t.Errorf("%s: %.0f allocs/op, budget %.0f", tc.name, got, tc.budget)
+		}
+	}
+}
+
+// TestAllocationByteBudget pins bytes/op alongside the counts: a change that
+// keeps the allocation count but grows what each allocation holds — a copied
+// message, a fatter buffer — passes the count gate and trips this one. The
+// budgets are measured values rounded up ~30% so a toolchain change does not
+// fail the build for a size-class difference.
+func TestAllocationByteBudget(t *testing.T) {
+	p := DefaultParser()
+
+	cases := []struct {
+		name   string
+		budget int64 // bytes/op
+		run    func()
+	}{
+		{"ParseSubject", 1000, func() { allocSink, _ = p.ParseSubject(benchSubject) }}, // measured 774
+		{"Parse/simple", 1500, func() { allocSink, _ = p.Parse(benchSimple) }},         // measured 1142
+		{"Parse/directives", 3200, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 2454
+		{"Parse/multiUnit", 5000, func() { allocSink, _ = p.Parse(benchMultiUnit) }},   // measured 3846
+	}
+
+	for _, tc := range cases {
+		r := testing.Benchmark(func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				tc.run()
+			}
+		})
+		if got := r.AllocedBytesPerOp(); got > tc.budget {
+			t.Errorf("%s: %d B/op, budget %d", tc.name, got, tc.budget)
 		}
 	}
 }

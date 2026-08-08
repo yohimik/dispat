@@ -106,7 +106,7 @@ func (a *App) planOptions() (plan.Options, error) {
 		Initials:         a.initialVersions(pkgs),
 		Root:             a.root,
 		NonPackageScopes: a.cfg.NonPackageScopes,
-		ParserConfig:     a.cfg.ParserConfig,
+		ParserConfig:     a.cfg.ResolvedParser,
 	}, nil
 }
 
