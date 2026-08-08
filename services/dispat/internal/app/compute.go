@@ -133,30 +133,15 @@ func (a *App) detectEdges(ctx context.Context, pkgs []*model.Package) ([]detecte
 		}
 	}
 
-	// The name map, root manifests before nested ones so a package's own
-	// identity beats a vendored or example manifest deeper in another
-	// package. A same-priority collision is ambiguous: W220, no edges by
-	// that name.
-	byName := make(map[string]string)
-	ambiguous := make(map[string]bool)
-	for _, root := range []bool{true, false} {
-		for _, pa := range all {
-			for _, m := range pa.mans {
-				if m.Root != root || m.Name == "" {
-					continue
-				}
-				owner, taken := byName[m.Name]
-				switch {
-				case !taken:
-					byName[m.Name] = pa.pkg.Name
-				case owner != pa.pkg.Name && root:
-					ambiguous[m.Name] = true
-				}
-			}
-		}
+	// The name map: scanner.NameIndex's rule, shared with the executor's
+	// auto-versioning — root manifests bind before nested ones, and a
+	// same-priority collision is ambiguous: W220, no edges by that name.
+	owners := make([]scanner.Owner, 0, len(all))
+	for _, pa := range all {
+		owners = append(owners, scanner.Owner{Package: pa.pkg.Name, Manifests: pa.mans})
 	}
-	for name := range ambiguous {
-		delete(byName, name)
+	byName, ambiguous := scanner.NameIndex(owners)
+	for _, name := range ambiguous {
 		a.log.Warn().Str("code", plan.CodeAmbiguousManifestName).
 			Str("name", name).
 			Msg("two packages declare the same manifest name; no edges derived from it")
@@ -169,7 +154,7 @@ func (a *App) detectEdges(ctx context.Context, pkgs []*model.Package) ([]detecte
 			for _, d := range m.Deps {
 				provider := byName[d.Name]
 				if provider == "" && d.LocalPath != "" {
-					provider = resolveLocal(byDir, pa.pkg.Dir, m.Path, d.LocalPath)
+					provider = scanner.ResolveLocalDir(byDir, pa.pkg.Dir, m.Path, d.LocalPath)
 				}
 				if provider == "" || provider == pa.pkg.Name {
 					continue
@@ -190,23 +175,6 @@ func (a *App) detectEdges(ctx context.Context, pkgs []*model.Package) ([]detecte
 		}
 	}
 	return edges, hasManifest
-}
-
-// resolveLocal maps a declared local path onto the package whose folder it
-// points into, ascending from the exact target so a path into a package's
-// sub-folder still finds it.
-func resolveLocal(byDir map[string]string, pkgDir, manifestRel, local string) string {
-	dir := filepath.Clean(filepath.Join(pkgDir, filepath.Dir(filepath.FromSlash(manifestRel)), filepath.FromSlash(local)))
-	for {
-		if name, ok := byDir[dir]; ok {
-			return name
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
 }
 
 // relPath is filepath.Rel with the path itself as the fallback, slashed for
@@ -443,7 +411,7 @@ func (a *App) applySuggestions(cfgPath string, apply []suggestion, out io.Writer
 		if renderErr != nil {
 			return renderErr
 		}
-		fmt.Fprintf(out, "\n%s\n%s", "# paste over the [[dependencies]] blocks in "+filepath.Base(cfgPath)+":", snippet)
+		fmt.Fprintf(out, "\n# paste over the [[dependencies]] blocks in %s:\n%s", filepath.Base(cfgPath), snippet)
 		a.log.Error().Err(err).Msg("cannot edit a TOML config in place")
 		return err
 	}
@@ -451,6 +419,9 @@ func (a *App) applySuggestions(cfgPath string, apply []suggestion, out io.Writer
 		a.log.Error().Err(err).Msg("writing the config failed")
 		return err
 	}
+	// Keep the in-memory view aligned with the file just written; the process
+	// exits right after, but a future long-lived caller must not see a config
+	// that disagrees with disk.
 	a.cfg.Dependencies = next
 	fmt.Fprintf(out, "\napplied %d change(s) to %s (previous copy at %s)\n",
 		len(apply), filepath.Base(cfgPath), filepath.Base(cfgPath)+config.BackupSuffix)

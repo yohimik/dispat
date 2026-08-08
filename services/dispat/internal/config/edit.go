@@ -21,9 +21,16 @@ var ErrTOMLEdit = errors.New("a TOML config cannot be rewritten in place")
 const BackupSuffix = ".backup"
 
 // ReplaceDependencies rewrites only the `dependencies` key of the config file
-// at path, leaving every other byte (formatting, key order, comments)
-// untouched, after saving a byte-for-byte copy at path + BackupSuffix. JSON
-// and YAML configs are supported; TOML returns ErrTOMLEdit.
+// at path, leaving every other byte of a JSON config (formatting, key order,
+// comments) untouched; a YAML config keeps its comments but is re-encoded, so
+// unrelated formatting may reflow. The previous bytes are saved at path +
+// BackupSuffix first, and the write itself is atomic (temp + rename). TOML
+// returns ErrTOMLEdit.
+//
+// The file is re-read here: deps must be the caller's complete intended list,
+// and an edit made to the file by someone else between the caller's read and
+// this call is overwritten for the `dependencies` key (every other key keeps
+// the concurrent edit).
 func ReplaceDependencies(path string, deps []DependencyConfig) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

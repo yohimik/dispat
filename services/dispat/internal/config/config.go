@@ -383,6 +383,16 @@ func validate(c *File) error {
 	if len(c.Shell) > 0 && c.Shell[0] == "" {
 		return errors.New("shell: first element (the interpreter) must not be empty")
 	}
+	// commit.include paths are staged relative to the monorepo root; anything
+	// absolute or escaping the root would stage files outside the repository.
+	for i, p := range c.Commit.Include {
+		if p == "" || filepath.IsAbs(p) {
+			return fmt.Errorf("commit.include[%d]: %q must be a repository-relative path", i, p)
+		}
+		if clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(p))); clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("commit.include[%d]: %q escapes the repository root", i, p)
+		}
+	}
 	if err := resolveInitials(c); err != nil {
 		return err
 	}

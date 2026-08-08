@@ -164,9 +164,19 @@ const (
 	// pinning a moving prerelease is worth an operator's glance.
 	CodeStableOverPrerelease = "W203"
 	// CodeAmbiguousManifestName marks two workspace packages whose manifests
-	// declare the same name: the name-to-package mapping is ambiguous, so
-	// compute derives no edges from that name.
+	// declare the same name: the name-to-package mapping is ambiguous, so no
+	// edges are derived from that name — by compute and by the executor's
+	// auto-versioning alike.
 	CodeAmbiguousManifestName = "W220"
+	// CodeUnscheduledRewriteEdge marks an auto-versioned manifest dependency
+	// with no configured `dependencies` edge behind it: the scheduler cannot
+	// order the consumer after this provider or skip it on the provider's
+	// failure, so the rewritten range is optimistic about a publish that may
+	// still fail. `dispat compute` derives the missing edge.
+	CodeUnscheduledRewriteEdge = "W221"
+
+	// --- release outcomes, repository-scoped (§16) ---
+
 	// CodeBadPrereleaseTag rejects an existing prerelease tag whose counter is
 	// not a numeric identifier (§11.3). Repository-scoped.
 	CodeBadPrereleaseTag = "E182"

@@ -246,6 +246,13 @@ type CommitConfig struct {
 	// to skip it, e.g. for a remote that rejects ls-remote but accepts
 	// pushes.
 	Verify *bool `mapstructure:"verify" json:"verify,omitempty"` // default true
+	// Include lists extra repo-relative paths the release commit stages on
+	// top of the published packages' folders: the shared artifacts a version
+	// stage or an autoVersion syncLock regenerates outside every package
+	// folder, a workspace-level package-lock.json first among them. Paths
+	// must stay inside the repository (no absolute paths, no "..") and may
+	// name files that do not exist yet.
+	Include []string `mapstructure:"include" json:"include,omitempty"`
 }
 
 // IsEnabled reports whether the release commit is created (default false).
@@ -414,20 +421,24 @@ type SpaceFlowConfig struct {
 }
 
 // DependencyConfig is one consumer -> provider relation.
+// The yaml tags exist because the CLI's compute command re-encodes this one
+// struct when editing a YAML config in place; without them the encoder would
+// write lowercased field names with `kind: ""` / `keep: false` noise on every
+// edge.
 type DependencyConfig struct {
-	Consumer string `mapstructure:"consumer" json:"consumer,omitempty"`
-	Provider string `mapstructure:"provider" json:"provider,omitempty"`
+	Consumer string `mapstructure:"consumer" json:"consumer,omitempty" yaml:"consumer"`
+	Provider string `mapstructure:"provider" json:"provider,omitempty" yaml:"provider"`
 	// Kind is the manifest dependency field the edge stands for:
 	// "dependencies" (the default when empty), "devDependencies",
 	// "peerDependencies" or "optionalDependencies". Propagation follows or
 	// ignores the edge according to parser.propagation.kinds, whose default
 	// is every kind except devDependencies.
-	Kind string `mapstructure:"kind" json:"kind,omitempty"`
+	Kind string `mapstructure:"kind" json:"kind,omitempty" yaml:"kind,omitempty"`
 	// Keep marks an edge `dispat compute` must never suggest removing: the
 	// declaration is deliberate even though no manifest declares it (a Docker
 	// image chain, a codegen coupling). Purely a compute-command annotation —
 	// the planner treats kept edges like any other.
-	Keep bool `mapstructure:"keep" json:"keep,omitempty"`
+	Keep bool `mapstructure:"keep" json:"keep,omitempty" yaml:"keep,omitempty"`
 }
 
 // Values of the commitErrors key.

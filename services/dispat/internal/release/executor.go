@@ -303,7 +303,8 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	}
 
 	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins,
-		results: results, started: make(map[string]time.Time), scan: e.Scanner}
+		results: results, started: make(map[string]time.Time), scan: e.Scanner,
+		avChanged: make(map[string]bool)}
 
 	// The native rewriting inputs — the manifest-name and folder indexes of
 	// the whole workspace — are built once, and only when a releasing package
@@ -313,7 +314,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			if r.scan == nil {
 				r.scan = scanner.New()
 			}
-			r.avNames, r.avDirs = workspaceNames(p, e.Log)
+			r.avNames, r.avDirs = workspaceNames(ctx, r.scan, p, e.Log)
 			break
 		}
 	}
@@ -378,6 +379,11 @@ type run struct {
 	scan    scanner.Scanner
 	avNames map[string]string
 	avDirs  map[string]string
+	// avChanged (guarded by mu) records which packages' version stages
+	// actually modified a manifest — natively or through a flow.version
+	// script — so a syncLock task with nothing to regenerate can skip its
+	// subprocess instead of serialising an empty `npm install` per package.
+	avChanged map[string]bool
 }
 
 // hasVersionTask reports whether the package's release runs a version task:
@@ -552,23 +558,32 @@ func (r *run) execute(ctx context.Context, t task) {
 	}
 
 	space := rel.Pkg.Space
-	var commands, before, after []string
-	var native func(context.Context) error
+	var frame stage
 	switch t.kind {
 	case taskVersion:
-		commands, before, after = space.VersionScript, space.BeforeVersionScript, space.PostVersionScript
+		frame = stage{commands: space.VersionScript, before: space.BeforeVersionScript, after: space.PostVersionScript}
 		if space.AutoVersion != nil {
-			native = tc.autoVersion
+			frame.native = tc.autoVersion
 		}
 	case taskBuild:
-		commands, before, after = space.BuildScript, space.BeforeBuildScript, space.PostBuildScript
+		frame = stage{commands: space.BuildScript, before: space.BeforeBuildScript, after: space.PostBuildScript}
 	case taskSyncLock:
-		// The lock-sync sequence: no hooks of its own, budgeted separately.
-		commands = space.AutoVersion.SyncLock
+		// The lock-sync sequence: no hooks of its own, budgeted separately —
+		// and skipped outright when this package's version stage changed no
+		// manifest, so a quiet release does not serialise one lock
+		// regeneration per package for nothing.
+		r.mu.Lock()
+		manifestsChanged := r.avChanged[t.pkg]
+		r.mu.Unlock()
+		if manifestsChanged {
+			frame = stage{commands: space.AutoVersion.SyncLock}
+		} else {
+			log.Debug().Msg("syncLock: no manifest changed, nothing to regenerate")
+		}
 	default:
 		// postPublish is not part of this frame: it only runs after the
 		// package is fully published, further down.
-		commands, before, after = space.PublishScript, space.BeforePublishScript, nil
+		frame = stage{commands: space.PublishScript, before: space.BeforePublishScript}
 	}
 	if t.kind == taskVersion && len(tc.updates) == 0 && len(rel.DueTo) > 0 {
 		// Every provider this package was bumped for failed or was skipped
@@ -578,7 +593,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		// against baselines too (§9.4) and never writes a dead provider's
 		// planned version, so it proceeds.
 		log.Info().Msg("version: no successfully updated providers, skipping scripts")
-		commands, before, after = nil, nil, nil
+		frame.commands, frame.before, frame.after = nil, nil, nil
 	}
 
 	if t.kind == taskPublish {
@@ -588,9 +603,14 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 	}
 
-	if what, err := tc.stageFrame(ctx, before, native, commands, after); err != nil {
+	if what, err := tc.stageFrame(ctx, frame); err != nil {
 		fail(err, what)
 		return
+	}
+	if t.kind == taskVersion && len(frame.commands) > 0 {
+		// A flow.version script may have edited manifests too; the syncLock
+		// skip must stay conservative about what it cannot see.
+		tc.markManifestsChanged()
 	}
 	if t.kind != taskPublish {
 		log.Info().Msg(t.kind.String() + " succeeded")
@@ -637,32 +657,42 @@ func (tc *taskCtx) loginGate(ctx context.Context) error {
 	return nil
 }
 
+// stage is one task's gating frame: the bracketing hooks, the stage's shell
+// commands, and the optional native step dispat runs itself (the version
+// stage's auto-versioning). One value instead of four same-shaped positional
+// parameters, so a call site cannot quietly transpose two of them.
+type stage struct {
+	before   []string
+	native   func(context.Context) error
+	commands []string
+	after    []string
+}
+
 // stageFrame runs the task's gating frame: before hook, the native step when
-// the stage has one (the version stage's auto-versioning), stage scripts,
-// after hook — each fail-fast, every failure failing the release, because all
-// of them exist to decide whether the release happens. what labels the
-// failing piece for the log ("beforeBuild hook failed", "build script
-// failed").
-func (tc *taskCtx) stageFrame(ctx context.Context, before []string, native func(context.Context) error, commands, after []string) (what string, err error) {
+// the stage has one, stage scripts, after hook — each fail-fast, every
+// failure failing the release, because all of them exist to decide whether
+// the release happens. what labels the failing piece for the log
+// ("beforeBuild hook failed", "build script failed").
+func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err error) {
 	kind := tc.t.kind
-	if err := tc.hook(ctx, "before"+stageTitle(kind), before, true); err != nil {
+	if err := tc.hook(ctx, "before"+stageTitle(kind), s.before, true); err != nil {
 		return "before" + stageTitle(kind) + " hook failed", err
 	}
-	if native != nil {
-		if err := native(ctx); err != nil {
+	if s.native != nil {
+		if err := s.native(ctx); err != nil {
 			return "auto-versioning failed", err
 		}
 	}
-	if len(commands) == 0 {
+	if len(s.commands) == 0 {
 		// No script configured: the stage completes without running anything.
 		tc.log.Debug().Msg(kind.String() + ": no script configured, nothing to execute")
 	} else {
 		tc.log.Info().Msg(kind.String() + " started")
-		if err := tc.sequence(kind.String(), commands, true).RunMergingOutputs(ctx, tc.rel); err != nil {
+		if err := tc.sequence(kind.String(), s.commands, true).RunMergingOutputs(ctx, tc.rel); err != nil {
 			return kind.String() + " script failed", err
 		}
 	}
-	if err := tc.hook(ctx, "post"+stageTitle(kind), after, true); err != nil {
+	if err := tc.hook(ctx, "post"+stageTitle(kind), s.after, true); err != nil {
 		return "post" + stageTitle(kind) + " hook failed", err
 	}
 	return "", nil

@@ -23,27 +23,28 @@ import (
 // workspaceNames maps every package's manifest identity onto its package
 // name, from the root manifests alone — a package's identity is declared at
 // its root, not in a vendored example three levels down. Also returns the
-// cleaned package-folder index for declared-local-path matching. First in
-// plan order wins a name collision (compute reports the ambiguity as W220;
-// the executor stays deterministic about it).
-func workspaceNames(p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
-	names = make(map[string]string)
+// cleaned package-folder index for declared-local-path matching. The mapping
+// is scanner.NameIndex's, the same rule compute uses, so a name compute
+// refuses as ambiguous (W220) is never quietly rewritten here either.
+func workspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
+	owners := make([]scanner.Owner, 0, len(p.Order))
 	dirs = make(map[string]string, len(p.Order))
 	for _, name := range p.Order {
 		rel := p.Releases[name]
+		if rel == nil {
+			continue
+		}
 		dirs[filepath.Clean(rel.Pkg.Dir)] = name
-		mans, err := scanner.ScanRoot(rel.Pkg.Dir)
+		mans, err := sc.ScanRoot(ctx, rel.Pkg.Dir)
 		if err != nil {
 			log.Debug().Err(err).Str("package", name).Msg("auto-versioning: root manifest failed to parse")
 		}
-		for _, m := range mans {
-			if m.Name == "" {
-				continue
-			}
-			if _, taken := names[m.Name]; !taken {
-				names[m.Name] = name
-			}
-		}
+		owners = append(owners, scanner.Owner{Package: name, Manifests: mans})
+	}
+	names, ambiguous := scanner.NameIndex(owners)
+	for _, name := range ambiguous {
+		log.Warn().Str("code", plan.CodeAmbiguousManifestName).Str("name", name).
+			Msg("two packages declare the same manifest name; auto-versioning derives nothing from it")
 	}
 	return names, dirs
 }
@@ -63,21 +64,33 @@ func (tc *taskCtx) autoVersion(ctx context.Context) error {
 	if av.AllManifests {
 		mans, err = tc.scan.Scan(ctx, tc.rel.Pkg.Dir)
 	} else {
-		mans, err = scanner.ScanRoot(tc.rel.Pkg.Dir)
+		mans, err = tc.scan.ScanRoot(ctx, tc.rel.Pkg.Dir)
 	}
 	if err != nil {
+		// An interrupted scan is an interruption, not a partial parse: the
+		// shutdown contract says stop issuing work.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		// A partial scan is reported but not fatal: the parsed manifests are
 		// still reconciled — matching how compute treats the same situation.
 		tc.log.Warn().Err(err).Msg("auto-versioning: some manifests failed to parse")
 	}
 
 	for _, m := range mans {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr // interrupted mid-stage: no more rewrites
+		}
 		if !writer.Supported(m.Path) {
 			continue // read-only ecosystem (Cargo, Python, ...): flow.version's job for now
 		}
 		edits := tc.manifestEdits(av, m)
 		version := ""
-		if av.WriteVersion {
+		// The own-version write applies to the package's *root* manifests
+		// alone: a nested manifest (an example, a fixture) has its own
+		// version story, and stamping the release version into it would be
+		// wrong however the space scans.
+		if av.WriteVersion && m.Root {
 			version = tc.rel.Next.String()
 			if m.Version != "" && m.Version != tc.rel.Previous().String() && m.Version != version {
 				// §12.4: tags are authoritative; a manifest version disagreeing
@@ -105,6 +118,7 @@ func (tc *taskCtx) autoVersion(ctx context.Context) error {
 				Msg("auto-versioning: declaration disappeared between scan and rewrite")
 		}
 		if len(res.Applied) > 0 || res.VersionWritten {
+			tc.markManifestsChanged()
 			tc.log.Info().Str("manifest", m.Path).
 				Int("ranges", len(res.Applied)).
 				Bool("versionWritten", res.VersionWritten).
@@ -114,14 +128,26 @@ func (tc *taskCtx) autoVersion(ctx context.Context) error {
 	return nil
 }
 
+// markManifestsChanged records — under mu — that this package's version stage
+// modified a manifest, which is what its syncLock task keys off.
+func (tc *taskCtx) markManifestsChanged() {
+	tc.mu.Lock()
+	tc.avChanged[tc.t.pkg] = true
+	tc.mu.Unlock()
+}
+
 // manifestEdits derives one manifest's range rewrites under the policy,
-// emitting W197/W203 as it goes.
+// emitting W197/W203/W221 as it goes.
 func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []writer.Edit {
+	scheduled := make(map[string]bool, len(tc.plan.Providers[tc.t.pkg]))
+	for _, prov := range tc.plan.Providers[tc.t.pkg] {
+		scheduled[prov] = true
+	}
 	var edits []writer.Edit
 	for _, d := range m.Deps {
 		provider := tc.avNames[d.Name]
 		if provider == "" && d.LocalPath != "" {
-			provider = resolveLocalDir(tc.avDirs, tc.rel.Pkg.Dir, m.Path, d.LocalPath)
+			provider = scanner.ResolveLocalDir(tc.avDirs, tc.rel.Pkg.Dir, m.Path, d.LocalPath)
 		}
 		if provider == "" && av.NameSubstring {
 			// The substring fallback: a declared name whose last segment is a
@@ -147,6 +173,16 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 		next := rangeText(av.Range, version, m.Ecosystem)
 		if next == d.Range {
 			continue
+		}
+		if releasing && !scheduled[provider] {
+			// The manifest says "depends on", the config's `dependencies` list
+			// does not: nothing orders this package after the provider or
+			// skips it when the provider fails, so the version written here is
+			// optimistic about a publish still in flight (§9.4).
+			tc.log.Warn().Str("code", plan.CodeUnscheduledRewriteEdge).
+				Str("manifest", m.Path).
+				Str("provider", provider).
+				Msg("manifest dependency has no configured edge; run `dispat compute` to declare it")
 		}
 		if !releasing {
 			// §9.4: the provider is not in this run — its release happened
@@ -174,6 +210,13 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 // as the manifest should declare it: the planned version when the provider is
 // releasing and has not failed, its baseline otherwise. prerelease reports
 // whether that version is a prerelease — the W203 ingredient.
+//
+// "Has not failed" is deliberately optimistic: a provider whose publish has
+// not run yet is treated as releasing, because with a configured edge the
+// scheduler guarantees this stage runs after the provider's build (and, when
+// its space needs it, after its publish), and a later provider failure skips
+// this package's own publish anyway. Without a configured edge neither
+// guarantee exists — which is exactly what W221 flags.
 func (tc *taskCtx) providerVersion(name string) (version string, prerelease, releasing bool) {
 	pr := tc.plan.Releases[name]
 	tc.mu.Lock()
@@ -230,32 +273,18 @@ func rangeText(policy, version, ecosystem string) string {
 }
 
 // matchAny reports whether the declared range matches one of the globs; an
-// empty glob list means every range is eligible.
+// empty glob list means every range is eligible. Globs use the planner's
+// scope semantics — "*" matches any run of bytes — because a version range is
+// not a filesystem path: under filepath.Match, "*" would quietly refuse to
+// cross the "/" in "file:../core" and behave differently per OS.
 func matchAny(globs []string, rng string) bool {
 	if len(globs) == 0 {
 		return true
 	}
 	for _, g := range globs {
-		if ok, _ := filepath.Match(g, rng); ok {
+		if plan.GlobMatch(g, rng) {
 			return true
 		}
 	}
 	return false
-}
-
-// resolveLocalDir maps a declared local path (file:, replace, path =) onto
-// the package whose folder it points into, ascending from the exact target so
-// a path into a sub-folder still finds it.
-func resolveLocalDir(dirs map[string]string, pkgDir, manifestRel, local string) string {
-	dir := filepath.Clean(filepath.Join(pkgDir, filepath.Dir(filepath.FromSlash(manifestRel)), filepath.FromSlash(local)))
-	for {
-		if name, ok := dirs[dir]; ok {
-			return name
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
 }

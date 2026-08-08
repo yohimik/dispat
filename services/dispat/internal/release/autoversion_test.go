@@ -273,7 +273,7 @@ func TestAutoVersionRequirementsFile(t *testing.T) {
 
 func TestSyncLockRunsBetweenVersionAndBuildSerialised(t *testing.T) {
 	root := t.TempDir()
-	space := avSpace(&model.AutoVersion{Kinds: allKinds(), SyncLock: []string{"locksync"}})
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true, SyncLock: []string{"locksync"}})
 	names := []string{"a", "b", "c"}
 	for _, n := range names {
 		seedFile(t, root, n+"/package.json", `{"name": "@acme/`+n+`", "version": "1.0.0"}`)
@@ -296,10 +296,10 @@ func TestSyncLockRunsBetweenVersionAndBuildSerialised(t *testing.T) {
 
 func TestSyncLockBudgetConfigurable(t *testing.T) {
 	root := t.TempDir()
-	space := avSpace(&model.AutoVersion{Kinds: allKinds(), SyncLock: []string{"locksync"}, SyncLockConcurrency: 3})
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true, SyncLock: []string{"locksync"}, SyncLockConcurrency: 3})
 	names := []string{"a", "b", "c"}
 	for _, n := range names {
-		seedFile(t, root, n+"/package.json", `{"name": "@acme/`+n+`"}`)
+		seedFile(t, root, n+"/package.json", `{"name": "@acme/`+n+`", "version": "1.0.0"}`)
 	}
 	p := avPlan(root, space, names...)
 	r := &fakeRunner{delay: 30 * time.Millisecond}
@@ -312,7 +312,7 @@ func TestSyncLockBudgetConfigurable(t *testing.T) {
 
 func TestSyncLockFailureFailsThePackageBeforeBuild(t *testing.T) {
 	root := t.TempDir()
-	space := avSpace(&model.AutoVersion{Kinds: allKinds(), SyncLock: []string{"locksync"}})
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true, SyncLock: []string{"locksync"}})
 	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
 	p := avPlan(root, space, "a")
 	dir := filepath.Join(root, "a")
@@ -321,6 +321,22 @@ func TestSyncLockFailureFailsThePackageBeforeBuild(t *testing.T) {
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Equal(t, "syncLock", res["a"].FailedStage)
 	assert.Equal(t, -1, r.indexOf("build "+dir), "the build never ran")
+}
+
+func TestSyncLockSkippedWhenNothingChanged(t *testing.T) {
+	// The version stage rewrote no manifest (no version write, no workspace
+	// dependency), so the syncLock task completes without spawning its
+	// subprocess: a quiet release must not pay one lock regeneration per
+	// package for nothing.
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), SyncLock: []string{"locksync"}})
+	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	p := avPlan(root, space, "a")
+	r := &fakeRunner{}
+	res := newExecutor(execSpec{Runner: r, Build: 1, Publish: 1}).Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
+	assert.Equal(t, -1, r.indexOf("locksync "+filepath.Join(root, "a")),
+		"no manifest changed: the syncLock subprocess must not run")
 }
 
 func TestAutoVersionSkipsUserScriptShortCircuitButNotNative(t *testing.T) {

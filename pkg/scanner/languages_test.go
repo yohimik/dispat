@@ -260,7 +260,7 @@ func TestScanRootMatchesSuffixManifests(t *testing.T) {
 	write(t, dir, "App.csproj", `<Project><PropertyGroup><Version>1.0.0</Version></PropertyGroup></Project>`)
 	write(t, dir, "pubspec.yaml", "name: app\n")
 	write(t, dir, "nested/Other.csproj", `<Project></Project>`)
-	mans, err := ScanRoot(dir)
+	mans, err := ScanRoot(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}

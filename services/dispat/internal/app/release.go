@@ -99,6 +99,7 @@ func (a *App) Release(ctx context.Context) (map[string]*release.Result, error) {
 		Tagger:             tagger,
 		Recorders:          a.recorders(gh, commitMode),
 		Reverter:           a.git,
+		Scanner:            a.scan,
 		Log:                a.log,
 	}
 	start := time.Now()

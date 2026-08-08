@@ -5,8 +5,9 @@
 // package's job.
 //
 // The scanner is deliberately lightweight: a handful of file-name probes and
-// thin per-format parsers, no SBOM machinery. New ecosystems are added by
-// registering another parser over their manifest file name.
+// thin per-format parsers, no SBOM machinery. The recognised manifest names
+// are fixed at build time; supporting a new ecosystem means adding a parser
+// to this package.
 package scanner
 
 import (
@@ -108,16 +109,19 @@ type Manifest struct {
 	Root bool
 }
 
-// Scanner turns a folder into its parsed manifests.
+// Scanner turns a folder into its parsed manifests. Both methods share one
+// error contract: a manifest that fails to parse is skipped, its error joined
+// into the returned error, and the successfully parsed manifests are returned
+// either way, so callers may report the error and keep the partial result.
 type Scanner interface {
 	// Scan returns every recognised manifest under dir in deterministic
 	// (path-sorted) order, descending into sub-folders but skipping
-	// dependency and VCS folders (node_modules, vendor, target, dot-folders).
-	//
-	// A manifest that fails to parse is skipped, its error joined into the
-	// returned error; the successfully parsed manifests are returned either
-	// way, so callers may report the error and keep the partial result.
+	// dependency and build-output folders (node_modules, vendor, dist, ...,
+	// and every dot-folder).
 	Scan(ctx context.Context, dir string) ([]Manifest, error)
+	// ScanRoot parses only the manifests sitting directly in dir — the files
+	// that declare the folder's own identity — without descending anywhere.
+	ScanRoot(ctx context.Context, dir string) ([]Manifest, error)
 }
 
 // parseFunc parses one manifest file's bytes. rel is the file's path
@@ -170,12 +174,25 @@ func parserFor(name string) (parseFunc, bool) {
 	return nil, false
 }
 
-// skipDirs are folder names never descended into: installed dependencies and
-// build output, where copied manifests describe third-party code.
+// skipDirs are folder names never descended into: installed dependencies,
+// virtual environments and build output, where copied or generated manifests
+// describe third-party code rather than the workspace (a `dist/package.json`
+// is a build artifact; a Python venv contains thousands of third-party
+// manifests under site-packages). Dot-folders are skipped separately.
 var skipDirs = map[string]bool{
-	"node_modules": true,
-	"vendor":       true,
-	"target":       true,
+	"node_modules":     true,
+	"bower_components": true,
+	"vendor":           true,
+	"target":           true,
+	"dist":             true,
+	"build":            true,
+	"out":              true,
+	"bin":              true,
+	"obj":              true,
+	"venv":             true,
+	"env":              true,
+	"__pycache__":      true,
+	"Pods":             true,
 }
 
 // fsScanner is the filesystem Scanner.
@@ -233,11 +250,8 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 	return mans, errors.Join(errs...)
 }
 
-// ScanRoot parses only the manifests sitting directly in dir — the files
-// that declare the folder's own identity — without descending anywhere. Same
-// error contract as Scan: parse failures are joined into the error while the
-// parsed manifests are returned either way.
-func ScanRoot(dir string) ([]Manifest, error) {
+// ScanRoot implements Scanner.
+func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -254,6 +268,10 @@ func ScanRoot(dir string) ([]Manifest, error) {
 		errs []error
 	)
 	for _, name := range names {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			errs = append(errs, ctxErr)
+			break
+		}
 		parse, ok := parserFor(name)
 		if !ok {
 			continue
@@ -273,14 +291,88 @@ func ScanRoot(dir string) ([]Manifest, error) {
 	return mans, errors.Join(errs...)
 }
 
-// sortDeps fixes a manifest's dependency order: by field, then name. Maps in
-// the source formats carry no order worth preserving.
+// ScanRoot is the package-level convenience over New().ScanRoot.
+func ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
+	return New().ScanRoot(ctx, dir)
+}
+
+// Owner is one package's parsed manifests: the input NameIndex maps over.
+type Owner struct {
+	Package   string
+	Manifests []Manifest
+}
+
+// NameIndex maps every declared manifest name onto the package declaring it,
+// under one rule shared by every consumer of the mapping: root manifests bind
+// before nested ones (a package's own identity beats a vendored or example
+// manifest deeper inside another package), and a name two packages declare at
+// root priority is ambiguous — returned in ambiguous (sorted) instead of
+// mapped, because deriving relations from it would be guessing.
+func NameIndex(owners []Owner) (names map[string]string, ambiguous []string) {
+	names = make(map[string]string)
+	dropped := make(map[string]bool)
+	for _, root := range []bool{true, false} {
+		for _, o := range owners {
+			for _, m := range o.Manifests {
+				if m.Root != root || m.Name == "" {
+					continue
+				}
+				owner, taken := names[m.Name]
+				switch {
+				case !taken:
+					names[m.Name] = o.Package
+				case owner != o.Package && root && !dropped[m.Name]:
+					dropped[m.Name] = true
+					ambiguous = append(ambiguous, m.Name)
+				}
+			}
+		}
+	}
+	sort.Strings(ambiguous)
+	for _, name := range ambiguous {
+		delete(names, name)
+	}
+	return names, ambiguous
+}
+
+// ResolveLocalDir maps a declared local path (an npm "file:" range, a go.mod
+// relative replace, a Cargo `path` key) onto the package whose folder it
+// points into: dirs indexes cleaned package folders by name, pkgDir is the
+// consuming package's folder, manifestRel the declaring manifest's
+// slash-relative path inside it. The lookup ascends from the exact target, so
+// a path into a package's sub-folder still finds the package. Empty when the
+// path leaves every known package.
+func ResolveLocalDir(dirs map[string]string, pkgDir, manifestRel, local string) string {
+	dir := filepath.Clean(filepath.Join(pkgDir, filepath.Dir(filepath.FromSlash(manifestRel)), filepath.FromSlash(local)))
+	for {
+		if name, ok := dirs[dir]; ok {
+			return name
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// sortDeps fixes a manifest's dependency order: by field, then name, then the
+// remaining fields. Maps in the source formats carry no order worth
+// preserving, and the comparator is total under a stable sort so two
+// declarations tying on every key (a pubspec override next to its dependency,
+// say) still come out in one deterministic order.
 func sortDeps(deps []DeclaredDep) {
-	sort.Slice(deps, func(i, j int) bool {
+	sort.SliceStable(deps, func(i, j int) bool {
 		if a, b := kindRank(deps[i].Kind), kindRank(deps[j].Kind); a != b {
 			return a < b
 		}
-		return deps[i].Name < deps[j].Name
+		if deps[i].Name != deps[j].Name {
+			return deps[i].Name < deps[j].Name
+		}
+		if deps[i].Range != deps[j].Range {
+			return deps[i].Range < deps[j].Range
+		}
+		return deps[i].LocalPath < deps[j].LocalPath
 	})
 }
 

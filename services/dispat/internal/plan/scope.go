@@ -189,6 +189,13 @@ func underDir(file, dir string) bool {
 // frequently scoped ("@acme/ui") and "@acme/*" must reach them. The matcher is
 // an iterative two-pointer walk with a single backtrack point: no regular
 // expression, no recursion, and linear on every input a scope term can be.
+// GlobMatch reports whether s matches pattern, where "*" matches any run of
+// bytes, path separators included. Exported so the executor's autoVersion
+// range matcher and scope resolution agree on what a glob means: a version
+// range is not a filesystem path, and filepath.Match's separator rules would
+// make `*` quietly miss `file:../core`.
+func GlobMatch(pattern, s string) bool { return globMatch(pattern, s) }
+
 func globMatch(pattern, s string) bool {
 	star, mark := -1, 0
 	i, j := 0, 0

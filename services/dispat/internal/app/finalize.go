@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -104,6 +106,16 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	}
 	if len(pkgs) == 0 {
 		return nil
+	}
+	// commit.include: the shared artifacts regenerated outside every package
+	// folder (a workspace lockfile a syncLock rewrote, say) belong in the same
+	// release commit as the package folders. A configured path that does not
+	// exist is simply not staged — `git add` would refuse an empty pathspec.
+	for _, p := range a.cfg.Commit.Include {
+		full := filepath.Join(a.root, filepath.FromSlash(p))
+		if _, err := os.Stat(full); err == nil {
+			dirs = append(dirs, full)
+		}
 	}
 
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
