@@ -34,9 +34,9 @@ Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning
 first, ambiguous names reported instead of guessed) and `ResolveLocalDir` (declared local path → owning
 package folder).
 
-## Known 1.0 scope
+## Deliberately out of scope
 
-Deliberately not read yet, listed so nobody discovers it in production: npm `workspaces`, `overrides` and
+Deliberately not read, listed so nobody discovers it in production: npm `workspaces`, `overrides` and
 `resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and target-specific tables; Maven
 `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and `<modules>`; Poetry
 multi-constraint dependency lists; PEP 735 `include-group`; NuGet Central Package Management

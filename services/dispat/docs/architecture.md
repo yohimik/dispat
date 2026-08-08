@@ -256,24 +256,110 @@ services/dispat/
 Tag names are built in exactly one place, `plan.Release.TagName()`. They have to be: the name is what the *next* run
 reads a package's baseline from, so a caller rendering one differently would silently give that package no history.
 
-## Task graph
+## Graph algorithms
 
-Each changed package contributes up to three task nodes:
+A handful of small graph algorithms and one graph-shaped structure carry the whole tool; this section is the map of what runs where.
 
-- `version` exists only when the package's bump is `DueTo` provider updates. Incoming edges: each changed provider's
-  `build`, plus that provider's `publish` when the provider's space sets `isBuildWaitingPublish: true`. Outgoing edge:
-  the package's own `build`.
-- `build` depends on `version` when present, otherwise carries the provider edges itself. Outgoing edge: `publish`.
-- `publish` depends on the package's own `build` and always on every changed provider's `publish` (publishing against an
-  unpublished provider version would be broken regardless of the flag; `isBuildWaitingPublish` only controls whether the
-  consumer may *build* before the provider publishes).
+### Topological sort: the publish order
 
-The scheduler is a dependency-counting loop (Kahn's idea at task granularity): tasks whose in-degree reaches zero enter
-their stage's ready queue; a single coordinating goroutine launches workers within each stage budget (`build`
-and `version` share the build budget, `publish` has its own) and collects completions over a channel. There are no locks
-in the scheduling hot path; a mutex guards only the shared result map that skip decisions and provider filtering read.
-Every task finishes exactly once, including no-op completions for packages already failed or skipped, which is what lets
-the counting terminate without special cases.
+`internal/graph.TopoSort` is Kahn's algorithm over package names with one refinement: the zero-in-degree frontier is a
+**min-heap**, so ties always break alphabetically and the same graph yields the same order on every machine (§17.2).
+
+```
+    a     b        frontier = nodes with no pending providers: {a, b}
+     \   / \       the heap pops alphabetically -> a, b, then c, d, then e
+      c    d       every provider precedes every consumer
+       \  /
+        e          a cycle leaves nodes stranded with the frontier empty:
+                   TopoSort returns a typed *CycleError naming them, which
+                   the planner reports as E200 with the edges' manifest kinds
+```
+
+Cost: O((V+E) log V) for the heap pops; run once per plan.
+
+### The task graph: what a release actually schedules
+
+Each releasing package contributes up to four task nodes. `version` exists when the package's bump is `DueTo` provider
+updates **or** its space auto-versions (§9.4 reconciles against every workspace dependency, so the stage cannot be
+conditional on this run's updates); `syncLock` exists when an autoVersion space configures the scripts. `build` and
+`publish` always exist.
+
+```
+  core:   build ─────────────► publish
+            │                    │ │
+            │  (isBuildWaiting)──┘ │ (always)
+            ▼                      ▼
+  web:    version ─► syncLock ─► build ─► publish
+```
+
+(The two provider edges land on web's *first* task — its `version` — and on its `publish`; the bullets below are the
+precise rule.)
+
+- A consumer's **first** task (version when present, build otherwise) waits for each changed provider's `build`, and
+  additionally for that provider's `publish` when the provider's space sets `isBuildWaitingPublish: true` (the Docker
+  case: the consumer can only build after the base image is pushed).
+- A consumer's `publish` **always** waits for its providers' publishes: publishing against an unpublished provider
+  version would be broken regardless of the flag.
+- `syncLock` sits between `version` and `build`, in a scheduling class of its own.
+
+### Drain: the one scheduling pump
+
+`graph.Drain` consumes a Scheduler (the incremental core of Kahn's algorithm) with bounded parallelism. One
+coordinating goroutine owns all scheduler state; every ready node gets a goroutine of its own; completions come back
+over one channel and cascade new ready nodes.
+
+```
+   ready queues, one per class          budgets
+   build:    [web:version, ...]   ◄──   build/version share BuildConcurrency
+   publish:  [core:publish]       ◄──   PublishConcurrency
+   syncLock: [web:syncLock]       ◄──   min over the voting spaces (default 1)
+
+   loop: launch while budgets allow ──► goroutine per node ──► done channel
+         ▲                                                        │
+         └── completion cascades newly-ready nodes ◄──────────────┘
+```
+
+Per-class queues mean a stalled class never blocks another class's budget. There are no locks in the scheduling hot
+path; a mutex guards only the shared result map that skip decisions, provider filtering and the syncLock skip read.
+Every task finishes exactly once — including no-op completions for packages already failed or skipped — which is what
+lets the counting terminate without special cases. A cancelled context stops new launches (in-flight nodes are awaited,
+the rest are reported cancelled), and a frontier that empties with nodes remaining is diagnosed as a cycle instead of
+deadlocking.
+
+### Propagation: bounded BFS, three phases
+
+Propagation (§9.2) walks the dependency graph outward from each unit's source packages, along kind-filtered edges,
+admitted against each **target's own** pending window. Every package is expanded at most once per phase, so the walk is
+O(V+E) whatever the directive's depth says — `^` (one edge), `+N` and `^^`/`+*` (the closure) only change where the
+expansion stops, never how often a node is visited.
+
+```
+   feat(core)^          feat(core)^^ / +*
+   core ─► api          core ─► api ─► app        bumps merge by max();
+     └──► cli             └──► cli                a package never re-propagates
+        (depth 1:              (closure: api,     a bump it merely received
+         api, cli)              cli, app)
+```
+
+The three phases (channel proposals, channel resolution, bump propagation) may not be merged: phase 3 reads what phase
+2 settled. Phase 1 reads only units and baselines, which is what makes the channel axis converge.
+
+### Ancestry: three sources, memoised
+
+Cancellation (§10.4) and prerelease-train containment ask "is commit a an ancestor of commit b?". The answer comes from
+the strongest available source — git itself (`merge-base --is-ancestor`), the commits' parent pointers (BFS), or plain
+history order for linear fakes — and every (a, b) answer is memoised on the computation, because the same pair is asked
+from several nested phases and each uncached git answer is a subprocess.
+
+```
+   c1 ── c2 ── c3 ── c4      ancestor(c2, c4)?  git first;
+           \                 parent-pointer BFS when git has
+            └─ c5            no answer (ErrNoAncestry); history
+                             rank as the linear-case fallback
+```
+
+A real git failure aborts planning rather than silently degrading to the weaker fallbacks: a wrong ancestry answer
+changes which releases get cancelled or contained.
 
 ## Failure semantics
 

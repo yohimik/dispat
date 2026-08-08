@@ -37,7 +37,7 @@ disables the exemption entirely.
 
 ## `parser`
 
-The commit-message parser options, previously fixed at the specification defaults. Everything is optional: an absent
+The commit-message parser options. Everything is optional: an absent
 `parser` object (or any unset field) keeps the default, so existing configurations parse exactly as before. An invalid
 value fails the config load, before any planning.
 

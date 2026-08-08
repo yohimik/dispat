@@ -4,10 +4,10 @@
 // writing counterpart of the scanner package and shares its field-name
 // spelling for dependency kinds.
 //
-// v1 writes package.json (byte-precise JSON scalar replacement), go.mod (via
-// golang.org/x/mod/modfile, format-preserving by design) and requirements
-// files (per-line splicing). Other ecosystems are read-only until they gain a
-// writer, and only package.json has an own-version field to write.
+// Writers exist for package.json (byte-precise JSON scalar replacement),
+// go.mod (via golang.org/x/mod/modfile, format-preserving by design) and
+// requirements files (per-line splicing); every other ecosystem is read-only
+// here, and only package.json has an own-version field to write.
 package writer
 
 import (

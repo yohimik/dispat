@@ -82,7 +82,7 @@ func (tc *taskCtx) autoVersion(ctx context.Context) error {
 			return ctxErr // interrupted mid-stage: no more rewrites
 		}
 		if !writer.Supported(m.Path) {
-			continue // read-only ecosystem (Cargo, Python, ...): flow.version's job for now
+			continue // read-only ecosystem (Cargo, Python, ...): flow.version's job
 		}
 		edits := tc.manifestEdits(av, m)
 		version := ""

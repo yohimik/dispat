@@ -269,8 +269,8 @@ func TestFixedSparseNeverAlignsLaggards(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Rejected pins fall back (§16 unit-scoped blast radius) and propagated
-// transitions graduate — the two behaviours the integration suite originally
-// pinned as contrary findings, now fixed.
+// transitions graduate — the two planner properties the integration suite
+// fences with dedicated regression tests.
 // ---------------------------------------------------------------------------
 
 func TestRejectedPinFallsBackToTheComputedVersion(t *testing.T) {

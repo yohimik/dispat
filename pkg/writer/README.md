@@ -23,11 +23,11 @@ rewritten `package.json` is re-validated as JSON before a single byte lands on d
 | `go.mod` | yes (`golang.org/x/mod/modfile`) | no such field |
 | `requirements*.txt` | yes (per-line splice, comments and CRLF preserved) | no such field |
 
-## Known 1.0 scope
+## Deliberately out of scope
 
-The other ecosystems the scanner reads — Cargo, pyproject, composer, Maven, NuGet, pub — are read-only for
-now: their reconciliation belongs to a `flow.version` script until they gain a writer here. Only
-`package.json` has a writable own-version field.
+The other ecosystems the scanner reads — Cargo, pyproject, composer, Maven, NuGet, pub — are read-only:
+their reconciliation belongs to a `flow.version` script. Only `package.json` has a writable own-version
+field.
 
 ## Requirements
 

@@ -33,6 +33,14 @@ into one dependency graph. dispat is built for that case:
   skipped (unless they have changes of their own) and every unaffected subgraph keeps releasing. Failed or skipped
   consumers are never lost. The next run catches them up automatically, at the exact version they were originally owed,
   with no state file and no double release. Recovery is just re-running.
+- **The graph can come from the manifests themselves.** `dispat compute` reads packages' project files
+  (`package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml`,
+  `requirements*.txt`) and derives the consumer/provider graph from them, suggesting additions, removals and kind
+  corrections against the config — previewable, confirmable one by one or applied wholesale, with `--check` gating CI
+  on a drifted graph and `keep: true` marking deliberate relations no manifest declares (a Docker chain). And a space
+  with an `autoVersion` block gets its manifests rewritten by dispat itself at the version stage: declared workspace
+  ranges reconciled to end-of-run versions and own versions updated, format-preservingly, under match/range policies,
+  with `syncLock` scripts (e.g. `npm install`) run between version and build under their own concurrency budget.
 - **A release is treated as what it really is: a distributed transaction.** Publishing a graph of packages means
   irreversible writes across independent services (an npm registry, a Docker registry, GitHub) with no rollback to
   fall back on. dispat handles that the way distributed systems do. Each package's leg commits by durably recording its
@@ -70,23 +78,6 @@ dispat stands on the shoulders of two things:
   values and marshal them to loadable files.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
-
-## Recently added
-
-- **Computed dependency graph.** `dispat compute` analyzes packages' project files (`package.json`, `go.mod`,
-  `Cargo.toml`, `pyproject.toml`, `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `requirements*.txt`) and
-  derives the consumer/provider graph from them, so relations no longer have to be declared by hand:
-  it suggests additions, removals and kind corrections against the config, previewable, confirmable one by one or
-  applied wholesale (with the previous config backed up), and `--check` gates CI on a drifted graph. An edge marked
-  `keep: true` states a deliberate relation no manifest declares (a Docker chain) and is never suggested for removal.
-- **Native auto versioning.** A space with an `autoVersion` block gets its manifests rewritten by dispat itself at the
-  version stage — declared workspace ranges reconciled to end-of-run versions and own versions updated,
-  format-preservingly, for `package.json`, `go.mod` and `requirements*.txt` — with match/range policies (only touch
-  `workspace:*`, write caret/tilde/exact/a literal), per-kind and per-provider filters, substring name matching
-  (`nameMatch: substring` lets package `app` match a declared `@core/app`), and `syncLock` scripts (e.g. `npm install`)
-  run between version and build under their own concurrency budget (default 1, so shared lock files never corrupt;
-  a root-level lock file joins the release commit through `commit.include`). Both features are covered by the
-  [black-box test plan](./tests/integration/docs/test-plan.md) (goals 10 and 11).
 
 ## Planned features
 

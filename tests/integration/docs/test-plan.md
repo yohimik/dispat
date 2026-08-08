@@ -167,12 +167,12 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestPlanCancelSemantics`                                 | Cancel discards pending work irreversibly (post-cancel fix releases 0.0.1, not 0.1.1); a spent cancel warns (W170); a cancelled/no-op release run executes zero scripts.                                                                                       |
 | `TestPlanHoldResumeAndReleaseAsAuto`                      | Hold reports the withheld version (W154) and excludes the package from *execution*, not just tagging (zero script runs while held); resume releases at accumulated `max()` with exactly one build; redundant `auto` warns (W158).                              |
 | `TestPlanExactPinGuards`                                  | E153 (not greater), E157 (major jump > 1), E154 (multi-package pin), each in an isolated repo so a rejected pin cannot collide with earlier tags.                                                                                                              |
-| `TestPlanRejectedPinFallsBackToTheComputedBump`           | A rejected pin has §16's unit-scoped blast radius: E156 fires, the bad unit contributes nothing, and the sibling `feat` still releases at its computed 0.1.0 (formerly finding #1, now fixed; see Findings).                                                   |
+| `TestPlanRejectedPinFallsBackToTheComputedBump`           | A rejected pin has §16's unit-scoped blast radius: E156 fires, the bad unit contributes nothing, and the sibling `feat` still releases at its computed 0.1.0 (a regression fence; see Regression fences).                                                   |
 | `TestPlanConsumerFailureCatchesUpAfterProviderPublished`  | Consumer fails while provider publishes; the next run catches the consumer up at the owed version, labelled W193, provider not re-released; a third run converges.                                                                                             |
 | `TestPlanProviderBuildFailureBlocksConsumerThenHeals`     | Provider fails to build; consumer is blocked (W194), never attempted; after the fix both release in one run, with neither W194 nor W193.                                                                                                                       |
 | `TestPlanCatchUpWholeHistoryForNeverReleasedConsumer`     | A package created *after* a provider's propagating commit still catches up on its first ever run; an untagged package's window is the whole history.                                                                                                           |
 | `TestPlanPrereleaseTrainWeirdCases`                       | `^@beta` cannot drag a stable consumer (W208); `^@beta++1` brings it onto the train; a multi-package direct transition graduates the whole train; the graduated train converges.                                                                               |
-| `TestPlanPropagatedGraduationTransitionGraduatesTheTrain` | A propagated `beta>stable` *transition* graduates the dependants still on the named train (the `release(core)@beta>stable@@beta>stable++N` form configuration.md documents), and the graduated train converges (formerly finding #2, now fixed; see Findings). |
+| `TestPlanPropagatedGraduationTransitionGraduatesTheTrain` | A propagated `beta>stable` *transition* graduates the dependants still on the named train (the `release(core)@beta>stable@@beta>stable++N` form configuration.md documents), and the graduated train converges (a regression fence; see Regression fences). |
 | `TestPlanChannelOnlyReleaseAndEntryPatch` | A release directive that only moves the channel is still a release, explained by W202; entering a prerelease channel with nothing pending takes the §11.4 entry patch, explained by W204, and its scripts execute. |
 
 ### Goal 4: config, login, originals (`config_test.go`)
@@ -291,24 +291,21 @@ away instead of one binary invocation.)
 | `TestAutoVersionSyncLockSerialised`         | Several packages' syncLock scripts never overlap under the default budget of 1 while builds keep the build budget — the corrupted-shared-lockfile guard over the real scheduler.                                                                           |
 | `TestAutoVersionDiagnosticsAndCommitInclude` | Three runs: W221 for a rewritten edge with no configured counterpart (and `commit.include` staging the regenerated root package-lock.json into the release commit); W192+W197 after the manifest was hand-edited backwards; W203 when the provider goes to beta under a stable consumer. All asserted as JSON events per package. |
 
-## Findings
+## Regression fences
 
-The suite originally turned up two behaviours contradicting a reasonable reading of the documentation, and pinned them
-as regression fences marking the behaviour *observed*, not endorsed. **Both have since been fixed in the planner**, and
-each fence was flipped into a test of the corrected behaviour, so a regression now fails exactly one clearly-labelled
-test each:
+Two planner behaviours are subtle enough to earn dedicated guard tests: each pins a property whose violation once
+produced a plausible-looking but wrong plan, so a regression fails exactly one clearly-labelled test.
 
-1. **A rejected `Release-As` pin used to swallow a sibling unit's bump.** The package published and tagged its unchanged
-   baseline, silently dropping a `feat` sharing the commit with the bad pin. Fixed: every pin guard now reports its
-   error and falls back to the ordinarily computed version (§16's unit-scoped blast radius), so the sibling releases and
-   a lone rejected pin still releases nothing. Guarded by
-   `TestPlanRejectedPinFallsBackToTheComputedBump` (and unit tests in `internal/plan`).
-2. **A propagated graduation transition never graduated the dependant.** The propagation call site resolved every
-   propagated value with `graduates=false`, refusing the very transition `channel.go` documented as the deliberate
-   exception, so `release(core)@beta>stable@@beta>stable++*` left dependants on the train (W200/W206). Fixed:
-   transitions bypass the graduation guard (a propagated *bare* `stable` is still suppressed), so the documented form
-   ends the whole train. Guarded by `TestPlanPropagatedGraduationTransitionGraduatesTheTrain` (and unit tests in
-   `internal/plan`).
+1. **A rejected `Release-As` pin must not swallow a sibling unit's bump.** Every pin guard reports its error and falls
+   back to the ordinarily computed version (§16's unit-scoped blast radius): the sibling releases at its computed
+   version, and a lone rejected pin releases nothing. Guarded by `TestPlanRejectedPinFallsBackToTheComputedBump` (and
+   unit tests in `internal/plan`). The failure mode being fenced: a package publishing and tagging its unchanged
+   baseline while silently dropping a `feat` that shared the commit with the bad pin.
+2. **A propagated graduation transition must graduate the dependant.** Transitions bypass the graduation guard (a
+   propagated *bare* `stable` is still suppressed), so `release(core)@beta>stable@@beta>stable++*` ends the whole
+   train. Guarded by `TestPlanPropagatedGraduationTransitionGraduatesTheTrain` (and unit tests in `internal/plan`).
+   The failure mode being fenced: dependants left on the train (W200/W206) by the exact form the configuration page
+   documents for ending one.
 
 ## Running
 

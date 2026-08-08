@@ -388,7 +388,7 @@ func TestGlobMatchingNothingWarns(t *testing.T) {
 }
 
 func TestGlobalIsAnOrdinaryScopeName(t *testing.T) {
-	// "global" used to alias "*". It is now an ordinary name like any other,
+	// "global" is an ordinary scope name like any other, not an alias of "*",
 	// so writing it where no package carries it is exactly the E130 typo the
 	// unknown-include error exists to catch — and "*" stays the one way to
 	// address the whole workspace.

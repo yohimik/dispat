@@ -29,9 +29,8 @@ One test file per goal:
 | `compute_test.go`     | The compute command through the binary: the detect/apply/check loop with backup and convergence, keep/removal semantics, and the W220 ambiguity as a JSON event.                                                                                                                                                                                                                             |
 | `autoversion_test.go` | Native auto-versioning through the binary: range/version rewriting under the match policy, the serialised syncLock slot, the W192/W197/W203/W221 diagnostics across three runs, and commit.include staging the regenerated root lock file.                                                                                                                                                    |
 
-## Findings
+## Regression fences
 
-The suite originally turned up two behaviours contradicting the documentation (a rejected `Release-As` pin swallowing a
-sibling bump; a propagated graduation transition never graduating dependants). Both are now **fixed in the planner**,
-and the fences were flipped into tests guarding the corrected behaviour. See the
-[findings in the test plan](./test-plan.md#findings).
+Two planner properties carry dedicated guard tests: a rejected `Release-As` pin must not swallow a sibling bump, and a
+propagated graduation transition must graduate the dependants. See the
+[regression fences in the test plan](./test-plan.md#regression-fences).

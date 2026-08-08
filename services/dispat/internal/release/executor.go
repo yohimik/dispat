@@ -361,10 +361,11 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 }
 
 // run is the shared state of one Executor.Run invocation. Every task
-// goroutine works against the same value, so what used to travel through
-// every helper's parameter list — the plan, the workspace variables, the
-// login gates, the result map with its mutex — lives here instead. mu guards
-// results and started; everything else is read-only once Run has built it.
+// goroutine works against the same value, so the plan, the workspace
+// variables, the login gates and the result map with its mutex live here
+// instead of travelling through every helper's parameter list. mu guards
+// results, started and avChanged; everything else is read-only once Run has
+// built it.
 type run struct {
 	*Executor
 	plan    *plan.Plan

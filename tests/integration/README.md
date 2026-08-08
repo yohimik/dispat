@@ -41,7 +41,7 @@ go test ./... -count 5           # stability check: repeated runs pass
 ## Results
 
 The suite's current status and per-area coverage summary live in **[test results](./docs/test-results.md)**: what
-passes (including `-race` and repeated `-count` runs), what each test file covers, and the behavioural findings the
-suite turned up (both since fixed, with the fences flipped into tests guarding the corrected behaviour). The
+passes (including `-race` and repeated `-count` runs), what each test file covers, and the planner properties fenced
+by dedicated regression tests. The
 workspace's unit-test statement coverage table lives in
 **[unit test coverage](../../services/dispat/docs/coverage.md)**.

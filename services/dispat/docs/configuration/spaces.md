@@ -138,7 +138,7 @@ only the version text changes, formatting, key order and comments survive. Manif
 documents and line-by-line "name specifier" files — and writers exist for `package.json`, `go.mod` and the line shape's
 canonical case, `requirements*.txt` (only the matching line's specifier changes; spelling, spacing and comments
 survive). The other structured ecosystems (Cargo, pyproject, Composer, Maven, .NET, Dart) feed `compute` and the graph
-but their rewriting stays `flow.version`'s job until they gain a writer.
+but their rewriting is `flow.version`'s job.
 
 Because §9.4 reconciles against *every* workspace dependency — including providers released by earlier runs — an
 auto-versioning space runs a version task for **every** releasing package, not only those bumped by provider updates.
