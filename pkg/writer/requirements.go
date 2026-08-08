@@ -11,10 +11,18 @@ import (
 // text changes.
 
 // isRequirementsFile mirrors the scanner's recognition of pip requirements
-// files: a .txt whose name contains "requirements".
+// files, and must stay byte-for-byte in step with pkg/scanner's copy (the
+// two modules deliberately share no code): a .txt whose base name starts or
+// ends with the word "requirements".
 func isRequirementsFile(name string) bool {
 	lower := strings.ToLower(name)
-	return strings.HasSuffix(lower, ".txt") && strings.Contains(lower, "requirements")
+	if !strings.HasSuffix(lower, ".txt") {
+		return false
+	}
+	words := strings.FieldsFunc(strings.TrimSuffix(lower, ".txt"), func(r rune) bool {
+		return r == '-' || r == '_' || r == '.'
+	})
+	return len(words) > 0 && (words[0] == "requirements" || words[len(words)-1] == "requirements")
 }
 
 // rewriteRequirements edits a requirements file line by line: a line whose

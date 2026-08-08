@@ -243,6 +243,9 @@ bare-name
 	wantMain := []DeclaredDep{
 		{Name: "acme-core", Range: "==1.0.0", Kind: KindDependencies},
 		{Name: "bare-name", Kind: KindDependencies},
+		// -e ./editable is a workspace edge: a path-only declaration named
+		// after the folder, exactly like a csproj ProjectReference.
+		{Name: "editable", Kind: KindDependencies, LocalPath: "./editable"},
 		{Name: "requests", Range: ">=2.0,<3", Kind: KindDependencies},
 		{Name: "uvicorn", Range: ">=0.30", Kind: KindDependencies},
 	}

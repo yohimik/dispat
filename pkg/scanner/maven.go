@@ -1,9 +1,42 @@
 package scanner
 
 import (
+	"bytes"
 	"encoding/xml"
+	"fmt"
+	"io"
 	"strings"
 )
+
+// decodeXML unmarshals an XML manifest, tolerating the single-byte encodings
+// legacy Maven and Visual Studio files still declare (ISO-8859-1,
+// windows-1252): Go's decoder refuses any non-UTF-8 declaration when no
+// CharsetReader is set, and a scanner should read what the tools wrote.
+// windows-1252 is treated as latin-1; the 0x80-0x9F range differs between the
+// two, but identifiers never use it and mojibake in free text is harmless
+// here.
+func decodeXML(data []byte, v any) error {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		switch strings.ToLower(charset) {
+		case "utf-8", "utf8", "us-ascii", "ascii":
+			return input, nil
+		case "iso-8859-1", "iso8859-1", "latin1", "windows-1252", "cp1252":
+			raw, err := io.ReadAll(input)
+			if err != nil {
+				return nil, err
+			}
+			var b bytes.Buffer
+			b.Grow(len(raw))
+			for _, c := range raw {
+				b.WriteRune(rune(c))
+			}
+			return &b, nil
+		}
+		return nil, fmt.Errorf("unsupported XML encoding %q", charset)
+	}
+	return dec.Decode(v)
+}
 
 // mavenManifest is the subset of pom.xml the scanner reads. groupId and
 // version may live on the parent instead of the project itself.
@@ -35,7 +68,7 @@ type mavenDep struct {
 // indirected.
 func parseMaven(rel string, data []byte) (Manifest, error) {
 	var raw mavenManifest
-	if err := xml.Unmarshal(data, &raw); err != nil {
+	if err := decodeXML(data, &raw); err != nil {
 		return Manifest{}, err
 	}
 	group := raw.GroupID

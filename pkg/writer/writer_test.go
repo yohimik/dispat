@@ -1,9 +1,9 @@
 package writer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -214,16 +214,30 @@ func TestRewriteDispatch(t *testing.T) {
 	if !Supported("requirements.txt") || !Supported("dev-requirements.txt") || Supported("readme.txt") {
 		t.Error("requirements files are recognised by pattern")
 	}
-	if _, err := Rewrite("Cargo.toml", "", nil); err == nil {
-		t.Error("unsupported manifests must error, not silently no-op")
+	if _, err := Rewrite("Cargo.toml", "", nil); !errors.Is(err, ErrUnsupportedManifest) {
+		t.Errorf("unsupported manifests must return ErrUnsupportedManifest, got %v", err)
 	}
 }
 
-func TestResultShapes(t *testing.T) {
-	// Edits round-trip through Result untouched — callers report them.
-	e := Edit{Name: "x", Kind: "peerDependencies", Range: "^1"}
-	r := Result{Missing: []Edit{e}}
-	if !reflect.DeepEqual(r.Missing[0], e) {
-		t.Error("edits are plain data")
+func TestRewriteGuards(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "package.json")
+	if err := os.WriteFile(path, []byte(`{"name":"a"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// An Edit targeting a non-dependency field is refused up front: the JSON
+	// descent must never be steerable into scripts or arbitrary objects.
+	if _, err := Rewrite(path, "", []Edit{{Name: "build", Kind: "scripts", Range: "rm -rf /"}}); err == nil {
+		t.Error("an unknown Edit.Kind must be rejected")
+	}
+
+	// Result.Path echoes the target so batching callers keep the correlation.
+	res, err := Rewrite(path, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Path != path {
+		t.Errorf("Result.Path = %q, want %q", res.Path, path)
 	}
 }

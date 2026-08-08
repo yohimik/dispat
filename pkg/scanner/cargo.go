@@ -1,8 +1,6 @@
 package scanner
 
 import (
-	"fmt"
-
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -40,23 +38,17 @@ func parseCargo(rel string, data []byte) (Manifest, error) {
 	if v, ok := raw.Package.Version.(string); ok {
 		m.Version = v
 	}
-	for kind, table := range map[Kind]map[string]any{
-		KindDependencies:    raw.Dependencies,
-		KindDevDependencies: raw.DevDependencies,
-	} {
-		if err := cargoDeps(&m, kind, table); err != nil {
-			return Manifest{}, err
-		}
-	}
-	if err := cargoDeps(&m, KindDependencies, raw.BuildDependencies); err != nil {
-		return Manifest{}, err
-	}
+	cargoDeps(&m, KindDependencies, raw.Dependencies)
+	cargoDeps(&m, KindDevDependencies, raw.DevDependencies)
+	// build-dependencies count as plain dependencies: a build dependency's
+	// change still forces the consumer to rebuild.
+	cargoDeps(&m, KindDependencies, raw.BuildDependencies)
 	sortDeps(m.Deps)
 	return m, nil
 }
 
 // cargoDeps coerces one dependency table's entries into declarations.
-func cargoDeps(m *Manifest, kind Kind, table map[string]any) error {
+func cargoDeps(m *Manifest, kind Kind, table map[string]any) {
 	for name, value := range table {
 		dep := DeclaredDep{Name: name, Kind: kind}
 		switch v := value.(type) {
@@ -73,9 +65,11 @@ func cargoDeps(m *Manifest, kind Kind, table map[string]any) error {
 				dep.LocalPath = p
 			}
 		default:
-			return fmt.Errorf("dependency %q: unsupported value %T", name, value)
+			// An unrecognised value shape (a bool, a number) drops this entry
+			// alone, matching how the python and pubspec parsers treat the
+			// same situation — one odd declaration must not void a manifest.
+			continue
 		}
 		m.Deps = append(m.Deps, dep)
 	}
-	return nil
 }

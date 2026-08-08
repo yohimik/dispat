@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"encoding/xml"
 	"path/filepath"
 	"strings"
 )
@@ -36,19 +35,28 @@ type csprojManifest struct {
 // local-path signal — the strongest workspace evidence a .NET solution has.
 func parseCsproj(rel string, data []byte) (Manifest, error) {
 	var raw csprojManifest
-	if err := xml.Unmarshal(data, &raw); err != nil {
+	if err := decodeXML(data, &raw); err != nil {
 		return Manifest{}, err
 	}
 	m := Manifest{Path: rel, Ecosystem: EcosystemNuGet, Root: isRoot(rel)}
+	// PackageId from any group beats AssemblyName from any group: a project
+	// often sets AssemblyName in an early per-configuration group and its
+	// PackageId in a later one, and NuGet's precedence is by property, not by
+	// group order.
 	for _, pg := range raw.PropertyGroups {
-		if m.Name == "" {
+		if m.Name == "" && pg.PackageID != "" {
 			m.Name = pg.PackageID
-		}
-		if m.Name == "" {
-			m.Name = pg.AssemblyName
 		}
 		if m.Version == "" {
 			m.Version = pg.Version
+		}
+	}
+	if m.Name == "" {
+		for _, pg := range raw.PropertyGroups {
+			if pg.AssemblyName != "" {
+				m.Name = pg.AssemblyName
+				break
+			}
 		}
 	}
 	if m.Name == "" {

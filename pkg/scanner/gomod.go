@@ -13,9 +13,17 @@ import (
 // filesystem path, which is a deliberate local wiring worth an edge either
 // way. Go declares exact versions, so Range is the required version verbatim.
 func parseGoMod(rel string, data []byte) (Manifest, error) {
+	// Parse first for full fidelity (ParseLax drops replace directives, and
+	// relative replaces are this parser's strongest workspace signal). When
+	// strict parsing fails — typically a directive newer than the vendored
+	// x/mod — fall back to ParseLax rather than refuse the manifest: the
+	// requires survive, only replace-derived local paths are lost.
 	f, err := modfile.Parse(rel, data, nil)
 	if err != nil {
-		return Manifest{}, err
+		var laxErr error
+		if f, laxErr = modfile.ParseLax(rel, data, nil); laxErr != nil {
+			return Manifest{}, err // the strict error names the real problem
+		}
 	}
 	m := Manifest{
 		Path:      rel,
@@ -25,7 +33,10 @@ func parseGoMod(rel string, data []byte) (Manifest, error) {
 	if f.Module != nil {
 		m.Name = f.Module.Mod.Path
 	}
-	// Relative-path replaces, keyed by the replaced module path.
+	// Relative-path replaces, keyed by the replaced module path. A replace
+	// with a version-specific left side collapses onto the path: for
+	// workspace-edge purposes the target folder is the signal, whichever
+	// version it replaces.
 	local := make(map[string]string)
 	for _, rep := range f.Replace {
 		if rep.New.Version == "" && isRelativePath(rep.New.Path) {

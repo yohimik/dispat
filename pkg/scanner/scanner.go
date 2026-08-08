@@ -195,6 +195,28 @@ var skipDirs = map[string]bool{
 	"Pods":             true,
 }
 
+// maxManifestBytes caps a single manifest read. A manifest is a hand-written
+// file measured in kilobytes; anything near this bound is generated output or
+// garbage, and a scanner that walks arbitrary checkouts must not slurp a
+// 2 GB file into memory over a name collision.
+const maxManifestBytes = 16 << 20
+
+// ErrManifestTooLarge marks a manifest skipped for exceeding the read cap;
+// joined into the scan error like any parse failure.
+var ErrManifestTooLarge = errors.New("scanner: manifest exceeds 16 MiB")
+
+// readManifest is os.ReadFile behind the size cap.
+func readManifest(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxManifestBytes {
+		return nil, fmt.Errorf("%w (%d bytes)", ErrManifestTooLarge, info.Size())
+	}
+	return os.ReadFile(path)
+}
+
 // fsScanner is the filesystem Scanner.
 type fsScanner struct{}
 
@@ -230,7 +252,7 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		data, err := os.ReadFile(path)
+		data, err := readManifest(path)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", rel, err))
 			return nil
@@ -276,7 +298,7 @@ func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 		if !ok {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := readManifest(filepath.Join(dir, name))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue

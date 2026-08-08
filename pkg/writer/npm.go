@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // span is the byte range of one JSON scalar value inside the file.
@@ -56,15 +57,14 @@ func rewriteNpm(path, version string, edits []Edit) (Result, error) {
 	if len(patches) == 0 {
 		return res, nil
 	}
-	for i := range patches {
-		for j := i + 1; j < len(patches); j++ {
-			if patches[j].start > patches[i].start {
-				patches[i], patches[j] = patches[j], patches[i]
-			}
-		}
-	}
+	sort.Slice(patches, func(i, j int) bool { return patches[i].start > patches[j].start })
 	for _, p := range patches {
 		data = append(data[:p.start], append(p.text, data[p.end:]...)...)
+	}
+	// The splice is span-precise, but a manifest is user data: never write
+	// bytes back without proving they still parse.
+	if !json.Valid(data) {
+		return res, fmt.Errorf("%s: internal error: rewrite produced invalid JSON", path)
 	}
 	return res, atomicWrite(path, data)
 }
@@ -206,7 +206,9 @@ func skipValue(dec *json.Decoder) error {
 }
 
 // atomicWrite replaces the file's contents keeping its permissions, via a
-// same-folder temp file and rename, so a crash never leaves a half manifest.
+// same-folder temp file, fsync and rename: a process crash never leaves a
+// half-written manifest (a power loss is the filesystem's problem, and the
+// fsync narrows even that window).
 func atomicWrite(path string, data []byte) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -224,6 +226,11 @@ func atomicWrite(path string, data []byte) error {
 		os.Remove(name)
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(name)
 		return err
@@ -232,5 +239,9 @@ func atomicWrite(path string, data []byte) error {
 		os.Remove(name)
 		return err
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
 }
