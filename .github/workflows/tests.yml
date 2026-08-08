@@ -36,6 +36,8 @@ jobs:
         run: |
           go vet -C pkg/ccme ./...
           go vet -C pkg/models ./...
+          go vet -C pkg/scanner ./...
+          go vet -C pkg/writer ./...
           go vet -C services/dispat ./...
           go vet -C tests/integration ./...
 
@@ -56,6 +58,8 @@ jobs:
         run: |
           go test -C pkg/ccme     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
           go test -C pkg/models   ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-models.out"
+          go test -C pkg/scanner  ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-scanner.out"
+          go test -C pkg/writer   ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-writer.out"
           go test -C services/dispat ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
 
       - name: Upload unit coverage profiles
@@ -65,6 +69,8 @@ jobs:
           path: |
             cover-ccme.out
             cover-models.out
+            cover-scanner.out
+            cover-writer.out
             cover-cli.out
           retention-days: 7
 
@@ -126,7 +132,7 @@ jobs:
       - name: Compute coverage totals
         run: |
           # Three views of the suite for the job summary — the unit layer
-          # (the three modules' own tests), the integration layer (the
+          # (the workspace modules' own tests), the integration layer (the
           # black-box suite's instrumented binary — CLI module scope, since
           # that is the binary) — with only the combined total across all
           # four profiles (go tool cover merges the overlapping blocks)
@@ -147,8 +153,8 @@ jobs:
             cat "$3"
           }
 
-          merge coverage-unit.out cover-ccme.out cover-models.out cover-cli.out
-          merge coverage.out      cover-ccme.out cover-models.out cover-cli.out cover-integration.out
+          merge coverage-unit.out cover-ccme.out cover-models.out cover-scanner.out cover-writer.out cover-cli.out
+          merge coverage.out      cover-ccme.out cover-models.out cover-scanner.out cover-writer.out cover-cli.out cover-integration.out
           UNIT=$(pct coverage-unit.out)
           INTEGRATION=$(pct cover-integration.out)
           TOTAL=$(pct coverage.out)

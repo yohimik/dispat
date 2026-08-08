@@ -178,7 +178,7 @@ func TestAutoVersionCatchUpAndDriftDiagnostics(t *testing.T) {
 
 	var logBuf bytes.Buffer
 	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2})
-	e.Log = zerolog.New(&logBuf)
+	e.Log = syncedLog(&logBuf)
 	res := e.Run(context.Background(), p)
 	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
 
@@ -203,7 +203,7 @@ func TestAutoVersionStableOverPrereleaseW203(t *testing.T) {
 
 	var logBuf bytes.Buffer
 	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2})
-	e.Log = zerolog.New(&logBuf)
+	e.Log = syncedLog(&logBuf)
 	res := e.Run(context.Background(), p)
 	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
 	assert.Contains(t, fileText(t, root, "web/package.json"), `"@acme/core": "^1.0.1-beta.1"`)
@@ -352,4 +352,11 @@ func TestAutoVersionSkipsUserScriptShortCircuitButNotNative(t *testing.T) {
 func TestAutoVersionOrderingStrings(t *testing.T) {
 	assert.Equal(t, "syncLock", taskSyncLock.String())
 	assert.True(t, strings.HasPrefix(stageTitle(taskSyncLock), "S"))
+}
+
+// syncedLog returns a logger writing into buf through zerolog's sync writer:
+// the executor logs from concurrent task goroutines, and a bare bytes.Buffer
+// is not a concurrency-safe sink.
+func syncedLog(buf *bytes.Buffer) zerolog.Logger {
+	return zerolog.New(zerolog.SyncWriter(buf))
 }

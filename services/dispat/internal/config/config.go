@@ -563,6 +563,37 @@ func resolveInitials(c *File) error {
 // plus the validated dependency edges. Every direct sub-folder of a space is a
 // package named after the folder; names must be unique across all spaces.
 func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error) {
+	pkgs, err := DiscoverPackages(c, root)
+	if err != nil {
+		return nil, nil, err
+	}
+	owner := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		owner[p.Name] = true
+	}
+
+	deps := make([]model.Dependency, 0, len(c.Dependencies))
+	for i, d := range c.Dependencies {
+		if !owner[d.Consumer] {
+			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown consumer package %q", i, d.Consumer)
+		}
+		if !owner[d.Provider] {
+			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown provider package %q", i, d.Provider)
+		}
+		kind, err := DepKind(d.Kind)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: dependencies[%d]: %w", i, err)
+		}
+		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
+	}
+	return pkgs, deps, nil
+}
+
+// DiscoverPackages is Discover without the dependency-list validation: the
+// packages that exist on disk, whatever the `dependencies` key says. It exists
+// for `dispat compute`, whose whole job includes suggesting the removal of
+// edges naming packages that no longer exist — edges Discover must refuse.
+func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 	spaceNames := make([]string, 0, len(c.Spaces))
 	for n := range c.Spaces {
 		spaceNames = append(spaceNames, n)
@@ -606,7 +637,7 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		dir := filepath.Join(root, sc.Path)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
+			return nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
 		for _, e := range entries {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
@@ -614,7 +645,7 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 			}
 			name := e.Name()
 			if prev, dup := owner[name]; dup {
-				return nil, nil, fmt.Errorf(
+				return nil, fmt.Errorf(
 					"config: package %q exists in both space %q and space %q; package names must be unique",
 					name, prev, sn)
 			}
@@ -628,34 +659,20 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 	}
 
 	// autoVersion `only` names must be discovered packages; anything else is
-	// the same class of typo as an unknown dependency endpoint.
+	// the same class of typo as an unknown dependency endpoint. Only enabled
+	// blocks are held to it: a disabled block is inert configuration.
 	for _, sn := range spaceNames {
 		av := c.Spaces[sn].AutoVersion
-		if av == nil {
+		if av == nil || !av.IsEnabled() {
 			continue
 		}
 		for _, name := range av.Only {
 			if _, ok := owner[name]; !ok {
-				return nil, nil, fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
+				return nil, fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
 			}
 		}
 	}
-
-	deps := make([]model.Dependency, 0, len(c.Dependencies))
-	for i, d := range c.Dependencies {
-		if _, ok := owner[d.Consumer]; !ok {
-			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown consumer package %q", i, d.Consumer)
-		}
-		if _, ok := owner[d.Provider]; !ok {
-			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown provider package %q", i, d.Provider)
-		}
-		kind, err := DepKind(d.Kind)
-		if err != nil {
-			return nil, nil, fmt.Errorf("config: dependencies[%d]: %w", i, err)
-		}
-		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
-	}
-	return pkgs, deps, nil
+	return pkgs, nil
 }
 
 // DepKind maps a dependency edge's configured kind onto the model's. Empty

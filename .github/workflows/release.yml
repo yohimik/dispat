@@ -32,6 +32,8 @@ jobs:
         run: |
           go test -C pkg/ccme         ./... -count=1 -timeout 10m
           go test -C pkg/models       ./... -count=1 -timeout 10m
+          go test -C pkg/scanner      ./... -count=1 -timeout 10m
+          go test -C pkg/writer       ./... -count=1 -timeout 10m
           go test -C services/dispat  ./... -count=1 -timeout 10m
           go test -C tests/integration ./... -count=1 -timeout 20m
 

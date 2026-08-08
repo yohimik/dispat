@@ -46,14 +46,51 @@ func ReplaceDependencies(path string, deps []DependencyConfig) error {
 	if bytes.Equal(out, data) {
 		return nil
 	}
-	if err := os.WriteFile(path+BackupSuffix, data, 0o644); err != nil {
-		return fmt.Errorf("saving backup: %w", err)
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, info.Mode().Perm())
+	mode := info.Mode().Perm()
+	// The backup carries the config's own permissions: a 0600 config must not
+	// leak through a world-readable copy.
+	if err := os.WriteFile(path+BackupSuffix, data, mode); err != nil {
+		return fmt.Errorf("saving backup: %w", err)
+	}
+	return atomicWrite(path, out, mode)
+}
+
+// atomicWrite replaces path via a same-directory temp file and rename, so a
+// crash mid-write can truncate the temp file but never the config itself.
+func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Chmod(name, mode); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
 }
 
 // RenderDependenciesTOML renders the dependencies list as [[dependencies]]

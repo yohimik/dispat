@@ -65,13 +65,20 @@ type suggestion struct {
 // marked `keep: true` is never suggested for removal, and nothing is written
 // at all outside Write/Interactive.
 func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) (int, error) {
-	pkgs, _, err := config.Discover(a.cfg, a.root)
+	// Packages only, deliberately without Discover's dependency validation: a
+	// stale edge naming a deleted package must reach diffEdges as a removal
+	// suggestion, not abort the one command able to fix it.
+	pkgs, err := config.DiscoverPackages(a.cfg, a.root)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")
 		return 0, err
 	}
+	known := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		known[p.Name] = true
+	}
 	detected, hasManifest := a.detectEdges(ctx, pkgs)
-	sugs := a.diffEdges(detected, hasManifest)
+	sugs := a.diffEdges(detected, hasManifest, known)
 
 	out := opts.Out
 	if out == nil {
@@ -214,10 +221,11 @@ func relPath(root, path string) string {
 // diffEdges compares the detected edges with the config's declared list and
 // produces the suggestions: additions for detected-but-undeclared pairs, kind
 // corrections for declared pairs whose field disagrees, removals for declared
-// pairs no manifest supports. A pair is (consumer, provider): the kind
-// dimension corrects rather than duplicates, matching how the config is
-// authored.
-func (a *App) diffEdges(detected []detectedEdge, hasManifest map[string]bool) []suggestion {
+// pairs no manifest supports — and for pairs naming a package that no longer
+// exists at all, which Discover would refuse to load. A pair is (consumer,
+// provider): the kind dimension corrects rather than duplicates, matching how
+// the config is authored.
+func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]bool) []suggestion {
 	type pair struct{ consumer, provider string }
 	detKinds := make(map[pair][]model.DepKind)
 	detDetail := make(map[pair]map[model.DepKind]string)
@@ -263,20 +271,36 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest map[string]bool) []
 	for i, d := range a.cfg.Dependencies {
 		p := pair{d.Consumer, d.Provider}
 		kinds, found := detKinds[p]
-		declaredKind, err := config.DepKind(d.Kind)
-		if err != nil {
-			continue // Discover already rejected it; unreachable here
-		}
+		// An unparseable declared kind is reachable here (compute skips
+		// Discover's dependency validation on purpose): treated as "kind
+		// disagrees" when the pair is detected, and as an ordinary removal
+		// candidate otherwise.
+		declaredKind, kindErr := config.DepKind(d.Kind)
 		switch {
-		case found && !containsKind(kinds, declaredKind):
+		case !d.Keep && (!known[d.Consumer] || !known[d.Provider]):
+			gone := d.Consumer
+			if known[d.Consumer] {
+				gone = d.Provider
+			}
+			sugs = append(sugs, suggestion{
+				action: actionRemove,
+				entry:  d,
+				index:  i,
+				detail: fmt.Sprintf("package %q no longer exists (keep: true silences this)", gone),
+			})
+		case found && (kindErr != nil || !containsKind(kinds, declaredKind)):
 			want := strongestKind(kinds)
 			entry := d
 			entry.Kind = string(want)
+			from := declaredKind.String()
+			if kindErr != nil {
+				from = fmt.Sprintf("invalid kind %q", d.Kind)
+			}
 			sugs = append(sugs, suggestion{
 				action: actionKind,
 				entry:  entry,
 				index:  i,
-				detail: fmt.Sprintf("%s -> %s: %s", declaredKind, want, detDetail[p][want]),
+				detail: fmt.Sprintf("%s -> %s: %s", from, want, detDetail[p][want]),
 			})
 		case !found && !d.Keep && hasManifest[d.Consumer]:
 			sugs = append(sugs, suggestion{
