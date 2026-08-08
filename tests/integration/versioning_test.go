@@ -12,6 +12,7 @@ package integration
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -336,4 +337,49 @@ func TestVersioningFixedSpaceExecutesEveryMemberScript(t *testing.T) {
 
 	r.ReleaseOK()
 	assert.Equal(t, 2, buildRuns(r), "both members build: the ride is a real release")
+}
+
+// TestVersioningFixedConflictResolutions pins the two fixed-space conflict
+// warnings. Competing exact pins: the space has one shared version, so the
+// newest pin wins and W211 says so. Divergent channels: the space moves as
+// one, so a deterministic winner is picked and W212 says so — the warning is
+// the operator's only sign that half their intent was overridden.
+func TestVersioningFixedConflictResolutions(t *testing.T) {
+	t.Run("W211_competing_pins", func(t *testing.T) {
+		r := harness.New(t)
+		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
+			"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		}))
+		r.SeedPackage("packages", "a")
+		r.SeedPackage("packages", "b")
+		r.Commit("feat(a,b): bootstrap")
+		r.CommitEmpty("release(a): pin a\n\nRelease-As: 0.5.0\n")
+		r.CommitEmpty("release(b): pin b, later\n\nRelease-As: 0.9.0\n")
+
+		res := r.ReleaseOK()
+		assert.True(t, harness.HasCode(res.Events, "W211"),
+			"competing pins in one fixed space must be reported")
+		assert.True(t, r.HasTag("a@0.9.0"), "the newest pin moves the space: %v", r.TagList())
+		assert.True(t, r.HasTag("b@0.9.0"), "tags: %v", r.TagList())
+		assert.False(t, r.HasTag("a@0.5.0"), "the losing pin must not also release")
+	})
+
+	t.Run("W212_divergent_channels", func(t *testing.T) {
+		r := harness.New(t)
+		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
+			"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		}))
+		r.SeedPackage("packages", "a")
+		r.SeedPackage("packages", "b")
+		r.Commit("feat(a)@beta: a wants beta\n---\nfeat(b)@rc: b wants rc")
+
+		res := r.ReleaseOK()
+		assert.True(t, harness.HasCode(res.Events, "W212"),
+			"divergent member channels must be reported")
+		tags := r.TagList()
+		require.Len(t, tags, 2, "both members release once: %v", tags)
+		suffix := func(tag string) string { return tag[strings.LastIndexByte(tag, '@'):] }
+		assert.Equal(t, suffix(tags[0]), suffix(tags[1]),
+			"the space moves as one: both members share version and channel: %v", tags)
+	})
 }

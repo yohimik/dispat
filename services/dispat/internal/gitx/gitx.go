@@ -332,6 +332,10 @@ type Git interface {
 	// pointers. Any other error aborts planning: a silently wrong ancestry
 	// answer would change cancellation and prerelease-train containment.
 	IsAncestor(ctx context.Context, a, b string) (bool, error)
+	// IsShallow reports whether the repository's history is incomplete — a
+	// shallow clone or a graft. The planner refuses to plan over one (§16
+	// E196): hidden commits and tags make every window silently wrong.
+	IsShallow(ctx context.Context) (bool, error)
 }
 
 // ErrNoAncestry is the IsAncestor answer of a Git implementation that cannot
@@ -449,6 +453,15 @@ func (c *CLI) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 	}
 	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w: %s",
 		a, b, err, strings.TrimSpace(stderr.String()))
+}
+
+// IsShallow reports whether the repository is a shallow clone.
+func (c *CLI) IsShallow(ctx context.Context) (bool, error) {
+	out, err := c.run(ctx, "rev-parse", "--is-shallow-repository")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "true", nil
 }
 
 // Record and field separators for the commit log. Both are ASCII control

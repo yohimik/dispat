@@ -12,6 +12,33 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Format and vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "gofmt needs to run on:"; echo "$out"; exit 1
+          fi
+
+      - name: go vet
+        run: |
+          go vet -C pkg/ccme ./...
+          go vet -C pkg/models ./...
+          go vet -C services/dispat ./...
+          go vet -C tests/integration ./...
+
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -27,9 +54,9 @@ jobs:
 
       - name: Run unit tests with coverage
         run: |
-          go test -C pkg/ccme     ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
-          go test -C pkg/models   ./... -count=1 -covermode=atomic -coverprofile="$PWD/cover-models.out"
-          go test -C services/dispat ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
+          go test -C pkg/ccme     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
+          go test -C pkg/models   ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-models.out"
+          go test -C services/dispat ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
 
       - name: Upload unit coverage profiles
         uses: actions/upload-artifact@v4
@@ -62,11 +89,11 @@ jobs:
         run: |
           export DISPAT_COVERDIR="$RUNNER_TEMP/dispat-covdata"
           mkdir -p "$DISPAT_COVERDIR"
-          go test -C tests/integration ./... -count=1
+          go test -C tests/integration ./... -count=1 -timeout 20m
           go tool covdata textfmt -i="$DISPAT_COVERDIR" -o="$PWD/cover-integration.out"
 
       - name: Run integration tests under the race detector
-        run: go test -C tests/integration . -count=1 -race
+        run: go test -C tests/integration . -count=1 -timeout 20m -race
 
       - name: Upload integration coverage profile
         uses: actions/upload-artifact@v4

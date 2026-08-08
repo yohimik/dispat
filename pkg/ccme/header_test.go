@@ -712,3 +712,52 @@ func TestSubjectRejectsMultipleLines(t *testing.T) {
 		t.Errorf("ParseSubject with a body = %v (%s), want E100", err, codesOf(res))
 	}
 }
+
+// TestScopeTermsMayBeUTF8 pins the §5.2 charset boundary from the accepting
+// side: any byte above US-ASCII space that is not "(", ")", "," or ":" is a
+// scope-char, so multibyte scope names parse intact.
+func TestScopeTermsMayBeUTF8(t *testing.T) {
+	t.Parallel()
+
+	p := DefaultParser()
+	res, err := p.ParseSubject("feat(cafés,приложение): x")
+	if err != nil {
+		t.Fatalf("multibyte scopes must parse: %v (%s)", err, codesOf(res))
+	}
+	terms := res.Units[0].Header.Scopes
+	if len(terms) != 2 || terms[0].Name != "cafés" || terms[1].Name != "приложение" {
+		t.Errorf("scopes = %v", terms)
+	}
+}
+
+// TestScopeTermsRejectControlCharacters pins the other side of the boundary:
+// §5.2's scope-char excludes the whole ASCII control range, not just the
+// space and tab the whitespace rule names.
+func TestScopeTermsRejectControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	p := DefaultParser()
+	for _, in := range []string{"feat(a\x00b): x", "feat(a\vb): x", "feat(a\fb): x"} {
+		res, err := p.ParseSubject(in)
+		if err == nil || firstError(res) != CodeE102 {
+			t.Errorf("ParseSubject(%q) = %v (%s), want E102", in, err, codesOf(res))
+		}
+	}
+}
+
+// TestDiagnosticColumnCountsBytes pins the documented Position semantics:
+// Column is a byte offset, so a caret renderer indexes the raw line directly.
+// "é" is two bytes; if columns counted runes the space would sit one earlier.
+func TestDiagnosticColumnCountsBytes(t *testing.T) {
+	t.Parallel()
+
+	p := DefaultParser()
+	// f-e-a-t-( = bytes 1-5, a = 6, é = 7-8, space at byte 9.
+	res, _ := p.ParseSubject("feat(aé b): x")
+	if len(res.Errors()) != 1 || res.Errors()[0].Code != CodeE102 {
+		t.Fatalf("codes: %s", codesOf(res))
+	}
+	if got := res.Errors()[0].Position; got.Line != 1 || got.Column != 9 {
+		t.Errorf("position = %s, want 1:9 (byte column)", got)
+	}
+}

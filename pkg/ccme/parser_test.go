@@ -1,6 +1,7 @@
 package ccme
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -752,5 +753,43 @@ func TestWorkedExampleD7(t *testing.T) {
 	res, err = p.Parse("chore(core): bump TypeScript\n\nRelease-As: patch")
 	if err == nil || firstError(res) != CodeE151 {
 		t.Errorf("Release-As: patch = %v (%s), want E151", err, codesOf(res))
+	}
+}
+
+// TestDefaultLimitBoundaries exercises the §14.1 bounds at their default
+// values rather than lowered test values: the boundary itself is legal, one
+// past it is E158, and a near-limit input costs nothing pathological.
+func TestDefaultLimitBoundaries(t *testing.T) {
+	t.Parallel()
+
+	p := DefaultParser()
+
+	terms := make([]string, DefaultScopeTermsPerUnit)
+	for i := range terms {
+		terms[i] = "p" + strconv.Itoa(i)
+	}
+	atLimit := "feat(" + strings.Join(terms, ",") + "): x"
+	if res, err := p.Parse(atLimit); err != nil {
+		t.Errorf("%d scope terms is the boundary and must parse: %v (%s)",
+			DefaultScopeTermsPerUnit, err, codesOf(res))
+	}
+	over := "feat(" + strings.Join(append(terms, "one-more"), ",") + "): x"
+	if res, err := p.Parse(over); err == nil || !hasCode(res, CodeE158) {
+		t.Errorf("%d scope terms = %v (%s), want E158", DefaultScopeTermsPerUnit+1, err, codesOf(res))
+	}
+
+	// A message just under the byte bound parses; just over is E158.
+	line := strings.Repeat("x", 1023) + "\n"
+	body := strings.Repeat(line, (DefaultMessageBytes/1024)-1)
+	under := "feat: near the limit\n\n" + body
+	if len(under) > DefaultMessageBytes {
+		t.Fatalf("fixture miscounted: %d bytes", len(under))
+	}
+	if res, err := p.Parse(under); err != nil {
+		t.Errorf("a message under limits.messageBytes must parse: %v (%s)", err, codesOf(res))
+	}
+	overMsg := under + strings.Repeat("y", DefaultMessageBytes-len(under)+1)
+	if res, err := p.Parse(overMsg); err == nil || !hasCode(res, CodeE158) {
+		t.Errorf("a message over limits.messageBytes = %v (%s), want E158", err, codesOf(res))
 	}
 }

@@ -151,6 +151,8 @@ func (g *plainGit) CreateTag(ctx context.Context, name, msg, target string) erro
 	return g.inner.CreateTag(ctx, name, msg, target)
 }
 
+func (g *plainGit) IsShallow(ctx context.Context) (bool, error) { return g.inner.IsShallow(ctx) }
+
 func TestCancellationWithoutAncestryChecker(t *testing.T) {
 	// The cancel semantics — reaching backwards only — must hold under all
 	// three ancestry sources: with the git-native check (every other test),

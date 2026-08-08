@@ -98,6 +98,12 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 				if ci == termStart {
 					return h, warns, fail(CodeE104, at(ci), "empty scope term")
 				}
+				// The closing term counts against the cap too; checking only
+				// at commas would quietly admit limit+1 terms.
+				if n := p.cfg.Limits.ScopeTermsPerUnit; n > 0 && len(h.Scopes) >= n {
+					return h, warns, fail(CodeE158, at(ci),
+						"scope-set has more than %d terms", n)
+				}
 				h.Scopes = append(h.Scopes, newScopeTerm(line[termStart:ci], at(termStart)))
 				break scopeLoop
 			case ',':

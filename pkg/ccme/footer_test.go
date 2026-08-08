@@ -550,3 +550,50 @@ func TestImpliedDepthYieldsToFooter(t *testing.T) {
 		})
 	}
 }
+
+// TestFooterScopeValueCharset pins the §5.2 charset in the footer spelling:
+// multibyte terms are legal scope-chars, ASCII control characters are not.
+func TestFooterScopeValueCharset(t *testing.T) {
+	t.Parallel()
+
+	p := DefaultParser()
+	res, err := p.Parse("feat^: a\n\nPropagate-Scope: cafés,приложение")
+	if err != nil {
+		t.Fatalf("multibyte footer scopes must parse: %v (%s)", err, codesOf(res))
+	}
+	if got := res.Units[0].Directives.PropagateScope.String(); got != "cafés,приложение" {
+		t.Errorf("Propagate-Scope = %q", got)
+	}
+
+	res, err = p.Parse("feat^: a\n\nPropagate-Scope: caf\vés")
+	if err == nil || !hasCode(res, CodeE151) {
+		t.Errorf("control char in a footer scope = %v (%s), want E151", err, codesOf(res))
+	}
+}
+
+// TestMiscasedBreakingInsideFreeFormValueIsNotW155 is the regression fence
+// for the false positive: a "Breaking change:" line *inside* a BREAKING
+// CHANGE footer's free-form value is part of the breaking change already in
+// force, not a failed attempt to declare one.
+func TestMiscasedBreakingInsideFreeFormValueIsNotW155(t *testing.T) {
+	t.Parallel()
+
+	p := DefaultParser()
+	res, err := p.Parse("feat: a\n\nBREAKING CHANGE: the API moved.\nBreaking change: this line is value text.")
+	if err != nil {
+		t.Fatalf("%v (codes: %s)", err, codesOf(res))
+	}
+	if hasCode(res, CodeW155) {
+		t.Errorf("W155 fired inside a free-form BREAKING CHANGE value (codes: %s)", codesOf(res))
+	}
+	if res.Units[0].Directives.BreakingChange == "" {
+		t.Error("the breaking change itself must still be in force")
+	}
+
+	// The fence must not weaken the real case: a miscased line that opens the
+	// final paragraph is still the silent failure W155 exists to catch.
+	res, _ = p.Parse("feat: a\n\nBreaking change: this was meant to be breaking.")
+	if !hasCode(res, CodeW155) {
+		t.Errorf("the real miscasing must still warn (codes: %s)", codesOf(res))
+	}
+}

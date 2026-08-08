@@ -317,3 +317,26 @@ func TestPlanPropagatedGraduationTransitionGraduatesTheTrain(t *testing.T) {
 	r.ReleaseOK()
 	assert.Equal(t, before, len(r.TagList()))
 }
+
+// TestPlanChannelOnlyReleaseAndEntryPatch: a release directive that only
+// moves the channel is still a release (§13.9) — W202 explains its presence
+// in the plan — and entering a prerelease channel with nothing pending takes
+// the §11.4 entry patch, reported as W204. Both are non-suppressible: a tag
+// appearing with no bump-worthy commit is exactly what a reader of the log
+// cannot otherwise account for.
+func TestPlanChannelOnlyReleaseAndEntryPatch(t *testing.T) {
+	r := singlePackageRepo(t, markerBuild)
+	r.Commit("feat(core): stable work")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("release(core)@beta: enter beta with nothing pending")
+	res := r.ReleaseOK()
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W202", "core"),
+		"a channel-only release must be explained")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W204", "core"),
+		"the entry patch must be explained")
+	assert.True(t, r.HasTag("core@0.1.1-beta.0"),
+		"channel entry with nothing pending takes the entry patch: %v", r.TagList())
+	assert.Equal(t, 2, buildRuns(r), "a channel-only release executes its scripts")
+}

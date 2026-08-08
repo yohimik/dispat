@@ -80,8 +80,11 @@ func TestConcurrencyBuildBudgetEnforced(t *testing.T) {
 func TestConcurrencyPublishBudgetIsIndependentOfBuild(t *testing.T) {
 	const publishBudget = 2
 	names := packageNames(5, "pkg")
+	// The build sleep must dwarf process-launch jitter (single-digit
+	// milliseconds on a loaded runner) because the assertion demands *full*
+	// overlap of all five builds, not merely "some".
 	r := budgetRepo(t, budgets{Build: len(names), Publish: publishBudget,
-		BuildSleep: 20 * time.Millisecond, PublishSleep: 200 * time.Millisecond})
+		BuildSleep: 150 * time.Millisecond, PublishSleep: 200 * time.Millisecond})
 	seedIndependentPackages(r, names)
 
 	r.ReleaseOK()

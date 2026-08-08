@@ -38,6 +38,8 @@ type fakeGit struct {
 	tags map[string]string
 	// tagsFor maps a package to its tag names, newest release first.
 	tagsFor map[string][]string
+	// shallow makes IsShallow answer true (the E196 scenario).
+	shallow bool
 }
 
 func newFakeGit(history ...commit) *fakeGit {
@@ -117,6 +119,8 @@ func (f *fakeGit) IsAncestor(_ context.Context, a, b string) (bool, error) {
 }
 
 func (f *fakeGit) CreateTag(context.Context, string, string, string) error { return nil }
+
+func (f *fakeGit) IsShallow(context.Context) (bool, error) { return f.shallow, nil }
 
 // countingGit records how many git queries planning makes per package.
 type countingGit struct {
@@ -1354,9 +1358,46 @@ func TestCycleIsRejected(t *testing.T) {
 		{Consumer: "app", Provider: "core"},
 		{Consumer: "core", Provider: "app"},
 	}
-	_, err := Compute(context.Background(), newFakeGit(), Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cycle")
+	// A cycle is not a load failure but §16's E200: a fatal plan carrying the
+	// repository-scoped diagnostic, so the code reaches the events stream.
+	p, err := Compute(context.Background(), newFakeGit(), Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+	require.True(t, p.Fatal(), "a cyclic graph must make the plan fatal")
+	require.Len(t, p.Diagnostics, 1)
+	assert.Equal(t, CodeDependencyCycle, p.Diagnostics[0].Code)
+	assert.Contains(t, p.Diagnostics[0].Message, "cycle")
+	assert.Empty(t, p.Order, "no publish order exists")
+}
+
+func TestDuplicateVersionTagsAreRejected(t *testing.T) {
+	// Two reachable tags parsing to the same version on different commits:
+	// "core@1.2.3" and "core@1.2.3+hotfix" collide because build metadata
+	// carries no precedence (§12.1).
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core): first"},
+		commit{sha: "c2", message: "feat(core): second"},
+	).tag("core", "1.2.3", "c1")
+	git.tags["core@1.2.3+hotfix"] = "c2"
+	git.tagsFor["core"] = append(git.tagsFor["core"], "core@1.2.3+hotfix")
+
+	pkgs, _ := testPackages()
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	require.True(t, p.Fatal())
+	require.Len(t, p.Diagnostics, 1)
+	assert.Equal(t, CodeDuplicateVersionTag, p.Diagnostics[0].Code)
+	assert.Equal(t, "core", p.Diagnostics[0].Pkg)
+}
+
+func TestShallowRepositoryIsRejected(t *testing.T) {
+	git := newFakeGit(commit{sha: "c1", message: "feat(core): work"})
+	git.shallow = true
+	pkgs, _ := testPackages()
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	require.True(t, p.Fatal())
+	require.Len(t, p.Diagnostics, 1)
+	assert.Equal(t, CodeShallowRepository, p.Diagnostics[0].Code)
 }
 
 // ---------------------------------------------------------------------------

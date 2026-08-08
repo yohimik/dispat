@@ -167,6 +167,19 @@ const (
 	// not an opt-in: a fresh repository writing `Release-As: 5.0.0` against a
 	// computed 1.5.0 gets it with no configuration involved.
 	CodePinMajorJump = "E157"
+	// CodeDuplicateVersionTag rejects two reachable tags that parse to the
+	// same version of one package but point at different commits (§12.1): the
+	// baseline selection is ambiguous, so no correct plan exists.
+	// Repository-scoped.
+	CodeDuplicateVersionTag = "E191"
+	// CodeShallowRepository rejects a shallow or grafted repository (§16): an
+	// incomplete history hides tags and commits, and every window computed
+	// over it is wrong in ways nothing downstream can detect.
+	// Repository-scoped.
+	CodeShallowRepository = "E196"
+	// CodeDependencyCycle rejects a configured dependency graph with a cycle
+	// (§16): no publish order exists. Repository-scoped.
+	CodeDependencyCycle = "E200"
 )
 
 // MaxMajorJump is the §14.1 default: an exact Release-As may raise the major
@@ -184,12 +197,12 @@ const MaxMajorJump = 1
 // commit log. It is resolved by a human correcting the repository, after which
 // the run is simply repeated, so no partial release may be emitted meanwhile.
 var repositoryScoped = map[string]bool{
-	CodeBadPrereleaseTag:   true, // E182
-	CodeGraduateNoIncrease: true, // E185
-	"E191":                 true, // duplicate version tags
-	CodeVersionNotGreater:  true, // E195
-	"E196":                 true, // shallow or grafted repository
-	"E200":                 true, // dependency cycle
+	CodeBadPrereleaseTag:    true, // E182
+	CodeGraduateNoIncrease:  true, // E185
+	CodeDuplicateVersionTag: true, // E191
+	CodeVersionNotGreater:   true, // E195
+	CodeShallowRepository:   true, // E196
+	CodeDependencyCycle:     true, // E200
 }
 
 // IsRepositoryScoped reports whether a diagnostic code aborts the run whatever
@@ -804,7 +817,21 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	}
 
 	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
+		if errors.Is(err, errFatalPlan) {
+			return cp.fatalPlan(), nil
+		}
 		return nil, err
+	}
+
+	// §16 E196: a shallow or grafted clone hides commits and tags, so every
+	// window and baseline computed over it is silently wrong. Checked before
+	// any history is read.
+	if shallow, err := git.IsShallow(ctx); err != nil {
+		return nil, fmt.Errorf("plan: checking repository completeness: %w", err)
+	} else if shallow {
+		cp.err(CodeShallowRepository, "", "",
+			"the repository is shallow or grafted: history is incomplete, so no correct plan can be computed; run `git fetch --unshallow` first")
+		return cp.fatalPlan(), nil
 	}
 	// The parser options come from the configuration file's `parser` object;
 	// a zero Config is the specification defaults, so nothing changes for a
@@ -816,6 +843,9 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp.parser = parser
 
 	if err := cp.loadTagsAndWindows(); err != nil { // §13.2, §13.3
+		if errors.Is(err, errFatalPlan) {
+			return cp.fatalPlan(), nil
+		}
 		return nil, err
 	}
 	if err := cp.parseAndResolve(); err != nil { // §13.4
@@ -940,10 +970,32 @@ func (cp *computation) loadWorkspace(deps []model.Dependency) error {
 
 	order, err := g.TopoSort()
 	if err != nil {
-		return err
+		// §16 E200: a cyclic graph has no publish order — the run cannot
+		// produce a correct plan, and the code must surface as a diagnostic
+		// (not a bare load failure) so operators and tooling can key off it.
+		cp.err(CodeDependencyCycle, "", "", err.Error())
+		return errFatalPlan
 	}
 	cp.order = order
 	return nil
+}
+
+// errFatalPlan signals that a repository-scoped error was recorded in
+// cp.diags: no correct plan exists, and Compute returns the diagnostics as a
+// fatal plan instead of an ordinary error, so the §16 code reaches the
+// caller's diagnostics stream.
+var errFatalPlan = errors.New("plan: repository-scoped error")
+
+// fatalPlan is the plan of a repository where no correct plan exists: the
+// recorded diagnostics — at least one of them repository-scoped, making
+// Fatal() true — and nothing releasable.
+func (cp *computation) fatalPlan() *Plan {
+	return &Plan{
+		Releases:    map[string]*Release{},
+		Providers:   map[string][]string{},
+		Diagnostics: cp.diags,
+		ancestor:    cp.ancestorOrSelf,
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -963,6 +1015,17 @@ func (cp *computation) loadTagsAndWindows() error {
 		tags, err := cp.git.Tags(cp.ctx, p.Name, rel.TagFormat())
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
+		}
+
+		// §16 E191: two reachable tags parsing to the same version of this
+		// package (build metadata carries no precedence, so "1.2.3" and
+		// "1.2.3+b" collide) on different commits make the baseline selection
+		// ambiguous — no correct plan exists.
+		if a, b, dup := duplicateVersionTags(tags); dup {
+			cp.err(CodeDuplicateVersionTag, p.Name, "", fmt.Sprintf(
+				"tags %s and %s parse to the same version %s but point at different commits",
+				a.Name, b.Name, a.Version.String()))
+			return errFatalPlan
 		}
 
 		newest, hasNewest := tags.Baseline()
@@ -1019,6 +1082,27 @@ func (cp *computation) loadTagsAndWindows() error {
 
 	cp.buildUnion(lists)
 	return nil
+}
+
+// duplicateVersionTags finds two parsed tags carrying the same version on
+// different commits. Version identity ignores build metadata, exactly as
+// precedence does.
+func duplicateVersionTags(tags gitx.Tags) (a, b gitx.Tag, dup bool) {
+	byVersion := make(map[string]gitx.Tag, len(tags))
+	for _, t := range tags {
+		if !t.Parsed {
+			continue
+		}
+		key := t.Version.String()
+		prev, seen := byVersion[key]
+		if seen && prev.Commit != t.Commit {
+			return prev, t, true
+		}
+		if !seen {
+			byVersion[key] = t
+		}
+	}
+	return gitx.Tag{}, gitx.Tag{}, false
 }
 
 // baselineChannel is channelOf(baseline(P)) (§11.1). It reads the package's

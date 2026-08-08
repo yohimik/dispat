@@ -117,7 +117,7 @@ func TestOrderBuildWaitsForPublishWhenConfigured(t *testing.T) {
 // one is unconditionally gated on the provider's publish, which is the
 // hard, timing-independent half of this test.
 func TestOrderBuildDoesNotWaitForPublishByDefault(t *testing.T) {
-	r := providerConsumerRepo(t, false, 400*time.Millisecond)
+	r := providerConsumerRepo(t, false, 800*time.Millisecond)
 	r.ReleaseOK()
 
 	tl := r.Timeline("timeline.log")
@@ -127,7 +127,8 @@ func TestOrderBuildDoesNotWaitForPublishByDefault(t *testing.T) {
 	consumerPublish := harness.Find(t, tl, "consumer-publish")
 
 	// Timing evidence: the consumer's near-instant build fits inside the
-	// provider's 400ms publish window, so it plainly did not wait for it.
+	// provider's 800ms publish window — wide enough that even a stalled
+	// runner launches the consumer inside it — so it plainly did not wait.
 	harness.AssertSequential(t, providerBuild, consumerBuild) // still gated on the build
 	assert.Truef(t, consumerBuild.Start.Before(providerPublish.End),
 		"consumer build started at %s, after the provider's publish ended at %s — isBuildWaitingPublish is false, it should not have waited",

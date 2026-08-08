@@ -25,8 +25,19 @@ import (
 // everyone else reuses the result.
 var binaries struct {
 	once           sync.Once
+	dir            string // the temp build dir, removed by CleanupBinaries
 	dispat, tsmark string
 	err            error
+}
+
+// CleanupBinaries removes the once-per-run build directory. The sync.Once
+// cache outlives any single test, so no t.Cleanup can own the directory; the
+// test package's TestMain calls this after m.Run() instead, and a build that
+// never happened is a no-op.
+func CleanupBinaries() {
+	if binaries.dir != "" {
+		_ = os.RemoveAll(binaries.dir)
+	}
 }
 
 // Build compiles the dispat CLI (from services/dispat) and the tsmark timing
@@ -66,6 +77,7 @@ func build() (dispat, tsmark string, err error) {
 	if err != nil {
 		return "", "", err
 	}
+	binaries.dir = dir
 
 	// atomic matches the unit profiles, so the text profiles concatenate into
 	// one; -coverpkg=./... mirrors the unit job's scope for the CLI module.

@@ -45,9 +45,16 @@ func ParseTimeline(t testing.TB, path string) []Interval {
 		at := time.Unix(0, n)
 		switch event {
 		case "start":
+			// A label recorded twice (a scenario running two releases into one
+			// log, say) would silently keep only the last pair and let a wrong
+			// assertion pass green; per-run logs must use distinct labels.
+			_, dup := starts[label]
+			require.Falsef(t, dup, "label %q recorded twice in %s: use distinct labels per run", label, path)
 			starts[label] = at
 			order = append(order, label)
 		case "end":
+			_, dup := ends[label]
+			require.Falsef(t, dup, "label %q ended twice in %s: use distinct labels per run", label, path)
 			ends[label] = at
 		default:
 			t.Fatalf("unknown timeline event %q in %q", event, line)

@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -819,4 +820,130 @@ func TestConfigGitRepositoryGuard(t *testing.T) {
 	out, runErr = exec.Command(dispat, "init", "--root", t.TempDir()).CombinedOutput()
 	require.Error(t, runErr, "init outside a repository root must fail\n%s", out)
 	assert.Contains(t, string(out), "not a git repository root")
+}
+
+// hookLog builds the scripts map wiring every per-package stage hook (all
+// nine), the three stages and announce to one appending log line each, so a
+// scenario can read back exactly what fired and in which order.
+func hookLog() map[string]string {
+	names := []string{
+		"beforeAll", "beforeVersion", "postVersion", "beforeBuild", "postBuild",
+		"beforePublish", "postPublish", "beforeAnnounce", "postAnnounce",
+		"build", "publish", "version", "announce",
+	}
+	scripts := make(map[string]string, len(names))
+	for _, n := range names {
+		scripts[n] = "echo " + n + ":$DISPAT_PACKAGE >> ../../hooks.log"
+	}
+	return scripts
+}
+
+// hookFlow references every hookLog script from its flow slot.
+func hookFlow() *models.SpaceFlowConfig {
+	return &models.SpaceFlowConfig{
+		Build: []string{"build"}, Publish: []string{"publish"}, Version: []string{"version"},
+		Announce:      []string{"announce"},
+		BeforeAll:     []string{"beforeAll"},
+		BeforeVersion: []string{"beforeVersion"}, PostVersion: []string{"postVersion"},
+		BeforeBuild: []string{"beforeBuild"}, PostBuild: []string{"postBuild"},
+		BeforePublish: []string{"beforePublish"}, PostPublish: []string{"postPublish"},
+		BeforeAnnounce: []string{"beforeAnnounce"}, PostAnnounce: []string{"postAnnounce"},
+	}
+}
+
+// hookSequence returns hooks.log's entries for one package, in file order.
+func hookSequence(t *testing.T, r *harness.Repo, pkg string) []string {
+	t.Helper()
+	data, err := os.ReadFile(r.Path("hooks.log"))
+	require.NoError(t, err)
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if name, p, ok := strings.Cut(line, ":"); ok && p == pkg {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// TestConfigAllStageHooksFireInOrder exercises the full per-package hook
+// frame — every one of the nine hooks plus the announce stage — on a
+// provider/consumer pair. The provider runs the plain frame; the consumer,
+// bumped because of the provider, additionally runs the version stage with
+// its two hooks. Order is asserted per package: the frame's shape is a
+// per-package promise, interleaving across packages is the scheduler's
+// business.
+func TestConfigAllStageHooksFireInOrder(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = hookLog()
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: hookFlow()}}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core)^: propagate to the consumer")
+
+	r.ReleaseOK()
+	assert.Equal(t, []string{
+		"beforeAll", "beforeBuild", "build", "postBuild",
+		"beforePublish", "publish", "postPublish",
+		"beforeAnnounce", "announce", "postAnnounce",
+	}, hookSequence(t, r, "core"), "the provider's frame")
+	assert.Equal(t, []string{
+		"beforeAll", "beforeVersion", "version", "postVersion",
+		"beforeBuild", "build", "postBuild",
+		"beforePublish", "publish", "postPublish",
+		"beforeAnnounce", "announce", "postAnnounce",
+	}, hookSequence(t, r, "app"), "the consumer adds the version stage inside the same frame")
+}
+
+// TestConfigStageHookAuthoritySplit pins the documented split: hooks up to
+// beforePublish gate the release (their failure fails the package), while
+// postPublish and the whole announce frame observe a release that is already
+// out and may only warn.
+func TestConfigStageHookAuthoritySplit(t *testing.T) {
+	t.Run("post_publish_and_announce_only_warn", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := harness.BaseFile(1)
+		cfg.Scripts = map[string]string{
+			"build": echoBuild, "publish": "echo publishing",
+			"boom": "exit 1",
+		}
+		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+			Build: []string{"build"}, Publish: []string{"publish"},
+			PostPublish: []string{"boom"}, BeforeAnnounce: []string{"boom"},
+			Announce: []string{"boom"}, PostAnnounce: []string{"boom"},
+		}}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): ship it")
+
+		r.ReleaseOK() // exit 0 despite four failing warn-only sequences
+		assert.True(t, r.HasTag("core@0.1.0"),
+			"the release is out; observers failing must not unreport it: %v", r.TagList())
+	})
+
+	t.Run("gating_hooks_fail_the_package", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := harness.BaseFile(1)
+		cfg.Scripts = map[string]string{
+			"build": echoBuild, "publish": "echo publishing",
+			"boom": "exit 1", "onfail": "echo onFail:$DISPAT_FAILED_STAGE >> ../../hooks.log",
+		}
+		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+			Build: []string{"build"}, Publish: []string{"publish"},
+			PostBuild: []string{"boom"}, OnFail: []string{"onfail"},
+		}}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): doomed")
+
+		res := r.Release()
+		assert.NotZero(t, res.Code, "a failing gating hook fails the run")
+		assert.Empty(t, r.TagList(), "nothing may be tagged")
+		data, err := os.ReadFile(r.Path("hooks.log"))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "onFail:build",
+			"onFail observes the failure with the stage that carried it")
+	})
 }
