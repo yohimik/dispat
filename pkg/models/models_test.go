@@ -128,3 +128,25 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 		t.Error("marshalled config must be valid JSON")
 	}
 }
+
+func TestAutoVersionConfigAccessors(t *testing.T) {
+	var nilAV *AutoVersionConfig
+	if nilAV.IsEnabled() {
+		t.Error("a nil autoVersion block is off")
+	}
+	if nilAV.WriteVersionEnabled() {
+		t.Error("a nil block writes nothing")
+	}
+	if !(&AutoVersionConfig{}).IsEnabled() {
+		t.Error("a present block defaults to enabled")
+	}
+	if (&AutoVersionConfig{Enabled: Bool(false)}).IsEnabled() {
+		t.Error("enabled:false turns the block off")
+	}
+	if !(&AutoVersionConfig{}).WriteVersionEnabled() {
+		t.Error("writeVersion defaults to true")
+	}
+	if (&AutoVersionConfig{WriteVersion: Bool(false)}).WriteVersionEnabled() {
+		t.Error("writeVersion can be disabled")
+	}
+}

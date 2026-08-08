@@ -1,6 +1,6 @@
 package integration
 
-// Repository-scoped errors (the §16 fatal bucket). These codes mean no
+// Area 9: repository-scoped errors (the §16 fatal bucket). These codes mean no
 // correct plan exists at all, so they abort the run whatever commitErrors
 // says — the cases where a partial release would be worst. Each scenario
 // constructs the broken repository for real and asserts three things: the

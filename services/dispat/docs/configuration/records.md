@@ -88,6 +88,7 @@ file still fails the package like any other recording failure.
 | `push`          | `false`                  | Push the release commit and tags. Tags that already exist on the remote are skipped with a warning; the rest are pushed. Only applies when `enabled` is true. |
 | `remote`        | `origin`                 | Remote to push to.                                                                                              |
 | `verify`        | `true`                   | Verify remote access (`git ls-remote`) before any release work when `push` is enabled. Set `false` to skip the check, e.g. for a remote that rejects ls-remote but accepts pushes. |
+| `include`       | —                        | Extra repo-relative paths the release commit stages on top of the published packages' folders: the shared artifacts a version stage or an [`autoVersion.syncLock`](./spaces.md#autoversion) regenerates outside every package folder, a workspace-level `package-lock.json` first among them. Paths must stay inside the repository; one that does not exist at commit time is simply not staged. |
 
 **Disabled** (the default), dispat creates no commit at all. Each package's annotated tag is created right after its
 publish succeeds and points at the commit the run released from: `HEAD` of the checkout, which stays put for the whole
@@ -95,8 +96,8 @@ run since nothing is committed. Whatever the release changed on disk (changelog 
 left in the worktree, and pushing the tags is left to CI (`git push origin --tags`).
 
 When **enabled**, the run instead finishes with a *finalize phase*: all published packages' folders are staged and
-committed in a single commit (changelog files, version-script manifest changes; add build outputs to your
-`.gitignore` or they get committed too), and the release tags are created **on that commit** instead of during each
+committed in a single commit (changelog files, version-script manifest changes, plus any `include` paths that exist;
+add build outputs to your `.gitignore` or they get committed too), and the release tags are created **on that commit** instead of during each
 publish. A package whose scripts exported [`PACKAGE_<KEY>`](../environment.md#script-outputs) is the exception: its
 tag is excluded from the release commit and created at the exported commit hash instead. If nothing changed on disk
 (e.g. changelogs disabled), no empty commit is created but tags are still placed.

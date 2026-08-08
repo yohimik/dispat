@@ -84,7 +84,9 @@ dispat stands on the shoulders of two things:
   format-preservingly, for `package.json`, `go.mod` and `requirements*.txt` — with match/range policies (only touch
   `workspace:*`, write caret/tilde/exact/a literal), per-kind and per-provider filters, substring name matching
   (`nameMatch: substring` lets package `app` match a declared `@core/app`), and `syncLock` scripts (e.g. `npm install`)
-  run between version and build under their own concurrency budget (default 1, so shared lock files never corrupt).
+  run between version and build under their own concurrency budget (default 1, so shared lock files never corrupt;
+  a root-level lock file joins the release commit through `commit.include`). Both features are covered by the
+  [black-box test plan](./tests/integration/docs/test-plan.md) (goals 10 and 11).
 
 ## Planned features
 

@@ -106,5 +106,5 @@ functions plus fuzzing, run by [CI](../../.github/workflows/tests.yml) on every 
 fakes, and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
 disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
-Together they hold **94.5%** workspace statement coverage
+Together they hold **93.0%** workspace statement coverage
 ([per-package table](./docs/coverage.md), [test inventory](./docs/architecture.md#testing)).

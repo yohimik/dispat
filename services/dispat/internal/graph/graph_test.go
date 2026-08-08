@@ -1,6 +1,10 @@
 package graph
 
 import (
+	"errors"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -126,4 +130,30 @@ func TestSchedulerGenericNodeType(t *testing.T) {
 
 	assert.Equal(t, []node{build}, s.Ready())
 	assert.Equal(t, []node{publish}, s.Done(build))
+}
+
+func TestTopoSortCycleErrorIsTyped(t *testing.T) {
+	g := New()
+	g.AddNode("a")
+	g.AddNode("b")
+	if err := g.AddEdge("a", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddEdge("b", "a"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := g.TopoSort()
+	var cyc *CycleError
+	if !errors.As(err, &cyc) {
+		t.Fatalf("want a *CycleError, got %T: %v", err, err)
+	}
+	want := []string{"a", "b"}
+	got := append([]string(nil), cyc.Nodes...)
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Nodes = %v, want %v", cyc.Nodes, want)
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("message must name the cycle: %q", err.Error())
+	}
 }

@@ -146,15 +146,15 @@ Rewriting failures fail the version stage (with `revertOnFail` rolling the half-
 
 | Key                   | Type             | Default  | Effect                                                                                                                                                                                                                                            |
 |-----------------------|------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `enabled`             | bool             | `true`   | Turns the block off without deleting it.                                                                                                                                                                                                          |
-| `manifests`           | string           | `root`   | `root`: only manifests directly in the package folder; `all`: every manifest found under it (`node_modules`, `vendor`, `target` and dot-folders are never entered).                                                                               |
+| `enabled`             | bool             | `true`   | Turns the block off without deleting it. The minimal opt-in block is `{"enabled": true}`: a completely empty `{}` object is pruned by the config loader and reads as absent.                                                                       |
+| `manifests`           | string           | `root`   | `root`: only manifests directly in the package folder; `all`: every manifest found under it (dependency, virtual-env and build-output folders — `node_modules`, `vendor`, `dist`, `venv`, ... — and dot-folders are never entered).                                                                               |
 | `kinds`               | array of strings | all four | Restrict rewriting to the named manifest fields (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`).                                                                                                                  |
 | `only`                | array of strings | all      | Restrict rewriting to declarations of the named provider packages; every name must be a discovered package.                                                                                                                                       |
 | `nameMatch`           | string           | `exact`  | How a declared name finds its workspace package when no manifest declares that name and no local path matches: `exact` — such declarations are simply not workspace dependencies — or `substring`, which also matches a declared name whose **last `/`- or `:`-separated segment** equals a package's folder name, so package `app` matches `@core/app`, `com.acme:app` or a bare `app` line even when the `app` package has no parseable manifest of its own. Opt-in because it can false-positive (a third-party `@types/app` would match a package named `app`). |
-| `match`               | array of globs   | any      | Rewrite only declared ranges matching one of the globs, e.g. `["workspace:*"]` — so a range pinned by hand is never overridden.                                                                                                                   |
+| `match`               | array of globs   | any      | Rewrite only declared ranges matching one of the globs, e.g. `["workspace:*"]` — so a range pinned by hand is never overridden. `*` matches any run of characters (slashes included, same as scope globs), so `file:../core` is matched by `file:*` and by `*`.                                                                          |
 | `range`               | string           | `caret`  | The write policy: `caret` (`^1.2.3`), `tilde` (`~1.2.3`), `exact` (`1.2.3`), a `{version}` template (`>={version}`), or any other literal written verbatim (`workspace:*`). Ecosystems with their own version spelling override the keywords: `go.mod` always receives exact canonical `vX.Y.Z`, Python files always receive `==X.Y.Z`; templates and literals pass through everywhere. |
-| `writeVersion`        | bool             | `true`   | Also write the package's own new version into its manifest's version field (§12.4).                                                                                                                                                               |
-| `syncLock`            | array of names   | —        | References into `scripts`, run inside the package folder **after** its manifests were rewritten and **before** its build — the slot for `npm install` and friends, so lock files follow the manifests.                                             |
+| `writeVersion`        | bool             | `true`   | Also write the package's own new version into its manifest's version field (§12.4). Applies to the package's **root** manifests only: a nested manifest (an example, a fixture) keeps its own version even under `manifests: all`.                                                                                                                                                               |
+| `syncLock`            | array of names   | —        | References into `scripts`, run inside the package folder **after** its manifests were rewritten and **before** its build — the slot for `npm install` and friends, so lock files follow the manifests. Skipped for a package whose version stage changed nothing, so a quiet release does not regenerate locks for no reason. A lock file living at the **repo root** (npm workspaces) is outside every package folder: list it under [`commit.include`](./records.md#commit) so the release commit carries it.        |
 | `syncLockConcurrency` | int              | `1`      | Run-wide cap on simultaneously running `syncLock` scripts. Shared lock files corrupt under parallel writers, hence the serial default; when spaces disagree, the smallest configured value wins.                                                    |
 
 ```yaml
@@ -169,10 +169,12 @@ scripts:
   npm-install: npm install --package-lock-only
 ```
 
-Three warnings narrate what the rewrite did that the commit log alone cannot explain: `W192` — the manifest's declared
+Four warnings narrate what the rewrite did that the commit log alone cannot explain: `W192` — the manifest's declared
 own version disagreed with the baseline (tags are authoritative; the computed version is written over it), `W197` — a
 range was caught up to a provider released **outside** this run (§9.4's catch-up), `W203` — a stable release now ranges
-over a **prerelease** provider.
+over a **prerelease** provider, and `W221` — a rewritten dependency has **no configured `dependencies` edge** behind
+it, so nothing orders this package after that provider or skips it when the provider fails; the written version is
+optimistic about a publish still in flight. `dispat compute` derives the missing edge.
 
 ## `runScripts` and `dispat run`
 

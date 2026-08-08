@@ -316,7 +316,10 @@ type SpaceConfig struct {
 // manifest-rewriting policy of the version stage (§9.4, §12.4). The presence
 // of the object enables the feature unless `enabled: false` says otherwise.
 type AutoVersionConfig struct {
-	// Enabled turns the block off without deleting it. Default true.
+	// Enabled turns the block off without deleting it. Default true when the
+	// block sets any key at all. A completely empty {} block is treated as
+	// absent (the config loader's flattening prunes empty objects), so the
+	// minimal opt-in is {"enabled": true}.
 	Enabled *bool `mapstructure:"enabled" json:"enabled,omitempty"`
 	// Manifests selects which manifests of a package are rewritten: "root"
 	// (default) — only manifests directly in the package folder — or "all",

@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
 // Compute is a filesystem affair with no git involved, so its tests build a
@@ -229,7 +231,7 @@ func TestComputeAmbiguousNameW220(t *testing.T) {
 	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
 	require.NoError(t, err)
 	assert.Zero(t, open, "ambiguous name derives no edges")
-	assert.Contains(t, logBuf.String(), "W220")
+	assert.Contains(t, logBuf.String(), plan.CodeAmbiguousManifestName)
 }
 
 func TestComputeTOMLConfigPrintsSnippet(t *testing.T) {
@@ -254,4 +256,72 @@ func TestComputeTOMLConfigPrintsSnippet(t *testing.T) {
 	before, readErr := os.ReadFile(cfgPath)
 	require.NoError(t, readErr)
 	assert.NotContains(t, string(before), "[[dependencies]]", "config untouched")
+}
+
+func TestComputeSuggestsRemovalOfStaleEndpoints(t *testing.T) {
+	// The edge names a package that no longer exists on disk — the state that
+	// makes every other command refuse to load. compute must run anyway and
+	// offer the removal; keep: true still silences it.
+	cfg := libsConfig(
+		config.DependencyConfig{Consumer: "app", Provider: "ghost"},
+		config.DependencyConfig{Consumer: "gone", Provider: "app", Keep: true},
+	)
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/app/package.json", `{"name": "@acme/app"}`)
+
+	var out bytes.Buffer
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
+	require.NoError(t, err, "compute must tolerate the drift it exists to fix")
+	assert.Equal(t, 1, open)
+	assert.Contains(t, out.String(), `- remove app -> ghost`)
+	assert.Contains(t, out.String(), `no longer exists`)
+	assert.NotContains(t, out.String(), "gone -> app", "keep: true silences even a stale edge")
+
+	// The release path stays strict: Discover still refuses the stale edge.
+	_, _, err = config.Discover(a.cfg, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
+}
+
+func TestComputeInteractiveNeedsInput(t *testing.T) {
+	cfg := libsConfig()
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/app/package.json", `{"name": "@acme/app", "dependencies": {"@acme/core": "workspace:*"}}`)
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+
+	var out bytes.Buffer
+	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Interactive: true, Out: &out})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input stream")
+}
+
+func TestComputeUnknownConfigFormat(t *testing.T) {
+	// A config under an extension the editor does not know: the write fails
+	// cleanly and the file is untouched.
+	cfg := libsConfig()
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/app/package.json", `{"name": "@acme/app", "dependencies": {"@acme/core": "workspace:*"}}`)
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	odd := filepath.Join(root, "dispat.conf")
+	data, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(odd, data, 0o644))
+
+	var out bytes.Buffer
+	_, err = a.Compute(context.Background(), odd, ComputeOptions{Write: true, Out: &out})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown config format")
+	after, err := os.ReadFile(odd)
+	require.NoError(t, err)
+	assert.Equal(t, data, after, "a failed write must leave the file untouched")
+}
+
+func TestStrongestKindFullRanking(t *testing.T) {
+	assert.Equal(t, model.KindPeerDependencies,
+		strongestKind([]model.DepKind{model.KindDevDependencies, model.KindOptionalDependencies, model.KindPeerDependencies}),
+		"peer outranks optional outranks dev")
+	assert.Equal(t, model.KindOptionalDependencies,
+		strongestKind([]model.DepKind{model.KindOptionalDependencies, model.KindDevDependencies}))
+	assert.Equal(t, model.KindDependencies,
+		strongestKind([]model.DepKind{model.KindDevDependencies, model.KindDependencies}))
 }

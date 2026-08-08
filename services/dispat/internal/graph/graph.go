@@ -95,11 +95,11 @@ func (e *CycleError) Error() string {
 // stringHeap is a min-heap of node names.
 type stringHeap []string
 
-func (h stringHeap) Len() int            { return len(h) }
-func (h stringHeap) Less(i, j int) bool  { return h[i] < h[j] }
-func (h stringHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *stringHeap) Push(x interface{}) { *h = append(*h, x.(string)) }
-func (h *stringHeap) Pop() interface{} {
+func (h stringHeap) Len() int           { return len(h) }
+func (h stringHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h stringHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *stringHeap) Push(x any)        { *h = append(*h, x.(string)) }
+func (h *stringHeap) Pop() any {
 	n := len(*h) - 1
 	v := (*h)[n]
 	*h = (*h)[:n]

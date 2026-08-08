@@ -1366,6 +1366,8 @@ func TestCycleIsRejected(t *testing.T) {
 	require.Len(t, p.Diagnostics, 1)
 	assert.Equal(t, CodeDependencyCycle, p.Diagnostics[0].Code)
 	assert.Contains(t, p.Diagnostics[0].Message, "cycle")
+	assert.Contains(t, p.Diagnostics[0].Message, "app -> core (dependencies)",
+		"the diagnostic names the edges and the manifest field carrying each one")
 	assert.Empty(t, p.Order, "no publish order exists")
 }
 

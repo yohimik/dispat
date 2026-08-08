@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/pkg/models"
+
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -1032,4 +1034,114 @@ func TestLoadParserInvalidValues(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid keys")
 	})
+}
+
+func TestAutoVersionResolution(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		// The minimal opt-in block enables everything at its documented
+		// defaults: all four kinds, root manifests only, exact name matching,
+		// writeVersion on, no syncLock. ({"enabled": true} rather than {}:
+		// viper prunes empty objects while flattening, so a bare {} is
+		// indistinguishable from an absent key by decode time.)
+		cfg := minimalConfig()
+		libs := cfg.Spaces["libs"]
+		libs.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true)}
+		cfg.Spaces["libs"] = libs
+		root := writeModelRepo(t, cfg, "pkgs/core")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		pkgs, _, err := Discover(loaded, root)
+		require.NoError(t, err)
+		av := pkgs[0].Space.AutoVersion
+		require.NotNil(t, av)
+		assert.False(t, av.AllManifests)
+		assert.False(t, av.NameSubstring)
+		assert.True(t, av.WriteVersion, "writeVersion defaults on")
+		assert.Empty(t, av.SyncLock)
+		assert.Zero(t, av.SyncLockConcurrency)
+		for _, k := range []model.DepKind{model.KindDependencies, model.KindDevDependencies,
+			model.KindPeerDependencies, model.KindOptionalDependencies} {
+			assert.True(t, av.Kinds[k], "empty kinds means all four: %s", k)
+		}
+		assert.Nil(t, av.Only, "empty only means every provider")
+	})
+
+	t.Run("customised", func(t *testing.T) {
+		cfg := minimalConfig()
+		cfg.Scripts["lock"] = "npm install --package-lock-only"
+		libs := cfg.Spaces["libs"]
+		libs.AutoVersion = &AutoVersionConfig{
+			Manifests:           "all",
+			Kinds:               []string{"dependencies", "peerDependencies"},
+			Only:                []string{"core"},
+			NameMatch:           "substring",
+			Match:               []string{"workspace:*"},
+			Range:               "exact",
+			WriteVersion:        models.Bool(false),
+			SyncLock:            []string{"lock"},
+			SyncLockConcurrency: 2,
+		}
+		cfg.Spaces["libs"] = libs
+		root := writeModelRepo(t, cfg, "pkgs/core")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		pkgs, _, err := Discover(loaded, root)
+		require.NoError(t, err)
+		av := pkgs[0].Space.AutoVersion
+		require.NotNil(t, av)
+		assert.True(t, av.AllManifests)
+		assert.True(t, av.NameSubstring)
+		assert.False(t, av.WriteVersion)
+		assert.Equal(t, []string{"workspace:*"}, av.Match)
+		assert.Equal(t, "exact", av.Range)
+		assert.Equal(t, []string{"npm install --package-lock-only"}, av.SyncLock,
+			"syncLock names resolve through the scripts map")
+		assert.Equal(t, 2, av.SyncLockConcurrency)
+		assert.True(t, av.Kinds[model.KindDependencies])
+		assert.True(t, av.Kinds[model.KindPeerDependencies])
+		assert.False(t, av.Kinds[model.KindDevDependencies], "unlisted kinds excluded")
+		assert.Equal(t, map[string]bool{"core": true}, av.Only)
+	})
+
+	t.Run("disabled_block_is_inert", func(t *testing.T) {
+		// enabled:false yields no AutoVersion at all — and its `only` list is
+		// not validated, because a disabled block is dormant configuration.
+		cfg := minimalConfig()
+		libs := cfg.Spaces["libs"]
+		libs.AutoVersion = &AutoVersionConfig{
+			Enabled: models.Bool(false),
+			Only:    []string{"no-such-package"},
+		}
+		cfg.Spaces["libs"] = libs
+		root := writeModelRepo(t, cfg, "pkgs/core")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		pkgs, _, err := Discover(loaded, root)
+		require.NoError(t, err)
+		assert.Nil(t, pkgs[0].Space.AutoVersion)
+	})
+}
+
+func TestCommitIncludeValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, wantErr string
+	}{
+		{"absolute", "/etc/passwd", "repository-relative"},
+		{"escapes_root", "../outside.txt", "escapes the repository root"},
+		{"empty", "", "repository-relative"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.Commit = &CommitConfig{Enabled: models.Bool(true), Include: []string{tc.path}}
+			_, err := loadModel(t, cfg, "pkgs/core")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+
+	cfg := minimalConfig()
+	cfg.Commit = &CommitConfig{Enabled: models.Bool(true), Include: []string{"package-lock.json", "locks/go.work.sum"}}
+	loaded, err := loadModel(t, cfg, "pkgs/core")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"package-lock.json", "locks/go.work.sum"}, loaded.Commit.Include)
 }

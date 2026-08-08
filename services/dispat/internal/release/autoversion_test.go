@@ -376,3 +376,85 @@ func TestAutoVersionOrderingStrings(t *testing.T) {
 func syncedLog(buf *bytes.Buffer) zerolog.Logger {
 	return zerolog.New(zerolog.SyncWriter(buf))
 }
+
+func TestAutoVersionRewriteFailureFailsTheVersionStage(t *testing.T) {
+	// The manifest's folder is read-only, so the writer cannot create its
+	// temp file: the native step's error must fail the package at the version
+	// stage, and with revertOnFail set the reverter must be asked to roll the
+	// folder back.
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true})
+	space.RevertOnFail = true
+	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	dir := filepath.Join(root, "a")
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	rv := &fakeReverter{}
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1})
+	e.Reverter = rv
+	res := e.Run(context.Background(), avPlan(root, space, "a"))
+
+	require.Equal(t, StatusFailed, res["a"].Status)
+	assert.Equal(t, "version", res["a"].FailedStage, "auto-versioning fails the version stage")
+	require.Error(t, res["a"].Err)
+	assert.Equal(t, []string{dir}, rv.dirs, "revertOnFail rolls the failing folder back")
+}
+
+func TestAutoVersionConverges(t *testing.T) {
+	// The multi-run convention applied natively: a second release over the
+	// same plan rewrites nothing — the manifest already carries the computed
+	// version and range, so the file bytes are stable and syncLock stays
+	// silent.
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true, SyncLock: []string{"locksync"}})
+	seedFile(t, root, "core/package.json", `{"name": "@acme/core", "version": "1.0.0"}`)
+	seedFile(t, root, "web/package.json",
+		`{"name": "@acme/web", "version": "1.0.0", "dependencies": {"@acme/core": "^1.0.0"}}`)
+
+	res := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2}).
+		Run(context.Background(), avPlan(root, space, "core", "web"))
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	first := fileText(t, root, "web/package.json")
+	assert.Contains(t, first, `"@acme/core": "^1.0.1"`)
+
+	r2 := &fakeRunner{}
+	res = newExecutor(execSpec{Runner: r2, Build: 2, Publish: 2}).
+		Run(context.Background(), avPlan(root, space, "core", "web"))
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	assert.Equal(t, first, fileText(t, root, "web/package.json"), "second run rewrites nothing")
+	assert.Equal(t, -1, r2.indexOf("locksync "+filepath.Join(root, "web")),
+		"nothing changed: the second run's syncLock is skipped")
+}
+
+func TestAutoVersionUnscheduledEdgeW221(t *testing.T) {
+	// web's manifest depends on core and both release, but the config
+	// declares no edge (empty plan.Providers): the rewrite is optimistic
+	// about core's publish, which W221 must say out loud.
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds()})
+	seedFile(t, root, "core/package.json", `{"name": "@acme/core"}`)
+	seedFile(t, root, "web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
+	p := avPlan(root, space, "core", "web")
+
+	var logBuf bytes.Buffer
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2})
+	e.Log = syncedLog(&logBuf)
+	res := e.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	assert.Contains(t, logBuf.String(), plan.CodeUnscheduledRewriteEdge,
+		"a rewritten edge with no configured counterpart must be reported")
+
+	// The counter-case: with the edge declared, no W221.
+	seedFile(t, root, "web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
+	p = avPlan(root, space, "core", "web")
+	p.Providers["web"] = []string{"core"}
+	logBuf.Reset()
+	e = newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2})
+	e.Log = syncedLog(&logBuf)
+	res = e.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	assert.NotContains(t, logBuf.String(), plan.CodeUnscheduledRewriteEdge)
+}

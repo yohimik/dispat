@@ -176,6 +176,10 @@ commit:
   push: false
   remote: origin
   verify: true   # ls-remote check before any work when push is enabled
+  # Extra repo-relative paths the release commit stages: the shared artifacts
+  # a syncLock regenerates outside every package folder (paths that do not
+  # exist at commit time are simply not staged).
+  # include: [package-lock.json]
 
 # Shell used for all scripts; default /bin/sh -c.
 # shell: ["bash", "-c"]

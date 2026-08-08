@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against nine goals, one test file each:
+The suite was designed against eleven goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -40,6 +40,13 @@ The suite was designed against nine goals, one test file each:
    says, each constructed for real: a dependency cycle (E200), duplicate version tags (E191), and a shallow clone
    (E196). These are the cases where a partial release would be worst, so each asserts the non-zero exit, the code in
    the events, and that nothing was released or executed.
+10. **The `compute` command** (`compute_test.go`): the manifest-derived dependency graph through the binary — the
+    detect/apply/check loop with its backup and convergence, `keep` and removal semantics, and the W220 ambiguity
+    reaching the JSON events.
+11. **Native auto-versioning** (`autoversion_test.go`): manifests rewritten by the binary at the version stage —
+    range reconciliation under the match policy, own-version writes, the serialised `syncLock` slot, the
+    W192/W197/W203/W221 diagnostics as JSON events across three runs, and `commit.include` staging the regenerated
+    root lock file into the release commit.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -99,6 +106,8 @@ tests/integration/
   records_test.go           goal 7
   commands_test.go          goal 8
   fatal_test.go             goal 9
+  compute_test.go           goal 10
+  autoversion_test.go       goal 11
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -261,6 +270,26 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestFatalDependencyCycle`       | A cyclic dependency graph loads as config but refuses to plan: exit 1, E200 in the events, no tag, no script, and `status` refuses too.                                                                   |
 | `TestFatalDuplicateVersionTags`  | Two reachable tags parsing to the same version of one package on different commits (`core@0.1.0` next to a hand-planted `core@0.1.0+dup`) make the baseline ambiguous: exit 1, E191, pending work unreleased. |
 | `TestFatalShallowRepository`     | A `git clone --depth 1` of the repository refuses to release: exit 1, E196 in the events, instead of silently planning over truncated history.                                                             |
+
+### Goal 10: the compute command (`compute_test.go`)
+
+| Test                                  | Claim proven                                                                                                                                                                                                 |
+|---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestComputeDetectApplyStatus`        | The full loop through the binary: a preview writes nothing, `--check` exits 1 on drift, `--write` applies with a byte-identical `.backup`, the next `status` orders by the new edge, and `--check` converges. |
+| `TestComputeKeepAndRemoval`           | A stale edge is suggested for removal; `keep: true` silences it, survives `--write`, and the config still loads.                                                                                             |
+| `TestComputeAmbiguousNameReportsW220` | Two packages declaring one manifest name derive no edges and the ambiguity reaches the JSON events as W220.                                                                                                  |
+
+(The command's finer grain — cross-ecosystem matching, interactive selection, the TOML snippet fallback, stale-endpoint
+removals, error paths — is unit-tested in `services/dispat/internal/app`, where each case is one in-memory monorepo
+away instead of one binary invocation.)
+
+### Goal 11: native auto-versioning (`autoversion_test.go`)
+
+| Test                                        | Claim proven                                                                                                                                                                                                                                              |
+|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestAutoVersionReleaseRewritesManifests`   | A `workspace:*` range is reconciled to the provider's released version, a hand-pin outside the match globs survives, both own versions advance, and the syncLock snapshot proves it ran after the rewrite.                                                 |
+| `TestAutoVersionSyncLockSerialised`         | Several packages' syncLock scripts never overlap under the default budget of 1 while builds keep the build budget — the corrupted-shared-lockfile guard over the real scheduler.                                                                           |
+| `TestAutoVersionDiagnosticsAndCommitInclude` | Three runs: W221 for a rewritten edge with no configured counterpart (and `commit.include` staging the regenerated root package-lock.json into the release commit); W192+W197 after the manifest was hand-edited backwards; W203 when the provider goes to beta under a stable consumer. All asserted as JSON events per package. |
 
 ## Findings
 

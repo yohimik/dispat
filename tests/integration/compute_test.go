@@ -1,6 +1,6 @@
 package integration
 
-// Area 9: the compute command through the compiled binary. compute derives
+// Area 10: the compute command through the compiled binary. compute derives
 // the dependency graph from real manifests on disk and edits the config
 // file; what must hold over the process boundary is the full loop — scan,
 // suggest, gate CI, apply, back up — and that the very next status consumes
@@ -106,4 +106,27 @@ func TestComputeKeepAndRemoval(t *testing.T) {
 
 	// With the stale edge gone the config loads and status still runs.
 	r.StatusOK()
+}
+
+// TestComputeAmbiguousNameReportsW220 through the binary: two packages
+// declaring the same manifest name derive no edges, and the ambiguity reaches
+// the JSON events as W220.
+func TestComputeAmbiguousNameReportsW220(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{Build: []string{"build"}}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+	r.WriteFile("packages/a/package.json", `{"name": "@acme/same"}`)
+	r.WriteFile("packages/b/package.json", `{"name": "@acme/same"}`)
+	r.Commit("feat(a,b): two packages, one manifest name")
+
+	res := r.Command("compute", "--check")
+	assert.Zero(t, res.Code, "an ambiguous name derives nothing: no drift, exit 0; stdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "W220"),
+		"the ambiguity must reach the events: %s", res.Stdout)
 }
