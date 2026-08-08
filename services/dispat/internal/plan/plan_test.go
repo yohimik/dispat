@@ -116,15 +116,6 @@ func (f *fakeGit) IsAncestor(_ context.Context, a, b string) (bool, error) {
 	return ia <= ib, nil
 }
 
-func (f *fakeGit) Subjects(_ context.Context, sinceTag string) ([]string, error) {
-	cs, _ := f.Commits(context.Background(), sinceTag)
-	out := make([]string, 0, len(cs))
-	for _, c := range cs {
-		out = append(out, strings.SplitN(c.Message, "\n", 2)[0])
-	}
-	return out, nil
-}
-
 func (f *fakeGit) CreateTag(context.Context, string, string, string) error { return nil }
 
 // countingGit records how many git queries planning makes per package.

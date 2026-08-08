@@ -34,6 +34,7 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -744,6 +745,15 @@ type computation struct {
 	channel     map[string]string
 	channelFrom map[string]string
 
+	// ancestry state: the memo behind ancestorOrSelf, the flag that the Git
+	// implementation answered gitx.ErrNoAncestry (so only the fallbacks are
+	// consulted from then on), and the first real git failure — which aborts
+	// Compute rather than let the weaker fallbacks decide cancellation and
+	// containment.
+	ancCache map[[2]string]bool
+	ancNoGit bool
+	ancErr   error
+
 	diags []Diagnostic
 }
 
@@ -814,6 +824,9 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp.collectCancels() // §13.5
 	cp.resolveHolds()   // §13.6a
 	cp.directBumps()    // §13.6
+	if err := cp.ancestryFailed(); err != nil {
+		return nil, err
+	}
 
 	// §13.7 is §9.2's three phases; §13.8 is invoked from inside it.
 	cp.propagateChannels() // phase 1
@@ -823,6 +836,9 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp.finalise()      // §13.9, §13.10
 	cp.reportCancels() // W170
 	cp.reportHeld()    // W154
+	if err := cp.ancestryFailed(); err != nil {
+		return nil, err
+	}
 
 	return &Plan{
 		Order:       cp.order,
@@ -1069,11 +1085,10 @@ func (cp *computation) buildUnion(lists [][]gitx.Commit) {
 
 // ancestorOrSelf reports whether a is an ancestor-or-self of b.
 //
-// Three sources of truth, in order of preference: the Git implementation, the
-// parent pointers carried by the commits, and — when neither is available —
-// history order, which is exact for the linear case and the only thing left
-// otherwise. Ancestry rather than commit dates is what keeps cancellation
-// deterministic under merges and rebases (§10.4).
+// Answers are memoised on the computation: the same (commit, baseline) pair
+// is asked from several nested phases, and each uncached git answer is a
+// subprocess — on a prerelease train the containment checks alone would
+// otherwise fork once per commit×package.
 func (cp *computation) ancestorOrSelf(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -1081,9 +1096,40 @@ func (cp *computation) ancestorOrSelf(a, b string) bool {
 	if a == b {
 		return true
 	}
-	if ac, ok := cp.git.(ancestryChecker); ok {
-		if yes, err := ac.IsAncestor(cp.ctx, a, b); err == nil {
+	key := [2]string{a, b}
+	if v, ok := cp.ancCache[key]; ok {
+		return v
+	}
+	v := cp.ancestorLookup(a, b)
+	if cp.ancCache == nil {
+		cp.ancCache = make(map[[2]string]bool)
+	}
+	cp.ancCache[key] = v
+	return v
+}
+
+// ancestorLookup answers one uncached ancestry question. Three sources of
+// truth, in order of preference: the Git implementation, the parent pointers
+// carried by the commits, and — when neither is available — history order,
+// which is exact for the linear case and the only thing left otherwise.
+// Ancestry rather than commit dates is what keeps cancellation deterministic
+// under merges and rebases (§10.4).
+//
+// A real git failure — as opposed to gitx.ErrNoAncestry's "I have no answer,
+// use the fallback" — is recorded once in cp.ancErr and aborts Compute: the
+// fallbacks answer a weaker question, and silently degrading to them (on a
+// cancelled context, say) would change which releases get cancelled or
+// contained.
+func (cp *computation) ancestorLookup(a, b string) bool {
+	if !cp.ancNoGit && cp.ancErr == nil {
+		yes, err := cp.git.IsAncestor(cp.ctx, a, b)
+		switch {
+		case err == nil:
 			return yes
+		case errors.Is(err, gitx.ErrNoAncestry):
+			cp.ancNoGit = true
+		default:
+			cp.ancErr = err
 		}
 	}
 	if cp.linked {
@@ -1111,6 +1157,16 @@ func (cp *computation) ancestorOrSelf(a, b string) bool {
 		return false
 	}
 	return ra.rank >= rb.rank // newest first: later in the list is older
+}
+
+// ancestryFailed surfaces the first real git failure an ancestry question
+// hit. Compute checks it between phases: once git has failed, every fallback
+// answer after it is untrustworthy, so no plan may be emitted.
+func (cp *computation) ancestryFailed() error {
+	if cp.ancErr != nil {
+		return fmt.Errorf("plan: ancestry query failed: %w", cp.ancErr)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

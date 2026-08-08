@@ -524,7 +524,27 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		if _, ok := owner[d.Provider]; !ok {
 			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown provider package %q", i, d.Provider)
 		}
-		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider})
+		kind, err := depKind(d.Kind)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: dependencies[%d]: %w", i, err)
+		}
+		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
 	}
 	return pkgs, deps, nil
+}
+
+// depKind maps a dependency edge's configured kind onto the model's. Empty
+// means a plain runtime dependency (§8.4's zero value).
+func depKind(s string) (model.DepKind, error) {
+	switch s {
+	case "", "dependencies":
+		return model.KindDependencies, nil
+	case "devDependencies":
+		return model.KindDevDependencies, nil
+	case "peerDependencies":
+		return model.KindPeerDependencies, nil
+	case "optionalDependencies":
+		return model.KindOptionalDependencies, nil
+	}
+	return "", fmt.Errorf(`unknown dependency kind %q (one of "dependencies", "devDependencies", "peerDependencies", "optionalDependencies")`, s)
 }

@@ -46,7 +46,7 @@ func (a *App) TestScript(ctx context.Context, name, pkg string) error {
 	log := a.log.With().Str("package", pkg).Str("stage", stage).Logger()
 	log.Info().Msg("test script started")
 	seq := release.Sequence{Runner: &script.ShellRunner{Shell: a.cfg.Shell}, Dir: rel.Pkg.Dir,
-		Stage: stage, Commands: []string{cmd}, Env: release.CommandEnv(pl, pkg, stage, a.log),
+		Stage: stage, Commands: []string{cmd}, Env: release.CommandEnv(pl, pkg, stage, release.WorkspaceEnv(pl, a.log)),
 		Log: log, FailFast: true}
 	if err := seq.RunMergingOutputs(ctx, rel); err != nil {
 		log.Error().Err(err).Msg("test script failed")

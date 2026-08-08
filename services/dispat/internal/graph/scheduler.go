@@ -1,5 +1,10 @@
 package graph
 
+import (
+	"context"
+	"fmt"
+)
+
 // Scheduler is the incremental core of Kahn's algorithm: a dependency graph
 // consumed node by node while something else — a worker pool, a sort loop —
 // decides when and in what order the ready nodes actually run.
@@ -99,7 +104,16 @@ func (s *Scheduler[N]) Blocked() []N {
 // is treated as 1). Classes exist because budgets can be independent — the
 // executor caps its build and publish stages separately — and each class
 // keeps its own ready queue, so a stalled class never blocks another class's
-// budget. Drain returns when every node has completed.
+// budget. Drain returns nil once every node has completed.
+//
+// Two things end it early, both only after every in-flight node has been
+// awaited, so no goroutine outlives the call. A cancelled ctx stops new
+// launches: nodes not yet launched never run at all and ctx.Err() is
+// returned — the caller decides what a never-ran node means. And a graph
+// whose remaining nodes can never become ready (a dependency cycle) is
+// reported as an error instead of the coordinator blocking forever; callers
+// validate their graphs first (the planner rejects cycles as E200), so
+// hitting it is a programming error, but a diagnosed one.
 //
 // This is the one scheduling pump in the program: the executor drains
 // (package, stage) tasks over two budgets, the run command drains package
@@ -107,7 +121,7 @@ func (s *Scheduler[N]) Blocked() []N {
 // guarantees only the ordering the edges state, plus the happens-before
 // between a node's completion and its dependents' starts that the completion
 // channel provides.
-func Drain[N comparable, C comparable](s *Scheduler[N], class func(N) C, budget func(C) int, run func(N)) {
+func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], class func(N) C, budget func(C) int, run func(N)) error {
 	ready := make(map[C][]N)
 	var classes []C // first-seen order, so launch scanning is deterministic
 	push := func(n N) {
@@ -122,28 +136,40 @@ func Drain[N comparable, C comparable](s *Scheduler[N], class func(N) C, budget 
 	}
 
 	inFlight := make(map[C]int)
+	inFlightTotal := 0
 	done := make(chan N)
 	finished, total := 0, s.Len()
 	for finished < total {
-		for _, c := range classes {
-			queue := ready[c]
-			limit := max(1, budget(c))
-			for len(queue) > 0 && inFlight[c] < limit {
-				n := queue[len(queue)-1]
-				queue = queue[:len(queue)-1]
-				inFlight[c]++
-				go func(n N) {
-					run(n)
-					done <- n
-				}(n)
+		if ctx.Err() == nil {
+			for _, c := range classes {
+				queue := ready[c]
+				limit := max(1, budget(c))
+				for len(queue) > 0 && inFlight[c] < limit {
+					n := queue[len(queue)-1]
+					queue = queue[:len(queue)-1]
+					inFlight[c]++
+					inFlightTotal++
+					go func(n N) {
+						run(n)
+						done <- n
+					}(n)
+				}
+				ready[c] = queue
 			}
-			ready[c] = queue
+		}
+		if inFlightTotal == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("graph: %d node(s) can never become ready (dependency cycle)", len(s.Blocked()))
 		}
 		n := <-done
 		inFlight[class(n)]--
+		inFlightTotal--
 		finished++
 		for _, next := range s.Done(n) {
 			push(next)
 		}
 	}
+	return nil
 }

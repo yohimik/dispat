@@ -197,7 +197,7 @@ flags:
 			fmt.Fprint(stdout, notes)
 		}
 	default:
-		if a.Release(ctx) != nil {
+		if _, err := a.Release(ctx); err != nil {
 			return 1
 		}
 	}

@@ -1,8 +1,6 @@
 package plan
 
 import (
-	"context"
-
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -12,18 +10,6 @@ import (
 // depthUnbounded is the "+*" / "all" depth of §8.3: the full transitive
 // closure. It is spelled as ccme's own value so the two never drift apart.
 const depthUnbounded = int(ccme.DepthAll)
-
-// ancestryChecker is an optional capability the planner uses when the Git
-// implementation offers it.
-//
-// It is deliberately not on gitx.Git. A test double does not need it to
-// describe a plan — the commits' own parent pointers answer the same question
-// — so requiring it would make every fake carry machinery it does not
-// exercise.
-type ancestryChecker interface {
-	// IsAncestor reports whether a is an ancestor-or-self of b (§10.4).
-	IsAncestor(ctx context.Context, a, b string) (bool, error)
-}
 
 // commitKey identifies a commit within a pending window.
 //

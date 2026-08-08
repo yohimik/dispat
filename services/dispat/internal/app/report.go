@@ -107,7 +107,7 @@ func (a *App) printGraph(pl *plan.Plan) {
 // summarize prints one line per processed package plus totals, and returns
 // how many packages failed.
 func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took time.Duration) int {
-	published, failed, skipped := 0, 0, 0
+	published, failed, skipped, cancelled := 0, 0, 0, 0
 	for _, name := range pl.Order {
 		res, ok := results[name]
 		if !ok {
@@ -121,6 +121,10 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 		case release.StatusFailed:
 			failed++
 			ev = a.log.Error().Err(res.Err).Str("failedStage", res.FailedStage)
+		case release.StatusCancelled:
+			// Interrupted, not failed: the next run owes it the same release.
+			cancelled++
+			ev = a.log.Warn()
 		default:
 			skipped++
 			ev = a.log.Warn()
@@ -140,6 +144,7 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 		Int("published", published).
 		Int("failed", failed).
 		Int("skipped", skipped).
+		Int("cancelled", cancelled).
 		Int("held", len(pl.Held())).
 		Int("unchanged", len(pl.Order)-len(results)-len(pl.Held())).
 		Dur("took", took).

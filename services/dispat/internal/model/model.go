@@ -120,9 +120,9 @@ type Package struct {
 //
 // Which fields imply "must be republished" is a property of the repository
 // rather than of any one commit, so §8.4 gives units no override: the set of
-// traversed kinds is fixed for the whole run. dispat has no manifest model and
-// no configuration for this, so every configured edge is a KindDependencies
-// edge — but the distinction is carried through the graph so that a unit's
+// traversed kinds is fixed for the whole run. dispat has no manifest model —
+// the kind comes from the edge's `kind` key in the configuration's
+// dependencies list (default: a plain runtime dependency) — and a unit's
 // propagation is filtered by kind exactly as the specification describes.
 type DepKind string
 

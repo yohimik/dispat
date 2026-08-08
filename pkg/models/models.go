@@ -329,6 +329,12 @@ type SpaceFlowConfig struct {
 type DependencyConfig struct {
 	Consumer string `mapstructure:"consumer" json:"consumer,omitempty"`
 	Provider string `mapstructure:"provider" json:"provider,omitempty"`
+	// Kind is the manifest dependency field the edge stands for:
+	// "dependencies" (the default when empty), "devDependencies",
+	// "peerDependencies" or "optionalDependencies". Propagation follows or
+	// ignores the edge according to parser.propagation.kinds, whose default
+	// is every kind except devDependencies.
+	Kind string `mapstructure:"kind" json:"kind,omitempty"`
 }
 
 // Values of the commitErrors key.

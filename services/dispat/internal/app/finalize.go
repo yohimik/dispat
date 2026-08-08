@@ -60,6 +60,18 @@ type finalizer struct {
 	gh     *github.Releaser
 	remote string
 	hooks  *runHooks
+	// skipHooks silences the bracket hooks: an interrupted run still records
+	// what published (the commit, the tags, the push) but runs no more of the
+	// operator's scripts.
+	skipHooks bool
+}
+
+// run executes one warn-only bracket hook, unless the run was interrupted.
+func (f finalizer) run(ctx context.Context, name string, refs []string) {
+	if f.skipHooks {
+		return
+	}
+	f.hooks.run(ctx, name, refs)
 }
 
 // finalize runs the end-of-run release-commit phase: one commit staging every
@@ -95,7 +107,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	}
 
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
-	fin.hooks.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
+	fin.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
 	committed, err := a.git.CommitDirs(ctx, dirs, msg)
 	if err != nil {
 		a.log.Error().Err(err).Msg("release commit failed")
@@ -104,7 +116,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	if committed {
 		a.log.Info().Str("message", msg).Msg("created release commit")
 	}
-	fin.hooks.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
+	fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
 	for _, rel := range rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
@@ -113,9 +125,9 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			return err
 		}
 	}
-	fin.hooks.run(ctx, "postCommit", a.cfg.Run.PostCommit)
+	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)
 	if a.cfg.Commit.PushEnabled() {
-		fin.hooks.run(ctx, "beforePush", a.cfg.Run.BeforePush)
+		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
 		skipped, err := a.git.Push(ctx, fin.remote, tags)
 		if err != nil {
 			a.log.Error().Err(err).Str("remote", fin.remote).Msg("push failed")
@@ -126,7 +138,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 				Msg("tag already exists on the remote, skipped")
 		}
 		a.log.Info().Str("remote", fin.remote).Strs("tags", tags).Msg("pushed release commit and tags")
-		fin.hooks.run(ctx, "afterPush", a.cfg.Run.AfterPush)
+		fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
 	}
 	if fin.gh != nil {
 		// The releases document the exact release commit and tag in their

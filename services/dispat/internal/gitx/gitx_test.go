@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -387,14 +388,6 @@ func TestHeadSHA(t *testing.T) {
 	assert.Equal(t, string(bytes.TrimSpace(out)), sha)
 }
 
-func TestSubjects(t *testing.T) {
-	_, cli := initRepo(t)
-	subjects, err := cli.Subjects(context.Background(), "")
-	require.NoError(t, err)
-	require.Len(t, subjects, 1)
-	assert.Equal(t, "feat(core): initial", subjects[0])
-}
-
 // addBareRemote creates a bare repository and registers it as "origin".
 func addBareRemote(t *testing.T, root string) string {
 	t.Helper()
@@ -422,8 +415,9 @@ func TestCommitDirs(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, committed)
 
-	subjects, err := cli.Subjects(ctx, "")
-	require.NoError(t, err)
+	out, gerr := exec.Command("git", "-C", root, "log", "--format=%s").Output()
+	require.NoError(t, gerr)
+	subjects := strings.Split(strings.TrimSpace(string(out)), "\n")
 	require.Len(t, subjects, 2)
 	assert.Equal(t, "chore(release): core@0.2.0", subjects[0], "newest commit first")
 }

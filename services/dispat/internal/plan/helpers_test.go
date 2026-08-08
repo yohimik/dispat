@@ -124,10 +124,11 @@ func TestMatchesFrom(t *testing.T) {
 // ancestry fallbacks: parent-pointer BFS and history-rank order
 // ---------------------------------------------------------------------------
 
-// plainGit hides fakeGit's IsAncestor so the planner has to fall back to the
-// commits' parent pointers (stripParents=false) or to history order alone
-// (stripParents=true).
+// plainGit answers ancestry with gitx.ErrNoAncestry (via the embedded stub)
+// so the planner has to fall back to the commits' parent pointers
+// (stripParents=false) or to history order alone (stripParents=true).
 type plainGit struct {
+	gitx.NoAncestry
 	inner        *fakeGit
 	stripParents bool
 }
@@ -144,10 +145,6 @@ func (g *plainGit) Commits(ctx context.Context, sinceTag string) ([]gitx.Commit,
 		}
 	}
 	return cs, err
-}
-
-func (g *plainGit) Subjects(ctx context.Context, sinceTag string) ([]string, error) {
-	return g.inner.Subjects(ctx, sinceTag)
 }
 
 func (g *plainGit) CreateTag(ctx context.Context, name, msg, target string) error {

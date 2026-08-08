@@ -51,10 +51,15 @@ func (a *App) Status(ctx context.Context) error {
 		return err
 	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
-		a.log.Error().Str("reason", blocked).Msg("refusing to release")
 		if pl.Fatal() {
+			// No correct plan exists: the one case status itself fails on.
+			a.log.Error().Str("reason", blocked).Msg("refusing to release")
 			return errors.New(blocked)
 		}
+		// A release would refuse, but showing the plan is this command's job
+		// and the plan shown is correct — so status reports the refusal at
+		// warning level and still exits 0.
+		a.log.Warn().Str("reason", blocked).Msg("a release would be refused")
 	}
 	return nil
 }

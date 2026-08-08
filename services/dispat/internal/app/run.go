@@ -135,9 +135,9 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	// package rather than stage granularity.
 	changed := make(map[string]*plan.Release)
 	sched := graph.NewScheduler[string]()
-	for _, name := range selected {
-		changed[name] = pl.Releases[name]
-		sched.Add(name)
+	for _, pkg := range selected {
+		changed[pkg] = pl.Releases[pkg]
+		sched.Add(pkg)
 	}
 	for pkg := range changed {
 		for _, prov := range pl.Providers[pkg] {
@@ -150,11 +150,14 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	run := &scriptRun{
 		app: a, pl: pl, changed: changed,
 		results: make(map[string]*runOutcome, len(changed)),
-		name:    name, stage: "run:" + name, onError: onError,
+		// The workspace listing depends only on the plan, so it is built once
+		// here and shared by every package's environment.
+		wsVars: release.WorkspaceEnv(pl, a.log),
+		name:   name, stage: "run:" + name, onError: onError,
 		runner: &script.ShellRunner{Shell: a.cfg.Shell},
 	}
 	// One class, one budget: the run command reuses the executor's pump.
-	graph.Drain(sched,
+	drainErr := graph.Drain(ctx, sched,
 		func(string) struct{} { return struct{}{} },
 		func(struct{}) int { return a.cfg.BuildConcurrency },
 		func(pkg string) { run.execute(ctx, pkg) })
@@ -172,6 +175,10 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	}
 	a.log.Info().Str("script", name).Int("ran", ran).Int("failed", failed).
 		Int("skipped", skipped).Msg("run finished")
+	if drainErr != nil {
+		a.log.Warn().Err(drainErr).Msg("run interrupted")
+		return drainErr
+	}
 	if failed > 0 {
 		return fmt.Errorf("%d run script(s) failed", failed)
 	}
@@ -258,6 +265,7 @@ type scriptRun struct {
 	pl      *plan.Plan
 	changed map[string]*plan.Release
 	results map[string]*runOutcome
+	wsVars  []string // the shared workspace listing, built once per run
 	mu      sync.Mutex
 	name    string
 	stage   string
@@ -323,7 +331,7 @@ func (s *scriptRun) execute(ctx context.Context, pkg string) {
 	log := s.app.log.With().Str("package", pkg).Str("stage", s.stage).Logger()
 	log.Info().Msg("run script started")
 	seq := release.Sequence{Runner: s.runner, Dir: rel.Pkg.Dir, Stage: s.stage, Commands: []string{cmd},
-		Env: release.CommandEnv(s.pl, pkg, s.stage, s.app.log), Log: log, FailFast: true}
+		Env: release.CommandEnv(s.pl, pkg, s.stage, s.wsVars), Log: log, FailFast: true}
 	if err := seq.RunMergingOutputs(ctx, rel); err != nil {
 		res.failed = true
 		log.Error().Err(err).Msg("run script failed")

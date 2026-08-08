@@ -6,6 +6,7 @@ package release
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,11 @@ const (
 	StatusPublished
 	StatusFailed
 	StatusSkipped
+	// StatusCancelled marks a package the run was interrupted out of: its
+	// remaining scripts never ran (or were killed mid-run) because the context
+	// was cancelled, not because anything about the package failed. The next
+	// run owes it the same release — recovery is just re-running (§17).
+	StatusCancelled
 )
 
 func (s Status) String() string {
@@ -36,6 +42,8 @@ func (s Status) String() string {
 		return "failed"
 	case StatusSkipped:
 		return "skipped"
+	case StatusCancelled:
+		return "cancelled"
 	default:
 		return "pending"
 	}
@@ -280,7 +288,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// updates leading straight into the build. Draining per class keeps the
 	// two budgets independent, so a stalled stage never blocks the other's.
 	budgets := map[taskKind]int{taskBuild: e.BuildConcurrency, taskPublish: e.PublishConcurrency}
-	graph.Drain(sched,
+	err := graph.Drain(ctx, sched,
 		func(t task) taskKind {
 			if t.kind == taskPublish {
 				return taskPublish
@@ -289,6 +297,23 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		},
 		func(k taskKind) int { return budgets[k] },
 		func(t task) { r.execute(ctx, t) })
+	if err != nil {
+		// Interrupted (or, impossibly after E200, cyclic): tasks that never
+		// launched left their packages pending. Cancelled, not failed — nothing
+		// about them went wrong, and the next run picks them up unchanged.
+		r.mu.Lock()
+		for _, res := range results {
+			if res.Status == StatusPending {
+				res.Status = StatusCancelled
+			}
+		}
+		r.mu.Unlock()
+		if ctx.Err() != nil {
+			e.Log.Warn().Msg("run interrupted: remaining packages cancelled; completed releases keep their records")
+		} else {
+			e.Log.Error().Err(err).Msg("task graph stalled")
+		}
+	}
 	return results
 }
 
@@ -359,6 +384,12 @@ func (r *run) execute(ctx context.Context, t task) {
 		r.mu.Unlock()
 		return
 	}
+	if ctx.Err() != nil {
+		// Interrupted between scheduling and start: no scripts, no hooks.
+		res.Status = StatusCancelled
+		r.mu.Unlock()
+		return
+	}
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results); skip {
 		res.Status = StatusSkipped
 		res.Blocked, res.BlockedBy = true, blocker
@@ -393,12 +424,31 @@ func (r *run) execute(ctx context.Context, t task) {
 	r.mu.Unlock()
 
 	fail := func(err error, msg string) {
+		// A task dying while the context is cancelled died *of* the
+		// cancellation (its script was killed mid-run): that is an
+		// interruption, not a package failure, and it must not spawn more
+		// scripts — no onFail, no announce. The revert still happens, detached
+		// from the cancellation, because a half-modified folder is exactly what
+		// revertOnFail promises to clean up.
+		interrupted := ctx.Err() != nil
 		r.mu.Lock()
-		res.Status = StatusFailed
-		res.FailedStage = t.kind.String()
-		res.Err = fmt.Errorf("%s: %w", t.kind, err)
+		if interrupted {
+			res.Status = StatusCancelled
+			res.Err = err
+		} else {
+			res.Status = StatusFailed
+			res.FailedStage = t.kind.String()
+			res.Err = fmt.Errorf("%s: %w", t.kind, err)
+		}
 		res.Duration = time.Since(r.started[t.pkg])
 		r.mu.Unlock()
+		if interrupted {
+			log.Warn().Err(err).Msg(t.kind.String() + " interrupted")
+			if rel.Pkg.Space.RevertOnFail {
+				r.revert(context.WithoutCancel(ctx), rel, log)
+			}
+			return
+		}
 		log.Error().Err(err).Msg(msg)
 		if rel.Pkg.Space.RevertOnFail {
 			r.revert(ctx, rel, log)
@@ -477,7 +527,12 @@ func (tc *taskCtx) loginGate(ctx context.Context) error {
 		// The login exports like any other script; a malformed export fails
 		// the login (it is a gating sequence), and what it did export becomes
 		// part of every space package's outputs.
-		seq := Sequence{Runner: tc.Runner, Dir: tc.rel.Pkg.Dir, Stage: "login",
+		//
+		// It runs in the *space* folder — the parent of every member package —
+		// not in whichever package's publish happened to win the race to the
+		// gate: a login script reading a local file must see the same folder
+		// on every run.
+		seq := Sequence{Runner: tc.Runner, Dir: filepath.Dir(tc.rel.Pkg.Dir), Stage: "login",
 			Commands: space.LoginScript, Env: loginEnv(space.Name, tc.wsVars),
 			Log: lg, FailFast: true}
 		outs, seqErr, parseErr := seq.capture(ctx, space.Name+":login")
@@ -523,14 +578,21 @@ func (tc *taskCtx) stageFrame(ctx context.Context, before, commands, after []str
 // postPublish hook and the announce frame.
 func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error, string)) {
 	rel, space := tc.rel, tc.rel.Pkg.Space
+	// The publish succeeded, so from here to the status flip this leg of the
+	// transaction is committing: it must durably record its completion (§17).
+	// Recording and tagging therefore run detached from cancellation — a
+	// Ctrl-C that killed the publish would have been an interruption, but one
+	// that loses the tag *after* the publish re-releases a released version on
+	// the next run, which is the one thing the model forbids.
+	recCtx := context.WithoutCancel(ctx)
 	for _, rec := range tc.Recorders {
-		if err := rec.Record(ctx, rel); err != nil {
+		if err := rec.Record(recCtx, rel); err != nil {
 			fail(err, "release recording failed")
 			return
 		}
 	}
 	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
-		if err := CreateReleaseTag(ctx, tc.Tagger, rel); err != nil {
+		if err := CreateReleaseTag(recCtx, tc.Tagger, rel); err != nil {
 			fail(err, "tagging failed")
 			return
 		}
@@ -540,6 +602,11 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 	tc.mu.Unlock()
 	tc.log.Info().Str("tag", rel.TagName()).Msg("published")
+
+	if ctx.Err() != nil {
+		// Interrupted: the release is out and recorded; observers stay silent.
+		return
+	}
 
 	// postPublish observes a release that is already out, which is why it
 	// runs after the status settles and only warns: failing the package now
@@ -719,10 +786,11 @@ func updatedEnv(updates []providerUpdate) []string {
 //	DISPAT_PUBLISHED_PACKAGES            space-separated keys of published packages
 //	DISPAT_FAILED_PACKAGES               keys of failed packages
 //	DISPAT_SKIPPED_PACKAGES              keys of skipped (blocked) packages
+//	DISPAT_CANCELLED_PACKAGES            keys of packages an interrupted run never ran
 //	DISPAT_UNPLANNED_PACKAGES            keys of packages the plan did not release
 //	                                     (unchanged, or held by Release-As: none)
 //	DISPAT_RESULT_<KEY>_NAME             the raw package name
-//	DISPAT_RESULT_<KEY>_STATUS           published / failed / skipped
+//	DISPAT_RESULT_<KEY>_STATUS           published / failed / skipped / cancelled
 //	DISPAT_RESULT_<KEY>_OLD_VERSION      version before the run
 //	DISPAT_RESULT_<KEY>_NEW_VERSION      version the run planned
 //	DISPAT_RESULT_<KEY>_CHANNEL          release channel
@@ -734,7 +802,7 @@ func updatedEnv(updates []providerUpdate) []string {
 // times instead of reading an unset variable.
 func RunEnv(p *plan.Plan, results map[string]*Result, log zerolog.Logger) []string {
 	env := WorkspaceEnv(p, log)
-	var published, failed, skipped, unplanned []string
+	var published, failed, skipped, cancelled, unplanned []string
 	taken := make(map[string]bool, len(p.Order))
 	for _, name := range p.Order {
 		k := plan.EnvKey(name)
@@ -752,6 +820,8 @@ func RunEnv(p *plan.Plan, results map[string]*Result, log zerolog.Logger) []stri
 			published = append(published, k)
 		case StatusFailed:
 			failed = append(failed, k)
+		case StatusCancelled:
+			cancelled = append(cancelled, k)
 		default:
 			skipped = append(skipped, k)
 		}
@@ -773,6 +843,7 @@ func RunEnv(p *plan.Plan, results map[string]*Result, log zerolog.Logger) []stri
 		"DISPAT_PUBLISHED_PACKAGES="+strings.Join(published, " "),
 		"DISPAT_FAILED_PACKAGES="+strings.Join(failed, " "),
 		"DISPAT_SKIPPED_PACKAGES="+strings.Join(skipped, " "),
+		"DISPAT_CANCELLED_PACKAGES="+strings.Join(cancelled, " "),
 		"DISPAT_UNPLANNED_PACKAGES="+strings.Join(unplanned, " "))
 }
 
@@ -799,18 +870,15 @@ func workspaceVersions(p *plan.Plan) []workspaceVersion {
 	return out
 }
 
-// scriptEnv builds the DISPAT_* environment for one task's script or hook.
-func (e *Executor) scriptEnv(t task, p *plan.Plan, wsVars []string, updates []providerUpdate, stage string) []string {
-	return packageEnv(p, t.pkg, wsVars, updates, stage)
-}
-
 // CommandEnv builds the full per-package DISPAT_* environment outside a
-// release run: the package variables, the workspace listing and the package's
-// provider updates, all considered live since no run is deciding otherwise.
-// It is what `dispat run <script>` hands a space's run scripts, so a script
-// is movable between a stage and a run script without changing what it reads.
-func CommandEnv(p *plan.Plan, pkg, stage string, log zerolog.Logger) []string {
-	return packageEnv(p, pkg, WorkspaceEnv(p, log), liveProviderUpdates(pkg, p, nil), stage)
+// release run: the package variables, the workspace listing (wsVars, built
+// once per run with WorkspaceEnv and shared across packages) and the
+// package's provider updates, all considered live since no run is deciding
+// otherwise. It is what `dispat run <script>` hands a space's run scripts, so
+// a script is movable between a stage and a run script without changing what
+// it reads.
+func CommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
+	return packageEnv(p, pkg, wsVars, liveProviderUpdates(pkg, p, nil), stage)
 }
 
 // packageEnv builds the DISPAT_* environment of one package's script or hook.

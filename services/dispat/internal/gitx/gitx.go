@@ -318,10 +318,6 @@ type Git interface {
 	// first by creation date. Callers select a baseline from it with
 	// Tags.Baseline or Tags.StableBaseline.
 	Tags(ctx context.Context, pkg string, format TagFormat) (Tags, error)
-	// Subjects lists commit subject lines reachable from HEAD, newest first.
-	// When sinceTag is non-empty only commits after that tag are listed;
-	// otherwise the whole history down to the first commit is used.
-	Subjects(ctx context.Context, sinceTag string) ([]string, error)
 	// Commits lists commit messages lines reachable from HEAD, newest first.
 	// When sinceTag is non-empty only commits after that tag are listed;
 	// otherwise the whole history down to the first commit is used.
@@ -329,6 +325,27 @@ type Git interface {
 	// CreateTag creates an annotated tag at target, or at HEAD when target
 	// is empty.
 	CreateTag(ctx context.Context, name, message, target string) error
+	// IsAncestor reports whether commit a is an ancestor-or-self of commit b
+	// (§10.4). An implementation without ancestry knowledge — a test double
+	// whose commits carry parent pointers instead — returns ErrNoAncestry
+	// (embed NoAncestry for exactly that) and the planner falls back to those
+	// pointers. Any other error aborts planning: a silently wrong ancestry
+	// answer would change cancellation and prerelease-train containment.
+	IsAncestor(ctx context.Context, a, b string) (bool, error)
+}
+
+// ErrNoAncestry is the IsAncestor answer of a Git implementation that cannot
+// answer ancestry questions at all. It is a capability statement, not a
+// failure: the caller uses its fallback for every ancestry question.
+var ErrNoAncestry = errors.New("gitx: ancestry not available")
+
+// NoAncestry is an embeddable IsAncestor stub for Git implementations that
+// have no ancestry knowledge of their own.
+type NoAncestry struct{}
+
+// IsAncestor always answers ErrNoAncestry.
+func (NoAncestry) IsAncestor(context.Context, string, string) (bool, error) {
+	return false, ErrNoAncestry
 }
 
 // CLI is the Git implementation backed by the git executable.
@@ -432,22 +449,6 @@ func (c *CLI) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 	}
 	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w: %s",
 		a, b, err, strings.TrimSpace(stderr.String()))
-}
-
-func (c *CLI) Subjects(ctx context.Context, sinceTag string) ([]string, error) {
-	rangeArg := "HEAD"
-	if sinceTag != "" {
-		rangeArg = sinceTag + "..HEAD"
-	}
-	out, err := c.run(ctx, "log", "--format=%s", rangeArg)
-	if err != nil {
-		return nil, err
-	}
-	out = strings.TrimRight(out, "\n")
-	if out == "" {
-		return nil, nil
-	}
-	return strings.Split(out, "\n"), nil
 }
 
 // Record and field separators for the commit log. Both are ASCII control

@@ -22,14 +22,20 @@ import (
 // phase and the summary. The returned error is non-nil when anything kept the
 // run from completing cleanly — a blocked plan, failed verification, a failed
 // package, a failed finalize — with the details already logged.
-func (a *App) Release(ctx context.Context) error {
+//
+// The results map carries one entry per package the plan released, whatever
+// its outcome, so a front end driving App directly reads what happened from
+// the values rather than from the log stream; it is nil when the run never
+// reached execution (a blocked plan, failed verification, a failed gating
+// hook).
+func (a *App) Release(ctx context.Context) (map[string]*release.Result, error) {
 	pl, err := a.computePlan(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
 		a.log.Error().Str("reason", blocked).Msg("refusing to release")
-		return errors.New(blocked)
+		return nil, errors.New(blocked)
 	}
 
 	commitMode := a.cfg.Commit.IsEnabled()
@@ -56,13 +62,13 @@ func (a *App) Release(ctx context.Context) error {
 	if pushMode && a.cfg.Commit.VerifyEnabled() {
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
 			a.log.Error().Err(err).Str("remote", remote).Msg("git remote verification failed")
-			return err
+			return nil, err
 		}
 	}
 	if gh != nil {
 		if err := gh.Verify(ctx); err != nil {
 			a.log.Error().Err(err).Msg("github verification failed")
-			return err
+			return nil, err
 		}
 	}
 
@@ -83,10 +89,10 @@ func (a *App) Release(ctx context.Context) error {
 	// — and does, before anything is built, published or tagged.
 	if err := hooks.runGating(ctx, "beforeAll", a.cfg.Run.BeforeAll); err != nil {
 		a.log.Error().Err(err).Msg("beforeAll hook failed, refusing to release")
-		return err
+		return nil, err
 	}
 
-	exec := &release.Executor{
+	executor := &release.Executor{
 		BuildConcurrency:   a.cfg.BuildConcurrency,
 		PublishConcurrency: a.cfg.PublishConcurrency,
 		Runner:             runner,
@@ -96,21 +102,38 @@ func (a *App) Release(ctx context.Context) error {
 		Log:                a.log,
 	}
 	start := time.Now()
-	results := exec.Run(ctx, pl)
+	results := executor.Run(ctx, pl)
 
-	hooks.env = release.RunEnv(pl, results, a.log)
-	// postAll runs once the whole task graph has finished, releases or not —
-	// "nothing published" is an outcome a notification script wants to see too.
-	hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
-	finErr := a.finalize(ctx, finalizer{gh: gh, remote: remote, hooks: hooks}, pl, results)
+	// An interrupted run stops running the operator's scripts — no postAll, no
+	// finalize bracket hooks — but what *published* before the interruption
+	// must still get its durable record: the release commit, the tags and the
+	// push are how a completed leg commits (§17), and losing them re-releases
+	// released versions on the next run. finalize therefore proceeds for the
+	// published packages, detached from the cancellation.
+	interrupted := ctx.Err() != nil
+	finCtx := ctx
+	if interrupted {
+		a.log.Warn().Msg("interrupted: skipping run hooks, recording completed releases")
+		finCtx = context.WithoutCancel(ctx)
+	} else {
+		hooks.env = release.RunEnv(pl, results, a.log)
+		// postAll runs once the whole task graph has finished, releases or not —
+		// "nothing published" is an outcome a notification script wants to see
+		// too.
+		hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
+	}
+	finErr := a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, skipHooks: interrupted}, pl, results)
 	failed := a.summarize(pl, results, time.Since(start))
 	if finErr != nil {
-		return finErr
+		return results, finErr
+	}
+	if interrupted {
+		return results, ctx.Err()
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d package(s) failed", failed)
+		return results, fmt.Errorf("%d package(s) failed", failed)
 	}
-	return nil
+	return results, nil
 }
 
 // recorders assembles every per-publish release recorder this run records

@@ -280,7 +280,7 @@ func TestCommandEnv(t *testing.T) {
 		Providers: map[string][]string{"app": {"core"}},
 	}
 
-	env := CommandEnv(p, "app", "run:lint", zerolog.Nop())
+	env := CommandEnv(p, "app", "run:lint", WorkspaceEnv(p, zerolog.Nop()))
 	got := map[string]bool{}
 	for _, e := range env {
 		got[e] = true

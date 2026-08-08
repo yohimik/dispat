@@ -1083,8 +1083,10 @@ func TestRunLoginFailureFailsEverySpacePublish(t *testing.T) {
 		}
 		p.Order = append(p.Order, name)
 	}
-	// The login runs in the folder of whichever publish reaches the gate first.
-	r := &fakeRunner{fail: map[string]bool{"login a": true, "login b": true}}
+	// The login runs in the space folder — the parent of every member package
+	// (the packages' dirs here are bare names, so their shared parent is ".").
+	// Which publish reaches the gate first no longer decides the cwd.
+	r := &fakeRunner{fail: map[string]bool{"login .": true}}
 	tg := &fakeTagger{}
 	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 2, Publish: 2}).Run(context.Background(), p)
 
