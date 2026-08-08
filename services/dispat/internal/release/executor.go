@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/scanner"
 
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -124,7 +125,10 @@ type Executor struct {
 	Tagger             Tagger
 	Recorders          []ReleaseRecorder // run in order after each successful publish
 	Reverter           Reverter          // rolls back package folders for revertOnFail spaces
-	Log                zerolog.Logger
+	// Scanner reads manifests for the autoVersion spaces' native rewriting;
+	// nil defaults to the filesystem scanner.
+	Scanner scanner.Scanner
+	Log     zerolog.Logger
 }
 
 type taskKind uint8
@@ -133,15 +137,21 @@ const (
 	taskVersion taskKind = iota
 	taskBuild
 	taskPublish
+	// taskSyncLock runs a space's autoVersion.syncLock scripts between the
+	// package's version and build stages, under its own run-wide budget
+	// (default 1): its job is regenerating shared lock files, which corrupt
+	// under parallel writers.
+	taskSyncLock
 )
 
 // stageNames maps each task kind onto its lowercase stage name and the
 // TitleCase fragment hook names embed ("beforeBuild", "postVersion") — one
 // table, so the two spellings cannot drift apart.
 var stageNames = [...]struct{ name, title string }{
-	taskVersion: {"version", "Version"},
-	taskBuild:   {"build", "Build"},
-	taskPublish: {"publish", "Publish"},
+	taskVersion:  {"version", "Version"},
+	taskBuild:    {"build", "Build"},
+	taskPublish:  {"publish", "Publish"},
+	taskSyncLock: {"syncLock", "SyncLock"},
 }
 
 func (k taskKind) String() string { return stageNames[k].name }
@@ -262,11 +272,22 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		b, pub := task{name, taskBuild}, task{name, taskPublish}
 		sched.AddEdge(b, pub)
 		// Packages bumped because of provider updates run a version task
-		// right before their build; provider dependencies attach to it.
+		// right before their build, and so does every releasing package of an
+		// autoVersion space — §9.4 reconciles against every workspace
+		// dependency, including providers released by an earlier run, so the
+		// stage cannot be conditional on this run's updates. Provider
+		// dependencies attach to it. A space with syncLock scripts inserts a
+		// syncLock task between the version and the build.
 		first := b
-		if len(p.Releases[name].DueTo) > 0 {
+		if hasVersionTask(p.Releases[name]) {
 			ver := task{name, taskVersion}
-			sched.AddEdge(ver, b)
+			pre := b
+			if av := p.Releases[name].Pkg.Space.AutoVersion; av != nil && len(av.SyncLock) > 0 {
+				sync := task{name, taskSyncLock}
+				sched.AddEdge(sync, b)
+				pre = sync
+			}
+			sched.AddEdge(ver, pre)
 			first = ver
 		}
 		for _, prov := range p.Providers[name] {
@@ -282,18 +303,39 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	}
 
 	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins,
-		results: results, started: make(map[string]time.Time)}
+		results: results, started: make(map[string]time.Time), scan: e.Scanner}
+
+	// The native rewriting inputs — the manifest-name and folder indexes of
+	// the whole workspace — are built once, and only when a releasing package
+	// actually auto-versions.
+	for name := range changed {
+		if p.Releases[name].Pkg.Space.AutoVersion != nil {
+			if r.scan == nil {
+				r.scan = scanner.New()
+			}
+			r.avNames, r.avDirs = workspaceNames(p, e.Log)
+			break
+		}
+	}
 
 	// Version tasks share the build budget: they are short local manifest
-	// updates leading straight into the build. Draining per class keeps the
-	// two budgets independent, so a stalled stage never blocks the other's.
-	budgets := map[taskKind]int{taskBuild: e.BuildConcurrency, taskPublish: e.PublishConcurrency}
+	// updates leading straight into the build. syncLock has its own budget —
+	// almost always 1 — because its whole reason to exist is serialising lock
+	// file regeneration. Draining per class keeps the budgets independent, so
+	// a stalled stage never blocks another's.
+	budgets := map[taskKind]int{
+		taskBuild:    e.BuildConcurrency,
+		taskPublish:  e.PublishConcurrency,
+		taskSyncLock: syncLockBudget(p, changed),
+	}
 	err := graph.Drain(ctx, sched,
 		func(t task) taskKind {
-			if t.kind == taskPublish {
-				return taskPublish
+			switch t.kind {
+			case taskPublish, taskSyncLock:
+				return t.kind
+			default:
+				return taskBuild
 			}
-			return taskBuild
 		},
 		func(k taskKind) int { return budgets[k] },
 		func(t task) { r.execute(ctx, t) })
@@ -330,6 +372,44 @@ type run struct {
 	results map[string]*Result
 	mu      sync.Mutex
 	started map[string]time.Time
+	// The native auto-versioning inputs, built once in Run when any releasing
+	// package's space enables it: the manifest scanner and the workspace's
+	// manifest-name and folder indexes (see workspaceNames).
+	scan    scanner.Scanner
+	avNames map[string]string
+	avDirs  map[string]string
+}
+
+// hasVersionTask reports whether the package's release runs a version task:
+// it was bumped for provider updates, or its space auto-versions (whose
+// reconciliation is unconditional per §9.4).
+func hasVersionTask(rel *plan.Release) bool {
+	return len(rel.DueTo) > 0 || rel.Pkg.Space.AutoVersion != nil
+}
+
+// syncLockBudget resolves the run-wide syncLock concurrency: the smallest
+// value voted by the releasing autoVersion spaces with syncLock scripts (0
+// meaning the default), or 1 — the safe serialisation a shared lock file
+// needs — when nobody votes.
+func syncLockBudget(p *plan.Plan, changed map[string]bool) int {
+	budget := 0
+	for name := range changed {
+		av := p.Releases[name].Pkg.Space.AutoVersion
+		if av == nil || len(av.SyncLock) == 0 {
+			continue
+		}
+		vote := av.SyncLockConcurrency
+		if vote == 0 {
+			vote = 1
+		}
+		if budget == 0 || vote < budget {
+			budget = vote
+		}
+	}
+	if budget == 0 {
+		return 1
+	}
+	return budget
 }
 
 // taskCtx is one task's execution context: the task, the release it belongs
@@ -461,9 +541,9 @@ func (r *run) execute(ctx context.Context, t task) {
 			"DISPAT_FAILED_STAGE="+t.kind.String(), "DISPAT_ERROR="+err.Error())
 	}
 
-	// beforeAll runs at the package's first task: version when the package has
-	// one (it exists exactly when DueTo is non-empty), build otherwise.
-	first := t.kind == taskVersion || (t.kind == taskBuild && len(rel.DueTo) == 0)
+	// beforeAll runs at the package's first task: version when the package
+	// has one, build otherwise.
+	first := t.kind == taskVersion || (t.kind == taskBuild && !hasVersionTask(rel))
 	if first {
 		if err := tc.hook(ctx, "beforeAll", rel.Pkg.Space.BeforeAllScript, true); err != nil {
 			fail(err, "beforeAll hook failed")
@@ -473,21 +553,30 @@ func (r *run) execute(ctx context.Context, t task) {
 
 	space := rel.Pkg.Space
 	var commands, before, after []string
+	var native func(context.Context) error
 	switch t.kind {
 	case taskVersion:
 		commands, before, after = space.VersionScript, space.BeforeVersionScript, space.PostVersionScript
+		if space.AutoVersion != nil {
+			native = tc.autoVersion
+		}
 	case taskBuild:
 		commands, before, after = space.BuildScript, space.BeforeBuildScript, space.PostBuildScript
+	case taskSyncLock:
+		// The lock-sync sequence: no hooks of its own, budgeted separately.
+		commands = space.AutoVersion.SyncLock
 	default:
 		// postPublish is not part of this frame: it only runs after the
 		// package is fully published, further down.
 		commands, before, after = space.PublishScript, space.BeforePublishScript, nil
 	}
-	if t.kind == taskVersion && len(tc.updates) == 0 {
+	if t.kind == taskVersion && len(tc.updates) == 0 && len(rel.DueTo) > 0 {
 		// Every provider this package was bumped for failed or was skipped
 		// (the package itself proceeds on its own changes): there is nothing
 		// to sync manifests to, so the version scripts — hooks included —
-		// must not run.
+		// must not run. Native reconciliation is different: it compares
+		// against baselines too (§9.4) and never writes a dead provider's
+		// planned version, so it proceeds.
 		log.Info().Msg("version: no successfully updated providers, skipping scripts")
 		commands, before, after = nil, nil, nil
 	}
@@ -499,7 +588,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 	}
 
-	if what, err := tc.stageFrame(ctx, before, commands, after); err != nil {
+	if what, err := tc.stageFrame(ctx, before, native, commands, after); err != nil {
 		fail(err, what)
 		return
 	}
@@ -548,15 +637,21 @@ func (tc *taskCtx) loginGate(ctx context.Context) error {
 	return nil
 }
 
-// stageFrame runs the task's gating frame: before hook, stage scripts, after
-// hook — each sequence fail-fast, every failure failing the release, because
-// all three exist to decide whether the release happens. what labels the
+// stageFrame runs the task's gating frame: before hook, the native step when
+// the stage has one (the version stage's auto-versioning), stage scripts,
+// after hook — each fail-fast, every failure failing the release, because all
+// of them exist to decide whether the release happens. what labels the
 // failing piece for the log ("beforeBuild hook failed", "build script
 // failed").
-func (tc *taskCtx) stageFrame(ctx context.Context, before, commands, after []string) (what string, err error) {
+func (tc *taskCtx) stageFrame(ctx context.Context, before []string, native func(context.Context) error, commands, after []string) (what string, err error) {
 	kind := tc.t.kind
 	if err := tc.hook(ctx, "before"+stageTitle(kind), before, true); err != nil {
 		return "before" + stageTitle(kind) + " hook failed", err
+	}
+	if native != nil {
+		if err := native(ctx); err != nil {
+			return "auto-versioning failed", err
+		}
 	}
 	if len(commands) == 0 {
 		// No script configured: the stage completes without running anything.

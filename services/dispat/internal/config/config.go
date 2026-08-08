@@ -40,6 +40,7 @@ type (
 	CommitConfig            = public.CommitConfig
 	SpaceConfig             = public.SpaceConfig
 	SpaceFlowConfig         = public.SpaceFlowConfig
+	AutoVersionConfig       = public.AutoVersionConfig
 	DependencyConfig        = public.DependencyConfig
 	ParserConfig            = public.ParserConfig
 	ParserPropagationConfig = public.ParserPropagationConfig
@@ -465,7 +466,81 @@ func validateSpace(c *File, name string, s SpaceConfig) (SpaceConfig, error) {
 	if err := checkScriptRefs(c, scriptRefs(&s), fmt.Sprintf("space %q: ", name)); err != nil {
 		return s, err
 	}
+	if err := validateAutoVersion(c, name, s.AutoVersion); err != nil {
+		return s, err
+	}
 	return s, nil
+}
+
+// validateAutoVersion checks a space's autoVersion object. The `only` names
+// need the discovered packages and are checked in Discover instead.
+func validateAutoVersion(c *File, space string, av *public.AutoVersionConfig) error {
+	if av == nil {
+		return nil
+	}
+	prefix := fmt.Sprintf("space %q: autoVersion: ", space)
+	switch av.Manifests {
+	case "", "root", "all":
+	default:
+		return fmt.Errorf(`%smanifests: unknown value %q (want "root" or "all")`, prefix, av.Manifests)
+	}
+	for _, k := range av.Kinds {
+		if _, err := DepKind(k); err != nil {
+			return fmt.Errorf("%skinds: %w", prefix, err)
+		}
+	}
+	for _, m := range av.Match {
+		if _, err := filepath.Match(m, ""); err != nil {
+			return fmt.Errorf("%smatch: invalid pattern %q: %w", prefix, m, err)
+		}
+	}
+	switch av.NameMatch {
+	case "", "exact", "substring":
+	default:
+		return fmt.Errorf(`%snameMatch: unknown value %q (want "exact" or "substring")`, prefix, av.NameMatch)
+	}
+	if av.SyncLockConcurrency < 0 {
+		return fmt.Errorf("%ssyncLockConcurrency must be >= 0, got %d", prefix, av.SyncLockConcurrency)
+	}
+	return checkScriptRefs(c, map[string][]string{"autoVersion.syncLock": av.SyncLock}, fmt.Sprintf("space %q: ", space))
+}
+
+// resolveAutoVersion maps a validated autoVersion object onto the domain
+// policy; nil (or enabled: false) resolves to nil, feature off.
+func resolveAutoVersion(c *File, av *public.AutoVersionConfig) *model.AutoVersion {
+	if !av.IsEnabled() {
+		return nil
+	}
+	kinds := make(map[model.DepKind]bool, 4)
+	if len(av.Kinds) == 0 {
+		for _, k := range []model.DepKind{model.KindDependencies, model.KindDevDependencies,
+			model.KindPeerDependencies, model.KindOptionalDependencies} {
+			kinds[k] = true
+		}
+	} else {
+		for _, raw := range av.Kinds {
+			k, _ := DepKind(raw) // validated
+			kinds[k] = true
+		}
+	}
+	var only map[string]bool
+	if len(av.Only) > 0 {
+		only = make(map[string]bool, len(av.Only))
+		for _, name := range av.Only {
+			only[name] = true
+		}
+	}
+	return &model.AutoVersion{
+		AllManifests:        av.Manifests == "all",
+		Kinds:               kinds,
+		Only:                only,
+		NameSubstring:       av.NameMatch == "substring",
+		Match:               av.Match,
+		Range:               av.Range,
+		WriteVersion:        av.WriteVersionEnabled(),
+		SyncLock:            c.Commands(av.SyncLock),
+		SyncLockConcurrency: av.SyncLockConcurrency,
+	}
 }
 
 // resolveInitials parses the initials map into versions.
@@ -526,6 +601,7 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 			OnFailScript:         c.Commands(sc.Flow.OnFail),
 			OnSkipScript:         c.Commands(sc.Flow.OnSkip),
 			TagFormat:            tagFormat,
+			AutoVersion:          resolveAutoVersion(c, sc.AutoVersion),
 		}
 		dir := filepath.Join(root, sc.Path)
 		entries, err := os.ReadDir(dir)
@@ -551,6 +627,20 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		}
 	}
 
+	// autoVersion `only` names must be discovered packages; anything else is
+	// the same class of typo as an unknown dependency endpoint.
+	for _, sn := range spaceNames {
+		av := c.Spaces[sn].AutoVersion
+		if av == nil {
+			continue
+		}
+		for _, name := range av.Only {
+			if _, ok := owner[name]; !ok {
+				return nil, nil, fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
+			}
+		}
+	}
+
 	deps := make([]model.Dependency, 0, len(c.Dependencies))
 	for i, d := range c.Dependencies {
 		if _, ok := owner[d.Consumer]; !ok {
@@ -559,7 +649,7 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		if _, ok := owner[d.Provider]; !ok {
 			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown provider package %q", i, d.Provider)
 		}
-		kind, err := depKind(d.Kind)
+		kind, err := DepKind(d.Kind)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: dependencies[%d]: %w", i, err)
 		}
@@ -568,9 +658,9 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 	return pkgs, deps, nil
 }
 
-// depKind maps a dependency edge's configured kind onto the model's. Empty
+// DepKind maps a dependency edge's configured kind onto the model's. Empty
 // means a plain runtime dependency (§8.4's zero value).
-func depKind(s string) (model.DepKind, error) {
+func DepKind(s string) (model.DepKind, error) {
 	switch s {
 	case "", "dependencies":
 		return model.KindDependencies, nil

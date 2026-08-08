@@ -297,6 +297,84 @@ type SpaceConfig struct {
 	// changed package of the space, in topological order, with the package's
 	// full DISPAT_* environment; spaces without the name are skipped.
 	RunScripts map[string]string `mapstructure:"runScripts" json:"runScripts,omitempty"`
+	// AutoVersion enables native manifest rewriting at the version stage:
+	// dispat itself updates the declared ranges of workspace dependencies
+	// (and the package's own version field) in package.json and go.mod,
+	// before any flow.version script runs. nil means off. See
+	// AutoVersionConfig.
+	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+}
+
+// AutoVersionConfig is a space's `autoVersion` object: the native
+// manifest-rewriting policy of the version stage (§9.4, §12.4). The presence
+// of the object enables the feature unless `enabled: false` says otherwise.
+type AutoVersionConfig struct {
+	// Enabled turns the block off without deleting it. Default true.
+	Enabled *bool `mapstructure:"enabled" json:"enabled,omitempty"`
+	// Manifests selects which manifests of a package are rewritten: "root"
+	// (default) — only manifests directly in the package folder — or "all",
+	// every manifest found under it.
+	Manifests string `mapstructure:"manifests" json:"manifests,omitempty"`
+	// Kinds restricts rewriting to the named manifest fields
+	// ("dependencies", "devDependencies", "peerDependencies",
+	// "optionalDependencies"). Empty means all four.
+	Kinds []string `mapstructure:"kinds" json:"kinds,omitempty"`
+	// Only restricts rewriting to declarations of the named provider
+	// packages. Empty means every workspace provider.
+	Only []string `mapstructure:"only" json:"only,omitempty"`
+	// NameMatch selects how a declared dependency name is matched onto a
+	// workspace package when neither a manifest-declared name nor a local
+	// path already matches:
+	//
+	//	"exact" (default)  only names the workspace's manifests declare
+	//	"substring"        additionally, a declared name whose last segment
+	//	                   (after / or :) equals a package's folder name
+	//	                   matches that package — so package "app" matches a
+	//	                   declared "@core/app", "com.acme:app" or a bare
+	//	                   "app" line, even when the app package has no
+	//	                   parseable manifest of its own
+	NameMatch string `mapstructure:"nameMatch" json:"nameMatch,omitempty"`
+	// Match restricts rewriting to declared ranges matching one of the
+	// globs, e.g. ["workspace:*"] — so a range the user pinned by hand is
+	// never overridden. Empty means any declared range is rewritten.
+	Match []string `mapstructure:"match" json:"match,omitempty"`
+	// Range is the write policy — what the new declared range looks like,
+	// built from the provider's end-of-run version:
+	//
+	//	"caret" (default)   ^1.2.3
+	//	"tilde"             ~1.2.3
+	//	"exact"             1.2.3
+	//	a {version} template  e.g. ">={version}"
+	//	any other literal   written verbatim, e.g. "workspace:*"
+	//
+	// go.mod requires exact canonical versions, so Go manifests always
+	// receive vX.Y.Z regardless of this policy.
+	Range string `mapstructure:"range" json:"range,omitempty"`
+	// WriteVersion also writes the package's own new version into its
+	// manifest's version field (§12.4; a drifted manifest version is W192).
+	// Default true.
+	WriteVersion *bool `mapstructure:"writeVersion" json:"writeVersion,omitempty"`
+	// SyncLock names top-level scripts run inside the package folder after
+	// its manifests were rewritten (e.g. "npm install" to sync the lock
+	// file), between the version and build stages.
+	SyncLock []string `mapstructure:"syncLock" json:"syncLock,omitempty"`
+	// SyncLockConcurrency caps how many syncLock scripts run at the same
+	// moment across the whole run — shared lock files corrupt under
+	// parallel writers, so the default is 1. When spaces disagree, the
+	// smallest configured value wins.
+	SyncLockConcurrency int `mapstructure:"syncLockConcurrency" json:"syncLockConcurrency,omitempty"`
+}
+
+// IsEnabled reports whether the autoVersion block is active (default true
+// when the block is present). Nil-safe.
+func (c *AutoVersionConfig) IsEnabled() bool {
+	return c != nil && (c.Enabled == nil || *c.Enabled)
+}
+
+// WriteVersionEnabled reports whether the package's own version field is
+// rewritten (default true). Nil-safe.
+func (c *AutoVersionConfig) WriteVersionEnabled() bool {
+	return c != nil && (c.WriteVersion == nil || *c.WriteVersion)
 }
 
 // SpaceFlowConfig is a space's `flow` object: what runs at which stage, keyed
@@ -345,6 +423,11 @@ type DependencyConfig struct {
 	// ignores the edge according to parser.propagation.kinds, whose default
 	// is every kind except devDependencies.
 	Kind string `mapstructure:"kind" json:"kind,omitempty"`
+	// Keep marks an edge `dispat compute` must never suggest removing: the
+	// declaration is deliberate even though no manifest declares it (a Docker
+	// image chain, a codegen coupling). Purely a compute-command annotation —
+	// the planner treats kept edges like any other.
+	Keep bool `mapstructure:"keep" json:"keep,omitempty"`
 }
 
 // Values of the commitErrors key.

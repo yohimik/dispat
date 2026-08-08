@@ -77,9 +77,19 @@ func (g *Graph) TopoSort() ([]string, error) {
 	if len(order) != s.Len() {
 		cyc := s.Blocked()
 		sort.Strings(cyc)
-		return nil, fmt.Errorf("graph: dependency cycle involving: %s", strings.Join(cyc, ", "))
+		return nil, &CycleError{Nodes: cyc}
 	}
 	return order, nil
+}
+
+// CycleError reports that the graph has no topological order; Nodes are the
+// blocked nodes. Typed so a caller can enrich its diagnostic with what it
+// knows about the edges among them (the planner names each edge's manifest
+// field, as §13.1 requires).
+type CycleError struct{ Nodes []string }
+
+func (e *CycleError) Error() string {
+	return "graph: dependency cycle involving: " + strings.Join(e.Nodes, ", ")
 }
 
 // stringHeap is a min-heap of node names.

@@ -27,6 +27,7 @@ const (
 	cmdInit    = "init"    // write a starter config file; needs no config or git
 	cmdTest    = "test"    // run one top-level script inside one package
 	cmdPreview = "preview" // print one package's pending release notes
+	cmdCompute = "compute" // derive the dependency graph from manifests
 )
 
 // Version is the dispat version `--version` reports. The default marks a
@@ -71,6 +72,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"run command: select the packages the commits since the git revision address (scopes first, changed files for scopeless commits; e.g. HEAD~1, origin/main, a tag; 'all' selects every package) instead of the release window")
 	initFormat := fs.String("format", "json",
 		"init command: config file format (json, yaml or toml)")
+	computeWrite := fs.Bool("write", false,
+		"compute command: apply every suggestion to the config file")
+	computeInteractive := fs.BoolP("interactive", "i", false,
+		"compute command: confirm each suggestion before applying it")
+	computeCheck := fs.Bool("check", false,
+		"compute command: report only and exit 1 when suggestions exist (CI gate)")
 	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `%s
@@ -91,6 +98,13 @@ commands:
                            folder with its full DISPAT_* environment; releases nothing
   preview <package>        print the package's pending release notes (breaking
                            changes, features, fixes) for the current window
+  compute                  scan every package's manifests (package.json, go.mod,
+                           Cargo.toml, pyproject.toml, composer.json, pom.xml,
+                           *.csproj, pubspec.yaml, requirements*.txt), derive
+                           the dependency graph and suggest config changes;
+                           --write applies all, --interactive confirms each,
+                           --check gates CI; an edge marked keep: true is
+                           never suggested for removal
 
 flags:
 %s`, logo, fs.FlagUsages())
@@ -196,6 +210,20 @@ flags:
 		} else {
 			fmt.Fprint(stdout, notes)
 		}
+	case cmdCompute:
+		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
+			Write:       *computeWrite,
+			Interactive: *computeInteractive,
+			Check:       *computeCheck,
+			In:          os.Stdin,
+			Out:         stdout,
+		})
+		if err != nil {
+			return 1
+		}
+		if *computeCheck && open > 0 {
+			return 1
+		}
 	default:
 		if _, err := a.Release(ctx); err != nil {
 			return 1
@@ -226,7 +254,7 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 	}
 	inv.cmd = rest[0]
 	switch inv.cmd {
-	case cmdRelease, cmdStatus, cmdInit:
+	case cmdRelease, cmdStatus, cmdInit, cmdCompute:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return inv, true

@@ -503,6 +503,24 @@ func TestLoadErrors(t *testing.T) {
 				s.Path = ""
 			})
 		}, "path is required"},
+		{"autoVersion bad manifests", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{Manifests: "some"} })
+		}, "manifests"},
+		{"autoVersion bad kind", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{Kinds: []string{"bundledDependencies"}} })
+		}, "kinds"},
+		{"autoVersion bad match glob", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{Match: []string{"[oops"}} })
+		}, "match"},
+		{"autoVersion bad nameMatch", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{NameMatch: "fuzzy"} })
+		}, "nameMatch"},
+		{"autoVersion unknown syncLock script", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{SyncLock: []string{"nope"}} })
+		}, "unknown script"},
+		{"autoVersion negative syncLockConcurrency", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{SyncLockConcurrency: -1} })
+		}, "syncLockConcurrency"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/scanner"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -24,17 +25,19 @@ import (
 )
 
 // App holds everything one run needs: the monorepo root, its validated
-// configuration, the logger the run reports through, and the git client.
+// configuration, the logger the run reports through, the git client and the
+// manifest scanner (swappable in tests).
 type App struct {
 	root string
 	cfg  *config.File
 	log  zerolog.Logger
 	git  *gitx.CLI
+	scan scanner.Scanner
 }
 
 // New assembles an App for one monorepo.
 func New(root string, cfg *config.File, log zerolog.Logger) *App {
-	return &App{root: root, cfg: cfg, log: log, git: &gitx.CLI{Dir: root}}
+	return &App{root: root, cfg: cfg, log: log, git: &gitx.CLI{Dir: root}, scan: scanner.New()}
 }
 
 // Status computes the plan and reports it — diagnostics, then the full graph

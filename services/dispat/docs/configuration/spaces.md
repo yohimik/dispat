@@ -14,6 +14,7 @@ package named after the folder.
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning).                                                                                                                                                                                                                                                    |
 | `runScripts`            | map name → shell command | no         | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
+| `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 
 ## Stages and hooks
 
@@ -125,6 +126,53 @@ since staying behind is its point.
 
 Dependency edges stay package-scoped either way: a provider propagating into one member bumps that member (which then
 carries its space along under `fixed`), and only the member with provider updates runs a version task.
+
+## `autoVersion`
+
+With an `autoVersion` object present, the version stage rewrites the space's manifests natively — no `flow.version`
+script required (one may still run afterwards, seeing the already-reconciled files). dispat scans the package's
+manifests, matches each declared dependency against the workspace (by manifest name, or by a declared local path:
+`file:`, a relative `replace`, `path =`), and rewrites the declaration to the provider's **end-of-run** version — the
+planned version when the provider is releasing and has not failed, its baseline otherwise. The rewrite is byte-precise:
+only the version text changes, formatting, key order and comments survive. Manifests come in two shapes — structured
+documents and line-by-line "name specifier" files — and writers exist for `package.json`, `go.mod` and the line shape's
+canonical case, `requirements*.txt` (only the matching line's specifier changes; spelling, spacing and comments
+survive). The other structured ecosystems (Cargo, pyproject, Composer, Maven, .NET, Dart) feed `compute` and the graph
+but their rewriting stays `flow.version`'s job until they gain a writer.
+
+Because §9.4 reconciles against *every* workspace dependency — including providers released by earlier runs — an
+auto-versioning space runs a version task for **every** releasing package, not only those bumped by provider updates.
+Rewriting failures fail the version stage (with `revertOnFail` rolling the half-edited folder back).
+
+| Key                   | Type             | Default  | Effect                                                                                                                                                                                                                                            |
+|-----------------------|------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`             | bool             | `true`   | Turns the block off without deleting it.                                                                                                                                                                                                          |
+| `manifests`           | string           | `root`   | `root`: only manifests directly in the package folder; `all`: every manifest found under it (`node_modules`, `vendor`, `target` and dot-folders are never entered).                                                                               |
+| `kinds`               | array of strings | all four | Restrict rewriting to the named manifest fields (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`).                                                                                                                  |
+| `only`                | array of strings | all      | Restrict rewriting to declarations of the named provider packages; every name must be a discovered package.                                                                                                                                       |
+| `nameMatch`           | string           | `exact`  | How a declared name finds its workspace package when no manifest declares that name and no local path matches: `exact` — such declarations are simply not workspace dependencies — or `substring`, which also matches a declared name whose **last `/`- or `:`-separated segment** equals a package's folder name, so package `app` matches `@core/app`, `com.acme:app` or a bare `app` line even when the `app` package has no parseable manifest of its own. Opt-in because it can false-positive (a third-party `@types/app` would match a package named `app`). |
+| `match`               | array of globs   | any      | Rewrite only declared ranges matching one of the globs, e.g. `["workspace:*"]` — so a range pinned by hand is never overridden.                                                                                                                   |
+| `range`               | string           | `caret`  | The write policy: `caret` (`^1.2.3`), `tilde` (`~1.2.3`), `exact` (`1.2.3`), a `{version}` template (`>={version}`), or any other literal written verbatim (`workspace:*`). Ecosystems with their own version spelling override the keywords: `go.mod` always receives exact canonical `vX.Y.Z`, Python files always receive `==X.Y.Z`; templates and literals pass through everywhere. |
+| `writeVersion`        | bool             | `true`   | Also write the package's own new version into its manifest's version field (§12.4).                                                                                                                                                               |
+| `syncLock`            | array of names   | —        | References into `scripts`, run inside the package folder **after** its manifests were rewritten and **before** its build — the slot for `npm install` and friends, so lock files follow the manifests.                                             |
+| `syncLockConcurrency` | int              | `1`      | Run-wide cap on simultaneously running `syncLock` scripts. Shared lock files corrupt under parallel writers, hence the serial default; when spaces disagree, the smallest configured value wins.                                                    |
+
+```yaml
+spaces:
+  js:
+    path: packages
+    autoVersion:
+      match: ["workspace:*"]      # only ranges the workspace manages
+      range: caret                # write ^<new version>
+      syncLock: [npm-install]     # scripts.npm-install: "npm install"
+scripts:
+  npm-install: npm install --package-lock-only
+```
+
+Three warnings narrate what the rewrite did that the commit log alone cannot explain: `W192` — the manifest's declared
+own version disagreed with the baseline (tags are authoritative; the computed version is written over it), `W197` — a
+range was caught up to a provider released **outside** this run (§9.4's catch-up), `W203` — a stable release now ranges
+over a **prerelease** provider.
 
 ## `runScripts` and `dispat run`
 

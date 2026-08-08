@@ -5,8 +5,12 @@ scripts:
   build: "npm run build"
   publish: "npm publish --access public"
   # Sync manifests to just-released provider versions; receives them as
-  # per-package DISPAT_UPDATED_* variables.
+  # per-package DISPAT_UPDATED_* variables. With autoVersion (below) dispat
+  # rewrites package.json/go.mod itself and a script like this is only needed
+  # for what the native rewriting does not cover.
   sync-deps: "node ./scripts/sync-deps.js"
+  # Regenerate the lock file after autoVersion rewrote the manifests.
+  npm-install: "npm install --package-lock-only"
   npm-login: "npm whoami || npm login"
   smoke-test: "npm run smoke"
   announce: "./scripts/announce.sh"
@@ -41,6 +45,25 @@ spaces:
     # a failed package; --concurrency's build value bounds the parallelism.
     runScripts:
       lint: "npm run lint"
+    # Native manifest rewriting at the version stage (package.json, go.mod):
+    # declared workspace ranges are reconciled to end-of-run provider
+    # versions and the package's own version field is updated, before any
+    # flow.version script. All keys optional; the block's presence enables it.
+    autoVersion:
+      match: ["workspace:*"]     # only rewrite ranges matching these globs
+                                 # (hand-pinned versions survive); empty = any
+      range: caret               # what to write: caret ^1.2.3 (default),
+                                 # tilde, exact, a ">={version}" template, or
+                                 # a literal like "workspace:*"
+      kinds: [dependencies, devDependencies, peerDependencies]
+      # only: [core, utils]      # restrict to these providers
+      # nameMatch: substring     # also match a declared name's last segment
+                                 # onto a folder name (@core/app -> app), for
+                                 # packages whose manifests declare no name
+      # manifests: root          # root (default) or all manifests in the package
+      # writeVersion: true       # also write the package's own version field
+      syncLock: [npm-install]    # scripts run after the rewrite, before build
+      syncLockConcurrency: 1     # run-wide cap; 1 keeps shared lock files safe
     flow:
       build: [install, build]
       publish: publish
@@ -80,11 +103,16 @@ run:
   # beforeAll: check-preconditions
   postAll: notify
 
+# Consumer -> provider relations. `dispat compute` derives this list from the
+# packages' manifests and suggests additions/removals/kind corrections;
+# keep: true marks a deliberate edge no manifest declares (a Docker chain),
+# which compute then never suggests removing.
 dependencies:
   - consumer: app
     provider: core
   - consumer: app
     provider: utils
+    keep: true
 
 # Baseline versions used when a package's latest tag is missing or cannot be
 # parsed (e.g. a stray core@0.0.1.0). The next release bumps on top of

@@ -1,8 +1,10 @@
 go 1.26
 
 use (
-	pkg/models
 	pkg/ccme
+	pkg/models
+	pkg/scanner
+	pkg/writer
 	services/dispat
 	tests/integration
 )

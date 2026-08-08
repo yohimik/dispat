@@ -148,6 +148,25 @@ const (
 	// CodeBlocked marks a package that was planned but not attempted because a
 	// dependency failed to publish (§19.3). Non-suppressible.
 	CodeBlocked = "W194"
+
+	// --- manifests (§9.4, §12.4; emitted by the executor and by compute) ---
+
+	// CodeManifestVersionDrift marks a manifest whose declared own version
+	// disagrees with the package's baseline (§12.4): tags are authoritative,
+	// the computed version is written over the drifted one.
+	CodeManifestVersionDrift = "W192"
+	// CodeRangeCatchUp marks a declared range reconciled against a provider
+	// that is not releasing this run (§9.4): the manifest had fallen behind an
+	// earlier release and auto-versioning caught it up.
+	CodeRangeCatchUp = "W197"
+	// CodeStableOverPrerelease marks a stable release whose manifest now
+	// ranges over a prerelease provider (§9.4): legal, but a stable consumer
+	// pinning a moving prerelease is worth an operator's glance.
+	CodeStableOverPrerelease = "W203"
+	// CodeAmbiguousManifestName marks two workspace packages whose manifests
+	// declare the same name: the name-to-package mapping is ambiguous, so
+	// compute derives no edges from that name.
+	CodeAmbiguousManifestName = "W220"
 	// CodeBadPrereleaseTag rejects an existing prerelease tag whose counter is
 	// not a numeric identifier (§11.3). Repository-scoped.
 	CodeBadPrereleaseTag = "E182"
@@ -973,7 +992,26 @@ func (cp *computation) loadWorkspace(deps []model.Dependency) error {
 		// §16 E200: a cyclic graph has no publish order — the run cannot
 		// produce a correct plan, and the code must surface as a diagnostic
 		// (not a bare load failure) so operators and tooling can key off it.
-		cp.err(CodeDependencyCycle, "", "", err.Error())
+		// §13.1 also requires the cycle report to name the manifest field
+		// carrying each edge, so the message lists the edges among the
+		// blocked nodes with their kinds.
+		msg := err.Error()
+		var cyc *graph.CycleError
+		if errors.As(err, &cyc) {
+			members := make(map[string]bool, len(cyc.Nodes))
+			for _, n := range cyc.Nodes {
+				members[n] = true
+			}
+			var edges []string
+			for d := range seen {
+				if members[d.Consumer] && members[d.Provider] {
+					edges = append(edges, fmt.Sprintf("%s -> %s (%s)", d.Consumer, d.Provider, d.Kind))
+				}
+			}
+			sort.Strings(edges)
+			msg += "; edges: " + strings.Join(edges, ", ")
+		}
+		cp.err(CodeDependencyCycle, "", "", msg)
 		return errFatalPlan
 	}
 	cp.order = order

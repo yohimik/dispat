@@ -107,6 +107,43 @@ type Space struct {
 	// packages ships with, and a monorepo mixing two of them is the case
 	// worth supporting.
 	TagFormat string
+	// AutoVersion is the space's resolved native manifest-rewriting policy
+	// for the version stage; nil means the feature is off and manifest
+	// syncing stays the VersionScript's job alone.
+	AutoVersion *AutoVersion
+}
+
+// AutoVersion is a space's resolved autoVersion policy: which declarations
+// the version stage rewrites natively (§9.4) and what it writes.
+type AutoVersion struct {
+	// AllManifests rewrites every manifest under the package folder instead
+	// of only the root ones.
+	AllManifests bool
+	// Kinds are the manifest fields eligible for rewriting; always fully
+	// populated (all four kinds when the config named none).
+	Kinds map[DepKind]bool
+	// Only restricts rewriting to declarations of these provider packages;
+	// nil means every workspace provider.
+	Only map[string]bool
+	// NameSubstring additionally matches a declared name onto the package
+	// whose folder name equals its last /- or :-separated segment, for
+	// packages whose manifests declare no name the workspace can learn.
+	NameSubstring bool
+	// Match are the declared-range globs eligible for rewriting; empty means
+	// any. A range matching none of the globs — a hand-pinned version — is
+	// left alone.
+	Match []string
+	// Range is the write policy: "caret" (also the empty default), "tilde",
+	// "exact", a {version} template, or a verbatim literal.
+	Range string
+	// WriteVersion also rewrites the package's own manifest version field.
+	WriteVersion bool
+	// SyncLock are resolved shell commands run inside the package folder
+	// after its manifests changed, between version and build.
+	SyncLock []string
+	// SyncLockConcurrency is the space's vote for the run-wide syncLock
+	// budget; 0 means the default of 1.
+	SyncLockConcurrency int
 }
 
 // Package is a single releasable folder inside a space.

@@ -126,19 +126,51 @@ pkg/models               the PUBLIC configuration model (its own module): the
                          loadable JSON. Models and pure helpers only;
                          loading, validation and discovery stay internal to
                          the CLI.
+pkg/scanner              manifest READER (its own module). Two manifest
+                         shapes: structured documents — package.json, go.mod,
+                         Cargo.toml, pyproject.toml (PEP 621 + Poetry, PEP
+                         503 name normalisation), composer.json, pom.xml
+                         (groupId:artifactId coordinates), *.csproj
+                         (suffix-matched; ProjectReference = local path),
+                         pubspec.yaml — and line-by-line "name specifier"
+                         files, requirements*.txt (pattern-matched; a dev/
+                         test file name maps to devDependencies). All parsed
+                         into one ecosystem-neutral shape: declared identity
+                         (name, version; line manifests have none) plus
+                         declared dependencies with their ranges, fields and
+                         local paths. Thin per-format parsers, a walking
+                         Scan (skips node_modules/vendor/target/dot-folders)
+                         and a root-only ScanRoot; in-memory Fake for tests.
+                         Feeds `dispat compute` and auto-versioning. Code
+                         DSL manifests (Gemfile, build.gradle, mix.exs,
+                         Package.swift) are deliberately absent: parsing
+                         code with regexes produces wrong graphs.
+pkg/writer               manifest WRITER (its own module): format-preserving
+                         in-place edits — package.json via byte-precise JSON
+                         scalar replacement, go.mod via x/mod/modfile,
+                         requirements*.txt via per-line specifier splicing —
+                         replacing only the version text being changed.
+                         Atomic same-folder rename; reports applied and
+                         missing edits. Other ecosystems are read-only until
+                         they gain a writer here.
 services/dispat/
   main.go                thin entry point: os.Exit(cli.Run(...))
   internal/
     cli      the command-line controller: pflag flags, command dispatch
-             (release / status / run <script> / init / test / preview, with
-             an unknown word treated as a run script name), zerolog setup,
+             (release / status / run <script> / init / test / preview /
+             compute, with an unknown word treated as a run script name),
+             zerolog setup,
              config file resolution and loading; then delegates to app and
              maps its results onto exit codes
     app      the application: App with Status, Release, RunScript
              (the `dispat run` implementation: changed packages scheduled
              over the dependency graph within the build budget, --on-error
              skip/continue semantics, or one targeted package (named, or
-             inferred from the invocation directory), TestScript, Preview and the
+             inferred from the invocation directory), TestScript, Preview,
+             Compute (manifest scan -> derived edges -> suggestions diffed
+             against the config, previewed / confirmed / applied with the
+             config's dependencies array rewritten format-preservingly and
+             the previous copy backed up) and the
              standalone InitConfig, holding recorder
              assembly (changelog + github), diagnostic reporting and the
              release-refusal policy, upfront remote/API verification,
@@ -185,9 +217,13 @@ services/dispat/
                               file-derived set by longest path prefix
                directives.go  the ccme -> plan adapters: unit accessors,
                               propagation knobs, version helpers
-    release  the executor: task-graph construction (version/build/publish
-             nodes, dependency edges) over graph.Scheduler, with per-stage
-             worker budgets, skip propagation, provider-update
+    release  the executor: task-graph construction (version/syncLock/build/
+             publish nodes, dependency edges) over graph.Scheduler, with
+             per-stage worker budgets (syncLock's own budget defaults to 1,
+             serialising lock file regeneration), native auto-versioning at
+             the version stage (autoversion.go: pkg/scanner + pkg/writer
+             under the space's match/range/kinds/only policy, emitting
+             W192/W197/W203), skip propagation, provider-update
              filtering, script sequences (fail-fast vs warn-only), per-stage
              hooks, the once-per-space login gate (sync.Once keyed by space),
              the warn-only announce frame after each publish, the warn-only
@@ -312,8 +348,8 @@ keeps dispat language-agnostic:
 
 | Not implemented                                             | Delegated to                                                                 |
 |-------------------------------------------------------------|------------------------------------------------------------------------------|
-| Rewriting dependency ranges in manifests                    | `flow.version`, via the `DISPAT_WORKSPACE_*` variables                       |
-| Manifest-vs-baseline version checks                         | (nothing)                                                                    |
+| Rewriting dependency ranges in manifests                    | native for `package.json`/`go.mod` under [`autoVersion`](./configuration/spaces.md#autoversion) (W197/W203); other ecosystems: `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
+| Manifest-vs-baseline version checks                         | native under `autoVersion` (W192); otherwise nothing                         |
 | Publish targets, registries, adopting published versions    | `flow.publish`                                                               |
 | `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps                |
 | Per-run safety limits (max packages, majors, channel moves) | (nothing; the exact-pin major-jump guard *is* enforced, with a default of 1) |

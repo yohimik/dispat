@@ -71,18 +71,30 @@ dispat stands on the shoulders of two things:
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 
+## Recently added
+
+- **Computed dependency graph.** `dispat compute` analyzes packages' project files (`package.json`, `go.mod`,
+  `Cargo.toml`, `pyproject.toml`, `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `requirements*.txt`) and
+  derives the consumer/provider graph from them, so relations no longer have to be declared by hand:
+  it suggests additions, removals and kind corrections against the config, previewable, confirmable one by one or
+  applied wholesale (with the previous config backed up), and `--check` gates CI on a drifted graph. An edge marked
+  `keep: true` states a deliberate relation no manifest declares (a Docker chain) and is never suggested for removal.
+- **Native auto versioning.** A space with an `autoVersion` block gets its manifests rewritten by dispat itself at the
+  version stage — declared workspace ranges reconciled to end-of-run versions and own versions updated,
+  format-preservingly, for `package.json`, `go.mod` and `requirements*.txt` — with match/range policies (only touch
+  `workspace:*`, write caret/tilde/exact/a literal), per-kind and per-provider filters, substring name matching
+  (`nameMatch: substring` lets package `app` match a declared `@core/app`), and `syncLock` scripts (e.g. `npm install`)
+  run between version and build under their own concurrency budget (default 1, so shared lock files never corrupt).
+
 ## Planned features
 
 - **Per-package overrides within a space.** A package will be able to override its enclosing space's configuration
   (scripts, concurrency, `revertOnFail`, changelog/GitHub behavior, ...) for itself alone, so one-off exceptions no
   longer require carving a package out into its own space.
-- **Computed dependency graph.** A command that analyzes packages' project files directly and derives the
-  consumer/provider graph from them, so relations no longer have to be declared by hand in config; explicit overrides
-  will be supported for cases the analysis can't or shouldn't infer.
 - **Extendable config.** Configuration will be splittable across multiple files, so large monorepos don't have to keep
   every space and package declaration in one flat file.
-- **Auto versioning for a broad range of languages.** Version bumps will be applied natively across package managers, so
-  packages get automatic bump treatment without hand-rolled scripts.
+- **Auto versioning for more languages.** Native manifest writers beyond `package.json` and `go.mod` (Cargo.toml,
+  pyproject.toml, ...), so more ecosystems get automatic bump treatment without hand-rolled scripts.
 
 ## Projects using dispat (Real-world examples)
 

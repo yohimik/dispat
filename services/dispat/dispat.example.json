@@ -4,6 +4,7 @@
     "build": "npm run build",
     "publish": "npm publish --access public",
     "sync-deps": "node ./scripts/sync-deps.js",
+    "npm-install": "npm install --package-lock-only",
     "npm-login": "npm whoami || npm login",
     "smoke-test": "npm run smoke",
     "announce": "./scripts/announce.sh",
@@ -19,6 +20,13 @@
       "versioning": "independent",
       "runScripts": {
         "lint": "npm run lint"
+      },
+      "autoVersion": {
+        "match": ["workspace:*"],
+        "range": "caret",
+        "kinds": ["dependencies", "devDependencies", "peerDependencies"],
+        "syncLock": ["npm-install"],
+        "syncLockConcurrency": 1
       },
       "flow": {
         "build": ["install", "build"],
@@ -42,7 +50,7 @@
   "run": {"postAll": "notify"},
   "dependencies": [
     { "consumer": "app", "provider": "core" },
-    { "consumer": "app", "provider": "utils" }
+    { "consumer": "app", "provider": "utils", "keep": true }
   ],
   "initials": {
     "core": "1.0.0"
