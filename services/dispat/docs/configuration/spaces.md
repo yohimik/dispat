@@ -57,9 +57,10 @@ Authentication (`npm login`, `docker login`, ...) is a property of the space, no
 until it finishes, and it is never re-run within the run. Two spaces referencing the *same* script still log in once
 each (n spaces, n logins), because credentials and registries belong to the space. A failing login fails the publish of
 **every** package in the space (none of them could have succeeded without it); other spaces are unaffected. The login
-runs in the folder of the package whose publish happened to trigger it and gets the space-scoped environment:
+runs in the **space folder** (the parent of every member package), so a script reading a local file sees the same
+folder on every run, and gets the space-scoped environment:
 `DISPAT_SPACE`, `DISPAT_STAGE=login`, the [workspace listing](../environment.md#workspace-data) and `DISPAT_OUTPUT`. No
-package variables, since which package triggered it is a scheduling accident. What it
+package variables, since which package's publish triggered it is a scheduling accident. What it
 [exports](../environment.md#script-outputs) is space-scoped too: every package of the space receives the login's exports
 from its publish stage onward, sourced `<space>:login`.
 
@@ -150,18 +151,18 @@ a run script. A changed package whose space does not define the name completes a
 is an error (running nothing silently is how a typo hides).
 
 The run can also be narrowed to a single package, in two ways. `dispat run <name> <package>` runs the script in exactly
-that package — changed or not, with no graph — and errors on an unknown package or on one whose space does not define
+that package (changed or not, with no graph) and errors on an unknown package or on one whose space does not define
 the script, because a *targeted* run that runs nothing would be a typo hiding. And the shorthand, invoked from inside a
-package's folder (or any subdirectory of it), narrows to that package the same way — config resolution finds the
-monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just works — while from the monorepo
+package's folder (or any subdirectory of it), narrows to that package the same way (config resolution finds the
+monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just works), while from the monorepo
 top it covers every changed package as usual. The shorthand takes no package argument.
 
 A third selection axis is `--since <rev>` (`-s`): instead of the release window, select the packages **the commits in
-`rev..HEAD` address** — `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),
+`rev..HEAD` address**: `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),
 `-s origin/main` over this branch's own commits (PR pipelines; the base moving on does not widen the set),
 `-s <tag>` since a release, and the reserved `-s all` selects every package. Selection follows the same scope semantics
-as planning: a commit's written scopes are authoritative — globs, exclusions and `nonPackageScopes`
-included — and only a unit with **no scope-set falls back to the files it changed** (§6.2, longest path prefix).
+as planning: a commit's written scopes are authoritative (globs, exclusions and `nonPackageScopes`
+included), and only a unit with **no scope-set falls back to the files it changed** (§6.2, longest path prefix).
 Ordering, concurrency and output carrying apply to the selected set exactly as to the changed one. `--since` is mutually
 exclusive with an explicit `<package>` and overrides the shorthand's folder inference.
 

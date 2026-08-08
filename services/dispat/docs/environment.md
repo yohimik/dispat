@@ -159,10 +159,11 @@ the same `<KEY>` scheme:
 DISPAT_PUBLISHED_PACKAGES="CORE"              # keys of published packages
 DISPAT_FAILED_PACKAGES="UI"                   # keys of failed packages
 DISPAT_SKIPPED_PACKAGES="APP"                 # keys of packages skipped because a provider failed
+DISPAT_CANCELLED_PACKAGES=""                  # keys of packages an interrupted run never ran
 DISPAT_UNPLANNED_PACKAGES="UTILS"             # keys of packages the plan did not release
                                               # (unchanged, or held by Release-As: none)
 DISPAT_RESULT_CORE_NAME="core"                # one block per planned package
-DISPAT_RESULT_CORE_STATUS="published"         # published / failed / skipped
+DISPAT_RESULT_CORE_STATUS="published"         # published / failed / skipped / cancelled
 DISPAT_RESULT_CORE_OLD_VERSION="1.2.3"
 DISPAT_RESULT_CORE_NEW_VERSION="1.3.0"
 DISPAT_RESULT_CORE_CHANNEL="stable"
@@ -170,9 +171,11 @@ DISPAT_RESULT_UI_FAILED_STAGE="build"         # failed packages only
 DISPAT_RESULT_APP_BLOCKED_BY="ui"             # skipped packages only: the provider to blame
 ```
 
-The four list variables are set even when empty, so a shell for-loop iterates zero times instead of reading an unset
+The five list variables are set even when empty, so a shell for-loop iterates zero times instead of reading an unset
 variable; `_FAILED_STAGE` and `_BLOCKED_BY`, conversely, are **unset** when there is nothing to report. Unplanned
-packages carry no `DISPAT_RESULT_*` block; their state is the workspace listing's baseline entry.
+packages carry no `DISPAT_RESULT_*` block; their state is the workspace listing's baseline entry. A `cancelled` status
+means the run was interrupted (Ctrl-C, a killed CI job) before the package ran: nothing about it failed, and the next
+run picks it up unchanged.
 
 ## Size
 

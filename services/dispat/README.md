@@ -64,8 +64,8 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   release decisions are reviewed and versioned like code. [Details](./docs/commits.md#release-control).
 - **Any language, any registry, any tooling.** Stages are shell commands fed a rich
   [`DISPAT_*` environment](./docs/environment.md); scripts pass values to each other through `$DISPAT_OUTPUT`, up to
-  attaching build artefacts to GitHub releases. Because release state lives in git tags — each package's tag is the
-  transaction record of its completed release, written only after the publish succeeded — every build system, CI and
+  attaching build artefacts to GitHub releases. Release state lives in git tags: each package's tag is the transaction
+  record of its completed release, written only after the publish succeeded. That is why every build system, CI and
   caching layer (BuildKit, remote task caches, compiler caches) works from inside a script unchanged, and none of it can
   confuse the release computation.
 - **Release records built in.** Per-package changelogs, annotated tags, GitHub releases, an optional single release
@@ -82,6 +82,7 @@ Start with [Getting started](./docs/getting-started.md), then dip into the refer
 | Document                                                 | Contents                                                                     |
 |----------------------------------------------------------|------------------------------------------------------------------------------|
 | [Getting started](./docs/getting-started.md)             | Install, first config, commit convention, commands, CI setup.                |
+| [Cookbook](./docs/cookbook.md)                           | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels. |
 | [Concepts](./docs/concepts.md)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.    |
 | [CLI](./docs/cli.md)                                     | Every command, flag and exit code.                                           |
 | [Configuration file](./docs/configuration/README.md)     | Top-level options, script sequences, run-level hooks; links the pages below. |
@@ -105,5 +106,5 @@ functions plus fuzzing, run by [CI](../../.github/workflows/tests.yml) on every 
 fakes, and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
 disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
-Together they hold **95.3%** workspace statement coverage
+Together they hold **94.5%** workspace statement coverage
 ([per-package table](./docs/coverage.md), [test inventory](./docs/architecture.md#testing)).

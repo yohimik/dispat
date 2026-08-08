@@ -145,7 +145,7 @@ can also be bracketed with per-space hooks: `flow.beforeAll`, `flow.beforeVersio
 while `flow.postPublish` only warns since the release is already out. Run-level hooks observe the whole run: a gating
 `run.beforeAll` runs once before the task graph (its failure aborts the run), and the warn-only `run.postAll` plus the
 commit/push hooks run after, with the outcome exported as
-`DISPAT_PUBLISHED/FAILED/SKIPPED/UNPLANNED_PACKAGES` and per-package `DISPAT_RESULT_*` variables.
+`DISPAT_PUBLISHED/FAILED/SKIPPED/CANCELLED/UNPLANNED_PACKAGES` and per-package `DISPAT_RESULT_*` variables.
 
 Everything released is versioned and tagged, whatever its build produces. An exception there would cost convergence,
 because a package whose window never advances reappears in every plan for ever. Packages held by `Release-As: none`
