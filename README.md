@@ -76,6 +76,11 @@ dispat stands on the shoulders of two things:
   the two-axis propagation grammar, performance notes and fuzzing.
 - **[models](./pkg/models)**: the public configuration model, so external tooling can author dispat configs as typed
   values and marshal them to loadable files.
+- **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library — package.json, go.mod, Cargo.toml,
+  pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml and requirements files parsed into one
+  ecosystem-neutral shape; the library behind `dispat compute` and auto-versioning.
+- **[writer](./pkg/writer)**: the manifest writer — format-preserving, byte-precise in-place edits for package.json,
+  go.mod and requirements files, with atomic writes and validated output.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 
