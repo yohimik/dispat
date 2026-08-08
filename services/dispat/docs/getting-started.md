@@ -111,6 +111,7 @@ dispat lint                 # the same: an unknown command word means "run <word
 dispat run lint --on-error continue   # keep running dependents of a failed package
 dispat test build core      # run the top-level "build" script once inside packages/core
                             # with core's full DISPAT_* environment; releases nothing
+dispat preview              # pending release notes for every package with something pending
 dispat preview core         # print core's pending release notes (breaking changes,
                             # features, fixes): what its next changelog entry would say
 dispat --concurrency 4,2    # override build/publish parallelism

@@ -57,7 +57,7 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"run"},                               // run requires the script name
 		{"run", "a", "b", "c"},                // ...plus at most one package
 		{"test", "probe"},                     // test requires script and package
-		{"preview"},                           // preview requires the package
+		{"preview", "a", "b"},                 // preview takes at most one package
 		{"status", "extra"},                   // status takes no arguments
 		{"bogus", "extra"},                    // more than one non-command word
 		{"run", "x", "--on-error", "explode"}, // unknown --on-error value

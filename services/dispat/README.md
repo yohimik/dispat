@@ -40,7 +40,7 @@ A few more moves:
 
 ```sh
 $ dispat compute                    # derive the dependency graph from the manifests; --write applies
-$ dispat preview core               # what core's next changelog entry will say
+$ dispat preview                    # pending release notes, all packages (preview core: just one)
 $ dispat test build core            # try the build script in packages/core with the real DISPAT_* env
 $ dispat lint                       # run a script in every changed package, in graph order
 $ git commit -m "feat(core)@beta: try it out"

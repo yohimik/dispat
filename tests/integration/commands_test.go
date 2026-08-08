@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
@@ -128,4 +130,39 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 	graduated := entry("core@0.2.0")
 	assert.Contains(t, graduated, "feature A", "the graduation collects the whole train")
 	assert.Contains(t, graduated, "fix B")
+}
+
+// TestCommandsPreviewAllPackages: `dispat preview` with no package name
+// renders every package that has something pending, in publish order, and
+// says "no pending changes" once nothing does. Packages with an empty window
+// stay out of the combined preview instead of adding noise.
+func TestCommandsPreviewAllPackages(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.SeedPackage("packages", "quiet")
+	r.Commit("feat(core)^: streaming api\n---\nfix(web): close a leak")
+
+	res := r.Command("preview")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "## core@0.1.0", "the provider's pending notes")
+	assert.Contains(t, res.Stdout, "## web@0.0.1", "the consumer's pending notes")
+	assert.Contains(t, res.Stdout, "- streaming api")
+	assert.Contains(t, res.Stdout, "- close a leak")
+	assert.NotContains(t, res.Stdout, "quiet", "a package with nothing pending stays out")
+	assert.Less(t, strings.Index(res.Stdout, "## core@"), strings.Index(res.Stdout, "## web@"),
+		"packages render in publish order")
+
+	// Released, the combined preview is empty too.
+	r.ReleaseOK()
+	res = r.Command("preview")
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "no pending changes")
+	assert.NotContains(t, res.Stdout, "##", "no headers when nothing is pending")
+
+	// Too many arguments stays a usage error.
+	assert.Equal(t, 2, r.Command("preview", "core", "web").Code)
 }

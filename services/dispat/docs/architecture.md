@@ -7,7 +7,7 @@ from discovery on is the `app` package's `Status` (steps 3-6) and `Release` (all
 callable without a command line.
 
 1. Parse the command line (pflag); dispatch `release`, `status`, `run <script> [package]`, `init`,
-   `test <script> <package>` or `preview <package>`. An unknown command word is `run`'s shorthand (`dispat lint`).
+   `test <script> <package>` or `preview [package]`. An unknown command word is `run`'s shorthand (`dispat lint`).
    `init` writes a starter config and exits before anything else (there is no config to load yet), refusing a `--root`
    that is not a git repository root. The run command computes the plan, then executes the named space run script inside
    each changed package over the dependency graph (build concurrency budget; `--on-error` decides whether a failure
@@ -16,7 +16,8 @@ callable without a command line.
    (or `all`) instead selects what the commits since a revision address: scopes first, changed files for scopeless
    units (§6.2). Nothing below step 6 applies to it. `test` and `preview` compute the plan quietly (diagnostics, no
    graph), then run one top-level script in one package's folder with its full
-   `DISPAT_*` environment / print one package's pending release notes, and stop.
+   `DISPAT_*` environment / print the pending release notes (one package's, or every pending package's in publish
+   order when none is named), and stop.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root), then load and validate it (viper; unknown keys rejected; flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path, names unique across spaces.

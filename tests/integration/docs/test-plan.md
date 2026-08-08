@@ -35,7 +35,8 @@ The suite was designed against eleven goals, one test file each:
    and commit mode's release commit, tag placement and push against a real bare remote.
 8. **The `init`, `test` and `preview` commands** (`commands_test.go`): the starter config the very next `status`
    can load, one script run inside one package with its full `DISPAT_*` environment, and the pending release notes on
-   stdout, narrowing to the fresh changeset across a prerelease train.
+   stdout, for one package and for every pending package at once, narrowing to the fresh changeset across a
+   prerelease train.
 9. **Repository-scoped fatal errors** (`fatal_test.go`): the §16 bucket that aborts a run whatever `commitErrors`
    says, each constructed for real: a dependency cycle (E200), duplicate version tags (E191), and a shallow clone
    (E196). These are the cases where a partial release would be worst, so each asserts the non-zero exit, the code in
@@ -262,6 +263,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestCommandsInitThenStatusCompose` | `dispat init --format toml` then a plain `dispat status`: the fallback finds `dispat.toml` with no `--config` anywhere, the starter config loads and discovers the package, and a second `init` refuses to overwrite (exit 1).                                                                |
 | `TestCommandsTestScript`            | `dispat test <script> <pkg>` runs the script inside the package folder with the full `DISPAT_*` environment (`DISPAT_NEW_VERSION`, `DISPAT_STAGE=test:<name>`) and releases nothing; unknown script, unknown package and a failing script all exit 1.                                         |
 | `TestCommandsPreviewNotesWindowing` | `dispat preview <pkg>` prints the pending notes (header, sections, entries), reports "no pending changes" once released, errors on an unknown package; and across a prerelease train the preview and each entry narrow to the fresh changeset while the graduation collects the whole train. |
+| `TestCommandsPreviewAllPackages` | `dispat preview` with no package renders every package with something pending in publish order, keeps quiet packages out, reports "no pending changes" once nothing is pending, and rejects more than one argument (exit 2). |
 
 ### Goal 9: repository-scoped fatal errors (`fatal_test.go`)
 

@@ -96,8 +96,9 @@ commands:
                            at the git repository root, unless one already exists
   test <script> <package>  run the named top-level script inside the package's
                            folder with its full DISPAT_* environment; releases nothing
-  preview <package>        print the package's pending release notes (breaking
-                           changes, features, fixes) for the current window
+  preview [package]        print the pending release notes (breaking changes,
+                           features, fixes) for one package, or for every
+                           package with something pending when none is named
   compute                  scan every package's manifests (package.json, go.mod,
                            Cargo.toml, pyproject.toml, composer.json, pom.xml,
                            *.csproj, pubspec.yaml, requirements*.txt), derive
@@ -205,10 +206,13 @@ flags:
 		if err != nil {
 			return 1
 		}
-		if notes == "" {
-			fmt.Fprintf(stdout, "no pending changes for %s\n", testPkg)
-		} else {
+		switch {
+		case notes != "":
 			fmt.Fprint(stdout, notes)
+		case testPkg == "":
+			fmt.Fprintln(stdout, "no pending changes")
+		default:
+			fmt.Fprintf(stdout, "no pending changes for %s\n", testPkg)
 		}
 	case cmdCompute:
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
@@ -277,12 +281,14 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		}
 		inv.script, inv.pkg = rest[1], rest[2]
 	case cmdPreview:
-		if len(rest) != 2 {
-			log.Error().Msg("preview requires exactly one argument: the package name")
+		if len(rest) > 2 {
+			log.Error().Msg("preview takes at most one argument: the package name")
 			usage()
 			return inv, true
 		}
-		inv.pkg = rest[1]
+		if len(rest) == 2 {
+			inv.pkg = rest[1] // no argument: preview every package
+		}
 	default:
 		// Not a command name: treat the word as a run script, so
 		// `dispat lint` is `dispat run lint`. A name no space defines
