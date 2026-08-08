@@ -63,7 +63,7 @@ func TestReleaseReason(t *testing.T) {
 		rel  Release
 		want string
 	}{
-		"fixed_ride":   {Release{FixedRide: true}, "fixed space versioning"},
+		"fixed_ride":   {Release{FixedRide: true}, "fixed group versioning"},
 		"catch_up":     {Release{CatchUp: true, Sources: []StaleSource{{Provider: "a"}, {Provider: "a"}, {Provider: "b"}}}, "catch-up from a, b"},
 		"channel_only": {Release{ChannelOnly: true, Channel: "stable", BaselineChannel: "beta"}, "channel beta -> stable"},
 		"channel_from": {Release{ChannelOnly: true, ChannelFrom: "core"}, "channel from core"},

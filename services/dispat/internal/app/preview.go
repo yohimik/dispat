@@ -56,7 +56,7 @@ func (a *App) Preview(ctx context.Context, pkg string) (string, error) {
 // previewOne renders one package's pending notes; empty when nothing is
 // pending.
 func (a *App) previewOne(rel *plan.Release) string {
-	sections := changelog.RenderSections(rel, entryFormat(a.cfg.Changelog.EntryFormatConfig))
+	sections := changelog.RenderSections(rel, changelog.SpecFormat(rel.Pkg.Changelog.Format))
 	if sections == "" && !rel.Releasing() {
 		return ""
 	}

@@ -20,8 +20,8 @@ data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 The contract: every field carries a `mapstructure` tag (how the CLI decodes the file) and a `json` tag with
 the same key (how a model marshals back into a loadable file), so **a marshalled model is a loadable
 config**. Optional sub-objects are pointers, so an unset object marshals as an absent key rather than `{}`
-noise; tri-state options (`enabled`, `verify`, `writeVersion`) are `*bool` with nil-safe accessors and a
-`Bool()` helper.
+noise; tri-state options (`enabled`, `verify`, `writeVersion`, and every scalar of a `PackageConfig`
+override, where absent must mean "inherit") are `*bool` with nil-safe accessors and a `Bool()` helper.
 
 This module contains models only. Loading, validation, defaulting and package discovery live in the CLI's
 internal config package: an invalid model marshals fine and fails with a clear error when the CLI loads it.

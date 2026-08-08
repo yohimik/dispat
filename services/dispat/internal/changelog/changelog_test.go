@@ -138,6 +138,34 @@ func TestRecordCustomFileAndTitle(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "CHANGELOG.md"))
 }
 
+// TestDispatcherRoutesPerPackagePolicy: the dispatcher reads each package's
+// resolved changelog policy — a disabled package writes nothing at all, an
+// enabled one writes through its own file, title and format.
+func TestDispatcherRoutesPerPackagePolicy(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	d := &Dispatcher{Now: func() time.Time { return testDate }}
+	ctx := context.Background()
+
+	enabled := testRelease(dirA, ccme.Version{Major: 2})
+	enabled.Pkg.Changelog = model.ChangelogSpec{
+		Enabled: true, File: "HISTORY.md", Title: "# History",
+		Format: model.RecordFormat{FeaturesTitle: "Added"},
+	}
+	disabled := testRelease(dirB, ccme.Version{Major: 2})
+	disabled.Pkg.Changelog = model.ChangelogSpec{Enabled: false, File: "HISTORY.md"}
+
+	require.NoError(t, d.Record(ctx, enabled))
+	require.NoError(t, d.Record(ctx, disabled))
+
+	data, err := os.ReadFile(filepath.Join(dirA, "HISTORY.md"))
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(data), "# History\n"))
+	assert.Contains(t, string(data), "### Added")
+	entries, err := os.ReadDir(dirB)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a disabled package records nothing")
+}
+
 func TestRenderSectionsFallsBackToNamesWithoutVersions(t *testing.T) {
 	// A Release built without version data (Updates empty) still names its
 	// providers rather than dropping the section.
@@ -157,10 +185,10 @@ func TestRenderFixedRideNoChangesEntry(t *testing.T) {
 		FixedRide: true,
 	}
 	sections := RenderSections(rel, Format{})
-	assert.Equal(t, "No changes — version bump to keep the space's fixed versioning.\n", sections)
+	assert.Equal(t, "No changes — version bump to keep the versioning group on one version.\n", sections)
 
 	entry := RenderEntry(rel, testDate, Format{})
-	assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\nNo changes — version bump to keep the space's fixed versioning.\n", entry)
+	assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\nNo changes — version bump to keep the versioning group on one version.\n", entry)
 }
 
 func TestRenderFixedMemberWithOwnUnitsIsOrdinary(t *testing.T) {

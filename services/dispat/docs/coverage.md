@@ -6,30 +6,30 @@ integration suite's profile: its harness builds the real dispat binary with `-co
 points every invocation's `GOCOVERDIR` there, so the flows only that suite exercises (the app/cli composition, the
 finalize phase, the commands) count too. All four text profiles concatenate into one (`go tool cover` merges the
 overlapping blocks): the workspace total the README's `coverage` badge shows, always for the latest `main` build; the
-per-layer numbers (unit: all modules, **84.9%**; integration: the CLI module through the instrumented binary, **81.6%**)
+per-layer numbers (unit: all modules, **85.5%**; integration: the CLI module through the instrumented binary, **81.5%**)
 appear in CI's job summary. The badge is the authoritative, always-current number; the table below is a hand-run local
 snapshot, regenerated on **2026-08-08** with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts
 until someone regenerates it.
 
 | Module / package                 | Statement coverage                                                                       |
 |----------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**              | **93.0%**                                                                                |
+| **workspace total**              | **93.3%**                                                                                |
 | `pkg/ccme` (commit parser)       | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)     | 100%                                                                                     |
 | `pkg/manifest` (shared vocabulary) | 100%                                                                                   |
-| `pkg/scanner` (manifest reader)  | **86.3%**, plus two fuzz targets over every registered parser                            |
-| `pkg/writer` (manifest writer)   | **85.6%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
-| `services/dispat` (all packages) | **92.8%** aggregate, `main.go` included (the integration suite runs the real binary)     |
-| - `main.go`, `script`, `model`   | 100%                                                                                     |
+| `pkg/scanner` (manifest reader)  | **85.6%**, plus two fuzz targets over every registered parser                            |
+| `pkg/writer` (manifest writer)   | **84.5%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
+| `services/dispat` (all packages) | **93.3%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| - `main.go`, `script`, `model`, `globx` | 100%                                                                              |
 | - `cli` (controller)             | 98.3%                                                                                    |
-| - `changelog`                    | 96.7%                                                                                    |
-| - `graph` (scheduler)            | 96.2%                                                                                    |
-| - `plan` (planner)               | 94.7%                                                                                    |
+| - `changelog`                    | 97.0%                                                                                    |
+| - `graph` (scheduler)            | 96.4%                                                                                    |
+| - `plan` (planner)               | 94.8%                                                                                    |
+| - `config`                       | 93.5%                                                                                    |
 | - `github`                       | 92.9%                                                                                    |
 | - `gitx`                         | 91.8%                                                                                    |
-| - `app`                          | 91.3%                                                                                    |
+| - `app`                          | 91.8%                                                                                    |
 | - `release` (executor)           | 91.1%                                                                                    |
-| - `config`                       | 90.9%                                                                                    |
 
 The per-package test inventory (what each package's suite actually asserts) is in
 [Architecture / Testing](./architecture.md#testing).

@@ -100,11 +100,18 @@ func (s *Scheduler[N]) Blocked() []N {
 
 // Drain consumes the scheduler with bounded parallelism: every node runs
 // exactly once in a goroutine of its own, edges respected, with at most
-// budget(class(n)) nodes of one class in flight at a time (a budget below 1
+// budget(class(n)) slots of one class occupied at a time (a budget below 1
 // is treated as 1). Classes exist because budgets can be independent — the
 // executor caps its build and publish stages separately — and each class
 // keeps its own ready queue, so a stalled class never blocks another class's
 // budget. Drain returns nil once every node has completed.
+//
+// weight is how many of its class's slots a node occupies, clamped to
+// [1, budget] so a node can always launch on an idle class — a package
+// weighted past the budget simply runs alone. It must be pure: it is read
+// again on completion to release the slots. A node that does not fit waits
+// at the head of its queue and nothing behind it overtakes; the head-of-line
+// discipline is what makes a heavy node's wait finite instead of starvable.
 //
 // Two things end it early, both only after every in-flight node has been
 // awaited, so no goroutine outlives the call. A cancelled ctx stops new
@@ -121,7 +128,7 @@ func (s *Scheduler[N]) Blocked() []N {
 // guarantees only the ordering the edges state, plus the happens-before
 // between a node's completion and its dependents' starts that the completion
 // channel provides.
-func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], class func(N) C, budget func(C) int, run func(N)) error {
+func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], class func(N) C, budget func(C) int, weight func(N) int, run func(N)) error {
 	ready := make(map[C][]N)
 	var classes []C // first-seen order, so launch scanning is deterministic
 	push := func(n N) {
@@ -134,6 +141,7 @@ func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], cla
 	for _, n := range s.Ready() {
 		push(n)
 	}
+	cost := func(n N, limit int) int { return min(max(1, weight(n)), limit) }
 
 	inFlight := make(map[C]int)
 	inFlightTotal := 0
@@ -144,10 +152,14 @@ func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], cla
 			for _, c := range classes {
 				queue := ready[c]
 				limit := max(1, budget(c))
-				for len(queue) > 0 && inFlight[c] < limit {
+				for len(queue) > 0 {
 					n := queue[len(queue)-1]
+					w := cost(n, limit)
+					if inFlight[c]+w > limit {
+						break // head of line waits; nothing overtakes it
+					}
 					queue = queue[:len(queue)-1]
-					inFlight[c]++
+					inFlight[c] += w
 					inFlightTotal++
 					go func(n N) {
 						run(n)
@@ -164,7 +176,8 @@ func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], cla
 			return fmt.Errorf("graph: %d node(s) can never become ready (dependency cycle)", len(s.Blocked()))
 		}
 		n := <-done
-		inFlight[class(n)]--
+		c := class(n)
+		inFlight[c] -= cost(n, max(1, budget(c)))
 		inFlightTotal--
 		finished++
 		for _, next := range s.Done(n) {

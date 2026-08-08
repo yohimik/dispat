@@ -9,7 +9,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
-	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
@@ -55,11 +54,11 @@ func (h *runHooks) exec(ctx context.Context, name string, refs []string, failFas
 }
 
 // finalizer bundles what the finalize phase needs from the surrounding
-// Release call — the resolved GitHub releaser (nil when disabled), the push
-// remote and the run-level hooks — so finalize does not take each of them as
-// a positional parameter.
+// Release call — the resolved GitHub dispatch (empty when every package is
+// disabled), the push remote and the run-level hooks — so finalize does not
+// take each of them as a positional parameter.
 type finalizer struct {
-	gh     *github.Releaser
+	gh     *ghDispatch
 	remote string
 	hooks  *runHooks
 	// skipHooks silences the bracket hooks: an interrupted run still records
@@ -152,17 +151,20 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		a.log.Info().Str("remote", fin.remote).Strs("tags", tags).Msg("pushed release commit and tags")
 		fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
 	}
-	if fin.gh != nil {
+	if fin.gh != nil && !fin.gh.empty() {
 		// The releases document the exact release commit and tag in their
 		// body, whether or not they were pushed; with push enabled the tag is
 		// additionally pinned to the commit via target_commitish (only then
-		// does the SHA exist on the remote).
+		// does the SHA exist on the remote). Every resolved releaser gets the
+		// stamp: the dispatch routes each package to one of them.
 		if sha, err := a.git.HeadSHA(ctx); err != nil {
 			a.log.Warn().Err(err).Msg("cannot resolve HEAD, github releases will omit the commit")
 		} else {
-			fin.gh.CommitSHA = sha
-			if a.cfg.Commit.PushEnabled() {
-				fin.gh.TargetCommitish = sha
+			for _, gh := range fin.gh.all {
+				gh.CommitSHA = sha
+				if a.cfg.Commit.PushEnabled() {
+					gh.TargetCommitish = sha
+				}
 			}
 		}
 		for _, rel := range rels {

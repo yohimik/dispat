@@ -55,7 +55,7 @@ func TestFixedChangeReleasesWholeSpace(t *testing.T) {
 	assert.True(t, b.NoChanges(), "the ride carries no content of its own")
 	assert.False(t, a.FixedRide, "the package with the change is an ordinary release")
 	assert.False(t, a.NoChanges())
-	assert.Equal(t, "fixed space versioning", b.Reason())
+	assert.Equal(t, "fixed group versioning", b.Reason())
 
 	found := false
 	for _, d := range p.Diagnostics {
@@ -205,6 +205,164 @@ func TestTwoFixedSpacesVersionSeparately(t *testing.T) {
 	assertVersion(t, v(1, 1, 0), p.Releases["l2"].Next)
 	assert.False(t, p.Releases["r1"].Releasing())
 	assert.False(t, p.Releases["r2"].Releasing())
+}
+
+func TestFixedGroupSpansSpaces(t *testing.T) {
+	// Two spaces joined to one declared group version as one: a change in
+	// either space moves every member of the group, across both spaces, while
+	// an independent bystander stays put.
+	left := &model.Space{Name: "left", Versioning: model.VersioningFixed, VersionGroup: "core"}
+	right := &model.Space{Name: "right", Versioning: model.VersioningFixed, VersionGroup: "core"}
+	solo := &model.Space{Name: "solo"}
+	pkgs := []*model.Package{
+		{Name: "l1", Dir: "/r/l/l1", Space: left},
+		{Name: "r1", Dir: "/r/r/r1", Space: right},
+		{Name: "c", Dir: "/r/s/c", Space: solo},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(l1): moves the whole group"},
+	).tag("l1", "1.0.0", "").tag("r1", "1.0.0", "")
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+
+	assertVersion(t, v(1, 1, 0), p.Releases["l1"].Next)
+	assertVersion(t, v(1, 1, 0), p.Releases["r1"].Next, "one version across both spaces")
+	assert.True(t, p.Releases["r1"].FixedRide)
+	assert.False(t, p.Releases["c"].Releasing())
+}
+
+func TestFixedGroupMixedModes(t *testing.T) {
+	// A group can mix assignment modes when a member's own configuration says
+	// so: the fixed member rides to the shared version, the fixedSparse member
+	// with no changes of its own stays at its previous version — the shared
+	// computation is one, the assignment is per member.
+	fixed := &model.Space{Name: "left", Versioning: model.VersioningFixed, VersionGroup: "core"}
+	sparse := &model.Space{Name: "right", Versioning: model.VersioningFixedSparse, VersionGroup: "core"}
+	pkgs := []*model.Package{
+		{Name: "a", Dir: "/r/l/a", Space: fixed},
+		{Name: "b", Dir: "/r/l/b", Space: fixed},
+		{Name: "s", Dir: "/r/r/s", Space: sparse},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a): only a changes"},
+	).tag("a", "1.0.0", "").tag("b", "1.0.0", "").tag("s", "1.0.0", "")
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+
+	assertVersion(t, v(1, 1, 0), p.Releases["a"].Next)
+	assertVersion(t, v(1, 1, 0), p.Releases["b"].Next, "the fixed sibling rides")
+	assert.True(t, p.Releases["b"].FixedRide)
+	assert.False(t, p.Releases["s"].Releasing(), "the sparse member stays behind")
+	assertVersion(t, v(1, 0, 0), p.Releases["s"].Next)
+}
+
+func TestFixedGroupMixedModeLaggards(t *testing.T) {
+	// The laggard alignment is per member too: with nothing pending, a fixed
+	// member below the group's published baseline catches up while a sparse
+	// member in the same group is left exactly where fixedSparse promises to
+	// leave it.
+	fixed := &model.Space{Name: "left", Versioning: model.VersioningFixed, VersionGroup: "core"}
+	sparse := &model.Space{Name: "right", Versioning: model.VersioningFixedSparse, VersionGroup: "core"}
+	pkgs := []*model.Package{
+		{Name: "a", Dir: "/r/l/a", Space: fixed},
+		{Name: "b", Dir: "/r/l/b", Space: fixed},
+		{Name: "s", Dir: "/r/r/s", Space: sparse},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a): released work"},
+	).tag("a", "0.1.0", "c1")
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+
+	assert.False(t, p.Releases["a"].Releasing(), "a already published")
+	require.True(t, p.Releases["b"].Releasing(), "the fixed laggard catches up")
+	assertVersion(t, v(0, 1, 0), p.Releases["b"].Next)
+	assert.False(t, p.Releases["s"].Releasing(), "the sparse member never aligns")
+}
+
+func TestFixedGroupNeverPublishedHasNothingToAlign(t *testing.T) {
+	// A group with no published baseline and nothing pending: there is no
+	// version to align laggards to, and nothing releases.
+	git := newFakeGit(
+		commit{sha: "c1", message: "docs: no package addressed"},
+	)
+	p := computeFixed(t, model.VersioningFixed, git)
+	assert.Empty(t, p.Releasing())
+}
+
+func TestFixedGroupHeldLaggardStaysHeld(t *testing.T) {
+	// The alignment catch-up must not override a hold: the held laggard
+	// stays behind even though the group's published baseline is ahead.
+	git := newFakeGit(
+		commit{sha: "c2", message: "release(b): keep b back\n\nRelease-As: none\n"},
+		commit{sha: "c1", message: "feat(a): released work"},
+	).tag("a", "0.1.0", "c1")
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	assert.False(t, p.Releases["a"].Releasing(), "a already published")
+	assert.True(t, p.Releases["b"].Held)
+	assert.False(t, p.Releases["b"].Releasing(), "a hold beats the alignment")
+}
+
+func TestFixedGroupRepositoryScopedPinErrorAbortsTheGroup(t *testing.T) {
+	// A group pin that violates a repository-scoped guard (E157: the major
+	// raised past the limit) leaves every member untouched — no correct plan
+	// exists for the group, so no partial version assignment may leak out.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(a): way too high\n\nRelease-As: 9.0.0\n"},
+	).tag("a", "1.0.0", "").tag("b", "1.0.0", "")
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	assert.True(t, p.HasErrors())
+	assert.False(t, p.Releases["a"].Releasing())
+	assert.False(t, p.Releases["b"].Releasing())
+	assertVersion(t, v(1, 0, 0), p.Releases["a"].Next, "reporting stays at the baseline")
+}
+
+func TestFixedGroupDiagnosticsNameGroup(t *testing.T) {
+	// Competing pins inside one group warn as W211 against the group's
+	// synthetic package name, so the diagnostic names what actually holds the
+	// single version.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(a): pin low\n\nRelease-As: 1.5.0\n"},
+		commit{sha: "c2", message: "release(b): pin high\n\nRelease-As: 2.0.0\n"},
+	).tag("a", "1.0.0", "").tag("b", "1.0.0", "")
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	found := false
+	for _, d := range p.Diagnostics {
+		if d.Code == CodeFixedPinConflict {
+			found = true
+			assert.Equal(t, "group:shared", d.Pkg, "the conflict is the group's, not a member's")
+		}
+	}
+	require.True(t, found, "competing pins must warn: %v", p.Diagnostics)
+	assertVersion(t, v(2, 0, 0), p.Releases["a"].Next, "the newest pin wins")
+	assertVersion(t, v(2, 0, 0), p.Releases["b"].Next)
+}
+
+func TestPackageOptsOutOfFixedSpace(t *testing.T) {
+	// A package override resolves to a derived Space with independent
+	// versioning under the same space name — discovery's clone — and the
+	// planner keeps it out of the group: the space's other members still
+	// version together without it.
+	shared := &model.Space{Name: "shared", Versioning: model.VersioningFixed}
+	optOut := &model.Space{Name: "shared", Versioning: model.VersioningIndependent}
+	pkgs := []*model.Package{
+		{Name: "a", Dir: "/r/pkgs/a", Space: shared},
+		{Name: "b", Dir: "/r/pkgs/b", Space: shared},
+		{Name: "o", Dir: "/r/pkgs/o", Space: optOut},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a): moves the group"},
+	).tag("a", "1.0.0", "").tag("b", "1.0.0", "").tag("o", "5.0.0", "")
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+
+	assertVersion(t, v(1, 1, 0), p.Releases["a"].Next)
+	assertVersion(t, v(1, 1, 0), p.Releases["b"].Next)
+	assert.False(t, p.Releases["o"].Releasing(), "the opted-out package is independent")
+	assertVersion(t, v(5, 0, 0), p.Releases["o"].Next)
 }
 
 func TestFixedRideFromPropagatedBump(t *testing.T) {

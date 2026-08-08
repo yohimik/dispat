@@ -40,6 +40,8 @@ type (
 	CommitConfig            = public.CommitConfig
 	SpaceConfig             = public.SpaceConfig
 	SpaceFlowConfig         = public.SpaceFlowConfig
+	PackageConfig           = public.PackageConfig
+	VersionGroupConfig      = public.VersionGroupConfig
 	AutoVersionConfig       = public.AutoVersionConfig
 	DependencyConfig        = public.DependencyConfig
 	ParserConfig            = public.ParserConfig
@@ -139,36 +141,73 @@ var DefaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dis
 // DefaultFileNames that exists in root or, failing that, in any parent
 // directory up to the filesystem root: the ascent is what lets the CLI run
 // from inside a package folder, with the config's own directory becoming the
-// effective monorepo root. When nothing is found, the error says so and
-// names every candidate tried.
+// effective monorepo root.
+//
+// A package folder may carry a dispat config file of its own — its override
+// layer — so a found file only ends the ascent when it declares spaces (or
+// cannot be read at all, because a broken root config must fail in Load, not
+// be silently skipped). When no file on the way up declares spaces, the
+// first file found is returned anyway: the "at least one space" error it
+// produces names the real mistake. When nothing is found, the error says so
+// and names every candidate tried.
 func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
 	if explicit {
 		return filepath.Join(root, name), root, nil
 	}
-	for _, cand := range DefaultFileNames {
-		p := filepath.Join(root, cand)
-		if _, err := os.Stat(p); err == nil {
-			return p, root, nil
+	var fallback, fallbackRoot string
+	// A directory contributes its first existing candidate name alone — the
+	// name-order precedence within one folder predates the ascent and stays.
+	try := func(dir string) (string, bool) {
+		for _, cand := range DefaultFileNames {
+			p := filepath.Join(dir, cand)
+			if _, err := os.Stat(p); err != nil {
+				continue
+			}
+			if isRootConfig(p) {
+				return p, true
+			}
+			if fallback == "" {
+				fallback, fallbackRoot = p, dir
+			}
+			break
 		}
+		return "", false
+	}
+	if p, ok := try(root); ok {
+		return p, root, nil
 	}
 	// Not in root itself: ascend. Absolute paths make the parent walk
 	// well-defined wherever the relative root pointed.
 	if abs, absErr := filepath.Abs(root); absErr == nil {
 		for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
-			for _, cand := range DefaultFileNames {
-				p := filepath.Join(dir, cand)
-				if _, err := os.Stat(p); err == nil {
-					return p, dir, nil
-				}
+			if p, ok := try(dir); ok {
+				return p, dir, nil
 			}
 			if dir == filepath.Dir(dir) { // filesystem root
 				break
 			}
 		}
 	}
+	if fallback != "" {
+		return fallback, fallbackRoot, nil
+	}
 	return "", "", fmt.Errorf(
 		"config: no dispat config file found in %s or any parent directory (tried %s); run `dispat init` to create one",
 		root, strings.Join(DefaultFileNames, ", "))
+}
+
+// isRootConfig reports whether the file is a monorepo root configuration —
+// it declares spaces — rather than a package's in-folder override file. A
+// file viper cannot read counts as a root config: Load is where a broken
+// config fails loudly, and skipping it to use a parent's file would hide the
+// breakage.
+func isRootConfig(path string) bool {
+	v := viper.New()
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		return true
+	}
+	return v.IsSet("spaces")
 }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
@@ -340,6 +379,9 @@ func validate(c *File) error {
 	if len(c.Spaces) == 0 {
 		return errors.New("at least one space is required")
 	}
+	if err := validateVersionGroups(c); err != nil {
+		return err
+	}
 	if err := validateConcurrency(c); err != nil {
 		return err
 	}
@@ -368,6 +410,17 @@ func validate(c *File) error {
 			return err
 		}
 		c.Spaces[name] = validated
+	}
+	// versionGroup references can only be checked once every space's
+	// versioning is normalized: a reference may name another space's
+	// implicit group.
+	for name, s := range c.Spaces {
+		if s.VersionGroup == "" {
+			continue
+		}
+		if _, _, err := resolveVersionGroup(c, s.VersionGroup); err != nil {
+			return fmt.Errorf("space %q: %w", name, err)
+		}
 	}
 	if err := checkScriptRefs(c, runHookRefs(c), ""); err != nil {
 		return err
@@ -451,44 +504,58 @@ func validateLogging(c *File) error {
 // runScripts, script references — and returns it with its versioning value
 // normalized.
 func validateSpace(c *File, name string, s SpaceConfig) (SpaceConfig, error) {
+	return validateSpaceAs(c, fmt.Sprintf("space %q", name), s)
+}
+
+// validateSpaceAs is validateSpace under an explicit error label, so the
+// same checks validate a package's merged override config ("space "libs":
+// package "core"") — an override is space-shaped and held to space rules.
+func validateSpaceAs(c *File, label string, s SpaceConfig) (SpaceConfig, error) {
 	if s.Path == "" {
-		return s, fmt.Errorf("space %q: path is required", name)
+		return s, fmt.Errorf("%s: path is required", label)
 	}
 	if s.TagFormat != "" {
 		if err := gitx.TagFormat(s.TagFormat).Validate(); err != nil {
-			return s, fmt.Errorf("space %q: %w", name, err)
+			return s, fmt.Errorf("%s: %w", label, err)
 		}
+	}
+	// Checked before normalization, which erases the difference between an
+	// absent versioning and an explicit "independent" — only the former may
+	// accompany a group reference.
+	if s.VersionGroup != "" && s.Versioning != "" {
+		return s, fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
 	}
 	versioning, ok := normalizeVersioning(s.Versioning)
 	if !ok {
-		return s, fmt.Errorf("space %q: unknown versioning %q (want %q, %q or %q)",
-			name, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
+		return s, fmt.Errorf("%s: unknown versioning %q (want %q, %q or %q)",
+			label, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
 	}
 	s.Versioning = versioning
 	for scriptName, cmd := range s.RunScripts {
 		if scriptName == "" {
-			return s, fmt.Errorf("space %q: runScripts contains an empty script name", name)
+			return s, fmt.Errorf("%s: runScripts contains an empty script name", label)
 		}
 		if strings.TrimSpace(cmd) == "" {
-			return s, fmt.Errorf("space %q: runScripts[%q] is empty", name, scriptName)
+			return s, fmt.Errorf("%s: runScripts[%q] is empty", label, scriptName)
 		}
 	}
-	if err := checkScriptRefs(c, scriptRefs(&s), fmt.Sprintf("space %q: ", name)); err != nil {
+	if err := checkScriptRefs(c, scriptRefs(&s), label+": "); err != nil {
 		return s, err
 	}
-	if err := validateAutoVersion(c, name, s.AutoVersion); err != nil {
+	if err := validateAutoVersion(c, label, s.AutoVersion); err != nil {
 		return s, err
 	}
 	return s, nil
 }
 
-// validateAutoVersion checks a space's autoVersion object. The `only` names
-// need the discovered packages and are checked in Discover instead.
-func validateAutoVersion(c *File, space string, av *public.AutoVersionConfig) error {
+// validateAutoVersion checks an autoVersion object under the owner's error
+// label. The `only` names need the discovered packages and are checked in
+// Discover instead.
+func validateAutoVersion(c *File, label string, av *public.AutoVersionConfig) error {
 	if av == nil {
 		return nil
 	}
-	prefix := fmt.Sprintf("space %q: autoVersion: ", space)
+	prefix := label + ": autoVersion: "
 	switch av.Manifests {
 	case "", "root", "all":
 	default:
@@ -512,7 +579,7 @@ func validateAutoVersion(c *File, space string, av *public.AutoVersionConfig) er
 	if av.SyncLockConcurrency < 0 {
 		return fmt.Errorf("%ssyncLockConcurrency must be >= 0, got %d", prefix, av.SyncLockConcurrency)
 	}
-	return checkScriptRefs(c, map[string][]string{"autoVersion.syncLock": av.SyncLock}, fmt.Sprintf("space %q: ", space))
+	return checkScriptRefs(c, map[string][]string{"autoVersion.syncLock": av.SyncLock}, label+": ")
 }
 
 // resolveAutoVersion maps a validated autoVersion object onto the domain
@@ -603,6 +670,12 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 // packages that exist on disk, whatever the `dependencies` key says. It exists
 // for `dispat compute`, whose whole job includes suggesting the removal of
 // edges naming packages that no longer exist — edges Discover must refuse.
+//
+// Discovery is also where a package's effective configuration settles: a
+// folder excluded by the space's .dispatignore is not a package at all, and
+// a package with overrides — a `packages` entry, an in-folder config file,
+// or both — gets a derived Space of its own with the merged configuration,
+// validated here because the override layers need the folders to exist.
 func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 	spaceNames := make([]string, 0, len(c.Spaces))
 	for n := range c.Spaces {
@@ -610,61 +683,127 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 	}
 	sort.Strings(spaceNames) // deterministic discovery order
 
+	baseChangelog := changelogSpec(c.Changelog)
+	baseGitHub := githubSpec(c.GitHub)
+	type onlyCheck struct {
+		label string
+		av    *AutoVersionConfig
+	}
+	var onlyChecks []onlyCheck
+
 	var pkgs []*model.Package
 	owner := make(map[string]string) // package name -> space name
 	for _, sn := range spaceNames {
 		sc := c.Spaces[sn]
-		tagFormat := sc.TagFormat
-		if tagFormat == "" {
-			tagFormat = c.TagFormat
-		}
-		space := &model.Space{
-			Name:                 sn,
-			Path:                 sc.Path,
-			BuildWaitsPublish:    sc.IsBuildWaitingPublish,
-			RevertOnFail:         sc.RevertOnFail,
-			Versioning:           model.Versioning(sc.Versioning),
-			RunScripts:           sc.RunScripts,
-			BuildScript:          c.Commands(sc.Flow.Build),
-			PublishScript:        c.Commands(sc.Flow.Publish),
-			VersionScript:        c.Commands(sc.Flow.Version),
-			LoginScript:          c.Commands(sc.Flow.Login),
-			AnnounceScript:       c.Commands(sc.Flow.Announce),
-			BeforeAllScript:      c.Commands(sc.Flow.BeforeAll),
-			BeforeVersionScript:  c.Commands(sc.Flow.BeforeVersion),
-			PostVersionScript:    c.Commands(sc.Flow.PostVersion),
-			BeforeBuildScript:    c.Commands(sc.Flow.BeforeBuild),
-			PostBuildScript:      c.Commands(sc.Flow.PostBuild),
-			BeforePublishScript:  c.Commands(sc.Flow.BeforePublish),
-			PostPublishScript:    c.Commands(sc.Flow.PostPublish),
-			BeforeAnnounceScript: c.Commands(sc.Flow.BeforeAnnounce),
-			PostAnnounceScript:   c.Commands(sc.Flow.PostAnnounce),
-			OnFailScript:         c.Commands(sc.Flow.OnFail),
-			OnSkipScript:         c.Commands(sc.Flow.OnSkip),
-			TagFormat:            tagFormat,
-			AutoVersion:          resolveAutoVersion(c, sc.AutoVersion),
+		base, err := buildSpace(c, fmt.Sprintf("space %q", sn), sn, sc)
+		if err != nil {
+			return nil, fmt.Errorf("config: %w", err)
 		}
 		dir := filepath.Join(root, sc.Path)
+		ignore, err := loadIgnore(dir)
+		if err != nil {
+			return nil, fmt.Errorf("config: space %q: %s: %w", sn, DispatignoreName, err)
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
+		consumed := make(map[string][]string) // packages key -> matching folders
+		var ignoredDirs []string
 		for _, e := range entries {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
 			name := e.Name()
+			if ignoredName(ignore, name) {
+				ignoredDirs = append(ignoredDirs, name)
+				continue
+			}
 			if prev, dup := owner[name]; dup {
 				return nil, fmt.Errorf(
 					"config: package %q exists in both space %q and space %q; package names must be unique",
 					name, prev, sn)
 			}
 			owner[name] = sn
-			pkgs = append(pkgs, &model.Package{
-				Name:  name,
-				Dir:   filepath.Join(dir, name),
-				Space: space,
-			})
+			pkg := &model.Package{
+				Name:          name,
+				Dir:           filepath.Join(dir, name),
+				Space:         base,
+				BuildWeight:   1,
+				PublishWeight: 1,
+				Changelog:     baseChangelog,
+				GitHub:        baseGitHub,
+			}
+
+			entryPO, hasEntry := sc.Package(name)
+			if hasEntry {
+				key := strings.ToLower(name)
+				consumed[key] = append(consumed[key], name)
+			}
+			filePO, fileSrc, err := loadPackageFile(pkg.Dir)
+			if err != nil {
+				return nil, fmt.Errorf("config: space %q: package %q: %w", sn, name, err)
+			}
+			if hasEntry || fileSrc != "" {
+				label := fmt.Sprintf("space %q: package %q", sn, name)
+				merged := sc
+				ex := &packageExtras{}
+				if hasEntry {
+					if err := validatePackageLayer(label, entryPO); err != nil {
+						return nil, fmt.Errorf("config: %w", err)
+					}
+					merged = mergePackageOverride(merged, entryPO)
+					ex.apply(c, entryPO)
+				}
+				if fileSrc != "" {
+					if err := validatePackageLayer(fmt.Sprintf("%s (%s)", label, fileSrc), filePO); err != nil {
+						return nil, fmt.Errorf("config: %w", err)
+					}
+					merged = mergePackageOverride(merged, filePO)
+					ex.apply(c, filePO)
+				}
+				merged, err = validateSpaceAs(c, label, merged)
+				if err != nil {
+					return nil, fmt.Errorf("config: %w", err)
+				}
+				if pkg.Space, err = buildSpace(c, label, sn, merged); err != nil {
+					return nil, fmt.Errorf("config: %w", err)
+				}
+				if (hasEntry && entryPO.AutoVersion != nil) || filePO.AutoVersion != nil {
+					onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
+				}
+				pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
+				if ex.changelog != nil {
+					pkg.Changelog = changelogSpec(ex.changelog)
+				}
+				if ex.github != nil {
+					pkg.GitHub = githubSpec(ex.github)
+				}
+			}
+			pkgs = append(pkgs, pkg)
+		}
+		// Every `packages` key must have matched exactly one folder: an
+		// unmatched key is the same class of typo as an unknown dependency
+		// endpoint, and a key matching two folders (names differing only by
+		// case) has no single package to configure.
+		for key := range sc.Packages {
+			matches := consumed[key]
+			if len(matches) > 1 {
+				sort.Strings(matches)
+				return nil, fmt.Errorf(
+					"config: space %q: packages[%q] matches folders %s ambiguously (keys are matched case-insensitively)",
+					sn, key, strings.Join(matches, ", "))
+			}
+			if len(matches) == 0 {
+				for _, ig := range ignoredDirs {
+					if strings.EqualFold(ig, key) {
+						return nil, fmt.Errorf(
+							"config: space %q: packages[%q]: folder %q is excluded by %s",
+							sn, key, ig, DispatignoreName)
+					}
+				}
+				return nil, fmt.Errorf("config: space %q: packages[%q] matches no package folder", sn, key)
+			}
 		}
 	}
 
@@ -682,7 +821,61 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 			}
 		}
 	}
+	for _, chk := range onlyChecks {
+		if !chk.av.IsEnabled() {
+			continue
+		}
+		for _, name := range chk.av.Only {
+			if _, ok := owner[name]; !ok {
+				return nil, fmt.Errorf("config: %s: autoVersion.only: unknown package %q", chk.label, name)
+			}
+		}
+	}
 	return pkgs, nil
+}
+
+// buildSpace resolves one validated space-shaped configuration onto the
+// domain Space: script references become shell commands, the tag format
+// falls back to the repository's, and the versioning mode and group key come
+// from the config's own versioning or the group it references. label locates
+// the owner in errors — the space itself, or the package whose merged
+// override this is.
+func buildSpace(c *File, label, spaceName string, sc SpaceConfig) (*model.Space, error) {
+	mode, group, err := resolveSpaceVersioning(c, spaceName, sc)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
+	tagFormat := sc.TagFormat
+	if tagFormat == "" {
+		tagFormat = c.TagFormat
+	}
+	return &model.Space{
+		Name:                 spaceName,
+		Path:                 sc.Path,
+		BuildWaitsPublish:    sc.IsBuildWaitingPublish,
+		RevertOnFail:         sc.RevertOnFail,
+		Versioning:           model.Versioning(mode),
+		VersionGroup:         group,
+		RunScripts:           sc.RunScripts,
+		BuildScript:          c.Commands(sc.Flow.Build),
+		PublishScript:        c.Commands(sc.Flow.Publish),
+		VersionScript:        c.Commands(sc.Flow.Version),
+		LoginScript:          c.Commands(sc.Flow.Login),
+		AnnounceScript:       c.Commands(sc.Flow.Announce),
+		BeforeAllScript:      c.Commands(sc.Flow.BeforeAll),
+		BeforeVersionScript:  c.Commands(sc.Flow.BeforeVersion),
+		PostVersionScript:    c.Commands(sc.Flow.PostVersion),
+		BeforeBuildScript:    c.Commands(sc.Flow.BeforeBuild),
+		PostBuildScript:      c.Commands(sc.Flow.PostBuild),
+		BeforePublishScript:  c.Commands(sc.Flow.BeforePublish),
+		PostPublishScript:    c.Commands(sc.Flow.PostPublish),
+		BeforeAnnounceScript: c.Commands(sc.Flow.BeforeAnnounce),
+		PostAnnounceScript:   c.Commands(sc.Flow.PostAnnounce),
+		OnFailScript:         c.Commands(sc.Flow.OnFail),
+		OnSkipScript:         c.Commands(sc.Flow.OnSkip),
+		TagFormat:            tagFormat,
+		AutoVersion:          resolveAutoVersion(c, sc.AutoVersion),
+	}, nil
 }
 
 // DepKind maps a dependency edge's configured kind onto the model's. Empty

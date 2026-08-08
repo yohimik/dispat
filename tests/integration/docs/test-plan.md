@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against eleven goals, one test file each:
+The suite was designed against twelve goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -48,6 +48,13 @@ The suite was designed against eleven goals, one test file each:
     range reconciliation under the match policy, own-version writes, the serialised `syncLock` slot, the
     W192/W197/W203/W221 diagnostics as JSON events across three runs, and `commit.include` staging the regenerated
     root lock file into the release commit.
+12. **Per-package overrides, versioning groups and `.dispatignore`** (`overrides_test.go`): the layered configuration
+    through the binary: a `packages` entry replacing one flow entry while the sibling keeps the space's, the in-folder
+    config file beating the entry (the tag proves it), `.dispatignore` exclusions (never released, unknown scope in
+    commits), a declared `versionGroups` group spanning two spaces to one version (with the W210 ride) and its
+    convergence, per-package changelog/GitHub record policies, the concurrency weight serialising a heavyweight build
+    on the tsmark timeline, the config ascent walking past an in-folder file for the run shorthand, and run scripts
+    defined only in an override (both layers).
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -292,6 +299,19 @@ away instead of one binary invocation.)
 | `TestAutoVersionReleaseRewritesManifests`   | A `workspace:*` range is reconciled to the provider's released version, a hand-pin outside the match globs survives, both own versions advance, and the syncLock snapshot proves it ran after the rewrite.                                                 |
 | `TestAutoVersionSyncLockSerialised`         | Several packages' syncLock scripts never overlap under the default budget of 1 while builds keep the build budget: the corrupted-shared-lockfile guard over the real scheduler.                                                                           |
 | `TestAutoVersionDiagnosticsAndCommitInclude` | Three runs: W221 for a rewritten edge with no configured counterpart (and `commit.include` staging the regenerated root package-lock.json into the release commit); W192+W197 after the manifest was hand-edited backwards; W203 when the provider goes to beta under a stable consumer. All asserted as JSON events per package. |
+
+### Goal 12: per-package overrides, versioning groups and `.dispatignore` (`overrides_test.go`)
+
+| Test                                          | Claim proven                                                                                                                                                                                                                                              |
+|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestOverridesFlowBuildPerPackage`            | A `packages` entry replaces one flow entry for one package alone: the override's build runs for it, the space's for the sibling, the un-named stages inherit (both publish and tag), and a second run converges.                                          |
+| `TestOverridesInFolderFileWins`               | The package folder's own dispat.json is the most local layer — its `tagFormat` beats the `packages` entry's, proven by the tag the release actually creates, while the sibling keeps the repository default.                                              |
+| `TestOverridesDispatignore`                   | A folder listed in `.dispatignore` is not a package: never released, and a commit scoping it draws the unknown-scope diagnostic (E130) like any non-package name.                                                                                         |
+| `TestOverridesVersionGroupSpansSpaces`        | A declared `versionGroups` group joined by two spaces versions as one: a change in one space rides the other space's package to the same version (W210 on the rider), and aligned members converge on the next run.                                       |
+| `TestOverridesPerPackageRecords`              | Record policies resolve per package: one package writes its changelog under an overridden file name, its sibling disables both records, and the GitHub fake receives exactly the enabled package's release.                                               |
+| `TestOverridesPackageConcurrencyWeight`       | A package whose `concurrency` equals the build budget occupies it whole: its build overlaps no other build on the tsmark timeline while the ordinary packages stay free to overlap each other.                                                            |
+| `TestOverridesRunShorthandFromPackageFolder`  | The config ascent walks past the package's own (spaces-less) override file to the monorepo root, so the run shorthand keeps working from inside a package folder that carries one.                                                                        |
+| `TestOverridesRunScriptOnlyInPackage`         | A run script defined only in a package's in-folder file (found through discovery) or only in a `packages` entry (found in the loaded config) runs in that package alone; a name defined nowhere stays a hard error.                                       |
 
 ## Regression fences
 

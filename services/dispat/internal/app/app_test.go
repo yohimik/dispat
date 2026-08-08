@@ -13,7 +13,9 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
 // The end-to-end behaviour of App — status, release, hooks, finalize, exit
@@ -78,28 +80,77 @@ func TestRenderCommitMessage(t *testing.T) {
 	assert.Equal(t, "no placeholders", renderCommitMessage("no placeholders", pkgs, tags))
 }
 
+// TestGithubDispatchDistinctTargets: one releaser per distinct resolved
+// target — packages sharing a target share the releaser, a disabled package
+// has none, and an unresolvable target disables its packages without failing
+// the others.
+func TestGithubDispatchDistinctTargets(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "tok")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	pkg := func(name string, spec model.GitHubSpec) *plan.Release {
+		return &plan.Release{Pkg: &model.Package{Name: name, GitHub: spec}}
+	}
+	pl := &plan.Plan{
+		Order: []string{"a", "b", "c", "d", "e"},
+		Releases: map[string]*plan.Release{
+			"a": pkg("a", model.GitHubSpec{Enabled: true, Owner: "acme", Repo: "mono"}),
+			"b": pkg("b", model.GitHubSpec{Enabled: true, Owner: "acme", Repo: "mono"}),
+			"c": pkg("c", model.GitHubSpec{Enabled: true, Owner: "acme", Repo: "other"}),
+			"d": pkg("d", model.GitHubSpec{Enabled: false}),
+			"e": pkg("e", model.GitHubSpec{Enabled: true}), // no repository anywhere: unresolvable
+		},
+	}
+	a := &App{log: zerolog.Nop()}
+	d := a.githubDispatch(pl)
+
+	assert.Len(t, d.all, 2, "two distinct targets, two releasers")
+	assert.False(t, d.empty())
+	assert.Same(t, d.byPkg["a"], d.byPkg["b"], "one target, one releaser")
+	assert.NotSame(t, d.byPkg["a"], d.byPkg["c"])
+	assert.Equal(t, "other", d.byPkg["c"].Repo)
+	assert.Nil(t, d.byPkg["d"], "disabled: no releaser")
+	assert.Nil(t, d.byPkg["e"], "unresolvable: disabled with a warning, others unaffected")
+
+	// Record on a package without a releaser is a silent no-op, so the
+	// recorder chain never fails on a deliberately disabled package.
+	require.NoError(t, d.Record(context.Background(), pl.Releases["d"]))
+}
+
+// TestRecordersAssembly: the changelog dispatcher is always present (each
+// package's policy decides for itself); the GitHub dispatch joins outside
+// release-commit mode and only when something resolved.
+func TestRecordersAssembly(t *testing.T) {
+	a := &App{log: zerolog.Nop()}
+	empty := &ghDispatch{log: zerolog.Nop()}
+	assert.Len(t, a.recorders(empty, false), 1, "no resolved target, changelog alone")
+
+	one := &ghDispatch{all: []*github.Releaser{{}}, log: zerolog.Nop()}
+	assert.Len(t, a.recorders(one, false), 2)
+	assert.Len(t, a.recorders(one, true), 1, "commit mode: github moves to finalize")
+}
+
 func TestGithubReleaserResolution(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
 	t.Setenv("GITHUB_TOKEN", "envtoken")
 	t.Setenv("CUSTOM_TOKEN", "customtoken")
 
-	gh, err := githubReleaser(&config.GitHubConfig{}, zerolog.Nop())
+	gh, err := githubReleaser(model.GitHubSpec{}, zerolog.Nop())
 	require.NoError(t, err)
 	assert.Equal(t, "envowner", gh.Owner)
 	assert.Equal(t, "envrepo", gh.Repo)
 	assert.Equal(t, "envtoken", gh.Token)
 
-	gh, err = githubReleaser(&config.GitHubConfig{Owner: "acme", Repo: "mono", TokenEnv: "CUSTOM_TOKEN"}, zerolog.Nop())
+	gh, err = githubReleaser(model.GitHubSpec{Owner: "acme", Repo: "mono", TokenEnv: "CUSTOM_TOKEN"}, zerolog.Nop())
 	require.NoError(t, err)
 	assert.Equal(t, "acme", gh.Owner)
 	assert.Equal(t, "mono", gh.Repo)
 	assert.Equal(t, "customtoken", gh.Token)
 
 	t.Setenv("GITHUB_REPOSITORY", "")
-	_, err = githubReleaser(&config.GitHubConfig{}, zerolog.Nop())
+	_, err = githubReleaser(model.GitHubSpec{}, zerolog.Nop())
 	assert.ErrorContains(t, err, "no repository")
 
 	t.Setenv("GITHUB_TOKEN", "")
-	_, err = githubReleaser(&config.GitHubConfig{Owner: "acme", Repo: "mono"}, zerolog.Nop())
+	_, err = githubReleaser(model.GitHubSpec{Owner: "acme", Repo: "mono"}, zerolog.Nop())
 	assert.ErrorContains(t, err, "GITHUB_TOKEN")
 }

@@ -12,7 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
@@ -41,6 +44,38 @@ func defaultStr(s *string, def string) {
 	}
 }
 
+// SpecFormat maps a package's resolved record format onto the renderer's.
+func SpecFormat(f model.RecordFormat) Format {
+	return Format{
+		DateFormat:        f.DateFormat,
+		BreakingTitle:     f.BreakingTitle,
+		FeaturesTitle:     f.FeaturesTitle,
+		FixesTitle:        f.FixesTitle,
+		DependenciesTitle: f.DependenciesTitle,
+	}
+}
+
+// Dispatcher routes each release through a FileWriter built from the
+// package's resolved changelog policy — per-package configuration decides
+// the file, the title, the format, and whether a changelog is written at
+// all. It implements release.ReleaseRecorder.
+type Dispatcher struct {
+	Now func() time.Time // injectable clock, passed to the writers
+	Log zerolog.Logger   // carries the per-package skip notices
+}
+
+// Record writes the release entry through the package's policy; a package
+// whose changelog is disabled records nothing.
+func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
+	spec := rel.Pkg.Changelog
+	if !spec.Enabled {
+		d.Log.Debug().Str("package", rel.Pkg.Name).Msg("changelog file disabled by config")
+		return nil
+	}
+	w := &FileWriter{File: spec.File, Title: spec.Title, Format: SpecFormat(spec.Format), Now: d.Now}
+	return w.Record(ctx, rel)
+}
+
 // RenderSections renders the grouped commit sections of a release (breaking
 // changes, features, fixes, dependency updates) without any entry header —
 // suitable as the body of a GitHub release.
@@ -50,7 +85,7 @@ func RenderSections(rel *plan.Release, f Format) string {
 	// the version moved and nothing else did, in the changelog and in the
 	// GitHub release alike.
 	if rel.NoChanges() {
-		return "No changes — version bump to keep the space's fixed versioning.\n"
+		return "No changes — version bump to keep the versioning group on one version.\n"
 	}
 	var parts []string
 	// NotesUnits, not Units: a prerelease's entry contains only its own

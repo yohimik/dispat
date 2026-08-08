@@ -1,7 +1,9 @@
 # Release records
 
 What a successful release leaves behind besides the tag: the per-package changelog file, the GitHub release, and the
-optional end-of-run release commit.
+optional end-of-run release commit. `changelog` and `github` are top-level policies a single package may
+[override field by field](./spaces.md#per-package-overrides) — disable one record for one package, or point one
+package's releases at another repository.
 
 ## Entry format options (shared by `changelog` and `github`)
 

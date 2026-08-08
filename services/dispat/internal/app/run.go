@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -84,9 +85,31 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 			defined = true
 			break
 		}
+		for _, po := range sc.Packages {
+			if _, ok := po.RunScripts[strings.ToLower(name)]; ok {
+				defined = true
+				break
+			}
+		}
+		if defined {
+			break
+		}
 	}
 	if !defined {
-		msg := fmt.Sprintf("no space defines run script %q", name)
+		// A script defined only in a package folder's own config file is not
+		// in the loaded config at all; discovery reads those files, so the
+		// typo guard consults it before rejecting.
+		if pkgs, err := config.DiscoverPackages(a.cfg, a.root); err == nil {
+			for _, p := range pkgs {
+				if _, ok := p.Space.RunScripts[strings.ToLower(name)]; ok {
+					defined = true
+					break
+				}
+			}
+		}
+	}
+	if !defined {
+		msg := fmt.Sprintf("no space or package defines run script %q", name)
 		if note, ok := lookupNote(name); ok {
 			msg = note
 		}
@@ -156,10 +179,12 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		name:   name, stage: "run:" + name, onError: onError,
 		runner: &script.ShellRunner{Shell: a.cfg.Shell},
 	}
-	// One class, one budget: the run command reuses the executor's pump.
+	// One class, one budget: the run command reuses the executor's pump,
+	// build budget and build weights included.
 	drainErr := graph.Drain(ctx, sched,
 		func(string) struct{} { return struct{}{} },
 		func(struct{}) int { return a.cfg.BuildConcurrency },
+		func(pkg string) int { return pl.Releases[pkg].Pkg.BuildWeight },
 		func(pkg string) { run.execute(ctx, pkg) })
 
 	ran, failed, skipped := 0, 0, 0

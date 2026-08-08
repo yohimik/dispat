@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // scopeResult is one resolved scope-set (§6.1) together with the terms that
@@ -183,39 +185,12 @@ func underDir(file, dir string) bool {
 	return strings.HasPrefix(file, strings.TrimSuffix(clean, "/")+"/")
 }
 
-// globMatch reports whether s matches a scope term containing "*".
-//
-// "*" matches any run of characters, "/" included, because package names are
-// frequently scoped ("@acme/ui") and "@acme/*" must reach them. The matcher is
-// an iterative two-pointer walk with a single backtrack point: no regular
-// expression, no recursion, and linear on every input a scope term can be.
 // GlobMatch reports whether s matches pattern, where "*" matches any run of
 // bytes, path separators included. Exported so the executor's autoVersion
 // range matcher and scope resolution agree on what a glob means: a version
 // range is not a filesystem path, and filepath.Match's separator rules would
-// make `*` quietly miss `file:../core`.
-func GlobMatch(pattern, s string) bool { return globMatch(pattern, s) }
+// make `*` quietly miss `file:../core`. The matcher itself lives in globx,
+// where .dispatignore patterns share it.
+func GlobMatch(pattern, s string) bool { return globx.Match(pattern, s) }
 
-func globMatch(pattern, s string) bool {
-	star, mark := -1, 0
-	i, j := 0, 0
-	for i < len(s) {
-		switch {
-		case j < len(pattern) && pattern[j] == s[i]:
-			i++
-			j++
-		case j < len(pattern) && pattern[j] == '*':
-			star, mark = j, i
-			j++
-		case star >= 0:
-			mark++
-			i, j = mark, star+1
-		default:
-			return false
-		}
-	}
-	for j < len(pattern) && pattern[j] == '*' {
-		j++
-	}
-	return j == len(pattern)
-}
+func globMatch(pattern, s string) bool { return globx.Match(pattern, s) }

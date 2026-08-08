@@ -5,16 +5,19 @@ One file at the monorepo root describes everything dispat does; `dispat init` wr
 
 Loaded with viper: the format is inferred from the file extension, so JSON, YAML or TOML all work. With no `--config`
 flag the file is **discovered**: the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in
-the root is used (the names [`dispat init`](../cli.md) writes under its formats), and when none exists the run fails
-with an error naming every candidate tried. An explicitly passed `--config` is used as-is, with no fallback, so a typo
-there fails loudly instead of silently loading a different file. Unknown keys are rejected (typo protection). Viper
-matches keys case-insensitively and lowercases map keys, so script and space names are effectively case-insensitive.
+the root is used (the names [`dispat init`](../cli.md) writes under its formats), ascending parent directories when the
+root has none — a found file only ends the ascent when it declares `spaces`, because a package folder's own
+[in-folder config file](./spaces.md#in-folder-configuration-files) is an override, not a root. When none exists
+anywhere, the run fails with an error naming every candidate tried. An explicitly passed `--config` is used as-is, with
+no fallback, so a typo there fails loudly instead of silently loading a different file. Unknown keys are rejected (typo
+protection). Viper matches keys case-insensitively and lowercases map keys, so script and space names are effectively
+case-insensitive.
 
 This page covers the top level; the larger objects have their own pages:
 
 | Page                                  | Covers                                                                                         |
 |---------------------------------------|------------------------------------------------------------------------------------------------|
-| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, `versioning`, `runScripts`. |
+| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, `versioning` and versioning groups, `runScripts`, per-package overrides, in-folder config files, `.dispatignore`. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                       |
 | [Release records](./records.md)       | `changelog`, `github`, `commit`, the shared entry format options.                              |
 | [Commit parsing options](./parser.md) | `commitErrors`, `nonPackageScopes`, `parser`.                                                  |
@@ -29,11 +32,12 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 |--------------------|--------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------|
 | `scripts`          | map name → shell command       | no        | Named shell commands, like package.json scripts. Referenced by spaces.                                                           |
 | `spaces`           | map name → space               | yes (≥ 1) | Package groups sharing build/publish behaviour; see [Spaces](./spaces.md).                                                       |
+| `versionGroups`    | map name → `{versioning}`      | no        | Shared-versioning groups that cut across spaces, joined by name via a space's or package's `versionGroup` key; see [Versioning groups](./spaces.md#versioning-groups). |
 | `dependencies`     | list of `{consumer, provider, kind, keep}` | no  | Package-level consumer → provider relations. Both must exist; self-dependencies and cycles are rejected; duplicates are ignored. The optional `kind` names the manifest field the edge stands for: `dependencies` (default), `devDependencies`, `peerDependencies` or `optionalDependencies`; propagation follows or ignores the edge according to `parser.propagation.kinds` (default: every kind except `devDependencies`). `keep: true` marks an edge [`dispat compute`](../cli.md#commands) must never suggest removing: a deliberate relation no manifest declares (a Docker chain); the planner treats kept edges like any other. |
 | `concurrency`      | int or `[int, int]`            | no        | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.       |
 | `logLevel`         | string                         | no        | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                        |
 | `logFormat`        | string                         | no        | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                   |
-| `tagFormat`        | string                         | no        | Release tag template, overridable per space. Default `{name}@{version}`; see [`tagFormat`](./versions.md#tagformat).             |
+| `tagFormat`        | string                         | no        | Release tag template, overridable per space and per package. Default `{name}@{version}`; see [`tagFormat`](./versions.md#tagformat). |
 | `commitErrors`     | string                         | no        | What an error in a commit message does to the run: `warn` (default) or `error`; see [`commitErrors`](./parser.md#commiterrors).  |
 | `nonPackageScopes` | array of strings               | no        | Scope names that are deliberately not packages. Default `["release"]`; see [`nonPackageScopes`](./parser.md#nonpackagescopes).   |
 | `changelog`        | object                         | no        | Per-package changelog file options; see [`changelog`](./records.md#changelog).                                                   |

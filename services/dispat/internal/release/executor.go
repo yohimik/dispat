@@ -339,6 +339,20 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			}
 		},
 		func(k taskKind) int { return budgets[k] },
+		// A package's configured weight is how many stage slots its tasks
+		// occupy. syncLock keeps the ordinary cost: its budget exists to
+		// serialise lock-file writers, not to price packages.
+		func(t task) int {
+			pkg := p.Releases[t.pkg].Pkg
+			switch t.kind {
+			case taskPublish:
+				return pkg.PublishWeight
+			case taskSyncLock:
+				return 1
+			default:
+				return pkg.BuildWeight
+			}
+		},
 		func(t task) { r.execute(ctx, t) })
 	if err != nil {
 		// Interrupted (or, impossibly after E200, cyclic): tasks that never

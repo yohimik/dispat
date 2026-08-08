@@ -62,6 +62,24 @@ func TestReplaceDependenciesJSONPreservesEverythingElse(t *testing.T) {
 	assert.True(t, cfg.Dependencies[1].Keep)
 }
 
+func TestReplaceDependenciesJSONPreservesOverrideBlocks(t *testing.T) {
+	// The splice touches only the top-level dependencies key, so the
+	// versionGroups map and a space's packages overrides — nested structures
+	// the compute command knows nothing about — survive byte for byte.
+	src := `{
+    "versionGroups": {"platform": {"versioning": "fixed"}},
+    "spaces": {"libs": {"path": "pkgs", "packages": {"core": {"revertOnFail": false}}}},
+    "dependencies": []
+}
+`
+	path := writeConfigFile(t, "dispat.json", src)
+	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "app", Provider: "core"}}))
+	got := readFile(t, path)
+	assert.Contains(t, got, `"versionGroups": {"platform": {"versioning": "fixed"}},`)
+	assert.Contains(t, got, `"packages": {"core": {"revertOnFail": false}}`)
+	assert.Contains(t, got, `"provider": "core"`)
+}
+
 func TestReplaceDependenciesJSONAppendsMissingKey(t *testing.T) {
 	src := "{\n  \"scripts\": {\"b\": \"make\"}\n}\n"
 	path := writeConfigFile(t, "dispat.json", src)

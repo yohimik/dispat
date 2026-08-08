@@ -67,6 +67,14 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	if _, ok := sc.RunScript("format"); ok {
 		t.Error("unknown run scripts do not resolve")
 	}
+
+	ov := SpaceConfig{Packages: map[string]PackageConfig{"core": {TagFormat: "v{version}"}}}
+	if pc, ok := ov.Package("Core"); !ok || pc.TagFormat != "v{version}" {
+		t.Errorf("Package(Core) = %+v, %v", pc, ok)
+	}
+	if _, ok := ov.Package("app"); ok {
+		t.Error("packages without an override do not resolve")
+	}
 }
 
 func TestCommandsPreservesOrder(t *testing.T) {
@@ -126,6 +134,57 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	}
 	if string(data) != "" && json.Valid(data) != true {
 		t.Error("marshalled config must be valid JSON")
+	}
+}
+
+func TestPackageConfigRoundTrip(t *testing.T) {
+	// A package override marshals under the config keys and survives the trip
+	// with its tri-state pointers intact — nil stays absent (inherit), an
+	// explicit false stays false (override), which is the whole reason the
+	// scalars are pointers here where SpaceConfig's are plain.
+	f := File{
+		VersionGroups: map[string]VersionGroupConfig{"core": {Versioning: VersioningFixed}},
+		Spaces: map[string]SpaceConfig{
+			"libs": {Path: "packages", Packages: map[string]PackageConfig{
+				"app": {
+					RevertOnFail: Bool(false),
+					VersionGroup: "core",
+					Concurrency:  []int{2, 1},
+					Changelog:    &ChangelogConfig{Enabled: Bool(false)},
+				},
+			}},
+		},
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back File
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	pc, ok := back.Spaces["libs"].Package("app")
+	if !ok {
+		t.Fatalf("override lost in the round trip: %s", data)
+	}
+	if pc.RevertOnFail == nil || *pc.RevertOnFail {
+		t.Errorf("explicit false must survive as false, got %v", pc.RevertOnFail)
+	}
+	if pc.IsBuildWaitingPublish != nil {
+		t.Errorf("unset pointer must survive as nil, got %v", pc.IsBuildWaitingPublish)
+	}
+	if pc.VersionGroup != "core" || len(pc.Concurrency) != 2 {
+		t.Errorf("scalar fields lost: %+v", pc)
+	}
+	if back.VersionGroups["core"].Versioning != VersioningFixed {
+		t.Errorf("versionGroups lost: %+v", back.VersionGroups)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["versionGroups"]; !ok {
+		t.Errorf("versionGroups must marshal under its config key: %s", data)
 	}
 }
 

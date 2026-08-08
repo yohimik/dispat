@@ -35,6 +35,16 @@
         "login": "npm-login",
         "postBuild": "smoke-test",
         "announce": "announce"
+      },
+      "packages": {
+        "core": {
+          "revertOnFail": false,
+          "flow": { "build": "build" },
+          "versionGroup": "platform",
+          "concurrency": [2, 1],
+          "changelog": { "file": "HISTORY.md" },
+          "github": { "enabled": false }
+        }
       }
     },
     "apps": {
@@ -46,6 +56,9 @@
       },
       "tagFormat": "packages/apps/{name}@v{version}"
     }
+  },
+  "versionGroups": {
+    "platform": { "versioning": "fixed" }
   },
   "run": {"postAll": "notify"},
   "dependencies": [

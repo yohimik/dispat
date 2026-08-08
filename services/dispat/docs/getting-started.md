@@ -33,7 +33,9 @@ for the other formats). No flag is needed afterwards: every command finds the fi
 }
 ```
 
-Every direct sub-folder of `packages/libs` is now a package named after its folder. Declare relations between packages
+Every direct sub-folder of `packages/libs` is now a package named after its folder (a
+[`.dispatignore`](./configuration/spaces.md#dispatignore) file in the space folder can exempt some). Declare relations
+between packages
 under `dependencies` so bumps propagate and ordering is enforced:
 
 ```json

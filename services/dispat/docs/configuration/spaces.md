@@ -1,20 +1,24 @@
 # Spaces
 
 A space is a group of packages sharing build/publish behaviour. Every direct sub-folder of the space's `path` is a
-package named after the folder.
+package named after the folder, unless a [`.dispatignore`](#dispatignore) file in the space folder excludes it. A single
+package can depart from its space's configuration through a [per-package override](#per-package-overrides) — one-off
+exceptions do not require carving the package out into a space of its own.
 
 ## Space options
 
 | Key                     | Type                     | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 |-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped). Package names must be unique across all spaces.                                                                                                                                                                                                                  |
+| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped, and [`.dispatignore`](#dispatignore) excludes more). Package names must be unique across all spaces.                                                                                                                                                                |
 | `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
 | `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage, or is skipped after its version stage already modified files.                                                                                                                                                   |
 | `flow`                  | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
-| `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning).                                                                                                                                                                                                                                                    |
+| `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                                                                                                            |
+| `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name — a top-level [`versionGroups`](#versioning-groups) entry, or another space with `fixed`/`fixedSparse` versioning. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                 |
 | `runScripts`            | map name → shell command | no         | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
+| `packages`              | map name → object        | no         | Per-package overrides, keyed by package folder name (matched case-insensitively); see [Per-package overrides](#per-package-overrides). Every key must match exactly one package folder — an unmatched key is the same class of typo as an unknown dependency endpoint.                                                                                                                   |
 
 ## Stages and hooks
 
@@ -106,26 +110,76 @@ How the versions of a space's packages relate to each other.
 | `fixed`                   | One shared version for the whole space: a change to **any** member (by commit scope or changed files) releases **every** member at the same next version.                                                                          |
 | `fixedSparse`             | The shared version is computed exactly like `fixed`, but a member with no changes of its own keeps its previous version and is not released; changed members release at the shared version, aligning to it the moment they change. |
 
-Under `fixed` and `fixedSparse` the space versions **as if it were one package**: the shared next version is computed
-over the space's highest baseline with the max bump across all members, the space runs a **single prerelease train**
-(a channel directive on one member moves the whole space; a graduation ends the train for all of it), and an exact
-`Release-As` naming one member pins the space's single version, with the usual pin guards applied to it. A
+A space with shared versioning is a **versioning group** whose name is the space's own — the general mechanism, groups
+that cut across the filesystem included, is described under [Versioning groups](#versioning-groups). Everything below
+holds for any group, whichever way its members joined.
+
+Under `fixed` and `fixedSparse` the group versions **as if it were one package**: the shared next version is computed
+over the group's highest baseline with the max bump across all members, the group runs a **single prerelease train**
+(a channel directive on one member moves the whole group; a graduation ends the train for all of it), and an exact
+`Release-As` naming one member pins the group's single version, with the usual pin guards applied to it. A
 `Release-As: none` hold still applies to the member it names: the held member stays behind and catches up when resumed.
 
-Scopes (commit scope-sets and changed files) keep exactly one job in a fixed space: deciding **which changelog entries a
-package receives** (and what its GitHub release announces). A member released only because of the shared version gets a
-single "no changes" entry instead of borrowing its neighbour's notes, and its presence in the plan is reported as `W210`
-(non-suppressible, like the catch-up codes: nothing in the commit log alone explains it). Such a ride is a full release
-at the execution level: its version/build/publish scripts, hooks, tag and records all run.
+Scopes (commit scope-sets and changed files) keep exactly one job in a versioning group: deciding **which changelog
+entries a package receives** (and what its GitHub release announces). A member released only because of the shared
+version gets a single "no changes" entry instead of borrowing its neighbour's notes, and its presence in the plan is
+reported as `W210` (non-suppressible, like the catch-up codes: nothing in the commit log alone explains it). Such a ride
+is a full release at the execution level: its version/build/publish scripts, hooks, tag and records all run.
 
-Two convergence properties are worth knowing. A fixed space whose members all carry the shared version releases nothing
-on a quiet run, exactly like independent packages. And a `fixed` member left *behind* the space's published baseline
-(its ride failed in an earlier run, or the space adopted `fixed` with unequal versions) is caught up at exactly that
+Two convergence properties are worth knowing. A group whose members all carry the shared version releases nothing
+on a quiet run, exactly like independent packages. And a `fixed` member left *behind* the group's published baseline
+(its ride failed in an earlier run, or the group formed with unequal versions) is caught up at exactly that
 baseline on the next run (also `W210`), restoring the one-version invariant. `fixedSparse` deliberately never does this,
 since staying behind is its point.
 
 Dependency edges stay package-scoped either way: a provider propagating into one member bumps that member (which then
-carries its space along under `fixed`), and only the member with provider updates runs a version task.
+carries its group along under `fixed`), and only the member with provider updates runs a version task.
+
+## Versioning groups
+
+Version relationships do not always follow the filesystem: two folders that build differently — and therefore live in
+different spaces — may still want one version, and one space may hold packages of several release cadences. The
+top-level `versionGroups` map declares such groups by name; spaces and packages **join** a group by naming it in their
+`versionGroup` key.
+
+```json
+{
+  "versionGroups": {
+    "platform": { "versioning": "fixed" }
+  },
+  "spaces": {
+    "libs": { "path": "packages", "versionGroup": "platform" },
+    "apps": {
+      "path": "apps",
+      "packages": {
+        "shell": { "versionGroup": "platform" }
+      }
+    }
+  }
+}
+```
+
+Here every package of `libs` plus the single `shell` package version together as group `platform`, while the rest of
+`apps` stays independent.
+
+A declaration carries one key: `versioning`, `fixed` or `fixedSparse` (`independent` is invalid — a group exists to
+share versions). The declaration's mode is authoritative for everyone who joins, which is why `versionGroup` and
+`versioning` are mutually exclusive on the same space or package: a member cannot contradict its group. A declared
+group nobody joins is inert configuration, like a disabled block.
+
+The joining rules:
+
+- `versionGroup` is settable on a space (all its packages join) and on a single package (through a `packages` entry or
+  an [in-folder config file](#in-folder-configuration-files)); the [most local layer wins](#per-package-overrides).
+- The reference may also name another **space** whose own `versioning` is `fixed`/`fixedSparse` — that space's implicit
+  group. A space that itself joined a declared group has no group of its own to reference; name the declared group
+  directly. Group and space names share one namespace (a declaration shadowing a space name is rejected), and an
+  unknown reference is an error, the same typo protection as an unknown dependency endpoint.
+- A member's assignment mode is its own: a `fixed` space and a `fixedSparse` package can join the same group — the
+  shared version is computed once, then each member follows its own mode (ride along, or stay behind when unchanged).
+
+Group diagnostics (`W210` rides, `W211` competing pins, `W212` channel conflicts) name the group; the synthetic package
+they are raised against is `group:<name>`.
 
 ## `autoVersion`
 
@@ -200,8 +254,8 @@ named script inside each **changed** package (the packages a release would proce
 a package's script starts only after every changed provider's finished, and independent packages run concurrently within
 the build concurrency budget (`--concurrency`'s first value). Each script gets the package's full
 [DISPAT_* environment](../environment.md) (`DISPAT_STAGE` is `run:<name>`), so a script moves freely between a stage and
-a run script. A changed package whose space does not define the name completes as a no-op; a name **no** space defines
-is an error (running nothing silently is how a typo hides).
+a run script. A changed package whose space does not define the name completes as a no-op; a name **no** space or
+[package override](#per-package-overrides) defines is an error (running nothing silently is how a typo hides).
 
 The run can also be narrowed to a single package, in two ways. `dispat run <name> <package>` runs the script in exactly
 that package (changed or not, with no graph) and errors on an unknown package or on one whose space does not define
@@ -231,3 +285,72 @@ carries them through) as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAM
 (`base:run:lint`). Providers merge in name order, the package's own re-export overrides, and under
 `--on-error continue` a failed provider's exports still reach its dependents, mirroring what the pipeline's `onFail`
 hooks receive.
+
+## Per-package overrides
+
+A space's `packages` map adjusts the space's configuration for single packages, keyed by package folder name (matched
+case-insensitively, like every config map key). An override object mirrors the space options minus `path` — a package's
+location *is* its folder, so a `path` key is rejected — and adds four package-only keys:
+
+| Key           | Type              | Effect                                                                                                                                                                                                                                                                                                     |
+|---------------|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `changelog`   | object            | Overlays the top-level [`changelog`](./records.md#changelog) **field by field** for this package's release records: flip `enabled`, rename the file, retitle a section — unset fields keep the global values.                                                                                              |
+| `github`      | object            | Overlays the top-level [`github`](./records.md#github) the same way: a package can disable its GitHub releases or target another repository while keeping the global `tokenEnv`. Distinct effective targets each get their own up-front verification.                                                       |
+| `concurrency` | int or `[b, p]`   | How many slots of the stage [concurrency budgets](./README.md#top-level-options) the package's tasks occupy — a *weight*, scalar or `[build, publish]` pair. Absent and `0` mean `1`, the ordinary cost (deliberately unlike the top-level key, where `0` means the CPU count — a weight has no CPU reading). A package whose weight reaches a stage's budget runs that stage **alone**: the slot for the Android build that would starve every neighbour of memory. Weights change slot accounting, never ordering, and a waiting heavy package is never overtaken. |
+| `versionGroup`| string            | Joins this one package to a [versioning group](#versioning-groups).                                                                                                                                                                                                                                        |
+
+A field left unset **inherits** from the space; a field set overrides it. The per-field rules follow from what each
+object means:
+
+- The boolean options (`isBuildWaitingPublish`, `revertOnFail`) are tri-state in an override: absent inherits, an
+  explicit `false` overrides a space's `true`.
+- `flow` merges **entry by entry**: an overridden stage or hook replaces that entry's list, every other entry inherits,
+  and an explicit empty array (`"build": []`) clears an inherited entry. References still resolve against the top-level
+  `scripts` map. `flow.login` cannot be overridden: login runs [once per space, in the space folder](#flowlogin),
+  gating every publish of the space — a per-package login would contradict all three.
+- `runScripts` merges **name by name**: an overridden name wins, the space's other names survive.
+- `versioning`/`versionGroup` are one axis: a layer setting either supersedes both inherited values (so a package sets
+  `versioning: independent` to opt out of its space's group, or `versionGroup: <name>` to join another). Setting both
+  in one layer is a contradiction and is rejected.
+- `autoVersion` replaces **wholesale**: its empty fields already carry meaning relative to their siblings (no `kinds`
+  means all four), so a field-level overlay could never express them against a non-empty base. An override of
+  `{"enabled": false}` switches the space's block off for the package.
+- `tagFormat` overrides like everywhere else: package over space over repository.
+
+## In-folder configuration files
+
+A package folder may carry a dispat config file of its own — the same names and formats the root config resolves
+through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins). Its top-level object is exactly
+the per-package override object above, and it is the **most local** layer: space config, then the space's `packages`
+entry, then the in-folder file, field by field. The same merge rules apply, unknown keys are rejected with the file
+named, and the file travels with the package — a package moved between spaces keeps its exceptions.
+
+```json
+// packages/core/dispat.json
+{
+  "revertOnFail": true,
+  "versionGroup": "platform"
+}
+```
+
+An in-folder file that declares `spaces` is refused with guidance: the folder holds a monorepo root of its own — a
+vendored or nested repository — and must be excluded via `.dispatignore`, not half-merged. Config resolution is aware
+of these files too: running the CLI from inside a package folder ascends **past** the package's own file to the config
+that declares spaces, so `cd packages/core && dispat lint` works with or without one.
+
+## `.dispatignore`
+
+A plain-text file inside a space folder listing direct sub-folders that are **not** packages — scratch areas, fixtures,
+a vendored repository:
+
+```
+# not packages
+sandbox
+tmp-*
+```
+
+One pattern per line; blank lines and `#` comments are skipped, and `*` matches any run of characters (the same glob the
+scope terms and `autoVersion.match` use). Patterns match the space folder's **direct sub-folder names** only, and each
+space folder carries its own file. An excluded folder is invisible to discovery — never released, never scanned by
+`compute` or `autoVersion`, its name an unknown scope in commits — and a `packages` entry naming one is rejected with
+the exclusion spelled out.

@@ -11,8 +11,9 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
-	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
@@ -45,16 +46,10 @@ func (a *App) Release(ctx context.Context) (map[string]*release.Result, error) {
 		remote = "origin"
 	}
 
-	// Resolve the GitHub releaser (nil when disabled or unresolvable).
-	var gh *github.Releaser
-	if a.cfg.GitHub.IsEnabled() {
-		var ghErr error
-		if gh, ghErr = githubReleaser(a.cfg.GitHub, a.log); ghErr != nil {
-			a.log.Warn().Err(ghErr).Msg("github releases disabled")
-		}
-	} else {
-		a.log.Debug().Msg("github releases disabled by config")
-	}
+	// Resolve the GitHub releasers: one per distinct target the packages'
+	// resolved policies name — most runs resolve to a single one. Empty
+	// means every package is disabled or unresolvable.
+	gh := a.githubDispatch(pl)
 
 	// Verify external access up front, before any release work starts.
 	// commit.verify (default true) can switch the git check off for remotes
@@ -65,8 +60,8 @@ func (a *App) Release(ctx context.Context) (map[string]*release.Result, error) {
 			return nil, err
 		}
 	}
-	if gh != nil {
-		if err := gh.Verify(ctx); err != nil {
+	for _, r := range gh.all {
+		if err := r.Verify(ctx); err != nil {
 			a.log.Error().Err(err).Msg("github verification failed")
 			return nil, err
 		}
@@ -138,32 +133,79 @@ func (a *App) Release(ctx context.Context) (map[string]*release.Result, error) {
 }
 
 // recorders assembles every per-publish release recorder this run records
-// through: the changelog file writer when enabled, and the resolved GitHub
-// releaser (nil when disabled or unresolvable) — except in release-commit
+// through: the changelog dispatcher — always present, because each package's
+// resolved policy decides whether its file is written — and the GitHub
+// dispatch when any package resolved a releaser, except in release-commit
 // mode, where GitHub recording moves to the finalize phase so the releases
 // reference the end-of-run commit.
-func (a *App) recorders(gh *github.Releaser, commitMode bool) []release.ReleaseRecorder {
-	var recs []release.ReleaseRecorder
-	if a.cfg.Changelog.IsEnabled() {
-		recs = append(recs, &changelog.FileWriter{
-			File:   a.cfg.Changelog.File,
-			Title:  a.cfg.Changelog.Title,
-			Format: entryFormat(a.cfg.Changelog.EntryFormatConfig),
-		})
-	} else {
-		a.log.Debug().Msg("changelog files disabled by config")
-	}
-	if gh != nil && !commitMode {
+func (a *App) recorders(gh *ghDispatch, commitMode bool) []release.ReleaseRecorder {
+	recs := []release.ReleaseRecorder{&changelog.Dispatcher{Log: a.log}}
+	if !gh.empty() && !commitMode {
 		recs = append(recs, gh)
 	}
 	return recs
 }
 
-// githubReleaser resolves repository and token for the GitHub recorder. The
-// repository comes from config or $GITHUB_REPOSITORY ("owner/repo"), the
-// token from the configured env var (default $GITHUB_TOKEN).
-func githubReleaser(gc *config.GitHubConfig, log zerolog.Logger) (*github.Releaser, error) {
-	owner, repo := gc.Owner, gc.Repo
+// ghDispatch routes each package's release to the releaser its resolved
+// GitHub policy names; a package whose policy is disabled or unresolvable
+// has none and records nothing. It implements release.ReleaseRecorder. all
+// holds the distinct releasers once each, for up-front verification and the
+// finalize phase's commit stamping.
+type ghDispatch struct {
+	byPkg map[string]*github.Releaser
+	all   []*github.Releaser
+	log   zerolog.Logger
+}
+
+// Record implements release.ReleaseRecorder.
+func (d *ghDispatch) Record(ctx context.Context, rel *plan.Release) error {
+	gh := d.byPkg[rel.Pkg.Name]
+	if gh == nil {
+		d.log.Debug().Str("package", rel.Pkg.Name).Msg("github release disabled by config")
+		return nil
+	}
+	return gh.Record(ctx, rel)
+}
+
+// empty reports whether no package resolved a releaser.
+func (d *ghDispatch) empty() bool { return len(d.all) == 0 }
+
+// githubDispatch resolves one GitHub releaser per distinct target the
+// packages' resolved policies name — most runs resolve to a single one —
+// and maps each package to its releaser. A package whose policy is disabled
+// is skipped silently; an unresolvable target (no repository, no token)
+// disables its packages with one warning per target.
+func (a *App) githubDispatch(pl *plan.Plan) *ghDispatch {
+	d := &ghDispatch{byPkg: make(map[string]*github.Releaser), log: a.log}
+	targets := make(map[model.GitHubSpec]*github.Releaser)
+	for _, name := range pl.Order {
+		spec := pl.Releases[name].Pkg.GitHub
+		if !spec.Enabled {
+			continue
+		}
+		gh, seen := targets[spec]
+		if !seen {
+			var err error
+			if gh, err = githubReleaser(spec, a.log); err != nil {
+				a.log.Warn().Err(err).Str("package", name).Msg("github releases disabled")
+			} else {
+				d.all = append(d.all, gh)
+			}
+			targets[spec] = gh
+		}
+		if gh != nil {
+			d.byPkg[name] = gh
+		}
+	}
+	return d
+}
+
+// githubReleaser resolves repository and token for one package's GitHub
+// policy. The repository comes from the resolved spec or $GITHUB_REPOSITORY
+// ("owner/repo"), the token from the configured env var (default
+// $GITHUB_TOKEN).
+func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser, error) {
+	owner, repo := spec.Owner, spec.Repo
 	if owner == "" || repo == "" {
 		if env := os.Getenv("GITHUB_REPOSITORY"); env != "" {
 			parts := strings.SplitN(env, "/", 2)
@@ -180,7 +222,7 @@ func githubReleaser(gc *config.GitHubConfig, log zerolog.Logger) (*github.Releas
 	if owner == "" || repo == "" {
 		return nil, errors.New("no repository configured (set github.owner and github.repo, or $GITHUB_REPOSITORY)")
 	}
-	tokenEnv := gc.TokenEnv
+	tokenEnv := spec.TokenEnv
 	if tokenEnv == "" {
 		tokenEnv = "GITHUB_TOKEN"
 	}
@@ -189,24 +231,13 @@ func githubReleaser(gc *config.GitHubConfig, log zerolog.Logger) (*github.Releas
 		return nil, fmt.Errorf("no token found in $%s", tokenEnv)
 	}
 	return &github.Releaser{
-		APIURL: gc.APIURL,
+		APIURL: spec.APIURL,
 		Owner:  owner,
 		Repo:   repo,
 		Token:  token,
-		Format: entryFormat(gc.EntryFormatConfig),
+		Format: changelog.SpecFormat(spec.Format),
 		Log:    log,
 	}, nil
-}
-
-// entryFormat maps the config format options onto the changelog renderer.
-func entryFormat(f config.EntryFormatConfig) changelog.Format {
-	return changelog.Format{
-		DateFormat:        f.DateFormat,
-		BreakingTitle:     f.BreakingTitle,
-		FeaturesTitle:     f.FeaturesTitle,
-		FixesTitle:        f.FixesTitle,
-		DependenciesTitle: f.DependenciesTitle,
-	}
 }
 
 // seq folds a scalar sequence back into text.

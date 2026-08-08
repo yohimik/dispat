@@ -82,6 +82,29 @@ spaces:
       # update channels. Receives DISPAT_BREAKING_CHANGES / DISPAT_FEATURES /
       # DISPAT_FIXES (the changelog's groupings) and only warns on failure.
       announce: announce
+    # Per-package overrides, keyed by package folder name: the space's
+    # options minus `path`, plus changelog, github, concurrency and
+    # versionGroup. Unset fields inherit; flow merges entry by entry
+    # (flow.login excluded — login stays once per space), runScripts name by
+    # name, autoVersion replaces wholesale, changelog/github overlay the
+    # top-level objects field by field. A package folder may instead carry
+    # its own dispat.json/.yaml/.toml with this same shape — the most local
+    # layer. A .dispatignore file in the space folder (one name or *-glob
+    # per line) excludes folders that are not packages at all.
+    packages:
+      core:
+        revertOnFail: false               # tri-state: absent inherits
+        flow:
+          build: build                    # replaces this entry alone
+        versionGroup: platform            # join the declared group below
+        # The stage-budget slots this package's tasks occupy ([build,
+        # publish] or one value for both; 0/absent = 1). A weight reaching
+        # the stage's budget runs that stage alone — the heavyweight build.
+        concurrency: [2, 1]
+        changelog:
+          file: HISTORY.md                # unset fields keep the global ones
+        github:
+          enabled: false                  # no GitHub releases for this one
   apps:
     path: packages/apps
     isBuildWaitingPublish: false
@@ -90,6 +113,16 @@ spaces:
       publish: publish-go
     # Overrides the repository-wide tagFormat for this space only.
     tagFormat: "packages/apps/{name}@v{version}"
+
+# Shared-versioning groups that cut across spaces, joined by name through a
+# space's or package's versionGroup key. The declaration owns the group's
+# mode (fixed or fixedSparse; independent would defeat the point), so a
+# member never sets versioning alongside versionGroup. A space with
+# versioning: fixed/fixedSparse is implicitly a group named after itself,
+# and versionGroup may reference such a space too.
+versionGroups:
+  platform:
+    versioning: fixed
 
 # The top-level `run` object holds the run-level hooks, executed in the
 # monorepo root. beforeAll is the one gating run hook: it runs once before

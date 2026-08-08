@@ -29,15 +29,26 @@ func (v Versioning) Shared() bool {
 	return v == VersioningFixed || v == VersioningFixedSparse
 }
 
-// Space groups packages that share build and publish behaviour.
+// Space groups packages that share build and publish behaviour. A package
+// whose configuration overrides its space's carries its own Space value — a
+// derived copy with the overrides applied — so every consumer of Space reads
+// per-package behaviour without knowing overrides exist; Name always stays
+// the configured space's name.
 type Space struct {
 	Name string
 	// Path of the space folder, relative to the monorepo root. Every direct
-	// sub-folder is a package.
+	// sub-folder is a package, unless a .dispatignore file in the space
+	// folder excludes it.
 	Path string
 	// Versioning is how versions relate across the space's packages; the zero
 	// value means VersioningIndependent.
 	Versioning Versioning
+	// VersionGroup is the shared-versioning group key the planner groups by:
+	// the referenced versionGroups entry (or another space's group) when
+	// configuration names one, the space's own name otherwise. The zero
+	// value means the space's own group. Only read when Versioning is
+	// shared.
+	VersionGroup string
 	// RunScripts are the space's named `dispat run <name>` scripts: raw shell
 	// commands (not script references), keyed by lowercased name. `dispat run
 	// <name>` executes the command inside each changed package of the space in
@@ -151,6 +162,47 @@ type Package struct {
 	Name  string
 	Dir   string // folder in which scripts run
 	Space *Space
+	// BuildWeight and PublishWeight are the stage-budget slots the package's
+	// tasks occupy, always >= 1; 1 is the ordinary cost. A weight reaching
+	// the stage's budget makes the package run that stage alone.
+	BuildWeight   int
+	PublishWeight int
+	// Changelog and GitHub are the package's resolved record policies: the
+	// top-level configuration overlaid with the package's override, so the
+	// recorders read the package alone.
+	Changelog ChangelogSpec
+	GitHub    GitHubSpec
+}
+
+// RecordFormat customises how a release entry renders — the resolved
+// counterpart of the config's entry-format options, shared by the changelog
+// file and the GitHub release body. Empty fields mean the renderer defaults.
+type RecordFormat struct {
+	DateFormat        string
+	BreakingTitle     string
+	FeaturesTitle     string
+	FixesTitle        string
+	DependenciesTitle string
+}
+
+// ChangelogSpec is a package's resolved changelog policy.
+type ChangelogSpec struct {
+	Enabled bool
+	File    string // empty means the writer default (CHANGELOG.md)
+	Title   string // empty means the writer default
+	Format  RecordFormat
+}
+
+// GitHubSpec is a package's resolved GitHub-release policy. Owner/Repo may
+// be empty here: the runtime fallback to $GITHUB_REPOSITORY stays with the
+// releaser resolution, which is where "unresolvable" is an outcome.
+type GitHubSpec struct {
+	Enabled  bool
+	Owner    string
+	Repo     string
+	APIURL   string // empty means the public GitHub API
+	TokenEnv string // empty means GITHUB_TOKEN
+	Format   RecordFormat
 }
 
 // DepKind is the manifest dependency field a graph edge stands for (§8.4).

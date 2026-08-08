@@ -20,9 +20,13 @@ import (
 // File mirrors the configuration at the monorepo root. Viper infers the
 // format from the file extension (yaml, json, toml, ...).
 type File struct {
-	Scripts      map[string]string      `mapstructure:"scripts" json:"scripts,omitempty"`
-	Spaces       map[string]SpaceConfig `mapstructure:"spaces" json:"spaces,omitempty"`
-	Dependencies []DependencyConfig     `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	Scripts map[string]string      `mapstructure:"scripts" json:"scripts,omitempty"`
+	Spaces  map[string]SpaceConfig `mapstructure:"spaces" json:"spaces,omitempty"`
+	// VersionGroups declares shared-versioning groups that cut across the
+	// filesystem, keyed by group name. Spaces and packages join a group by
+	// naming it in their versionGroup key; see VersionGroupConfig.
+	VersionGroups map[string]VersionGroupConfig `mapstructure:"versionGroups" json:"versionGroups,omitempty"`
+	Dependencies  []DependencyConfig            `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	// Concurrency accepts a single value applied to both stages
 	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
 	// 0 entries mean "number of CPUs".
@@ -285,6 +289,16 @@ const (
 	VersioningFixedSparse = "fixedSparse"
 )
 
+// VersionGroupConfig declares one entry of the top-level `versionGroups`
+// map: a shared-versioning group whose membership is stated by the members
+// themselves, through their versionGroup key. The declaration owns the
+// group's versioning mode — "fixed" or "fixedSparse"; "independent" is
+// invalid, because a group exists to share — so every member moves under one
+// rule and a member cannot contradict it.
+type VersionGroupConfig struct {
+	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+}
+
 // SpaceConfig is the raw configuration of one space. Everything the space
 // runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
@@ -298,6 +312,13 @@ type SpaceConfig struct {
 	// "independent" (default), "fixed" or "fixedSparse". See the Versioning*
 	// constants.
 	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	// VersionGroup names the shared-versioning group the space's packages
+	// join: an entry of the top-level versionGroups map, or the name of
+	// another space with fixed/fixedSparse versioning. Empty means the
+	// space's own implicit group (its name) when its versioning is shared.
+	// A declared group's versioning mode is authoritative, so a space naming
+	// one must not set versioning itself.
+	VersionGroup string `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
 	// RunScripts are the space's named `dispat run <name>` scripts. Unlike
 	// the stage entries, values are shell commands themselves, not references
 	// into `scripts`. `dispat run <name>` executes the script inside each
@@ -310,6 +331,56 @@ type SpaceConfig struct {
 	// before any flow.version script runs. nil means off. See
 	// AutoVersionConfig.
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	// Packages are per-package overrides, keyed by package folder name.
+	// Each entry adjusts the space's configuration for that one package; see
+	// PackageConfig. A package folder may instead (or additionally) carry its
+	// own dispat config file, which overrides the entry here field by field.
+	Packages map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
+}
+
+// PackageConfig overrides its enclosing space's configuration for a single
+// package. It mirrors SpaceConfig's keys minus `path` — a package's location
+// is its folder, so a path here is a config error — and adds the
+// package-only keys: `changelog`, `github` and `concurrency`. The same shape
+// is the top-level object of a dispat config file placed inside a package
+// folder, which is the most local override layer: space config, then the
+// space's `packages` entry, then the in-folder file, field by field.
+//
+// A field left unset inherits from the layer below, which is why the scalar
+// booleans are pointers here where SpaceConfig's are plain: an override must
+// be able to say nothing. `flow.login` is deliberately absent from the
+// override surface (validation rejects it): login runs once per space, in
+// the space folder, gating every publish of the space — a per-package login
+// would contradict all three.
+type PackageConfig struct {
+	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
+	TagFormat             string           `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	// Versioning overrides how the package relates to its space's shared
+	// version — most usefully "independent", opting one package out of a
+	// fixed space. Mutually exclusive with naming a declared versionGroup,
+	// whose mode is authoritative.
+	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	// VersionGroup names the shared-versioning group this package joins; see
+	// SpaceConfig.VersionGroup.
+	VersionGroup string `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
+	// RunScripts are merged into the space's map name by name; a name set
+	// here wins over the space's.
+	RunScripts  map[string]string  `mapstructure:"runScripts" json:"runScripts,omitempty"`
+	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	// Changelog and GitHub overlay the top-level objects field by field for
+	// this package's release records — flip enabled, rename the file, target
+	// another repository — leaving unset fields at the global values.
+	Changelog *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
+	GitHub    *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
+	// Concurrency is the number of stage-budget slots the package's tasks
+	// occupy: a single value for both stages or a [build, publish] pair.
+	// Absent or 0 means 1, the ordinary cost; a package whose value reaches
+	// the stage's budget runs that stage alone. (Deliberately unlike the
+	// top-level key, where 0 means "number of CPUs" — a weight has no CPU
+	// reading.)
+	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
 }
 
 // AutoVersionConfig is a space's `autoVersion` object: the native
@@ -476,6 +547,13 @@ func (c *File) Script(ref string) (string, bool) {
 func (s SpaceConfig) RunScript(name string) (string, bool) {
 	cmd, ok := s.RunScripts[strings.ToLower(name)]
 	return cmd, ok
+}
+
+// Package resolves a per-package override by folder name case-insensitively,
+// for the same viper reason as Script.
+func (s SpaceConfig) Package(folder string) (PackageConfig, bool) {
+	pc, ok := s.Packages[strings.ToLower(folder)]
+	return pc, ok
 }
 
 // Commands resolves a sequence of script references into the shell commands

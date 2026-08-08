@@ -88,9 +88,6 @@ dispat stands on the shoulders of two things:
 
 ## Planned features
 
-- **Per-package overrides within a space.** A package will be able to override its enclosing space's configuration
-  (scripts, concurrency, `revertOnFail`, changelog/GitHub behavior, ...) for itself alone, so one-off exceptions no
-  longer require carving a package out into its own space.
 - **Extendable config.** Configuration will be splittable across multiple files, so large monorepos don't have to keep
   every space and package declaration in one flat file.
 - **Auto versioning for more languages.** Native manifest writers beyond `package.json` and `go.mod` (Cargo.toml,
