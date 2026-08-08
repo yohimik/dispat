@@ -1,8 +1,8 @@
 # models
 
 The public configuration model of the dispat CLI: the typed structs a `dispat.json` / `dispat.yaml` /
-`dispat.toml` decodes into, published so external tooling — generators, migration scripts, the black-box
-integration suite — can author configurations as typed values and marshal them to loadable files instead of
+`dispat.toml` decodes into, published so external tooling (generators, migration scripts, the black-box
+integration suite) can author configurations as typed values and marshal them to loadable files instead of
 hand-writing raw config strings.
 
 ```go

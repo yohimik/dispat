@@ -36,7 +36,7 @@ into one dependency graph. dispat is built for that case:
 - **The graph can come from the manifests themselves.** `dispat compute` reads packages' project files
   (`package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml`,
   `requirements*.txt`) and derives the consumer/provider graph from them, suggesting additions, removals and kind
-  corrections against the config — previewable, confirmable one by one or applied wholesale, with `--check` gating CI
+  corrections against the config: previewable, confirmable one by one or applied wholesale, with `--check` gating CI
   on a drifted graph and `keep: true` marking deliberate relations no manifest declares (a Docker chain). And a space
   with an `autoVersion` block gets its manifests rewritten by dispat itself at the version stage: declared workspace
   ranges reconciled to end-of-run versions and own versions updated, format-preservingly, under match/range policies,
@@ -76,12 +76,12 @@ dispat stands on the shoulders of two things:
   the two-axis propagation grammar, performance notes and fuzzing.
 - **[models](./pkg/models)**: the public configuration model, so external tooling can author dispat configs as typed
   values and marshal them to loadable files.
-- **[manifest](./pkg/manifest)**: the shared manifest vocabulary — dependency kinds, manifest file-name rules, name
-  normalisation — that keeps the scanner and writer halves in perfect agreement.
-- **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library — package.json, go.mod, Cargo.toml,
+- **[manifest](./pkg/manifest)**: the shared manifest vocabulary (dependency kinds, manifest file-name rules, name
+  normalisation) that keeps the scanner and writer halves in perfect agreement.
+- **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library: package.json, go.mod, Cargo.toml,
   pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml and requirements files parsed into one
   ecosystem-neutral shape; the library behind `dispat compute` and auto-versioning.
-- **[writer](./pkg/writer)**: the manifest writer — format-preserving, byte-precise in-place edits for package.json,
+- **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for package.json,
   go.mod and requirements files, with atomic writes and validated output.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.

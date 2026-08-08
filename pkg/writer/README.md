@@ -1,7 +1,7 @@
 # writer
 
 A deliberately lightweight manifest writer: format-preserving in-place edits where only the version text
-being changed is replaced, and every other byte of the file — indentation, key order, comments — survives
+being changed is replaced, and every other byte of the file (indentation, key order, comments) survives
 verbatim. The writing counterpart of [`pkg/scanner`](../scanner), sharing its vocabulary through
 [`pkg/manifest`](../manifest), and the library behind dispat's native auto-versioning. The goal is to
 support **all package managers**; each ecosystem gains a writer once its rewrite can be made byte-precise.
@@ -27,8 +27,8 @@ rewritten `package.json` is re-validated as JSON before a single byte lands on d
 
 ## Not written today
 
-The goal is a writer per scanner-supported ecosystem; the ones without one — Cargo, pyproject, composer,
-Maven, NuGet, pub — are read-only, and their reconciliation belongs to a `flow.version` script. Only
+The goal is a writer per scanner-supported ecosystem; the ones without one (Cargo, pyproject, composer,
+Maven, NuGet, pub) are read-only, and their reconciliation belongs to a `flow.version` script. Only
 `package.json` has a writable own-version field.
 
 ## Requirements

@@ -129,17 +129,17 @@ pkg/models               the PUBLIC configuration model (its own module): the
 pkg/manifest             the SHARED manifest vocabulary (its own module):
                          dependency kinds spelled like the manifest fields,
                          the requirements-file name rule and PEP 503 name
-                         normalisation — the definitions the scanner and the
+                         normalisation: the definitions the scanner and the
                          writer must apply identically, held in one place so
                          the reading and writing halves cannot drift. Models
                          and pure functions only; no I/O, no dependencies.
 pkg/scanner              manifest READER (its own module). Two manifest
-                         shapes: structured documents — package.json, go.mod,
+                         shapes: structured documents (package.json, go.mod,
                          Cargo.toml, pyproject.toml (PEP 621 + Poetry, PEP
                          503 name normalisation), composer.json, pom.xml
                          (groupId:artifactId coordinates), *.csproj
                          (suffix-matched; ProjectReference = local path),
-                         pubspec.yaml — and line-by-line "name specifier"
+                         pubspec.yaml) and line-by-line "name specifier"
                          files, requirements*.txt (pattern-matched; a dev/
                          test file name maps to devDependencies). All parsed
                          into one ecosystem-neutral shape: declared identity
@@ -158,9 +158,9 @@ pkg/scanner              manifest READER (its own module). Two manifest
                          Package.swift) are deliberately absent: parsing
                          code with regexes produces wrong graphs.
 pkg/writer               manifest WRITER (its own module): format-preserving
-                         in-place edits — package.json via byte-precise JSON
+                         in-place edits (package.json via byte-precise JSON
                          scalar replacement, go.mod via x/mod/modfile,
-                         requirements*.txt via per-line specifier splicing —
+                         requirements*.txt via per-line specifier splicing)
                          replacing only the version text being changed.
                          Atomic same-folder rename; reports applied and
                          missing edits. Ecosystems without a writer are
@@ -301,7 +301,7 @@ conditional on this run's updates); `syncLock` exists when an autoVersion space 
   web:    version ─► syncLock ─► build ─► publish
 ```
 
-(The two provider edges land on web's *first* task — its `version` — and on its `publish`; the bullets below are the
+(The two provider edges land on web's *first* task, its `version`, and on its `publish`; the bullets below are the
 precise rule.)
 
 - A consumer's **first** task (version when present, build otherwise) waits for each changed provider's `build`, and
@@ -330,7 +330,7 @@ over one channel and cascade new ready nodes.
 
 Per-class queues mean a stalled class never blocks another class's budget. There are no locks in the scheduling hot
 path; a mutex guards only the shared result map that skip decisions, provider filtering and the syncLock skip read.
-Every task finishes exactly once — including no-op completions for packages already failed or skipped — which is what
+Every task finishes exactly once, including no-op completions for packages already failed or skipped, which is what
 lets the counting terminate without special cases. A cancelled context stops new launches (in-flight nodes are awaited,
 the rest are reported cancelled), and a frontier that empties with nodes remaining is diagnosed as a cycle instead of
 deadlocking.
@@ -339,7 +339,7 @@ deadlocking.
 
 Propagation (§9.2) walks the dependency graph outward from each unit's source packages, along kind-filtered edges,
 admitted against each **target's own** pending window. Every package is expanded at most once per phase, so the walk is
-O(V+E) whatever the directive's depth says — `^` (one edge), `+N` and `^^`/`+*` (the closure) only change where the
+O(V+E) whatever the directive's depth says: `^` (one edge), `+N` and `^^`/`+*` (the closure) only change where the
 expansion stops, never how often a node is visited.
 
 ```
@@ -356,8 +356,8 @@ The three phases (channel proposals, channel resolution, bump propagation) may n
 ### Ancestry: three sources, memoised
 
 Cancellation (§10.4) and prerelease-train containment ask "is commit a an ancestor of commit b?". The answer comes from
-the strongest available source — git itself (`merge-base --is-ancestor`), the commits' parent pointers (BFS), or plain
-history order for linear fakes — and every (a, b) answer is memoised on the computation, because the same pair is asked
+the strongest available source: git itself (`merge-base --is-ancestor`), the commits' parent pointers (BFS), or plain
+history order for linear fakes. Every (a, b) answer is memoised on the computation, because the same pair is asked
 from several nested phases and each uncached git answer is a subprocess.
 
 ```

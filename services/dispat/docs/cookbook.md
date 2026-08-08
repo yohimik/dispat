@@ -8,6 +8,7 @@ against a throwaway repository; only timestamps and durations are normalized. Sc
 If a term is new, [Concepts](concepts.md) defines all of them in a few minutes of reading.
 
 - [An npm package](#an-npm-package)
+- [Let the manifests declare the graph](#let-the-manifests-declare-the-graph)
 - [A Docker image chain](#a-docker-image-chain)
 - [An Android app](#an-android-app)
 - [npm and Docker in one graph](#npm-and-docker-in-one-graph)
@@ -72,6 +73,73 @@ script therefore stamps it in before packing:
 ```sh
 npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run build
 ```
+
+## Let the manifests declare the graph
+
+Instead of maintaining `dependencies` by hand and writing a version-sync script, let dispat read both from the
+manifests. One space, `autoVersion` turned on, and no `dependencies` list yet:
+
+```json
+{
+  "scripts": {
+    "build": "npm ci && npm run build",
+    "publish": "npm publish --access public"
+  },
+  "spaces": {
+    "libs": {
+      "path": "packages",
+      "flow": { "build": "build", "publish": "publish" },
+      "autoVersion": { "match": ["workspace:*"] }
+    }
+  }
+}
+```
+
+`packages/web/package.json` declares `"@acme/core": "workspace:*"`. `dispat compute` finds the edge and shows where
+it came from:
+
+```console
+$ dispat compute
++ add    web -> core (dependencies)  packages/web/package.json dependencies "@acme/core": "workspace:*"
+
+1 suggestion(s); apply all with --write, choose with --interactive
+
+$ dispat compute --write
++ add    web -> core (dependencies)  packages/web/package.json dependencies "@acme/core": "workspace:*"
+
+applied 1 change(s) to dispat.json (previous copy at dispat.json.backup)
+
+$ dispat compute --check
+dependencies are in sync: 1 detected edge(s), 1 declared
+```
+
+`--check` exits non-zero whenever the config lags the manifests, so put it in CI next to your linters. Now release:
+the `autoVersion` block means dispat itself rewrites the manifests at the version stage, before each build.
+
+```console
+$ dispat
+12:04:05 INF manifest reconciled manifest=package.json package=core ranges=0 stage=version version=0.1.0 versionWritten=true
+12:04:05 INF build succeeded package=core stage=build version=0.1.0
+12:04:05 INF + core@0.1.0 package=core stage=publish version=0.1.0
+12:04:05 INF manifest reconciled manifest=package.json package=web ranges=1 stage=version version=0.1.0 versionWritten=true
+12:04:05 INF build succeeded package=web stage=build version=0.1.0
+12:04:05 INF published package=core stage=publish tag=core@0.1.0 version=0.1.0
+12:04:05 INF published package=web stage=publish tag=web@0.1.0 version=0.1.0
+
+$ cat packages/web/package.json
+{
+  "name": "@acme/web",
+  "version": "0.1.0",
+  "dependencies": {"@acme/core": "^0.1.0", "left-pad": "1.3.0"}
+}
+```
+
+Read the manifest: the `workspace:*` range became `^0.1.0` (only ranges matching the `match` globs are touched, so
+the hand-pinned `left-pad` survived), and the `version` field advanced on its own. Only the version text changed;
+every other byte of the file is exactly as it was. To regenerate a lock file after the rewrite, name a `syncLock`
+script in the block and, if the lock file lives at the repo root, list it under `commit.include` so the release
+commit carries it. Details: [`autoVersion`](configuration/spaces.md#autoversion) and
+[the compute command](cli.md#the-compute-command).
 
 ## A Docker image chain
 

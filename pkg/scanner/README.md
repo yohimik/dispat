@@ -1,7 +1,7 @@
 # scanner
 
 A deliberately lightweight manifest reader: thin per-format parsers turning dependency manifests into one
-ecosystem-neutral shape — the package's declared identity (name, version) and its declared dependencies
+ecosystem-neutral shape: the package's declared identity (name, version) and its declared dependencies
 with their ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no
 network. The goal is to support **all package managers**; the shared vocabulary (dependency kinds, the
 file-name rules) lives in [`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can
