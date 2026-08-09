@@ -51,4 +51,9 @@ jobs:
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The syncLock `go mod tidy` and the module-mode binary builds must
+          # resolve the dependency tags this same run just pushed: fetch our
+          # own modules directly from the repository, skipping the proxy and
+          # the sum database, both of which lag fresh tags.
+          GOPRIVATE: github.com/yohimik/dispat
         run: ./dispat --log-format json

@@ -15,7 +15,9 @@ for target in linux/amd64 darwin/arm64 windows/amd64; do
     *) EXT="" ;;
   esac
   OUT="dist/dispat-${GOOS}-${GOARCH}${EXT}"
-  GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath \
+  # GOWORK=off: build in pure module mode, exactly as `go install` would —
+  # the dependency tags this run already pushed are what gets resolved.
+  GOWORK=off GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${DISPAT_NEW_VERSION}" \
     -o "$OUT" .
   echo "built $OUT (version ${DISPAT_NEW_VERSION})"

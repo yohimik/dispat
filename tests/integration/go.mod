@@ -16,7 +16,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace (
-	github.com/yohimik/dispat/pkg/ccme => ../../pkg/ccme
-	github.com/yohimik/dispat/pkg/models => ../../pkg/models
-)

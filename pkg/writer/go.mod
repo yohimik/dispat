@@ -7,4 +7,3 @@ require (
 	golang.org/x/mod v0.29.0
 )
 
-replace github.com/yohimik/dispat/pkg/manifest => ../manifest

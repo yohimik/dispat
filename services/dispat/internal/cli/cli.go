@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/rs/zerolog"
@@ -39,6 +41,23 @@ const (
 // shorthand — a `version` command would shadow a run script named after the
 // version stage.
 var Version = "dev"
+
+// resolvedVersion is what --version prints: the ldflags-injected value when a
+// release build set one; otherwise the module version the Go toolchain
+// stamped into the binary (`go install .../services/dispat@v1.2.3` records
+// v1.2.3 there, with no ldflags involved); otherwise the "dev" default of a
+// plain local build, whose stamp is "(devel)".
+func resolvedVersion() string {
+	if Version != "dev" {
+		return Version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if v := bi.Main.Version; v != "" && v != "(devel)" {
+			return strings.TrimPrefix(v, "v")
+		}
+	}
+	return Version
+}
 
 // logo is the dispat mark rendered for terminals — the block twin of
 // imgs/logo.png: two same-size 6×6 squares,
@@ -125,7 +144,7 @@ flags:
 	if *showVersion {
 		// Before anything else: the version must print without a config file.
 		fmt.Fprintln(stdout, logo)
-		fmt.Fprintln(stdout, "\ndispat "+Version)
+		fmt.Fprintln(stdout, "\ndispat "+resolvedVersion())
 		return 0
 	}
 

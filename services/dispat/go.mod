@@ -16,13 +16,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace (
-	github.com/yohimik/dispat/pkg/ccme => ../../pkg/ccme
-	github.com/yohimik/dispat/pkg/models => ../../pkg/models
-	github.com/yohimik/dispat/pkg/scanner => ../../pkg/scanner
-	github.com/yohimik/dispat/pkg/writer => ../../pkg/writer
-)
-
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -41,4 +34,3 @@ require (
 	golang.org/x/text v0.28.0 // indirect
 )
 
-replace github.com/yohimik/dispat/pkg/manifest => ../../pkg/manifest

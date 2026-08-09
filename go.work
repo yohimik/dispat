@@ -9,3 +9,16 @@ use (
 	services/dispat
 	tests/integration
 )
+
+// The workspace, not the modules, carries the local-path replaces: workspace
+// commands (builds, tests, vet) resolve the sibling modules from the
+// checkout, while module-scoped commands (`go install pkg@version`,
+// `go mod tidy`) ignore go.work and resolve the published tags — which is
+// what keeps the released modules installable.
+replace (
+	github.com/yohimik/dispat/pkg/ccme v0.0.0-00010101000000-000000000000 => ./pkg/ccme
+	github.com/yohimik/dispat/pkg/manifest v0.0.0-00010101000000-000000000000 => ./pkg/manifest
+	github.com/yohimik/dispat/pkg/models v0.0.0-00010101000000-000000000000 => ./pkg/models
+	github.com/yohimik/dispat/pkg/scanner v0.0.0-00010101000000-000000000000 => ./pkg/scanner
+	github.com/yohimik/dispat/pkg/writer v0.0.0-00010101000000-000000000000 => ./pkg/writer
+)
