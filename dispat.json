@@ -1,7 +1,7 @@
 {
   "scripts": {
     "go-mod-tidy": "go mod tidy",
-    "build-dispat": "go build ./..."
+    "build-dispat": "sh ../../scripts/build-dispat.sh"
   },
   "packages": {
     "dispat": {
@@ -62,9 +62,6 @@
       "provider": "manifest"
     }
   ],
-  "github": {
-    "enabled": false
-  },
   "commit": {
     "enabled": true,
     "push": true

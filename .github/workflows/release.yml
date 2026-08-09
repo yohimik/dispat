@@ -45,4 +45,10 @@ jobs:
         run: go build -C services/dispat -o "$PWD/dispat" .
 
       - name: Run the release
-        run: ./dispat
+        # dispat does the whole release itself: autoVersion rewrites, the
+        # release commit, tags, the push, and the GitHub release with the
+        # three cross-compiled binaries its build stage exported.
+        # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./dispat --log-format json
