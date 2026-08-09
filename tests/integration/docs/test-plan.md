@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against twelve goals, one test file each:
+The suite was designed against fourteen goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -62,6 +62,10 @@ The suite was designed against twelve goals, one test file each:
     a `packages` entry or an in-folder config file ordering the graph like top-level edges, and `dispat compute`
     editing each declaration where it lives: removals applied to the declaring package config (in-folder file or the
     nested entry list, each with its own backup) while manifest-detected additions land in the root list.
+14. **Interruption** (`interrupt_test.go`): a SIGINT mid-run shuts the run down gracefully through the real signal
+    handler: the in-flight script is killed, remaining packages report `cancelled` rather than `failed` or `skipped`,
+    nothing is tagged for work that did not finish, and the next run releases the cancelled packages at the version
+    they were owed.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -101,7 +105,9 @@ tests/integration/
                             there, folding the suite into the coverage badge
     repo.go                 Repo: git fixture (init, seed packages, commit, tags), config
                             writing, Release/ReleaseOK/Status/StatusOK/RunScript/
-                            RunScriptOK/Command/CommandAt -> RunResult
+                            RunScriptOK/Command/CommandAt -> RunResult;
+                            StartRelease -> Proc (Signal/Wait) for the
+                            interruption scenarios
     config.go               BaseFile() (concurrency + JSON logs + GitHub disabled),
                             WriteConfigModel (typed model -> dispat.json),
                             WriteConfigRaw (raw map, for shapes the model cannot express)
@@ -123,6 +129,9 @@ tests/integration/
   fatal_test.go             goal 9
   compute_test.go           goal 10
   autoversion_test.go       goal 11
+  overrides_test.go         goal 12
+  packages_test.go          goal 13
+  interrupt_test.go         goal 14
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -214,7 +223,6 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestConfigInitialsBaselines`                          | Initials seed the version of a package whose newest tag is unparseable (the pre-last tag is NOT used and the window still starts at the broken tag), an unmatched initials key only warns, and the next release reads the new real tag back.                                                                                                                                                                                 |
 | `TestConfigRunLevelHooks`                              | The run-level hook frame against a real remote: every hook fires in phase order in the monorepo root, postAll sees the run outcome and the workspace listing, and a quiet second run keeps the commit/push hooks off because their phases never happen.                                                                                                                                                                       |
 | `TestConfigRunLevelHookFailureSemantics`               | A failing warn-only run hook (postAll) does not fail the run and its sequence continues; the gating beforeAll aborts the run before any release work.                                                                                                                                                                                                                                                                         |
-
 | `TestConfigFormatsSmoke`                               | One minimal smoke per config format: the same monorepo releases through the binary under dispat.json, dispat.yaml and the init command's dispat.toml starter; the json leg also pins that `status` reports without tagging.                                                                                                                                                                                                    |
 | `TestConfigAllStageHooksFireInOrder`                   | Every one of the nine per-package hooks plus the announce stage fires, in the documented frame order, on a provider/consumer pair; the consumer additionally runs the version stage with its two hooks inside the same frame.                                                                                                                                                                                                 |
 | `TestConfigStageHookAuthoritySplit`                    | The documented authority split: failing postPublish and the whole announce frame only warn (exit 0, tag exists), while a failing gating hook (postBuild) fails the package, tags nothing, and fires onFail with the stage that carried the failure.                                                                                                                                                                            |
@@ -333,6 +341,12 @@ away instead of one binary invocation.)
 | `TestPackagesDependencyEdges`          | Provider lists declared in a `packages` entry and in an in-folder config file order the graph exactly like top-level edges (`status` dependsOn proves it).                                                                                               |
 | `TestPackagesComputeRemoveFromInFolder`| A stale in-folder edge is suggested with its declaring file named, `--check` gates on it, and `--write` removes it from that file (other keys intact, own `.backup`) while a manifest-detected addition still lands in the root list.                     |
 | `TestPackagesComputeRemoveFromEntry`   | A stale edge under `packages.<name>.dependencies` in the root config is emptied in place — the entry's other keys and the rest of the file survive — and the gate converges.                                                                             |
+
+### Goal 14: interruption (`interrupt_test.go`)
+
+| Test                            | Claim proven                                                                                                                                                                                                                                                             |
+|---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestInterruptGracefulShutdown` | A SIGINT delivered mid-build (via `harness.StartRelease`/`Proc`) exits non-zero with both packages `cancelled` in the summary events — the killed build is an interruption, not a failure; the never-launched consumer is not `skipped` — nothing is tagged, and the next run releases both at the version they were owed (one tag each, the consumer's build completing on the tsmark log). |
 
 ## Regression fences
 

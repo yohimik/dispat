@@ -138,7 +138,7 @@ jobs:
           # (the workspace modules' own tests), the integration layer (the
           # black-box suite's instrumented binary — CLI module scope, since
           # that is the binary) — with only the combined total across all
-          # four profiles (go tool cover merges the overlapping blocks)
+          # seven profiles (go tool cover merges the overlapping blocks)
           # becoming the README badge.
           merge() { out=$1; shift; { head -n 1 "$1"; tail -q -n +2 "$@"; } > "$out"; }
           pct() { go tool cover -func="$1" | tail -n 1 | awk '{print $3}'; }
