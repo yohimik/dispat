@@ -2,7 +2,6 @@
   "scripts": {
     "go-mod-tidy": "go mod tidy",
     "commit-module": "sh ../../scripts/commit-module.sh",
-    "push-tag": "git push -f origin $DISPAT_TAG",
     "build-dispat": "sh ../../scripts/build-dispat.sh"
   },
   "packages": {
@@ -19,11 +18,12 @@
       "isBuildWaitingPublish": true,
       "autoVersion": {
         "enabled": true,
-        "syncLock": ["go-mod-tidy"]
+        "syncLock": [
+          "go-mod-tidy"
+        ]
       },
       "flow": {
-        "beforePublish": "commit-module",
-        "postPublish": "push-tag"
+        "beforePublish": "commit-module"
       }
     },
     "services": {
@@ -31,11 +31,12 @@
       "path": "services",
       "autoVersion": {
         "enabled": true,
-        "syncLock": ["go-mod-tidy"]
+        "syncLock": [
+          "go-mod-tidy"
+        ]
       },
       "flow": {
-        "beforePublish": "commit-module",
-        "postPublish": "push-tag"
+        "beforePublish": "commit-module"
       }
     }
   },
@@ -73,8 +74,18 @@
       "provider": "manifest"
     }
   ],
-  "concurrency": [0, 1],
+  "concurrency": [
+    0,
+    1
+  ],
   "changelog": {
-    "enabled": false
+    "enabled": true
+  },
+  "commit": {
+    "enabled": true,
+    "push": true
+  },
+  "github": {
+    "enabled": true
   }
 }
