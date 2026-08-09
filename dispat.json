@@ -9,6 +9,15 @@
       "flow": {
         "build": "build-dispat"
       }
+    },
+    "manifest": {
+      "versionGroup": "manifests"
+    },
+    "scanner": {
+      "versionGroup": "manifests"
+    },
+    "writer": {
+      "versionGroup": "manifests"
     }
   },
   "spaces": {
@@ -87,5 +96,10 @@
   },
   "github": {
     "enabled": true
+  },
+  "versionGroups": {
+    "manifests": {
+      "versioning": "fixed"
+    }
   }
 }

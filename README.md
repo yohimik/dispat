@@ -105,6 +105,12 @@ dispat stands on the shoulders of two things:
 
 ## Projects using dispat (Real-world examples)
 
+- **dispat itself**: this repository is a Go multi-module workspace released by the dispat binary built from its own
+  checkout — every release starting with the very first `1.0.0-rc.0` was cut this way (only the `0.0.0` prototype
+  predates it). One run rewrites the six modules' go.mods to the released versions, regenerates their go.sums, tags
+  each module Go-style (`pkg/ccme/v1.0.0-rc.0`, `services/dispat/v1.0.0-rc.0`), and publishes a GitHub release per
+  module with the cross-compiled binaries attached to the CLI's, which is what keeps
+  `go install github.com/yohimik/dispat/services/dispat@latest` working.
 - [webxash3d-fwgs](https://github.com/yohimik/webxash3d-fwgs): WebAssembly port of the Xash3D-FWGS game engine. A real
   "docker depending on docker depending on npm" provider chain, four levels deep, with parallel builds from the engine
   package to the modded server image.
