@@ -2,7 +2,7 @@
 
 What a successful release leaves behind besides the tag: the per-package changelog file, the GitHub release, and the
 optional end-of-run release commit. `changelog` and `github` are top-level policies a single package may
-[override field by field](./packages.md) — disable one record for one package, or point one package's releases at
+[override field by field](./packages.md): disable one record for one package, or point one package's releases at
 another repository.
 
 ## Entry format options (shared by `changelog` and `github`)
@@ -60,20 +60,19 @@ fail the run before anything is built.
 
 **Which commit the release points at.** A GitHub release hangs off its tag, and GitHub resolves the tag by name on the
 *remote*: if the tag already exists there when the release is created, the release attaches to exactly the commit it
-marks; if not, GitHub creates the tag ref at the **default branch head**. What that means per mode:
+marks; if not, GitHub creates the tag ref at the default branch head. Per mode:
 
-- [`commit`](#commit) **disabled** (the default): the release is created right after the package publishes. The tag
-  exists only locally at that point (on the commit the run released from, with pushing left to CI), so GitHub creates
-  its tag ref at the default branch head. In the usual CI setup (a job on the default branch, tags pushed right after
-  the run) the two coincide; they can differ if the run released another branch or the push never happened.
-- [`commit`](#commit) **enabled**: GitHub releases move to the end of the run, and every release body documents the
-  release commit SHA and the tag in a `### Release` section, whether or not they were pushed. With `commit.push` on,
-  releases are created **after** the push and the tag is additionally pinned to the release commit via
-  `target_commitish`. Without `push`, the SHA cannot be sent to GitHub (it does not exist on the remote yet), so GitHub
-  creates the tag ref at the default branch head until you push; the true commit and tag remain recorded in the release
-  body.
-- A package whose scripts exported [`PACKAGE_<KEY>`](../environment.md#script-outputs) overrides both modes: its release
-  documents the exported hash and sends it as `target_commitish`.
+| Mode                                          | Tag ref on GitHub                                        | Release body                                             |
+|-----------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------|
+| [`commit`](#commit) disabled (default)        | Default branch head, until CI pushes the local tag       | The notes alone                                          |
+| `commit` enabled, `push` off                  | Default branch head, until you push                      | Documents the release commit SHA and tag (`### Release`) |
+| `commit` enabled, `push` on                   | Pinned to the release commit via `target_commitish`      | Documents the release commit SHA and tag                 |
+| [`PACKAGE_<KEY>`](../environment.md#script-outputs) exported | Pinned to the exported hash via `target_commitish` | Documents the exported hash                              |
+
+In the usual CI setup with `commit` disabled (a job on the default branch, tags pushed right after the run) the branch
+head and the released commit coincide; they can differ if the run released another branch or the push never happened.
+With `commit` enabled, releases move to the end of the run and, under `push`, are created after the push, when the SHA
+exists on the remote.
 
 The export's value names the **release assets**: a whitespace-separated list of absolute paths to existing files, each
 uploaded (named after the file, `application/octet-stream`) right after the release is created, in `commit`

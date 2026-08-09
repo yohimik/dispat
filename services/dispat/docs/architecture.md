@@ -22,18 +22,18 @@ callable without a command line.
    `DISPAT_*` environment / print the pending release notes (one package's, or every pending package's in publish order
    when none is named), and stop.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
-   effective monorepo root; a file without `spaces` or `packages` — a package's in-folder override — does not end the
+   effective monorepo root; a file without `spaces` or `packages` (a package's in-folder override) does not end the
    ascent), then load and validate it (viper; unknown keys rejected; flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatignore`, names
-   unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here —
-   the top-level `packages` entry, then the folder's own dispat config file — each configured package getting a derived
+   unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here
+   (the top-level `packages` entry, then the folder's own dispat config file), each configured package getting a derived
    space value with the merged configuration (a standalone package a single-package space of its own), so everything
    downstream reads per-package behaviour without knowing the layers exist. Dependency declarations are collected from
-   every source — the root list, the entries, the in-folder files — into one merged list.
+   every source (the root list, the entries, the in-folder files) into one merged list.
 4. Build the dependency graph from the merged relations; topologically sort it (cycles abort with the members named).
 5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
-   compute direct bumps, run the three propagation phases, then versions, with every versioning group — a
-   `fixed`/`fixedSparse` space, or a declared `versionGroups` entry its members joined — versioned as one (see "Fixed
+   compute direct bumps, run the three propagation phases, then versions, with every versioning group (a
+   `fixed`/`fixedSparse` space, or a declared `versionGroups` entry its members joined) versioned as one (see "Fixed
    versioning groups" below).
 6. Print the diagnostics, then the full graph with `old -> new` versions and channel transitions, in publish order.
    `status` stops here.
@@ -110,9 +110,9 @@ The traversal is shared by both axes: breadth-first from the unit's source packa
 measured from the originating source set and never re-based on an intermediate. A package republishing as a catch-up
 does not propagate onward, so a failed publish can never enlarge what a commit releases.
 
-**Fixed versioning groups.** Packages with shared versioning are grouped by their resolved group key — the space's own
+**Fixed versioning groups.** Packages with shared versioning are grouped by their resolved group key: the space's own
 name for a `fixed`/`fixedSparse` space, or the declared `versionGroups` entry the space or package joined, so a group
-may span spaces — and each group is versioned as one virtual package, after the per-package pipeline has produced bumps,
+may span spaces. Each group is versioned as one virtual package, after the per-package pipeline has produced bumps,
 channels and pins. The group aggregates what the version computation reads: the baselines of *every* member (held ones
 included, so the shared version can never fall below a position a member already published) and the bumps, new work and
 channel movements of the members that would release. It runs that through the ordinary §13.9 computation, pins, trains
@@ -127,165 +127,28 @@ a mid-life adoption) is re-released at exactly that baseline on the next run.
 
 ## Module map
 
-```
-pkg/ccme                 the commit-message parser: units, headers, inline
-                         directives, footers, scope terms, semver. Regex-free,
-                         single pass, no backtracking; immutable and safe for
-                         concurrent use. Knows nothing of git, workspaces or
-                         versions; it parses messages.
-pkg/models               the PUBLIC configuration model (its own module): the
-                         structs a dispat.json/.yaml decodes into, with json
-                         tags mirroring the mapstructure keys so external
-                         tooling (and the black-box integration suite) can
-                         author configs as typed values and marshal them to
-                         loadable JSON. Models and pure helpers only;
-                         loading, validation and discovery stay internal to
-                         the CLI.
-pkg/manifest             the SHARED manifest vocabulary (its own module):
-                         dependency kinds spelled like the manifest fields,
-                         the requirements-file name rule and PEP 503 name
-                         normalisation: the definitions the scanner and the
-                         writer must apply identically, held in one place so
-                         the reading and writing halves cannot drift. Models
-                         and pure functions only; no I/O, no dependencies.
-pkg/scanner              manifest READER (its own module). Two manifest
-                         shapes: structured documents (package.json, go.mod,
-                         Cargo.toml, pyproject.toml (PEP 621 + Poetry, PEP
-                         503 name normalisation), composer.json, pom.xml
-                         (groupId:artifactId coordinates), *.csproj
-                         (suffix-matched; ProjectReference = local path),
-                         pubspec.yaml) and line-by-line "name specifier"
-                         files, requirements*.txt (pattern-matched; a dev/
-                         test file name maps to devDependencies). All parsed
-                         into one ecosystem-neutral shape: declared identity
-                         (name, version; line manifests have none) plus
-                         declared dependencies with their ranges, fields and
-                         local paths. Thin per-format parsers, a walking
-                         Scan (skips node_modules/vendor/target/dot-folders)
-                         and a root-only ScanRoot, both capped at 16 MiB per
-                         file; NameIndex (manifest name -> owning package,
-                         ambiguity reported, never guessed) and
-                         ResolveLocalDir shared by compute and
-                         auto-versioning. The walk skips dependency,
-                         virtual-env and build-output folders. Feeds
-                         `dispat compute` and auto-versioning. Code
-                         DSL manifests (Gemfile, build.gradle, mix.exs,
-                         Package.swift) are deliberately absent: parsing
-                         code with regexes produces wrong graphs.
-pkg/writer               manifest WRITER (its own module): format-preserving
-                         in-place edits (package.json via byte-precise JSON
-                         scalar replacement, go.mod via x/mod/modfile,
-                         requirements*.txt via per-line specifier splicing)
-                         replacing only the version text being changed.
-                         Atomic same-folder rename; reports applied and
-                         missing edits. Ecosystems without a writer are
-                         read-only here; their reconciliation belongs to a
-                         flow.version script. Shares pkg/manifest's kinds
-                         and file-name rules with the scanner.
-services/dispat/
-  main.go                thin entry point: os.Exit(cli.Run(...))
-  internal/
-    cli      the command-line controller: pflag flags, command dispatch
-             (release / status / run <script> / init / test / preview /
-             compute, with an unknown word treated as a run script name),
-             zerolog setup,
-             config file resolution and loading; then delegates to app and
-             maps its results onto exit codes
-    app      the application: App with Status, Release, RunScript
-             (the `dispat run` implementation: changed packages scheduled
-             over the dependency graph within the build budget, --on-error
-             skip/continue semantics, or one targeted package (named, or
-             inferred from the invocation directory), TestScript, Preview,
-             Compute (manifest scan -> derived edges -> suggestions diffed
-             against the config, previewed / confirmed / applied with the
-             config's dependencies array rewritten format-preservingly and
-             the previous copy backed up) and the
-             standalone InitConfig, holding recorder
-             assembly (changelog + github), diagnostic reporting and the
-             release-refusal policy, upfront remote/API verification,
-             run-level hooks (gating beforeAll; warn-only postAll +
-             commit/push hooks; all run in the repo root), finalize phase
-             (release commit, tags, push, github releases), graph printout,
-             summary; callable from any front end, not only the CLI
-    config   viper loading (UnmarshalExact + weak typing for scalar-or-pair
-             concurrency) over the public pkg/models structs (aliased, so the
-             rest of the CLI imports only this package), config file
-             resolution (the --config fallback names, in --root or ascending its
-             parents, stopping only at a file that declares spaces), initials
-             baseline versions, tag formats, commit-error policy,
-             versioning-mode, versionGroups and runScripts validation, the
-             parser-object resolution onto a ccme.Config (validated by
-             constructing a parser at load time), package discovery on the
-             filesystem (.dispatignore filtering; per-package override
-             merging — packages entries and in-folder config files — each
-             overridden package resolved onto a derived Space of its own)
-    model    shared domain types: Space (incl. Versioning mode, VersionGroup
-             + RunScripts), Package (incl. stage weights and the resolved
-             changelog/github record policies), Dependency, DepKind
-    globx    the one glob matcher scope terms, autoVersion range globs and
-             .dispatignore patterns share: "*" matches any run of bytes,
-             path separators included
-    graph    the shared dependency machinery: Scheduler[N], the incremental
-             core of Kahn's algorithm (nodes, edges, the ready frontier,
-             done -> newly-ready), used by the executor to drive its task
-             graph; and Graph, a validated string-node facade draining a
-             Scheduler through a name-ordered min-heap: O((V+E) log V),
-             deterministic output, cycle detection by leftover in-degree
-    gitx     Git interface + CLI implementation shelling out to git: TagFormat
-             (render/parse/glob, incl. {channel}/{counter} prerelease
-             spelling), one tag listing per package with peeled
-             target commits, from which Tags.Baseline and Tags.StableBaseline
-             are selections rather than second queries; merge-base ancestry,
-             commit log with
-             SHAs, parents and first-parent file lists, tag -a, checkout +
-             clean for revertOnFail rollbacks, add + commit for the release
-             commit, ls-remote verification, remote tag listing, branch +
-             tag push that skips tags already on the remote
-    plan     the planner, split by concern:
-               plan.go        windows, cancellation, holds, direct bumps,
-                              versions, fixed versioning groups, emit,
-                              diagnostics
-               propagate.go   the three propagation phases and the shared
-                              depth-bounded traversal
-               channel.go     channel derivation, proposal resolution,
-                              prerelease version computation, graduation
-               scope.go       scope-set resolution: globs, exclusions, the
-                              file-derived set by longest path prefix
-               directives.go  the ccme -> plan adapters: unit accessors,
-                              propagation knobs, version helpers
-    release  the executor: task-graph construction (version/syncLock/build/
-             publish nodes, dependency edges) over graph.Scheduler, with
-             per-stage worker budgets (syncLock's own budget defaults to 1,
-             serialising lock file regeneration), native auto-versioning at
-             the version stage (autoversion.go: pkg/scanner + pkg/writer
-             under the space's match/range/kinds/only policy, emitting
-             W192/W197/W203), skip propagation, provider-update
-             filtering, script sequences (fail-fast vs warn-only), per-stage
-             hooks, the once-per-space login gate (sync.Once keyed by space),
-             the warn-only announce frame after each publish, the warn-only
-             onFail/onSkip outcome scripts, DISPAT_* script environments incl.
-             the run-outcome and release-notes listings, the DISPAT_OUTPUT
-             export file every per-package sequence (the login included)
-             gets (parsed after the sequence, a failed one included; merged
-             onto the Release, login exports space-wide at each publish; and
-             carried into every later script's environment as DISPAT_OUTPUT_*
-             with DISPAT_OUTPUT_SOURCE_* provenance, DISPAT_EXPORT_GITHUB
-             passing through whole), line-buffered log streaming of script
-             output
-    script   Runner interface + ShellRunner (configurable shell, default
-             sh -c; injected env, cwd = package)
-    changelog entry rendering (Format with defaults) + FileWriter recorder that
-             prepends entries to the per-package changelog file
-    github   Releaser recorder: same changelog data delivered as a GitHub
-             release via POST /repos/{owner}/{repo}/releases, only for
-             packages that exported DISPAT_EXPORT_GITHUB, prereleases
-             marked as such, the export's files uploaded as release assets
-             through the created release's upload_url (invalid entries
-             skipped with a warning)
-```
+One line per package; each package's doc comment carries the full story, and the deeper design notes live in the
+sections below.
 
-Tag names are built in exactly one place, `plan.Release.TagName()`. They have to be: the name is what the *next* run
-reads a package's baseline from, so a caller rendering one differently would silently give that package no history.
+| Package | Role |
+|---|---|
+| `pkg/ccme` | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](../../../pkg/ccme/SPEC.md). |
+| `pkg/models` | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values. |
+| `pkg/manifest` | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically. |
+| `pkg/scanner` | Manifest reader (own module): nine ecosystems parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors. |
+| `pkg/writer` | Format-preserving manifest writer (own module): `package.json`, `go.mod`, `requirements*.txt`; byte-precise range and version rewrites, atomic writes. |
+| `internal/cli` | The command-line controller: flags, dispatch, exit-code mapping, logger construction. |
+| `internal/app` | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, the finalize phase and run-level hooks; wires every other package together. |
+| `internal/config` | Config resolution, loading, validation, package discovery, per-package override merging, `.dispatignore`, format-preserving config editing for `compute --write`. |
+| `internal/plan` | The planner: windows, scopes, directives, propagation, channels, fixed groups; a pure function of history, graph and configuration. |
+| `internal/graph` | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below. |
+| `internal/release` | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs. |
+| `internal/changelog` | Changelog rendering and the per-package record dispatcher. |
+| `internal/github` | The GitHub release recorder: REST calls, asset uploads, up-front verification. |
+| `internal/gitx` | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`. |
+| `internal/script` | Shell script execution with process-group cancellation and bounded pipe waits. |
+| `internal/model` | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release. |
+| `internal/globx` | The one glob matcher scope terms, `autoVersion.match` and `.dispatignore` share. |
 
 ## Graph algorithms
 
@@ -296,6 +159,8 @@ runs where.
 
 `internal/graph.TopoSort` is Kahn's algorithm over package names with one refinement: the zero-in-degree frontier is a
 **min-heap**, so ties always break alphabetically and the same graph yields the same order on every machine (§17.2).
+The heap makes the sort O((V+E) log V), which with one bounded `git tag`/`git log` query pair per package is what
+keeps planning cheap at monorepo scale.
 
 ```
     a     b        frontier = nodes with no pending providers: {a, b}
@@ -353,7 +218,7 @@ and cascade new ready nodes.
 
 Per-class queues mean a stalled class never blocks another class's budget. A node occupies as many of its class's slots
 as its package's configured weight (the per-package `concurrency` override; clamped to `[1, budget]`, so a weight past
-the budget simply runs alone). A node that does not fit waits at the head of its queue and nothing behind it overtakes —
+the budget simply runs alone). A node that does not fit waits at the head of its queue and nothing behind it overtakes it;
 the head-of-line discipline is what makes a heavy node's wait finite instead of starvable. syncLock keeps the ordinary
 cost of one: its budget exists to serialise lock-file writers, not to price packages. There are no locks in the
 scheduling hot path; a mutex guards only the shared result map that skip decisions, provider filtering and the syncLock
@@ -498,24 +363,14 @@ the specification's own §9.4/§12.4 codes.
 
 ## Testing
 
-`go test ./...` runs testify-based unit tests with in-memory fakes:
+`go test ./...` runs testify-based unit tests with in-memory fakes; every internal package and every `pkg/` module has
+its own suite. What each suite asserts, claim by claim, is catalogued in the
+[integration test plan](../../../tests/integration/docs/test-plan.md) and summarised per area in
+[test results](../../../tests/integration/docs/test-results.md); the statement-coverage snapshot per package is in
+[coverage](./coverage.md).
 
-| Package   | Coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| ccme      | Its own suite: header grammar, footers, units, diagnostics, semver, allocation and fuzz tests, plus the specification's conformance vectors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| scanner   | Its own suite: per-ecosystem parsing (npm fields and local paths, go.mod requires/replaces with the lax fallback, Cargo tables/renames/workspace degradation, PEP 621/Poetry/groups, composer, Maven coordinates and scopes, csproj precedence, pubspec overrides folded onto declarations, requirements continuations/flags/editable installs), walk-and-skip behaviour, partial results on malformed manifests, context cancellation, NameIndex/ResolveLocalDir, plus two fuzz targets over every registered parser.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| writer    | Its own suite: byte-exact format preservation for all three formats (deliberately ugly fixtures compared byte-for-byte), no-op detection via mtime, JSON escaping and mode preservation, missing fields and composite values, the shared dispatch table, the Edit.Kind whitelist, Result.Path, ErrUnsupportedManifest, plus a fuzz target proving a rewrite either errors or leaves valid JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| graph     | Ordering constraints, alphabetical determinism, cycle errors, unknown nodes; Scheduler frontier/cascade semantics (diamond joins, one-time hand-out, blocked-as-cycle, generic node types); Drain's weighted slot accounting (budget never exceeded, weight-past-budget clamping and serialisation, sub-1 weights costing one, edges respected under weights).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| globx     | The shared glob matcher's table: literals, `*` runs crossing separators, backtracking, empty patterns and inputs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| config    | Defaults (incl. `commitErrors`, `nonPackageScopes`, `tagFormat`), model-authored JSON loading with per-format smoke tests (JSON/YAML/TOML), config file resolution (fallback order, explicit names, the not-found error), flag precedence, optional scripts, scalar-or-array script references, flow/login/run-hook resolution and their unknown- and empty-reference errors, changelog/github objects, initials parsing, per-space tag formats and their validation, versioning-mode normalization and rejection, runScripts validation and case-insensitive lookup, the parser object (defaults, every option mapped onto ccme.Config, invalid values rejected at load), discovery errors (and discovery carrying versioning + runScripts onto the Space), the autoVersion object (validation errors, the full resolution mapping incl. defaults and the inert disabled block), commit.include validation, versionGroups declarations and references (invalid modes, namespace collisions, unknown and independent-space references, the mutual exclusion with versioning), per-package overrides (the tri-state pointer scalars, entry-level flow merge incl. the empty-array clear, runScripts union, the wholesale autoVersion replacement, the forbidden flow.login and path keys, script-ref and concurrency validation, record-policy overlays, unmatched/ambiguous packages keys), in-folder config files (all four formats, precedence over the packages entry, unknown keys, the nested-root refusal), .dispatignore (patterns, comments, globs), the config-resolution ascent skipping override files, and the config editor (JSON byte-splice, YAML comment preservation, TOML refusal, backups, atomic no-op writes, override blocks surviving the dependencies splice). |
-| plan      | Propagation is opt-in; caret/`^^`/`+N` depths; `^none`; `Propagate-Scope`; edge kinds; `max()` merging; scope resolution (derived, longest prefix, globs incl. the matcher's backtracking table, `*`, exclusions, unknown includes vs excludes); baselines and initials; catch-up (stale, never-released, discharge-once, no widening) and the staleness-audit duality; cancellation under all three ancestry sources (git-native, parent-pointer BFS, history rank); holds, resume and exact pins with every guard and the rejected-pin fallback; channels, trains, graduation, propagated-transition graduation, suppression and convergence; error blast radius; tag formats; the reporting accessors (Reason, counters, outputs, PossiblyBehind); fixed versioning groups (rides and W210, shared version over the max baseline, sparse members staying behind, the single shared train, space-wide pins and per-member holds, laggard alignment and its absence under fixedSparse, group isolation between two fixed spaces, propagation into a fixed space, declared groups spanning spaces, mixed-mode groups and their laggard semantics, group-named diagnostics, a package's clone opting out of its space's group).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| release   | Ordering under both `isBuildWaitingPublish` values, version-task placement, failed/skipped provider filtering, publish- and build-failure cascades, skip cascades and blocked reporting, held packages excluded, channel-only releases executed, per-stage budgets, script envs (incl. channel variables and workspace versions), the once-per-space login gate (single run, per-space not per-script, failure failing every space publish), hook ordering/environment/gating (incl. warn-only postPublish), the announce frame (order, warn-only failures, skipped on a failed publish), the onFail/onSkip outcome scripts (fired once with the failure/skip specifics, silent on success), the release-notes environment, fail-fast vs warn-only sequences, the run-outcome environment, script-less releases, recorder failures, revertOnFail at every stage, space tag formats, the DISPAT_OUTPUT exports (accumulation across scripts and hooks, both name spellings, re-export override incl. source, flow into onFail even from a failed sequence, empty listing, the NAME=value grammar with its reserved DISPAT_ names and gating-failure semantics, DISPAT_OUTPUT_SOURCE_* provenance, space-wide login exports incl. their gating parse failures, the DISPAT_EXPORT_GITHUB pass-through), and native auto-versioning (range/version rewriting against real manifests, every policy filter, failed-provider baseline fallback, rewrite-failure + revertOnFail, convergence across two runs, the W192/W197/W203/W221 diagnostics, syncLock placement, budgets, failure semantics and the skip-when-unchanged rule).                                                                                                                                                           |
-| changelog | Section/entry rendering, custom formats, file prepend, custom file/title, the fixed-ride "no changes" entry (and content beating the placeholder), the prerelease notes windowing (a prerelease renders only its fresh changeset, a graduation the whole window), the per-package dispatcher (a disabled package records nothing; an enabled one writes through its own file, title and format).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| github    | Request shape (path, auth, payload) via httptest, custom format, prerelease marking, the DISPAT_EXPORT_GITHUB gate (no export, no release, no API call), its asset uploads through the advertised upload_url (multi-file lists, names, content type, bytes, failure propagation, invalid entries skipped with a warning, empty creation bodies tolerated), API and connection errors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| script    | Default and custom shells, env injection, failure propagation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| gitx      | Against a real temporary git repo: tag round trips, baseline vs stable baseline, peeled tag commits, ancestry, commit logs carrying SHAs/parents/multi-paragraph messages, tag format render/parse/glob and custom-format resolution, scoped RevertDir, CommitDirs (incl. empty-stage no-op), VerifyRemote, pushes to a bare remote and the push skipping tags that already exist on the remote.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| app       | Unit tests of its helpers: commit-message templating, github repository/token resolution and the per-target dispatch (one releaser per distinct resolved target, disabled and unresolvable packages recording nothing, the recorder assembly), the initials mapping (case-insensitive, unmatched keys warned), the --on-error validator, the init starter configs, the git-prerequisites guard (missing git binary / missing .git), and the compute command end to end against real mini-monorepos (detection incl. cross-ecosystem matching, the name-ambiguity drop, diffing with keep/kind/stale-endpoint semantics, preview/write/interactive/check modes, backups, the TOML snippet fallback, error paths). The composition claims (release flows, hooks, finalize, records) live in the black-box `tests/integration` suite.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| cli       | Unit tests of the controller itself: the --version flag, unknown flags printing usage, command-arity and --on-error usage errors (exit 2, before any config or git), the missing-config error, the init command (a loadable starter per format, never overwriting, only at a git repository root), the logger constructor's level fallback. Full command flows are covered black-box by `tests/integration`, which drives the compiled binary.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-
-The planner's two formulations of staleness (walking down from a provider and up from a consumer) are asserted to agree,
-which is a cheap and effective conformance check on the propagation rules.
+The composition claims (the compiled binary, real git over a process boundary, exit codes, scheduling under real
+concurrency, signal handling) live exclusively in the black-box
+[integration suite](../../../tests/integration/README.md), which builds the real binary and asserts on git state, JSON
+log events and nanosecond execution timelines. `services/dispat` itself hosts no end-to-end tests; a test that could
+only be satisfied by faking what the suite can witness for real belongs there instead.

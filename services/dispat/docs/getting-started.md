@@ -124,6 +124,30 @@ dispat --version            # print the dispat version (release binaries carry
                             # the release tag's version; local builds say dev)
 ```
 
+## Reviewing a plan
+
+`dispat status` prints the plan a release would execute, without touching anything:
+
+```console
+$ dispat status
+14:02:11 INF ● changed bump=minor channel=stable dueToProviders=[] ownCommits=2 package=core reason=direct space=libs version="1.2.3 -> 1.3.0"
+14:02:11 INF ● changed bump=patch channel=stable dueToProviders=[core] ownCommits=0 package=app reason="propagated from core" space=libs version="0.8.1 -> 0.8.2"
+14:02:11 INF unchanged channel=stable package=tools space=libs version=2.0.0
+14:02:11 INF release plan ready held=0 packages=3 releasing=2
+```
+
+Four things in a plan cannot be explained by reading the commit log alone, so dispat always reports them:
+
+| Marker           | Meaning                                                                                                     |
+|------------------|-------------------------------------------------------------------------------------------------------------|
+| **catch-up**     | The package is releasing only because a dependency published in an *earlier* run. Carries that version.     |
+| **channel-only** | The package is releasing only because its channel changed. Carries both channels.                           |
+| **held**         | The package accumulated a bump but `Release-As: none` is withholding it. Carries the version it would have. |
+| **blocked**      | The package was planned and never attempted, because a dependency failed to publish.                        |
+
+A caret that reached a consumer and could not oblige it (a stable consumer of a prerelease) is reported too, so a
+directive that looks like it should have released something and did not is visible rather than silent.
+
 ## Running in CI (GitHub Actions example)
 
 ```yaml
@@ -148,39 +172,12 @@ Notes:
 
 - `fetch-depth: 0` matters. The planner reads tags and commit ranges, so it needs full history. A shallow clone is
   detected and refused (error `E196`) rather than silently planned over.
-- By default dispat creates tags locally; push them after a successful run (as above). Alternatively enable
-  `"commit": {"enabled": true, "push": true}` in the config: dispat then creates one release commit (changelogs +
-  manifest changes), places the tags on it and pushes everything itself, so the manual `git push` step can go. This
-  requires a checked-out branch (`actions/checkout` with a `ref`), remote access is verified before any work starts
-  (`commit.verify: false` skips the check), and tags already on the remote are skipped rather than failing the push.
-- Known limitation: concurrent dispat runs on the same checkout are not guarded by a lock, so serialize release
-  jobs in CI.
-- GitHub releases are created via the API for every published package whose scripts exported `DISPAT_EXPORT_GITHUB`.
-  The export is the per-package opt-in, and its value (a list of absolute paths) names the files attached as release
-  assets: `echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz" >> "$DISPAT_OUTPUT"` (an empty value releases without
-  assets; an invalid path is skipped with a warning). In release-commit mode the release body always documents the
-  release commit SHA and tag. With `commit.push` enabled, releases are created after the push and pinned to the
-  release commit via `target_commitish`; without it, GitHub creates the tag ref at the default branch head until you
-  push (the true commit and tag stay recorded in the body). Or disable releases entirely with
-  `"github": {"enabled": false}`.
-- Any script, the login included, can export values for the later scripts `GITHUB_OUTPUT`-style through
-  `$DISPAT_OUTPUT`: append `DISPAT_OUTPUT_<NAME>=value` lines and later scripts read `$DISPAT_OUTPUT_<NAME>`, with
-  `$DISPAT_OUTPUT_SOURCE_<NAME>` naming the script that exported it. See
-  [Script outputs](environment.md#script-outputs).
-- Exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
-- Run `dispat status` on pull requests to review the plan before it is a release: it prints the diagnostics, the
-  graph in publish order, and every version and channel transition, without touching anything.
-
-## Reviewing a plan
-
-Four things in a plan cannot be explained by reading the commit log alone, so dispat always reports them:
-
-| Marker           | Meaning                                                                                                     |
-|------------------|-------------------------------------------------------------------------------------------------------------|
-| **catch-up**     | The package is releasing only because a dependency published in an *earlier* run. Carries that version.     |
-| **channel-only** | The package is releasing only because its channel changed. Carries both channels.                           |
-| **held**         | The package accumulated a bump but `Release-As: none` is withholding it. Carries the version it would have. |
-| **blocked**      | The package was planned and never attempted, because a dependency failed to publish.                        |
-
-A caret that reached a consumer and could not oblige it (a stable consumer of a prerelease) is reported too, so a
-directive that looks like it should have released something and did not is visible rather than silent.
+- By default dispat creates tags locally; push them after a successful run, as above. Alternatively enable the
+  [release commit](configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then
+  creates one commit carrying the changelogs and manifest changes, places the tags on it and pushes everything
+  itself. [GitHub releases](configuration/records.md#github) are created for every published package whose scripts
+  exported `DISPAT_EXPORT_GITHUB`, with the export's file paths attached as assets; see
+  [script outputs](environment.md#script-outputs) for the export mechanism.
+- Concurrent dispat runs on the same checkout are not guarded by a lock, so serialize release jobs in CI.
+- The exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still
+  released. On pull requests, run `dispat status` to review the plan before it becomes a release.

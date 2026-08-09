@@ -11,6 +11,15 @@ Messages are parsed by [`pkg/ccme`](../../../pkg/ccme). A message holds one or m
 [footers]
 ```
 
+The type decides the bump (overridable via [`parser.types`](./configuration/parser.md#parser)):
+
+| Type                    | Bump  |
+|-------------------------|-------|
+| `feat`                  | minor |
+| `fix`, `perf`, `revert` | patch |
+| any other known type    | none  |
+| any type with `!`       | major |
+
 ## Scope sets
 
 | Term      | Resolves to                                       | Unknown name                  |

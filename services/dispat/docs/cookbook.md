@@ -473,5 +473,6 @@ core@0.2.0-beta.1
 
 The graduation releases `0.2.0`: the betas' accumulated work, minus the prerelease marker. Nothing on the train is
 counted twice. The full channel rules, including bringing consumers onto a train with `++N` and graduating a whole train
-at once, are in [Commit messages](commits.md) and
-[Versions and channels](configuration/versions.md).
+at once, are in [Commit messages](commits.md#channels-and-prereleases) and
+[Concepts](concepts.md#prereleases-and-channels); how a channel is spelled inside a tag is
+[`tagFormat`](configuration/versions.md#tagformat)'s business.

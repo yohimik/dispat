@@ -48,24 +48,39 @@ Scopes must name discovered packages; `*` means the whole workspace, a term with
 set, and a leading `-` excludes. A typo in an *include* is an error, because it would otherwise silently drop a release;
 excluding a package that no longer exists is only a warning.
 
-**Propagation is opt-in.** A plain `feat(core): ...` releases `core` and nothing else. Reach is stated per commit with
+### Propagation is opt-in
+
+A plain `feat(core): ...` releases `core` and nothing else. Reach is stated per commit with
 `^` (one edge), `^^` (all edges) or `+N`. The bump dependants take defaults to `patch`; `^minor` or a
 `Propagate:` footer changes it, `^none` disables it. `Propagate-Scope` intersects the reached set with a scope-set, so
 an internal app can be kept out of a workspace-wide change. Bumps merge by `max()`: two changed providers still produce
 one patch, and a consumer's own `feat` beats an incoming `patch`. A package never propagates onward from a bump it
 received. The originating commit's own depth is the only control, so blast radius is readable from the message.
 
-**Prereleases and channels.** A package's channel is derived from its baseline tag alone, with no side file and no
+### Prereleases and channels
+
+A package's channel is derived from its baseline tag alone, with no side file and no
 config. `@beta` on a unit puts its packages on the beta line; `@@`/`++N` propagate a channel to dependants;
 `@beta>stable` is a transition that graduates whatever still matches. A stable consumer is not dragged into a release by
 a provider's prerelease (it could not resolve it anyway): `feat(core)^@beta` releases `core` alone and reports why; to
 take the consumers along, put them on the line too with `feat(core)^@beta++1`. Trains converge on their own:
-once a package is on `beta`, a directive saying `beta` proposes nothing. Release notes follow the train's shape: each
+once a package is on `beta`, a directive saying `beta` proposes nothing.
+
+A typical train, in tags:
+
+```
+feat(core)@beta: try streaming     ->  core@1.3.0-beta.0
+fix(core): edge case               ->  core@1.3.0-beta.1
+feat(core): second feature         ->  core@1.4.0-beta.0   (the train's target recomputes)
+release(core)@stable: promote      ->  core@1.4.0
+``` Release notes follow the train's shape: each
 prerelease's changelog entry and GitHub release document only its own changeset (`beta.1` does not repeat `beta.0`'s
 notes), and the graduation collects the whole train into the one entry the stable line's readers see, while the version
 is always computed over the whole train.
 
-**Space versioning modes.** A space may declare how its packages' versions relate:
+### Space versioning modes
+
+A space may declare how its packages' versions relate:
 [`versioning`](./configuration/spaces.md#versioning) is `independent` (the default, and everything described above),
 `fixed` or `fixedSparse`. Under `fixed` the space versions as one package: a change to any member releases every member
 at one shared next version (computed over the space's highest baseline with the max bump), the space runs a single
@@ -76,14 +91,26 @@ members; the rest keep their previous versions until they change, at which point
 and file scopes keep exactly one job in these modes: deciding which changelog entries (and GitHub release notes) each
 package receives.
 
-**Release control.** `Release-As: none` holds a package: its bump is retained and reported, not released, until a later
+The same commit under each mode, for a space of `a` (changed by `feat(a)`) and `b` (unchanged, at `1.0.0`):
+
+| Mode          | `a`              | `b`                                             |
+|---------------|------------------|-------------------------------------------------|
+| `independent` | `1.1.0`          | stays `1.0.0`, not released                     |
+| `fixed`       | `1.1.0`          | `1.1.0`, released with a "no changes" entry (W210) |
+| `fixedSparse` | `1.1.0`          | stays `1.0.0` until its own next change         |
+
+### Release control
+
+`Release-As: none` holds a package: its bump is retained and reported, not released, until a later
 `Release-As: auto` resumes it at the `max()` of everything accumulated. `Release-As: <version>` pins an exact version,
 guarded against going backwards, against undershooting what the commits require, and against a major jump of more than
 one. `cancel(pkg)` discards unreleased metadata for a package; it never reaches an already-published tag.
 
 ## Failure and recovery
 
-**When a provider fails or is skipped.** Failures never abort the run. A provider that failed at any stage (version,
+### When a provider fails or is skipped
+
+Failures never abort the run. A provider that failed at any stage (version,
 build or publish) or was skipped taints its consumers: they are skipped unless they have a release reason of their own,
 meaning their own conventional commits or another changed provider that did publish successfully. This holds in both
 `isBuildWaitingPublish` modes; a consumer's publish always waits for its providers' publishes, so even a consumer that
@@ -95,7 +122,9 @@ variables, and if none remain the version script is not executed at all. Spaces 
 additionally roll back all local changes inside a failing package's folder (tracked files restored, untracked files
 removed), so a half-finished release leaves no residue in the worktree.
 
-**Catch-up: failed consumers are never lost.** Publishing is not atomic, so a run can end with some packages published
+### Catch-up: failed consumers are never lost
+
+Publishing is not atomic, so a run can end with some packages published
 and others not. Catch-up is not a repair pass bolted on for that case; it is what the ordinary rule does when asked
 against the right window. A commit propagates to a dependant exactly while *the dependant's own* window still contains
 it, which does not change when the provider releases. So a consumer that missed a run is still owed its release on the

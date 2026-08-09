@@ -3,8 +3,8 @@
 A deliberately lightweight manifest reader: thin per-format parsers turning dependency manifests into one
 ecosystem-neutral shape: the package's declared identity (name, version) and its declared dependencies with their
 ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no network. The goal is to
-support **all package managers**; the shared vocabulary (dependency kinds, the file-name rules) lives in [
-`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can never drift apart. It only reads;
+support **all package managers**; the shared vocabulary (dependency kinds, the file-name rules) lives in
+[`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can never drift apart. It only reads;
 rewriting is the writer's job. This is the library behind
 `dispat compute` (deriving a monorepo's dependency graph from its manifests) and the executor's native auto-versioning.
 
