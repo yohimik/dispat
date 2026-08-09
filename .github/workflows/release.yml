@@ -1,11 +1,12 @@
 name: Release
 
-# Trigger only when a release tag of the CLI is pushed: dispat's own tag
-# format, "services/dispat@<version>" (e.g. services/dispat@1.0.0-rc.0).
+# Trigger only when a release tag of the CLI is pushed: the Go-module-style
+# tag dispat's own config renders, "services/dispat/v<version>"
+# (e.g. services/dispat/v1.0.0-rc.0).
 on:
   push:
     tags:
-      - 'services/dispat@*'
+      - 'services/dispat/v*'
 
 permissions:
   contents: write
@@ -73,9 +74,9 @@ jobs:
           CGO_ENABLED: 0
         run: |
           # The version baked into `dispat --version`: the tag's version
-          # section (services/dispat@1.0.0-rc.0 -> 1.0.0-rc.0). Local builds
+          # section (services/dispat/v1.0.0-rc.0 -> 1.0.0-rc.0). Local builds
           # default to "dev".
-          VERSION="${GITHUB_REF_NAME#*@}"
+          VERSION="${GITHUB_REF_NAME##*/v}"
           mkdir -p dist
           OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
           go build -C services/dispat -trimpath \
@@ -105,7 +106,7 @@ jobs:
         run: ls -lh dist
 
       - name: Resolve the version from the tag
-        run: echo "VERSION=${GITHUB_REF_NAME#*@}" >> "$GITHUB_ENV"
+        run: echo "VERSION=${GITHUB_REF_NAME##*/v}" >> "$GITHUB_ENV"
 
       - name: Create release and upload binaries
         uses: softprops/action-gh-release@v2

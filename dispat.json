@@ -1,25 +1,32 @@
 {
   "scripts": {
-    "build-go-library": "git tag $DISPAT_TAG && git push origin $DISPAT_TAG",
-    "revert-go-library": "git push origin --delete $DISPAT_TAG",
-    "publish": "echo publish $DISPAT_PACKAGE@$DISPAT_NEW_VERSION"
+    "go-mod-tidy": "go mod tidy",
+    "push-tag": "git push origin $DISPAT_TAG",
+    "delete-remote-tag": "git push origin --delete $DISPAT_TAG"
   },
   "spaces": {
     "pkg": {
-      "tagFormat": "pkg/{package}/v${version}",
+      "tagFormat": "pkg/{name}/v{version}",
       "path": "pkg",
-      "flow": {
-        "publish": "build-go-library",
-        "onFail": "revert-go-library"
-      },
       "autoVersion": {
-        "enabled": true
+        "enabled": true,
+        "syncLock": ["go-mod-tidy"]
+      },
+      "flow": {
+        "postPublish": "push-tag",
+        "onFail": "delete-remote-tag"
       }
     },
     "services": {
-      "tagFormat": "services/{package}/v${version}",
+      "tagFormat": "services/{name}/v{version}",
       "path": "services",
+      "autoVersion": {
+        "enabled": true,
+        "syncLock": ["go-mod-tidy"]
+      },
       "flow": {
+        "postPublish": "push-tag",
+        "onFail": "delete-remote-tag"
       }
     }
   },
