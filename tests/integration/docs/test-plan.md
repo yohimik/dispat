@@ -55,6 +55,12 @@ The suite was designed against twelve goals, one test file each:
     convergence, per-package changelog/GitHub record policies, the concurrency weight serialising a heavyweight build
     on the tsmark timeline, the config ascent walking past an in-folder file for the run shorthand, and run scripts
     defined only in an override (both layers).
+13. **The top-level `packages` section: standalone packages and package dependencies** (`packages_test.go`): a
+    `packages` entry with a `path` releasing as a full package outside every space (own flow, tag, changelog, and
+    convergence), the standalone path config errors (escaping the root, naming no folder), provider lists declared in
+    a `packages` entry or an in-folder config file ordering the graph like top-level edges, and `dispat compute`
+    editing each declaration where it lives: removals applied to the declaring package config (in-folder file or the
+    nested entry list, each with its own backup) while manifest-detected additions land in the root list.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -312,6 +318,16 @@ away instead of one binary invocation.)
 | `TestOverridesPackageConcurrencyWeight`       | A package whose `concurrency` equals the build budget occupies it whole: its build overlaps no other build on the tsmark timeline while the ordinary packages stay free to overlap each other.                                                            |
 | `TestOverridesRunShorthandFromPackageFolder`  | The config ascent walks past the package's own (spaces-less) override file to the monorepo root, so the run shorthand keeps working from inside a package folder that carries one.                                                                        |
 | `TestOverridesRunScriptOnlyInPackage`         | A run script defined only in a package's in-folder file (found through discovery) or only in a `packages` entry (found in the loaded config) runs in that package alone; a name defined nowhere stays a hard error.                                       |
+
+### Goal 13: the top-level `packages` section (`packages_test.go`)
+
+| Test                                   | Claim proven                                                                                                                                                                                                                                              |
+|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestPackagesStandalonePath`           | An entry with a `path` releases as a full package outside the space folders: its own flow runs in its own folder, it tags under the repository format, writes its changelog, leaves the space packages untouched, and a second run converges.             |
+| `TestPackagesStandaloneConfigErrors`   | A standalone path escaping the repository fails the load; a path naming no folder fails discovery with the folder named — both before anything is released.                                                                                              |
+| `TestPackagesDependencyEdges`          | Provider lists declared in a `packages` entry and in an in-folder config file order the graph exactly like top-level edges (`status` dependsOn proves it).                                                                                               |
+| `TestPackagesComputeRemoveFromInFolder`| A stale in-folder edge is suggested with its declaring file named, `--check` gates on it, and `--write` removes it from that file (other keys intact, own `.backup`) while a manifest-detected addition still lands in the root list.                     |
+| `TestPackagesComputeRemoveFromEntry`   | A stale edge under `packages.<name>.dependencies` in the root config is emptied in place — the entry's other keys and the rest of the file survive — and the gate converges.                                                                             |
 
 ## Regression fences
 

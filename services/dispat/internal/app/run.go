@@ -85,21 +85,20 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 			defined = true
 			break
 		}
-		for _, po := range sc.Packages {
-			if _, ok := po.RunScripts[strings.ToLower(name)]; ok {
-				defined = true
-				break
-			}
-		}
+	}
+	for _, po := range a.cfg.Packages {
 		if defined {
 			break
+		}
+		if _, ok := po.RunScripts[strings.ToLower(name)]; ok {
+			defined = true
 		}
 	}
 	if !defined {
 		// A script defined only in a package folder's own config file is not
 		// in the loaded config at all; discovery reads those files, so the
 		// typo guard consults it before rejecting.
-		if pkgs, err := config.DiscoverPackages(a.cfg, a.root); err == nil {
+		if pkgs, _, err := config.DiscoverPackages(a.cfg, a.root); err == nil {
 			for _, p := range pkgs {
 				if _, ok := p.Space.RunScripts[strings.ToLower(name)]; ok {
 					defined = true

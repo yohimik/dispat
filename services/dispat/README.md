@@ -91,7 +91,8 @@ Start with [Getting started](./docs/getting-started.md), then dip into the refer
 | [Concepts](./docs/concepts.md)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.    |
 | [CLI](./docs/cli.md)                                     | Every command, flag and exit code.                                           |
 | [Configuration file](./docs/configuration/README.md)     | Top-level options, script sequences, run-level hooks; links the pages below. |
-| [Spaces](./docs/configuration/spaces.md)                 | Space options, stages and hooks, versioning modes and groups, run scripts, per-package overrides, `.dispatignore`. |
+| [Spaces](./docs/configuration/spaces.md)                 | Space options, stages and hooks, versioning modes and groups, run scripts, `.dispatignore`. |
+| [Packages](./docs/configuration/packages.md)             | Per-package overrides, standalone packages, package dependencies, in-folder config files. |
 | [Tags and baselines](./docs/configuration/versions.md)   | `tagFormat` and `initials`.                                                  |
 | [Release records](./docs/configuration/records.md)       | Changelogs, GitHub releases, the release commit.                             |
 | [Commit parsing options](./docs/configuration/parser.md) | `commitErrors`, `nonPackageScopes`, the `parser` object.                     |

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -20,18 +21,33 @@ var ErrTOMLEdit = errors.New("a TOML config cannot be rewritten in place")
 // BackupSuffix is appended to the config file name for the pre-edit copy.
 const BackupSuffix = ".backup"
 
-// ReplaceDependencies rewrites only the `dependencies` key of the config file
-// at path, leaving every other byte of a JSON config (formatting, key order,
-// comments) untouched; a YAML config keeps its comments but is re-encoded, so
-// unrelated formatting may reflow. The previous bytes are saved at path +
+// ReplaceDependencies rewrites only the dependency list at keyPath of the
+// config file at path — ["dependencies"] for the file's own top-level list,
+// ["packages", <key>, "dependencies"] for a packages entry of the root
+// config — leaving every other byte of a JSON config (formatting, key order,
+// comments) untouched; a YAML config keeps its comments but is re-encoded,
+// so unrelated formatting may reflow, and a shorthand-authored list comes
+// back in the canonical object form. The previous bytes are saved at path +
 // BackupSuffix first, and the write itself is atomic (temp + rename). TOML
 // returns ErrTOMLEdit.
 //
-// The file is re-read here: deps must be the caller's complete intended list,
-// and an edit made to the file by someone else between the caller's read and
-// this call is overwritten for the `dependencies` key (every other key keeps
+// The file is re-read here: deps must be the caller's complete intended
+// list, and an edit made to the file by someone else between the caller's
+// read and this call is overwritten for that one key (every other key keeps
 // the concurrent edit).
-func ReplaceDependencies(path string, deps []DependencyConfig) error {
+func ReplaceDependencies(path string, keyPath []string, deps []DependencyConfig) error {
+	return replaceKey(path, keyPath, deps)
+}
+
+// ReplaceStringList is ReplaceDependencies for the package-level dependency
+// shape: a plain list of provider names.
+func ReplaceStringList(path string, keyPath []string, items []string) error {
+	return replaceKey(path, keyPath, items)
+}
+
+// replaceKey rewrites the value at keyPath of the config file at path with
+// the rendered value, backing the previous bytes up and writing atomically.
+func replaceKey(path string, keyPath []string, value any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -39,9 +55,9 @@ func ReplaceDependencies(path string, deps []DependencyConfig) error {
 	var out []byte
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".json":
-		out, err = replaceDepsJSON(data, deps)
+		out, err = replaceValueJSON(data, keyPath, value)
 	case ".yaml", ".yml":
-		out, err = replaceDepsYAML(data, deps)
+		out, err = replaceValueYAML(data, keyPath, value)
 	case ".toml":
 		return ErrTOMLEdit
 	default:
@@ -120,33 +136,56 @@ func RenderDependenciesTOML(deps []DependencyConfig) (string, error) {
 	return string(out), err
 }
 
-// replaceDepsJSON splices a re-rendered dependencies array over the existing
-// one (or appends the key when absent), byte-precise outside the array.
-func replaceDepsJSON(data []byte, deps []DependencyConfig) ([]byte, error) {
+// RenderStringListTOML renders a package-level dependency list at its key
+// path — the paste-ready fallback for TOML configs.
+func RenderStringListTOML(keyPath []string, items []string) (string, error) {
+	var wrapped any = items
+	for i := len(keyPath) - 1; i >= 0; i-- {
+		wrapped = map[string]any{keyPath[i]: wrapped}
+	}
+	out, err := toml.Marshal(wrapped)
+	return string(out), err
+}
+
+// emptyList reports a zero-length (or nil) slice value, which must render as
+// "[]" rather than "null".
+func emptyList(value any) bool {
+	v := reflect.ValueOf(value)
+	return v.Kind() == reflect.Slice && v.Len() == 0
+}
+
+// replaceValueJSON splices a re-rendered value over the existing one at
+// keyPath (or appends a top-level key when absent), byte-precise outside the
+// spliced span.
+func replaceValueJSON(data []byte, keyPath []string, value any) ([]byte, error) {
 	indent := detectJSONIndent(data)
-	rendered, err := json.MarshalIndent(deps, indent, indent)
+	rendered, err := json.MarshalIndent(value, strings.Repeat(indent, len(keyPath)), indent)
 	if err != nil {
 		return nil, err
 	}
-	if len(deps) == 0 {
+	if emptyList(value) {
 		rendered = []byte("[]")
 	}
 
-	start, end, closing, err := jsonDependenciesSpan(data)
+	start, end, closing, err := jsonKeySpan(data, keyPath)
 	if err != nil {
 		return nil, err
 	}
 	if start >= 0 {
 		return splice(data, start, end, rendered), nil
 	}
-	// No dependencies key: append it as the last member, before the object's
-	// closing brace. A separating comma is needed unless the object is empty.
+	// No such key: append it as the object's last member, before the closing
+	// brace. Only a top-level key may be created — nested paths are only ever
+	// edited, and their absence would be a caller bug.
+	if len(keyPath) != 1 {
+		return nil, fmt.Errorf("key %s not found", strings.Join(keyPath, "."))
+	}
 	head := bytes.TrimRight(data[:closing], " \t\n\r")
 	sep := ",\n" + indent
 	if bytes.HasSuffix(head, []byte("{")) {
 		sep = "\n" + indent
 	}
-	entry := sep + `"dependencies": ` + string(rendered) + "\n"
+	entry := sep + `"` + keyPath[0] + `": ` + string(rendered) + "\n"
 	return splice(data, int64(len(head)), closing, []byte(entry)), nil
 }
 
@@ -158,10 +197,12 @@ func splice(data []byte, start, end int64, repl []byte) []byte {
 	return append(out, data[end:]...)
 }
 
-// jsonDependenciesSpan tokenises the file and returns the byte span of the
-// top-level "dependencies" value, or start = -1 with the offset of the
-// object's closing brace when the key is absent.
-func jsonDependenciesSpan(data []byte) (start, end, closing int64, err error) {
+// jsonKeySpan tokenises the file and returns the byte span of the value at
+// keyPath (keys matched case-insensitively, descending through nested
+// objects), or start = -1 with the offset of the top-level object's closing
+// brace when a single absent top-level key is asked for. An absent ancestor
+// is an error.
+func jsonKeySpan(data []byte, keyPath []string) (start, end, closing int64, err error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	tok, err := dec.Token()
@@ -171,39 +212,62 @@ func jsonDependenciesSpan(data []byte) (start, end, closing int64, err error) {
 	if tok != json.Delim('{') {
 		return 0, 0, 0, errors.New("top level is not an object")
 	}
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return 0, 0, 0, err
-		}
-		key, _ := keyTok.(string)
-		afterKey := dec.InputOffset()
-		if !strings.EqualFold(key, "dependencies") {
+	path := keyPath
+	for {
+		descended := false
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return 0, 0, 0, err
+			}
+			key, _ := keyTok.(string)
+			afterKey := dec.InputOffset()
+			if !strings.EqualFold(key, path[0]) {
+				if err := skipJSONValue(dec); err != nil {
+					return 0, 0, 0, err
+				}
+				continue
+			}
+			if len(path) > 1 {
+				tok, err := dec.Token()
+				if err != nil {
+					return 0, 0, 0, err
+				}
+				if tok != json.Delim('{') {
+					return 0, 0, 0, fmt.Errorf("key %q is not an object", path[0])
+				}
+				path = path[1:]
+				descended = true
+				break
+			}
 			if err := skipJSONValue(dec); err != nil {
 				return 0, 0, 0, err
 			}
+			start := afterKey
+			for start < int64(len(data)) && (data[start] == ':' || data[start] == ' ' ||
+				data[start] == '\t' || data[start] == '\n' || data[start] == '\r') {
+				start++
+			}
+			return start, dec.InputOffset(), 0, nil
+		}
+		if descended {
 			continue
 		}
-		if err := skipJSONValue(dec); err != nil {
+		// The current object holds no matching key.
+		if len(keyPath) > 1 {
+			return 0, 0, 0, fmt.Errorf("key %s not found", strings.Join(keyPath, "."))
+		}
+		// The next token is the top-level object's closing brace.
+		before := dec.InputOffset()
+		if _, err := dec.Token(); err != nil {
 			return 0, 0, 0, err
 		}
-		start := afterKey
-		for start < int64(len(data)) && (data[start] == ':' || data[start] == ' ' ||
-			data[start] == '\t' || data[start] == '\n' || data[start] == '\r') {
-			start++
+		closing = dec.InputOffset() - 1
+		if closing < before {
+			closing = before
 		}
-		return start, dec.InputOffset(), 0, nil
+		return -1, -1, closing, nil
 	}
-	// The next token is the object's closing brace.
-	before := dec.InputOffset()
-	if _, err := dec.Token(); err != nil {
-		return 0, 0, 0, err
-	}
-	closing = dec.InputOffset() - 1
-	if closing < before {
-		closing = before
-	}
-	return -1, -1, closing, nil
 }
 
 // skipJSONValue consumes one value, balancing nested delimiters.
@@ -241,10 +305,10 @@ func detectJSONIndent(data []byte) string {
 	return "  "
 }
 
-// replaceDepsYAML swaps the document's top-level `dependencies` value node
-// (appending the key when absent) and re-encodes; yaml.v3 nodes carry their
-// comments, so the rest of the file survives the round trip.
-func replaceDepsYAML(data []byte, deps []DependencyConfig) ([]byte, error) {
+// replaceValueYAML swaps the document's value node at keyPath (appending an
+// absent top-level key) and re-encodes; yaml.v3 nodes carry their comments,
+// so the rest of the file survives the round trip.
+func replaceValueYAML(data []byte, keyPath []string, value any) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
@@ -252,22 +316,37 @@ func replaceDepsYAML(data []byte, deps []DependencyConfig) ([]byte, error) {
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, errors.New("top level is not a mapping")
 	}
-	var value yaml.Node
-	if err := value.Encode(deps); err != nil {
+	var rendered yaml.Node
+	if err := rendered.Encode(value); err != nil {
 		return nil, err
 	}
-	root := doc.Content[0]
-	replaced := false
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if strings.EqualFold(root.Content[i].Value, "dependencies") {
-			root.Content[i+1] = &value
-			replaced = true
+	node := doc.Content[0]
+	for depth, key := range keyPath {
+		last := depth == len(keyPath)-1
+		found := false
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if !strings.EqualFold(node.Content[i].Value, key) {
+				continue
+			}
+			if last {
+				node.Content[i+1] = &rendered
+			} else {
+				node = node.Content[i+1]
+				if node.Kind != yaml.MappingNode {
+					return nil, fmt.Errorf("key %q is not a mapping", key)
+				}
+			}
+			found = true
 			break
 		}
-	}
-	if !replaced {
-		key := &yaml.Node{Kind: yaml.ScalarNode, Value: "dependencies"}
-		root.Content = append(root.Content, key, &value)
+		if !found {
+			// Only a top-level key may be created; see replaceValueJSON.
+			if len(keyPath) != 1 {
+				return nil, fmt.Errorf("key %s not found", strings.Join(keyPath, "."))
+			}
+			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
+			node.Content = append(node.Content, keyNode, &rendered)
+		}
 	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

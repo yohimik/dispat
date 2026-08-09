@@ -18,7 +18,7 @@ literal:
 Exactly one `{version}` is required (none leaves every version indistinguishable, more than one makes parsing
 ambiguous), and every format is validated at load time, including a render-and-read-back round trip. `{name}` may appear
 any number of times, including none. The repository-wide format is overridable per space and, through a
-[per-package override](./spaces.md#per-package-overrides), per package.
+[per-package entry](./packages.md), per package.
 
 | Format                         | Example tag            |
 |--------------------------------|------------------------|

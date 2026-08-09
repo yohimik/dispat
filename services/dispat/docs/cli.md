@@ -21,7 +21,7 @@ dispat [command] [flags]
 | Flag            | Default     | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |-----------------|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--root`        | `.`         | Where to start config resolution, usually where you stand. The *effective* monorepo root is the directory the config file is found in (see `--config`), so the CLI works from inside a package folder.                                                                                                                                                                                                                                                                                            |
-| `--config`      | auto        | Config file name, relative to `--root`. When not set, the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in `--root` is used, or, failing that, the first found in any parent directory up to the filesystem root — a found file only stops the ascent when it declares `spaces`, so a package's own [in-folder override file](./configuration/spaces.md#in-folder-configuration-files) never masquerades as the root config; an explicit name is used as-is (no fallback, no ascent). |
+| `--config`      | auto        | Config file name, relative to `--root`. When not set, the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in `--root` is used, or, failing that, the first found in any parent directory up to the filesystem root — a found file only stops the ascent when it declares `spaces` or `packages`, so a package's own [in-folder override file](./configuration/packages.md#in-folder-configuration-files) never masquerades as the root config; an explicit name is used as-is (no fallback, no ascent). |
 | `--concurrency` | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                                                                                                                                                                                                                                                                                                             |
 | `--on-error`    | `skip`      | `run` only: what a failing script does to the failed package's dependents. `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure.                                                                                                                                                                                                                                                                                                                 |
 | `--since`, `-s` |             | `run` only: select the packages **the commits since a git revision address** instead of the release window: `HEAD~1` (the last commit), `origin/main` (this branch's own commits), a release tag, or `all` for every package. Selection follows the planner's scope semantics: a commit's written scopes are authoritative, and only scopeless units fall back to the files they changed (§6.2). Graph ordering and output carrying still apply; mutually exclusive with an explicit `[package]`. |
@@ -39,7 +39,10 @@ Flag precedence (via viper): explicitly set flag > config file > flag default > 
 ## The compute command
 
 `dispat compute` reads what every package already declares about its dependencies and turns it into the config's
-`dependencies` list, so the graph does not have to be maintained by hand.
+declared edges, so the graph does not have to be maintained by hand. It diffs the manifests against the **merged**
+declaration list: the top-level `dependencies` key plus every
+[package-declared list](./configuration/packages.md#package-dependencies) (a `packages` entry's or an in-folder
+config file's).
 
 **What it reads.** Every package folder is scanned for manifests: `package.json`, `go.mod`, `Cargo.toml`,
 `pyproject.toml` (PEP 621 and Poetry), `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml` and
@@ -52,19 +55,26 @@ are PEP 503-normalised, Maven names are `groupId:artifactId`), then by a declare
 
 **What it suggests.** Three kinds of change, each printed with the manifest line that motivates it:
 
-- `+ add` for a detected pair the config does not declare;
+- `+ add` for a detected pair no source declares;
 - `~ kind` for a declared pair whose `kind` disagrees with the manifests;
 - `- remove` for a declared pair no manifest supports. Removal is only suggested when the consumer actually has
   parsed manifests, plus, unconditionally, when an edge names a package that no longer exists on disk (the one drift
   every other command refuses to load). An edge marked `keep: true` is never suggested for removal: the escape hatch
-  for deliberate relations no manifest declares, a Docker image chain being the usual one.
+  for deliberate relations no manifest declares, a Docker image chain being the usual one. A package-declared edge
+  cannot carry `keep`; redeclaring it in the top-level list with `keep: true` silences the suggestion the same way.
+
+A suggestion against a package-declared edge names its source (`[packages/core/dispat.json: dependencies[0]]`), so
+the listing says which file an applied change would touch.
 
 **How changes are applied.** Nothing is written by default. `--write` applies every suggestion, `--interactive` asks
-`y`/`N` per suggestion on stdin, and either way the previous config is first copied to `<name>.backup` (an untracked
-file worth a `.gitignore` entry; it is overwritten on every applying run). The write itself is atomic. A TOML config
-is not rewritten in place: `--write` prints paste-ready `[[dependencies]]` blocks and fails instead. `--check`
-overrides both apply modes: it writes nothing and exits `1` when any suggestion exists, which is the CI gate for a
-config lagging the manifests.
+`y`/`N` per suggestion on stdin. Each change is applied to the file that holds the declaration: additions append to
+the root config's top-level `dependencies` list, a removal edits the declaring source — the root list, the
+`packages.<name>.dependencies` entry, or the package's own in-folder config file — and a kind correction on a
+package-declared edge moves it to the root list (the provider-string form cannot carry a kind). Every edited file is
+first copied to `<name>.backup` (untracked files worth a `.gitignore` entry; overwritten on every applying run), and
+each write is atomic. A TOML file is not rewritten in place: `--write` prints a paste-ready block for it and fails
+instead. `--check` overrides both apply modes: it writes nothing and exits `1` when any suggestion exists across any
+source, which is the CI gate for a config lagging the manifests.
 
 ## Exit codes
 

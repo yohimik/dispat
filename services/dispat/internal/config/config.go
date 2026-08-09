@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -144,12 +145,12 @@ var DefaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dis
 // effective monorepo root.
 //
 // A package folder may carry a dispat config file of its own — its override
-// layer — so a found file only ends the ascent when it declares spaces (or
-// cannot be read at all, because a broken root config must fail in Load, not
-// be silently skipped). When no file on the way up declares spaces, the
-// first file found is returned anyway: the "at least one space" error it
-// produces names the real mistake. When nothing is found, the error says so
-// and names every candidate tried.
+// layer — so a found file only ends the ascent when it declares spaces or
+// packages (or cannot be read at all, because a broken root config must fail
+// in Load, not be silently skipped). When no file on the way up declares
+// either, the first file found is returned anyway: the "at least one space
+// or package" error it produces names the real mistake. When nothing is
+// found, the error says so and names every candidate tried.
 func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
 	if explicit {
 		return filepath.Join(root, name), root, nil
@@ -197,17 +198,17 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 }
 
 // isRootConfig reports whether the file is a monorepo root configuration —
-// it declares spaces — rather than a package's in-folder override file. A
-// file viper cannot read counts as a root config: Load is where a broken
-// config fails loudly, and skipping it to use a parent's file would hide the
-// breakage.
+// it declares spaces or packages — rather than a package's in-folder
+// override file. A file viper cannot read counts as a root config: Load is
+// where a broken config fails loudly, and skipping it to use a parent's file
+// would hide the breakage.
 func isRootConfig(path string) bool {
 	v := viper.New()
 	v.SetConfigFile(path)
 	if err := v.ReadInConfig(); err != nil {
 		return true
 	}
-	return v.IsSet("spaces")
+	return v.IsSet("spaces") || v.IsSet("packages")
 }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
@@ -232,8 +233,17 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 
 	var cfg File
 	// UnmarshalExact rejects unknown keys, catching config typos early.
-	// WeaklyTypedInput lets a scalar concurrency value decode into the slice.
-	weak := func(dc *mapstructure.DecoderConfig) { dc.WeaklyTypedInput = true }
+	// WeaklyTypedInput lets a scalar concurrency value decode into the slice,
+	// and the shorthand hook expands {consumer: provider(s)} dependency items
+	// into full entries before decoding.
+	weak := func(dc *mapstructure.DecoderConfig) {
+		dc.WeaklyTypedInput = true
+		if dc.DecodeHook != nil {
+			dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(dependencyShorthandHook, dc.DecodeHook)
+		} else {
+			dc.DecodeHook = mapstructure.DecodeHookFunc(dependencyShorthandHook)
+		}
+	}
 	if err := v.UnmarshalExact(&cfg, weak); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
@@ -241,6 +251,101 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// dependenciesType is the decode target the shorthand hook watches for: the
+// top-level `dependencies` list.
+var dependenciesType = reflect.TypeOf([]public.DependencyConfig(nil))
+
+// dependencyShorthandHook expands shorthand items of the `dependencies`
+// array before decoding. A full entry is an object carrying a `consumer` or
+// `provider` key; any other object is shorthand — each key a consumer name,
+// its value a provider name or array of names — and expands to one full
+// entry per provider. Viper lowercases map keys, so shorthand consumer names
+// are matched like every other name-keyed map in the config.
+func dependencyShorthandHook(_, to reflect.Type, data any) (any, error) {
+	if to != dependenciesType {
+		return data, nil
+	}
+	items, ok := data.([]any)
+	if !ok {
+		return data, nil
+	}
+	out := make([]any, 0, len(items))
+	for i, item := range items {
+		m, ok := stringKeyMap(item)
+		if !ok || isEdgeObject(m) {
+			out = append(out, item)
+			continue
+		}
+		consumers := make([]string, 0, len(m))
+		for k := range m {
+			consumers = append(consumers, k)
+		}
+		sort.Strings(consumers)
+		for _, consumer := range consumers {
+			providers, ok := providerNames(m[consumer])
+			if !ok {
+				return nil, fmt.Errorf(
+					"dependencies[%d]: %q wants a provider name or an array of names", i, consumer)
+			}
+			for _, p := range providers {
+				out = append(out, map[string]any{"consumer": consumer, "provider": p})
+			}
+		}
+	}
+	return out, nil
+}
+
+// stringKeyMap normalizes the two map shapes config formats decode into.
+func stringKeyMap(v any) (map[string]any, bool) {
+	switch m := v.(type) {
+	case map[string]any:
+		return m, true
+	case map[any]any:
+		out := make(map[string]any, len(m))
+		for k, val := range m {
+			s, ok := k.(string)
+			if !ok {
+				return nil, false
+			}
+			out[s] = val
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// isEdgeObject reports whether a dependencies item is a full edge object
+// rather than a consumer-keyed shorthand.
+func isEdgeObject(m map[string]any) bool {
+	for k := range m {
+		switch strings.ToLower(k) {
+		case "consumer", "provider":
+			return true
+		}
+	}
+	return false
+}
+
+// providerNames reads a shorthand value: one provider name or an array of
+// names.
+func providerNames(v any) ([]string, bool) {
+	switch x := v.(type) {
+	case string:
+		return []string{x}, true
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			s, ok := e.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 // resolveParser maps the config's `parser` object onto a ccme.Config. Unset
@@ -376,8 +481,11 @@ func fillOptional(c *File) {
 // that everything is validated before Discover consumes any of it.
 func validate(c *File) error {
 	fillOptional(c)
-	if len(c.Spaces) == 0 {
-		return errors.New("at least one space is required")
+	if len(c.Spaces) == 0 && len(c.Packages) == 0 {
+		return errors.New("at least one space or package is required")
+	}
+	if err := validatePackageEntries(c); err != nil {
+		return err
 	}
 	if err := validateVersionGroups(c); err != nil {
 		return err
@@ -636,11 +744,57 @@ func resolveInitials(c *File) error {
 	return nil
 }
 
-// Discover walks every space folder and returns the packages found inside,
-// plus the validated dependency edges. Every direct sub-folder of a space is a
-// package named after the folder; names must be unique across all spaces.
+// DepSource locates where a dependency edge was declared, so `dispat
+// compute` can edit the exact file (and key) holding it.
+type DepSource struct {
+	// File is the config file holding the declaration; empty means the
+	// loaded root config itself.
+	File string
+	// KeyPath is the key path of the list inside that file:
+	// ["dependencies"], or ["packages", <key>, "dependencies"] for a
+	// packages entry of the root config.
+	KeyPath []string
+	// Index is the entry's position within that list.
+	Index int
+}
+
+// Label renders the source for error messages and suggestion listings:
+// "dependencies[2]", `packages["core"]: dependencies[0]`, or
+// "packages/core/dispat.json: dependencies[0]".
+func (s DepSource) Label() string {
+	var b strings.Builder
+	if s.File != "" {
+		b.WriteString(s.File)
+		b.WriteString(": ")
+	}
+	if len(s.KeyPath) == 3 {
+		fmt.Fprintf(&b, "packages[%q]: ", s.KeyPath[1])
+	}
+	fmt.Fprintf(&b, "dependencies[%d]", s.Index)
+	return b.String()
+}
+
+// IsRootList reports whether the source is the root config's own top-level
+// `dependencies` list — the one place compute appends additions to.
+func (s DepSource) IsRootList() bool {
+	return s.File == "" && len(s.KeyPath) == 1
+}
+
+// DeclaredDependency is one dependency edge with its declaration source. A
+// package-level declaration is already normalized: the consumer is the
+// declaring package and the kind is empty (the default).
+type DeclaredDependency struct {
+	DependencyConfig
+	Source DepSource
+}
+
+// Discover walks every space folder and returns the packages found inside
+// (standalone `packages` entries included), plus the validated dependency
+// edges merged from every declaration source. Every direct sub-folder of a
+// space is a package named after the folder; names must be unique across all
+// spaces.
 func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error) {
-	pkgs, err := DiscoverPackages(c, root)
+	pkgs, declared, err := DiscoverPackages(c, root)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -649,17 +803,17 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		owner[p.Name] = true
 	}
 
-	deps := make([]model.Dependency, 0, len(c.Dependencies))
-	for i, d := range c.Dependencies {
+	deps := make([]model.Dependency, 0, len(declared))
+	for _, d := range declared {
 		if !owner[d.Consumer] {
-			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown consumer package %q", i, d.Consumer)
+			return nil, nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
 		}
 		if !owner[d.Provider] {
-			return nil, nil, fmt.Errorf("config: dependencies[%d]: unknown provider package %q", i, d.Provider)
+			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {
-			return nil, nil, fmt.Errorf("config: dependencies[%d]: %w", i, err)
+			return nil, nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
 		}
 		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
 	}
@@ -667,16 +821,19 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 }
 
 // DiscoverPackages is Discover without the dependency-list validation: the
-// packages that exist on disk, whatever the `dependencies` key says. It exists
-// for `dispat compute`, whose whole job includes suggesting the removal of
-// edges naming packages that no longer exist — edges Discover must refuse.
+// packages that exist on disk plus every declared dependency edge with its
+// source, whatever the declarations say. It exists for `dispat compute`,
+// whose whole job includes suggesting the removal of edges naming packages
+// that no longer exist — edges Discover must refuse.
 //
 // Discovery is also where a package's effective configuration settles: a
-// folder excluded by the space's .dispatignore is not a package at all, and
-// a package with overrides — a `packages` entry, an in-folder config file,
+// folder excluded by the space's .dispatignore is not a package at all, a
+// package with overrides — a `packages` entry, an in-folder config file,
 // or both — gets a derived Space of its own with the merged configuration,
-// validated here because the override layers need the folders to exist.
-func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
+// and a `packages` entry with a `path` becomes a standalone package outside
+// every space, validated here because the override layers need the folders
+// to exist.
+func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, error) {
 	spaceNames := make([]string, 0, len(c.Spaces))
 	for n := range c.Spaces {
 		spaceNames = append(spaceNames, n)
@@ -691,36 +848,47 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 	}
 	var onlyChecks []onlyCheck
 
+	// The merged declaration list: the root config's own `dependencies`
+	// first, in file order, then each package's lists in discovery order.
+	declared := make([]DeclaredDependency, 0, len(c.Dependencies))
+	for i, d := range c.Dependencies {
+		declared = append(declared, DeclaredDependency{
+			DependencyConfig: d,
+			Source:           DepSource{KeyPath: []string{"dependencies"}, Index: i},
+		})
+	}
+
 	var pkgs []*model.Package
-	owner := make(map[string]string) // package name -> space name
+	owner := make(map[string]string)      // package name -> space name
+	consumed := make(map[string][]string) // packages key -> matching folders
+	type ignoredDir struct{ space, name string }
+	var ignoredDirs []ignoredDir
 	for _, sn := range spaceNames {
 		sc := c.Spaces[sn]
 		base, err := buildSpace(c, fmt.Sprintf("space %q", sn), sn, sc)
 		if err != nil {
-			return nil, fmt.Errorf("config: %w", err)
+			return nil, nil, fmt.Errorf("config: %w", err)
 		}
 		dir := filepath.Join(root, sc.Path)
 		ignore, err := loadIgnore(dir)
 		if err != nil {
-			return nil, fmt.Errorf("config: space %q: %s: %w", sn, DispatignoreName, err)
+			return nil, nil, fmt.Errorf("config: space %q: %s: %w", sn, DispatignoreName, err)
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return nil, fmt.Errorf("config: space %q: %w", sn, err)
+			return nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
-		consumed := make(map[string][]string) // packages key -> matching folders
-		var ignoredDirs []string
 		for _, e := range entries {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
 			name := e.Name()
 			if ignoredName(ignore, name) {
-				ignoredDirs = append(ignoredDirs, name)
+				ignoredDirs = append(ignoredDirs, ignoredDir{sn, name})
 				continue
 			}
 			if prev, dup := owner[name]; dup {
-				return nil, fmt.Errorf(
+				return nil, nil, fmt.Errorf(
 					"config: package %q exists in both space %q and space %q; package names must be unique",
 					name, prev, sn)
 			}
@@ -735,14 +903,19 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 				GitHub:        baseGitHub,
 			}
 
-			entryPO, hasEntry := sc.Package(name)
+			entryPO, hasEntry := c.Package(name)
 			if hasEntry {
+				if entryPO.Path != "" {
+					return nil, nil, fmt.Errorf(
+						"config: packages[%q]: package %q belongs to space %q — its location is the space folder, so path cannot be set",
+						strings.ToLower(name), name, sn)
+				}
 				key := strings.ToLower(name)
 				consumed[key] = append(consumed[key], name)
 			}
 			filePO, fileSrc, err := loadPackageFile(pkg.Dir)
 			if err != nil {
-				return nil, fmt.Errorf("config: space %q: package %q: %w", sn, name, err)
+				return nil, nil, fmt.Errorf("config: space %q: package %q: %w", sn, name, err)
 			}
 			if hasEntry || fileSrc != "" {
 				label := fmt.Sprintf("space %q: package %q", sn, name)
@@ -750,24 +923,24 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 				ex := &packageExtras{}
 				if hasEntry {
 					if err := validatePackageLayer(label, entryPO); err != nil {
-						return nil, fmt.Errorf("config: %w", err)
+						return nil, nil, fmt.Errorf("config: %w", err)
 					}
 					merged = mergePackageOverride(merged, entryPO)
 					ex.apply(c, entryPO)
 				}
 				if fileSrc != "" {
 					if err := validatePackageLayer(fmt.Sprintf("%s (%s)", label, fileSrc), filePO); err != nil {
-						return nil, fmt.Errorf("config: %w", err)
+						return nil, nil, fmt.Errorf("config: %w", err)
 					}
 					merged = mergePackageOverride(merged, filePO)
 					ex.apply(c, filePO)
 				}
 				merged, err = validateSpaceAs(c, label, merged)
 				if err != nil {
-					return nil, fmt.Errorf("config: %w", err)
+					return nil, nil, fmt.Errorf("config: %w", err)
 				}
 				if pkg.Space, err = buildSpace(c, label, sn, merged); err != nil {
-					return nil, fmt.Errorf("config: %w", err)
+					return nil, nil, fmt.Errorf("config: %w", err)
 				}
 				if (hasEntry && entryPO.AutoVersion != nil) || filePO.AutoVersion != nil {
 					onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
@@ -780,31 +953,135 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 					pkg.GitHub = githubSpec(ex.github)
 				}
 			}
+			if hasEntry {
+				declared, err = collectPackageDeps(declared, name,
+					DepSource{KeyPath: []string{"packages", strings.ToLower(name), "dependencies"}},
+					entryPO.Dependencies)
+				if err != nil {
+					return nil, nil, fmt.Errorf("config: %w", err)
+				}
+			}
+			if fileSrc != "" {
+				declared, err = collectPackageDeps(declared, name,
+					DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}, filePO.Dependencies)
+				if err != nil {
+					return nil, nil, fmt.Errorf("config: %w", err)
+				}
+			}
 			pkgs = append(pkgs, pkg)
 		}
-		// Every `packages` key must have matched exactly one folder: an
-		// unmatched key is the same class of typo as an unknown dependency
-		// endpoint, and a key matching two folders (names differing only by
-		// case) has no single package to configure.
-		for key := range sc.Packages {
-			matches := consumed[key]
-			if len(matches) > 1 {
-				sort.Strings(matches)
-				return nil, fmt.Errorf(
-					"config: space %q: packages[%q] matches folders %s ambiguously (keys are matched case-insensitively)",
-					sn, key, strings.Join(matches, ", "))
-			}
-			if len(matches) == 0 {
-				for _, ig := range ignoredDirs {
-					if strings.EqualFold(ig, key) {
-						return nil, fmt.Errorf(
-							"config: space %q: packages[%q]: folder %q is excluded by %s",
-							sn, key, ig, DispatignoreName)
-					}
+	}
+	// Every `packages` key without a path must have matched exactly one
+	// folder: an unmatched key is the same class of typo as an unknown
+	// dependency endpoint, and a key matching two folders (names differing
+	// only by case, possibly across spaces) has no single package to
+	// configure.
+	for key, po := range c.Packages {
+		if po.Path != "" {
+			continue
+		}
+		matches := consumed[key]
+		if len(matches) > 1 {
+			sort.Strings(matches)
+			return nil, nil, fmt.Errorf(
+				"config: packages[%q] matches folders %s ambiguously (keys are matched case-insensitively)",
+				key, strings.Join(matches, ", "))
+		}
+		if len(matches) == 0 {
+			for _, ig := range ignoredDirs {
+				if strings.EqualFold(ig.name, key) {
+					return nil, nil, fmt.Errorf(
+						"config: packages[%q]: folder %q in space %q is excluded by %s",
+						key, ig.name, ig.space, DispatignoreName)
 				}
-				return nil, fmt.Errorf("config: space %q: packages[%q] matches no package folder", sn, key)
+			}
+			return nil, nil, fmt.Errorf(
+				"config: packages[%q] matches no package folder (a standalone package needs a path)", key)
+		}
+	}
+
+	// Standalone packages: entries with a path, in deterministic key order.
+	// An entry whose key matched a folder was rejected above, so every name
+	// here is new.
+	var standalone []string
+	for key, po := range c.Packages {
+		if po.Path != "" {
+			standalone = append(standalone, key)
+		}
+	}
+	sort.Strings(standalone)
+	for _, key := range standalone {
+		po := c.Packages[key]
+		label := fmt.Sprintf("package %q", key)
+		dir := filepath.Join(root, filepath.FromSlash(po.Path))
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: %s: %w", label, err)
+		}
+		if !info.IsDir() {
+			return nil, nil, fmt.Errorf("config: %s: path %q is not a folder", label, po.Path)
+		}
+		owner[key] = ""
+		pkg := &model.Package{
+			Name:          key,
+			Dir:           dir,
+			BuildWeight:   1,
+			PublishWeight: 1,
+			Changelog:     baseChangelog,
+			GitHub:        baseGitHub,
+		}
+		// The entry is the package's whole configuration: a synthetic
+		// single-package space built through the same layers as an override —
+		// the entry, then the in-folder file — so a standalone package can
+		// never express something a space package cannot.
+		merged := SpaceConfig{Path: po.Path, Flow: &SpaceFlowConfig{}}
+		ex := &packageExtras{}
+		if err := validatePackageLayer(label, po); err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		merged = mergePackageOverride(merged, po)
+		ex.apply(c, po)
+		filePO, fileSrc, err := loadPackageFile(dir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: %s: %w", label, err)
+		}
+		if fileSrc != "" {
+			if err := validatePackageLayer(fmt.Sprintf("%s (%s)", label, fileSrc), filePO); err != nil {
+				return nil, nil, fmt.Errorf("config: %w", err)
+			}
+			merged = mergePackageOverride(merged, filePO)
+			ex.apply(c, filePO)
+		}
+		merged, err = validateSpaceAs(c, label, merged)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		if pkg.Space, err = buildSpace(c, label, key, merged); err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		if po.AutoVersion != nil || filePO.AutoVersion != nil {
+			onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
+		}
+		pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
+		if ex.changelog != nil {
+			pkg.Changelog = changelogSpec(ex.changelog)
+		}
+		if ex.github != nil {
+			pkg.GitHub = githubSpec(ex.github)
+		}
+		declared, err = collectPackageDeps(declared, key,
+			DepSource{KeyPath: []string{"packages", key, "dependencies"}}, po.Dependencies)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		if fileSrc != "" {
+			declared, err = collectPackageDeps(declared, key,
+				DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}, filePO.Dependencies)
+			if err != nil {
+				return nil, nil, fmt.Errorf("config: %w", err)
 			}
 		}
+		pkgs = append(pkgs, pkg)
 	}
 
 	// autoVersion `only` names must be discovered packages; anything else is
@@ -817,7 +1094,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 		}
 		for _, name := range av.Only {
 			if _, ok := owner[name]; !ok {
-				return nil, fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
+				return nil, nil, fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
 			}
 		}
 	}
@@ -827,11 +1104,11 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, error) {
 		}
 		for _, name := range chk.av.Only {
 			if _, ok := owner[name]; !ok {
-				return nil, fmt.Errorf("config: %s: autoVersion.only: unknown package %q", chk.label, name)
+				return nil, nil, fmt.Errorf("config: %s: autoVersion.only: unknown package %q", chk.label, name)
 			}
 		}
 	}
-	return pkgs, nil
+	return pkgs, declared, nil
 }
 
 // buildSpace resolves one validated space-shaped configuration onto the

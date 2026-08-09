@@ -6,8 +6,8 @@ One file at the monorepo root describes everything dispat does; `dispat init` wr
 Loaded with viper: the format is inferred from the file extension, so JSON, YAML or TOML all work. With no `--config`
 flag the file is **discovered**: the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in
 the root is used (the names [`dispat init`](../cli.md) writes under its formats), ascending parent directories when the
-root has none — a found file only ends the ascent when it declares `spaces`, because a package folder's own
-[in-folder config file](./spaces.md#in-folder-configuration-files) is an override, not a root. When none exists
+root has none — a found file only ends the ascent when it declares `spaces` or `packages`, because a package folder's
+own [in-folder config file](./packages.md#in-folder-configuration-files) is an override, not a root. When none exists
 anywhere, the run fails with an error naming every candidate tried. An explicitly passed `--config` is used as-is, with
 no fallback, so a typo there fails loudly instead of silently loading a different file. Unknown keys are rejected (typo
 protection). Viper matches keys case-insensitively and lowercases map keys, so script and space names are effectively
@@ -17,7 +17,8 @@ This page covers the top level; the larger objects have their own pages:
 
 | Page                                  | Covers                                                                                         |
 |---------------------------------------|------------------------------------------------------------------------------------------------|
-| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, `versioning` and versioning groups, `runScripts`, per-package overrides, in-folder config files, `.dispatignore`. |
+| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, `versioning` and versioning groups, `runScripts`, `.dispatignore`. |
+| [Packages](./packages.md)             | The top-level `packages` map: per-package overrides, standalone packages via `path`, package-declared dependencies, in-folder config files. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                       |
 | [Release records](./records.md)       | `changelog`, `github`, `commit`, the shared entry format options.                              |
 | [Commit parsing options](./parser.md) | `commitErrors`, `nonPackageScopes`, `parser`.                                                  |
@@ -31,9 +32,10 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | Key                | Type                           | Required  | Description                                                                                                                      |
 |--------------------|--------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------|
 | `scripts`          | map name → shell command       | no        | Named shell commands, like package.json scripts. Referenced by spaces.                                                           |
-| `spaces`           | map name → space               | yes (≥ 1) | Package groups sharing build/publish behaviour; see [Spaces](./spaces.md).                                                       |
+| `spaces`           | map name → space               | see note  | Package groups sharing build/publish behaviour; see [Spaces](./spaces.md). At least one space **or** one `packages` entry is required.                                                       |
+| `packages`         | map name → package             | no        | Per-package configuration: overrides for space packages (key = folder name), and standalone packages outside every space via `path`; see [Packages](./packages.md).                          |
 | `versionGroups`    | map name → `{versioning}`      | no        | Shared-versioning groups that cut across spaces, joined by name via a space's or package's `versionGroup` key; see [Versioning groups](./spaces.md#versioning-groups). |
-| `dependencies`     | list of `{consumer, provider, kind, keep}` | no  | Package-level consumer → provider relations. Both must exist; self-dependencies and cycles are rejected; duplicates are ignored. The optional `kind` names the manifest field the edge stands for: `dependencies` (default), `devDependencies`, `peerDependencies` or `optionalDependencies`; propagation follows or ignores the edge according to `parser.propagation.kinds` (default: every kind except `devDependencies`). `keep: true` marks an edge [`dispat compute`](../cli.md#commands) must never suggest removing: a deliberate relation no manifest declares (a Docker chain); the planner treats kept edges like any other. |
+| `dependencies`     | list of `{consumer, provider, kind, keep}` | no  | Package-level consumer → provider relations. Both must exist; self-dependencies and cycles are rejected; duplicates are ignored. An item may instead be a shorthand keyed by consumer name whose value is a provider name or array of names (`{"web": ["core", "utils"]}`), expanded at load; packages can also declare their own providers ([package dependencies](./packages.md#package-dependencies)), and all declarations merge into one list. The optional `kind` names the manifest field the edge stands for: `dependencies` (default), `devDependencies`, `peerDependencies` or `optionalDependencies`; propagation follows or ignores the edge according to `parser.propagation.kinds` (default: every kind except `devDependencies`). `keep: true` marks an edge [`dispat compute`](../cli.md#commands) must never suggest removing: a deliberate relation no manifest declares (a Docker chain); the planner treats kept edges like any other. |
 | `concurrency`      | int or `[int, int]`            | no        | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.       |
 | `logLevel`         | string                         | no        | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                        |
 | `logFormat`        | string                         | no        | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                   |

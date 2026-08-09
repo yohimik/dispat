@@ -35,16 +35,6 @@
         "login": "npm-login",
         "postBuild": "smoke-test",
         "announce": "announce"
-      },
-      "packages": {
-        "core": {
-          "revertOnFail": false,
-          "flow": { "build": "build" },
-          "versionGroup": "platform",
-          "concurrency": [2, 1],
-          "changelog": { "file": "HISTORY.md" },
-          "github": { "enabled": false }
-        }
       }
     },
     "apps": {
@@ -55,6 +45,21 @@
         "publish": "publish-go"
       },
       "tagFormat": "packages/apps/{name}@v{version}"
+    }
+  },
+  "packages": {
+    "core": {
+      "revertOnFail": false,
+      "flow": { "build": "build" },
+      "versionGroup": "platform",
+      "concurrency": [2, 1],
+      "changelog": { "file": "HISTORY.md" },
+      "github": { "enabled": false }
+    },
+    "cli": {
+      "path": "tools/cli",
+      "flow": { "build": "build-go", "publish": "publish-go" },
+      "dependencies": ["core"]
     }
   },
   "versionGroups": {

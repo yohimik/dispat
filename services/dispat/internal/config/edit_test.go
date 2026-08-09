@@ -43,7 +43,7 @@ func TestReplaceDependenciesJSONPreservesEverythingElse(t *testing.T) {
 		{Consumer: "app", Provider: "core"},
 		{Consumer: "app", Provider: "tools", Kind: "devDependencies", Keep: true},
 	}
-	require.NoError(t, ReplaceDependencies(path, deps))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, deps))
 
 	got := readFile(t, path)
 	assert.Contains(t, got, `"spaces": {"libs": {"path": "pkgs"}},`, "untouched head")
@@ -68,22 +68,94 @@ func TestReplaceDependenciesJSONPreservesOverrideBlocks(t *testing.T) {
 	// the compute command knows nothing about — survive byte for byte.
 	src := `{
     "versionGroups": {"platform": {"versioning": "fixed"}},
-    "spaces": {"libs": {"path": "pkgs", "packages": {"core": {"revertOnFail": false}}}},
+    "spaces": {"libs": {"path": "pkgs"}},
+    "packages": {"core": {"revertOnFail": false, "dependencies": ["util"]}},
     "dependencies": []
 }
 `
 	path := writeConfigFile(t, "dispat.json", src)
-	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "app", Provider: "core"}}))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "app", Provider: "core"}}))
 	got := readFile(t, path)
 	assert.Contains(t, got, `"versionGroups": {"platform": {"versioning": "fixed"}},`)
-	assert.Contains(t, got, `"packages": {"core": {"revertOnFail": false}}`)
+	assert.Contains(t, got, `"packages": {"core": {"revertOnFail": false, "dependencies": ["util"]}}`)
 	assert.Contains(t, got, `"provider": "core"`)
+}
+
+func TestReplaceStringListJSONNestedPath(t *testing.T) {
+	// A packages entry's dependencies list is a nested key; the splice must
+	// hit exactly that list and leave the root list and the entry's other
+	// keys alone.
+	src := `{
+    "spaces": {"libs": {"path": "pkgs"}},
+    "packages": {"core": {"revertOnFail": false, "dependencies": ["old", "util"]}},
+    "dependencies": [{"consumer": "app", "provider": "core"}]
+}
+`
+	path := writeConfigFile(t, "dispat.json", src)
+	require.NoError(t, ReplaceStringList(path, []string{"packages", "core", "dependencies"}, []string{"util"}))
+	got := readFile(t, path)
+	assert.NotContains(t, got, `"old"`)
+	assert.Contains(t, got, `"revertOnFail": false`)
+	assert.Contains(t, got, `"dependencies": [{"consumer": "app", "provider": "core"}]`,
+		"root list untouched")
+	assert.Equal(t, src, readFile(t, path+BackupSuffix))
+
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &cfg), "result is valid JSON")
+	entry := cfg["packages"].(map[string]any)["core"].(map[string]any)
+	assert.Equal(t, []any{"util"}, entry["dependencies"])
+
+	// Emptying the list keeps the key as [] rather than null.
+	require.NoError(t, ReplaceStringList(path, []string{"packages", "core", "dependencies"}, nil))
+	require.NoError(t, json.Unmarshal([]byte(readFile(t, path)), &cfg))
+	entry = cfg["packages"].(map[string]any)["core"].(map[string]any)
+	assert.Equal(t, []any{}, entry["dependencies"])
+}
+
+func TestReplaceStringListJSONMissingNestedKeyErrors(t *testing.T) {
+	path := writeConfigFile(t, "dispat.json", `{"packages": {"core": {}}}`)
+	err := ReplaceStringList(path, []string{"packages", "app", "dependencies"}, []string{"x"})
+	require.Error(t, err, "nested paths are only edited, never created")
+	_, statErr := os.Stat(path + BackupSuffix)
+	assert.True(t, os.IsNotExist(statErr), "failure writes nothing")
+}
+
+func TestReplaceStringListYAMLNestedPath(t *testing.T) {
+	src := `# config
+packages:
+  core:
+    revertOnFail: false # keep me
+    dependencies:
+      - old
+      - util
+dependencies:
+  - consumer: app
+    provider: core
+`
+	path := writeConfigFile(t, "dispat.yaml", src)
+	require.NoError(t, ReplaceStringList(path, []string{"packages", "core", "dependencies"}, []string{"util"}))
+	got := readFile(t, path)
+	assert.Contains(t, got, "# config")
+	assert.Contains(t, got, "# keep me")
+	assert.NotContains(t, got, "- old")
+	assert.Contains(t, got, "provider: core", "root list untouched")
+}
+
+func TestReplaceStringListTOMLRefuses(t *testing.T) {
+	path := writeConfigFile(t, "dispat.toml", "[packages.core]\ndependencies = [\"old\"]\n")
+	err := ReplaceStringList(path, []string{"packages", "core", "dependencies"}, []string{"util"})
+	assert.ErrorIs(t, err, ErrTOMLEdit)
+
+	snippet, err := RenderStringListTOML([]string{"packages", "core", "dependencies"}, []string{"util"})
+	require.NoError(t, err)
+	assert.Contains(t, snippet, "[packages]")
+	assert.Contains(t, snippet, "'util'")
 }
 
 func TestReplaceDependenciesJSONAppendsMissingKey(t *testing.T) {
 	src := "{\n  \"scripts\": {\"b\": \"make\"}\n}\n"
 	path := writeConfigFile(t, "dispat.json", src)
-	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "a", Provider: "b"}}))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "a", Provider: "b"}}))
 	got := readFile(t, path)
 	assert.Contains(t, got, `"scripts": {"b": "make"},`)
 	var cfg map[string]any
@@ -93,7 +165,7 @@ func TestReplaceDependenciesJSONAppendsMissingKey(t *testing.T) {
 
 func TestReplaceDependenciesJSONEmptyObject(t *testing.T) {
 	path := writeConfigFile(t, "dispat.json", "{}\n")
-	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "a", Provider: "b"}}))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "a", Provider: "b"}}))
 	var cfg map[string]any
 	require.NoError(t, json.Unmarshal([]byte(readFile(t, path)), &cfg))
 	assert.Len(t, cfg["dependencies"], 1)
@@ -111,7 +183,7 @@ spaces:
     path: pkgs
 `
 	path := writeConfigFile(t, "dispat.yaml", src)
-	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "app", Provider: "core"}}))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "app", Provider: "core"}}))
 	got := readFile(t, path)
 	assert.Contains(t, got, "# the monorepo config")
 	assert.Contains(t, got, "# the build")
@@ -123,7 +195,7 @@ spaces:
 
 func TestReplaceDependenciesYAMLAppendsMissingKey(t *testing.T) {
 	path := writeConfigFile(t, "dispat.yaml", "scripts:\n  b: make\n")
-	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "a", Provider: "b", Kind: "peerDependencies"}}))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "a", Provider: "b", Kind: "peerDependencies"}}))
 	got := readFile(t, path)
 	assert.Contains(t, got, "dependencies:")
 	assert.Contains(t, got, "kind: peerDependencies")
@@ -132,14 +204,14 @@ func TestReplaceDependenciesYAMLAppendsMissingKey(t *testing.T) {
 func TestReplaceDependenciesNoChangeWritesNothing(t *testing.T) {
 	src := "{\n  \"dependencies\": [\n    {\n      \"consumer\": \"a\",\n      \"provider\": \"b\"\n    }\n  ]\n}"
 	path := writeConfigFile(t, "dispat.json", src)
-	require.NoError(t, ReplaceDependencies(path, []DependencyConfig{{Consumer: "a", Provider: "b"}}))
+	require.NoError(t, ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "a", Provider: "b"}}))
 	_, err := os.Stat(path + BackupSuffix)
 	assert.True(t, os.IsNotExist(err), "no change, no backup, no write")
 }
 
 func TestReplaceDependenciesTOMLRefuses(t *testing.T) {
 	path := writeConfigFile(t, "dispat.toml", "[scripts]\nb = \"make\"\n")
-	err := ReplaceDependencies(path, []DependencyConfig{{Consumer: "a", Provider: "b"}})
+	err := ReplaceDependencies(path, []string{"dependencies"}, []DependencyConfig{{Consumer: "a", Provider: "b"}})
 	assert.ErrorIs(t, err, ErrTOMLEdit)
 	_, statErr := os.Stat(path + BackupSuffix)
 	assert.True(t, os.IsNotExist(statErr), "refusal writes nothing")

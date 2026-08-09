@@ -19,13 +19,15 @@ callable without a command line.
    `DISPAT_*` environment / print the pending release notes (one package's, or every pending package's in publish
    order when none is named), and stop.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
-   effective monorepo root; a file without `spaces` — a package's in-folder override — does not end the ascent), then
-   load and validate it (viper; unknown keys rejected; flag bindings applied).
+   effective monorepo root; a file without `spaces` or `packages` — a package's in-folder override — does not end the
+   ascent), then load and validate it (viper; unknown keys rejected; flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatignore`, names
-   unique across spaces. Per-package overrides resolve here — the space's `packages` entry, then the folder's own
-   dispat config file — each overridden package getting a derived space value with the merged configuration, so
-   everything downstream reads per-package behaviour without knowing overrides exist.
-4. Build the dependency graph from configured relations; topologically sort it (cycles abort with the members named).
+   unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here
+   — the top-level `packages` entry, then the folder's own dispat config file — each configured package getting a
+   derived space value with the merged configuration (a standalone package a single-package space of its own), so
+   everything downstream reads per-package behaviour without knowing the layers exist. Dependency declarations are
+   collected from every source — the root list, the entries, the in-folder files — into one merged list.
+4. Build the dependency graph from the merged relations; topologically sort it (cycles abort with the members named).
 5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
    compute direct bumps, run the three propagation phases, then versions, with every versioning group — a
    `fixed`/`fixedSparse` space, or a declared `versionGroups` entry its members joined — versioned as one

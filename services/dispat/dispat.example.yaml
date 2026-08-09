@@ -82,29 +82,6 @@ spaces:
       # update channels. Receives DISPAT_BREAKING_CHANGES / DISPAT_FEATURES /
       # DISPAT_FIXES (the changelog's groupings) and only warns on failure.
       announce: announce
-    # Per-package overrides, keyed by package folder name: the space's
-    # options minus `path`, plus changelog, github, concurrency and
-    # versionGroup. Unset fields inherit; flow merges entry by entry
-    # (flow.login excluded — login stays once per space), runScripts name by
-    # name, autoVersion replaces wholesale, changelog/github overlay the
-    # top-level objects field by field. A package folder may instead carry
-    # its own dispat.json/.yaml/.toml with this same shape — the most local
-    # layer. A .dispatignore file in the space folder (one name or *-glob
-    # per line) excludes folders that are not packages at all.
-    packages:
-      core:
-        revertOnFail: false               # tri-state: absent inherits
-        flow:
-          build: build                    # replaces this entry alone
-        versionGroup: platform            # join the declared group below
-        # The stage-budget slots this package's tasks occupy ([build,
-        # publish] or one value for both; 0/absent = 1). A weight reaching
-        # the stage's budget runs that stage alone — the heavyweight build.
-        concurrency: [2, 1]
-        changelog:
-          file: HISTORY.md                # unset fields keep the global ones
-        github:
-          enabled: false                  # no GitHub releases for this one
   apps:
     path: packages/apps
     isBuildWaitingPublish: false
@@ -113,6 +90,45 @@ spaces:
       publish: publish-go
     # Overrides the repository-wide tagFormat for this space only.
     tagFormat: "packages/apps/{name}@v{version}"
+
+# Per-package configuration. An entry whose key matches a package folder in
+# one of the spaces (case-insensitively; it must match exactly one) overrides
+# that package's space configuration: the space's options minus `path`, plus
+# changelog, github, concurrency and dependencies. Unset fields inherit; flow
+# merges entry by entry (flow.login excluded — login stays once per space),
+# runScripts name by name, autoVersion replaces wholesale, changelog/github
+# overlay the top-level objects field by field. A package folder may instead
+# carry its own dispat.json/.yaml/.toml with this same shape — the most local
+# layer. A .dispatignore file in a space folder (one name or *-glob per line)
+# excludes folders that are not packages at all.
+#
+# An entry with a `path` (root-relative) declares a standalone package
+# outside every space: the entry key is the package name and the entry itself
+# is its whole configuration — same keys, same in-folder file layering.
+packages:
+  core:
+    revertOnFail: false               # tri-state: absent inherits
+    flow:
+      build: build                    # replaces this entry alone
+    versionGroup: platform            # join the declared group below
+    # The stage-budget slots this package's tasks occupy ([build,
+    # publish] or one value for both; 0/absent = 1). A weight reaching
+    # the stage's budget runs that stage alone — the heavyweight build.
+    concurrency: [2, 1]
+    changelog:
+      file: HISTORY.md                # unset fields keep the global ones
+    github:
+      enabled: false                  # no GitHub releases for this one
+  cli:
+    path: tools/cli                   # standalone: lives outside the spaces
+    flow:
+      build: build-go
+      publish: publish-go
+    # Provider names this package depends on (one name or an array); the
+    # consumer is the package itself and the kind is "dependencies". Merged
+    # with the top-level list below; an edge needing another kind or keep
+    # belongs there instead.
+    dependencies: [core]
 
 # Shared-versioning groups that cut across spaces, joined by name through a
 # space's or package's versionGroup key. The declaration owns the group's
@@ -136,10 +152,15 @@ run:
   # beforeAll: check-preconditions
   postAll: notify
 
-# Consumer -> provider relations. `dispat compute` derives this list from the
-# packages' manifests and suggests additions/removals/kind corrections;
-# keep: true marks a deliberate edge no manifest declares (a Docker chain),
-# which compute then never suggests removing.
+# Consumer -> provider relations. Besides the full objects, an item may be a
+# shorthand keyed by consumer name whose value is a provider name or an array
+# of names (- web: [core, utils]); packages may also declare their own
+# providers in their `packages` entry or in-folder file, and everything
+# merges into one list. `dispat compute` derives the list from the packages'
+# manifests and suggests additions/removals/kind corrections, editing each
+# declaration in the file that holds it; keep: true marks a deliberate edge
+# no manifest declares (a Docker chain), which compute then never suggests
+# removing.
 dependencies:
   - consumer: app
     provider: core

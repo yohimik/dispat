@@ -1,14 +1,14 @@
 package integration
 
 // Area 12: per-package overrides, versioning groups and .dispatignore.
-// spaces.md promises that a package can override its space's configuration —
-// from a `packages` entry or from a dispat config file inside the package
-// folder, most local winning — that declared versionGroups version their
-// members as one across spaces, that `.dispatignore` excludes folders from
-// discovery, and that the per-package record and concurrency policies hold
-// through a real release. Only the compiled binary can prove the layers
-// compose: config load, discovery, planning, scheduling and the recorders
-// all participate in every scenario here.
+// packages.md promises that a package can override its space's configuration
+// — from a top-level `packages` entry or from a dispat config file inside
+// the package folder, most local winning — that declared versionGroups
+// version their members as one across spaces, that `.dispatignore` excludes
+// folders from discovery, and that the per-package record and concurrency
+// policies hold through a real release. Only the compiled binary can prove
+// the layers compose: config load, discovery, planning, scheduling and the
+// recorders all participate in every scenario here.
 
 import (
 	"encoding/json"
@@ -47,10 +47,10 @@ func TestOverridesFlowBuildPerPackage(t *testing.T) {
 		"publish":   "echo publishing",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(),
-			Packages: map[string]models.PackageConfig{
-				"core": {Flow: &models.SpaceFlowConfig{Build: []string{"alt-build"}}},
-			}},
+		"libs": {Path: "packages", Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core": {Flow: &models.SpaceFlowConfig{Build: []string{"alt-build"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -78,11 +78,9 @@ func TestOverridesFlowBuildPerPackage(t *testing.T) {
 func TestOverridesInFolderFileWins(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	spc := cfg.Spaces["libs"]
-	spc.Packages = map[string]models.PackageConfig{
+	cfg.Packages = map[string]models.PackageConfig{
 		"core": {TagFormat: "entry-{name}@{version}"},
 	}
-	cfg.Spaces["libs"] = spc
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "extra")
@@ -169,14 +167,14 @@ func TestOverridesPerPackageRecords(t *testing.T) {
 		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(),
-			Packages: map[string]models.PackageConfig{
-				"core": {Changelog: &models.ChangelogConfig{File: "HISTORY.md"}},
-				"extra": {
-					Changelog: &models.ChangelogConfig{Enabled: models.Bool(false)},
-					GitHub:    &models.GitHubConfig{Enabled: models.Bool(false)},
-				},
-			}},
+		"libs": {Path: "packages", Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core": {Changelog: &models.ChangelogConfig{File: "HISTORY.md"}},
+		"extra": {
+			Changelog: &models.ChangelogConfig{Enabled: models.Bool(false)},
+			GitHub:    &models.GitHubConfig{Enabled: models.Bool(false)},
+		},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -205,10 +203,10 @@ func TestOverridesPackageConcurrencyWeight(t *testing.T) {
 		"publish": "echo publishing",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(),
-			Packages: map[string]models.PackageConfig{
-				"pkg0": {Concurrency: []int{2}},
-			}},
+		"libs": {Path: "packages", Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"pkg0": {Concurrency: []int{2}},
 	}
 	r.WriteConfigModel(cfg)
 	names := packageNames(3, "pkg")
@@ -263,11 +261,9 @@ func TestOverridesRunShorthandFromPackageFolder(t *testing.T) {
 func TestOverridesRunScriptOnlyInPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	spc := cfg.Spaces["libs"]
-	spc.Packages = map[string]models.PackageConfig{
+	cfg.Packages = map[string]models.PackageConfig{
 		"extra": {RunScripts: map[string]string{"buff": "echo buffed > buffed.txt"}},
 	}
-	cfg.Spaces["libs"] = spc
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "extra")

@@ -1,11 +1,13 @@
 package config
 
-// Per-package overrides and versioning groups. A package's effective
-// configuration is its space's, overlaid with up to two override layers —
-// the space's `packages` entry, then the package folder's own dispat config
-// file — most local winning field by field. The merge produces an ordinary
-// space-shaped config, validated with the same helpers as a space, so an
-// override can never express something a space cannot.
+// Per-package configuration and versioning groups. A space package's
+// effective configuration is its space's, overlaid with up to two override
+// layers — its top-level `packages` entry, then the package folder's own
+// dispat config file — most local winning field by field; a standalone
+// package (a `packages` entry with a path) starts from a synthetic base
+// instead of a space. The merge produces an ordinary space-shaped config,
+// validated with the same helpers as a space, so a package can never express
+// something a space cannot.
 
 import (
 	"errors"
@@ -83,6 +85,52 @@ func resolveSpaceVersioning(c *File, spaceName string, sc SpaceConfig) (mode, gr
 		return mode, group, err
 	}
 	return sc.Versioning, spaceName, nil
+}
+
+// validatePackageEntries checks the top-level packages map on its own: keys
+// must be named, and a standalone entry's path must stay inside the
+// repository. Whether a key without a path matches a package folder needs
+// the folders on disk and is checked in discovery instead.
+func validatePackageEntries(c *File) error {
+	for name, po := range c.Packages {
+		if name == "" {
+			return errors.New("packages: package name must not be empty")
+		}
+		if po.Path == "" {
+			continue
+		}
+		if filepath.IsAbs(po.Path) {
+			return fmt.Errorf("packages[%q]: path %q must be a repository-relative path", name, po.Path)
+		}
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(po.Path)))
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("packages[%q]: path %q escapes the repository root", name, po.Path)
+		}
+		if clean == "." {
+			return fmt.Errorf("packages[%q]: path %q must name a folder inside the repository", name, po.Path)
+		}
+	}
+	return nil
+}
+
+// collectPackageDeps appends one package layer's provider names to the
+// declared-edge list: the consumer is the package itself and the kind is the
+// default. The source's Index is filled per entry.
+func collectPackageDeps(declared []DeclaredDependency, pkg string, src DepSource, providers []string) ([]DeclaredDependency, error) {
+	for i, p := range providers {
+		src.Index = i
+		if strings.TrimSpace(p) == "" {
+			return nil, fmt.Errorf("%s: provider name must not be empty", src.Label())
+		}
+		if strings.EqualFold(p, pkg) {
+			return nil, fmt.Errorf("%s: package %q cannot depend on itself", src.Label(), pkg)
+		}
+		declared = append(declared, DeclaredDependency{
+			DependencyConfig: DependencyConfig{Consumer: pkg, Provider: p},
+			Source:           src,
+		})
+	}
+	return declared, nil
 }
 
 // validatePackageLayer checks what can be wrong with one override layer on
@@ -330,8 +378,8 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 // loadPackageFile probes a package folder for its in-folder dispat config
 // file — the same names and formats the root config resolves through — and
 // decodes it as a PackageConfig, the file's top-level object. A file that
-// declares spaces is refused with guidance: the folder holds a monorepo of
-// its own, and a nested root must be ignored, not merged.
+// declares spaces or packages is refused with guidance: the folder holds a
+// monorepo of its own, and a nested root must be ignored, not merged.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
 	var pc PackageConfig
 	for _, cand := range DefaultFileNames {
@@ -344,17 +392,23 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		if err := v.ReadInConfig(); err != nil {
 			return pc, p, fmt.Errorf("cannot read %s: %w", p, err)
 		}
-		if v.IsSet("spaces") {
-			return pc, p, fmt.Errorf(
-				"%s declares spaces, so the folder looks like a nested monorepo root rather than a package; add the folder to the space's %s or remove the file",
-				p, DispatignoreName)
+		for _, rootKey := range []string{"spaces", "packages"} {
+			if v.IsSet(rootKey) {
+				return pc, p, fmt.Errorf(
+					"%s declares %s, so the folder looks like a nested monorepo root rather than a package; ignore the folder (%s) or remove the file",
+					p, rootKey, DispatignoreName)
+			}
 		}
 		// The same decoding stance as the root config: unknown keys are
-		// rejected (a `path` key among them — a package's location is its
-		// folder), weak typing lifts scalar flow entries into slices.
+		// rejected, weak typing lifts scalar flow entries into slices.
 		weak := func(dc *mapstructure.DecoderConfig) { dc.WeaklyTypedInput = true }
 		if err := v.UnmarshalExact(&pc, weak); err != nil {
 			return pc, p, fmt.Errorf("invalid format in %s: %w", p, err)
+		}
+		if pc.Path != "" {
+			return pc, p, fmt.Errorf(
+				"%s: path cannot be set in a package folder's config file — the package's location is the folder itself (or its packages entry's path)",
+				p)
 		}
 		return pc, p, nil
 	}

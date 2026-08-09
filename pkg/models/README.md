@@ -13,6 +13,10 @@ cfg := models.File{
             Build: []string{"build"}, Publish: []string{"publish"},
         }},
     },
+    Packages: map[string]models.PackageConfig{
+        "core": {RevertOnFail: models.Bool(false)},          // override for a space package
+        "cli":  {Path: "tools/cli", Dependencies: []string{"core"}}, // standalone package
+    },
 }
 data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 ```
@@ -22,6 +26,11 @@ the same key (how a model marshals back into a loadable file), so **a marshalled
 config**. Optional sub-objects are pointers, so an unset object marshals as an absent key rather than `{}`
 noise; tri-state options (`enabled`, `verify`, `writeVersion`, and every scalar of a `PackageConfig`
 override, where absent must mean "inherit") are `*bool` with nil-safe accessors and a `Bool()` helper.
+
+A `Packages` entry plays one of two roles: without `Path` it overrides the space configuration of the package
+whose folder name matches the key; with `Path` it declares a standalone package outside every space. The
+model always holds dependency edges as the flat `[]DependencyConfig` list — the consumer-keyed shorthand the
+config file accepts is expanded by the CLI's loader, not expressed here.
 
 This module contains models only. Loading, validation, defaulting and package discovery live in the CLI's
 internal config package: an invalid model marshals fine and fails with a clear error when the CLI loads it.

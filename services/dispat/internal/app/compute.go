@@ -40,15 +40,17 @@ const (
 	actionKind   = "kind"
 )
 
-// suggestion is one proposed change to the config's dependencies list.
+// suggestion is one proposed change to a declared dependencies list.
 type suggestion struct {
 	action string
 	// entry is the edge in its proposed shape: the entry to append (add),
 	// the entry to delete (remove), or the existing entry with its new kind
 	// (kind).
 	entry config.DependencyConfig
-	// index locates the affected entry in cfg.Dependencies; -1 for add.
-	index int
+	// src locates the affected declaration — the root config's list, a
+	// packages entry's list, or a package folder's own config file. For add
+	// it is the root list with index -1: additions always go there.
+	src config.DepSource
 	// detail is the human-readable evidence: manifest provenance for
 	// add/kind, the absence explanation for remove.
 	detail string
@@ -68,7 +70,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	// Packages only, deliberately without Discover's dependency validation: a
 	// stale edge naming a deleted package must reach diffEdges as a removal
 	// suggestion, not abort the one command able to fix it.
-	pkgs, err := config.DiscoverPackages(a.cfg, a.root)
+	pkgs, declared, err := config.DiscoverPackages(a.cfg, a.root)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")
 		return 0, err
@@ -78,7 +80,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 		known[p.Name] = true
 	}
 	detected, hasManifest := a.detectEdges(ctx, pkgs)
-	sugs := a.diffEdges(detected, hasManifest, known)
+	sugs := a.diffEdges(detected, hasManifest, known, declared)
 
 	out := opts.Out
 	if out == nil {
@@ -86,7 +88,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	}
 	if len(sugs) == 0 {
 		fmt.Fprintf(out, "dependencies are in sync: %d detected edge(s), %d declared\n",
-			len(detected), len(a.cfg.Dependencies))
+			len(detected), len(declared))
 		return 0, nil
 	}
 	apply, err := a.selectSuggestions(sugs, opts, out)
@@ -96,7 +98,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	if len(apply) == 0 {
 		return len(sugs), nil
 	}
-	if err := a.applySuggestions(cfgPath, apply, out); err != nil {
+	if err := a.applySuggestions(cfgPath, apply, declared, out); err != nil {
 		return len(sugs), err
 	}
 	return len(sugs) - len(apply), nil
@@ -186,14 +188,14 @@ func relPath(root, path string) string {
 	return filepath.ToSlash(path)
 }
 
-// diffEdges compares the detected edges with the config's declared list and
+// diffEdges compares the detected edges with the merged declared list and
 // produces the suggestions: additions for detected-but-undeclared pairs, kind
 // corrections for declared pairs whose field disagrees, removals for declared
 // pairs no manifest supports — and for pairs naming a package that no longer
 // exists at all, which Discover would refuse to load. A pair is (consumer,
 // provider): the kind dimension corrects rather than duplicates, matching how
 // the config is authored.
-func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]bool) []suggestion {
+func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]bool, declared []config.DeclaredDependency) []suggestion {
 	type pair struct{ consumer, provider string }
 	detKinds := make(map[pair][]model.DepKind)
 	detDetail := make(map[pair]map[model.DepKind]string)
@@ -207,16 +209,17 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 			detDetail[p][e.dep.Kind] = e.detail
 		}
 	}
-	declared := make(map[pair]bool, len(a.cfg.Dependencies))
-	for _, d := range a.cfg.Dependencies {
-		declared[pair{d.Consumer, d.Provider}] = true
+	declaredPairs := make(map[pair]bool, len(declared))
+	for _, d := range declared {
+		declaredPairs[pair{d.Consumer, d.Provider}] = true
 	}
 
 	var sugs []suggestion
+	rootList := config.DepSource{KeyPath: []string{"dependencies"}, Index: -1}
 	// Additions, in deterministic order.
 	var addPairs []pair
 	for p := range detKinds {
-		if !declared[p] {
+		if !declaredPairs[p] {
 			addPairs = append(addPairs, p)
 		}
 	}
@@ -231,12 +234,14 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 		sugs = append(sugs, suggestion{
 			action: actionAdd,
 			entry:  config.DependencyConfig{Consumer: p.consumer, Provider: p.provider, Kind: string(kind)},
-			index:  -1,
+			src:    rootList,
 			detail: detDetail[p][kind],
 		})
 	}
-	// Corrections and removals, in the config's own order.
-	for i, d := range a.cfg.Dependencies {
+	// Corrections and removals, in declaration order: the root list first,
+	// then each package's lists. A package-declared edge carries no keep, so
+	// silencing its removal means redeclaring it at the top level.
+	for _, d := range declared {
 		p := pair{d.Consumer, d.Provider}
 		kinds, found := detKinds[p]
 		// An unparseable declared kind is reachable here (compute skips
@@ -244,6 +249,10 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 		// disagrees" when the pair is detected, and as an ordinary removal
 		// candidate otherwise.
 		declaredKind, kindErr := config.DepKind(d.Kind)
+		silence := "keep: true silences this"
+		if !d.Source.IsRootList() {
+			silence = "a top-level entry with keep: true silences this"
+		}
 		switch {
 		case !d.Keep && (!known[d.Consumer] || !known[d.Provider]):
 			gone := d.Consumer
@@ -252,13 +261,13 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 			}
 			sugs = append(sugs, suggestion{
 				action: actionRemove,
-				entry:  d,
-				index:  i,
-				detail: fmt.Sprintf("package %q no longer exists (keep: true silences this)", gone),
+				entry:  d.DependencyConfig,
+				src:    d.Source,
+				detail: fmt.Sprintf("package %q no longer exists (%s)", gone, silence),
 			})
 		case found && (kindErr != nil || !containsKind(kinds, declaredKind)):
 			want := strongestKind(kinds)
-			entry := d
+			entry := d.DependencyConfig
 			entry.Kind = string(want)
 			from := declaredKind.String()
 			if kindErr != nil {
@@ -267,15 +276,15 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 			sugs = append(sugs, suggestion{
 				action: actionKind,
 				entry:  entry,
-				index:  i,
+				src:    d.Source,
 				detail: fmt.Sprintf("%s -> %s: %s", from, want, detDetail[p][want]),
 			})
 		case !found && !d.Keep && hasManifest[d.Consumer]:
 			sugs = append(sugs, suggestion{
 				action: actionRemove,
-				entry:  d,
-				index:  i,
-				detail: fmt.Sprintf("no manifest of %q declares %q (keep: true silences this)", d.Consumer, d.Provider),
+				entry:  d.DependencyConfig,
+				src:    d.Source,
+				detail: fmt.Sprintf("no manifest of %q declares %q (%s)", d.Consumer, d.Provider, silence),
 			})
 		}
 	}
@@ -361,69 +370,155 @@ func (a *App) selectSuggestions(sugs []suggestion, opts ComputeOptions, out io.W
 	return nil, nil
 }
 
-// renderSuggestion is one suggestion's listing line.
+// renderSuggestion is one suggestion's listing line. Edges declared outside
+// the root list carry their source, so the user knows which file an applied
+// change touches.
 func renderSuggestion(s suggestion) string {
 	kind, _ := config.DepKind(s.entry.Kind)
 	edge := fmt.Sprintf("%s -> %s (%s)", s.entry.Consumer, s.entry.Provider, kind)
+	where := ""
+	if !s.src.IsRootList() {
+		where = fmt.Sprintf("  [%s]", s.src.Label())
+	}
 	switch s.action {
 	case actionAdd:
 		return fmt.Sprintf("+ add    %s  %s", edge, s.detail)
 	case actionRemove:
-		return fmt.Sprintf("- remove %s  %s", edge, s.detail)
+		return fmt.Sprintf("- remove %s  %s%s", edge, s.detail, where)
 	default:
-		return fmt.Sprintf("~ kind   %s  %s", edge, s.detail)
+		return fmt.Sprintf("~ kind   %s  %s%s", edge, s.detail, where)
 	}
 }
 
-// applySuggestions rewrites the config's dependencies list with the accepted
-// changes. A TOML config cannot be edited format-preservingly, so it gets the
-// rendered blocks to paste and an error, having written nothing.
-func (a *App) applySuggestions(cfgPath string, apply []suggestion, out io.Writer) error {
-	remove := make(map[int]bool)
-	newKind := make(map[int]string)
+// applySuggestions rewrites the declared dependency lists with the accepted
+// changes, each in the file that holds the declaration: the root config's
+// list gets its removals, kind rewrites and every addition; a package-level
+// list (a packages entry of the root config, or a package folder's own
+// config file) gets its removals — a kind correction there moves the edge to
+// the root list, because the provider-string form cannot carry a kind. A
+// TOML file cannot be edited format-preservingly, so it gets a rendered
+// block to paste and an error.
+func (a *App) applySuggestions(cfgPath string, apply []suggestion, declared []config.DeclaredDependency, out io.Writer) error {
+	sourceKey := func(s config.DepSource) string {
+		return s.File + "\x00" + strings.Join(s.KeyPath, "\x00")
+	}
+	rootRemove := make(map[int]bool)
+	rootKind := make(map[int]string)
 	var adds []config.DependencyConfig
+	pkgRemove := make(map[string]map[int]bool)
+	pkgSource := make(map[string]config.DepSource)
+	markPkg := func(s config.DepSource) {
+		k := sourceKey(s)
+		if pkgRemove[k] == nil {
+			pkgRemove[k] = make(map[int]bool)
+			pkgSource[k] = s
+		}
+		pkgRemove[k][s.Index] = true
+	}
 	for _, s := range apply {
 		switch s.action {
 		case actionAdd:
 			adds = append(adds, s.entry)
 		case actionRemove:
-			remove[s.index] = true
+			if s.src.IsRootList() {
+				rootRemove[s.src.Index] = true
+			} else {
+				markPkg(s.src)
+			}
 		case actionKind:
-			newKind[s.index] = s.entry.Kind
+			if s.src.IsRootList() {
+				rootKind[s.src.Index] = s.entry.Kind
+			} else {
+				markPkg(s.src)
+				adds = append(adds, s.entry)
+			}
 		}
 	}
-	// Declared entries keep their file order; accepted additions append.
-	next := make([]config.DependencyConfig, 0, len(a.cfg.Dependencies)+len(adds))
-	for i, d := range a.cfg.Dependencies {
-		if remove[i] {
-			continue
-		}
-		if k, ok := newKind[i]; ok {
-			d.Kind = k
-		}
-		next = append(next, d)
-	}
-	next = append(next, adds...)
 
-	err := config.ReplaceDependencies(cfgPath, next)
-	if errors.Is(err, config.ErrTOMLEdit) {
-		snippet, renderErr := config.RenderDependenciesTOML(next)
-		if renderErr != nil {
-			return renderErr
+	var edited []string
+	if len(adds) > 0 || len(rootRemove) > 0 || len(rootKind) > 0 {
+		// Declared entries keep their file order; accepted additions append.
+		next := make([]config.DependencyConfig, 0, len(a.cfg.Dependencies)+len(adds))
+		for i, d := range a.cfg.Dependencies {
+			if rootRemove[i] {
+				continue
+			}
+			if k, ok := rootKind[i]; ok {
+				d.Kind = k
+			}
+			next = append(next, d)
 		}
-		fmt.Fprintf(out, "\n# paste over the [[dependencies]] blocks in %s:\n%s", filepath.Base(cfgPath), snippet)
-		a.log.Error().Err(err).Msg("cannot edit a TOML config in place")
-		return err
+		next = append(next, adds...)
+
+		err := config.ReplaceDependencies(cfgPath, []string{"dependencies"}, next)
+		if errors.Is(err, config.ErrTOMLEdit) {
+			snippet, renderErr := config.RenderDependenciesTOML(next)
+			if renderErr != nil {
+				return renderErr
+			}
+			fmt.Fprintf(out, "\n# paste over the [[dependencies]] blocks in %s:\n%s", filepath.Base(cfgPath), snippet)
+			a.log.Error().Err(err).Msg("cannot edit a TOML config in place")
+			return err
+		}
+		if err != nil {
+			a.log.Error().Err(err).Msg("writing the config failed")
+			return err
+		}
+		// Keep the in-memory view aligned with the file just written; the
+		// process exits right after, but a future long-lived caller must not
+		// see a config that disagrees with disk.
+		a.cfg.Dependencies = next
+		edited = append(edited, filepath.Base(cfgPath))
 	}
-	if err != nil {
-		a.log.Error().Err(err).Msg("writing the config failed")
-		return err
+
+	// Package-level lists, in deterministic order. The remaining provider
+	// names are reconstructed from the merged declaration list, which holds
+	// every entry of every source in order.
+	sources := make([]string, 0, len(pkgRemove))
+	for k := range pkgRemove {
+		sources = append(sources, k)
 	}
-	// Keep the in-memory view aligned with the file just written; the process
-	// exits right after, but a future long-lived caller must not see a config
-	// that disagrees with disk.
-	a.cfg.Dependencies = next
-	fmt.Fprintf(out, "\napplied %d change(s) to %s (previous copy at %s)\n",
-		len(apply), filepath.Base(cfgPath), filepath.Base(cfgPath)+config.BackupSuffix)
+	sort.Strings(sources)
+	for _, k := range sources {
+		src := pkgSource[k]
+		remaining := []string{}
+		for _, d := range declared {
+			if sourceKey(d.Source) != k || pkgRemove[k][d.Source.Index] {
+				continue
+			}
+			remaining = append(remaining, d.Provider)
+		}
+		target := src.File
+		display := filepath.Base(cfgPath)
+		if target == "" {
+			target = cfgPath
+		} else {
+			display = relPath(a.root, target)
+		}
+		err := config.ReplaceStringList(target, src.KeyPath, remaining)
+		if errors.Is(err, config.ErrTOMLEdit) {
+			snippet, renderErr := config.RenderStringListTOML(src.KeyPath, remaining)
+			if renderErr != nil {
+				return renderErr
+			}
+			fmt.Fprintf(out, "\n# paste over the dependencies in %s:\n%s", display, snippet)
+			a.log.Error().Err(err).Msg("cannot edit a TOML config in place")
+			return err
+		}
+		if err != nil {
+			a.log.Error().Err(err).Msg("writing the config failed")
+			return err
+		}
+		if src.File == "" && len(src.KeyPath) == 3 {
+			if e, ok := a.cfg.Packages[src.KeyPath[1]]; ok {
+				e.Dependencies = remaining
+				a.cfg.Packages[src.KeyPath[1]] = e
+			}
+		}
+		edited = append(edited, display)
+	}
+
+	fmt.Fprintf(out, "\napplied %d change(s) to %s (previous copies carry the %s suffix)\n",
+		len(apply), strings.Join(edited, ", "), config.BackupSuffix)
 	return nil
 }

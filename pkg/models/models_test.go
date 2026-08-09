@@ -68,12 +68,12 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 		t.Error("unknown run scripts do not resolve")
 	}
 
-	ov := SpaceConfig{Packages: map[string]PackageConfig{"core": {TagFormat: "v{version}"}}}
-	if pc, ok := ov.Package("Core"); !ok || pc.TagFormat != "v{version}" {
+	pf := File{Packages: map[string]PackageConfig{"core": {TagFormat: "v{version}"}}}
+	if pc, ok := pf.Package("Core"); !ok || pc.TagFormat != "v{version}" {
 		t.Errorf("Package(Core) = %+v, %v", pc, ok)
 	}
-	if _, ok := ov.Package("app"); ok {
-		t.Error("packages without an override do not resolve")
+	if _, ok := pf.Package("app"); ok {
+		t.Error("packages without an entry do not resolve")
 	}
 }
 
@@ -145,14 +145,17 @@ func TestPackageConfigRoundTrip(t *testing.T) {
 	f := File{
 		VersionGroups: map[string]VersionGroupConfig{"core": {Versioning: VersioningFixed}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "packages", Packages: map[string]PackageConfig{
-				"app": {
-					RevertOnFail: Bool(false),
-					VersionGroup: "core",
-					Concurrency:  []int{2, 1},
-					Changelog:    &ChangelogConfig{Enabled: Bool(false)},
-				},
-			}},
+			"libs": {Path: "packages"},
+		},
+		Packages: map[string]PackageConfig{
+			"app": {
+				RevertOnFail: Bool(false),
+				VersionGroup: "core",
+				Concurrency:  []int{2, 1},
+				Changelog:    &ChangelogConfig{Enabled: Bool(false)},
+				Dependencies: []string{"core"},
+			},
+			"cli": {Path: "tools/cli"},
 		},
 	}
 	data, err := json.Marshal(f)
@@ -163,7 +166,7 @@ func TestPackageConfigRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	pc, ok := back.Spaces["libs"].Package("app")
+	pc, ok := back.Package("app")
 	if !ok {
 		t.Fatalf("override lost in the round trip: %s", data)
 	}
@@ -175,6 +178,12 @@ func TestPackageConfigRoundTrip(t *testing.T) {
 	}
 	if pc.VersionGroup != "core" || len(pc.Concurrency) != 2 {
 		t.Errorf("scalar fields lost: %+v", pc)
+	}
+	if len(pc.Dependencies) != 1 || pc.Dependencies[0] != "core" {
+		t.Errorf("dependencies lost: %+v", pc)
+	}
+	if cli, ok := back.Package("cli"); !ok || cli.Path != "tools/cli" {
+		t.Errorf("standalone path lost: %+v", cli)
 	}
 	if back.VersionGroups["core"].Versioning != VersioningFixed {
 		t.Errorf("versionGroups lost: %+v", back.VersionGroups)

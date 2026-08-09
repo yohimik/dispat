@@ -22,11 +22,24 @@ import (
 type File struct {
 	Scripts map[string]string      `mapstructure:"scripts" json:"scripts,omitempty"`
 	Spaces  map[string]SpaceConfig `mapstructure:"spaces" json:"spaces,omitempty"`
+	// Packages holds per-package configuration, keyed by package name. An
+	// entry without `path` adjusts the configuration of a package discovered
+	// in one of the space folders, matched by folder name (every key must
+	// match exactly one folder across all spaces). An entry with `path`
+	// declares a standalone package living outside every space, at that
+	// root-relative path; see PackageConfig.
+	Packages map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
 	// VersionGroups declares shared-versioning groups that cut across the
 	// filesystem, keyed by group name. Spaces and packages join a group by
 	// naming it in their versionGroup key; see VersionGroupConfig.
 	VersionGroups map[string]VersionGroupConfig `mapstructure:"versionGroups" json:"versionGroups,omitempty"`
-	Dependencies  []DependencyConfig            `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	// Dependencies declares consumer -> provider edges. Besides the full
+	// {consumer, provider, kind, keep} objects, the CLI's loader accepts
+	// shorthand array items — an object keyed by consumer name whose value is
+	// a provider name or array of names — normalized into full entries at
+	// load time. Packages may also declare their own providers; see
+	// PackageConfig.Dependencies. All declarations merge into one list.
+	Dependencies []DependencyConfig `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	// Concurrency accepts a single value applied to both stages
 	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
 	// 0 entries mean "number of CPUs".
@@ -331,20 +344,19 @@ type SpaceConfig struct {
 	// before any flow.version script runs. nil means off. See
 	// AutoVersionConfig.
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
-	// Packages are per-package overrides, keyed by package folder name.
-	// Each entry adjusts the space's configuration for that one package; see
-	// PackageConfig. A package folder may instead (or additionally) carry its
-	// own dispat config file, which overrides the entry here field by field.
-	Packages map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
 }
 
-// PackageConfig overrides its enclosing space's configuration for a single
-// package. It mirrors SpaceConfig's keys minus `path` — a package's location
-// is its folder, so a path here is a config error — and adds the
-// package-only keys: `changelog`, `github` and `concurrency`. The same shape
+// PackageConfig is one entry of the top-level `packages` map. Without `path`
+// it overrides the enclosing space's configuration for the package whose
+// folder name matches the entry key; with `path` it declares a standalone
+// package outside every space, whose configuration the entry itself is. It
+// mirrors SpaceConfig's keys plus the package-only keys: `changelog`,
+// `github`, `concurrency` and `dependencies`. The same shape (minus `path` —
+// a package's location is its entry or its folder, never the file inside it)
 // is the top-level object of a dispat config file placed inside a package
-// folder, which is the most local override layer: space config, then the
-// space's `packages` entry, then the in-folder file, field by field.
+// folder, which is the most local override layer: space config (or the
+// standalone entry's synthetic base), then the `packages` entry, then the
+// in-folder file, field by field.
 //
 // A field left unset inherits from the layer below, which is why the scalar
 // booleans are pointers here where SpaceConfig's are plain: an override must
@@ -353,6 +365,12 @@ type SpaceConfig struct {
 // the space folder, gating every publish of the space — a per-package login
 // would contradict all three.
 type PackageConfig struct {
+	// Path declares a standalone package at this root-relative folder,
+	// outside every space. Only valid on a top-level `packages` entry whose
+	// key matches no space folder: a space package's location is its folder
+	// and cannot be redefined, and an in-folder config file cannot move the
+	// folder it lives in.
+	Path                  string           `mapstructure:"path" json:"path,omitempty"`
 	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
@@ -381,6 +399,13 @@ type PackageConfig struct {
 	// top-level key, where 0 means "number of CPUs" — a weight has no CPU
 	// reading.)
 	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
+	// Dependencies names the provider packages this package depends on — a
+	// package name or an array of names (weak decoding lifts the scalar into
+	// a slice). The consumer is the package itself and the edge kind is the
+	// default ("dependencies"); an edge needing another kind or `keep` is
+	// declared in the top-level list instead. Entry-layer and in-folder-layer
+	// lists both count: all declarations merge with the top-level list.
+	Dependencies []string `mapstructure:"dependencies" json:"dependencies,omitempty"`
 }
 
 // AutoVersionConfig is a space's `autoVersion` object: the native
@@ -549,10 +574,10 @@ func (s SpaceConfig) RunScript(name string) (string, bool) {
 	return cmd, ok
 }
 
-// Package resolves a per-package override by folder name case-insensitively,
+// Package resolves a `packages` entry by package name case-insensitively,
 // for the same viper reason as Script.
-func (s SpaceConfig) Package(folder string) (PackageConfig, bool) {
-	pc, ok := s.Packages[strings.ToLower(folder)]
+func (c *File) Package(name string) (PackageConfig, bool) {
+	pc, ok := c.Packages[strings.ToLower(name)]
 	return pc, ok
 }
 
