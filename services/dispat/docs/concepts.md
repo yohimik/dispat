@@ -129,8 +129,8 @@ Acting on the provider does nothing: its version is already public, and cancella
    and the `DISPAT_EXPORT_GITHUB` export (absolute file paths) opts the package into a GitHub release with those files
    as assets.
 3. **publish**: waits for the package's own build and always for its providers' publishes. A space with a
-   `flow.login` authenticates **once per space** before its first publish (every other publish of the space waits for it;
-   a login failure fails them all); the login's exports reach every package of the space from its publish onward. On
+   `flow.login` authenticates **once per space** before its first publish (every other publish of the space waits for
+   it; a login failure fails them all); the login's exports reach every package of the space from its publish onward. On
    success the release recorders run (changelog file, GitHub release for packages that exported
    `DISPAT_EXPORT_GITHUB`), then the annotated tag is created (pushing is left to CI by default).
 4. **announce**: after the publish frame, for pushing the release out to update channels (a Slack message, a webhook, a
@@ -153,9 +153,9 @@ are the one thing that legitimately persists across runs, and they are excluded 
 
 Optionally the run can end with a *finalize phase* (disabled by default): the `commit` option creates one release commit
 capturing all published packages' changelog and manifest changes. Tags then point at that commit, GitHub releases move
-to the end of the run, and `commit.push` pushes the commit and tags, skipping any tag already on
-the remote so a partially pushed run converges (git and GitHub access are verified up front, before any work
-starts). The phase is bracketed by the warn-only run hooks
+to the end of the run, and `commit.push` pushes the commit and tags, skipping any tag already on the remote so a
+partially pushed run converges (git and GitHub access are verified up front, before any work starts). The phase is
+bracketed by the warn-only run hooks
 `run.beforeCommit`/`run.afterCommit`, `run.postCommit` (after commit and tags) and `run.beforePush`/`run.afterPush`.
 
 Build and publish have independent concurrency budgets (`concurrency: [build, publish]`); version tasks share the build

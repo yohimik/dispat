@@ -70,6 +70,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"run command: what a failing script does to the failed package's dependents (skip or continue)")
 	since := fs.StringP("since", "s", "",
 		"run command: select the packages the commits since the git revision address (scopes first, changed files for scopeless commits; e.g. HEAD~1, origin/main, a tag; 'all' selects every package) instead of the release window")
+	consumers := fs.Bool("consumers", false,
+		"run command: additionally run every package that transitively depends on a selected one, so downstream consumers are re-run with the change")
 	initFormat := fs.String("format", "json",
 		"init command: config file format (json, yaml or toml)")
 	computeWrite := fs.Bool("write", false,
@@ -146,6 +148,10 @@ flags:
 		bootLog.Error().Msg("--since and an explicit package are mutually exclusive: the package already names the whole selection")
 		return 2
 	}
+	if cmd == cmdRun && inv.pkg != "" && *consumers {
+		bootLog.Error().Msg("--consumers and an explicit package are mutually exclusive: a targeted run is exactly one package")
+		return 2
+	}
 	if cmd == cmdInit {
 		// Before config loading: init is what creates the config, so there is
 		// nothing to load yet (and no git repository is needed either).
@@ -187,7 +193,7 @@ flags:
 			return 1
 		}
 	case cmdRun:
-		opts := app.RunOptions{OnError: *onError, Package: inv.pkg, Since: *since}
+		opts := app.RunOptions{OnError: *onError, Package: inv.pkg, Since: *since, Consumers: *consumers}
 		if inv.shorthand {
 			// The shorthand narrows to the package the command was invoked
 			// from: --root (default ".") is where the user stood, and the

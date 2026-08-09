@@ -384,6 +384,124 @@ func TestRunShorthandNarrowsToTheInvokedPackage(t *testing.T) {
 	assert.ElementsMatch(t, []string{"a", "b"}, strings.Fields(string(data)))
 }
 
+// consumersRepo builds the --consumers fixture: a three-link chain
+// core <- mid <- app plus an independent extra, all in one space defining a
+// "lint" script that logs the package name and a "fail" script that fails in
+// core alone. Bootstrap-committed, then one more commit touching core only,
+// so `-s HEAD~1` addresses exactly core.
+func consumersRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	spc := cfg.Spaces["libs"]
+	spc.RunScripts = map[string]string{
+		"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`,
+		"fail": `[ "$DISPAT_PACKAGE" != "core" ] && echo "$DISPAT_PACKAGE" >> ../../lint.log`,
+	}
+	cfg.Spaces["libs"] = spc
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "mid", Provider: "core"},
+		{Consumer: "app", Provider: "mid"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "mid")
+	r.SeedPackage("packages", "app")
+	r.SeedPackage("packages", "extra")
+	r.Commit("feat(core,mid,app,extra): bootstrap the chain")
+	r.WriteFile("packages/core/touch.txt", "x")
+	r.Commit("chore(core): touch core alone")
+	return r
+}
+
+// consumersLog returns the packages the fixture's scripts recorded, in
+// execution order.
+func consumersLog(t *testing.T, r *harness.Repo) []string {
+	t.Helper()
+	data, err := os.ReadFile(r.Path("lint.log"))
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(data))
+}
+
+// TestRunConsumersExpandTransitively: a --since window covers only what the
+// commits address; --consumers adds every transitive dependent — app is
+// reached through mid, not by any commit — providers still running first,
+// and packages nothing depends on staying out.
+func TestRunConsumersExpandTransitively(t *testing.T) {
+	r := consumersRepo(t)
+
+	// The gap being fixed: the window alone re-runs nothing downstream.
+	r.RunScriptOK("lint", "-s", "HEAD~1")
+	assert.Equal(t, []string{"core"}, consumersLog(t, r), "the window covers what the commit addressed")
+
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "-s", "HEAD~1", "--consumers")
+	assert.Equal(t, []string{"core", "mid", "app"}, consumersLog(t, r),
+		"consumers are pulled in transitively (app only depends on core through mid), in graph order")
+
+	// Everything already selected: the expansion is a no-op.
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "-s", "all", "--consumers")
+	assert.ElementsMatch(t, []string{"core", "mid", "app", "extra"}, consumersLog(t, r))
+}
+
+// TestRunConsumersOnReleaseWindow: the default window has the same gap when
+// propagation does not reach the consumers (the default depth is 0) —
+// --consumers closes it there too.
+func TestRunConsumersOnReleaseWindow(t *testing.T) {
+	r := consumersRepo(t)
+
+	r.RunScriptOK("lint")
+	assert.ElementsMatch(t, []string{"core", "mid", "app", "extra"}, consumersLog(t, r),
+		"the bootstrap feat put every package in the release window")
+
+	// Release, then change core alone: the next window holds only core.
+	r.ReleaseOK()
+	r.WriteFile("packages/core/more.txt", "x")
+	r.Commit("feat(core): core moves on")
+
+	r.Remove("lint.log")
+	r.RunScriptOK("lint")
+	assert.Equal(t, []string{"core"}, consumersLog(t, r), "depth-0 propagation reaches no consumer")
+
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "--consumers")
+	assert.Equal(t, []string{"core", "mid", "app"}, consumersLog(t, r),
+		"--consumers re-runs the dependents of the released change")
+}
+
+// TestRunConsumersSkipCascade: an expanded consumer is a full member of the
+// run — a failing provider script skips it transitively under the default
+// --on-error skip, and --on-error continue runs it anyway.
+func TestRunConsumersSkipCascade(t *testing.T) {
+	r := consumersRepo(t)
+
+	res := r.RunScript("fail", "-s", "HEAD~1", "--consumers")
+	assert.Equal(t, 1, res.Code, "a failing script fails the command")
+	assert.Empty(t, consumersLog(t, r), "mid and app are skipped transitively behind core's failure")
+
+	res = r.RunScript("fail", "-s", "HEAD~1", "--consumers", "--on-error", "continue")
+	assert.Equal(t, 1, res.Code)
+	assert.Equal(t, []string{"mid", "app"}, consumersLog(t, r), "continue still runs the dependents, in order")
+}
+
+// TestRunConsumersRejectsTarget: a targeted run is exactly one package, so
+// --consumers refuses to combine with it — and overrides the folder
+// shorthand's narrowing instead, the way --since does.
+func TestRunConsumersRejectsTarget(t *testing.T) {
+	r := consumersRepo(t)
+
+	res := r.Command("run", "lint", "mid", "--consumers")
+	assert.Equal(t, 2, res.Code, "--consumers and an explicit package are mutually exclusive")
+
+	res = r.CommandAt("packages/mid", "lint", "--consumers")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.ElementsMatch(t, []string{"core", "mid", "app", "extra"}, consumersLog(t, r),
+		"the shorthand is not narrowed under --consumers: the whole window (plus consumers) runs")
+}
+
 // TestRunSinceSelectsByCommitScopes: --since re-scopes the run from the
 // release window to what the commits since a revision address, under the
 // planner's own scope semantics — a written scope is authoritative even when

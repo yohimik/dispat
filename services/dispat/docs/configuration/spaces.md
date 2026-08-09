@@ -3,20 +3,20 @@
 A space is a group of packages sharing build/publish behaviour. Every direct sub-folder of the space's `path` is a
 package named after the folder, unless a [`.dispatignore`](#dispatignore) file in the space folder excludes it. A single
 package can depart from its space's configuration through a top-level [`packages` entry](./packages.md) — one-off
-exceptions do not require carving the package out into a space of its own — and a package living outside every space
-is declared through a [standalone entry](./packages.md#standalone-packages-path).
+exceptions do not require carving the package out into a space of its own — and a package living outside every space is
+declared through a [standalone entry](./packages.md#standalone-packages-path).
 
 ## Space options
 
 | Key                     | Type                     | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 |-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped, and [`.dispatignore`](#dispatignore) excludes more). Package names must be unique across all spaces.                                                                                                                                                                |
+| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped, and [`.dispatignore`](#dispatignore) excludes more). Package names must be unique across all spaces.                                                                                                                                                              |
 | `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
 | `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage, or is skipped after its version stage already modified files.                                                                                                                                                   |
 | `flow`                  | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                                                                                                            |
-| `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name — a top-level [`versionGroups`](#versioning-groups) entry, or another space with `fixed`/`fixedSparse` versioning. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                 |
+| `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name — a top-level [`versionGroups`](#versioning-groups) entry, or another space with `fixed`/`fixedSparse` versioning. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                |
 | `runScripts`            | map name → shell command | no         | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 
@@ -65,8 +65,8 @@ Authentication (`npm login`, `docker login`, ...) is a property of the space, no
 until it finishes, and it is never re-run within the run. Two spaces referencing the *same* script still log in once
 each (n spaces, n logins), because credentials and registries belong to the space. A failing login fails the publish of
 **every** package in the space (none of them could have succeeded without it); other spaces are unaffected. The login
-runs in the **space folder** (the parent of every member package), so a script reading a local file sees the same
-folder on every run, and gets the space-scoped environment:
+runs in the **space folder** (the parent of every member package), so a script reading a local file sees the same folder
+on every run, and gets the space-scoped environment:
 `DISPAT_SPACE`, `DISPAT_STAGE=login`, the [workspace listing](../environment.md#workspace-data) and `DISPAT_OUTPUT`. No
 package variables, since which package's publish triggered it is a scheduling accident. What it
 [exports](../environment.md#script-outputs) is space-scoped too: every package of the space receives the login's exports
@@ -129,11 +129,11 @@ version gets a single "no changes" entry instead of borrowing its neighbour's no
 reported as `W210` (non-suppressible, like the catch-up codes: nothing in the commit log alone explains it). Such a ride
 is a full release at the execution level: its version/build/publish scripts, hooks, tag and records all run.
 
-Two convergence properties are worth knowing. A group whose members all carry the shared version releases nothing
-on a quiet run, exactly like independent packages. And a `fixed` member left *behind* the group's published baseline
-(its ride failed in an earlier run, or the group formed with unequal versions) is caught up at exactly that
-baseline on the next run (also `W210`), restoring the one-version invariant. `fixedSparse` deliberately never does this,
-since staying behind is its point.
+Two convergence properties are worth knowing. A group whose members all carry the shared version releases nothing on a
+quiet run, exactly like independent packages. And a `fixed` member left *behind* the group's published baseline (its
+ride failed in an earlier run, or the group formed with unequal versions) is caught up at exactly that baseline on the
+next run (also `W210`), restoring the one-version invariant. `fixedSparse` deliberately never does this, since staying
+behind is its point.
 
 Dependency edges stay package-scoped either way: a provider propagating into one member bumps that member (which then
 carries its group along under `fixed`), and only the member with provider updates runs a version task.
@@ -148,14 +148,23 @@ top-level `versionGroups` map declares such groups by name; spaces and packages 
 ```json
 {
   "versionGroups": {
-    "platform": { "versioning": "fixed" }
+    "platform": {
+      "versioning": "fixed"
+    }
   },
   "spaces": {
-    "libs": { "path": "packages", "versionGroup": "platform" },
-    "apps": { "path": "apps" }
+    "libs": {
+      "path": "packages",
+      "versionGroup": "platform"
+    },
+    "apps": {
+      "path": "apps"
+    }
   },
   "packages": {
-    "shell": { "versionGroup": "platform" }
+    "shell": {
+      "versionGroup": "platform"
+    }
   }
 }
 ```
@@ -165,8 +174,8 @@ Here every package of `libs` plus the single `shell` package version together as
 
 A declaration carries one key: `versioning`, `fixed` or `fixedSparse` (`independent` is invalid — a group exists to
 share versions). The declaration's mode is authoritative for everyone who joins, which is why `versionGroup` and
-`versioning` are mutually exclusive on the same space or package: a member cannot contradict its group. A declared
-group nobody joins is inert configuration, like a disabled block.
+`versioning` are mutually exclusive on the same space or package: a member cannot contradict its group. A declared group
+nobody joins is inert configuration, like a disabled block.
 
 The joining rules:
 
@@ -176,8 +185,8 @@ The joining rules:
   [most local layer wins](./packages.md#package-options).
 - The reference may also name another **space** whose own `versioning` is `fixed`/`fixedSparse` — that space's implicit
   group. A space that itself joined a declared group has no group of its own to reference; name the declared group
-  directly. Group and space names share one namespace (a declaration shadowing a space name is rejected), and an
-  unknown reference is an error, the same typo protection as an unknown dependency endpoint.
+  directly. Group and space names share one namespace (a declaration shadowing a space name is rejected), and an unknown
+  reference is an error, the same typo protection as an unknown dependency endpoint.
 - A member's assignment mode is its own: a `fixed` space and a `fixedSparse` package can join the same group — the
   shared version is computed once, then each member follows its own mode (ride along, or stay behind when unchanged).
 
@@ -186,8 +195,8 @@ they are raised against is `group:<name>`.
 
 ## `autoVersion`
 
-With an `autoVersion` object present, dispat keeps the space's manifests in sync with the released versions itself.
-No `flow.version` script is required; one may still run afterwards and sees the already-reconciled files.
+With an `autoVersion` object present, dispat keeps the space's manifests in sync with the released versions itself. No
+`flow.version` script is required; one may still run afterwards and sees the already-reconciled files.
 
 What happens at the version stage: dispat scans the package's manifests, matches each declared dependency against the
 workspace (by manifest name, or by a declared local path such as `file:`, a relative `replace` or `path =`), and
@@ -204,37 +213,37 @@ including providers released by earlier runs, so an auto-versioning space runs a
 package, not only those bumped by provider updates. Second, a rewriting failure fails the version stage, and
 `revertOnFail` rolls the half-edited folder back.
 
-| Key                   | Type             | Default  | Effect                                                                                                                                                                                                                                            |
-|-----------------------|------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `enabled`             | bool             | `true`   | Turns the block off without deleting it. The minimal opt-in block is `{"enabled": true}`: a completely empty `{}` object is pruned by the config loader and reads as absent.                                                                       |
-| `manifests`           | string           | `root`   | `root`: only manifests directly in the package folder; `all`: every manifest found under it (dependency, virtual-env and build-output folders such as `node_modules`, `vendor`, `dist` and `venv`, plus every dot-folder, are never entered).                                                                               |
-| `kinds`               | array of strings | all four | Restrict rewriting to the named manifest fields (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`).                                                                                                                  |
-| `only`                | array of strings | all      | Restrict rewriting to declarations of the named provider packages; every name must be a discovered package.                                                                                                                                       |
+| Key                   | Type             | Default  | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|-----------------------|------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `enabled`             | bool             | `true`   | Turns the block off without deleting it. The minimal opt-in block is `{"enabled": true}`: a completely empty `{}` object is pruned by the config loader and reads as absent.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `manifests`           | string           | `root`   | `root`: only manifests directly in the package folder; `all`: every manifest found under it (dependency, virtual-env and build-output folders such as `node_modules`, `vendor`, `dist` and `venv`, plus every dot-folder, are never entered).                                                                                                                                                                                                                                                                                                                     |
+| `kinds`               | array of strings | all four | Restrict rewriting to the named manifest fields (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`).                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `only`                | array of strings | all      | Restrict rewriting to declarations of the named provider packages; every name must be a discovered package.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `nameMatch`           | string           | `exact`  | How a declared name finds its workspace package when no manifest declares that name and no local path matches: `exact` (such declarations are simply not workspace dependencies) or `substring`, which also matches a declared name whose **last `/`- or `:`-separated segment** equals a package's folder name, so package `app` matches `@core/app`, `com.acme:app` or a bare `app` line even when the `app` package has no parseable manifest of its own. Opt-in because it can false-positive (a third-party `@types/app` would match a package named `app`). |
-| `match`               | array of globs   | any      | Rewrite only declared ranges matching one of the globs, e.g. `["workspace:*"]`, so a range pinned by hand is never overridden. `*` matches any run of characters (slashes included, same as scope globs), so `file:../core` is matched by `file:*` and by `*`.                                                                          |
-| `range`               | string           | `caret`  | The write policy: `caret` (`^1.2.3`), `tilde` (`~1.2.3`), `exact` (`1.2.3`), a `{version}` template (`>={version}`), or any other literal written verbatim (`workspace:*`). Ecosystems with their own version spelling override the keywords: `go.mod` always receives exact canonical `vX.Y.Z`, Python files always receive `==X.Y.Z`; templates and literals pass through everywhere. |
-| `writeVersion`        | bool             | `true`   | Also write the package's own new version into its manifest's version field (§12.4). Applies to the package's **root** manifests only: a nested manifest (an example, a fixture) keeps its own version even under `manifests: all`.                                                                                                                                                               |
-| `syncLock`            | array of names   | none     | References into `scripts`, run inside the package folder **after** its manifests were rewritten and **before** its build: the slot for `npm install` and friends, so lock files follow the manifests. Skipped for a package whose version stage changed nothing, so a quiet release does not regenerate locks for no reason. A lock file living at the **repo root** (npm workspaces) is outside every package folder: list it under [`commit.include`](./records.md#commit) so the release commit carries it.        |
-| `syncLockConcurrency` | int              | `1`      | Run-wide cap on simultaneously running `syncLock` scripts. Shared lock files corrupt under parallel writers, hence the serial default; when spaces disagree, the smallest configured value wins.                                                    |
+| `match`               | array of globs   | any      | Rewrite only declared ranges matching one of the globs, e.g. `["workspace:*"]`, so a range pinned by hand is never overridden. `*` matches any run of characters (slashes included, same as scope globs), so `file:../core` is matched by `file:*` and by `*`.                                                                                                                                                                                                                                                                                                    |
+| `range`               | string           | `caret`  | The write policy: `caret` (`^1.2.3`), `tilde` (`~1.2.3`), `exact` (`1.2.3`), a `{version}` template (`>={version}`), or any other literal written verbatim (`workspace:*`). Ecosystems with their own version spelling override the keywords: `go.mod` always receives exact canonical `vX.Y.Z`, Python files always receive `==X.Y.Z`; templates and literals pass through everywhere.                                                                                                                                                                           |
+| `writeVersion`        | bool             | `true`   | Also write the package's own new version into its manifest's version field (§12.4). Applies to the package's **root** manifests only: a nested manifest (an example, a fixture) keeps its own version even under `manifests: all`.                                                                                                                                                                                                                                                                                                                                |
+| `syncLock`            | array of names   | none     | References into `scripts`, run inside the package folder **after** its manifests were rewritten and **before** its build: the slot for `npm install` and friends, so lock files follow the manifests. Skipped for a package whose version stage changed nothing, so a quiet release does not regenerate locks for no reason. A lock file living at the **repo root** (npm workspaces) is outside every package folder: list it under [`commit.include`](./records.md#commit) so the release commit carries it.                                                    |
+| `syncLockConcurrency` | int              | `1`      | Run-wide cap on simultaneously running `syncLock` scripts. Shared lock files corrupt under parallel writers, hence the serial default; when spaces disagree, the smallest configured value wins.                                                                                                                                                                                                                                                                                                                                                                  |
 
 ```yaml
 spaces:
   js:
     path: packages
     autoVersion:
-      match: ["workspace:*"]      # only ranges the workspace manages
+      match: [ "workspace:*" ]      # only ranges the workspace manages
       range: caret                # write ^<new version>
-      syncLock: [npm-install]     # scripts.npm-install: "npm install"
+      syncLock: [ npm-install ]     # scripts.npm-install: "npm install"
 scripts:
   npm-install: npm install --package-lock-only
 ```
 
-Four warnings narrate what the rewrite did that the commit log alone cannot explain. `W192`: the manifest's declared
-own version disagreed with the baseline (tags are authoritative; the computed version is written over it). `W197`: a
-range was caught up to a provider released **outside** this run (§9.4's catch-up). `W203`: a stable release now ranges
-over a **prerelease** provider. And `W221`: a rewritten dependency has **no configured `dependencies` edge** behind
-it, so nothing orders this package after that provider or skips it when the provider fails; the written version is
-optimistic about a publish still in flight. `dispat compute` derives the missing edge.
+Four warnings narrate what the rewrite did that the commit log alone cannot explain. `W192`: the manifest's declared own
+version disagreed with the baseline (tags are authoritative; the computed version is written over it). `W197`: a range
+was caught up to a provider released **outside** this run (§9.4's catch-up). `W203`: a stable release now ranges over a
+**prerelease** provider. And `W221`: a rewritten dependency has **no configured `dependencies` edge** behind it, so
+nothing orders this package after that provider or skips it when the provider fails; the written version is optimistic
+about a publish still in flight. `dispat compute` derives the missing edge.
 
 ## `runScripts` and `dispat run`
 
@@ -261,11 +270,11 @@ a run script. A changed package whose space does not define the name completes a
 [package entry](./packages.md) defines is an error (running nothing silently is how a typo hides).
 
 The run can also be narrowed to a single package, in two ways. `dispat run <name> <package>` runs the script in exactly
-that package (changed or not, with no graph) and errors on an unknown package or on one whose space does not define
-the script, because a *targeted* run that runs nothing would be a typo hiding. And the shorthand, invoked from inside a
-package's folder (or any subdirectory of it), narrows to that package the same way (config resolution finds the
-monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just works), while from the monorepo
-top it covers every changed package as usual. The shorthand takes no package argument.
+that package (changed or not, with no graph) and errors on an unknown package or on one whose space does not define the
+script, because a *targeted* run that runs nothing would be a typo hiding. And the shorthand, invoked from inside a
+package's folder (or any subdirectory of it), narrows to that package the same way (config resolution finds the monorepo
+root by ascending parent directories, so `cd packages/core && dispat lint` just works), while from the monorepo top it
+covers every changed package as usual. The shorthand takes no package argument.
 
 A third selection axis is `--since <rev>` (`-s`): instead of the release window, select the packages **the commits in
 `rev..HEAD` address**: `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),
@@ -275,6 +284,14 @@ as planning: a commit's written scopes are authoritative (globs, exclusions and 
 included), and only a unit with **no scope-set falls back to the files it changed** (§6.2, longest path prefix).
 Ordering, concurrency and output carrying apply to the selected set exactly as to the changed one. `--since` is mutually
 exclusive with an explicit `<package>` and overrides the shorthand's folder inference.
+
+A window — `--since` or the release window — covers only the packages the commits **address**, never the packages a
+change *affects*: `dispat test -s HEAD~1` re-tests the changed provider, not the consumers that depend on it. The
+`--consumers` flag closes that gap: it additionally selects every package that **transitively depends** on a selected
+one — a consumer pulled in brings its own consumers, all the way down the graph. The added packages run whether or not
+they changed, after their selected providers, and a failing provider's script skips them under the default
+`--on-error skip` exactly like any selected dependent. `--consumers` is mutually exclusive with an explicit
+`<package>` (a targeted run is exactly one package) and, like `--since`, overrides the shorthand's folder inference.
 
 What a failure does is the `--on-error` flag: under `skip` (the default) the failed package's changed dependents are
 skipped, transitively (the same shape a release gives a failed provider), while independent packages keep running; under
@@ -303,5 +320,5 @@ tmp-*
 One pattern per line; blank lines and `#` comments are skipped, and `*` matches any run of characters (the same glob the
 scope terms and `autoVersion.match` use). Patterns match the space folder's **direct sub-folder names** only, and each
 space folder carries its own file. An excluded folder is invisible to discovery — never released, never scanned by
-`compute` or `autoVersion`, its name an unknown scope in commits — and a [`packages` entry](./packages.md) naming one
-is rejected with the exclusion spelled out.
+`compute` or `autoVersion`, its name an unknown scope in commits — and a [`packages` entry](./packages.md) naming one is
+rejected with the exclusion spelled out.

@@ -67,6 +67,17 @@ type RunOptions struct {
 	// Since is mutually exclusive with Package (the CLI rejects the pair) and
 	// overrides Dir's implicit narrowing — an explicit flag beats inference.
 	Since string
+	// Consumers additionally selects every package that transitively depends
+	// on a selected one, for the windowed runs — the release window or a
+	// --since window. A window alone covers only what the commits address,
+	// so without this flag nothing re-runs the downstream packages a
+	// provider change affects; with it, a consumer pulled in brings its own
+	// consumers, all the way down the graph. The added packages run whether
+	// or not they changed, after their selected providers, with the same
+	// skip cascade as any selected package. Consumers is mutually exclusive
+	// with Package (the CLI rejects the pair — a targeted run is exactly one
+	// package) and, like Since, overrides Dir's implicit narrowing.
+	Consumers bool
 }
 
 // RunScript computes the plan and executes the named space run script inside
@@ -151,6 +162,9 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 			selected = append(selected, rel.Pkg.Name)
 		}
 	}
+	if opts.Consumers {
+		selected = withConsumers(pl, selected)
+	}
 
 	// The task graph: one node per selected package, edges from every
 	// selected provider — the same shape the release executor schedules, at
@@ -214,10 +228,11 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 // and its space must define the script; RunOptions.Dir narrows only when it
 // points inside some package's folder, and silently does not when it points
 // anywhere else (the monorepo root, a space folder, outside the tree) — or
-// when --since is in play, because an explicit flag beats inference.
+// when --since or --consumers is in play, because an explicit flag beats
+// inference.
 func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, error) {
 	target := opts.Package
-	if target == "" && opts.Dir != "" && opts.Since == "" {
+	if target == "" && opts.Dir != "" && opts.Since == "" && !opts.Consumers {
 		target = a.packageAt(pl, opts.Dir)
 	}
 	if target == "" {
@@ -232,6 +247,41 @@ func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, er
 			rel.Pkg.Space.Name, target, name)
 	}
 	return target, nil
+}
+
+// withConsumers expands a selection with every package that transitively
+// depends on a selected one, returning the union in the plan's dependency
+// order. The whole declared graph is walked — not just edges among the
+// already-selected — so a consumer pulled in brings its own consumers too.
+func withConsumers(pl *plan.Plan, selected []string) []string {
+	consumers := make(map[string][]string) // provider -> direct consumers
+	for _, name := range pl.Order {
+		for _, prov := range pl.Providers[name] {
+			consumers[prov] = append(consumers[prov], name)
+		}
+	}
+	in := make(map[string]bool, len(selected))
+	queue := append([]string(nil), selected...)
+	for _, name := range selected {
+		in[name] = true
+	}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		for _, c := range consumers[name] {
+			if !in[c] {
+				in[c] = true
+				queue = append(queue, c)
+			}
+		}
+	}
+	out := make([]string, 0, len(in))
+	for _, name := range pl.Order {
+		if in[name] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // sincePackages resolves --since onto package names: every package for

@@ -27,9 +27,10 @@ The suite was designed against twelve goals, one test file each:
    prerelease train, failed-ride catch-up, holds/pins under a shared version, and no bleed between modes.
 6. **The `dispat run` command** (`run_test.go`): space `runScripts` executed inside changed packages over the dependency
    graph with the full environment, the `dispat <script>` shorthand (including its narrowing to the package it is
-   invoked from), the single-package target (`run <script> <package>`), the `--since` selection, the `--on-error`
-   skip/continue policies, the concurrency budget (including graph ordering *under* concurrency), cross-package output
-   carrying, skipping and error cases.
+   invoked from), the single-package target (`run <script> <package>`), the `--since` selection, the `--consumers`
+   expansion (transitive dependents of the window, full members of the skip cascade), the `--on-error` skip/continue
+   policies, the concurrency budget (including graph ordering *under* concurrency), cross-package output carrying,
+   skipping and error cases.
 7. **Release records** (`records_test.go`): the durable artefacts themselves: changelog files accumulating across
    releases above pre-dispat content, annotated tags with their messages and targets, GitHub releases in commit mode,
    and commit mode's release commit, tag placement and push against a real bare remote.
@@ -251,6 +252,10 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestRunTargetsANamedPackage`                      | `run <script> <package>` runs exactly the named package (changed or not, no graph) and errors on an unknown package or one whose space does not define the script.                                                                                                                                          |
 | `TestRunShorthandNarrowsToTheInvokedPackage`       | `dispat <script>` from inside a package folder (or a nested subdirectory) runs only that package, riding the config ascent; from the monorepo top it still covers every changed package.                                                                                                                      |
 | `TestRunSinceSelectsByCommitScopes`                | `--since HEAD~1` narrows the run to what the last commit addressed (the written scope wins over the changed files, a scopeless unit derives from its files, §6.2), `-s all` selects every package, an unknown revision exits 1, and combining `--since` with an explicit package is a usage error (exit 2). |
+| `TestRunConsumersExpandTransitively`               | `--consumers` widens a `--since` window with every transitive dependent — the far end of a three-link chain is reached through the middle package, providers still first — while packages nothing depends on stay out, and `-s all --consumers` is a no-op expansion.                                     |
+| `TestRunConsumersOnReleaseWindow`                  | The default release window has the same gap under depth-0 propagation, and `--consumers` closes it there too: a `feat(core)` window runs core alone plainly, core + its transitive consumers with the flag.                                                                                              |
+| `TestRunConsumersSkipCascade`                      | An expanded consumer is a full member of the run: a failing provider script skips it transitively under the default `--on-error skip` (exit 1), and `--on-error continue` runs it anyway.                                                                                                                |
+| `TestRunConsumersRejectsTarget`                    | Combining `--consumers` with an explicit package is a usage error (exit 2), and the folder shorthand is not narrowed under the flag — the whole window plus its consumers runs.                                                                                                                          |
 
 ### Goal 7: release records (`records_test.go`)
 
