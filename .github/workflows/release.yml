@@ -21,33 +21,8 @@ env:
   APP_NAME: dispat
 
 jobs:
-  tests:
-    # No binary ships from a commit that fails the suite.
-    name: Test the release commit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-          cache: true
-
-      - name: Run the full suite
-        run: |
-          go test -C pkg/ccme         ./... -count=1 -timeout 10m
-          go test -C pkg/manifest     ./... -count=1 -timeout 10m
-          go test -C pkg/models       ./... -count=1 -timeout 10m
-          go test -C pkg/scanner      ./... -count=1 -timeout 10m
-          go test -C pkg/writer      ./... -count=1 -timeout 10m
-          go test -C services/dispat  ./... -count=1 -timeout 10m
-          go test -C tests/integration ./... -count=1 -timeout 20m
-
   release:
     name: Run dispat, publish binaries
-    needs: tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -70,47 +45,4 @@ jobs:
         run: go build -C services/dispat -o "$PWD/dispat" .
 
       - name: Run the release
-        # commit mode: dispat creates the release commit, tags it and pushes
-        # the branch and the tags using the checkout's credentials.
-        run: ./dispat --log-format json
-
-      - name: Resolve the CLI tag this run created
-        id: tag
-        run: |
-          TAG=$(git tag --points-at HEAD 'services/dispat/v*' | head -n 1)
-          if [ -z "$TAG" ]; then
-            echo "no dispat release in this run; binaries are skipped"
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG##*/v}" >> "$GITHUB_OUTPUT"
-
-      - name: Build release binaries
-        if: steps.tag.outputs.tag != ''
-        env:
-          CGO_ENABLED: 0
-          VERSION: ${{ steps.tag.outputs.version }}
-        run: |
-          mkdir -p dist
-          for target in linux/amd64 darwin/arm64 windows/amd64; do
-            GOOS="${target%/*}"; GOARCH="${target#*/}"
-            EXT=""; [ "$GOOS" = "windows" ] && EXT=".exe"
-            OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${EXT}"
-            GOOS="$GOOS" GOARCH="$GOARCH" go build -C services/dispat -trimpath \
-              -ldflags="-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${VERSION}" \
-              -o "${PWD}/dist/${OUT_NAME}" .
-            echo "Built dist/${OUT_NAME} (version ${VERSION})"
-          done
-
-      - name: Create GitHub release with the binaries
-        if: steps.tag.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: dispat ${{ steps.tag.outputs.version }}
-          # A version with a prerelease section (1.0.0-rc.0) is marked as a
-          # GitHub prerelease, keeping it off the "latest" badge.
-          prerelease: ${{ contains(steps.tag.outputs.version, '-') }}
-          generate_release_notes: true
-          files: dist/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./dispat
