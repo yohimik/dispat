@@ -1,15 +1,60 @@
 {
   "scripts": {
-    "build": "echo build $DISPAT_PACKAGE@$DISPAT_NEW_VERSION",
+    "build-go-library": "git tag $DISPAT_TAG && git push origin $DISPAT_TAG",
+    "revert-go-library": "git push origin --delete $DISPAT_TAG",
     "publish": "echo publish $DISPAT_PACKAGE@$DISPAT_NEW_VERSION"
   },
   "spaces": {
-    "packages": {
-      "path": "packages",
+    "pkg": {
+      "tagFormat": "pkg/{package}/v${version}",
+      "path": "pkg",
       "flow": {
-        "build": "build",
-        "publish": "publish"
+        "publish": "build-go-library",
+        "onFail": "revert-go-library"
+      },
+      "autoVersion": {
+        "enabled": true
+      }
+    },
+    "services": {
+      "tagFormat": "services/{package}/v${version}",
+      "path": "services",
+      "flow": {
       }
     }
-  }
+  },
+  "dependencies": [
+    {
+      "consumer": "dispat",
+      "provider": "ccme"
+    },
+    {
+      "consumer": "dispat",
+      "provider": "manifest"
+    },
+    {
+      "consumer": "dispat",
+      "provider": "models"
+    },
+    {
+      "consumer": "dispat",
+      "provider": "scanner"
+    },
+    {
+      "consumer": "dispat",
+      "provider": "writer"
+    },
+    {
+      "consumer": "models",
+      "provider": "ccme"
+    },
+    {
+      "consumer": "scanner",
+      "provider": "manifest"
+    },
+    {
+      "consumer": "writer",
+      "provider": "manifest"
+    }
+  ]
 }

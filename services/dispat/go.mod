@@ -1,6 +1,6 @@
 module github.com/yohimik/dispat/services/dispat
 
-go 1.25.0
+go 1.25
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
