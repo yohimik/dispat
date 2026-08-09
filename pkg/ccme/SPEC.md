@@ -50,10 +50,10 @@ intent across a workspace of many packages:
 | 2 | **Dependent propagation** — opt in, and declare how far a change bumps its consumers                           | `^`, `^minor+2`, `^^minor` / `Propagate:` + `Propagate-Depth:` |
 | 3 | **Cancellation** — discard accumulated, unreleased release metadata without touching code                      | type `cancel`                                                  |
 | 4 | **Explicit or derived targeting** — scope names a package, or is omitted to derive packages from changed files | `feat(api,web)` / `feat`                                       |
-| 5 | **Prerelease channels** — enter, iterate on, graduate, and carry consumers along, each under its own depth     | `@beta`, `@@beta++1`, `@beta>stable`                           |
+| 5 | **Prerelease channels** — enter, iterate on, graduate, and carry consumers along, each under its own depth     | `%beta`, `%%beta++1`, `%beta>stable`                           |
 
 Capabilities 2 and 5 are two **independent axes** of the same idea. A commit says separately how far a *version bump*
-travels (`^`, `^^`, `+N`) and how far a *channel* travels (`@@`, `++N`), because the answers differ: a change usually
+travels (`^`, `^^`, `+N`) and how far a *channel* travels (`%%`, `++N`), because the answers differ: a change usually
 needs its consumers rebuilt, and much less often needs them moved onto a prerelease line. Both axes default to depth
 `0`, so a commit that says nothing releases its own packages and nothing else (§8.3, §8.3a).
 
@@ -69,7 +69,7 @@ dependency order and skips the dependents of anything that failed (§19), and co
 **Example carrying all five:**
 
 ```
-feat(@acme/core)^^minor@beta++*: streaming reader
+feat(@acme/core)^^minor%beta++*: streaming reader
 
 Replaces the buffered reader with an incremental one.
 
@@ -301,11 +301,12 @@ OPTIONAL. A parenthesised, comma-separated list of one or more **scope terms**.
 * Whitespace immediately after a comma is permitted and ignored. Whitespace elsewhere inside the parentheses is `E102`.
 * Parentheses MUST NOT nest and MUST be balanced (`E103`).
 * An empty scope-set `()` is `E104`.
-* A scope term MUST NOT contain: `(`, `)`, `,`, `:`, or whitespace. It MAY contain `@`, `/`, `.`, `*`, `-`, `+`, `^` and
-  any other printable character.
+* A scope term MUST NOT contain: `(`, `)`, `,`, `:`, or whitespace. It MAY contain `@`, `%`, `/`, `.`, `*`, `-`, `+`,
+  `^` and any other printable character.
 
-Because `@` inside parentheses is an ordinary character, npm-style scoped names work unmodified: `feat(@acme/ui)`. The
-`@` sigil for prerelease channels is only recognised **outside** the parentheses.
+Inside the parentheses every sigil character is ordinary, so npm-style scoped names work unmodified: `feat(@acme/ui)`.
+The `%` sigil for prerelease channels is only recognised **outside** the parentheses, and `@` carries no meaning
+anywhere in the grammar (package names and tags use it freely).
 
 Scope-term forms:
 
@@ -331,12 +332,12 @@ significant. Each sigil MAY appear at most once per header (`E110` on repeat).
 | `^^`  | `^^`                                                              | `Propagate-Depth: all`                                            |
 | `^^`  | `^^none` `^^patch` `^^minor` `^^major` `^^inherit`                | `Propagate: <value>` **and** `Propagate-Depth: all`               |
 | `+`   | `+0` … `+N`, `+*`                                                 | `Propagate-Depth: <N \| all>`                                     |
-| `@`   | `@<channel>`, `@stable`, `@<from>><to>`                           | `Channel: <value>`                                                |
-| `@@`  | `@@<channel>`, `@@stable`, `@@inherit`, `@@none`, `@@<from>><to>` | `Propagate-Channel: <value>` **and** `Propagate-Channel-Depth: 1` |
+| `%`   | `%<channel>`, `%stable`, `%<from>><to>`                           | `Channel: <value>`                                                |
+| `%%`  | `%%<channel>`, `%%stable`, `%%inherit`, `%%none`, `%%<from>><to>` | `Propagate-Channel: <value>` **and** `Propagate-Channel-Depth: 1` |
 | `++`  | `++0` … `++N`, `++*`, `++direct`, `++all`                         | `Propagate-Channel-Depth: <N \| all>`                             |
 
-Examples: `feat(api)^minor+2: …`, `fix^^inherit: …`, `feat(api)^^: …`, `feat(api)@beta!: …`,
-`feat(core)^@beta++1: …`, `release(core)@beta>stable@@beta>stable++*: …`.
+Examples: `feat(api)^minor+2: …`, `fix^^inherit: …`, `feat(api)^^: …`, `feat(api)%beta!: …`,
+`feat(core)^%beta++1: …`, `release(core)%beta>stable%%beta>stable++*: …`.
 
 `^`, `^^`, `+` and `++` values are matched byte-for-byte against the enumerated words; abbreviations such as `^min` are
 `E111`. `^` and `^^` MAY be written with no value at all, taking the default bump; every other sigil requires one.
@@ -346,7 +347,7 @@ Examples: `feat(api)^minor+2: …`, `fix^^inherit: …`, `feat(api)^^: …`, `fe
 A commit answers two separate questions about its dependents, and they have different answers far more often than not:
 
 * **how far does the version bump travel?** — the bump axis: `^`, `^^`, `+N`, and the `Propagate*` keys;
-* **how far does the channel travel?** — the channel axis: `@@`, `++N`, and the `Propagate-Channel*` keys.
+* **how far does the channel travel?** — the channel axis: `%%`, `++N`, and the `Propagate-Channel*` keys.
 
 **Both axes are opt-in, and both default to depth `0`.** A unit with no propagation directive touches only its own
 packages. One sigil reaches the direct consumers, and the depth token extends the reach:
@@ -364,23 +365,23 @@ packages. One sigil reaches the direct consumers, and the depth token extends th
 | Written         | Channel reaches            | Channel they take                  |
 |-----------------|----------------------------|------------------------------------|
 | *(nothing)*     | nobody                     | —                                  |
-| `@@beta`        | direct consumers           | `beta`                             |
-| `@@beta++3`     | up to 3 edges away         | `beta`                             |
-| `@@beta++*`     | every transitive dependent | `beta`                             |
+| `%%beta`        | direct consumers           | `beta`                             |
+| `%%beta++3`     | up to 3 edges away         | `beta`                             |
+| `%%beta++*`     | every transitive dependent | `beta`                             |
 | `++1`           | direct consumers           | `inherit` (default) — the origin's |
 | `++*`           | every transitive dependent | `inherit` (default) — the origin's |
-| `@@none`, `++0` | nobody                     | —                                  |
+| `%%none`, `++0` | nobody                     | —                                  |
 
 The bump ladder reads `nothing` / `^` / `^^`, with `+N` when the answer is neither 1 nor all. The channel ladder reads
-`nothing` / `@@x` / `@@x++*`, with `++N` for the same reason. `^^minor` is exactly `^minor+*`; `^^` on its own is
+`nothing` / `%%x` / `%%x++*`, with `++N` for the same reason. `^^minor` is exactly `^minor+*`; `^^` on its own is
 exactly `+*`. There is no doubled spelling of "channel to every level" — write `++*`.
 
 A bare `^` and a bare `^^` are both legal: the value is the bump, and it has a default. This is the one place where an
-empty value after a sigil is not `E111` (§16). A bare `@@` or `++` is `E111`: neither has a default worth guessing, and
+empty value after a sigil is not `E111` (§16). A bare `%%` or `++` is `E111`: neither has a default worth guessing, and
 `++` with no number is not a depth at all.
 
 **The two axes never constrain one another.** A channel may be propagated further than a bump, less far, or with no bump
-propagation at all — `feat(core)@@beta` puts the direct consumers on the beta line without giving them a bump, and
+propagation at all — `feat(core)%%beta` puts the direct consumers on the beta line without giving them a bump, and
 `feat(core)^^minor++1` bumps the whole closure while moving only the direct consumers onto the origin's channel. The
 channel axis in particular does **not** require the unit to produce a bump, which is what lets a `release` unit — whose
 bump is always `none` (§7.2) — carry a graduation to its dependents.
@@ -393,29 +394,29 @@ when they set different keys. This is the whole rule, and it decides the once-pe
 | Pair     | Keys                                          | One sigil or two? |
 |----------|-----------------------------------------------|-------------------|
 | `^` `^^` | both `Propagate-Depth`                        | **one**           |
-| `@` `@@` | `Channel` / `Propagate-Channel`               | **two**           |
+| `%` `%%` | `Channel` / `Propagate-Channel`               | **two**           |
 | `+` `++` | `Propagate-Depth` / `Propagate-Channel-Depth` | **two**           |
 
-So `^minor^^major` is `E110`, while `feat(core)@beta@@rc+2++1` is legal and sets four different keys. All four of `@`,
-`@@`, `+` and `++` are permitted once each, in any order.
+So `^minor^^major` is `E110`, while `feat(core)%beta%%rc+2++1` is legal and sets four different keys. All four of `%`,
+`%%`, `+` and `++` are permitted once each, in any order.
 
 `^` and `^^` differ only in what they do about an explicit `+N`. `^` states a depth only in the absence of one, so
 `^minor+2` and `+2^minor` both mean depth `2` with no diagnostic (§20.3). `^^` exists to *assert* `all`, so combining it
 with an explicit `+N` where `N` is not `all` is `E113` — two spellings of depth disagreeing in one header;
-`^^minor+*` is legal but redundant and emits `W110`. `@@` behaves like `^`, not like `^^`: it implies
-`Propagate-Channel-Depth: 1` only in the absence of an explicit `++N`, so `@@beta++3` is channel depth `3` with no
+`^^minor+*` is legal but redundant and emits `W110`. `%%` behaves like `^`, not like `^^`: it implies
+`Propagate-Channel-Depth: 1` only in the absence of an explicit `++N`, so `%%beta++3` is channel depth `3` with no
 diagnostic.
 
-**Why `@@` is not a reach.** `@` concerns the unit's own packages; `@@` changes the *audience* to the dependents.
+**Why `%%` is not a reach.** `%` concerns the unit's own packages; `%%` changes the *audience* to the dependents.
 `^`/`^^` keep one audience and change the *distance*. A channel has no distance dimension of its own to intensify — how
-far it goes is what `++N` says — so a doubled `@` could not have meant what a doubled `^` means. Given that, the two
-candidate readings were a doubled sigil (`@@`) or a compound one (`^@`), and `@@` was preferred because it keeps `@`
-reading as "channel" throughout, whereas `^@` would make `^` a namespace prefix in one form and a bump sigil taking bump
+far it goes is what `++N` says — so a doubled `%` could not have meant what a doubled `^` means. Given that, the two
+candidate readings were a doubled sigil (`%%`) or a compound one (`^%`), and `%%` was preferred because it keeps `%`
+reading as "channel" throughout, whereas `^%` would make `^` a namespace prefix in one form and a bump sigil taking bump
 words in every other.
 
 #### Channel transitions
 
-Every channel value — on `@` and on `@@` alike — MAY be written as a **transition**:
+Every channel value — on `%` and on `%%` alike — MAY be written as a **transition**:
 
 ```
 <from>><to>
@@ -435,21 +436,21 @@ other channel are left entirely alone — no channel change, and no release on t
 
 | Written            | Effect                                                           |
 |--------------------|------------------------------------------------------------------|
-| `@stable`          | This unit's packages go stable, whatever they are on now         |
-| `@beta>stable`     | Only those currently on `beta` go stable; the rest are untouched |
-| `@beta>rc`         | Promote the `beta` train one step                                |
-| `@*>stable`        | Every one of them that is on *some* prerelease goes stable       |
-| `@@beta>stable++*` | Every transitive dependent currently on `beta` graduates         |
-| `@@stable>beta++1` | Direct consumers currently on `stable` join the `beta` line      |
+| `%stable`          | This unit's packages go stable, whatever they are on now         |
+| `%beta>stable`     | Only those currently on `beta` go stable; the rest are untouched |
+| `%beta>rc`         | Promote the `beta` train one step                                |
+| `%*>stable`        | Every one of them that is on *some* prerelease goes stable       |
+| `%%beta>stable++*` | Every transitive dependent currently on `beta` graduates         |
+| `%%stable>beta++1` | Direct consumers currently on `stable` join the `beta` line      |
 
-The transition form is what makes graduation composable. `release(@acme/*)@beta>stable` graduates a whole family of
+The transition form is what makes graduation composable. `release(@acme/*)%beta>stable` graduates a whole family of
 packages in one unit and is **idempotent**: a package that was already graduated in an earlier run is on `stable`, does
 not match `beta`, and is simply not touched — no error, no redundant release, no need to hand-maintain the scope-set. It
 is also the only way a channel reaches a dependent and ends its prerelease line, because a propagated bare or inherited
 `stable` never graduates (§9.3, §11.5).
 
 Exclusions are available on both axes and at both levels: the scope-set excludes packages from the unit itself
-(`release(@acme/*,-@acme/legacy)@beta>stable`), and `Propagate-Channel-Scope` excludes them from the channel axis
+(`release(@acme/*,-@acme/legacy)%beta>stable`), and `Propagate-Channel-Scope` excludes them from the channel axis
 (§8.5a) without disturbing the bump axis.
 
 #### Inline and footer forms
@@ -489,14 +490,14 @@ non-empty description.
 | `perf(core)^patch+1: faster hash`       | `perf`     | `core`                 | prop=patch depth=1                 | no       |
 | `refactor(core)^^major!: drop v1 API`   | `refactor` | `core`                 | prop=major depth=all               | yes      |
 | `feat(core)^^: broad internal change`   | `feat`     | `core`                 | prop=patch depth=all               | no       |
-| `feat(cli)@beta: experimental watch`    | `feat`     | `cli`                  | channel=beta, nobody follows       | no       |
-| `feat(core)^@beta++1: broad change`     | `feat`     | `core`                 | self beta, direct consumers too    | no       |
-| `feat(core)@@beta: let consumers try`   | `feat`     | `core`                 | core stable, consumers onto beta   | no       |
-| `feat(core)^@beta@@stable: x`           | `feat`     | `core`                 | self beta, consumers pinned stable | no       |
+| `feat(cli)%beta: experimental watch`    | `feat`     | `cli`                  | channel=beta, nobody follows       | no       |
+| `feat(core)^%beta++1: broad change`     | `feat`     | `core`                 | self beta, direct consumers too    | no       |
+| `feat(core)%%beta: let consumers try`   | `feat`     | `core`                 | core stable, consumers onto beta   | no       |
+| `feat(core)^%beta%%stable: x`           | `feat`     | `core`                 | self beta, consumers pinned stable | no       |
 | `feat(core)^^minor++*: whole train`     | `feat`     | `core`                 | minor to all, origin's channel too | no       |
-| `release(cli)@stable: graduate 2.0`     | `release`  | `cli`                  | channel=stable                     | no       |
-| `release(@acme/*)@beta>stable: ship`    | `release`  | glob                   | graduate only those on `beta`      | no       |
-| `release(core)@stable@@beta>stable++*:` | `release`  | `core`                 | graduate core and its beta closure | no       |
+| `release(cli)%stable: graduate 2.0`     | `release`  | `cli`                  | channel=stable                     | no       |
+| `release(@acme/*)%beta>stable: ship`    | `release`  | glob                   | graduate only those on `beta`      | no       |
+| `release(core)%stable%%beta>stable++*:` | `release`  | `core`                 | graduate core and its beta closure | no       |
 | `cancel(*): reset release state`        | `cancel`   | all                    | —                                  | n/a      |
 
 ---
@@ -606,15 +607,15 @@ The mapping is configurable via `types` (§14). Unknown types are accepted and d
 that any code changed.
 
 ```
-release(@acme/cli)@stable: graduate to 2.0.0
+release(@acme/cli)%stable: graduate to 2.0.0
 ```
 
 ```
-release(@acme/core,@acme/cli)@rc: move the release train to rc
+release(@acme/core,@acme/cli)%rc: move the release train to rc
 ```
 
 ```
-release(@acme/core)@stable@@beta>stable++*: graduate the 2.0 train
+release(@acme/core)%stable%%beta>stable++*: graduate the 2.0 train
 
 Propagate-Channel-Scope: @acme/*, -@acme/legacy-adapter
 ```
@@ -642,7 +643,7 @@ on the header line. `release(@acme/api): Release-As: 3.0.0` is a valid header wh
 directive resolves to a real value at a real depth, and what silences it is the type's bump of `none`, not anything
 written in the directive (§8.3b). The **channel axis does not**, and that asymmetry is the point of the type. A channel
 is a statement about *where a package publishes*, not about whether it changed, so it is coherent — and necessary — for
-a package that changed nothing to move its consumers off a prerelease line. `release(core)@stable@@beta>stable++*` is
+a package that changed nothing to move its consumers off a prerelease line. `release(core)%stable%%beta>stable++*` is
 therefore the canonical graduation of a whole train, and it is the only shape in which a unit with no bump releases
 other packages.
 
@@ -690,10 +691,10 @@ does not). **`BREAKING CHANGE` is the sole exception and is case-sensitive** —
 | `Propagate`                           | `^x` / `^^x`      | `none` \| `patch` \| `minor` \| `major` \| `inherit`       | `patch`                      | unit                        |
 | `Propagate-Depth`                     | `^` / `^^` / `+N` | non-negative integer \| `direct` \| `all`                  | `0` (no propagation)         | unit                        |
 | `Propagate-Scope`                     | —                 | scope-set                                                  | `*`                          | unit                        |
-| `Propagate-Channel`                   | `@@x`             | `inherit` \| `none` \| `stable` \| `<ch>` \| `<from>><to>` | `inherit`                    | unit                        |
-| `Propagate-Channel-Depth`             | `@@` / `++N`      | non-negative integer \| `direct` \| `all`                  | `0` (no channel propagation) | unit                        |
+| `Propagate-Channel`                   | `%%x`             | `inherit` \| `none` \| `stable` \| `<ch>` \| `<from>><to>` | `inherit`                    | unit                        |
+| `Propagate-Channel-Depth`             | `%%` / `++N`      | non-negative integer \| `direct` \| `all`                  | `0` (no channel propagation) | unit                        |
 | `Propagate-Channel-Scope`             | —                 | scope-set                                                  | the unit's `Propagate-Scope` | unit                        |
-| `Channel`                             | `@x`              | `<channel>` \| `stable` \| `<from>><to>`                   | inherited from baseline      | unit                        |
+| `Channel`                             | `%x`              | `<channel>` \| `stable` \| `<from>><to>`                   | inherited from baseline      | unit                        |
 | `Release-As`                          | —                 | exact semver \| `none` \| `auto`                           | —                            | package, this window (§8.6) |
 | `Reverts`                             | —                 | commit sha                                                 | —                            | unit, informational         |
 
@@ -805,7 +806,7 @@ is `E112` (§5.3), and the chain is never consulted for that case.
 
 Precedence for depth is: **footer `Propagate-Depth` → inline `+N` → inline `^`/`^^` → configured `propagation.depth` →
 spec default `0`.** Channel depth has the exactly parallel chain: **footer `Propagate-Channel-Depth` → inline `++N` →
-inline `@@` → configured `propagation.channelDepth` → spec default `0`.** The same chain, minus the sigil-implication
+inline `%%` → configured `propagation.channelDepth` → spec default `0`.** The same chain, minus the sigil-implication
 step, applies to every other directive key.
 
 Footer sits above inline because that is the only order consistent with §5.3. In strict mode the question never arises —
@@ -836,25 +837,25 @@ away: that is `W201`, an inert value, because the author plainly wanted a bump t
 * `N` — up to N edges away.
 * `all` — the full transitive closure of dependents.
 
-**Default is `0` — a unit does not move anybody else's channel unless it says so.** Writing `@@<value>` is itself the
+**Default is `0` — a unit does not move anybody else's channel unless it says so.** Writing `%%<value>` is itself the
 opt-in and supplies a depth of `1`; an explicit `++N` overrides that without diagnostic, exactly as `+N` overrides the
 caret's implied `1` (§8.3).
 
 | Written     | Channel depth | Note                                               |
 |-------------|---------------|----------------------------------------------------|
 | *(nothing)* | `0`           | dependents keep their own channel                  |
-| `@@beta`    | `1`           | the sigil supplies the depth                       |
-| `@@beta++3` | `3`           | the explicit depth wins over `@@`'s 1              |
-| `@@beta++1` | `1`           | explicit, identical to `@@beta`                    |
+| `%%beta`    | `1`           | the sigil supplies the depth                       |
+| `%%beta++3` | `3`           | the explicit depth wins over `%%`'s 1              |
+| `%%beta++1` | `1`           | explicit, identical to `%%beta`                    |
 | `++*`       | all levels    | value defaults to `inherit`                        |
-| `@@beta++*` | all levels    | the whole reverse closure joins the `beta` line    |
+| `%%beta++*` | all levels    | the whole reverse closure joins the `beta` line    |
 | `++0`       | `0`           | explicit, identical to writing nothing             |
-| `@@none`    | —             | no channel propagation whatever the depth          |
-| `@@none++*` | —             | legal, redundant, `W152`                           |
-| `@@beta++0` | `0`           | legal, inert, `W201` — a value that reaches nobody |
+| `%%none`    | —             | no channel propagation whatever the depth          |
+| `%%none++*` | —             | legal, redundant, `W152`                           |
+| `%%beta++0` | `0`           | legal, inert, `W201` — a value that reaches nobody |
 
-`@@none` propagates nothing (the value wins); `++0` propagates nothing (the depth wins). Both are legal, both mean "no
-channel propagation", and both are `W152`. `@@beta++0` is `W201` instead, by §8.3b. This mirrors `^none`, `+0` and
+`%%none` propagates nothing (the value wins); `++0` propagates nothing (the depth wins). Both are legal, both mean "no
+channel propagation", and both are `W152`. `%%beta++0` is `W201` instead, by §8.3b. This mirrors `^none`, `+0` and
 `^minor+0` on the bump axis exactly.
 
 ### 8.3b Which diagnostic an inert directive earns
@@ -862,9 +863,9 @@ channel propagation", and both are `W152`. `@@beta++0` is `W201` instead, by §8
 Both axes obey one rule, stated once here and referenced from §8.3 and §8.3a:
 
 * **`W152` — redundancy.** Every part of the directive resolves to "nothing", so deleting the whole directive changes no
-  behaviour: `^none`, `+0`, `^none+*`, `^^none`, `@@none`, `++0`, `@@none++*`.
+  behaviour: `^none`, `+0`, `^none+*`, `^^none`, `%%none`, `++0`, `%%none++*`.
 * **`W201` — an inert value.** A **value** other than `none` is supplied on either axis and the depth on that axis
-  resolves to `0`, so the value reaches nobody: `^minor+0`, `@@beta++0`, and the footer forms `Propagate: minor` or
+  resolves to `0`, so the value reaches nobody: `^minor+0`, `%%beta++0`, and the footer forms `Propagate: minor` or
   `Propagate-Channel: beta` where nothing sets the corresponding depth above `0`.
 
 Where the rule selects `W201`, `W152` is **not** also emitted: `W201` is the more specific finding and names the actual
@@ -881,7 +882,7 @@ unit named a bump and then discarded it, while a bare `++0` is `W152`, because t
 **Why this defaults to `0`.** The rationale of §8.3 applies with more force here, not less. A propagated bump changes a
 package's version; a propagated channel changes *which line it publishes on*, which decides what installers resolve by
 default and can end or begin a release train. That is a larger consequence, it is invisible in the message unless the
-message says it, and it grows with the workspace. `@@beta++*` on a widely-depended package moves an entire reverse
+message says it, and it grows with the workspace. `%%beta++*` on a widely-depended package moves an entire reverse
 closure onto a prerelease line in one commit (§18.1), so the reach belongs in the commit that asks for it.
 
 The default costs less than it appears to, because **a channel is derived from a tag** (§11.1). A package already on a
@@ -927,7 +928,7 @@ propagates and `W135` is emitted.
 Restricts the **channel axis** in exactly the same way, and takes exactly the same value grammar.
 
 ```
-release(@acme/core)@stable@@beta>stable++*: graduate the 2.0 train
+release(@acme/core)%stable%%beta>stable++*: graduate the 2.0 train
 
 Propagate-Channel-Scope: @acme/*, -@acme/legacy-adapter
 ```
@@ -940,7 +941,7 @@ This is the exclusion operator for graduation. Two levels are available and they
 
 | Written                                      | Excludes                                                              |
 |----------------------------------------------|-----------------------------------------------------------------------|
-| `release(@acme/*,-@acme/legacy)@beta>stable` | `@acme/legacy` from the unit's **own** packages                       |
+| `release(@acme/*,-@acme/legacy)%beta>stable` | `@acme/legacy` from the unit's **own** packages                       |
 | `Propagate-Channel-Scope: *, -@acme/legacy`  | `@acme/legacy` from the **dependents** the channel reaches            |
 | `Propagate-Scope: *, -@acme/legacy`          | `@acme/legacy` from both axes, since the channel scope defaults to it |
 
@@ -1040,7 +1041,7 @@ particular:
 | `Release-As: 1.5.0`                          | **Yes**                | Resume, named version                                           |
 | `cancel(pkg)`                                | **Yes**, destructively | Discards the holding unit *and* the accumulated ledger (§8.6.2) |
 | An ordinary `feat` / `fix` / breaking change | No                     | Accumulates into the pending ledger; the package stays held     |
-| A channel directive (`@beta`, `@stable`)     | No                     | Recorded and re-evaluated when the hold lifts (#73j)            |
+| A channel directive (`%beta`, `%stable`)     | No                     | Recorded and re-evaluated when the hold lifts (#73j)            |
 | A propagated bump from an unheld dependency  | No                     | Recorded, not released (§13.7)                                  |
 
 This is the property that makes a hold usable as an embargo. If ordinary commits lifted it, a routine typo fix landing
@@ -1316,18 +1317,18 @@ propagated channel (§13.8).
 dependent whose baseline is a prerelease, the dependent is **not** graduated: it keeps its own channel, is released on
 it as usual if anything else releases it, and `W200` reports the suppression. Graduation ends a prerelease train and
 publishes under a version consumers will resolve by default, and it MUST NOT happen because an unrelated package's
-commit propagated a channel to it. The rule holds however the `stable` arose: written as `@@stable`, configured as
+commit propagated a channel to it. The rule holds however the `stable` arose: written as `%%stable`, configured as
 `propagation.channel`, or inherited from an origin that happens to be stable.
 
-**The transition form is the deliberate exception, and the only one.** `@@beta>stable` *does* graduate the dependents
+**The transition form is the deliberate exception, and the only one.** `%%beta>stable` *does* graduate the dependents
 whose baseline is on `beta`, because the author had to name the train being ended in order to write it. That is the
 reviewability property `W200` exists to protect — not "graduation never propagates", but "graduation never happens by
 accident". A transition is visible in the message, its `<from>` is checkable against the plan, and it is idempotent:
 dependents that already graduated do not match and are untouched, which is what makes it safe to leave the same
-directive in a long-lived release script. `@@*>stable` is the broad form and is subject to the same review as any other
+directive in a long-lived release script. `%%*>stable` is the broad form and is subject to the same review as any other
 broad directive (§18.1); `requireCodeownerFor` may name it (§14.1).
 
-Moving *onto* a prerelease line is unrestricted: `@@beta++*` puts an entire reverse closure on the beta line, which is
+Moving *onto* a prerelease line is unrestricted: `%%beta++*` puts an entire reverse closure on the beta line, which is
 the point of the operator and is safe because the stable baselines are untouched and §11.4 recomputes each train from
 them. It is nonetheless a real widening of blast radius and is bounded by `maxPackagesPerRun` (§14.1).
 
@@ -1398,9 +1399,9 @@ stable range exactly as before: a republished `cli@2.0.1` would contain byte-for
 would be a release with no content. Worse, §9.4 would reconcile `cli`'s declared range against `core`'s new version, so
 a **stable** `cli` would ship declaring a dependency on a **prerelease** — the one outcome §9.4 exists to prevent.
 
-The consequence is the one to hold on to: **`feat(core)^@beta` releases `core` alone.** The caret is honoured, the
+The consequence is the one to hold on to: **`feat(core)^%beta` releases `core` alone.** The caret is honoured, the
 dependents are reached, and every one of them is suppressed because none of them is on the beta line. To take the
-consumers along, put them on the line — `feat(core)^@beta++1` — and the suppression does not apply, because they are
+consumers along, put them on the line — `feat(core)^%beta++1` — and the suppression does not apply, because they are
 then released on `beta` themselves.
 
 Four details, each a place an implementation drifts:
@@ -1408,7 +1409,7 @@ Four details, each a place an implementation drifts:
 * **`stable` is resolvable by everyone.** A dependent on `beta` whose dependency releases a stable version is bumped
   normally; prereleases are the asymmetric case, not channels in general.
 * **The test uses `channel(d)` as resolved in this run**, not `d`'s baseline channel. A dependent that the channel axis
-  has just moved onto `beta` is on `beta` for this purpose, which is exactly what makes `^@beta++1` work in one commit.
+  has just moved onto `beta` is on `beta` for this purpose, which is exactly what makes `^%beta++1` work in one commit.
 * **Any one source suffices.** A unit whose scope-set spans packages on different channels propagates its bump if any of
   them releases something the target can resolve.
 * **A source that has already released still counts, on the channel it released on.** In a catch-up run (§13.7a) the
@@ -1440,7 +1441,7 @@ an earlier run.
 carries a **prerelease** version is the one case this rule cannot make safe, because there is no range that both admits
 the prerelease and is honest about it. §9.3a prevents the common way of arriving there — a prerelease no longer drags
 its stable consumers into a release — but it remains reachable deliberately, most often by graduating a consumer while
-its dependency stays on a train (`@@beta>stable` applied to a package whose provider is still on `beta`). The engine
+its dependency stays on a train (`%%beta>stable` applied to a package whose provider is still on `beta`). The engine
 MUST still reconcile, so that the published artefact resolves, and MUST report `W203` naming both packages and both
 versions. The remedy is always the same: graduate the provider too, or do not graduate the consumer yet.
 
@@ -1534,7 +1535,7 @@ Corollaries:
 * `cancel` does not delete published prerelease tags and does not change the channel a package is on.
 * If a package sits at `1.3.0-beta.4` and every pending unit is cancelled, the package stays at `1.3.0-beta.4` and is
   not re-released.
-* Cancelling does not graduate. To leave a prerelease line, use `release(pkg)@stable`.
+* Cancelling does not graduate. To leave a prerelease line, use `release(pkg)%stable`.
 * Because the pending window is measured from the last **stable** tag (§13.3), a `cancel` also discards units that
   contributed to already-published prerelease versions. Those prereleases remain published, but the eventual stable
   version will be computed without the cancelled units — which is precisely the "restate the changeset from scratch"
@@ -1598,8 +1599,8 @@ and a package may not be named after them any more than after `stable`.
   is `E111` — "move them to some prerelease or other" is not a releasable instruction.
 * `>` is the transition separator and cannot occur in a channel name, so the split is unambiguous. More than one `>` in
   a value is `E111`.
-* Both sides are validated as channel values in full: `@@beta>Latest` is `E181` on the right-hand side, and
-  `@@Beta>stable` is `E181` on the left.
+* Both sides are validated as channel values in full: `%%beta>Latest` is `E181` on the right-hand side, and
+  `%%Beta>stable` is `E181` on the left.
 
 `channels.allowed` (§14), when set, restricts both sides of every value, so a repository can enumerate its trains.
 
@@ -1664,17 +1665,17 @@ reviewable act of ending a train, and it happens in exactly two ways.
 **Directly**, by a `Channel` directive on the package itself:
 
 ```
-release(@acme/core,@acme/cli)@stable: promote the 2.0 train
+release(@acme/core,@acme/cli)%stable: promote the 2.0 train
 ```
 
 ```
-release(@acme/*,-@acme/legacy-adapter)@beta>stable: graduate everything still on beta
+release(@acme/*,-@acme/legacy-adapter)%beta>stable: graduate everything still on beta
 ```
 
 **By propagation**, and then only through a transition (§9.3):
 
 ```
-release(@acme/core)@stable@@beta>stable++*: graduate the 2.0 train
+release(@acme/core)%stable%%beta>stable++*: graduate the 2.0 train
 
 Propagate-Channel-Scope: @acme/*, -@acme/legacy-adapter
 ```
@@ -1687,22 +1688,22 @@ Rules, common to both:
 * Graduating a package already on `stable` is a no-op with `W185`, unless the window contains bumps, in which case it is
   an ordinary stable release. Written as a transition it is not even that: a stable package does not match a `<from>` of
   any prerelease channel, so nothing is proposed and no `W185` arises.
-* A `feat(cli)@stable:` unit both adds a feature and graduates; this is legal and equivalent to the two-unit form.
+* A `feat(cli)%stable:` unit both adds a feature and graduates; this is legal and equivalent to the two-unit form.
 * A bare or inherited `stable` arriving by propagation is suppressed with `W200` (§9.3). Only a direct directive, or a
   propagated **transition**, graduates.
 
 **Graduating a partly-graduated set.** This is the situation the transition form is for. A release train rarely ends in
 one run: a package is graduated by hand, or an earlier run failed partway, or one consumer was ready before the others.
-Restating `@stable` over the whole set then re-releases everything already on stable that has pending work, and emits
-`W185` for the rest; maintaining an ever-shrinking scope-set by hand is worse. `@beta>stable` states the intent
+Restating `%stable` over the whole set then re-releases everything already on stable that has pending work, and emits
+`W185` for the rest; maintaining an ever-shrinking scope-set by hand is worse. `%beta>stable` states the intent
 directly — *whatever is still on beta, finish it* — and is idempotent, so the same directive is correct on the first run
-and on the fifth. `@*>stable` says the same across several trains at once.
+and on the fifth. `%*>stable` says the same across several trains at once.
 
 **Excluding packages from graduation.** Three levels, from narrowest to broadest:
 
 | Written                                                | Excludes                                           |
 |--------------------------------------------------------|----------------------------------------------------|
-| `release(@acme/*,-@acme/legacy)@beta>stable`           | from the unit's own packages (§5.2)                |
+| `release(@acme/*,-@acme/legacy)%beta>stable`           | from the unit's own packages (§5.2)                |
 | `Propagate-Channel-Scope: @acme/*, -@acme/legacy`      | from the dependents the graduation reaches (§8.5a) |
 | `channels.allowed`, `requireCodeownerFor` (§14, §14.1) | from what may be written at all, repository-wide   |
 
@@ -1722,7 +1723,7 @@ commit, because a channel conflict is usually the result of a merge and blocking
 later intent.
 
 A transition that does not match a package is not a competing directive for it and takes no part in this rule: it
-proposes nothing, so an older `@beta` and a newer `@rc>stable` on a package sitting on `beta` leave it on `beta`, with
+proposes nothing, so an older `%beta` and a newer `%rc>stable` on a package sitting on `beta` leave it on `beta`, with
 no `W186`. Only directives that actually propose a channel compete.
 
 The same rule, applied to propagated channels, is `W160` (§9.3); a direct directive beats every propagated one
@@ -1732,15 +1733,15 @@ regardless of age (§13.8).
 
 The two axes are independent and both default to depth `0` (§8.3, §8.3a). For prereleases this means:
 
-* `feat(core)@beta` — `core` enters the beta line. Nothing else moves and nothing else releases.
-* `feat(core)^@beta` — the same. The caret reaches the direct consumers, but every one of them is suppressed by §9.3a,
+* `feat(core)%beta` — `core` enters the beta line. Nothing else moves and nothing else releases.
+* `feat(core)^%beta` — the same. The caret reaches the direct consumers, but every one of them is suppressed by §9.3a,
   because a stable consumer cannot resolve a beta release. `W208` reports each suppression.
-* `feat(core)^@beta++1` — `core` and its direct consumers all enter the beta line together, the consumers taking the
+* `feat(core)^%beta++1` — `core` and its direct consumers all enter the beta line together, the consumers taking the
   propagated `patch`. This is the form that keeps a train installable as a set, and it is what has to be written.
 * `feat(core)^: x` where `core` and its consumers are **already** on `beta` — everything stays on `beta` and takes its
   bump, with no channel directive anywhere, because a channel is derived from each package's own baseline (§11.1). An
   established train needs no directives to stay together.
-* `release(core)@stable@@beta>stable++*` — the train ends, for `core` and for every transitive dependent still on
+* `release(core)%stable%%beta>stable++*` — the train ends, for `core` and for every transitive dependent still on
   `beta`.
 
 The pattern to read out of that list is that directives are needed at the **boundaries** of a train — entering it and
@@ -1758,8 +1759,8 @@ leaving it — and nowhere in between. See §9.3 for the full rules and §24 D.4
 
 * `<version>` MUST be a valid SemVer 2.0.0 version, with no `v` prefix.
 * `<package>` MUST equal a workspace package name byte-for-byte.
-* **Parse at the last `@`.** Package names may contain `@` (`@acme/ui@1.2.3`); versions never do. Splitting at the first
-  `@` is a conformance failure.
+* **Parse at the last `%`.** Package names may contain `%` (`@acme/ui@1.2.3`); versions never do. Splitting at the first
+  `%` is a conformance failure.
 * Tags whose left part is not a known package are ignored silently (they are someone else's tags).
 * Tags whose right part is not valid SemVer are ignored with `W190`.
 * Build metadata (`1.2.3+sha.abc`) is permitted in tags, ignored for precedence per SemVer, and MUST NOT be carried into
@@ -1779,7 +1780,7 @@ configuration.
 
 ### 12.3 Baselines
 
-For package `P`, over reachable tags `P@*`:
+For package `P`, over reachable tags `P%*`:
 
 * `baseline(P)` = the highest by SemVer precedence.
 * `stableBaseline(P)` = the highest with no prerelease component.
@@ -2356,7 +2357,7 @@ are easy to miss and hard to diagnose:
   for that, which suppresses file-derived resolution without touching the graph.
 
 The output is a release plan: package, baseline, next version, channel, contributing units, and for each package the
-reason (`direct`, `propagated from X`, `channel from X` where the package has no bump of its own, or `catch-up from X@V`
+reason (`direct`, `propagated from X`, `channel from X` where the package has no bump of its own, or `catch-up from X%V`
 where `X` is not itself in this plan). Where the channel differs from the baseline's, the plan MUST show both — the
 transition a reader needs to see is `beta → stable`, not the word `stable` alone. Packages whose only reason is catch-up
 MUST be marked as such (`W193`) and MUST carry the origin's **published** version, so that a reviewer can see at a
@@ -2630,8 +2631,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 38g | `^minor+0`                                                                  | No propagation; `W201` alone — a bump value was supplied and the depth discards it (§8.3b). Not `W152`.                                                                                |
 | 38a | `^^` on a unit whose type maps to `none`                                    | No **bump** propagation — §9.2 phase 3 skips units with no bump, and depth is irrelevant. The channel axis is unaffected and still runs (§7.2).                                        |
 | 38b | A unit with no propagation directive at all                                 | Releases only its own packages. Both depths are `0` by default (§8.3, §8.3a); no dependent is touched.                                                                                 |
-| 38d | `++0`, `@@none`, or `@@none++*`                                             | No channel propagation; `W152` for redundancy.                                                                                                                                         |
-| 38h | `@@beta++0`                                                                 | No channel propagation; `W201` alone — a channel value was supplied and the depth discards it (§8.3b). Not `W152`. Exactly mirrors #38g.                                               |
+| 38d | `++0`, `%%none`, or `%%none++*`                                             | No channel propagation; `W152` for redundancy.                                                                                                                                         |
+| 38h | `%%beta++0`                                                                 | No channel propagation; `W201` alone — a channel value was supplied and the depth discards it (§8.3b). Not `W152`. Exactly mirrors #38g.                                               |
 | 38e | `++*` with no `^`, `^^` or `+N`                                             | Legal. The channel reaches the whole closure and no bump does; dependents that change channel are released as channel-only (`W202`).                                                   |
 | 38f | `^^minor++1`                                                                | Legal and common: bump the whole closure, move only the direct consumers onto the origin's channel. The axes do not bound one another (§5.3).                                          |
 | 38c | `^` on a unit whose scope resolves to a package with no dependents          | Legal and inert for propagation; the unit still releases its own packages.                                                                                                             |
@@ -2675,28 +2676,28 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 58  | Two channels in one window                                             | Newest commit wins, then last unit; `W186`.                                                                                                               |
 | 59  | Breaking change lands mid-beta                                         | `target` recomputed from stable baseline; counter resets to `0` (§11.4).                                                                                  |
 | 60  | Channel switch `beta` → `rc`                                           | Counter resets to `0`.                                                                                                                                    |
-| 60a | `^@@beta` on a unit whose own packages are stable                      | Origin releases stable; direct consumers enter the `beta` line and take the propagated patch. Legal — the stable baseline is untouched (§9.3).            |
-| 60b | `@@stable` reaching a dependent whose baseline is a prerelease         | **Not** graduated. The dependent keeps its channel; `W200`. Only a direct directive or a transition graduates (§11.5).                                    |
-| 60c | `@@stable` reaching a dependent already on stable                      | No-op; `W199` for the redundant directive.                                                                                                                |
-| 60d | `@@` with no value, e.g. `feat(core)@@: x`                             | `E111`. Unlike `^^`, a bare `@@` has no meaning (§5.3).                                                                                                   |
-| 60e | `@@` twice, or `@@@`                                                   | `E110`.                                                                                                                                                   |
-| 60f | `@beta@@rc`                                                            | Legal: origin on `beta`, dependents on `rc`. `@` and `@@` are distinct sigils (§5.3).                                                                     |
-| 60g | `@@Beta` / `@@latest`                                                  | `E181` / `E180` — propagated channel names obey §11.2 exactly as direct ones do.                                                                          |
-| 60h | `@@beta` with no `++N` on the unit                                     | Channel depth `1` — the sigil supplies it (§8.3a). The direct consumers move; no bump moves unless a caret says so.                                       |
-| 60i | `@@rc` and `@@beta` reaching one dependent from two units              | Newest commit wins, then last unit; `W160`.                                                                                                               |
-| 60j | `@@beta` where the dependent has its own `@stable` in the window       | The direct directive wins (§13.8); the propagated channel is discarded.                                                                                   |
+| 60a | `^%%beta` on a unit whose own packages are stable                      | Origin releases stable; direct consumers enter the `beta` line and take the propagated patch. Legal — the stable baseline is untouched (§9.3).            |
+| 60b | `%%stable` reaching a dependent whose baseline is a prerelease         | **Not** graduated. The dependent keeps its channel; `W200`. Only a direct directive or a transition graduates (§11.5).                                    |
+| 60c | `%%stable` reaching a dependent already on stable                      | No-op; `W199` for the redundant directive.                                                                                                                |
+| 60d | `%%` with no value, e.g. `feat(core)%%: x`                             | `E111`. Unlike `^^`, a bare `%%` has no meaning (§5.3).                                                                                                   |
+| 60e | `%%` twice, or `%%%`                                                   | `E110`.                                                                                                                                                   |
+| 60f | `%beta%%rc`                                                            | Legal: origin on `beta`, dependents on `rc`. `%` and `%%` are distinct sigils (§5.3).                                                                     |
+| 60g | `%%Beta` / `%%latest`                                                  | `E181` / `E180` — propagated channel names obey §11.2 exactly as direct ones do.                                                                          |
+| 60h | `%%beta` with no `++N` on the unit                                     | Channel depth `1` — the sigil supplies it (§8.3a). The direct consumers move; no bump moves unless a caret says so.                                       |
+| 60i | `%%rc` and `%%beta` reaching one dependent from two units              | Newest commit wins, then last unit; `W160`.                                                                                                               |
+| 60j | `%%beta` where the dependent has its own `%stable` in the window       | The direct directive wins (§13.8); the propagated channel is discarded.                                                                                   |
 | 60k | `++` with no value, e.g. `feat(core)++: x`                             | `E111`. A depth sigil with no number is not a depth.                                                                                                      |
 | 60l | `++` twice, or `+++`                                                   | `E110`.                                                                                                                                                   |
-| 60m | `feat(core)^@beta: x`, consumers on stable                             | **`core` alone releases.** The caret reaches them; §9.3a suppresses each with `W208`. Add `++1` to take them along.                                       |
-| 60n | `feat(core)@@beta: x`, consumers on stable, no caret                   | Consumers move onto `beta` with no bump: channel-only releases (`W202`), versioned by the channel-entry patch (`W204`).                                   |
-| 60o | `@beta>stable` on a package that is on `rc`                            | No match, nothing proposed, no `W185`. `W206` if no package in the unit's scope matches.                                                                  |
-| 60p | `@*>stable` on a mixed set                                             | Every package on some prerelease graduates; those already on stable are untouched.                                                                        |
-| 60q | `@@beta>stable++*` reaching a dependent on `beta`                      | **Graduated.** A transition is the deliberate, reviewable exception to `W200` (§9.3).                                                                     |
+| 60m | `feat(core)^%beta: x`, consumers on stable                             | **`core` alone releases.** The caret reaches them; §9.3a suppresses each with `W208`. Add `++1` to take them along.                                       |
+| 60n | `feat(core)%%beta: x`, consumers on stable, no caret                   | Consumers move onto `beta` with no bump: channel-only releases (`W202`), versioned by the channel-entry patch (`W204`).                                   |
+| 60o | `%beta>stable` on a package that is on `rc`                            | No match, nothing proposed, no `W185`. `W206` if no package in the unit's scope matches.                                                                  |
+| 60p | `%*>stable` on a mixed set                                             | Every package on some prerelease graduates; those already on stable are untouched.                                                                        |
+| 60q | `%%beta>stable++*` reaching a dependent on `beta`                      | **Graduated.** A transition is the deliberate, reviewable exception to `W200` (§9.3).                                                                     |
 | 60r | The same, run again after it succeeded                                 | Nothing. The dependent's baseline is now stable, so it no longer matches `<from>` (§13.7c G7).                                                            |
-| 60s | `@beta>beta`, or `@@rc>rc`                                             | `W207`, inert.                                                                                                                                            |
-| 60t | `@@stable>beta++1`                                                     | Direct consumers currently on stable enter the `beta` line; consumers already on a prerelease are untouched.                                              |
-| 60u | `@@beta>inherit`, `@@none>beta`, `@@beta>*`                            | `E111` — `inherit` and `none` are values, not channels, and `*` is legal only as a `<from>` (§11.2).                                                      |
-| 60v | `@@a>b>c`                                                              | `E111` — a transition has exactly one `>`.                                                                                                                |
+| 60s | `%beta>beta`, or `%%rc>rc`                                             | `W207`, inert.                                                                                                                                            |
+| 60t | `%%stable>beta++1`                                                     | Direct consumers currently on stable enter the `beta` line; consumers already on a prerelease are untouched.                                              |
+| 60u | `%%beta>inherit`, `%%none>beta`, `%%beta>*`                            | `E111` — `inherit` and `none` are values, not channels, and `*` is legal only as a `<from>` (§11.2).                                                      |
+| 60v | `%%a>b>c`                                                              | `E111` — a transition has exactly one `>`.                                                                                                                |
 | 60w | Graduating a consumer whose provider stays on `beta`                   | Permitted and reported: the stable consumer's range admits a prerelease, `W203` (§9.4). Graduate the provider too.                                        |
 | 61  | Graduation with no pending bumps                                       | Publishes the accumulated `target`; if that equals the baseline core, `E185`.                                                                             |
 | 62  | Graduating a package already stable                                    | `W185` no-op, or an ordinary release if bumps are pending.                                                                                                |
@@ -2708,8 +2709,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 65  | Tag with build metadata `pkg@1.2.3+abc`                                | Accepted; metadata ignored and not carried forward.                                                                                                       |
 | 66  | Two tags with the same version on different commits                    | `E191`.                                                                                                                                                   |
 | 67  | Tag `pkg@1.2.3` where `pkg` is unknown                                 | Ignored silently.                                                                                                                                         |
-| 68  | Tag `pkg@not-semver`                                                   | Ignored, `W190`.                                                                                                                                          |
-| 69  | `@acme/ui@1.2.3` split at first `@`                                    | Conformance failure; MUST split at last `@`.                                                                                                              |
+| 68  | Tag `pkg%not-semver`                                                   | Ignored, `W190`.                                                                                                                                          |
+| 69  | `@acme/ui@1.2.3` split at first `%`                                    | Conformance failure; MUST split at last `%`.                                                                                                              |
 | 70  | Manifest version disagrees with baseline                               | `W192`; tags win.                                                                                                                                         |
 | 71  | `Release-As` lower than baseline                                       | `E153`.                                                                                                                                                   |
 | 72  | `Release-As` exact on a multi-package scope                            | `E154`.                                                                                                                                                   |
@@ -2815,7 +2816,7 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `E102` | Whitespace inside a scope-set other than after a comma.                                                                                                                                                   |
 | `E103` | Unbalanced or nested parentheses.                                                                                                                                                                         |
 | `E104` | Empty scope-set `()`.                                                                                                                                                                                     |
-| `E110` | Duplicate inline directive sigil (including `^` with `^^`, a third caret, a second `@@`, a third at-sign, a second `++`, and a third plus).                                                               |
+| `E110` | Duplicate inline directive sigil (including `^` with `^^`, a third caret, a second `%%`, a third percent sign, a second `++`, and a third plus).                                                               |
 | `E111` | Unknown inline directive value, or an empty value after a sigil other than `^` and `^^`. Includes a malformed channel transition: more than one `>`, `inherit` or `none` on either side, `*` as a `<to>`. |
 | `E112` | Inline and footer set the same key to different values.                                                                                                                                                   |
 | `E113` | `^^` combined with an explicit `+N` where `N` is not `all`.                                                                                                                                               |
@@ -2864,7 +2865,7 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `W141` | `release` unit with no directives.                                                                                                                                                                                                                                                                        |
 | `W150` | Unknown footer key ignored.                                                                                                                                                                                                                                                                               |
 | `W151` | Trailing paragraph nearly footer-shaped but treated as body.                                                                                                                                                                                                                                              |
-| `W152` | A propagation directive in which **every** part resolves to no propagation, on either axis — `^none`, `+0`, `^none+*`, `^^none`, `@@none`, `++0`, `@@none++*`. Writing nothing says the same thing. Where a value was supplied and the depth is `0`, `W201` is emitted instead and `W152` is not (§8.3b). |
+| `W152` | A propagation directive in which **every** part resolves to no propagation, on either axis — `^none`, `+0`, `^none+*`, `^^none`, `%%none`, `++0`, `%%none++*`. Writing nothing says the same thing. Where a value was supplied and the depth is `0`, `W201` is emitted instead and `W152` is not (§8.3b). |
 | `W153` | Conflicting package-level `Release-As`; newest won.                                                                                                                                                                                                                                                       |
 | `W154` | Package held by `Release-As: none`; not released. The message MUST carry the withheld version.                                                                                                                                                                                                            |
 | `W155` | Footer key matches `BREAKING CHANGE` case-insensitively but not exactly; **not** treated as breaking.                                                                                                                                                                                                     |
@@ -2887,7 +2888,7 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `W197` | Manifest range reconciled against a dependency released by an earlier run (§9.4).                                                                                                                                                                                                                         |
 | `W199` | A proposed channel equals the package's current channel; the directive is redundant and nothing is proposed (§9.3).                                                                                                                                                                                       |
 | `W200` | A propagated `stable` would have graduated a dependent off a prerelease; suppressed. Write a transition to graduate deliberately (§9.3).                                                                                                                                                                  |
-| `W201` | A propagation **value** was supplied on either axis while that axis's depth resolves to `0`, so it reaches nobody and is inert — `^minor+0`, `@@beta++0`, or the footer equivalents (§8.3b). Supersedes `W152`.                                                                                           |
+| `W201` | A propagation **value** was supplied on either axis while that axis's depth resolves to `0`, so it reaches nobody and is inert — `^minor+0`, `%%beta++0`, or the footer equivalents (§8.3b). Supersedes `W152`.                                                                                           |
 | `W202` | Channel-only release: the package is in the plan solely because its channel changed. Carries the old and new channel (§13.9).                                                                                                                                                                             |
 | `W203` | A package released on `stable` declares a range on a workspace dependency whose current version is a prerelease (§9.4). Names both packages and versions.                                                                                                                                                 |
 | `W204` | Channel-entry patch applied: the computed prerelease would not have exceeded the baseline, so the target was advanced by one patch (§11.4).                                                                                                                                                               |
@@ -2983,9 +2984,9 @@ engine.
 | **Version-space exhaustion**   | `Release-As: 999999.0.0`                                              | Burns the package's version space permanently. No subsequent release can ever be lower.                                                                                                                                                                          |
 | **Ledger wipe**                | `cancel(*): x`                                                        | Discards every pending change, silently dropping the release and its changelog.                                                                                                                                                                                  |
 | **Silent release freeze**      | `Release-As: none` on a wide scope                                    | Blocks releases indefinitely; visible only as `W154`, easily lost in CI logs.                                                                                                                                                                                    |
-| **Channel hijack**             | `@beta` on a package expected to be stable                            | Diverts a release to a prerelease channel, or graduates a prerelease that was not ready.                                                                                                                                                                         |
-| **Prerelease flood**           | `@@beta++*` on a widely-depended package                              | Moves an entire reverse closure onto a prerelease line in one commit. Reversible — stable baselines are untouched — but noisy, and it is `maxPackagesPerRun` and `maxChannelMovesPerRun` that bound it.                                                          |
-| **Forced graduation**          | `@@*>stable++*` on a widely-depended package                          | Ends every dependent's prerelease train at once, publishing versions consumers resolve by default. Irreversible, since the stable versions cannot be recalled. Requires an explicit transition to write, which is why `W200` blocks every implicit route (§9.3). |
+| **Channel hijack**             | `%beta` on a package expected to be stable                            | Diverts a release to a prerelease channel, or graduates a prerelease that was not ready.                                                                                                                                                                         |
+| **Prerelease flood**           | `%%beta++*` on a widely-depended package                              | Moves an entire reverse closure onto a prerelease line in one commit. Reversible — stable baselines are untouched — but noisy, and it is `maxPackagesPerRun` and `maxChannelMovesPerRun` that bound it.                                                          |
+| **Forced graduation**          | `%%*>stable++*` on a widely-depended package                          | Ends every dependent's prerelease train at once, publishing versions consumers resolve by default. Irreversible, since the stable versions cannot be recalled. Requires an explicit transition to write, which is why `W200` blocks every implicit route (§9.3). |
 | **Blast-radius amplification** | `^^inherit` on a leaf package                                         | Turns a one-package change into a workspace-wide major release. Bounded by propagation being opt-in (§8.3): the reach is always written in the message.                                                                                                          |
 | **Resource exhaustion**        | Pathological scope globs or very large depths across a huge workspace | CPU/memory pressure in CI. Bounded by §18.3.                                                                                                                                                                                                                     |
 | **Induced-failure widening**   | Causing one publish to fail, hoping the retry releases more           | **Not possible.** §13.7c G5: a later run's target set is a subset of the first's. A retry can only discharge work already planned and reviewed.                                                                                                                  |
@@ -3297,7 +3298,7 @@ parseHeader(line):
     h  = { type:'', scopes:[], inline:{}, breaking:false, description:'' }
     sawCaret   = false     # scratch: a '^' or '^^' has been consumed (one sigil, §5.3)
     depthFrom  = none      # scratch: which token supplied h.inline['depth'] — '^', '^^' or '+'
-    cdepthFrom = none      # scratch: which token supplied h.inline['channelDepth'] — '@@' or '++'
+    cdepthFrom = none      # scratch: which token supplied h.inline['channelDepth'] — '%%' or '++'
 
     # 1. type
     if line.startsWith('BREAKING CHANGE') or line.startsWith('BREAKING-CHANGE'):
@@ -3307,7 +3308,7 @@ parseHeader(line):
     if h.type == '':
         if not sc.eof and isUpper(sc.peek): raise E101      # 'Feat: x'
         raise E100                                          # '123: x', ': x', ''
-    if not sc.eof and sc.peek not in '(^+@!:': raise E101    # 'feat2: x', 'feat_x: y'
+    if not sc.eof and sc.peek not in '(^+%!:': raise E101    # 'feat2: x', 'feat_x: y'
 
     # 2. optional scope-set
     if sc.accept('('):
@@ -3329,7 +3330,7 @@ parseHeader(line):
             term += c
 
     # 3. inline directives
-    while not sc.eof and sc.peek in '^+@':
+    while not sc.eof and sc.peek in '^+%':
         sigil = sc.next()
 
         if sigil == '^' and not sc.eof and sc.peek == '^':
@@ -3337,7 +3338,7 @@ parseHeader(line):
             if sawCaret: raise E110                    # ^ and ^^ are one sigil
             if not sc.eof and sc.peek == '^': raise E110   # ^^^ — third caret
             sawCaret = true
-            value = sc.readUntilAny('^+@!:')
+            value = sc.readUntilAny('^+%!:')
             if value != '':
                 h.inline['propagate'] = validateInline('propagate', value)
             if depthFrom == '+':                       # an explicit +N is already in hand
@@ -3347,31 +3348,31 @@ parseHeader(line):
             depthFrom         = '^^'
             continue
 
-        if sigil == '@' and not sc.eof and sc.peek == '@':
+        if sigil == '%' and not sc.eof and sc.peek == '%':
             sc.next()                                  # doubled at-sign
-            if not sc.eof and sc.peek == '@': raise E110   # @@@ — third at-sign
+            if not sc.eof and sc.peek == '%': raise E110   # %%% — third percent sign
             if 'propagateChannel' in h.inline: raise E110
-            value = sc.readUntilAny('^+@!:')
-            if value == '': raise E111                 # a bare '@@' means nothing
+            value = sc.readUntilAny('^+%!:')
+            if value == '': raise E111                 # a bare '%%' means nothing
             h.inline['propagateChannel'] = validateInline('propagateChannel', value)
-            if cdepthFrom == none:                     # '@@' implies channel depth 1 only if
+            if cdepthFrom == none:                     # '%%' implies channel depth 1 only if
                 h.inline['channelDepth'] = 1           # no explicit ++N has been seen yet;
-                cdepthFrom               = '@@'        # a later ++N may still override
+                cdepthFrom               = '%%'        # a later ++N may still override
             continue
 
         if sigil == '+' and not sc.eof and sc.peek == '+':
             sc.next()                                  # doubled plus
             if not sc.eof and sc.peek == '+': raise E110   # +++ — third plus
             if cdepthFrom == '++': raise E110          # one ++N per header
-            value = sc.readUntilAny('^+@!:')
+            value = sc.readUntilAny('^+%!:')
             if value == '': raise E111                 # '++' carries no default depth
             h.inline['channelDepth'] = validateInline('depth', value)
-            cdepthFrom               = '++'            # wins over '@@'s implied 1, silently
+            cdepthFrom               = '++'            # wins over '%%'s implied 1, silently
             continue
 
-        value = sc.readUntilAny('^+@!:')
+        value = sc.readUntilAny('^+%!:')
         if value == '' and sigil != '^': raise E111    # '^' alone is legal
-        key = { '^':'propagate', '+':'depth', '@':'channel' }[sigil]
+        key = { '^':'propagate', '+':'depth', '%':'channel' }[sigil]
 
         if sigil == '^':
             if sawCaret: raise E110
@@ -3458,19 +3459,19 @@ channelSide(v, asFrom):
 ```
 
 `isChannel` (§20.1) does not admit `>`, so the split is unambiguous: a channel name can never contain the separator, and
-`indexOf` needs no lookahead. `readUntilAny('^+@!:')` does not stop at `>`, so the whole transition arrives as one
+`indexOf` needs no lookahead. `readUntilAny('^+%!:')` does not stop at `>`, so the whole transition arrives as one
 value.
 
-**Why phase 3 is unambiguous.** The scope-set has already been consumed at phase 2, so any `@` remaining is outside
-parentheses and can only be a channel sigil. `readUntilAny('^+@!:')` stops at the next sigil, the breaking marker, or
+**Why phase 3 is unambiguous.** The scope-set has already been consumed at phase 2, so any `%` remaining is outside
+parentheses and can only be a channel sigil. `readUntilAny('^+%!:')` stops at the next sigil, the breaking marker, or
 the colon — none of which may appear in a directive value. No lookahead beyond one character is needed.
 
 The three doubled tokens do not change that bound. Each is a fixed two-character token distinguished from its single
 form by one `peek`, and each is followed by a guard against a third repetition, because without it `^^^minor` would
-tokenise as `^^` (empty value) followed by `^minor` and parse silently as `^^minor`; `@@@rc` and `+++2` have the same
+tokenise as `^^` (empty value) followed by `^minor` and parse silently as `^^minor`; `%%%rc` and `+++2` have the same
 shape. Repeated sigils are never a count.
 
-An empty value is legal **only** after `^` and `^^`. `@@`, `++`, `@` and `+` all raise `E111` on an empty value: a
+An empty value is legal **only** after `^` and `^^`. `%%`, `++`, `%` and `+` all raise `E111` on an empty value: a
 channel with no name and a depth with no number carry no default worth guessing, whereas a caret's value is a bump and
 bumps have one.
 
@@ -3487,15 +3488,15 @@ each depth, which is what keeps every combination order-independent:
 | `+2^^minor`        | `depthFrom: none → '+'`          | `E113`                                                   |
 | `^^minor+*`        | `depthFrom: none → '^^'`         | depth `all`, `W110`                                      |
 | `^minor+2+3`       | `depthFrom: none → '^' → '+'`    | `E110` on `+3` — one `+N` per header                     |
-| `@@beta++3`        | `cdepthFrom: none → '@@' → '++'` | channel depth `3` — the `++N` overrides `@@`'s implied 1 |
-| `++3@@beta`        | `cdepthFrom: none → '++'`        | channel depth `3` — `@@` supplies nothing, none needed   |
-| `@@beta++1++2`     | `cdepthFrom: none → '@@' → '++'` | `E110` on `++2` — one `++N` per header                   |
-| `@@beta@@rc`       | —                                | `E110` — one `@@` per header                             |
-| `^^minor@@beta++1` | both, independently              | bump all levels, channel one level — legal (§5.3)        |
+| `%%beta++3`        | `cdepthFrom: none → '%%' → '++'` | channel depth `3` — the `++N` overrides `%%`'s implied 1 |
+| `++3%%beta`        | `cdepthFrom: none → '++'`        | channel depth `3` — `%%` supplies nothing, none needed   |
+| `%%beta++1++2`     | `cdepthFrom: none → '%%' → '++'` | `E110` on `++2` — one `++N` per header                   |
+| `%%beta%%rc`       | —                                | `E110` — one `%%` per header                             |
+| `^^minor%%beta++1` | both, independently              | bump all levels, channel one level — legal (§5.3)        |
 
-`^` yields silently to an explicit `+N` (§8.3) and `^^` refuses to disagree with one (`E113`); `@@` behaves like `^`,
+`^` yields silently to an explicit `+N` (§8.3) and `^^` refuses to disagree with one (`E113`); `%%` behaves like `^`,
 since there is no doubled channel token asserting `all` for it to disagree with. Without the `depthFrom == '^'` and
-`cdepthFrom == '@@'` arms, the same header would mean two different things depending on the order it was typed in.
+`cdepthFrom == '%%'` arms, the same header would mean two different things depending on the order it was typed in.
 
 ### 20.4 Splitting a unit into header, body, footers
 
@@ -3572,7 +3573,7 @@ sentence appended after trailers. It produces `W151` and the paragraph is body.
 
 ```
 parseTag(ref):
-    at = lastIndexOf(ref, '@')
+    at = lastIndexOf(ref, '%')
     if at <= 0 or at == len(ref) - 1: return NONE
     name = ref[0..at]
     ver  = ref[at+1..]
@@ -3611,7 +3612,7 @@ All patterns are PCRE, anchored, and free of nested quantifiers, so they cannot 
 **Header (single pattern):**
 
 ```regex
-^(?<type>[a-z]+)(?:\((?<scopes>[^()\r\n]+)\))?(?<inline>(?:\^\^[^\^+@!:\r\n]*|@@[^\^+@!:\r\n]+|\+\+[^\^+@!:\r\n]+|\^[^\^+@!:\r\n]*|[+@][^\^+@!:\r\n]+)*)(?<breaking>!)?: (?<description>\S[^\r\n]*)$
+^(?<type>[a-z]+)(?:\((?<scopes>[^()\r\n]+)\))?(?<inline>(?:\^\^[^\^+%!:\r\n]*|%%[^\^+%!:\r\n]+|\+\+[^\^+%!:\r\n]+|\^[^\^+%!:\r\n]*|[+%][^\^+%!:\r\n]+)*)(?<breaking>!)?: (?<description>\S[^\r\n]*)$
 ```
 
 Group notes: `scopes` still requires splitting on `,` and per-term validation; `inline` still requires tokenising by
@@ -3623,18 +3624,18 @@ parsed with a leading space in the description (`E120`, vector 18). A `+` quanti
 **Inline directive tokens (apply with a global match to `inline`):**
 
 ```regex
-(\^\^|@@|\+\+|[\^+@])([^\^+@!:]*)
+(\^\^|%%|\+\+|[\^+%])([^\^+%!:]*)
 ```
 
-All three doubled alternatives MUST come first — with `[\^+@]` first, `^^minor` tokenises as a bare `^` with an empty
-value followed by `^minor`, `@@rc` as `@` followed by `@rc`, and `++2` as `+` with an empty value followed by `+2`,
+All three doubled alternatives MUST come first — with `[\^+%]` first, `^^minor` tokenises as a bare `^` with an empty
+value followed by `^minor`, `%%rc` as `%` followed by `%rc`, and `++2` as `+` with an empty value followed by `+2`,
 which is `E111` where the correct answer is a channel depth of 2. Note also that the value quantifier is `*`, not `+`,
-so that `^` and `^^` may stand alone and so that a valueless `@@` or `++` still tokenises: an empty value is legal after
-`^` and `^^`, and is `E111` after `+`, `@`, `@@`, and `++` — which the pattern does not catch and the caller MUST check.
-In the header pattern the single-caret and doubled-caret alternatives therefore take `*`, while `+`, `@`, `@@`
+so that `^` and `^^` may stand alone and so that a valueless `%%` or `++` still tokenises: an empty value is legal after
+`^` and `^^`, and is `E111` after `+`, `%`, `%%`, and `++` — which the pattern does not catch and the caller MUST check.
+In the header pattern the single-caret and doubled-caret alternatives therefore take `*`, while `+`, `%`, `%%`
 and `++` keep `+`.
 
-Neither pattern validates a repetition guard. `^^^minor`, `@@@rc` and `+++2` all tokenise as a doubled token followed by
+Neither pattern validates a repetition guard. `^^^minor`, `%%%rc` and `+++2` all tokenise as a doubled token followed by
 a single one and MUST be rejected as `E110` by the caller, exactly as in §20.3.
 
 **Directive value validation:**
@@ -3644,9 +3645,9 @@ a single one and MUST be rejected as `E110` by the caller, exactly as in §20.3.
 ^(?:\*|all|direct|0|[1-9][0-9]*)$                     # +  depth
 ^(?:\*|all|direct|0|[1-9][0-9]*)$                     # ++ propagate-channel-depth
 ^(?:(?:\*|stable|[a-z][a-z0-9-]{0,31})>)?(?:stable|[a-z][a-z0-9-]{0,31})$
-                                                      # @  channel, optional transition
+                                                      # %  channel, optional transition
 ^(?:inherit|none|(?:(?:\*|stable|[a-z][a-z0-9-]{0,31})>)?(?:stable|[a-z][a-z0-9-]{0,31}))$
-                                                      # @@ propagate-channel
+                                                      # %% propagate-channel
 ```
 
 The two channel patterns already exclude `*` as a `<to>` and `inherit`/`none` on either side of a `>`, because neither
@@ -3691,14 +3692,14 @@ This pattern MUST NOT be compiled with the `i` flag. Case-insensitivity here wou
 first alternative and be treated as a genuine breaking change, inverting the `W155` rule of §8.1.1. Every *other* footer
 key is resolved case-insensitively — but at key resolution, not in this pattern.
 
-**Release tag — note the greedy prefix, which is what makes the last-`@` rule work:**
+**Release tag — note the greedy prefix, which is what makes the last-`%` rule work:**
 
 ```regex
 ^(?<name>.+)@(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$
 ```
 
 Using `(?<name>.+?)` (lazy) here is a conformance bug: `@acme/ui@1.2.3` would yield the name `` and fail, or split at
-the wrong `@`.
+the wrong `%`.
 
 **Full SemVer 2.0.0** (the official pattern, reproduced for completeness):
 
@@ -3718,13 +3719,13 @@ A prerelease tag that does not match this pattern but is otherwise valid SemVer 
 
 | Pitfall                                    | Consequence                                                                                                                  | Avoidance                                                               |
 |--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| `[\^+@]` before `\^\^` in the tokeniser    | `^^minor` silently becomes `^minor` at depth 1                                                                               | Order the alternation longest-first                                     |
+| `[\^+%]` before `\^\^` in the tokeniser    | `^^minor` silently becomes `^minor` at depth 1                                                                               | Order the alternation longest-first                                     |
 | `\^+` to match the caret run               | `^^^minor` accepted as `^^minor`; carets read as a repetition count                                                          | Match the literal two-character token, then guard against a third caret |
-| `[\^+@]` before `@@` in the tokeniser      | `@@rc` becomes `@` with an empty value followed by `@rc`, silently setting the unit's own channel instead of its dependents' | Order the alternation longest-first, exactly as for `\^\^`              |
-| `[\^+@]` before `\+\+` in the tokeniser    | `++2` becomes `+` with an empty value followed by `+2`, silently setting the bump depth instead of the channel depth         | Order the alternation longest-first                                     |
+| `[\^+%]` before `%%` in the tokeniser      | `%%rc` becomes `%` with an empty value followed by `%rc`, silently setting the unit's own channel instead of its dependents' | Order the alternation longest-first, exactly as for `\^\^`              |
+| `[\^+%]` before `\+\+` in the tokeniser    | `++2` becomes `+` with an empty value followed by `+2`, silently setting the bump depth instead of the channel depth         | Order the alternation longest-first                                     |
 | Splitting a channel value at the first `-` | `beta-2>stable` loses its channel name; hyphens are legal in channel names                                                   | Split at `>`, which `isChannel` excludes                                |
-| Case-folding a channel value               | `@@Beta>stable` silently becomes a valid transition                                                                          | Channel names are case-sensitive; `E181`                                |
-| Lazy name in the tag pattern               | Scoped package names split at the wrong `@`                                                                                  | Greedy `.+` before the final `@`                                        |
+| Case-folding a channel value               | `%%Beta>stable` silently becomes a valid transition                                                                          | Channel names are case-sensitive; `E181`                                |
+| Lazy name in the tag pattern               | Scoped package names split at the wrong `%`                                                                                  | Greedy `.+` before the final `%`                                        |
 | `[a-zA-Z]+` for type                       | Accepts `Feat`, diverging from `E101`                                                                                        | `[a-z]+`, or lowercase explicitly                                       |
 | `[^\r\n]+` for the description             | `feat:  x` parses with a leading space instead of `E120`                                                                     | Anchor the group with `\S`                                              |
 | `.*` for scope contents                    | Swallows the `)` and the colon                                                                                               | `[^()\r\n]+`                                                            |
@@ -3760,8 +3761,8 @@ Sections B.4 and B.5 override these tags locally where stated.
 | 3    | `feat(core,cli): x`                      | scopes `[core, cli]`                                                                     |
 | 4    | `feat(core, cli): x`                     | scopes `[core, cli]` — space after comma allowed                                         |
 | 5    | `feat(core ,cli): x`                     | `E102`                                                                                   |
-| 6    | `feat(@acme/theme): x`                   | scopes `[@acme/theme]` — `@` inside parens is literal                                    |
-| 7    | `feat(@acme/theme)@beta: x`              | scopes `[@acme/theme]`, channel `beta`                                                   |
+| 6    | `feat(@acme/theme): x`                   | scopes `[%acme/theme]` — `%` inside parens is literal                                    |
+| 7    | `feat(@acme/theme)%beta: x`              | scopes `[%acme/theme]`, channel `beta`                                                   |
 | 8    | `feat(*,-docs-site): x`                  | all packages except `docs-site`                                                          |
 | 9    | `feat(.,-ui): x`                         | derived set minus `ui`                                                                   |
 | 10   | `feat(core)^minor+2: x`                  | propagate `minor`, depth `2`                                                             |
@@ -3778,26 +3779,26 @@ Sections B.4 and B.5 override these tags locally where stated.
 | 14g  | `feat(core)^minor^^: x`                  | `E110` — `^` and `^^` are one sigil                                                      |
 | 14h  | `feat(core)^^^minor: x`                  | `E110` — third caret                                                                     |
 | 14i  | `feat(core)^^med: x`                     | `E111`                                                                                   |
-| 14j  | `feat(core)^^@beta: x`                   | propagate `patch`, depth `all`, channel `beta`; channel depth `0`                        |
+| 14j  | `feat(core)^^%beta: x`                   | propagate `patch`, depth `all`, channel `beta`; channel depth `0`                        |
 | 14k  | `feat(core)++2: x`                       | channel depth `2`, `Propagate-Channel` defaults to `inherit`; no bump propagation        |
 | 14l  | `feat(core)++: x`                        | `E111` — `++` carries no default depth                                                   |
 | 14m  | `feat(core)+++2: x`                      | `E110` — third plus                                                                      |
 | 14n  | `feat(core)++1++2: x`                    | `E110` — one `++N` per header                                                            |
-| 14o  | `feat(core)@@beta++3: x`                 | channel `beta`, channel depth `3` — `++N` wins over `@@`'s implied 1, no diagnostic      |
-| 14p  | `feat(core)++3@@beta: x`                 | identical to 14o — order-independent                                                     |
-| 14q  | `feat(core)^^minor@@beta++1: x`          | bump `minor` to all levels, channel `beta` to one. Both axes, independent (§5.3)         |
+| 14o  | `feat(core)%%beta++3: x`                 | channel `beta`, channel depth `3` — `++N` wins over `%%`'s implied 1, no diagnostic      |
+| 14p  | `feat(core)++3%%beta: x`                 | identical to 14o — order-independent                                                     |
+| 14q  | `feat(core)^^minor%%beta++1: x`          | bump `minor` to all levels, channel `beta` to one. Both axes, independent (§5.3)         |
 | 14r  | `feat(core)+2++1: x`                     | depth `2`, channel depth `1`. `+` and `++` are distinct sigils                           |
 | 14r1 | `feat(core)+9999: x`                     | depth `all` — saturated at `1024` (§20.3), not `E111`                                    |
 | 14r2 | `feat(core)+20000: x`                    | depth `all` — the digit run is unbounded in length; saturation, never rejection          |
 | 14r3 | `feat(core)++20000: x`                   | channel depth `all` — identical treatment on the channel axis                            |
 | 14r4 | `feat(core)+00: x`                       | `E111` — leading zeros rejected; `0` alone is the only depth that may start with `0`     |
 | 14r5 | `feat(core)+007: x`                      | `E111` — not `7`                                                                         |
-| 14s  | `feat(core)@beta>rc: x`                  | `Channel` transition, `from` `beta`, `to` `rc`                                           |
-| 14t  | `feat(core)@@*>stable++*: x`             | `Propagate-Channel` transition from any prerelease to stable, channel depth `all`        |
-| 14u  | `feat(core)@@beta>*: x`                  | `E111` — `*` is a `from`-value only                                                      |
-| 14v  | `feat(core)@@a>b>c: x`                   | `E111` — one `>` per value                                                               |
-| 14w  | `feat(core)@>stable: x`                  | `E111` — empty `from`                                                                    |
-| 14x  | `feat(core)@@beta>inherit: x`            | `E111` — `inherit` is a value, not a channel                                             |
+| 14s  | `feat(core)%beta>rc: x`                  | `Channel` transition, `from` `beta`, `to` `rc`                                           |
+| 14t  | `feat(core)%%*>stable++*: x`             | `Propagate-Channel` transition from any prerelease to stable, channel depth `all`        |
+| 14u  | `feat(core)%%beta>*: x`                  | `E111` — `*` is a `from`-value only                                                      |
+| 14v  | `feat(core)%%a>b>c: x`                   | `E111` — one `>` per value                                                               |
+| 14w  | `feat(core)%>stable: x`                  | `E111` — empty `from`                                                                    |
+| 14x  | `feat(core)%%beta>inherit: x`            | `E111` — `inherit` is a value, not a channel                                             |
 | 15   | `feat(core)!^minor: x`                   | `E120` — `!` must precede the colon                                                      |
 | 16   | `Feat: x`                                | `E101`                                                                                   |
 | 17   | `feat:x`                                 | `E120`                                                                                   |
@@ -3809,7 +3810,7 @@ Sections B.4 and B.5 override these tags locally where stated.
 | 23   | `cancel(*): reset release state`         | control unit, scope all                                                                  |
 | 24   | `cancel(*)!: x`                          | `E170`                                                                                   |
 | 25   | `cancel(core)^minor: x`                  | `E171`                                                                                   |
-| 26   | `release(cli)@stable: x`                 | control unit, channel stable                                                             |
+| 26   | `release(cli)%stable: x`                 | control unit, channel stable                                                             |
 | 27   | `release(cli)!: x`                       | `E141`                                                                                   |
 | 27a  | `BREAKING CHANGE: gone` as a header line | `E100`                                                                                   |
 | 27b  | `breaking: x`                            | Valid header, unknown type `breaking`, bump `none`, `W140`. **Not** a breaking change.   |
@@ -3856,7 +3857,7 @@ fix(core): a
 
 fix(cli): b
 
-Signed-off-by: A <a@example.com>
+Signed-off-by: A <a%example.com>
 ```
 
 → two units; the trailer is message-level and ignored (§4.5).
@@ -3866,7 +3867,7 @@ Signed-off-by: A <a@example.com>
 ```
 cancel(core): reset release state
 
-Signed-off-by: A <a@example.com>
+Signed-off-by: A <a%example.com>
 ```
 
 → Valid. The trailer is message-level (§4.5) and exempt from `E171`.
@@ -3908,9 +3909,9 @@ Given `feat(core)` and the workspace above:
 | 38  | `feat(core)^: x` + `feat(cli): y` in one window      | `cli` = max(minor direct, patch propagated) = minor                                                                                                                                                  |
 | 39  | `feat(core)^^: x` with `Propagate-Scope: -docs-site` | As #33b minus `docs-site`, which is **untouched** and stays unreleased. `^^`, not `^`: at depth `1` `docs-site` is out of reach anyway and the vector would pass without the scope being read at all |
 | 39a | `feat(core)++1: x`                                   | `core` `1.5.0`; `cli`, `ui`, `api` take `core`'s channel — already stable, so `W199` each and nothing else releases                                                                                  |
-| 39b | `feat(core)@beta++1: x`                              | `core` `1.5.0-beta.0`; `cli` `2.0.1-beta.0`, `ui` `0.9.2-beta.0`, `api` `1.2.1-beta.0` — channel-only releases (`W202`, `W204`)                                                                      |
-| 39c | `feat(core)^@beta: x`                                | **`core` `1.5.0-beta.0` alone.** The caret reaches all three; each is suppressed by §9.3a with `W208`                                                                                                |
-| 39d | `feat(core)^@beta++1: x`                             | `core` `1.5.0-beta.0`; `cli` `2.0.1-beta.0`, `ui` `0.9.2-beta.0`, `api` `1.2.1-beta.0` — bump and channel together, no `W204`                                                                        |
+| 39b | `feat(core)%beta++1: x`                              | `core` `1.5.0-beta.0`; `cli` `2.0.1-beta.0`, `ui` `0.9.2-beta.0`, `api` `1.2.1-beta.0` — channel-only releases (`W202`, `W204`)                                                                      |
+| 39c | `feat(core)^%beta: x`                                | **`core` `1.5.0-beta.0` alone.** The caret reaches all three; each is suppressed by §9.3a with `W208`                                                                                                |
+| 39d | `feat(core)^%beta++1: x`                             | `core` `1.5.0-beta.0`; `cli` `2.0.1-beta.0`, `ui` `0.9.2-beta.0`, `api` `1.2.1-beta.0` — bump and channel together, no `W204`                                                                        |
 | 39e | `feat(core)^^minor++1: x`                            | `minor` reaches all six; the origin's channel reaches only the three direct consumers. Axes are independent                                                                                          |
 | 40  | `feat(ui)^: x`                                       | `ui` minor; `docs-site` and `@acme/theme` patch; `docs-site` released to the internal registry and tagged                                                                                            |
 
@@ -3990,23 +3991,23 @@ Baseline `api@1.0.0-beta.3`, stable baseline `api@0.9.0`.
 
 | #   | Pending                                                             | Expected                                                                                                                                                                                              |
 |-----|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 46  | `feat(api)@beta` (window bump: minor, `preserveMajorZero` on)       | target `applyBump(0.9.0, minor)` = `0.9.1` (minor remapped to patch while `0.y.z`); core differs from `1.0.0` → `0.9.1-beta.0`, and `E195` because that is **lower** than the baseline `1.0.0-beta.3` |
+| 46  | `feat(api)%beta` (window bump: minor, `preserveMajorZero` on)       | target `applyBump(0.9.0, minor)` = `0.9.1` (minor remapped to patch while `0.y.z`); core differs from `1.0.0` → `0.9.1-beta.0`, and `E195` because that is **lower** than the baseline `1.0.0-beta.3` |
 | 47  | same, with `preserveMajorZero: false`                               | target `applyBump(0.9.0, minor)` = `0.10.0` → `0.10.0-beta.0`, still `E195`                                                                                                                           |
-| 48  | `feat(api)!@beta`, `preserveMajorZero: false`                       | target `applyBump(0.9.0, major)` = `1.0.0`; core matches baseline core → `1.0.0-beta.4`                                                                                                               |
-| 49  | `release(api)@stable`, window containing the breaking change of #48 | `1.0.0`                                                                                                                                                                                               |
-| 50  | `release(api)@rc`, same window                                      | `1.0.0-rc.0`                                                                                                                                                                                          |
-| 51  | Baseline `core@1.4.2`, `feat(core)@beta`                            | `1.5.0-beta.0`                                                                                                                                                                                        |
-| 52  | Then another `fix(core)@beta` in the same window                    | `1.5.0-beta.1`                                                                                                                                                                                        |
-| 53  | Then a `feat(core)!@beta`                                           | `2.0.0-beta.0`                                                                                                                                                                                        |
-| 54  | Then `release(core)@stable`                                         | `2.0.0`                                                                                                                                                                                               |
+| 48  | `feat(api)!%beta`, `preserveMajorZero: false`                       | target `applyBump(0.9.0, major)` = `1.0.0`; core matches baseline core → `1.0.0-beta.4`                                                                                                               |
+| 49  | `release(api)%stable`, window containing the breaking change of #48 | `1.0.0`                                                                                                                                                                                               |
+| 50  | `release(api)%rc`, same window                                      | `1.0.0-rc.0`                                                                                                                                                                                          |
+| 51  | Baseline `core@1.4.2`, `feat(core)%beta`                            | `1.5.0-beta.0`                                                                                                                                                                                        |
+| 52  | Then another `fix(core)%beta` in the same window                    | `1.5.0-beta.1`                                                                                                                                                                                        |
+| 53  | Then a `feat(core)!%beta`                                           | `2.0.0-beta.0`                                                                                                                                                                                        |
+| 54  | Then `release(core)%stable`                                         | `2.0.0`                                                                                                                                                                                               |
 | 55  | `ui` at `0.9.1`, `feat(ui)`, `preserveMajorZero: true`              | `0.9.2`                                                                                                                                                                                               |
 | 56  | `ui` at `0.9.1`, `feat(ui)!`, `preserveMajorZero: true`             | `0.10.0`                                                                                                                                                                                              |
 | 57  | `ui` at `0.9.1`, `Release-As: 1.0.0`                                | `1.0.0`                                                                                                                                                                                               |
-| 57a | `cli` at `2.0.0`, no pending bumps, moved onto `beta` by `@@beta`   | `2.0.1-beta.0` — the channel-entry patch (§11.4). `W202` for the channel-only release, `W204` for the patch                                                                                           |
+| 57a | `cli` at `2.0.0`, no pending bumps, moved onto `beta` by `%%beta`   | `2.0.1-beta.0` — the channel-entry patch (§11.4). `W202` for the channel-only release, `W204` for the patch                                                                                           |
 | 57b | the same, but `cli`'s window already carries a `fix`                | `2.0.1-beta.0` and **no** `W204`: `applyBump(2.0.0, patch)` already exceeds the baseline, so no extra step is taken                                                                                   |
-| 57c | `cli` at `2.1.0-beta.3`, reached by `@@beta`                        | Nothing. `W199` — it is already on `beta`; the directive proposes no change. This is what makes the channel axis converge (§13.7c G7)                                                                 |
-| 57d | `cli` at `2.1.0-beta.3`, reached by `@@beta>rc++1`                  | `2.1.0-rc.0` — the transition matches, the counter resets (§11.4)                                                                                                                                     |
-| 57e | `cli` at `2.1.0-beta.3`, reached by `@@rc>stable++1`                | Nothing. `cli` is on `beta`, not `rc`; it does not match `<from>` and is untouched. `W206` if no reached dependent matches                                                                            |
+| 57c | `cli` at `2.1.0-beta.3`, reached by `%%beta`                        | Nothing. `W199` — it is already on `beta`; the directive proposes no change. This is what makes the channel axis converge (§13.7c G7)                                                                 |
+| 57d | `cli` at `2.1.0-beta.3`, reached by `%%beta>rc++1`                  | `2.1.0-rc.0` — the transition matches, the counter resets (§11.4)                                                                                                                                     |
+| 57e | `cli` at `2.1.0-beta.3`, reached by `%%rc>stable++1`                | Nothing. `cli` is on `beta`, not `rc`; it does not match `<from>` and is untouched. `W206` if no reached dependent matches                                                                            |
 
 Vectors 46 and 47 are retained deliberately: they demonstrate that a hand-created `1.0.0-beta.3` tag on a package whose
 last stable release is `0.9.0` produces a version regression under any non-breaking bump, which the engine MUST reject
@@ -4020,10 +4021,10 @@ as in #48.
 | 58 | `core@1.4.2`                     | `core`, `1.4.2`                                                                  |
 | 59 | `@acme/theme@1.0.0`              | `@acme/theme`, `1.0.0`                                                           |
 | 60 | `@acme/theme@1.0.0-rc.1+build.5` | `@acme/theme`, `1.0.0-rc.1`, metadata ignored                                    |
-| 61 | `core@v1.4.2`                    | ignored, `W190`                                                                  |
+| 61 | `core%v1.4.2`                    | ignored, `W190`                                                                  |
 | 62 | `unknown@1.0.0`                  | ignored silently                                                                 |
 | 63 | `core@1.4`                       | ignored, `W190`                                                                  |
-| 64 | `release-2024`                   | ignored (no `@`)                                                                 |
+| 64 | `release-2024`                   | ignored (no `%`)                                                                 |
 | 65 | `core@1.5.0-beta3`               | `E182` on use as a prerelease baseline — repository-scoped: the run aborts (§16) |
 
 ### B.7 Partial failure and catch-up
@@ -4068,7 +4069,7 @@ the originating source set in every run (§9.2).
 **Vector 69** — publish order. Plan contains every released package.
 
 → `core`, `api`, `cli`, `ui`, `@acme/theme`, `docs-site`. Dependencies precede dependents; ready sets are ordered
-byte-wise by name, and `@acme/theme` precedes `docs-site` because `@` (0x40) sorts below `d` (§19.2). `docs-site`
+byte-wise by name, and `@acme/theme` precedes `docs-site` because `%` (0x40) sorts below `d` (§19.2). `docs-site`
 takes its place in the order like any other package — its private registry does not remove it (§13.10a). Any
 implementation emitting `ui` before `core`, or `@acme/theme` before `ui`, fails conformance (`E197`).
 
@@ -4232,14 +4233,14 @@ lifts `srcChannels` out of the *unit* loop as well as the target loop — comput
 `old` from `core`'s unit and fails §9.2's per-unit property.
 
 **Vector 82e** — inverting `resolveChannels` must preserve §11.6 order. `cli` named by two commits, the older
-`release(cli)@rc` and the newer `release(cli)@beta`, both in `W(cli)`.
+`release(cli)%rc` and the newer `release(cli)%beta`, both in `W(cli)`.
 
 → `cli` takes `beta`; `W186` is raised because two candidates proposed. An implementation that builds the candidate list
 by pushing from units in commit order and then reads it front-to-back takes `rc` and fails. The push MUST be in §11.6
 order, or the read MUST sort (§13.8).
 
 **Vector 82f** — the `W186` count is over **proposals**, not over candidates. `ui` is on `beta` and is named by two
-commits in `W(ui)`: the newer `release(ui)@beta>stable`, and the older `release(ui)@rc>stable`.
+commits in `W(ui)`: the newer `release(ui)%beta>stable`, and the older `release(ui)%rc>stable`.
 
 → `ui` graduates to `stable` from the newer directive, and there is **no** `W186`: the older directive is a candidate
 but not a competitor, because `ui`'s baseline channel is `beta` and does not match its `<from>` of `rc` (§11.6). The
@@ -4271,27 +4272,27 @@ this rule constrains, and a test fixture depending back on the package it exerci
 → `E200`. Acyclicity is a property of the workspace read at `HEAD`, not of the plan, so a cycle that this run would not
 have touched still aborts it.
 
-### B.9 The channel axis — `@@`, `++`, and transitions
+### B.9 The channel axis — `%%`, `++`, and transitions
 
 Workspace of B.1 unless stated otherwise. Recall that `Propagate-Channel-Depth` defaults to `0`, so **no channel
 propagates unless the unit says so**, and that `Propagate-Channel` defaults to `inherit`, so `++N` alone carries the
 origin's own channel.
 
-**Vector 94** — propagating a prerelease from a stable origin. `feat(core)^@@beta: x`.
+**Vector 94** — propagating a prerelease from a stable origin. `feat(core)^%%beta: x`.
 
-→ `core` releases `1.5.0` on **stable** — its own channel is untouched by `@@`. Its direct dependents enter the beta
+→ `core` releases `1.5.0` on **stable** — its own channel is untouched by `%%`. Its direct dependents enter the beta
 line and take the propagated patch: `cli@2.0.1-beta.0`, `ui@0.9.2-beta.0`, `api@1.2.1-beta.0`. `@acme/theme` and
 `docs-site` are at depth 2 on both axes and are untouched. This is the case the operator exists for: ship the
 dependency, let consumers validate the integration on a prerelease first.
 
-**Vector 94a** — the same without the caret. `feat(core)@@beta: x`.
+**Vector 94a** — the same without the caret. `feat(core)%%beta: x`.
 
 → `core@1.5.0` stable; the three direct dependents move onto beta with **no** propagated bump, so each is a channel-only
 release (`W202`) versioned by the channel-entry patch (`W204`): `cli@2.0.1-beta.0`, `ui@0.9.2-beta.0`,
 `api@1.2.1-beta.0`. The versions coincide with vector 94 here because a propagated `patch` and a channel-entry `patch`
 are the same size; they diverge as soon as the unit propagates anything larger.
 
-**Vector 95** — a prerelease that keeps to itself. `feat(core)^@beta: x`.
+**Vector 95** — a prerelease that keeps to itself. `feat(core)^%beta: x`.
 
 → **`core@1.5.0-beta.0` and nothing else.** The caret reaches `cli`, `ui` and `api`; every one of them is suppressed by
 §9.3a and reported as `W208`, because a package on `stable` cannot resolve `core@1.5.0-beta.0` and republishing it would
@@ -4299,7 +4300,7 @@ produce an artefact identical to the one already published. This is the single m
 implementation that releases the three dependents here has not implemented §9.3a, and will publish stable packages whose
 manifests declare a range on a prerelease.
 
-**Vector 95a** — taking the consumers along. `feat(core)^@beta++1: x`.
+**Vector 95a** — taking the consumers along. `feat(core)^%beta++1: x`.
 
 → `core@1.5.0-beta.0`, `cli@2.0.1-beta.0`, `ui@0.9.2-beta.0`, `api@1.2.1-beta.0`. The channel axis puts them on the beta
 line, so §9.3a admits the bump, so there is no `W208` and no `W204`. Compare vector 95: one four-character token is the
@@ -4312,27 +4313,27 @@ whole difference, and it is written in the commit.
 own baseline (§11.1), and `cli` is on `beta`, so §9.3a admits the bump. `ui` and `api` are on stable and are suppressed
 with `W208`. Directives are needed at the boundaries of a train, not inside it.
 
-**Vector 96** — the reverse. `feat(core)^@beta@@stable: x`.
+**Vector 96** — the reverse. `feat(core)^%beta%%stable: x`.
 
-→ `core@1.5.0-beta.0` and nothing else. `@@stable` proposes `stable` for three dependents that are already on `stable`,
+→ `core@1.5.0-beta.0` and nothing else. `%%stable` proposes `stable` for three dependents that are already on `stable`,
 so each is `W199` and nothing changes; the caret is then suppressed by §9.3a with `W208` exactly as in vector 95. Under
 a specification where a propagated channel forced a release, this header published stable packages depending on a
 prerelease; it now cannot.
 
 **Vector 97** — a propagated `stable` MUST NOT graduate. Let `api` be at `1.2.1-rc.0` with stable baseline `api@1.2.0`.
-Commit: `feat(core)^@@stable: x`.
+Commit: `feat(core)^%%stable: x`.
 
 → `api` is **not** graduated. It keeps channel `rc`, and `W200` reports the suppression. `cli` and `ui`, both on stable
 already, get `W199` for the redundant channel and take ordinary stable patches from the caret. An implementation that
 graduates `api` here has ended a prerelease train on behalf of a commit that never mentioned it, and fails this vector.
 
-**Vector 97a** — the same, with the `stable` arriving by inheritance rather than by `@@`: `feat(core)++1: x`, where
+**Vector 97a** — the same, with the `stable` arriving by inheritance rather than by `%%`: `feat(core)++1: x`, where
 `core` is on stable and `propagation.channel` is `inherit`.
 
 → Identical outcome and identical `W200`. The prohibition is on the *propagated value*, not on the syntax that produced
 it.
 
-**Vector 97b** — the deliberate exception. Same baselines; commit `release(core)@@rc>stable++1: x`.
+**Vector 97b** — the deliberate exception. Same baselines; commit `release(core)%%rc>stable++1: x`.
 
 → `api` **is** graduated, to `1.2.1`. The transition names the train it ends, which is the whole basis on which §9.3
 permits it. `cli` and `ui` are on `stable` and do not match `<from>`, so they are untouched — no `W199`, no `W185`, no
@@ -4348,7 +4349,7 @@ just written one, so in fact it is not; but even where a package's window still 
 computed earlier in the same run re-releases `api` on every run for ever.
 
 **Vector 97d** — partial graduation. `cli` at `2.1.0-beta.4`, `ui` at `0.9.2-beta.1`, `api` already graduated to
-`1.2.1`. Commit: `release(core)@stable@@beta>stable++*`.
+`1.2.1`. Commit: `release(core)%stable%%beta>stable++*`.
 
 → `core` graduates directly; `cli` and `ui` graduate by transition; `api` is on `stable`, does not match, and is not
 touched — no error, no redundant release, and no need for the author to know which packages had already been done.
@@ -4365,18 +4366,18 @@ Propagate-Channel-Scope: *, -ui
 directive names it. Exclusion leaves a package on its line: it does not release, it is not an error, and it produces no
 diagnostic beyond the plan simply not containing it.
 
-**Vector 97f** — excluding from the unit's own packages. `release(@acme/*,-@acme/theme)@beta>stable`.
+**Vector 97f** — excluding from the unit's own packages. `release(@acme/*,-@acme/theme)%beta>stable`.
 
 → Only the matching `@acme/*` packages other than `@acme/theme` are considered at all. The scope-set excludes from the
 unit; `Propagate-Channel-Scope` excludes from what the unit reaches (§8.5a). Both use the same `-` operator and the same
 scope-set grammar.
 
-**Vector 98** — redundancy. `feat(core)^@@stable: x` where every dependent is already on stable.
+**Vector 98** — redundancy. `feat(core)^%%stable: x` where every dependent is already on stable.
 
 → Ordinary stable patches from the caret, plus `W199` on each redundant channel proposal.
 
 **Vector 98a** — graduating a consumer while its provider stays on a train. `core` at `1.5.0-beta.2` with no directive;
-commit `release(cli)@beta>stable`.
+commit `release(cli)%beta>stable`.
 
 → `cli` graduates. Its manifest is reconciled against `core`'s current version, which is a prerelease, so the published
 stable `cli` declares a range admitting `core@1.5.0-beta.2` and `W203` is raised naming both (§9.4). Permitted,
@@ -4386,22 +4387,22 @@ reported, and almost always a mistake — graduate `core` too.
 
 | #   | Header                                                      | Expected                                                                                                    |
 |-----|-------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
-| 99a | `feat(core)@@beta: x`                                       | `Propagate-Channel: beta`, `Propagate-Channel-Depth: 1`; own channel untouched                              |
-| 99b | `feat(core)@beta@@rc: x`                                    | `Channel: beta` **and** `Propagate-Channel: rc` — distinct sigils                                           |
-| 99c | `feat(core)@@: x`                                           | `E111` — a bare `@@` has no meaning, unlike `^^`                                                            |
-| 99d | `feat(core)@@beta@@rc: x`                                   | `E110` — one `@@` per header                                                                                |
-| 99e | `feat(core)@@@beta: x`                                      | `E110` — third at-sign                                                                                      |
-| 99f | `feat(core)@@Beta: x`                                       | `E181` — propagated channel names obey §11.2                                                                |
-| 99g | `feat(core)@@latest: x`                                     | `E180` — reserved                                                                                           |
-| 99h | `feat(core)@@beta: x` + footer `Propagate-Channel: rc`      | `E112`; lenient mode takes the footer with `W112`                                                           |
-| 99i | `docs(core)@@beta++1: x`                                    | Channel propagates; the type maps to `none`, so no bump does. Dependents are channel-only releases (`W202`) |
+| 99a | `feat(core)%%beta: x`                                       | `Propagate-Channel: beta`, `Propagate-Channel-Depth: 1`; own channel untouched                              |
+| 99b | `feat(core)%beta%%rc: x`                                    | `Channel: beta` **and** `Propagate-Channel: rc` — distinct sigils                                           |
+| 99c | `feat(core)%%: x`                                           | `E111` — a bare `%%` has no meaning, unlike `^^`                                                            |
+| 99d | `feat(core)%%beta%%rc: x`                                   | `E110` — one `%%` per header                                                                                |
+| 99e | `feat(core)%%%beta: x`                                      | `E110` — third percent sign                                                                                      |
+| 99f | `feat(core)%%Beta: x`                                       | `E181` — propagated channel names obey §11.2                                                                |
+| 99g | `feat(core)%%latest: x`                                     | `E180` — reserved                                                                                           |
+| 99h | `feat(core)%%beta: x` + footer `Propagate-Channel: rc`      | `E112`; lenient mode takes the footer with `W112`                                                           |
+| 99i | `docs(core)%%beta++1: x`                                    | Channel propagates; the type maps to `none`, so no bump does. Dependents are channel-only releases (`W202`) |
 | 99j | `feat(core)++1: x` + footer `Propagate-Channel-Depth: 3`    | `E112` — `++1` and the footer set one key to different values; lenient: footer wins, `W112`                 |
-| 99k | `feat(core)@@beta: x` + footer `Propagate-Channel-Depth: 3` | Accepted, channel depth `3`. `@@` supplies a depth only in the absence of an explicit one (§8.3a)           |
-| 99l | `feat(core)@@none++*: x`                                    | No channel propagation; `W152` for the redundant pairing                                                    |
-| 99m | `feat(core)@@beta++0: x`                                    | No channel propagation; `W201` **alone**, never `W152` (§8.3b). Mirrors #35a on the bump axis               |
-| 99n | `feat(core)@beta>stable@@beta>stable++*: x`                 | Legal. Direct transition on `core`, propagated transition on its closure                                    |
-| 99o | `feat(core)@@stable>beta++2: x`                             | Dependents within two edges that are on `stable` enter the `beta` line                                      |
-| 99p | `feat(core)@@beta>beta: x`                                  | `W207`, inert                                                                                               |
+| 99k | `feat(core)%%beta: x` + footer `Propagate-Channel-Depth: 3` | Accepted, channel depth `3`. `%%` supplies a depth only in the absence of an explicit one (§8.3a)           |
+| 99l | `feat(core)%%none++*: x`                                    | No channel propagation; `W152` for the redundant pairing                                                    |
+| 99m | `feat(core)%%beta++0: x`                                    | No channel propagation; `W201` **alone**, never `W152` (§8.3b). Mirrors #35a on the bump axis               |
+| 99n | `feat(core)%beta>stable%%beta>stable++*: x`                 | Legal. Direct transition on `core`, propagated transition on its closure                                    |
+| 99o | `feat(core)%%stable>beta++2: x`                             | Dependents within two edges that are on `stable` enter the `beta` line                                      |
+| 99p | `feat(core)%%beta>beta: x`                                  | `W207`, inert                                                                                               |
 
 ### B.10 Diagnostics not exercised elsewhere
 
@@ -4428,20 +4429,20 @@ unless stated otherwise.
 | 88c | the same with `maxMajorJump: null`                                                      | Accepted at `5.0.0` — the bound is the one default-enforced limit that may be disabled.                                                                    |
 | 88a | the same with `Release-As: 2.0.0`                                                       | Accepted — one major above the computed version is within the bound.                                                                                       |
 | 88b | `release(core): x` + `Release-As: 1.4.0`, computed `2.0.0`, `lenient: true`             | Accepted at `1.4.0`, `W159` — the lenient form of `E156` (§8.6).                                                                                           |
-| 89  | `feat(core)@latest: x`                                                                  | `E180` — `latest` is reserved (§11.2).                                                                                                                     |
-| 89a | `feat(core)@Beta: x`                                                                    | `E181` — channel names are lowercase.                                                                                                                      |
+| 89  | `feat(core)%latest: x`                                                                  | `E180` — `latest` is reserved (§11.2).                                                                                                                     |
+| 89a | `feat(core)%Beta: x`                                                                    | `E181` — channel names are lowercase.                                                                                                                      |
 | 90  | `feat(core): x` with a footer `X-Internal-Ticket: AB-1`                                 | Footer ignored, `W150`. Unknown keys never block (§17.3).                                                                                                  |
-| 91  | `feat(core)@@beta: x`, then a later `feat(core)@@rc: y`, both in `cli`'s window         | Newest commit wins — `cli` enters `rc`; `W160` naming both. Note `@@`, not `@`: `@` sets the unit's **own** channel and never reaches a dependent (§8.3a). |
+| 91  | `feat(core)%%beta: x`, then a later `feat(core)%%rc: y`, both in `cli`'s window         | Newest commit wins — `cli` enters `rc`; `W160` naming both. Note `%%`, not `%`: `%` sets the unit's **own** channel and never reaches a dependent (§8.3a). |
 | 92  | One commit containing `cancel(core)` and `feat(core)` (either order)                    | `W172`, **non-suppressible**: the `feat` is discarded by ancestor-or-self and `core` is not released (§10.3, D.6).                                         |
-| 93  | `release(core)@stable: x`, baseline `1.5.0-beta.2`, no pending bumps                    | `E185`, **repository-scoped** — the run aborts; graduation would not raise the version (§11.5, §16).                                                       |
-| 93a | `feat(core)^@beta: x`, dependents on stable                                             | `W208` per suppressed dependent, **non-suppressible** — the caret reached and could not oblige (§9.3a).                                                    |
-| 93b | `feat(core)@@beta: x`, dependents on stable                                             | `W202` per dependent, **non-suppressible**, plus `W204` for each channel-entry patch.                                                                      |
-| 93c | `feat(core)@@beta++0: x`                                                                | `W201` and nothing else — a channel value with depth `0` reaches nobody; `W152` is superseded (§8.3b).                                                     |
+| 93  | `release(core)%stable: x`, baseline `1.5.0-beta.2`, no pending bumps                    | `E185`, **repository-scoped** — the run aborts; graduation would not raise the version (§11.5, §16).                                                       |
+| 93a | `feat(core)^%beta: x`, dependents on stable                                             | `W208` per suppressed dependent, **non-suppressible** — the caret reached and could not oblige (§9.3a).                                                    |
+| 93b | `feat(core)%%beta: x`, dependents on stable                                             | `W202` per dependent, **non-suppressible**, plus `W204` for each channel-entry patch.                                                                      |
+| 93c | `feat(core)%%beta++0: x`                                                                | `W201` and nothing else — a channel value with depth `0` reaches nobody; `W152` is superseded (§8.3b).                                                     |
 | 93h | `feat(core)^minor+0: x`                                                                 | `W201` and nothing else — the bump-axis mirror of 93c.                                                                                                     |
-| 93d | `feat(core)@@beta++*: x` with `Propagate-Channel-Scope: -*`                             | `W205` — the channel scope excluded every reached dependent.                                                                                               |
-| 93e | `release(core)@@zeta>stable++*: x`, no dependent on `zeta`                              | `W206` — the transition matched nothing; the usual cause is a mistyped `<from>`.                                                                           |
-| 93f | `release(core)@beta>beta: x`                                                            | `W207`, inert.                                                                                                                                             |
-| 93g | `release(cli)@beta>stable: x` while `core` stays at `1.5.0-beta.2`                      | Graduates `cli`; `W203` naming `cli@2.1.0` and `core@1.5.0-beta.2` (§9.4).                                                                                 |
+| 93d | `feat(core)%%beta++*: x` with `Propagate-Channel-Scope: -*`                             | `W205` — the channel scope excluded every reached dependent.                                                                                               |
+| 93e | `release(core)%%zeta>stable++*: x`, no dependent on `zeta`                              | `W206` — the transition matched nothing; the usual cause is a mistyped `<from>`.                                                                           |
+| 93f | `release(core)%beta>beta: x`                                                            | `W207`, inert.                                                                                                                                             |
+| 93g | `release(cli)%beta>stable: x` while `core` stays at `1.5.0-beta.2`                      | Graduates `cli`; `W203` naming `cli@2.1.0` and `core@1.5.0-beta.2` (§9.4).                                                                                 |
 
 Vector 92 is the one to implement first of these: `W172` is non-suppressible precisely because the commit looks like it
 does something and does nothing, and it is the most likely authoring mistake with `cancel`.
@@ -4477,9 +4478,9 @@ propagate-val   = "none" / "patch" / "minor" / "major" / "inherit"
 depth-tok       = "+" depth-val
 deep-depth-tok  = "++" depth-val              ; Propagate-Channel-Depth; value REQUIRED
 depth-val       = "*" / "all" / "direct" / 1*DIGIT
-deep-channel-tok = "@@" deep-channel-val      ; Propagate-Channel; implies depth 1
+deep-channel-tok = "%%" deep-channel-val      ; Propagate-Channel; implies depth 1
 deep-channel-val = "inherit" / "none" / channel-val
-channel-tok     = "@" channel-val
+channel-tok     = "%" channel-val
 channel-val     = [ from-channel ">" ] to-channel
 from-channel    = "*" / "stable" / channel-name   ; "*" is any prerelease, never stable
 to-channel      = "stable" / channel-name         ; "*" is NOT a to-channel
@@ -4573,18 +4574,18 @@ changelog entries.
 
 ```
 # commit 1
-feat(@acme/core,@acme/cli)^@beta++1: new config loader
+feat(@acme/core,@acme/cli)^%beta++1: new config loader
 
 # commit 2
-fix(@acme/cli)@beta: handle missing config file
+fix(@acme/cli)%beta: handle missing config file
 
 # commit 3
-feat(@acme/core)!^@beta: config file format v2
+feat(@acme/core)!^%beta: config file format v2
 
 BREAKING CHANGE: `config.json` is replaced by `acme.config.js`.
 
 # commit 4
-release(@acme/core,@acme/cli)@beta>stable: ship 2.0
+release(@acme/core,@acme/cli)%beta>stable: ship 2.0
 ```
 
 From `core@1.4.2`, `cli@2.0.0`:
@@ -4598,7 +4599,7 @@ From `core@1.4.2`, `cli@2.0.0`:
 
 Three things in that sequence are worth reading carefully.
 
-**Commit 1 needs `++1`, and would release `core` alone without it.** `@beta` puts `core` on the prerelease line; the
+**Commit 1 needs `++1`, and would release `core` alone without it.** `%beta` puts `core` on the prerelease line; the
 caret reaches `cli`; and §9.3a then suppresses the bump, because a `cli` still on `stable` cannot resolve
 `core@1.5.0-beta.0`. `++1` moves `cli` onto the line in the same commit, and the suppression no longer applies. This is
 the boundary of the train and it is the one place a channel directive is needed on the way in. (`cli` is also named
@@ -4606,13 +4607,13 @@ directly in the scope-set here, so it would have entered the line anyway; the `+
 consumer along, and is written for that reason.)
 
 **Commit 3 needs nothing but the caret.** `cli` is already on `beta`, so its channel comes from its own baseline (§11.1)
-and §9.3a admits the propagated bump because origin and target are on the same line. No `@@`, no `++`, no repetition of
-`@beta`. An established train is directive-free.
+and §9.3a admits the propagated bump because origin and target are on the same line. No `%%`, no `++`, no repetition of
+`%beta`. An established train is directive-free.
 
-**Commit 4 uses a transition rather than `@stable`.** Both work here, because both packages are on `beta`. The
+**Commit 4 uses a transition rather than `%stable`.** Both work here, because both packages are on `beta`. The
 transition is preferred because it is idempotent: if `cli` had already been graduated by hand, or by a run that failed
-after `cli` and before `core`, `@stable` would emit `W185` for it and `@beta>stable` simply would not match it. Written
-as `release(@acme/*)@beta>stable`, the same commit graduates whatever is still on the line without naming the packages
+after `cli` and before `core`, `%stable` would emit `W185` for it and `%beta>stable` simply would not match it. Written
+as `release(@acme/*)%beta>stable`, the same commit graduates whatever is still on the line without naming the packages
 at all.
 
 Propagation flows from a dependency to its dependents only; the edge direction is never reversed. Without the caret,
@@ -4627,7 +4628,7 @@ must stay on `beta` because its replacement ships next quarter.
 The commit is one unit:
 
 ```
-release(@acme/core)@beta>stable@@beta>stable++*: graduate the 2.0 train
+release(@acme/core)%beta>stable%%beta>stable++*: graduate the 2.0 train
 
 Every package still on the beta line moves to stable. `@acme/ui` graduated
 already and is untouched; `@acme/legacy-adapter` stays on beta until its
@@ -4641,8 +4642,8 @@ What each piece does:
 | Piece                     | Effect                                                                                  |
 |---------------------------|-----------------------------------------------------------------------------------------|
 | `release`                 | No bump. The channel axis does not need one (§7.2); nothing here claims code changed.   |
-| `@beta>stable`            | Graduates `core` itself, and only if it is still on `beta`.                             |
-| `@@beta>stable`           | Proposes the same transition for the dependents the channel axis reaches.               |
+| `%beta>stable`            | Graduates `core` itself, and only if it is still on `beta`.                             |
+| `%%beta>stable`           | Proposes the same transition for the dependents the channel axis reaches.               |
 | `++*`                     | Reaches the whole transitive closure of dependents. Without it the reach would be 1.    |
 | `Propagate-Channel-Scope` | Excludes `@acme/legacy-adapter`, and confines the whole thing to the `@acme` namespace. |
 
@@ -4659,9 +4660,9 @@ channel scope excludes it. Neither absence produces a diagnostic, neither requir
 of either package, and re-running the same commit after a partial failure plans exactly the packages that did not
 publish — the transition stops matching the ones that did (§13.7c G7).
 
-Two mistakes this shape avoids. Writing `@@stable` instead of the transition would have graduated nothing at all:
+Two mistakes this shape avoids. Writing `%%stable` instead of the transition would have graduated nothing at all:
 `W200` suppresses every implicit graduation, precisely so that a directive aimed at one package cannot end another
-package's train (§9.3). Writing `@stable` on a hand-maintained scope-set — `release(@acme/core,@acme/cli,@acme/theme)`
+package's train (§9.3). Writing `%stable` on a hand-maintained scope-set — `release(@acme/core,@acme/cli,@acme/theme)`
 — would work today and be wrong next week, because the set that is still on `beta` changes on every run.
 
 ### D.5 Adopting CCME on a repository with imported history
@@ -4677,7 +4678,7 @@ nothing is rewritten.
 Then, immediately:
 
 ```
-release(@acme/core)@stable: re-baseline at current tag
+release(@acme/core)%stable: re-baseline at current tag
 ```
 
 The second commit is optional and only needed if a package's manifest and tag disagree.

@@ -6,7 +6,7 @@ every command; the reference pages ([configuration](./configuration/README.md), 
 
 ## Versions live in tags
 
-Versions live exclusively in annotated git tags: `package@MAJOR.MINOR.PATCH` by default, or whatever the space's
+Versions live exclusively in annotated git tags: `package%MAJOR.MINOR.PATCH` by default, or whatever the space's
 [`tagFormat`](./configuration/versions.md#tagformat) says. For each package the planner resolves two tags:
 
 - **baseline**: the highest tag by semver precedence, prereleases included. This is what the package last published, and
@@ -42,7 +42,7 @@ footers:
 | `fix(*,-app): ...`        | patch    | every package except `app`                 |
 | `fix: ...` (no scope)     | patch    | the packages owning the commit's files     |
 | `cancel(core): ...`       | none     | discards `core`'s unreleased metadata      |
-| `release(core)@beta: ...` | none     | moves `core` onto the beta line            |
+| `release(core)%beta: ...` | none     | moves `core` onto the beta line            |
 
 Scopes must name discovered packages; `*` means the whole workspace, a term with `*` is a glob, `.` is the file-derived
 set, and a leading `-` excludes. A typo in an *include* is an error, because it would otherwise silently drop a release;
@@ -59,20 +59,20 @@ received. The originating commit's own depth is the only control, so blast radiu
 
 ### Prereleases and channels
 
-A package's channel is derived from its baseline tag alone, with no side file and no config. `@beta` on a unit puts its
-packages on the beta line; `@@`/`++N` propagate a channel to dependants;
-`@beta>stable` is a transition that graduates whatever still matches. A stable consumer is not dragged into a release by
-a provider's prerelease (it could not resolve it anyway): `feat(core)^@beta` releases `core` alone and reports why; to
-take the consumers along, put them on the line too with `feat(core)^@beta++1`. Trains converge on their own:
+A package's channel is derived from its baseline tag alone, with no side file and no config. `%beta` on a unit puts its
+packages on the beta line; `%%`/`++N` propagate a channel to dependants;
+`%beta>stable` is a transition that graduates whatever still matches. A stable consumer is not dragged into a release by
+a provider's prerelease (it could not resolve it anyway): `feat(core)^%beta` releases `core` alone and reports why; to
+take the consumers along, put them on the line too with `feat(core)^%beta++1`. Trains converge on their own:
 once a package is on `beta`, a directive saying `beta` proposes nothing.
 
 A typical train, in tags:
 
 ```
-feat(core)@beta: try streaming     ->  core@1.3.0-beta.0
+feat(core)%beta: try streaming     ->  core@1.3.0-beta.0
 fix(core): edge case               ->  core@1.3.0-beta.1
 feat(core): second feature         ->  core@1.4.0-beta.0   (the train's target recomputes)
-release(core)@stable: promote      ->  core@1.4.0
+release(core)%stable: promote      ->  core@1.4.0
 ``` Release notes follow the train's shape: each
 prerelease's changelog entry and GitHub release document only its own changeset (`beta.1` does not repeat `beta.0`'s
 notes), and the graduation collects the whole train into the one entry the stable line's readers see, while the version

@@ -143,7 +143,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	// --- 3. inline directives --------------------------------------------
 	//
 	// Two independent axes (§5.3). The bump axis is "^", "^^" and "+N"; the
-	// channel axis is "@@" and "++N". "@" sits on neither: it sets the unit's
+	// channel axis is "%%" and "++N". "%" sits on neither: it sets the unit's
 	// own channel.
 	//
 	// sawCaret enforces the once-per-header rule across both caret spellings,
@@ -197,32 +197,32 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			continue
 		}
 
-		if sigil == '@' && doubled {
+		if sigil == '%' && doubled {
 			sc.next()
-			if !sc.eof() && sc.peek() == '@' {
+			if !sc.eof() && sc.peek() == '%' {
 				return h, warns, fail(CodeE110, at(sc.i),
-					"'@@@' is not a token: at-signs are not a repetition count")
+					"'%%%' is not a token: percent signs are not a repetition count")
 			}
 			if h.Inline.PropagateChannel != nil {
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '@@' directive")
+				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '%%' directive")
 			}
 			valPos := sc.i
 			value := sc.readUntilAny(inlineStopChars)
 			if value == "" {
 				return h, warns, fail(CodeE111, at(valPos),
-					"'@@' requires a channel: a channel with no name carries no default")
+					"'%%' requires a channel: a channel with no name carries no default")
 			}
 			cv, err := p.parseChannelValue(value, at(valPos), true)
 			if err != nil {
 				return h, warns, err
 			}
 			h.Inline.PropagateChannel = &cv
-			// "@@" is itself the opt-in and supplies a depth of 1, but only if
+			// "%%" is itself the opt-in and supplies a depth of 1, but only if
 			// no explicit ++N has been seen; a later one still overrides it.
 			if h.Inline.channelDepthFrom == depthUnset {
 				one := Depth(1)
 				h.Inline.ChannelDepth = &one
-				h.Inline.channelDepthFrom = depthFromDoubleAt
+				h.Inline.channelDepthFrom = depthFromDoubleSigil
 			}
 			continue
 		}
@@ -246,7 +246,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			if err != nil {
 				return h, warns, err
 			}
-			// An explicit ++N wins over the 1 that "@@" implies, silently.
+			// An explicit ++N wins over the 1 that "%%" implies, silently.
 			h.Inline.ChannelDepth = &dv
 			h.Inline.channelDepthFrom = depthFromDoublePlus
 			continue
@@ -305,9 +305,9 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			h.Inline.Depth = &dv
 			h.Inline.depthFrom = depthFromPlus
 
-		case '@':
+		case '%':
 			if h.Inline.Channel != nil {
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '@' directive")
+				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '%' directive")
 			}
 			cv, err := p.parseChannelValue(value, at(valPos), false)
 			if err != nil {
@@ -454,8 +454,8 @@ func (p *Parser) parseChannelValue(v string, pos Position, allowWords bool) (Cha
 }
 
 // parseChannelSide validates one side of a channel value (§11.2). Both sides
-// are validated in full, so "@@beta>Latest" is E181 on the right and
-// "@@Beta>stable" is E181 on the left.
+// are validated in full, so "%%beta>Latest" is E181 on the right and
+// "%%Beta>stable" is E181 on the left.
 func (p *Parser) parseChannelSide(v string, pos Position, asFrom bool) (string, error) {
 	switch {
 	case v == "":

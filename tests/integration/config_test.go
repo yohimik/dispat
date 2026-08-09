@@ -294,7 +294,7 @@ func TestConfigFusedPrereleaseTagFormatRoundTrips(t *testing.T) {
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("apps", "web")
-	r.Commit("feat(core)@beta: start the train\n---\nfeat(web)@beta: ride along in the other space")
+	r.Commit("feat(core)%beta: start the train\n---\nfeat(web)%beta: ride along in the other space")
 	r.ReleaseOK()
 	require.True(t, r.HasTag("core@v0.1.0-beta0"), "tags: %v", r.TagList())
 	require.True(t, r.HasTag("web@0.1.0-beta.0"),
@@ -390,10 +390,10 @@ func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 	r.WriteConfigModel(githubConfig(srv.URL))
 	t.Setenv("DISPAT_IT_TOKEN", "tkn")
 	r.SeedPackage("packages", "core")
-	r.Commit("feat(core)@beta: start the train")
+	r.Commit("feat(core)%beta: start the train")
 
 	r.ReleaseOK()
-	r.CommitEmpty("release(core)@stable: graduate")
+	r.CommitEmpty("release(core)%stable: graduate")
 	r.ReleaseOK()
 
 	releases := decodeAll[ghRelease](t, bodies())

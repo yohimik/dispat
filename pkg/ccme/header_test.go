@@ -52,7 +52,7 @@ func TestAppendixB1Parsing(t *testing.T) {
 		{"B1/4 space after comma", "feat(core, cli): x", expect{typ: "feat", scopes: []string{"core", "cli"}, desc: "x"}},
 		{"B1/5 space before comma", "feat(core ,cli): x", expect{errCode: CodeE102}},
 		{"B1/6 npm scope", "feat(@acme/theme): x", expect{typ: "feat", scopes: []string{"@acme/theme"}, desc: "x"}},
-		{"B1/7 npm scope and channel", "feat(@acme/theme)@beta: x", expect{
+		{"B1/7 npm scope and channel", "feat(@acme/theme)%beta: x", expect{
 			typ: "feat", scopes: []string{"@acme/theme"}, channel: ch("beta"), desc: "x"}},
 		{"B1/8 glob and exclusion", "feat(*,-docs-site): x", expect{
 			typ: "feat", scopes: []string{"*", "-docs-site"}, desc: "x"}},
@@ -87,7 +87,7 @@ func TestAppendixB1Parsing(t *testing.T) {
 		{"B1/14g caret then doubled", "feat(core)^minor^^: x", expect{errCode: CodeE110}},
 		{"B1/14h third caret", "feat(core)^^^minor: x", expect{errCode: CodeE110}},
 		{"B1/14i doubled caret bad value", "feat(core)^^med: x", expect{errCode: CodeE111}},
-		{"B1/14j doubled caret and channel", "feat(core)^^@beta: x", expect{
+		{"B1/14j doubled caret and channel", "feat(core)^^%beta: x", expect{
 			typ: "feat", scopes: []string{"core"}, depth: ptrD(DepthAll),
 			channel: ch("beta"), desc: "x"}},
 		// --- channel axis, §5.3 / §11.2 ---
@@ -96,11 +96,11 @@ func TestAppendixB1Parsing(t *testing.T) {
 		{"B1/14l bare ++", "feat(core)++: x", expect{errCode: CodeE111}},
 		{"B1/14m third plus", "feat(core)+++2: x", expect{errCode: CodeE110}},
 		{"B1/14n two ++N", "feat(core)++1++2: x", expect{errCode: CodeE110}},
-		{"B1/14o ++N wins over @@", "feat(core)@@beta++3: x", expect{
+		{"B1/14o ++N wins over %%", "feat(core)%%beta++3: x", expect{
 			typ: "feat", scopes: []string{"core"}, pchannel: ch("beta"), cdepth: ptrD(3), desc: "x"}},
-		{"B1/14p order independent", "feat(core)++3@@beta: x", expect{
+		{"B1/14p order independent", "feat(core)++3%%beta: x", expect{
 			typ: "feat", scopes: []string{"core"}, pchannel: ch("beta"), cdepth: ptrD(3), desc: "x"}},
-		{"B1/14q both axes", "feat(core)^^minor@@beta++1: x", expect{
+		{"B1/14q both axes", "feat(core)^^minor%%beta++1: x", expect{
 			typ: "feat", scopes: []string{"core"}, propagat: ptrP(PropagateMinor), depth: ptrD(DepthAll),
 			pchannel: ch("beta"), cdepth: ptrD(1), desc: "x"}},
 		{"B1/14r + and ++ are distinct", "feat(core)+2++1: x", expect{
@@ -113,22 +113,22 @@ func TestAppendixB1Parsing(t *testing.T) {
 			typ: "feat", scopes: []string{"core"}, cdepth: ptrD(DepthAll), desc: "x"}},
 		{"B1/14r4 leading zero", "feat(core)+00: x", expect{errCode: CodeE111}},
 		{"B1/14r5 leading zero 007", "feat(core)+007: x", expect{errCode: CodeE111}},
-		{"B1/14s channel transition", "feat(core)@beta>rc: x", expect{
+		{"B1/14s channel transition", "feat(core)%beta>rc: x", expect{
 			typ: "feat", scopes: []string{"core"}, channel: tr("beta", "rc"), desc: "x"}},
-		{"B1/14t any prerelease to stable", "feat(core)@@*>stable++*: x", expect{
+		{"B1/14t any prerelease to stable", "feat(core)%%*>stable++*: x", expect{
 			typ: "feat", scopes: []string{"core"},
 			pchannel: tr(ChannelAnyPrerelease, ChannelStable), cdepth: ptrD(DepthAll), desc: "x"}},
-		{"B1/14u star as to", "feat(core)@@beta>*: x", expect{errCode: CodeE111}},
-		{"B1/14v two arrows", "feat(core)@@a>b>c: x", expect{errCode: CodeE111}},
-		{"B1/14w empty from", "feat(core)@>stable: x", expect{errCode: CodeE111}},
-		{"B1/14x inherit as a side", "feat(core)@@beta>inherit: x", expect{errCode: CodeE111}},
-		{"B1/14y @@inherit is a word", "feat(core)@@inherit: x", expect{
+		{"B1/14u star as to", "feat(core)%%beta>*: x", expect{errCode: CodeE111}},
+		{"B1/14v two arrows", "feat(core)%%a>b>c: x", expect{errCode: CodeE111}},
+		{"B1/14w empty from", "feat(core)%>stable: x", expect{errCode: CodeE111}},
+		{"B1/14x inherit as a side", "feat(core)%%beta>inherit: x", expect{errCode: CodeE111}},
+		{"B1/14y %%inherit is a word", "feat(core)%%inherit: x", expect{
 			typ: "feat", scopes: []string{"core"}, pchannel: word(ChannelInherit), cdepth: ptrD(1), desc: "x"}},
-		{"B1/14z @@none is a word", "feat(core)@@none: x", expect{
+		{"B1/14z %%none is a word", "feat(core)%%none: x", expect{
 			typ: "feat", scopes: []string{"core"}, pchannel: word(ChannelNone), cdepth: ptrD(1), desc: "x"}},
-		{"B1/14z1 bare @@", "feat(core)@@: x", expect{errCode: CodeE111}},
-		{"B1/14z2 third at", "feat(core)@@@beta: x", expect{errCode: CodeE110}},
-		{"B1/14z3 inherit not a Channel value", "feat(core)@inherit: x", expect{errCode: CodeE111}},
+		{"B1/14z1 bare %%", "feat(core)%%: x", expect{errCode: CodeE111}},
+		{"B1/14z2 third at", "feat(core)%%%beta: x", expect{errCode: CodeE110}},
+		{"B1/14z3 inherit not a Channel value", "feat(core)%inherit: x", expect{errCode: CodeE111}},
 
 		{"B1/15 bang before directives", "feat(core)!^minor: x", expect{errCode: CodeE120}},
 		{"B1/16 uppercase type", "Feat: x", expect{errCode: CodeE101}},
@@ -143,7 +143,7 @@ func TestAppendixB1Parsing(t *testing.T) {
 			typ: "cancel", scopes: []string{"*"}, desc: "reset release state"}},
 		{"B1/24 cancel breaking", "cancel(*)!: x", expect{errCode: CodeE170}},
 		{"B1/25 cancel with directive", "cancel(core)^minor: x", expect{errCode: CodeE171}},
-		{"B1/26 release stable", "release(cli)@stable: x", expect{
+		{"B1/26 release stable", "release(cli)%stable: x", expect{
 			typ: "release", scopes: []string{"cli"}, channel: ch(ChannelStable), desc: "x"}},
 		{"B1/27 release breaking", "release(cli)!: x", expect{errCode: CodeE141}},
 		// BREAKING CHANGE can never be a type: uppercase and containing a
@@ -360,16 +360,16 @@ func TestChannelValidation(t *testing.T) {
 		subject string
 		code    string
 	}{
-		{"feat(core)@beta: x", ""},
-		{"feat(core)@rc-2: x", ""},
-		{"feat(core)@a: x", ""},
-		{"feat(core)@stable: x", ""},
-		{"feat(core)@latest: x", CodeE180},
-		{"feat(core)@Beta: x", CodeE181},
-		{"feat(core)@1beta: x", CodeE181},
-		{"feat(core)@be_ta: x", CodeE181},
-		{"feat(core)@" + strings.Repeat("b", 33) + ": x", CodeE181},
-		{"feat(core)@" + strings.Repeat("b", 32) + ": x", ""},
+		{"feat(core)%beta: x", ""},
+		{"feat(core)%rc-2: x", ""},
+		{"feat(core)%a: x", ""},
+		{"feat(core)%stable: x", ""},
+		{"feat(core)%latest: x", CodeE180},
+		{"feat(core)%Beta: x", CodeE181},
+		{"feat(core)%1beta: x", CodeE181},
+		{"feat(core)%be_ta: x", CodeE181},
+		{"feat(core)%" + strings.Repeat("b", 33) + ": x", CodeE181},
+		{"feat(core)%" + strings.Repeat("b", 32) + ": x", ""},
 	}
 	p := DefaultParser()
 	for _, tc := range tests {
@@ -385,14 +385,14 @@ func TestAllowedChannels(t *testing.T) {
 	t.Parallel()
 
 	p := MustNewParser(Config{AllowedChannels: []string{"beta", "rc"}})
-	if _, err := p.ParseSubject("feat(core)@beta: x"); err != nil {
+	if _, err := p.ParseSubject("feat(core)%beta: x"); err != nil {
 		t.Errorf("allowed channel rejected: %v", err)
 	}
-	res, err := p.ParseSubject("feat(core)@alpha: x")
+	res, err := p.ParseSubject("feat(core)%alpha: x")
 	if err == nil || firstError(res) != CodeE181 {
 		t.Errorf("disallowed channel = %v (%s), want E181", err, codesOf(res))
 	}
-	if _, err := p.ParseSubject("feat(core)@stable: x"); err != nil {
+	if _, err := p.ParseSubject("feat(core)%stable: x"); err != nil {
 		t.Errorf("stable must always be accepted: %v", err)
 	}
 }
@@ -529,7 +529,7 @@ func TestTypeBumpMapping(t *testing.T) {
 		{"chore(core)!: x", BumpMajor},
 		{"docs(core)!: x", BumpMajor},
 		{"cancel(core): x", BumpNone},
-		{"release(core)@beta: x", BumpNone},
+		{"release(core)%beta: x", BumpNone},
 	}
 	p := DefaultParser()
 	for _, tc := range tests {
@@ -618,14 +618,14 @@ func TestInertDirectiveDiagnostics(t *testing.T) {
 
 		// --- channel axis, mirroring the bump axis exactly ---
 		{"#38d bare ++0", "feat(core)++0: x", []string{CodeW152}},
-		{"#38d @@none", "feat(core)@@none: x", []string{CodeW152}},
-		{"#38d @@none++*", "feat(core)@@none++*: x", []string{CodeW152}},
-		{"#38h value discarded by channel depth 0", "feat(core)@@beta++0: x", []string{CodeW201}},
-		{"a real channel at a real depth", "feat(core)@@beta++2: x", nil},
+		{"#38d %%none", "feat(core)%%none: x", []string{CodeW152}},
+		{"#38d %%none++*", "feat(core)%%none++*: x", []string{CodeW152}},
+		{"#38h value discarded by channel depth 0", "feat(core)%%beta++0: x", []string{CodeW201}},
+		{"a real channel at a real depth", "feat(core)%%beta++2: x", nil},
 
 		// --- both axes at once ---
-		{"both inert", "feat(core)^minor+0@@beta++0: x", []string{CodeW201, CodeW201}},
-		{"one of each", "feat(core)^none+*@@beta++0: x", []string{CodeW152, CodeW201}},
+		{"both inert", "feat(core)^minor+0%%beta++0: x", []string{CodeW201, CodeW201}},
+		{"one of each", "feat(core)^none+*%%beta++0: x", []string{CodeW152, CodeW201}},
 	}
 
 	p := DefaultParser()
@@ -664,9 +664,9 @@ func TestInertChannelTransition(t *testing.T) {
 
 	p := DefaultParser()
 	for _, subject := range []string{
-		"feat(core)@beta>beta: x",
-		"feat(core)@@beta>beta++1: x",
-		"feat(core)@rc>rc@@beta>beta++1: x",
+		"feat(core)%beta>beta: x",
+		"feat(core)%%beta>beta++1: x",
+		"feat(core)%rc>rc%%beta>beta++1: x",
 	} {
 		res, err := p.ParseSubject(subject)
 		if err != nil {
@@ -679,7 +679,7 @@ func TestInertChannelTransition(t *testing.T) {
 	}
 
 	// A transition that actually moves something must stay silent.
-	res, err := p.ParseSubject("feat(core)@@beta>rc++1: x")
+	res, err := p.ParseSubject("feat(core)%%beta>rc++1: x")
 	if err != nil {
 		t.Fatal(err)
 	}

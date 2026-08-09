@@ -146,7 +146,7 @@ func TestAppendixB2MultiUnit(t *testing.T) {
 	})
 
 	t.Run("vector 30 message-level trailer", func(t *testing.T) {
-		res, err := p.Parse("fix(core): a\n\n---\n\nfix(cli): b\n\nSigned-off-by: A <a@example.com>")
+		res, err := p.Parse("fix(core): a\n\n---\n\nfix(cli): b\n\nSigned-off-by: A <a%example.com>")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -417,7 +417,7 @@ func TestParserIsReusableAndConcurrent(t *testing.T) {
 	t.Parallel()
 	p := DefaultParser()
 
-	const msg = "feat(core)^^minor@beta!: a\n\nbody\n\nPropagate-Channel-Depth: 2\n\n---\n\nfix(cli): b"
+	const msg = "feat(core)^^minor%beta!: a\n\nbody\n\nPropagate-Channel-Depth: 2\n\n---\n\nfix(cli): b"
 	done := make(chan string, 8)
 	for i := 0; i < 8; i++ {
 		go func() {
@@ -540,7 +540,7 @@ func TestClonePreservesNilVersusEmpty(t *testing.T) {
 	if got.AllowedChannels == nil {
 		t.Errorf("an empty AllowedChannels became nil, re-enabling every channel")
 	}
-	if _, err := MustNewParser(Config{AllowedChannels: []string{}}).ParseSubject("feat(core)@beta: x"); err == nil {
+	if _, err := MustNewParser(Config{AllowedChannels: []string{}}).ParseSubject("feat(core)%beta: x"); err == nil {
 		t.Errorf("an empty AllowedChannels must reject every channel name")
 	}
 }
@@ -554,7 +554,7 @@ func TestEmptySlicesDisableTheirDefaults(t *testing.T) {
 		MessageLevelTrailers: []string{},
 		Propagation:          PropagationConfig{Kinds: []DependencyKind{}},
 	})
-	res, err := p.Parse("feat(core): a\n\nSigned-off-by: A <a@x>")
+	res, err := p.Parse("feat(core): a\n\nSigned-off-by: A <a%x>")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +633,7 @@ func TestMaxBump(t *testing.T) {
 func TestFullExampleFromSpecSummary(t *testing.T) {
 	t.Parallel()
 
-	const msg = `feat(@acme/core)^^minor@beta: streaming reader
+	const msg = `feat(@acme/core)^^minor%beta: streaming reader
 
 Replaces the buffered reader with an incremental one.
 

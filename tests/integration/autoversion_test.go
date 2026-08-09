@@ -152,7 +152,7 @@ func TestAutoVersionDiagnosticsAndCommitInclude(t *testing.T) {
 	assert.NotContains(t, string(web), "9.9.9", "the computed version overwrote the drift")
 
 	// Run 3: core moves to beta, web releases stable ranging over it — W203.
-	r.CommitEmpty("feat(core)@beta: risky rewrite\n---\nfix(web): stable work of its own")
+	r.CommitEmpty("feat(core)%beta: risky rewrite\n---\nfix(web): stable work of its own")
 	res = r.ReleaseOK()
 	assert.True(t, harness.HasCodeForPackage(res.Events, "W203", "web"),
 		"a stable release ranging over a prerelease provider must be reported")

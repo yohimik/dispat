@@ -38,12 +38,12 @@
 //
 //	axis     value        depth   footers
 //	bump     "^", "^^"    "+N"    Propagate, Propagate-Depth, Propagate-Scope
-//	channel  "@@"         "++N"   Propagate-Channel, Propagate-Channel-Depth,
+//	channel  "%%"         "++N"   Propagate-Channel, Propagate-Channel-Depth,
 //	                              Propagate-Channel-Scope
 //
-// "@" is on neither axis: it sets the unit's own channel. Both depths default
+// "%" is on neither axis: it sets the unit's own channel. Both depths default
 // to 0, so a unit reaches nobody until it opts in. The doubled sigils are
-// fixed two-character tokens rather than repetition counts, so "^^^", "@@@"
+// fixed two-character tokens rather than repetition counts, so "^^^", "%%%"
 // and "+++" are all E110.
 //
 // A channel value may also be a transition, "from>to", where "*" on the left

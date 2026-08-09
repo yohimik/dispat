@@ -113,7 +113,7 @@ func TestFixedSingleSharedPrereleaseTrain(t *testing.T) {
 	// A channel directive on one member moves the whole fixed space onto one
 	// train: the space is one version, so it is one train too.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(a)@beta: start the train"},
+		commit{sha: "c1", message: "feat(a)%beta: start the train"},
 	).tag("a", "1.0.0", "").tag("b", "1.0.0", "")
 	p := computeFixed(t, model.VersioningFixed, git)
 

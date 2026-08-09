@@ -150,7 +150,7 @@ func TestPlanningQueriesGitOncePerPackage(t *testing.T) {
 	// them separately runs the same `git tag` twice, which is the easy way to
 	// double the tag work for an answer that comes from identical output.
 	git := counted(newFakeGit(
-		commit{sha: "c1", message: "feat(core)^^@beta++*: streaming"},
+		commit{sha: "c1", message: "feat(core)^^%beta++*: streaming"},
 		commit{sha: "c2", message: "fix(utils)^: helpers"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c1").
 		tag("utils", "1.0.0", "").tag("app", "1.0.0", ""))
@@ -416,8 +416,8 @@ func TestConflictingDirectChannelsPickTheNewest(t *testing.T) {
 	// chosen over rejecting the commit, because a channel conflict is usually
 	// the result of a merge.
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@beta: one line"},
-		commit{sha: "c2", message: "release(core)@rc: another"},
+		commit{sha: "c1", message: "release(core)%beta: one line"},
+		commit{sha: "c2", message: "release(core)%rc: another"},
 	).tag("core", "1.0.0", "")
 
 	p := compute(t, git, nil)
@@ -980,7 +980,7 @@ func TestExactPinIsGuarded(t *testing.T) {
 
 func TestEnterAPrereleaseTrain(t *testing.T) {
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)@beta: streaming"},
+		commit{sha: "c1", message: "feat(core)%beta: streaming"},
 	).tag("core", "1.2.3", "")
 
 	p := compute(t, git, nil)
@@ -996,7 +996,7 @@ func TestPrereleaseCounterAdvances(t *testing.T) {
 	// The window is measured from the last *stable* tag, so the feat that
 	// started the train is still pending and the target is unchanged.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)@beta: streaming"},
+		commit{sha: "c1", message: "feat(core)%beta: streaming"},
 		commit{sha: "c2", message: "fix(core): polish"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c1")
 
@@ -1010,7 +1010,7 @@ func TestPrereleaseCounterAdvances(t *testing.T) {
 
 func TestBreakingChangeMovesTheWholeTrain(t *testing.T) {
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)@beta: streaming"},
+		commit{sha: "c1", message: "feat(core)%beta: streaming"},
 		commit{sha: "c2", message: "feat(core)!: drop old API"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c1")
 
@@ -1023,8 +1023,8 @@ func TestBreakingChangeMovesTheWholeTrain(t *testing.T) {
 
 func TestGraduation(t *testing.T) {
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)@beta: streaming"},
-		commit{sha: "c2", message: "release(core)@stable: promote"},
+		commit{sha: "c1", message: "feat(core)%beta: streaming"},
+		commit{sha: "c2", message: "release(core)%stable: promote"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c1")
 
 	p := compute(t, git, nil)
@@ -1040,7 +1040,7 @@ func TestTransitionIsIdempotent(t *testing.T) {
 	// has already graduated is untouched — which is what makes the same
 	// directive correct on the first run and on the fifth.
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@beta>stable: finish the train"},
+		commit{sha: "c1", message: "release(core)%beta>stable: finish the train"},
 	).tag("core", "1.3.0", "")
 
 	p := compute(t, git, nil)
@@ -1057,7 +1057,7 @@ func TestCaretAloneDoesNotDragConsumersOntoATrain(t *testing.T) {
 	// because a stable consumer cannot resolve a beta release. W208 is
 	// non-suppressible precisely so this is visible.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)^@beta: streaming"},
+		commit{sha: "c1", message: "feat(core)^%beta: streaming"},
 	).tag("core", "1.2.3", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
@@ -1068,10 +1068,10 @@ func TestCaretAloneDoesNotDragConsumersOntoATrain(t *testing.T) {
 }
 
 func TestChannelPropagationCarriesTheTrain(t *testing.T) {
-	// "^@beta++1" is the form that has to be written: the consumers enter the
+	// "^%beta++1" is the form that has to be written: the consumers enter the
 	// train too, so §9.3a admits the bump.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)^@beta++1: streaming"},
+		commit{sha: "c1", message: "feat(core)^%beta++1: streaming"},
 	).tag("core", "1.2.3", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
@@ -1092,8 +1092,8 @@ func TestPropagatedStableNeverGraduates(t *testing.T) {
 	// Graduation must never happen because an unrelated package's commit
 	// propagated a channel.
 	git := newFakeGit(
-		commit{sha: "c0", message: "release(app)@beta: enter"},
-		commit{sha: "c1", message: "feat(core)^@@stable++1: back to stable"},
+		commit{sha: "c0", message: "release(app)%beta: enter"},
+		commit{sha: "c1", message: "feat(core)^%%stable++1: back to stable"},
 	).tag("core", "1.2.3", "").tag("app", "1.0.0", "").tag("app", "1.0.1-beta.0", "c0")
 
 	p := compute(t, git, nil)
@@ -1107,7 +1107,7 @@ func TestChannelOnlyReleaseGetsTheEntryPatch(t *testing.T) {
 	// SemVer ranks *below* the baseline, so one patch is applied and W204
 	// reports it.
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@beta: start the train"},
+		commit{sha: "c1", message: "release(core)%beta: start the train"},
 	).tag("core", "1.2.0", "")
 
 	p := compute(t, git, nil)
@@ -1125,7 +1125,7 @@ func TestEstablishedTrainNeedsNoDirectives(t *testing.T) {
 	// §11.7: a channel is derived from each package's own baseline, so a train
 	// already under way stays together with nothing written.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)@beta: streaming"},
+		commit{sha: "c1", message: "feat(core)%beta: streaming"},
 		commit{sha: "c2", message: "fix(core)^: polish"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c1").
 		tag("app", "1.0.0", "").tag("app", "1.0.1-beta.0", "c1")
@@ -1143,7 +1143,7 @@ func TestEstablishedTrainNeedsNoDirectives(t *testing.T) {
 // window still contains the commit. Comparing against the channel computed
 // earlier in the same run loses this and re-releases for ever.
 func TestChannelAxisConverges(t *testing.T) {
-	history := []commit{{sha: "c1", message: "release(core)@beta: start the train"}}
+	history := []commit{{sha: "c1", message: "release(core)%beta: start the train"}}
 
 	first := newFakeGit(history...).tag("core", "1.2.0", "")
 	assert.True(t, compute(t, first, nil).Releases["core"].Releasing(), "moves onto beta")
@@ -1159,8 +1159,8 @@ func TestChannelAxisConverges(t *testing.T) {
 func TestDirectChannelBeatsPropagated(t *testing.T) {
 	// §13.8: a direct directive beats every propagated one regardless of age.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(core)^@beta++1: streaming"},
-		commit{sha: "c2", message: "release(app)@rc: app rides its own train"},
+		commit{sha: "c1", message: "feat(core)^%beta++1: streaming"},
+		commit{sha: "c2", message: "release(app)%rc: app rides its own train"},
 	).tag("core", "1.2.3", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
@@ -1209,8 +1209,8 @@ func TestGraduationMustNotGoBackwards(t *testing.T) {
 	// The beta line was hand-tagged above what the stable baseline plus the
 	// pending window can produce, so graduating would lower the version.
 	git := newFakeGit(
-		commit{sha: "c0", message: "feat(core)@beta: try"},
-		commit{sha: "c1", message: "release(core)@stable: promote"},
+		commit{sha: "c0", message: "feat(core)%beta: try"},
+		commit{sha: "c1", message: "release(core)%stable: promote"},
 	).tag("core", "1.0.0", "").tag("core", "2.5.0-beta.0", "c0")
 
 	p := compute(t, git, nil)
@@ -1223,8 +1223,8 @@ func TestRedundantChannelDirectiveProposesNothing(t *testing.T) {
 	// A *fresh* directive pointing where the package already is warns W199:
 	// the author wrote it and it did nothing.
 	git := newFakeGit(
-		commit{sha: "c0", message: "release(core)@beta: start"},
-		commit{sha: "c1", message: "release(core)@beta: again"},
+		commit{sha: "c0", message: "release(core)%beta: start"},
+		commit{sha: "c1", message: "release(core)%beta: again"},
 	).tag("core", "1.0.0", "").tag("core", "1.0.1-beta.0", "c0")
 
 	p := compute(t, git, nil)
@@ -1239,7 +1239,7 @@ func TestContainedChannelDirectiveIsSilent(t *testing.T) {
 	// records it — so re-warning "already on beta" (W199) on every run until
 	// graduation would report the mechanism working as an anomaly.
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@beta: start"},
+		commit{sha: "c1", message: "release(core)%beta: start"},
 	).tag("core", "1.0.0", "").tag("core", "1.0.1-beta.0", "c1")
 
 	p := compute(t, git, nil)
@@ -1251,7 +1251,7 @@ func TestContainedChannelDirectiveIsSilent(t *testing.T) {
 
 func TestInertTransitionIsReported(t *testing.T) {
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@beta>beta: nowhere"},
+		commit{sha: "c1", message: "release(core)%beta>beta: nowhere"},
 	).tag("core", "1.0.0", "").tag("core", "1.1.0-beta.0", "c1")
 
 	p := compute(t, git, nil)
@@ -1263,7 +1263,7 @@ func TestPropagatedTransitionMatchingNothingIsReported(t *testing.T) {
 	// A mistyped <from>: the transition reaches the dependent and matches no
 	// package, so nothing moves and the directive is reported as inert.
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@@nosuch>stable++1: graduate them"},
+		commit{sha: "c1", message: "release(core)%%nosuch>stable++1: graduate them"},
 	).tag("core", "1.0.0", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
@@ -1275,7 +1275,7 @@ func TestPropagatedTransitionMatchingNothingIsReported(t *testing.T) {
 func TestChannelScopeExcludingEverythingWarns(t *testing.T) {
 	git := newFakeGit(commit{
 		sha:     "c1",
-		message: "feat(core)@beta++1: start a train\n\nPropagate-Channel-Scope: utils\n",
+		message: "feat(core)%beta++1: start a train\n\nPropagate-Channel-Scope: utils\n",
 	}).tag("core", "1.0.0", "").tag("app", "1.0.0", "").tag("utils", "1.0.0", "")
 
 	pkgs, _ := testPackages()
@@ -1293,8 +1293,8 @@ func TestConflictingPropagatedChannelsPickTheNewest(t *testing.T) {
 	// Two providers push different channels at the same dependent; the newer
 	// commit wins and the conflict is reported rather than rejected.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(utils)@rc++1: utils goes rc"},
-		commit{sha: "c2", message: "feat(core)@beta++1: core goes beta"},
+		commit{sha: "c1", message: "feat(utils)%rc++1: utils goes rc"},
+		commit{sha: "c2", message: "feat(core)%beta++1: core goes beta"},
 	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
@@ -1324,7 +1324,7 @@ func TestErrorBlastRadius(t *testing.T) {
 	// offending unit to invalidate. The fix after the bad tag is what forces
 	// the train to be continued — the tagged work alone is converged.
 	repoScoped := newFakeGit(
-		commit{sha: "c1", message: "feat(core)@beta: streaming"},
+		commit{sha: "c1", message: "feat(core)%beta: streaming"},
 		commit{sha: "c2", message: "fix(core): more"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta", "c1")
 
@@ -1414,7 +1414,7 @@ func TestPrereleaseTrainConvergesAfterRelease(t *testing.T) {
 	// already-published work re-releasing the train would produce beta.1,
 	// beta.2, ... forever.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(app)@beta!: new api"},
+		commit{sha: "c1", message: "feat(app)%beta!: new api"},
 	).tag("app", "0.1.5", "").tag("app", "1.0.0-beta.0", "c1")
 
 	p := compute(t, git, nil)
@@ -1437,7 +1437,7 @@ func TestPrereleaseTrainNewWorkContinuesTheCounter(t *testing.T) {
 	// breaking change keeps the target at 1.0.0 rather than shrinking it to a
 	// patch of the stable baseline.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(app)@beta!: new api"},
+		commit{sha: "c1", message: "feat(app)%beta!: new api"},
 		commit{sha: "c2", message: "fix(app): tweak"},
 	).tag("app", "0.1.5", "").tag("app", "1.0.0-beta.0", "c1")
 
@@ -1455,8 +1455,8 @@ func TestTrainGraduationCountsPublishedWork(t *testing.T) {
 	// bump of the already-published breaking change must still be in force
 	// even though it alone would not have re-released the train.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(app)@beta!: new api"},
-		commit{sha: "c2", message: "release(app)@stable: ship it"},
+		commit{sha: "c1", message: "feat(app)%beta!: new api"},
+		commit{sha: "c2", message: "release(app)%stable: ship it"},
 	).tag("app", "0.1.5", "").tag("app", "1.0.0-beta.0", "c1")
 
 	p := compute(t, git, nil)
@@ -1493,7 +1493,7 @@ func TestCancelCannotRetractPublishedPrerelease(t *testing.T) {
 	// patch, and the computed 0.1.6-beta.0 goes backwards from the baseline —
 	// E195 aborting the run over work that is already public.
 	git := newFakeGit(
-		commit{sha: "c1", message: "feat(app)@beta!: new api"},
+		commit{sha: "c1", message: "feat(app)%beta!: new api"},
 		commit{sha: "c2", message: "cancel(app): try to unship it"},
 		commit{sha: "c3", message: "fix(app): tweak"},
 	).tag("app", "0.1.5", "").tag("app", "1.0.0-beta.0", "c1")
@@ -1564,7 +1564,7 @@ func TestSpentCancelInsideATrainIsNotReported(t *testing.T) {
 	// whatever it had to say was said before beta.0 shipped it.
 	git := newFakeGit(
 		commit{sha: "c1", message: "cancel(app): drop pending work"},
-		commit{sha: "c2", message: "feat(app)@beta!: new api"},
+		commit{sha: "c2", message: "feat(app)%beta!: new api"},
 	).tag("app", "0.1.5", "").tag("app", "1.0.0-beta.0", "c2")
 
 	p := compute(t, git, nil)
@@ -1608,11 +1608,11 @@ func TestPropagatedTransitionGraduatesTheDependant(t *testing.T) {
 	// TestPropagatedStableNeverGraduates) — does graduate the dependants
 	// still on the named train, because its author had to name the train
 	// being ended in order to write it. This is the
-	// `release(core)@beta>stable@@beta>stable++*` form the configuration
+	// `release(core)%beta>stable%%beta>stable++*` form the configuration
 	// reference walks through.
 	git := newFakeGit(
-		commit{sha: "c0", message: "feat(core)^@beta++1: the train, both aboard"},
-		commit{sha: "c1", message: "release(core)@beta>stable@@beta>stable++1: graduate the whole train"},
+		commit{sha: "c0", message: "feat(core)^%beta++1: the train, both aboard"},
+		commit{sha: "c1", message: "release(core)%beta>stable%%beta>stable++1: graduate the whole train"},
 	).tag("core", "1.2.3", "").tag("core", "1.3.0-beta.0", "c0").
 		tag("app", "1.0.0", "").tag("app", "1.0.1-beta.0", "c0")
 
@@ -1635,7 +1635,7 @@ func TestPropagatedTransitionStillSkipsPackagesOffTheTrain(t *testing.T) {
 	// dependant whose baseline is not on the named train is unmatched and
 	// stays exactly where it is.
 	git := newFakeGit(
-		commit{sha: "c1", message: "release(core)@beta>stable@@beta>stable++1: graduate"},
+		commit{sha: "c1", message: "release(core)%beta>stable%%beta>stable++1: graduate"},
 	).tag("core", "1.3.0-beta.0", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)

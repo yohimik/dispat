@@ -95,8 +95,8 @@ A few more forms worth knowing early; the full reference is in
 fix(core,utils): shared fix      # several packages
 fix(*,-app): workspace-wide      # everything except app
 fix: touch up the loader         # no scope: the packages owning the changed files
-feat(core)@beta: try it out      # put core on a beta prerelease line
-release(core)@stable: promote    # graduate it back
+feat(core)%beta: try it out      # put core on a beta prerelease line
+release(core)%stable: promote    # graduate it back
 release(app): hold               # with a `Release-As: none` footer: withhold app
 cancel(app): drop pending work   # discard app's unreleased metadata
 ```

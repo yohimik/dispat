@@ -43,8 +43,8 @@ $ dispat compute                    # derive the dependency graph from the manif
 $ dispat preview                    # pending release notes, all packages (preview core: just one)
 $ dispat test build core            # try the build script in packages/core with the real DISPAT_* env
 $ dispat lint                       # run a script in every changed package, in graph order
-$ git commit -m "feat(core)@beta: try it out"
-$ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)@stable:
+$ git commit -m "feat(core)%beta: try it out"
+$ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)%stable:
 ```
 
 ## Key features
@@ -57,7 +57,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Self-healing runs.** Failures don't stop the world and are never lost: a broken package skips only its true
   dependants while the rest keeps releasing, and the next run catches the skipped ones up at the exact version they were
   owed. No state files, no double releases, no repair scripts: re-running *is* the recovery.
-- **Release control from commits.** `@beta` starts a prerelease train and `@beta>stable` graduates it;
+- **Release control from commits.** `%beta` starts a prerelease train and `%beta>stable` graduates it;
   `Release-As: none` holds a package and `Release-As: auto` resumes it; `Release-As: 2.0.0` pins an exact version and
   `cancel(pkg)` discards pending work. It is all written in commits, so release decisions are reviewed and versioned
   like code. [Details](./docs/commits.md#release-control).

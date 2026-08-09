@@ -256,7 +256,7 @@ func TestPlanPrereleaseTrainWeirdCases(t *testing.T) {
 	// A caret reaches consumer, but with no channel propagation a stable
 	// consumer cannot resolve a beta provider: suppressed, core alone
 	// enters beta.
-	r.CommitEmpty("feat(core)^@beta: start the train, but only core moves")
+	r.CommitEmpty("feat(core)^%beta: start the train, but only core moves")
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("consumer@"), "a stable consumer cannot be dragged onto a prerelease")
@@ -264,17 +264,17 @@ func TestPlanPrereleaseTrainWeirdCases(t *testing.T) {
 
 	// This time the channel explicitly propagates: both packages join the
 	// train together.
-	r.CommitEmpty("fix(core)^@beta++1: bring the consumer along this time")
+	r.CommitEmpty("fix(core)^%beta++1: bring the consumer along this time")
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("core@0.1.0-beta.1"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("consumer@0.0.1-beta.0"), "tags: %v", r.TagList())
 
 	// One graduation directive naming both packages directly — one legitimate
-	// way to end a train; the propagated "@@beta>stable" transition from a
+	// way to end a train; the propagated "%%beta>stable" transition from a
 	// directive on core alone is the other, covered by
 	// TestPlanPropagatedGraduationTransitionGraduatesTheTrain.
 	beforeGraduation := len(r.TagList())
-	r.CommitEmpty("release(core,consumer)@beta>stable: graduate the whole train")
+	r.CommitEmpty("release(core,consumer)%beta>stable: graduate the whole train")
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("consumer@0.0.1"), "tags: %v", r.TagList())
@@ -286,7 +286,7 @@ func TestPlanPrereleaseTrainWeirdCases(t *testing.T) {
 }
 
 // TestPlanPropagatedGraduationTransitionGraduatesTheTrain: configuration.md's
-// worked example — `release(core)@beta>stable@@beta>stable++N: graduate core
+// worked example — `release(core)%beta>stable%%beta>stable++N: graduate core
 // and everything still on beta behind it` — works as documented: a
 // propagated *transition* is the deliberate exception to "a propagated
 // stable never graduates a dependant" (its author had to name the train
@@ -299,11 +299,11 @@ func TestPlanPrereleaseTrainWeirdCases(t *testing.T) {
 // TestPlanPrereleaseTrainWeirdCases' W208 case and the unit suites.
 func TestPlanPropagatedGraduationTransitionGraduatesTheTrain(t *testing.T) {
 	r := linkedRepo(t, "core", "consumer", echoBuild)
-	r.CommitEmpty("feat(core)^@beta++1: start the train, bringing the consumer too")
+	r.CommitEmpty("feat(core)^%beta++1: start the train, bringing the consumer too")
 	r.ReleaseOK()
 	require.True(t, r.HasTag("consumer@0.0.1-beta.0"))
 
-	r.CommitEmpty("release(core)@beta>stable@@beta>stable++1: graduate the whole train")
+	r.CommitEmpty("release(core)%beta>stable%%beta>stable++1: graduate the whole train")
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("core@0.1.0"), "core's own direct transition graduates it; tags: %v", r.TagList())
 	assert.True(t, r.HasTag("consumer@0.0.1"),
@@ -330,7 +330,7 @@ func TestPlanChannelOnlyReleaseAndEntryPatch(t *testing.T) {
 	r.ReleaseOK()
 	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
 
-	r.CommitEmpty("release(core)@beta: enter beta with nothing pending")
+	r.CommitEmpty("release(core)%beta: enter beta with nothing pending")
 	res := r.ReleaseOK()
 	assert.True(t, harness.HasCodeForPackage(res.Events, "W202", "core"),
 		"a channel-only release must be explained")

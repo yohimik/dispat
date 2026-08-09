@@ -53,8 +53,8 @@ var diagnosticCases = []diagnosticCase{
 		cfg: Config{Limits: Limits{UnitsPerMessage: 8}}},
 	{code: CodeE170, message: "cancel(*)!: x"},
 	{code: CodeE171, message: "cancel(core)^minor: x"},
-	{code: CodeE180, message: "feat(core)@latest: x"},
-	{code: CodeE181, message: "feat(core)@Beta: x"},
+	{code: CodeE180, message: "feat(core)%latest: x"},
+	{code: CodeE181, message: "feat(core)%Beta: x"},
 
 	// Warnings (§16).
 	{code: CodeW001, message: "---\nfeat(core): a"},
@@ -72,7 +72,7 @@ var diagnosticCases = []diagnosticCase{
 	// §8.3b: a value on an axis whose depth is 0 reaches nobody. W201 is the
 	// more specific finding and suppresses W152 for that axis.
 	{code: CodeW201, message: "feat(core): a\n\nPropagate: minor\nPropagate-Depth: 0"},
-	{code: CodeW207, message: "feat(core)@beta>beta: x"},
+	{code: CodeW207, message: "feat(core)%beta>beta: x"},
 	{code: CodeW121, message: "feat:x", cfg: Config{Lenient: true}},
 	// The two silent failures of §8.1.1, plus the empty-value note.
 	{code: CodeW155, message: "feat(core): a\n\nBreaking change: gone"},

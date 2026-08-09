@@ -18,7 +18,7 @@ func TestFooterKeyEnd(t *testing.T) {
 		{"Breaking change: gone", -1},
 		{"breaking change: gone", -1},
 		{"Propagate: minor", 9},
-		{"Signed-off-by: A <a@example.com>", 13},
+		{"Signed-off-by: A <a%example.com>", 13},
 		{"Closes #12", 6},
 		{"Refs: #4", 4},
 		{"", -1},
@@ -299,7 +299,7 @@ func TestInlineFooterReconciliation(t *testing.T) {
 	})
 
 	t.Run("channel conflict", func(t *testing.T) {
-		res, err := strict.Parse("feat(core)@beta: a\n\nChannel: rc")
+		res, err := strict.Parse("feat(core)%beta: a\n\nChannel: rc")
 		if err == nil || firstError(res) != CodeE112 {
 			t.Errorf("= %v (%s), want E112", err, codesOf(res))
 		}
@@ -333,7 +333,7 @@ func TestCancelRejectsDirectives(t *testing.T) {
 	}{
 		{"cancel(core)!: x", CodeE170},
 		{"cancel(core)^minor: x", CodeE171},
-		{"cancel(core)@beta: x", CodeE171},
+		{"cancel(core)%beta: x", CodeE171},
 		{"cancel(core)+2: x", CodeE171},
 		{"cancel(core): x\n\nChannel: beta", CodeE171},
 		{"cancel(core): x\n\nBREAKING CHANGE: nope", CodeE171},
@@ -347,7 +347,7 @@ func TestCancelRejectsDirectives(t *testing.T) {
 	}
 
 	// A cancel unit with a scope-set, a body and an ignored trailer is legal.
-	res, err := p.Parse("cancel(*): reset release state\n\nAdopting CCME.\n\nSigned-off-by: A <a@x>")
+	res, err := p.Parse("cancel(*): reset release state\n\nAdopting CCME.\n\nSigned-off-by: A <a%x>")
 	if err != nil {
 		t.Errorf("%v (codes: %s)", err, codesOf(res))
 	}
@@ -358,7 +358,7 @@ func TestReleaseUnits(t *testing.T) {
 
 	p := DefaultParser()
 
-	res, err := p.Parse("release(cli)@stable: graduate 2.0")
+	res, err := p.Parse("release(cli)%stable: graduate 2.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestCustomTrailerLists(t *testing.T) {
 }
 
 // TestImpliedDepthYieldsToFooter covers §8.3's distinction between a depth a
-// sigil implies and one the author wrote. "^" and "@@" state a default, so a
+// sigil implies and one the author wrote. "^" and "%%" state a default, so a
 // footer naming a depth wins silently; "+N" and "++N" are the author's own
 // number, so a differing footer is a contradiction; and "^^" asserts all, so
 // even a footer must agree with it.
@@ -472,7 +472,7 @@ func TestImpliedDepthYieldsToFooter(t *testing.T) {
 		},
 		{
 			name:    "double at implies, footer states",
-			message: "feat(core)@@beta: a\n\nPropagate-Channel-Depth: 3",
+			message: "feat(core)%%beta: a\n\nPropagate-Channel-Depth: 3",
 			depth:   0,
 			cdepth:  3,
 		},

@@ -16,14 +16,14 @@ const (
 		"createReader({ stream: true }). Cursors are opaque and must not be\n" +
 		"parsed by callers.\n"
 
-	benchDirectives = "refactor(@acme/core,@acme/cli)^^inherit@beta!: remove the v1 plugin interface\n\n" +
+	benchDirectives = "refactor(@acme/core,@acme/cli)^^inherit%beta!: remove the v1 plugin interface\n\n" +
 		"The codemod at tools/codemods/plugins-v2 handles the mechanical part.\n\n" +
 		"BREAKING CHANGE: registerPlugin is gone. Use plugins: [] in the\n" +
 		"config object.\n" +
 		"Propagate-Channel: beta\n" +
 		"Propagate-Channel-Depth: all\n" +
 		"Propagate-Scope: @acme/*, -@acme/experimental-*\n" +
-		"Signed-off-by: A Developer <dev@example.com>\n"
+		"Signed-off-by: A Developer <dev%example.com>\n"
 
 	benchMultiUnit = "feat(@acme/api): add cursor pagination\n\n---\n\n" +
 		"fix(@acme/api): reject negative page sizes\n\n---\n\n" +

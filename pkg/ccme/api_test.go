@@ -205,7 +205,7 @@ func TestUnitAccessors(t *testing.T) {
 	if !res.Units[0].IsCancel() || !res.Units[0].IsControl() {
 		t.Error("cancel unit not recognised as a control unit")
 	}
-	res, _ = p.Parse("release(cli)@beta: x")
+	res, _ = p.Parse("release(cli)%beta: x")
 	if !res.Units[0].IsRelease() || !res.Units[0].IsControl() {
 		t.Error("release unit not recognised as a control unit")
 	}
@@ -276,7 +276,7 @@ func TestResultAccessors(t *testing.T) {
 	}
 
 	// A multi-error message aggregates.
-	multi, err := p.Parse("feat(core)^med: a\n\n---\n\nfix(cli)@Beta: b")
+	multi, err := p.Parse("feat(core)^med: a\n\n---\n\nfix(cli)%Beta: b")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -414,7 +414,7 @@ func TestFooterFields(t *testing.T) {
 	t.Parallel()
 
 	p := DefaultParser()
-	res, err := p.Parse("fix(core): a\n\nPropagate: minor\nCloses #7\nSigned-off-by: A <a@x>\nX-Team: infra")
+	res, err := p.Parse("fix(core): a\n\nPropagate: minor\nCloses #7\nSigned-off-by: A <a%x>\nX-Team: infra")
 	if err != nil {
 		t.Fatal(err)
 	}

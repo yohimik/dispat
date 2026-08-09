@@ -357,11 +357,11 @@ type InlineDirectives struct {
 	Propagate *Propagate
 	// Depth is set by "+N", by a bare or valued "^" (as 1), or by "^^" (as all).
 	Depth *Depth
-	// Channel is set by "@x": the unit's own channel.
+	// Channel is set by "%x": the unit's own channel.
 	Channel *ChannelValue
-	// PropagateChannel is set by "@@x": the channel given to dependents.
+	// PropagateChannel is set by "%%x": the channel given to dependents.
 	PropagateChannel *ChannelValue
-	// ChannelDepth is set by "++N", or implied as 1 by "@@".
+	// ChannelDepth is set by "++N", or implied as 1 by "%%".
 	ChannelDepth *Depth
 
 	// depthFrom and channelDepthFrom record which token supplied each depth.
@@ -385,8 +385,8 @@ const (
 	depthFromDoubleCaret
 	// depthFromPlus is an explicit "+N"; a second one is E110.
 	depthFromPlus
-	// depthFromDoubleAt is "@@": implies channel depth 1.
-	depthFromDoubleAt
+	// depthFromDoubleSigil is "%%": implies channel depth 1.
+	depthFromDoubleSigil
 	// depthFromDoublePlus is an explicit "++N"; a second one is E110.
 	depthFromDoublePlus
 )
@@ -413,9 +413,9 @@ func (d InlineDirectives) depthWasImplied() bool {
 }
 
 // channelDepthWasImplied reports whether the inline channel depth came from
-// "@@" rather than an explicit "++N".
+// "%%" rather than an explicit "++N".
 func (d InlineDirectives) channelDepthWasImplied() bool {
-	return d.channelDepthFrom == depthFromDoubleAt
+	return d.channelDepthFrom == depthFromDoubleSigil
 }
 
 // Directives is the reconciled directive state of a unit: inline sigils and

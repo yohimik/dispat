@@ -304,7 +304,7 @@ func (p *Parser) reconcile(b *unitBuilder, fd footerDirectives) {
 // reconcileDepth resolves a depth, where the inline side may have been merely
 // implied rather than written (§8.3).
 //
-// A sigil that implies a depth — "^" implies 1, "@@" implies 1 — states a
+// A sigil that implies a depth — "^" implies 1, "%%" implies 1 — states a
 // default, not an intent, so a footer that names one wins silently. "^^" is
 // different: it *asserts* a depth of all, so a footer that disagrees is E113,
 // exactly as a disagreeing "+N" is. Only a depth the author wrote as a number

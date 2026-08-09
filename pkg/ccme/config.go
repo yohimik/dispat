@@ -64,7 +64,7 @@ func DefaultIssueTrailers() []string {
 //
 // Propagation has two independent axes (§5.3). The bump axis is Bump plus
 // Depth, written "^", "^^" and "+N"; the channel axis is Channel plus
-// ChannelDepth, written "@@" and "++N". Both depths default to 0, so neither
+// ChannelDepth, written "%%" and "++N". Both depths default to 0, so neither
 // axis reaches anybody until a unit or this configuration opts in.
 type PropagationConfig struct {
 	// Bump is the default Propagate value. Zero value: PropagatePatch.

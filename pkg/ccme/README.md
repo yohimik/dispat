@@ -35,7 +35,7 @@ fmt.Println(u.Header.Type, u.Scopes(), u.Bump, u.Directives.Depth)
 `ParseSubject` is the narrow entry point for commit-lint checks; it takes the subject line alone:
 
 ```go
-res, err := p.ParseSubject("feat(@acme/core)^^minor@beta!: streaming reader")
+res, err := p.ParseSubject("feat(@acme/core)^^minor%beta!: streaming reader")
 u := res.Units[0]
 // u.Header.Type          == "feat"
 // u.Scopes().String()    == "@acme/core"
@@ -54,25 +54,25 @@ u := res.Units[0]
 | Axis    | Value     | Depth | Footers                                                                   |
 |---------|-----------|-------|---------------------------------------------------------------------------|
 | bump    | `^`, `^^` | `+N`  | `Propagate`, `Propagate-Depth`, `Propagate-Scope`                         |
-| channel | `@@`      | `++N` | `Propagate-Channel`, `Propagate-Channel-Depth`, `Propagate-Channel-Scope` |
+| channel | `%%`      | `++N` | `Propagate-Channel`, `Propagate-Channel-Depth`, `Propagate-Channel-Scope` |
 
-`@` sits on neither axis: it sets the unit's own channel.
+`%` sits on neither axis: it sets the unit's own channel.
 
 ```go
-res, _ := p.ParseSubject("feat(core)^^minor@@beta++2: x")
+res, _ := p.ParseSubject("feat(core)^^minor%%beta++2: x")
 d := res.Units[0].Directives
 // d.Propagate        == ccme.PropagateMinor
 // d.Depth            == ccme.DepthAll        // "^^" asserts all
 // d.PropagateChannel == ccme.ChannelValue{To: "beta"}
-// d.ChannelDepth     == ccme.Depth(2)        // "++2" overrides the 1 that "@@" implies
+// d.ChannelDepth     == ccme.Depth(2)        // "++2" overrides the 1 that "%%" implies
 ```
 
-The doubled sigils are fixed two-character tokens, never a repetition count: `^^^`, `@@@` and `+++` are all `E110`. A
-bare `^` is legal and means "propagate the default bump one level"; `@@`, `+` and `++` all require a value, because a
+The doubled sigils are fixed two-character tokens, never a repetition count: `^^^`, `%%%` and `+++` are all `E110`. A
+bare `^` is legal and means "propagate the default bump one level"; `%%`, `+` and `++` all require a value, because a
 channel with no name and a depth with no number carry nothing worth guessing (`E111`).
 
 A caret implies a depth of `1` and an explicit `+N` silently overrides it; `^^` *asserts* `all`, so a disagreeing
-`+N` is `E113` and a restating `+*` is `W110`. The same shape applies to `@@` and `++N`, except that `@@` only implies,
+`+N` is `E113` and a restating `+*` is `W110`. The same shape applies to `%%` and `++N`, except that `%%` only implies,
 never asserts. Every combination is order-independent.
 
 ### Channel transitions
@@ -80,12 +80,12 @@ never asserts. Every combination is order-independent.
 A channel value may be a transition, `from>to` (§11.2):
 
 ```go
-p.ParseSubject("release(core)@@*>stable++*: promote the whole train")
+p.ParseSubject("release(core)%%*>stable++*: promote the whole train")
 // d.PropagateChannel == ccme.ChannelValue{From: "*", To: "stable"}
 // d.ChannelDepth     == ccme.DepthAll
 ```
 
-`*` matches any prerelease and is a source only. `@@beta>*` is `E111`, because "move them to some prerelease or other"
+`*` matches any prerelease and is a source only. `%%beta>*` is `E111`, because "move them to some prerelease or other"
 is not a releasable instruction. `inherit` and `none` are whole values that only `Propagate-Channel` accepts; they are
 never a side of a transition. A transition whose sides are equal is inert and warns with `W207`.
 
@@ -221,7 +221,7 @@ entirely); it is the single highest-value knob here, and it costs nothing but pe
 ## What it covers
 
 Everything in a commit message: normalisation (§4.1), unit splitting and the escaped separator (§4.2), the header
-grammar (§5) including scope-sets, the `^` / `^^` / `+` / `++` / `@` / `@@` sigils, channel transitions (§11.2) and the
+grammar (§5) including scope-sets, the `^` / `^^` / `+` / `++` / `%` / `%%` sigils, channel transitions (§11.2) and the
 breaking marker, the body/footer split (§4.4, §20.5), the nine-entry footer registry (§8.1), inline-versus-footer
 reconciliation (§5.3), type-to-bump mapping (§7), and the `cancel` / `release` control rules (§7.2, §10.2).
 
@@ -254,8 +254,8 @@ author meant, and commit-lint tooling should reject them even though the release
 
 | Written                                  | Diagnostic | Why                                                                  |
 |------------------------------------------|------------|----------------------------------------------------------------------|
-| `^none`, `+0`, `^^none`, `@@none`, `++0` | `W152`     | the whole directive resolves to nothing; deleting it changes nothing |
-| `^minor+0`, `^inherit+0`, `@@beta++0`    | `W201`     | a value *was* named and the depth throws it away                     |
+| `^none`, `+0`, `^^none`, `%%none`, `++0` | `W152`     | the whole directive resolves to nothing; deleting it changes nothing |
+| `^minor+0`, `^inherit+0`, `%%beta++0`    | `W201`     | a value *was* named and the depth throws it away                     |
 | `release(core)^minor`                    | neither    | the directive is fine; what silences it is the type's bump of `none` |
 
 "Supplied" means written by the unit, in the header or a footer. A value inherited from `Config` never triggers

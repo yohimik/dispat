@@ -47,8 +47,8 @@ contradicting is an error.
 | `+N`     | `Propagate-Depth: N`         | Reach consumers up to N edges away. `+0` is no propagation. |
 | `^minor` | `Propagate: minor`           | The bump consumers take. Default `patch`.                   |
 | `^none`  | `Propagate: none`            | Propagate nothing, whatever the depth.                      |
-| `@beta`  | `Channel: beta`              | The unit's own packages move to that channel.               |
-| `@@beta` | `Propagate-Channel: beta`    | The channel handed to the consumers reached below.          |
+| `%beta`  | `Channel: beta`              | The unit's own packages move to that channel.               |
+| `%%beta` | `Propagate-Channel: beta`    | The channel handed to the consumers reached below.          |
 | `++N`    | `Propagate-Channel-Depth: N` | How far the channel travels. Default `0`.                   |
 
 Both depths default to `0`, and neither bounds the other: a unit reaches nobody on either axis until it says so.
@@ -75,14 +75,14 @@ package is on `stable`. Prerelease versions are `<major>.<minor>.<patch>-<channe
 counter, so `beta.10` sorts above `beta.9`.
 
 ```
-feat(core)@beta:            core enters the beta line; nothing else moves
-feat(core)^@beta:           the same: the caret reaches the consumers and every
+feat(core)%beta:            core enters the beta line; nothing else moves
+feat(core)^%beta:           the same: the caret reaches the consumers and every
                             one is suppressed, because a stable consumer cannot
                             resolve a beta release
-feat(core)^@beta++1:        core and its direct consumers enter beta together
+feat(core)^%beta++1:        core and its direct consumers enter beta together
 feat(core)^:                an established train stays on beta with no directive
-release(core)@stable:       graduate core
-release(core)@beta>stable@@beta>stable++*:
+release(core)%stable:       graduate core
+release(core)%beta>stable%%beta>stable++*:
                             graduate core and everything still on beta behind it
 ```
 

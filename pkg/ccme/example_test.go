@@ -9,7 +9,7 @@ import (
 func ExampleParser_ParseSubject() {
 	p := ccme.DefaultParser()
 
-	res, err := p.ParseSubject("feat(@acme/core)^^minor@beta!: streaming reader")
+	res, err := p.ParseSubject("feat(@acme/core)^^minor%beta!: streaming reader")
 	if err != nil {
 		fmt.Println("error:", err)
 		return

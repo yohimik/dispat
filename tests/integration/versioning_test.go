@@ -184,7 +184,7 @@ func TestVersioningFixedSharedPrereleaseTrain(t *testing.T) {
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
 
-	r.Commit("feat(a)@beta: start the train from a alone")
+	r.Commit("feat(a)%beta: start the train from a alone")
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("a@0.1.0-beta.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.0-beta.0"), "one train for the space; tags: %v", r.TagList())
@@ -194,7 +194,7 @@ func TestVersioningFixedSharedPrereleaseTrain(t *testing.T) {
 	assert.True(t, r.HasTag("a@0.1.0-beta.1"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.0-beta.1"), "the train continues as one; tags: %v", r.TagList())
 
-	r.CommitEmpty("release(a)@beta>stable: graduate the space via one member")
+	r.CommitEmpty("release(a)%beta>stable: graduate the space via one member")
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.0"), "graduation moves the whole space; tags: %v", r.TagList())
@@ -371,7 +371,7 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 		}))
 		r.SeedPackage("packages", "a")
 		r.SeedPackage("packages", "b")
-		r.Commit("feat(a)@beta: a wants beta\n---\nfeat(b)@rc: b wants rc")
+		r.Commit("feat(a)%beta: a wants beta\n---\nfeat(b)%rc: b wants rc")
 
 		res := r.ReleaseOK()
 		assert.True(t, harness.HasCode(res.Events, "W212"),

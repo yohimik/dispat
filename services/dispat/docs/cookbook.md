@@ -439,7 +439,7 @@ A risky rewrite goes out on a prerelease channel first. The channel is declared 
 it as `$DISPAT_CHANNEL` (here used as the npm dist-tag, so beta users opt in and `latest` stays untouched).
 
 ```console
-$ git commit -m "feat(core)@beta: risky rewrite, try it on beta first"
+$ git commit -m "feat(core)%beta: risky rewrite, try it on beta first"
 $ dispat
 12:04:05 INF ● changed bump=minor channel="stable -> beta" dueToProviders=[] ownCommits=1 package=core reason=direct space=libs version="0.1.0 -> 0.2.0-beta.0"
 12:04:05 INF npm publish --tag beta package=core stage=publish version=0.2.0-beta.0
@@ -458,7 +458,7 @@ The target version is recomputed from the whole train on every run, so a breakin
 target (to `1.0.0-beta.N`), which is exactly what it should do. When it is ready:
 
 ```console
-$ git commit --allow-empty -m "release(core)@beta>stable: graduate"
+$ git commit --allow-empty -m "release(core)%beta>stable: graduate"
 $ dispat
 12:04:05 INF ● changed bump=minor channel="beta -> stable" dueToProviders=[] ownCommits=2 package=core reason=direct space=libs version="0.2.0-beta.1 -> 0.2.0"
 12:04:05 INF npm publish --tag stable package=core stage=publish version=0.2.0

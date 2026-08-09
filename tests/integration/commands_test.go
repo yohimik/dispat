@@ -106,7 +106,7 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 		return rest
 	}
 
-	r.CommitEmpty("feat(core)@beta: feature A")
+	r.CommitEmpty("feat(core)%beta: feature A")
 	r.ReleaseOK()
 	require.True(t, r.HasTag("core@0.2.0-beta.0"), "tags: %v", r.TagList())
 	assert.Contains(t, entry("core@0.2.0-beta.0"), "feature A")
@@ -124,7 +124,7 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 	assert.Contains(t, beta1, "fix B")
 	assert.NotContains(t, beta1, "feature A", "a prerelease entry contains only its own changeset")
 
-	r.CommitEmpty("release(core)@stable: graduate")
+	r.CommitEmpty("release(core)%stable: graduate")
 	r.ReleaseOK()
 	require.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
 	graduated := entry("core@0.2.0")

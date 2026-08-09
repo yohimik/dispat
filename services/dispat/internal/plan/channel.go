@@ -57,7 +57,7 @@ var noProposal = channelProposal{}
 // author had to name the train being ended (`beta>stable`) in order to write
 // it, and matching against the target's baseline is what keeps it precise —
 // packages not on that train are simply unmatched. This is what makes the
-// documented `release(core)@beta>stable@@beta>stable++*` form actually end
+// documented `release(core)%beta>stable%%beta>stable++*` form actually end
 // the whole train, dependants included.
 func resolveChannelValue(v ccme.ChannelValue, cur, origin string, graduates bool) channelProposal {
 	var target string

@@ -77,12 +77,12 @@ func isChannelChar(c byte) bool { return isLower(c) || isDigit(c) || c == '-' }
 func isFooterKeyChar(c byte) bool { return isASCIILetter(c) || isDigit(c) || c == '-' }
 
 // isSigil reports whether c introduces an inline directive (§5.3).
-func isSigil(c byte) bool { return c == '^' || c == '+' || c == '@' }
+func isSigil(c byte) bool { return c == '^' || c == '+' || c == '%' }
 
 // isTypeTerminator reports whether c may legally follow the type (§20.3).
 func isTypeTerminator(c byte) bool {
 	switch c {
-	case '(', '^', '+', '@', '!', ':':
+	case '(', '^', '+', '%', '!', ':':
 		return true
 	default:
 		return false
@@ -91,7 +91,7 @@ func isTypeTerminator(c byte) bool {
 
 // inlineStopChars bounds an inline directive value: the next sigil, the
 // breaking marker, or the colon (§20.3).
-const inlineStopChars = "^+@!:"
+const inlineStopChars = "^+%!:"
 
 func containsByte(s string, c byte) bool {
 	for i := 0; i < len(s); i++ {
