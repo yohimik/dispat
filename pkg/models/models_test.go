@@ -218,3 +218,19 @@ func TestAutoVersionConfigAccessors(t *testing.T) {
 		t.Error("writeVersion can be disabled")
 	}
 }
+
+func TestGitHubAllPackagesEnabled(t *testing.T) {
+	var nilCfg *GitHubConfig
+	if nilCfg.AllPackagesEnabled() {
+		t.Error("nil config: disabled")
+	}
+	if (&GitHubConfig{}).AllPackagesEnabled() {
+		t.Error("unset field: disabled")
+	}
+	if !(&GitHubConfig{AllPackages: Bool(true)}).AllPackagesEnabled() {
+		t.Error("set true: enabled")
+	}
+	if (&GitHubConfig{AllPackages: Bool(false)}).AllPackagesEnabled() {
+		t.Error("set false: disabled")
+	}
+}

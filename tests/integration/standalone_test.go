@@ -179,3 +179,105 @@ func TestStandaloneAutoversionReconcilesAndSyncLocks(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(string(lock), "locked"), "unchanged manifests regenerate nothing")
 	assert.Empty(t, r.TagList(), "autoversion releases nothing")
 }
+
+func TestStandaloneChangelogOverrideFlags(t *testing.T) {
+	// Every config value the command consumes is also a flag overriding it
+	// for the invocation.
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): flagged feature")
+	res := r.Command("changelog", "core", "--file", "HISTORY.md", "--title", "# History", "--date-format", "2006")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	data, err := os.ReadFile(r.Path("packages", "core", "HISTORY.md"))
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(data), "# History\n"))
+	assert.Contains(t, string(data), "## core@0.1.0 (2026)", "the overridden date layout applies")
+	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+}
+
+func TestStandaloneAutoversionPolicyFlags(t *testing.T) {
+	// Policy flags override the space's block for the invocation, and force
+	// the defaults onto a space that has no block at all.
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1) // no autoVersion block on the space
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/package.json", `{"name": "core", "version": "0.0.0"}`)
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/web/package.json", `{"name": "web", "version": "0.0.0", "dependencies": {"core": "^0.0.0"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	// Without flags, the no-block space reconciles nothing.
+	res := r.Command("autoversion")
+	require.Equal(t, 0, res.Code)
+	web, err := os.ReadFile(r.Path("packages", "web", "package.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(web), `"core": "^0.0.0"`, "no policy, no rewrite")
+
+	// A policy flag forces the defaults plus the override: tilde ranges,
+	// no own-version write.
+	res = r.Command("autoversion", "--range", "tilde", "--write-version=false", "--sync-lock=false")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	web, err = os.ReadFile(r.Path("packages", "web", "package.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(web), `"core": "~0.1.0"`, "the overridden range policy applies")
+	assert.Contains(t, string(web), `"version": "0.0.0"`, "own-version write disabled by flag")
+}
+
+func TestStandaloneCommitMessageAndIncludeFlags(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.WriteFile("shared.lock", "regenerated\n")
+	r.Commit("feat(core): flagged commit")
+	r.WriteFile("shared.lock", "regenerated again\n") // dirty include path
+	r.WriteFile("packages/core/generated.txt", "artifact\n")
+
+	res := r.Command("commit", "core", "--message-format", "release: {packages} at {tags}", "--include", "shared.lock")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, "release: core at core@0.1.0", r.Git("log", "-1", "--format=%s"))
+	shown := r.Git("show", "--stat", "--format=", "HEAD")
+	assert.Contains(t, shown, "shared.lock", "the include path is staged alongside the folder")
+	assert.Contains(t, shown, "generated.txt")
+}
+
+func TestStandaloneChangelogRespectsDisabledConfig(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(false)}
+	r.WriteConfigModel(cfg)
+	r.Commit("feat(core): quiet feature")
+	res := r.Command("changelog", "core")
+	require.Equal(t, 0, res.Code, "a disabled changelog is a clean no-op")
+	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+}
+
+func TestStandaloneAutoversionFlagOverridesExistingBlock(t *testing.T) {
+	// A flag override starts from the space's own block, replacing only the
+	// flagged field: the block's writeVersion stays in force while the range
+	// policy changes for the invocation.
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
+		AutoVersion: &models.AutoVersionConfig{}}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/package.json", `{"name": "core", "version": "0.0.0"}`)
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/web/package.json", `{"name": "web", "version": "0.0.0", "dependencies": {"core": "^0.0.0"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	res := r.Command("autoversion", "--range", "exact", "--sync-lock=false")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	web, err := os.ReadFile(r.Path("packages", "web", "package.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(web), `"core": "0.1.0"`, "exact range from the flag")
+	assert.Contains(t, string(web), `"version": "0.1.0"`, "the block's writeVersion default still applies")
+}
+
+func TestStandaloneCommitPushWithoutRemoteFails(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): unpushable")
+	res := r.Command("commit", "core", "--tag", "--push")
+	assert.Equal(t, 1, res.Code, "pushing without a remote fails loudly")
+	assert.Equal(t, 1, r.TagCount("core@"), "the local work before the push still happened")
+}

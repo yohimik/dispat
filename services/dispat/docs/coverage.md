@@ -12,28 +12,28 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-09** with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
+**2026-08-09** (after the step commands landed) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
-| Module / package                   | Statement coverage                                                                       |
-|------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                | **94.7%**                                                                                |
-| `pkg/ccme` (commit parser)         | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
-| `pkg/models` (public config)       | 100%                                                                                     |
-| `pkg/manifest` (shared vocabulary) | 100%                                                                                     |
-| `pkg/scanner` (manifest reader)    | **94.9%**, plus two fuzz targets over every registered parser                            |
-| `pkg/writer` (manifest writer)     | **85.4%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
-| `services/dispat` (all packages)   | **94.5%** aggregate, `main.go` included (the integration suite runs the real binary)     |
-| - `main.go`, `globx`, `model`      | 100%                                                                                     |
-| - `cli` (controller)               | 99.2%                                                                                    |
-| - `graph` (scheduler)              | 98.2%                                                                                    |
-| - `changelog`                      | 97.0%                                                                                    |
-| - `plan` (planner)                 | 96.3%                                                                                    |
-| - `release` (executor)             | 95.1%                                                                                    |
-| - `gitx`                           | 93.8%                                                                                    |
-| - `config`                         | 93.3%                                                                                    |
-| - `github`                         | 93.0%                                                                                    |
-| - `app`                            | 92.1%                                                                                    |
-| - `script`                         | 92.0%                                                                                    |
+| Module / package                        | Statement coverage                                                                       |
+|-----------------------------------------|------------------------------------------------------------------------------------------|
+| **workspace total**                     | **94.3%**                                                                                |
+| `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
+| `pkg/models` (public config)            | 100%                                                                                     |
+| `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
+| `pkg/scanner` (manifest reader)         | **94.9%**, plus two fuzz targets over every registered parser                            |
+| `pkg/writer` (manifest writer)          | **85.4%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
+| `services/dispat` (all packages)        | **93.9%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| - `main.go`, `globx`, `model`           | 100%                                                                                     |
+| - `graph` (scheduler)                   | 98.2%                                                                                    |
+| - `changelog`                           | 96.3%                                                                                    |
+| - `plan` (planner)                      | 96.3%                                                                                    |
+| - `release` (executor)                  | 95.1%                                                                                    |
+| - `cli` (controller)                    | 94.4%                                                                                    |
+| - `gitx`                                | 93.9%                                                                                    |
+| - `config`                              | 93.2%                                                                                    |
+| - `github`                              | 93.0%                                                                                    |
+| - `script`                              | 92.0%                                                                                    |
+| - `app`                                 | 90.1%                                                                                    |
 
 The per-package test inventory (what each package's suite actually asserts) is in
 [Architecture / Testing](./architecture.md#testing).
