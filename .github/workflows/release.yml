@@ -1,12 +1,18 @@
 name: Release
 
-# Trigger only when a release tag of the CLI is pushed: the Go-module-style
-# tag dispat's own config renders, "services/dispat/v<version>"
-# (e.g. services/dispat/v1.0.0-rc.0).
+# dispat releases itself: this workflow builds the CLI from the checkout and
+# runs it against the repository. dispat computes the plan from the
+# conventional commits, rewrites the go.mods (autoVersion), writes the
+# changelogs, creates one release commit carrying all of it, tags every
+# released module on that commit (pkg/<name>/v<version>,
+# services/dispat/v<version>) and pushes the branch and the tags.
+#
+# Triggered manually: the tags do not exist before dispat creates them, and
+# tags pushed with the workflow's own GITHUB_TOKEN would not re-trigger a
+# tag-push workflow anyway, so the binary build and the GitHub release run
+# right here, after the dispat run, keyed off the tag it created.
 on:
-  push:
-    tags:
-      - 'services/dispat/v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,9 +22,8 @@ env:
 
 jobs:
   tests:
-    # A tag push does not trigger tests.yml, so the release re-runs the suite
-    # against the tagged commit: no binary ships from a commit that fails.
-    name: Test the tagged commit
+    # No binary ships from a commit that fails the suite.
+    name: Test the release commit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -36,30 +41,19 @@ jobs:
           go test -C pkg/manifest     ./... -count=1 -timeout 10m
           go test -C pkg/models       ./... -count=1 -timeout 10m
           go test -C pkg/scanner      ./... -count=1 -timeout 10m
-          go test -C pkg/writer       ./... -count=1 -timeout 10m
+          go test -C pkg/writer      ./... -count=1 -timeout 10m
           go test -C services/dispat  ./... -count=1 -timeout 10m
           go test -C tests/integration ./... -count=1 -timeout 20m
 
-  build:
-    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+  release:
+    name: Run dispat, publish binaries
     needs: tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            ext: ""
-          - goos: darwin
-            goarch: arm64
-            ext: ""
-          - goos: windows
-            goarch: amd64
-            ext: ".exe"
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -67,55 +61,55 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+      - name: Configure the release committer
         run: |
-          # The version baked into `dispat --version`: the tag's version
-          # section (services/dispat/v1.0.0-rc.0 -> 1.0.0-rc.0). Local builds
-          # default to "dev".
-          VERSION="${GITHUB_REF_NAME##*/v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Build dispat from the checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
+
+      - name: Run the release
+        # commit mode: dispat creates the release commit, tags it and pushes
+        # the branch and the tags using the checkout's credentials.
+        run: ./dispat --log-format json
+
+      - name: Resolve the CLI tag this run created
+        id: tag
+        run: |
+          TAG=$(git tag --points-at HEAD 'services/dispat/v*' | head -n 1)
+          if [ -z "$TAG" ]; then
+            echo "no dispat release in this run; binaries are skipped"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG##*/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release binaries
+        if: steps.tag.outputs.tag != ''
+        env:
+          CGO_ENABLED: 0
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
           mkdir -p dist
-          OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -C services/dispat -trimpath \
-            -ldflags="-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${VERSION}" \
-            -o "${PWD}/dist/${OUT_NAME}" .
-          echo "Built dist/${OUT_NAME} (version ${VERSION})"
+          for target in linux/amd64 darwin/arm64 windows/amd64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            EXT=""; [ "$GOOS" = "windows" ] && EXT=".exe"
+            OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${EXT}"
+            GOOS="$GOOS" GOARCH="$GOARCH" go build -C services/dispat -trimpath \
+              -ldflags="-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${VERSION}" \
+              -o "${PWD}/dist/${OUT_NAME}" .
+            echo "Built dist/${OUT_NAME} (version ${VERSION})"
+          done
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
-          retention-days: 1
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: List collected binaries
-        run: ls -lh dist
-
-      - name: Resolve the version from the tag
-        run: echo "VERSION=${GITHUB_REF_NAME##*/v}" >> "$GITHUB_ENV"
-
-      - name: Create release and upload binaries
+      - name: Create GitHub release with the binaries
+        if: steps.tag.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: dispat ${{ env.VERSION }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: dispat ${{ steps.tag.outputs.version }}
           # A version with a prerelease section (1.0.0-rc.0) is marked as a
           # GitHub prerelease, keeping it off the "latest" badge.
-          prerelease: ${{ contains(env.VERSION, '-') }}
+          prerelease: ${{ contains(steps.tag.outputs.version, '-') }}
           generate_release_notes: true
           files: dist/*
         env:

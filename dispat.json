@@ -1,8 +1,14 @@
 {
   "scripts": {
     "go-mod-tidy": "go mod tidy",
-    "push-tag": "git push origin $DISPAT_TAG",
-    "delete-remote-tag": "git push origin --delete $DISPAT_TAG"
+    "build-dispat": "go build ./..."
+  },
+  "packages": {
+    "dispat": {
+      "flow": {
+        "build": "build-dispat"
+      }
+    }
   },
   "spaces": {
     "pkg": {
@@ -11,10 +17,6 @@
       "autoVersion": {
         "enabled": true,
         "syncLock": ["go-mod-tidy"]
-      },
-      "flow": {
-        "postPublish": "push-tag",
-        "onFail": "delete-remote-tag"
       }
     },
     "services": {
@@ -23,10 +25,6 @@
       "autoVersion": {
         "enabled": true,
         "syncLock": ["go-mod-tidy"]
-      },
-      "flow": {
-        "postPublish": "push-tag",
-        "onFail": "delete-remote-tag"
       }
     }
   },
@@ -63,5 +61,12 @@
       "consumer": "writer",
       "provider": "manifest"
     }
-  ]
+  ],
+  "github": {
+    "enabled": false
+  },
+  "commit": {
+    "enabled": true,
+    "push": true
+  }
 }
