@@ -574,7 +574,7 @@ func TestResolveFile(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no dispat config file found")
 	assert.Contains(t, err.Error(), "any parent directory")
-	for _, name := range DefaultFileNames {
+	for _, name := range defaultFileNames {
 		assert.Contains(t, err.Error(), name, "the error must name every candidate")
 	}
 

@@ -86,7 +86,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 	case t.IsGlob():
 		matched := false
 		for _, p := range cp.pkgs {
-			if globMatch(t.Name, p.Name) {
+			if GlobMatch(t.Name, p.Name) {
 				out[p.Name] = true
 				matched = true
 			}
@@ -192,5 +192,3 @@ func underDir(file, dir string) bool {
 // make `*` quietly miss `file:../core`. The matcher itself lives in globx,
 // where .dispatignore patterns share it.
 func GlobMatch(pattern, s string) bool { return globx.Match(pattern, s) }
-
-func globMatch(pattern, s string) bool { return globx.Match(pattern, s) }

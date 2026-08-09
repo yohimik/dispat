@@ -382,7 +382,7 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 // monorepo of its own, and a nested root must be ignored, not merged.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
 	var pc PackageConfig
-	for _, cand := range DefaultFileNames {
+	for _, cand := range defaultFileNames {
 		p := filepath.Join(dir, cand)
 		if _, err := os.Stat(p); err != nil {
 			continue

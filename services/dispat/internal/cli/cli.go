@@ -41,7 +41,7 @@ const (
 var Version = "dev"
 
 // logo is the dispat mark rendered for terminals — the block twin of
-// imgs/logo.png (mirrored in imgs/logo.txt): two same-size 6×6 squares,
+// imgs/logo.png: two same-size 6×6 squares,
 // frame 1 thick, the filled square overlapping a quarter of the frame's
 // inner area. Each logical pixel is a double `█`, which is what keeps the
 // squares square in a terminal's ~1:2 character cells.

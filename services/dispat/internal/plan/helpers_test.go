@@ -195,7 +195,7 @@ func TestGlobMatch(t *testing.T) {
 		{"", "", true},
 		{"", "x", false},
 	} {
-		assert.Equalf(t, tc.want, globMatch(tc.pattern, tc.s), "globMatch(%q, %q)", tc.pattern, tc.s)
+		assert.Equalf(t, tc.want, GlobMatch(tc.pattern, tc.s), "GlobMatch(%q, %q)", tc.pattern, tc.s)
 	}
 }
 

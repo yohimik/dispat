@@ -130,16 +130,16 @@ func checkScriptRefs(c *File, refs map[string][]string, prefix string) error {
 // so explicitly set flags override file values (and file values override flag
 // defaults). Defaults applied afterwards: concurrency 0 means the number of
 // CPUs, logLevel defaults to "info", logFormat to "pretty".
-// DefaultFileNames are the config file names the CLI looks for, in order,
+// defaultFileNames are the config file names the CLI looks for, in order,
 // when --config is not explicitly set: the file `dispat init` writes under
 // each of its formats. The first that exists wins.
-var DefaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dispat.toml"}
+var defaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dispat.toml"}
 
 // ResolveFile returns the path of the configuration file to load and the
 // monorepo root it establishes. An explicitly named file is used as-is,
 // relative to root — a typo there must fail loudly, not fall back to a
 // different file — while the default resolves to the first of
-// DefaultFileNames that exists in root or, failing that, in any parent
+// defaultFileNames that exists in root or, failing that, in any parent
 // directory up to the filesystem root: the ascent is what lets the CLI run
 // from inside a package folder, with the config's own directory becoming the
 // effective monorepo root.
@@ -159,7 +159,7 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 	// A directory contributes its first existing candidate name alone — the
 	// name-order precedence within one folder predates the ascent and stays.
 	try := func(dir string) (string, bool) {
-		for _, cand := range DefaultFileNames {
+		for _, cand := range defaultFileNames {
 			p := filepath.Join(dir, cand)
 			if _, err := os.Stat(p); err != nil {
 				continue
@@ -194,7 +194,7 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 	}
 	return "", "", fmt.Errorf(
 		"config: no dispat config file found in %s or any parent directory (tried %s); run `dispat init` to create one",
-		root, strings.Join(DefaultFileNames, ", "))
+		root, strings.Join(defaultFileNames, ", "))
 }
 
 // isRootConfig reports whether the file is a monorepo root configuration —
