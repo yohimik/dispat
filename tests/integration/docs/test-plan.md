@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against fourteen goals, one test file each:
+The suite was designed against fifteen goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -66,6 +66,12 @@ The suite was designed against fourteen goals, one test file each:
     handler: the in-flight script is killed, remaining packages report `cancelled` rather than `failed` or `skipped`,
     nothing is tagged for work that did not finish, and the next run releases the cancelled packages at the version they
     were owed.
+15. **The standalone step commands** (`standalone_test.go`): `dispat changelog`, `dispat autoversion` and
+    `dispat commit` through the binary: the shared package selection (explicit, folder-narrowed, root-wide), the
+    W222 changelog idempotence, the in-flow scenario where nested step commands land the changelog inside the tagged
+    commit and the outer run skips the pre-written entry (W222) and the pre-created tag (W223), the `--tag`/`--push`
+    committer identity and remote delivery, the `DISPAT_OUTPUT` commit pin export, and autoversion's reconcile-once
+    plus syncLock-once convergence.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -132,6 +138,7 @@ tests/integration/
   overrides_test.go         goal 12
   packages_test.go          goal 13
   interrupt_test.go         goal 14
+  standalone_test.go        goal 15
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -347,6 +354,17 @@ in-memory monorepo away instead of one binary invocation.)
 | Test                            | Claim proven                                                                                                                                                                                                                                                                                                                                                                                |
 |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestInterruptGracefulShutdown` | A SIGINT delivered mid-build (via `harness.StartRelease`/`Proc`) exits non-zero with both packages `cancelled` in the summary events (the killed build is an interruption, not a failure; the never-launched consumer is not `skipped`), nothing is tagged, and the next run releases both at the version they were owed (one tag each, the consumer's build completing on the tsmark log). |
+
+### Goal 15: the standalone step commands (`standalone_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                                                                 |
+|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestStandaloneChangelogWritesAndIsIdempotent`  | The changelog command writes the pending entry without releasing; a second invocation is a byte-identical W222 skip; a following release keeps exactly one entry header; an unknown package errors, a converged one is a clean no-op.                        |
+| `TestStandaloneStepsInsideAReleaseFlow`         | The dogfood flow: nested `dispat changelog` + `dispat commit --tag` in beforePublish land the changelog inside the tagged commit (the fix under test); the outer run reports W222 and W223 with exit 0, one tag, and a quiet convergence run.                 |
+| `TestStandaloneCommitPushAndNothingToCommit`    | A clean folder commits nothing but `--tag` still tags HEAD (annotated, with the flag-supplied identity) and `--push` delivers branch and tag; a re-run converges before any git work.                                                                        |
+| `TestStandaloneCommitExportsPinWhenDispatOutputSet` | With DISPAT_OUTPUT in the environment, the commit command exports `PACKAGE_<KEY>=<sha>` for the outer run's tag and GitHub-release pin.                                                                                                                  |
+| `TestStandaloneCommitFolderNarrowing`           | Invoked inside a package folder the command narrows to that package; from the root it covers every releasing package.                                                                                                                                        |
+| `TestStandaloneAutoversionReconcilesAndSyncLocks` | Ranges and own versions reconcile to the planned versions, syncLock runs once per changed package, and a second invocation rewrites nothing and regenerates nothing.                                                                                       |
 
 ## Regression fences
 
