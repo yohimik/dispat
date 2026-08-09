@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "build": "echo build $DISPAT_PACKAGE@$DISPAT_NEW_VERSION",
+    "publish": "echo publish $DISPAT_PACKAGE@$DISPAT_NEW_VERSION"
+  },
+  "spaces": {
+    "packages": {
+      "path": "packages",
+      "flow": {
+        "build": "build",
+        "publish": "publish"
+      }
+    }
+  }
+}
