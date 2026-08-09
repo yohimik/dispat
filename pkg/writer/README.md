@@ -8,7 +8,7 @@ package managers**; each ecosystem gains a writer once its rewrite can be made b
 
 ```go
 res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
-    {Name: "@acme/core", Kind: "dependencies", Range: "^1.3.0"},
+{Name: "@acme/core", Kind: "dependencies", Range: "^1.3.0"},
 })
 // res.Applied, res.Missing, res.VersionWritten, res.Path
 ```

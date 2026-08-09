@@ -2,8 +2,8 @@
 
 What a successful release leaves behind besides the tag: the per-package changelog file, the GitHub release, and the
 optional end-of-run release commit. `changelog` and `github` are top-level policies a single package may
-[override field by field](./packages.md): disable one record for one package, or point one package's releases at
-another repository.
+[override field by field](./packages.md): disable one record for one package, or point one package's releases at another
+repository.
 
 ## Entry format options (shared by `changelog` and `github`)
 
@@ -62,12 +62,12 @@ fail the run before anything is built.
 *remote*: if the tag already exists there when the release is created, the release attaches to exactly the commit it
 marks; if not, GitHub creates the tag ref at the default branch head. Per mode:
 
-| Mode                                          | Tag ref on GitHub                                        | Release body                                             |
-|-----------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------|
-| [`commit`](#commit) disabled (default)        | Default branch head, until CI pushes the local tag       | The notes alone                                          |
-| `commit` enabled, `push` off                  | Default branch head, until you push                      | Documents the release commit SHA and tag (`### Release`) |
-| `commit` enabled, `push` on                   | Pinned to the release commit via `target_commitish`      | Documents the release commit SHA and tag                 |
-| [`PACKAGE_<KEY>`](../environment.md#script-outputs) exported | Pinned to the exported hash via `target_commitish` | Documents the exported hash                              |
+| Mode                                                         | Tag ref on GitHub                                   | Release body                                             |
+|--------------------------------------------------------------|-----------------------------------------------------|----------------------------------------------------------|
+| [`commit`](#commit) disabled (default)                       | Default branch head, until CI pushes the local tag  | The notes alone                                          |
+| `commit` enabled, `push` off                                 | Default branch head, until you push                 | Documents the release commit SHA and tag (`### Release`) |
+| `commit` enabled, `push` on                                  | Pinned to the release commit via `target_commitish` | Documents the release commit SHA and tag                 |
+| [`PACKAGE_<KEY>`](../environment.md#script-outputs) exported | Pinned to the exported hash via `target_commitish`  | Documents the exported hash                              |
 
 In the usual CI setup with `commit` disabled (a job on the default branch, tags pushed right after the run) the branch
 head and the released commit coincide; they can differ if the run released another branch or the push never happened.

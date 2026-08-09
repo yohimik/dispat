@@ -4,7 +4,7 @@ A Go parser for **Conventional Commits, Monorepo Extension (CCME) 1.0.0**, a str
 1.0.0.
 
 No regular expressions. The parser is the single left-to-right index scan described in §20 of the specification: one
-byte of lookahead, no backtracking, no recursion, O(n) time and O(1) working space. That is the property that matters
+byte of lookahead, no backtracking, no recursion, O (n) time and O (1) working space. That is the property that matters
 when the parser runs over untrusted commit messages in CI.
 
 The specification is vendored as [SPEC.md](SPEC.md), and every `§n.m` in the code and in this file refers to it. Note
@@ -72,8 +72,8 @@ bare `^` is legal and means "propagate the default bump one level"; `@@`, `+` an
 channel with no name and a depth with no number carry nothing worth guessing (`E111`).
 
 A caret implies a depth of `1` and an explicit `+N` silently overrides it; `^^` *asserts* `all`, so a disagreeing
-`+N` is `E113` and a restating `+*` is `W110`. The same shape applies to `@@` and `++N`, except that `@@` only
-implies, never asserts. Every combination is order-independent.
+`+N` is `E113` and a restating `+*` is `W110`. The same shape applies to `@@` and `++N`, except that `@@` only implies,
+never asserts. Every combination is order-independent.
 
 ### Channel transitions
 
@@ -85,16 +85,16 @@ p.ParseSubject("release(core)@@*>stable++*: promote the whole train")
 // d.ChannelDepth     == ccme.DepthAll
 ```
 
-`*` matches any prerelease and is a source only. `@@beta>*` is `E111`, because "move them to some prerelease or
-other" is not a releasable instruction. `inherit` and `none` are whole values that only `Propagate-Channel` accepts;
-they are never a side of a transition. A transition whose sides are equal is inert and warns with `W207`.
+`*` matches any prerelease and is a source only. `@@beta>*` is `E111`, because "move them to some prerelease or other"
+is not a releasable instruction. `inherit` and `none` are whole values that only `Propagate-Channel` accepts; they are
+never a side of a transition. A transition whose sides are equal is inert and warns with `W207`.
 
 A `Parser` is immutable after construction and safe for concurrent use.
 
 ## Configuration
 
-Everything lives in one `Config` struct that mirrors §14. **The zero value is the specification default**, so only
-the fields you actually want to change need setting:
+Everything lives in one `Config` struct that mirrors §14. **The zero value is the specification default**, so only the
+fields you actually want to change need setting:
 
 ```go
 p, err := ccme.NewParser(ccme.Config{
@@ -121,8 +121,8 @@ IssueTrailers:        []string{"Closes", "Fixes"},
 })
 ```
 
-`ccme.DefaultParser()` is shorthand for `ccme.MustNewParser(ccme.Config{})`, and `ccme.DefaultConfig()` returns the
-same values fully spelled out when you'd rather start from a populated struct:
+`ccme.DefaultParser()` is shorthand for `ccme.MustNewParser(ccme.Config{})`, and `ccme.DefaultConfig()` returns the same
+values fully spelled out when you'd rather start from a populated struct:
 
 ```go
 cfg := ccme.DefaultConfig()
@@ -145,27 +145,26 @@ tells you which it was.
 
 ## Performance
 
-The package is built for sweeping large histories: one parser, many messages, often in parallel. Parsing is O(n) in
+The package is built for sweeping large histories: one parser, many messages, often in parallel. Parsing is O (n) in
 message length with no backtracking, and the hot path avoids copying the input.
 
 - **Normalisation is a no-op when it can be.** A message that already has LF endings, no trailing whitespace and no
   trailing blank lines (what git hands you) is returned unchanged, with zero allocations. The check is driven by
   `strings.IndexByte` rather than a byte-at-a-time loop, since it runs over every message in a history. The rewrite
   path, when needed, is a single pass into one buffer.
-- **A single-unit message needs one allocation for its object graph.** `Result`, the `Unit` and the `[]*Unit` come
-  out of one backing struct rather than three separate allocations; multi-unit messages still get one array for all
-  units.
-- **Text is sliced, not rebuilt.** `Unit.Raw`, `Unit.Body`, `Header.Raw`, `Header.Description` and every scope term
-  are substrings of the normalised message. The one exception is a unit containing an escaped separator (`\---`),
-  which is not contiguous and so is reassembled.
+- **A single-unit message needs one allocation for its object graph.** `Result`, the `Unit` and the `[]*Unit` come out
+  of one backing struct rather than three separate allocations; multi-unit messages still get one array for all units.
+- **Text is sliced, not rebuilt.** `Unit.Raw`, `Unit.Body`, `Header.Raw`, `Header.Description` and every scope term are
+  substrings of the normalised message. The one exception is a unit containing an escaped separator (`\---`), which is
+  not contiguous and so is reassembled.
 - **One allocation for all units,** not one per unit, and none at all for the per-unit checks: scope-overlap,
-  propagation-redundancy and `Release-As` scope checks are all scans over a handful of terms rather than temporary
-  maps or filtered slices.
+  propagation-redundancy and `Release-As` scope checks are all scans over a handful of terms rather than temporary maps
+  or filtered slices.
 - **Footer keys are matched with an ASCII fold-compare** over the nine-entry registry instead of lowercasing the key
   into a fresh string for a map lookup. `BREAKING CHANGE` sits outside it, since §8.1.1 makes it the one key compared
   exactly.
-- **Clean parses do not allocate diagnostics.** `Errors()` and `Warnings()` return nil rather than an empty slice, so
-  a successful `Parse` allocates nothing for the diagnostic path.
+- **Clean parses do not allocate diagnostics.** `Errors()` and `Warnings()` return nil rather than an empty slice, so a
+  successful `Parse` allocates nothing for the diagnostic path.
 
 Two consequences follow from the zero-copy design and are worth knowing:
 
@@ -174,8 +173,8 @@ Two consequences follow from the zero-copy design and are worth knowing:
 - `Directives.Kinds` always aliases the parser configuration (§8.4 has no per-unit override). Treat it as read-only.
   Everything else a unit exposes is either a value or freshly allocated.
 
-`bench_test.go` covers subject-only, body, directive-heavy, multi-unit, CRLF and error inputs, plus a parallel
-benchmark and a `-race` test that hammers one shared parser from sixteen goroutines:
+`bench_test.go` covers subject-only, body, directive-heavy, multi-unit, CRLF and error inputs, plus a parallel benchmark
+and a `-race` test that hammers one shared parser from sixteen goroutines:
 
 ```sh
 go test -bench . -benchmem ./...
@@ -198,8 +197,7 @@ Measured on an Apple M5 Pro, Go 1.26:
 > is machine-specific anyway.
 
 Roughly 1.8M simple messages per second on one core. `B/op` is dominated by the `Unit` struct itself (`Header` and
-`Directives` are wide value types), not by copies of the input; a message ten times longer costs the same
-allocations.
+`Directives` are wide value types), not by copies of the input; a message ten times longer costs the same allocations.
 
 `ParseSimple` pays one of its five allocations for normalisation because its input ends in a newline, as
 `git log --format=%B` output does. A message already stripped of its trailing newline takes the zero-allocation fast
@@ -207,10 +205,9 @@ path.
 
 ### Tune `GOGC` for bulk sweeps
 
-A `Parser` holds no mutable state, so parsing scales across goroutines, but past a certain rate the limit is the
-garbage collector, not the parser. Each message produces a couple of kilobytes of short-lived garbage, and at a
-million-plus messages per second that is gigabytes per second for the collector to sweep. On the same machine as the
-table above:
+A `Parser` holds no mutable state, so parsing scales across goroutines, but past a certain rate the limit is the garbage
+collector, not the parser. Each message produces a couple of kilobytes of short-lived garbage, and at a million-plus
+messages per second that is gigabytes per second for the collector to sweep. On the same machine as the table above:
 
 | `BenchmarkParseParallel` | ns/op | speedup vs serial |
 |--------------------------|------:|------------------:|
@@ -224,8 +221,8 @@ entirely); it is the single highest-value knob here, and it costs nothing but pe
 ## What it covers
 
 Everything in a commit message: normalisation (§4.1), unit splitting and the escaped separator (§4.2), the header
-grammar (§5) including scope-sets, the `^` / `^^` / `+` / `++` / `@` / `@@` sigils, channel transitions (§11.2) and
-the breaking marker, the body/footer split (§4.4, §20.5), the nine-entry footer registry (§8.1), inline-versus-footer
+grammar (§5) including scope-sets, the `^` / `^^` / `+` / `++` / `@` / `@@` sigils, channel transitions (§11.2) and the
+breaking marker, the body/footer split (§4.4, §20.5), the nine-entry footer registry (§8.1), inline-versus-footer
 reconciliation (§5.3), type-to-bump mapping (§7), and the `cancel` / `release` control rules (§7.2, §10.2).
 
 Diagnostics carry a code, a severity and an exact position, so a caller can point a caret at the offending byte:
@@ -266,8 +263,8 @@ author meant, and commit-lint tooling should reject them even though the release
 
 ## What it does not cover
 
-This package parses messages. It does not read git, load a workspace, walk a dependency graph, or compute versions,
-so the diagnostics that need any of those are never emitted:
+This package parses messages. It does not read git, load a workspace, walk a dependency graph, or compute versions, so
+the diagnostics that need any of those are never emitted:
 
 `E130`, `E153`, `E156`, `E157`, `E182`, `E185`, `E191`, `E195`, `E196`, `E197`, `E198`, `E199`,
 `E200`, `W130`, `W131`, `W134`, `W135`, `W153`, `W154`, `W158`, `W159`, `W160`, `W170`, `W171`,
@@ -281,13 +278,13 @@ whose depth is `0`, and `W207` for a channel transition whose sides are equal.
 term addressing the whole workspace.
 
 The hold machinery of §8.6.1 is split the same way. `Release-As` values are parsed and classified (`4.0.0` is a pin,
-`none` a hold and `auto` a resume, all three package-level) but resolving which directive wins over a window belongs
-to the engine.
+`none` a hold and `auto` a resume, all three package-level) but resolving which directive wins over a window belongs to
+the engine.
 
 `Release-As` has **no bump form**: `Release-As: minor` is `E151`, with a diagnostic that says why (§8.6). How large a
 change is, is declared by the type; if a category of commit should release in your repository, say so once in `Types`
-rather than on every commit. And `Release-As: none` does not suppress its own unit's bump: a hold *retains* the
-pending work, which is what distinguishes it from `cancel` (§8.6.2, §13.6).
+rather than on every commit. And `Release-As: none` does not suppress its own unit's bump: a hold *retains* the pending
+work, which is what distinguishes it from `cancel` (§8.6.2, §13.6).
 
 ### Parser bounds are always enforced
 
@@ -330,21 +327,21 @@ The suite reproduces every vector of Appendix B.1 and B.2, and gates six things 
   positions stay inside the message, that `Valid` matches the diagnostics attached to a unit, that re-parsing the
   normalised message is indistinguishable from parsing the original, and that the zero-copy substrings really are
   substrings. The seed corpus alone runs under plain `go test`.
-- **Normalisation is a fixed point.** `FuzzNormalize` asserts idempotence and that the fast-path predicate agrees
-  with the rewriter; a disagreement there would let `Parse` and `Normalize` see different text.
+- **Normalisation is a fixed point.** `FuzzNormalize` asserts idempotence and that the fast-path predicate agrees with
+  the rewriter; a disagreement there would let `Parse` and `Normalize` see different text.
 - **Output is deterministic** (§17.2). `TestDiagnosticsAreDeterministic` parses one message fifty times and requires
   byte-identical diagnostics in the same order; nothing may depend on map-iteration order.
 - **`W155` and `W156` cannot be switched off** (§14.2). There is no suppression mechanism, and
   `TestSilentFailureWarningsCannotBeSuppressed` checks the most permissive configuration the API allows still emits
   both.
 - **Allocations do not regress.** `alloc_test.go` pins the per-message allocation counts and asserts that a body a
-  hundred times larger costs no extra allocations. It carries a `!race` build tag, since the race detector allocates
-  on its own.
+  hundred times larger costs no extra allocations. It carries a `!race` build tag, since the race detector allocates on
+  its own.
 
 ### The fuzz corpus
 
-`go test -fuzz` writes only *failing* inputs to `testdata/fuzz/<Target>/`. Those are regression cases (Go replays
-them on every plain `go test`), so **commit them**. Two are checked in, both defects the fuzzer found here:
+`go test -fuzz` writes only *failing* inputs to `testdata/fuzz/<Target>/`. Those are regression cases (Go replays them
+on every plain `go test`), so **commit them**. Two are checked in, both defects the fuzzer found here:
 
 | File                         | Input            | Defect                                                 |
 |------------------------------|------------------|--------------------------------------------------------|

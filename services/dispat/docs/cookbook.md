@@ -99,9 +99,9 @@ lives in:
 }
 ```
 
-One rule to know: `path` must name a folder inside the repository, so the package cannot be the repository root
-itself. Keeping the deliverable in a subfolder (`src`, `app`, whatever you already build from) is all it takes; the
-config, the changelog and the tags live at the root, the scripts run inside the folder.
+One rule to know: `path` must name a folder inside the repository, so the package cannot be the repository root itself.
+Keeping the deliverable in a subfolder (`src`, `app`, whatever you already build from) is all it takes; the config, the
+changelog and the tags live at the root, the scripts run inside the folder.
 
 Commits scoped with the package name drive it, and a commit with no scope counts too when it touches files inside the
 folder:

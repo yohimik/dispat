@@ -130,25 +130,25 @@ a mid-life adoption) is re-released at exactly that baseline on the next run.
 One line per package; each package's doc comment carries the full story, and the deeper design notes live in the
 sections below.
 
-| Package | Role |
-|---|---|
-| `pkg/ccme` | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](../../../pkg/ccme/SPEC.md). |
-| `pkg/models` | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values. |
-| `pkg/manifest` | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically. |
-| `pkg/scanner` | Manifest reader (own module): nine ecosystems parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors. |
-| `pkg/writer` | Format-preserving manifest writer (own module): `package.json`, `go.mod`, `requirements*.txt`; byte-precise range and version rewrites, atomic writes. |
-| `internal/cli` | The command-line controller: flags, dispatch, exit-code mapping, logger construction. |
-| `internal/app` | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, the finalize phase and run-level hooks; wires every other package together. |
-| `internal/config` | Config resolution, loading, validation, package discovery, per-package override merging, `.dispatignore`, format-preserving config editing for `compute --write`. |
-| `internal/plan` | The planner: windows, scopes, directives, propagation, channels, fixed groups; a pure function of history, graph and configuration. |
-| `internal/graph` | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below. |
-| `internal/release` | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs. |
-| `internal/changelog` | Changelog rendering and the per-package record dispatcher. |
-| `internal/github` | The GitHub release recorder: REST calls, asset uploads, up-front verification. |
-| `internal/gitx` | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`. |
-| `internal/script` | Shell script execution with process-group cancellation and bounded pipe waits. |
-| `internal/model` | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release. |
-| `internal/globx` | The one glob matcher scope terms, `autoVersion.match` and `.dispatignore` share. |
+| Package              | Role                                                                                                                                                                                                         |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](../../../pkg/ccme/SPEC.md). |
+| `pkg/models`         | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values.                                 |
+| `pkg/manifest`       | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically.                                |
+| `pkg/scanner`        | Manifest reader (own module): nine ecosystems parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors.               |
+| `pkg/writer`         | Format-preserving manifest writer (own module): `package.json`, `go.mod`, `requirements*.txt`; byte-precise range and version rewrites, atomic writes.                                                       |
+| `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
+| `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, the finalize phase and run-level hooks; wires every other package together.                                     |
+| `internal/config`    | Config resolution, loading, validation, package discovery, per-package override merging, `.dispatignore`, format-preserving config editing for `compute --write`.                                            |
+| `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, fixed groups; a pure function of history, graph and configuration.                                                                          |
+| `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
+| `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs.                                                                    |
+| `internal/changelog` | Changelog rendering and the per-package record dispatcher.                                                                                                                                                   |
+| `internal/github`    | The GitHub release recorder: REST calls, asset uploads, up-front verification.                                                                                                                               |
+| `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
+| `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits.                                                                                                                               |
+| `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
+| `internal/globx`     | The one glob matcher scope terms, `autoVersion.match` and `.dispatignore` share.                                                                                                                             |
 
 ## Graph algorithms
 
@@ -158,9 +158,9 @@ runs where.
 ### Topological sort: the publish order
 
 `internal/graph.TopoSort` is Kahn's algorithm over package names with one refinement: the zero-in-degree frontier is a
-**min-heap**, so ties always break alphabetically and the same graph yields the same order on every machine (§17.2).
-The heap makes the sort O((V+E) log V), which with one bounded `git tag`/`git log` query pair per package is what
-keeps planning cheap at monorepo scale.
+**min-heap**, so ties always break alphabetically and the same graph yields the same order on every machine (§17.2). The
+heap makes the sort O ((V+E) log V), which with one bounded `git tag`/`git log` query pair per package is what keeps
+planning cheap at monorepo scale.
 
 ```
     a     b        frontier = nodes with no pending providers: {a, b}
@@ -218,9 +218,9 @@ and cascade new ready nodes.
 
 Per-class queues mean a stalled class never blocks another class's budget. A node occupies as many of its class's slots
 as its package's configured weight (the per-package `concurrency` override; clamped to `[1, budget]`, so a weight past
-the budget simply runs alone). A node that does not fit waits at the head of its queue and nothing behind it overtakes it;
-the head-of-line discipline is what makes a heavy node's wait finite instead of starvable. syncLock keeps the ordinary
-cost of one: its budget exists to serialise lock-file writers, not to price packages. There are no locks in the
+the budget simply runs alone). A node that does not fit waits at the head of its queue and nothing behind it overtakes
+it; the head-of-line discipline is what makes a heavy node's wait finite instead of starvable. syncLock keeps the
+ordinary cost of one: its budget exists to serialise lock-file writers, not to price packages. There are no locks in the
 scheduling hot path; a mutex guards only the shared result map that skip decisions, provider filtering and the syncLock
 skip read. Every task finishes exactly once, including no-op completions for packages already failed or skipped, which
 is what lets the counting terminate without special cases. A cancelled context stops new launches (in-flight nodes are

@@ -42,8 +42,8 @@ The commit-message parser options. Everything is optional: an absent
 value fails the config load, before any planning.
 
 One setting deserves calling out before the table. **`propagation.depth` changes propagation from opt-in to
-on-by-default.** With the default `0`, a plain `feat(core):` releases `core` alone and reach must be written per
-commit (`^`, `^^`, `+N`). With `1`, every bump reaches its direct consumers with no caret written; `all` reaches every
+on-by-default.** With the default `0`, a plain `feat(core):` releases `core` alone and reach must be written per commit
+(`^`, `^^`, `+N`). With `1`, every bump reaches its direct consumers with no caret written; `all` reaches every
 transitive consumer. A directive on the unit always wins over the default. Teams coming from tools with automatic
 propagation usually want `1` here; teams that want blast radius readable from each commit keep `0`.
 
@@ -59,7 +59,7 @@ propagation usually want `1` here; teams that want blast radius readable from ea
 | `propagation.channelDepth` | `0`                                | The channel-axis counterpart: how far a channel travels by default.                                                                                                                                                                                                  |
 | `propagation.kinds`        | all but `devDependencies`          | The dependency edges propagation follows: `dependencies`, `peerDependencies`, `optionalDependencies`, `devDependencies` or `all`.                                                                                                                                    |
 | `propagation.channel`      | `inherit`                          | The default propagated channel value.                                                                                                                                                                                                                                |
-| `limits.unitsPerMessage`   | `64`                               | Most `---`-separated units one commit message may carry. The three `limits.*` keys are always-enforced parser bounds: exceeding one voids the whole message (E158), and a negative value disables that bound (trusted input only).                                    |
+| `limits.unitsPerMessage`   | `64`                               | Most `---`-separated units one commit message may carry. The three `limits.*` keys are always-enforced parser bounds: exceeding one voids the whole message (E158), and a negative value disables that bound (trusted input only).                                   |
 | `limits.scopeTermsPerUnit` | `256`                              | Most scope terms (names, globs, exclusions) one unit's scope-set may carry.                                                                                                                                                                                          |
 | `limits.messageBytes`      | `1048576`                          | Largest commit message parsed, in bytes (1 MiB).                                                                                                                                                                                                                     |
 | `allowedChannels`          | unrestricted                       | Restrict prerelease channel names (E181 outside the list); `stable` is always accepted.                                                                                                                                                                              |

@@ -59,8 +59,8 @@ received. The originating commit's own depth is the only control, so blast radiu
 
 ### Prereleases and channels
 
-A package's channel is derived from its baseline tag alone, with no side file and no
-config. `@beta` on a unit puts its packages on the beta line; `@@`/`++N` propagate a channel to dependants;
+A package's channel is derived from its baseline tag alone, with no side file and no config. `@beta` on a unit puts its
+packages on the beta line; `@@`/`++N` propagate a channel to dependants;
 `@beta>stable` is a transition that graduates whatever still matches. A stable consumer is not dragged into a release by
 a provider's prerelease (it could not resolve it anyway): `feat(core)^@beta` releases `core` alone and reports why; to
 take the consumers along, put them on the line too with `feat(core)^@beta++1`. Trains converge on their own:

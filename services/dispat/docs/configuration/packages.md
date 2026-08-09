@@ -48,14 +48,14 @@ every config map key). An entry plays one of two roles:
 An entry mirrors the [space options](./spaces.md#space-options) minus the space-defining keys, and adds the package-only
 keys:
 
-| Key            | Type            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-|----------------|-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`         | string          | Declares a [standalone package](#standalone-packages-path) at this root-relative folder. Only valid on an entry whose key matches no space folder (a space package's location *is* its folder, so redefining it is rejected), and never valid in an [in-folder file](#in-folder-configuration-files).                                                                                                                                                                                                                                                               |
-| `changelog`    | object          | Overlays the top-level [`changelog`](./records.md#changelog) **field by field** for this package's release records: flip `enabled`, rename the file, retitle a section; unset fields keep the global values.                                                                                                                                                                                                                                                                                                                                                        |
-| `github`       | object          | Overlays the top-level [`github`](./records.md#github) the same way: a package can disable its GitHub releases or target another repository while keeping the global `tokenEnv`. Distinct effective targets each get their own up-front verification.                                                                                                                                                                                                                                                                                                                |
-| `concurrency`  | int or `[b, p]` | The package's *weight*: how many slots of the stage [concurrency budgets](./README.md#top-level-options) its tasks occupy. See [package weights](#package-weights-concurrency) below. |
-| `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `dependencies` | string or array | Provider names this package [depends on](#package-dependencies); the consumer is the package itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Key            | Type            | Effect                                                                                                                                                                                                                                                                                                |
+|----------------|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `path`         | string          | Declares a [standalone package](#standalone-packages-path) at this root-relative folder. Only valid on an entry whose key matches no space folder (a space package's location *is* its folder, so redefining it is rejected), and never valid in an [in-folder file](#in-folder-configuration-files). |
+| `changelog`    | object          | Overlays the top-level [`changelog`](./records.md#changelog) **field by field** for this package's release records: flip `enabled`, rename the file, retitle a section; unset fields keep the global values.                                                                                          |
+| `github`       | object          | Overlays the top-level [`github`](./records.md#github) the same way: a package can disable its GitHub releases or target another repository while keeping the global `tokenEnv`. Distinct effective targets each get their own up-front verification.                                                 |
+| `concurrency`  | int or `[b, p]` | The package's *weight*: how many slots of the stage [concurrency budgets](./README.md#top-level-options) its tasks occupy. See [package weights](#package-weights-concurrency) below.                                                                                                                 |
+| `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                        |
+| `dependencies` | string or array | Provider names this package [depends on](#package-dependencies); the consumer is the package itself.                                                                                                                                                                                                  |
 
 For an entry overriding a space package, a field left unset **inherits** from the space; a field set overrides it. The
 per-field rules follow from what each object means:
@@ -89,8 +89,9 @@ never overtaken by lighter ones that became ready after it.
 ## Standalone packages: `path`
 
 An entry with a `path` is a package **outside every space**: a tools folder next to the workspaces, a deploy bundle at
-the repository top, or anything else that releases like a package but shares no parent folder with one. The path is relative to
-the monorepo root, must stay inside the repository (no absolute paths, no `..`), and must name an existing folder.
+the repository top, or anything else that releases like a package but shares no parent folder with one. The path is
+relative to the monorepo root, must stay inside the repository (no absolute paths, no `..`), and must name an existing
+folder.
 
 A standalone package is a full package in every respect: it plans, versions, builds, publishes, tags and writes records
 exactly like a space package. Its effective configuration is built through the same layers as an override, starting from
@@ -99,7 +100,8 @@ an empty base instead of a space: the entry, then the package's own
 
 - The package is its own single-package space, named after the entry key: its implicit
   [versioning group](./spaces.md#versioning-groups) is its own name, and `versionGroup` joins it to any other group.
-- There is no `flow.login`, because login is a space-level stage. A standalone package that needs authentication puts it in
+- There is no `flow.login`, because login is a space-level stage. A standalone package that needs authentication puts it
+  in
   `flow.beforePublish`.
 - `.dispatignore` does not apply; the entry alone decides that the folder is a package.
 
@@ -125,11 +127,11 @@ always land in the top-level list. Each edited file gets its own `.backup`.
 ## In-folder configuration files
 
 A package folder may carry a dispat config file of its own, under the same names and formats the root config resolves
-through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins). Its top-level object is exactly the
-package entry object above minus `path` (a file cannot move the folder it lives in), and it is the **most local**
+through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins). Its top-level object is exactly
+the package entry object above minus `path` (a file cannot move the folder it lives in), and it is the **most local**
 layer: space config (or the standalone entry's base), then the `packages` entry, then the in-folder file, field by
-field. The same merge rules apply, unknown keys are rejected with the file named, and the file travels with the
-package: a package moved between spaces keeps its exceptions.
+field. The same merge rules apply, unknown keys are rejected with the file named, and the file travels with the package:
+a package moved between spaces keeps its exceptions.
 
 ```json
 // packages/core/dispat.json

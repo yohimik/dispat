@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **94.7%** of the workspace's statements (unit layer alone: 87.9%; the
-integration layer's instrumented binary: 81.3%).
+The whole test suite currently covers **94.7%** of the workspace's statements (unit layer alone: 87.9%; the integration
+layer's instrumented binary: 81.3%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -14,26 +14,26 @@ appear in CI's job summary.
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
 **2026-08-09** with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
-| Module / package                        | Statement coverage                                                                       |
-|-----------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                     | **94.7%**                                                                                |
-| `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
-| `pkg/models` (public config)            | 100%                                                                                     |
-| `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
-| `pkg/scanner` (manifest reader)         | **94.9%**, plus two fuzz targets over every registered parser                            |
-| `pkg/writer` (manifest writer)          | **85.4%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
-| `services/dispat` (all packages)        | **94.5%** aggregate, `main.go` included (the integration suite runs the real binary)     |
-| - `main.go`, `globx`, `model`           | 100%                                                                                     |
-| - `cli` (controller)                    | 99.2%                                                                                    |
-| - `graph` (scheduler)                   | 98.2%                                                                                    |
-| - `changelog`                           | 97.0%                                                                                    |
-| - `plan` (planner)                      | 96.3%                                                                                    |
-| - `release` (executor)                  | 95.1%                                                                                    |
-| - `gitx`                                | 93.8%                                                                                    |
-| - `config`                              | 93.3%                                                                                    |
-| - `github`                              | 93.0%                                                                                    |
-| - `app`                                 | 92.1%                                                                                    |
-| - `script`                              | 92.0%                                                                                    |
+| Module / package                   | Statement coverage                                                                       |
+|------------------------------------|------------------------------------------------------------------------------------------|
+| **workspace total**                | **94.7%**                                                                                |
+| `pkg/ccme` (commit parser)         | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
+| `pkg/models` (public config)       | 100%                                                                                     |
+| `pkg/manifest` (shared vocabulary) | 100%                                                                                     |
+| `pkg/scanner` (manifest reader)    | **94.9%**, plus two fuzz targets over every registered parser                            |
+| `pkg/writer` (manifest writer)     | **85.4%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
+| `services/dispat` (all packages)   | **94.5%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| - `main.go`, `globx`, `model`      | 100%                                                                                     |
+| - `cli` (controller)               | 99.2%                                                                                    |
+| - `graph` (scheduler)              | 98.2%                                                                                    |
+| - `changelog`                      | 97.0%                                                                                    |
+| - `plan` (planner)                 | 96.3%                                                                                    |
+| - `release` (executor)             | 95.1%                                                                                    |
+| - `gitx`                           | 93.8%                                                                                    |
+| - `config`                         | 93.3%                                                                                    |
+| - `github`                         | 93.0%                                                                                    |
+| - `app`                            | 92.1%                                                                                    |
+| - `script`                         | 92.0%                                                                                    |
 
 The per-package test inventory (what each package's suite actually asserts) is in
 [Architecture / Testing](./architecture.md#testing).
@@ -60,8 +60,8 @@ go tool covdata textfmt -i="$DISPAT_COVERDIR" -o="$PWD/cover-integration.out"
 go tool cover -func=coverage.out | tail -n 1   # the workspace total
 ```
 
-Per-package numbers come from filtering the merged profile down to one package's files (keep the mode line) and
-running the same `go tool cover -func | tail -n 1` on the filtered profile.
+Per-package numbers come from filtering the merged profile down to one package's files (keep the mode line) and running
+the same `go tool cover -func | tail -n 1` on the filtered profile.
 
 ## What each layer contributes
 

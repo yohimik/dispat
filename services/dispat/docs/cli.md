@@ -6,24 +6,24 @@ dispat [command] [flags]
 
 ## Commands
 
-| Command                   | Effect                                                                                                              |
-|---------------------------|---------------------------------------------------------------------------------------------------------------------|
-| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.              |
-| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.            |
-| `run <script> [package]`  | Execute a space run script over the changed packages, graph-ordered; see [The run command](#the-run-command).       |
-| `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                    |
-| `test <script> <package>` | Run one top-level script in one package under the release environment; see [The test command](#the-test-command).   |
-| `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                              |
-| `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).          |
+| Command                   | Effect                                                                                                            |
+|---------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.            |
+| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.          |
+| `run <script> [package]`  | Execute a space run script over the changed packages, graph-ordered; see [The run command](#the-run-command).     |
+| `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
+| `test <script> <package>` | Run one top-level script in one package under the release environment; see [The test command](#the-test-command). |
+| `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
+| `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).        |
 
 ## Flags
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--root`              | `.`         | Where to start config resolution, usually where you stand. The *effective* monorepo root is the directory the config file is found in (see `--config`), so the CLI works from inside a package folder. |
-| `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.   |
+| `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.  |
 | `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
-| `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                          |
+| `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
 | `--since`, `-s`       |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
 | `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
 | `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
@@ -48,16 +48,16 @@ Four ways to select what it covers:
 
 - **Default**: the changed packages, the same set a release would process.
 - **A target**: `dispat run <script> <package>` runs in exactly that package, changed or not, with no graph. Naming an
-  unknown package, or one whose space does not define the script, is an error: a targeted run that runs nothing is how
-  a typo hides.
+  unknown package, or one whose space does not define the script, is an error: a targeted run that runs nothing is how a
+  typo hides.
 - **A window**: `--since <rev>` (`-s`) selects the packages the commits in `rev..HEAD` address: `HEAD~1` for the last
-  commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or `all` for
-  every package. Selection follows the planner's [scope semantics](./commits.md#scope-sets): a commit's written scopes
-  are authoritative, and only scopeless units fall back to the files they changed.
-- **Downstream expansion**: `--consumers` additionally selects every package that transitively depends on a selected
-  one (a consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone
-  would not reach. The added packages run whether or not they changed, after their selected providers, with the
-  ordinary `--on-error` cascade.
+  commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or `all` for every
+  package. Selection follows the planner's [scope semantics](./commits.md#scope-sets): a commit's written scopes are
+  authoritative, and only scopeless units fall back to the files they changed.
+- **Downstream expansion**: `--consumers` additionally selects every package that transitively depends on a selected one
+  (a consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone would
+  not reach. The added packages run whether or not they changed, after their selected providers, with the ordinary
+  `--on-error` cascade.
 
 `--since` and `--consumers` are each mutually exclusive with an explicit `[package]`.
 
@@ -69,24 +69,24 @@ every changed package. `--since` and `--consumers` override the folder narrowing
 
 `dispat init` writes a starter config file into `--root` (`dispat.json`, or `dispat.yaml` / `dispat.toml` with
 `--format`) and exits. An existing file is never overwritten; that is an error. So is a `--root` that is not a git
-repository root (no `.git`): the config establishes the effective monorepo root, so it belongs next to `.git`. Needs
-no config file.
+repository root (no `.git`): the config establishes the effective monorepo root, so it belongs next to `.git`. Needs no
+config file.
 
 ## The test command
 
 `dispat test <script> <package>` plans, then runs the named top-level script (a key of `scripts`) once, inside the
 package's folder, with the package's full [`DISPAT_*` environment](./environment.md) (`DISPAT_STAGE` is
 `test:<script>`). Nothing is released, tagged or written; it is a way to try a script under exactly the input a stage
-would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as
-both the old and new version.
+would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as both
+the old and new version.
 
 ## The preview command
 
 `dispat preview [package]` plans, then prints the pending release notes: the breaking-changes/features/fixes sections
 plus provider updates that the next release's changelog entry and GitHub release body would carry. With a package name
-the preview covers that package; without one it covers every package that has something pending, in publish order.
-It follows the [release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only
-its own changeset. Prints `no pending changes` when nothing is.
+the preview covers that package; without one it covers every package that has something pending, in publish order. It
+follows the [release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only its
+own changeset. Prints `no pending changes` when nothing is.
 
 ## The compute command
 

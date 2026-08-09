@@ -55,8 +55,8 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Blast radius written in the commit.** `feat(core):` releases `core` alone; `^` reaches direct consumers, `^^`
   the transitive closure, `+N` exactly N edges. Nothing is released on a guess.
 - **Self-healing runs.** Failures don't stop the world and are never lost: a broken package skips only its true
-  dependants while the rest keeps releasing, and the next run catches the skipped ones up at the exact version they
-  were owed. No state files, no double releases, no repair scripts: re-running *is* the recovery.
+  dependants while the rest keeps releasing, and the next run catches the skipped ones up at the exact version they were
+  owed. No state files, no double releases, no repair scripts: re-running *is* the recovery.
 - **Release control from commits.** `@beta` starts a prerelease train and `@beta>stable` graduates it;
   `Release-As: none` holds a package and `Release-As: auto` resumes it; `Release-As: 2.0.0` pins an exact version and
   `cancel(pkg)` discards pending work. It is all written in commits, so release decisions are reviewed and versioned
@@ -66,9 +66,9 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   release state lives in git tags, so every build system, CI and caching layer works from inside a script unchanged.
   `dispat compute` derives the dependency graph from the packages' own manifests (npm, Go, Cargo, Python, Composer,
   Maven, .NET, Dart), and an `autoVersion` space has dispat rewrite its manifests natively at the version stage.
-- **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an
-  optional release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan,
-  credentials are verified before any work, and nothing is ever published against an unpublished dependency.
+- **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
+  release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
+  verified before any work, and nothing is ever published against an unpublished dependency.
 
 ## Documentation
 

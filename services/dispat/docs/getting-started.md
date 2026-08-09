@@ -1,7 +1,7 @@
 # Getting started
 
-From zero to a releasing monorepo: install the binary, write one config file, name packages in your commits, and
-wire the release into CI.
+From zero to a releasing monorepo: install the binary, write one config file, name packages in your commits, and wire
+the release into CI.
 
 ## Install
 
@@ -35,8 +35,7 @@ for the other formats). No flag is needed afterwards: every command finds the fi
 
 Every direct sub-folder of `packages/libs` is now a package named after its folder (a
 [`.dispatignore`](./configuration/spaces.md#dispatignore) file in the space folder can exempt some). Declare relations
-between packages
-under `dependencies` so bumps propagate and ordering is enforced:
+between packages under `dependencies` so bumps propagate and ordering is enforced:
 
 ```json
 {
@@ -56,8 +55,8 @@ That is a complete, working configuration. Everything else is optional and layer
 - changelogs, GitHub releases, the release commit: [release records](configuration/records.md);
 - commit-message policies and parser tweaks: [parsing options](configuration/parser.md).
 
-[`dispat.example.json`](../dispat.example.json) and [`dispat.example.yaml`](../dispat.example.yaml) show every
-option in one annotated file.
+[`dispat.example.json`](../dispat.example.json) and [`dispat.example.yaml`](../dispat.example.yaml) show every option in
+one annotated file.
 
 ## Commit convention
 
@@ -69,8 +68,8 @@ feat(core): add streaming        # minor, core only
 feat(core)!: drop the old API    # major, core only
 ```
 
-**Reaching consumers is opt-in.** A plain `feat(core):` releases `core` and nothing else. Add a caret to say how far
-the change reaches:
+**Reaching consumers is opt-in.** A plain `feat(core):` releases `core` and nothing else. Add a caret to say how far the
+change reaches:
 
 ```
 feat(core)^: add streaming       # core + its direct consumers
@@ -80,8 +79,8 @@ feat(core)^minor: add streaming  # consumers take minor instead of the default p
 ```
 
 Consumers reached this way take a `patch` unless the commit says otherwise, and their own commits still win if they
-demand more. If you are coming from a tool where propagation was automatic, this is the one habit to change: without
-a caret, dependants are not bumped.
+demand more. If you are coming from a tool where propagation was automatic, this is the one habit to change: without a
+caret, dependants are not bumped.
 
 A few more forms worth knowing early; the full reference is in
 [Commit messages](commits.md):
@@ -173,11 +172,11 @@ Notes:
 - `fetch-depth: 0` matters. The planner reads tags and commit ranges, so it needs full history. A shallow clone is
   detected and refused (error `E196`) rather than silently planned over.
 - By default dispat creates tags locally; push them after a successful run, as above. Alternatively enable the
-  [release commit](configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then
-  creates one commit carrying the changelogs and manifest changes, places the tags on it and pushes everything
+  [release commit](configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then creates
+  one commit carrying the changelogs and manifest changes, places the tags on it and pushes everything
   itself. [GitHub releases](configuration/records.md#github) are created for every published package whose scripts
   exported `DISPAT_EXPORT_GITHUB`, with the export's file paths attached as assets; see
   [script outputs](environment.md#script-outputs) for the export mechanism.
 - Concurrent dispat runs on the same checkout are not guarded by a lock, so serialize release jobs in CI.
-- The exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still
-  released. On pull requests, run `dispat status` to review the plan before it becomes a release.
+- The exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
+  On pull requests, run `dispat status` to review the plan before it becomes a release.

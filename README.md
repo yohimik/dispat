@@ -36,28 +36,28 @@ $ dispat
 - **Polyglot by construction.** Packages are just folders and stages are plain shell commands, so any language, build
   system, registry, CI or cache plugs in with zero integration work. Whatever a stage uses (BuildKit layers, an Nx or
   Bazel cache, a compiler cache) is the stage's business, and none of it can confuse the release computation. The
-  per-[space](./services/dispat/docs/concepts.md) `isBuildWaitingPublish` option states whether a consumer's build
-  needs the provider merely *built* (node) or already *published* (docker), so a four-level npm-to-docker chain
-  schedules correctly out of the box.
+  per-[space](./services/dispat/docs/concepts.md) `isBuildWaitingPublish` option states whether a consumer's build needs
+  the provider merely *built* (node) or already *published* (docker), so a four-level npm-to-docker chain schedules
+  correctly out of the box.
 - **Built around an error model, not a happy path.** A failure never aborts the run: the broken package's consumers are
   skipped (unless they have changes of their own) and every unaffected subgraph keeps releasing. Failed or skipped
   consumers are never lost. The next run catches them up automatically, at the exact version they were originally owed,
   with no state file and no double release. Recovery is just re-running.
 - **The graph can come from the manifests themselves.** `dispat compute` reads the packages' project files
-  (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements
-  files) and derives the consumer/provider graph from them. Suggestions are previewable, confirmable one by one or
-  applied wholesale; `--check` gates CI on a drifted graph, and `keep: true` marks deliberate relations no manifest
-  declares, such as a Docker chain. A space with an `autoVersion` block goes further: dispat rewrites its manifests at
-  the version stage, reconciling declared ranges to end-of-run versions format-preservingly, with `syncLock` scripts
-  (`npm install`) regenerating lock files between version and build.
+  (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements files)
+  and derives the consumer/provider graph from them. Suggestions are previewable, confirmable one by one or applied
+  wholesale; `--check` gates CI on a drifted graph, and `keep: true` marks deliberate relations no manifest declares,
+  such as a Docker chain. A space with an `autoVersion` block goes further: dispat rewrites its manifests at the version
+  stage, reconciling declared ranges to end-of-run versions format-preservingly, with `syncLock` scripts (`npm install`)
+  regenerating lock files between version and build.
 - **A release is treated as what it really is: a distributed transaction.** Publishing a graph of packages means
-  irreversible writes across independent services (an npm registry, a Docker registry, GitHub) with no rollback to
-  fall back on. dispat handles that the way distributed systems do. Each package's leg commits by durably recording
-  its completion: the annotated git tag, written only after the publish succeeded. There are no state files and no
-  registry queries, so nothing can drift from what actually happened. Recovery is deterministic replay: the plan is a
-  pure function of history, graph and configuration, so a re-run recomputes the same transaction and executes only
-  the legs whose record is missing. Completed work is never repeated, owed work is never lost, and the run converges
-  however many times it is interrupted.
+  irreversible writes across independent services (an npm registry, a Docker registry, GitHub) with no rollback to fall
+  back on. dispat handles that the way distributed systems do. Each package's leg commits by durably recording its
+  completion: the annotated git tag, written only after the publish succeeded. There are no state files and no registry
+  queries, so nothing can drift from what actually happened. Recovery is deterministic replay: the plan is a pure
+  function of history, graph and configuration, so a re-run recomputes the same transaction and executes only the legs
+  whose record is missing. Completed work is never repeated, owed work is never lost, and the run converges however many
+  times it is interrupted.
 
 Could you wire the same thing up in a general-purpose task scheduler? With enough YAML and glue, probably. dispat
 deliberately does less: release logic only, meaning build and publish to a registry with versioning, tagging and

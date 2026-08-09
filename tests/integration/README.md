@@ -10,8 +10,8 @@ would, and asserts on the three outputs a release run actually has:
 - **execution timelines**: nanosecond-resolution intervals recorded by the purpose-built `tsmark` probe, wherever
   *timing* rather than mere ordering is the claim.
 
-Configs are authored as typed models from the public [`pkg/models`](../../pkg/models) module and marshalled to JSON,
-so a test that compiles is a test whose config loads.
+Configs are authored as typed models from the public [`pkg/models`](../../pkg/models) module and marshalled to JSON, so
+a test that compiles is a test whose config loads.
 
 The full design (goals, architecture, the coverage matrix per test, flakiness posture and conventions for new tests)
 lives in the **[test plan](./docs/test-plan.md)**.
@@ -40,8 +40,7 @@ go test ./... -count 5           # stability check: repeated runs pass
 
 ## Results
 
-The suite's current status and per-area coverage summary live in **[test results](./docs/test-results.md)**: what
-passes (including `-race` and repeated `-count` runs), what each test file covers, and the planner properties fenced
-by dedicated regression tests. The
-workspace's unit-test statement coverage table lives in
+The suite's current status and per-area coverage summary live in **[test results](./docs/test-results.md)**: what passes
+(including `-race` and repeated `-count` runs), what each test file covers, and the planner properties fenced by
+dedicated regression tests. The workspace's unit-test statement coverage table lives in
 **[unit test coverage](../../services/dispat/docs/coverage.md)**.
