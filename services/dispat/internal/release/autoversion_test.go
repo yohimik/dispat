@@ -458,3 +458,24 @@ func TestAutoVersionUnscheduledEdgeW221(t *testing.T) {
 	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
 	assert.NotContains(t, logBuf.String(), plan.CodeUnscheduledRewriteEdge)
 }
+
+func TestAutoVersionWriteFailureFailsTheVersionStage(t *testing.T) {
+	// A manifest the rewriter cannot replace (its folder refuses the temp
+	// file) fails the version stage, and with it the package: half-synced
+	// manifests must not build.
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true})
+	seedFile(t, root, "core/package.json", `{"name": "core", "version": "1.0.0"}`)
+	p := avPlan(root, space, "core")
+	require.NoError(t, os.Chmod(filepath.Join(root, "core"), 0o555))
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "core"), 0o755) })
+
+	r := &fakeRunner{}
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
+	require.Equal(t, StatusFailed, res["core"].Status)
+	assert.Equal(t, "version", res["core"].FailedStage)
+	assert.Equal(t, 0, r.countPrefix("build"), "a failed version stage stops the package before its build")
+}

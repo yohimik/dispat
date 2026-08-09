@@ -1482,3 +1482,24 @@ func TestRunLaunchOrderDeterministic(t *testing.T) {
 	assert.Equal(t, []string{"build a", "build b", "build c"}, first)
 	assert.Equal(t, first, runOnce(), "identical plans launch identically")
 }
+
+// errTagger refuses every tag.
+type errTagger struct{}
+
+func (errTagger) CreateTag(context.Context, string, string, string) error {
+	return errors.New("tag refused")
+}
+
+func TestTaggingFailureFailsThePackage(t *testing.T) {
+	// The tag is the durable record of the release (§17): failing to write it
+	// fails the package even though the publish script succeeded, so the next
+	// run replays the leg instead of losing it.
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	r := &fakeRunner{}
+	e := newExecutor(execSpec{Runner: r, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	e.Tagger = errTagger{}
+	res := e.Run(context.Background(), p)
+	require.Equal(t, StatusFailed, res["a"].Status)
+	assert.Equal(t, "publish", res["a"].FailedStage)
+	assert.Contains(t, res["a"].Err.Error(), "tag refused")
+}

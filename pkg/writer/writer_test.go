@@ -241,3 +241,34 @@ func TestRewriteGuards(t *testing.T) {
 		t.Errorf("Result.Path = %q, want %q", res.Path, path)
 	}
 }
+
+func TestAtomicWriteErrors(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
+	// A missing target fails at the stat that reads its permissions.
+	if err := atomicWrite(filepath.Join(t.TempDir(), "absent.json"), []byte("{}")); err == nil {
+		t.Error("a missing target must error")
+	}
+	// An unwritable folder fails at the temp-file stage; the target survives
+	// untouched and no temp file is left behind.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "package.json")
+	if err := os.WriteFile(path, []byte(`{"name":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := atomicWrite(path, []byte("{}")); err == nil {
+		t.Error("an unwritable folder must error")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"name":"x"}` {
+		t.Errorf("target modified by a failed write: %s", data)
+	}
+}

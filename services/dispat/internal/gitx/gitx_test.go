@@ -492,3 +492,84 @@ func TestTagNameNormativeForm(t *testing.T) {
 	v.Prerelease = []string{"beta", "4"}
 	assert.Equal(t, "core@1.2.3-beta.4", TagName("core", v))
 }
+
+// bareRepo creates an empty repository with nothing committed.
+func bareRepo(t *testing.T) *CLI {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	cmd := exec.Command("git", "-C", root, "init", "-q")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git init: %s", out)
+	return &CLI{Dir: root}
+}
+
+func TestHeadSHANoCommits(t *testing.T) {
+	cli := bareRepo(t)
+	_, err := cli.HeadSHA(context.Background())
+	require.Error(t, err, "an unborn HEAD has no SHA")
+	assert.Contains(t, err.Error(), "rev-parse")
+}
+
+func TestPushNoRemote(t *testing.T) {
+	_, cli := initRepo(t)
+	_, err := cli.Push(context.Background(), "origin", nil)
+	require.Error(t, err, "pushing without a remote fails loudly")
+}
+
+func TestTagsOutsideRepo(t *testing.T) {
+	cli := &CLI{Dir: t.TempDir()} // not a repository at all
+	_, err := cli.Tags(context.Background(), "core", DefaultTagFormat)
+	require.Error(t, err)
+}
+
+func TestCommitDirsNothingStaged(t *testing.T) {
+	root, cli := initRepo(t)
+	committed, err := cli.CommitDirs(context.Background(),
+		[]string{filepath.Join(root, "packages", "core")}, "chore(release): nothing")
+	require.NoError(t, err)
+	assert.False(t, committed, "a clean folder stages nothing and creates no commit")
+}
+
+func TestRevertDirNoChanges(t *testing.T) {
+	root, cli := initRepo(t)
+	require.NoError(t, cli.RevertDir(context.Background(), filepath.Join(root, "packages", "core")),
+		"reverting a clean folder is a no-op, not an error")
+}
+
+func TestIsShallowStates(t *testing.T) {
+	root, cli := initRepo(t)
+	shallow, err := cli.IsShallow(context.Background())
+	require.NoError(t, err)
+	assert.False(t, shallow, "a full clone is not shallow")
+
+	// A --depth 1 clone of the same repository is.
+	cloneDir := t.TempDir()
+	cmd := exec.Command("git", "clone", "-q", "--depth", "1", "file://"+root, cloneDir)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git clone: %s", out)
+	shallowClone := &CLI{Dir: cloneDir}
+	shallow, err = shallowClone.IsShallow(context.Background())
+	require.NoError(t, err)
+	assert.True(t, shallow)
+}
+
+func TestPathspecInsideAndOutside(t *testing.T) {
+	root, cli := initRepo(t)
+	assert.Equal(t, filepath.Join("packages", "core"),
+		cli.pathspec(filepath.Join(root, "packages", "core")), "inside the repo: relative")
+	assert.Equal(t, ".", cli.pathspec(root), "the root itself")
+	outside := filepath.Dir(root)
+	assert.Equal(t, "..", cli.pathspec(outside), "an expressible outside path stays relative")
+}
+
+func TestGlobAndMatchesUnsplittableFormat(t *testing.T) {
+	f := TagFormat("no placeholders")
+	assert.Equal(t, "core*", f.Glob("core"), "an uncompilable format degrades to a name prefix")
+	assert.False(t, f.Matches("core", "core@1.0.0"))
+	if _, ok := f.ParseVersion("core", "core@1.0.0"); ok {
+		t.Error("an uncompilable format parses nothing")
+	}
+}

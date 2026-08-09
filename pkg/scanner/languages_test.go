@@ -298,3 +298,28 @@ func TestPep508DepForms(t *testing.T) {
 		}
 	}
 }
+
+func TestPubspecOverridesAnnotateExisting(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "pubspec.yaml", `name: acme_app
+dependencies:
+  acme_core: ^1.0.0
+  acme_utils:
+dependency_overrides:
+  acme_core:
+    path: ../core
+  acme_utils:
+    version: ^2.0.0
+`)
+	m := scanOne(t, dir)
+	want := []DeclaredDep{
+		// The override's path annotates the declaration; its declared range
+		// survives because the declaration already had one.
+		{Name: "acme_core", Range: "^1.0.0", Kind: KindDependencies, LocalPath: "../core"},
+		// A rangeless declaration takes the override's version.
+		{Name: "acme_utils", Range: "^2.0.0", Kind: KindDependencies},
+	}
+	if !reflect.DeepEqual(m.Deps, want) {
+		t.Errorf("deps mismatch:\n got %+v\nwant %+v", m.Deps, want)
+	}
+}

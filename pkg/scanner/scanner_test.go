@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -217,5 +218,106 @@ func TestKindString(t *testing.T) {
 	}
 	if KindDevDependencies.String() != "devDependencies" {
 		t.Error("named kinds pass through")
+	}
+}
+
+func TestNameIndex(t *testing.T) {
+	owners := []Owner{
+		{Package: "core", Manifests: []Manifest{
+			{Name: "@acme/core", Root: true},
+			{Name: "nested-example", Root: false},
+		}},
+		{Package: "web", Manifests: []Manifest{
+			{Name: "@acme/web", Root: true},
+			{Name: "", Root: true}, // unnamed manifests bind nothing
+		}},
+		{Package: "clone", Manifests: []Manifest{
+			{Name: "@acme/web", Root: true}, // collides with web at root priority
+		}},
+		{Package: "vendored", Manifests: []Manifest{
+			{Name: "@acme/core", Root: false}, // nested loses to core's root claim
+		}},
+	}
+	names, ambiguous := NameIndex(owners)
+	if got := names["@acme/core"]; got != "core" {
+		t.Errorf("@acme/core -> %q, want core (root binds before nested)", got)
+	}
+	if got := names["nested-example"]; got != "core" {
+		t.Errorf("nested-example -> %q, want core", got)
+	}
+	if _, ok := names["@acme/web"]; ok {
+		t.Error("@acme/web is ambiguous at root priority and must not be mapped")
+	}
+	if !reflect.DeepEqual(ambiguous, []string{"@acme/web"}) {
+		t.Errorf("ambiguous = %v, want [@acme/web]", ambiguous)
+	}
+}
+
+func TestResolveLocalDir(t *testing.T) {
+	root := filepath.FromSlash("/repo")
+	dirs := map[string]string{
+		filepath.Clean(filepath.Join(root, "libs/core")): "core",
+		filepath.Clean(filepath.Join(root, "apps/web")):  "web",
+	}
+	web := filepath.Join(root, "apps/web")
+	for _, tc := range []struct {
+		manifestRel, local, want string
+	}{
+		{"package.json", "../../libs/core", "core"},                    // exact folder
+		{"package.json", "../../libs/core/dist", "core"},               // sub-folder ascends
+		{"nested/inner/package.json", "../../../../libs/core", "core"}, // manifest below the root
+		{"package.json", ".", "web"},                                   // self
+		{"package.json", "../../elsewhere", ""},                        // outside every package
+	} {
+		if got := ResolveLocalDir(dirs, web, tc.manifestRel, tc.local); got != tc.want {
+			t.Errorf("ResolveLocalDir(%q, %q) = %q, want %q", tc.manifestRel, tc.local, got, tc.want)
+		}
+	}
+}
+
+func TestReadManifestErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := readManifest(filepath.Join(dir, "absent.json")); err == nil {
+		t.Error("a missing manifest must error")
+	}
+	big := filepath.Join(dir, "package.json")
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A sparse file over the cap: the size guard must reject it before any
+	// read, so the fixture costs no real disk.
+	if err := f.Truncate(maxManifestBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = readManifest(big)
+	if !errors.Is(err, ErrManifestTooLarge) {
+		t.Errorf("oversized manifest: got %v, want ErrManifestTooLarge", err)
+	}
+}
+
+func TestScanRootErrorPaths(t *testing.T) {
+	if _, err := New().ScanRoot(context.Background(), filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Error("an unreadable folder must error")
+	}
+
+	dir := t.TempDir()
+	write(t, dir, "package.json", `{`)
+	write(t, dir, "pubspec.yaml", "name: ok\n")
+	mans, err := ScanRoot(context.Background(), dir) // package-level convenience
+	if err == nil {
+		t.Error("a malformed manifest must surface in the joined error")
+	}
+	if len(mans) != 1 || mans[0].Name != "ok" {
+		t.Errorf("the parseable manifest is still returned: %+v", mans)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New().ScanRoot(ctx, dir); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled scan: got %v, want context.Canceled", err)
 	}
 }

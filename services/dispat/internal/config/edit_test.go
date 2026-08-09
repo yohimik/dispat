@@ -225,3 +225,29 @@ func TestReplaceDependenciesTOMLRefuses(t *testing.T) {
 	assert.Contains(t, snippet, "kind = 'devDependencies'")
 	assert.Contains(t, snippet, "keep = true")
 }
+
+func TestEditAtomicWriteErrors(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
+	// An unwritable folder fails at the temp-file stage, leaving nothing behind.
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	err := atomicWrite(filepath.Join(dir, "dispat.json"), []byte("{}"), 0o644)
+	require.Error(t, err)
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries, "no temp file survives a failed write")
+
+	// A target that is a folder fails at the rename, and the temp file is
+	// cleaned up.
+	dir2 := t.TempDir()
+	target := filepath.Join(dir2, "dispat.json")
+	require.NoError(t, os.Mkdir(target, 0o755))
+	err = atomicWrite(target, []byte("{}"), 0o644)
+	require.Error(t, err)
+	entries, readErr = os.ReadDir(dir2)
+	require.NoError(t, readErr)
+	assert.Len(t, entries, 1, "only the pre-existing folder remains")
+}

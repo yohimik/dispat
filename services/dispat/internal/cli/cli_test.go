@@ -41,6 +41,16 @@ func TestVersionFlag(t *testing.T) {
 	assert.Equal(t, logo+"\n\ndispat 1.2.3\n", stdout.String())
 }
 
+func TestHelpFlag(t *testing.T) {
+	// --help exits 0 (asking for help is not an error) after the usage text,
+	// and needs no config file or repository.
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--help"}, &stdout, &stderr)
+	assert.Equal(t, 0, code)
+	assert.Contains(t, stderr.String(), "usage: dispat")
+	assert.Contains(t, stderr.String(), "flags:")
+}
+
 func TestUnknownFlagPrintsUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--nope"}, &stdout, &stderr)

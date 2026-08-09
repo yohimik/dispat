@@ -258,3 +258,109 @@ func TestComputeUsesTheConfiguredParser(t *testing.T) {
 		assert.Equal(t, []string{"core"}, p.Releases["app"].DueTo)
 	})
 }
+
+func TestCommitKey(t *testing.T) {
+	assert.Equal(t, "abc123", commitKey(gitx.Commit{SHA: "abc123", Message: "fix: x"}),
+		"the SHA is the identity when present")
+	assert.Equal(t, "msg:fix: x", commitKey(gitx.Commit{Message: "fix: x"}),
+		"SHA-less implementations fall back to the message")
+}
+
+func TestKindSet(t *testing.T) {
+	assert.Nil(t, kindSet(nil), "no list means every kind")
+	assert.Nil(t, kindSet([]ccme.DependencyKind{ccme.KindDependencies, ccme.KindAll}),
+		"'all' anywhere in the list widens to every kind")
+	assert.Equal(t, map[model.DepKind]bool{
+		model.KindDependencies:         true,
+		model.KindDevDependencies:      true,
+		model.KindPeerDependencies:     true,
+		model.KindOptionalDependencies: true,
+	}, kindSet([]ccme.DependencyKind{
+		ccme.KindDependencies, ccme.KindDevDependencies,
+		ccme.KindPeerDependencies, ccme.KindOptionalDependencies,
+	}))
+	assert.Equal(t, map[model.DepKind]bool{model.KindPeerDependencies: true},
+		kindSet([]ccme.DependencyKind{ccme.KindPeerDependencies}))
+}
+
+func TestUnderDir(t *testing.T) {
+	assert.True(t, underDir("r/libs/core/main.go", "r/libs/core"))
+	assert.True(t, underDir("r/libs/core", "r/libs/core"), "the folder itself")
+	assert.True(t, underDir("r/libs/core/x", "r/libs/core/"), "a trailing slash is cleaned")
+	assert.False(t, underDir("r/libs/core-extra/x", "r/libs/core"),
+		"a sibling sharing the prefix is outside")
+	assert.True(t, underDir("anything/at/all", ""), "a root-dir package owns everything")
+	assert.True(t, underDir("anything/at/all", "."), "same for the dot spelling")
+}
+
+func TestBaselineChannel(t *testing.T) {
+	cp := &computation{rel: map[string]*Release{"core": {BaselineChannel: "beta"}}}
+	assert.Equal(t, "beta", cp.baselineChannel("core"))
+	assert.Equal(t, ccme.ChannelStable, cp.baselineChannel("unknown"),
+		"a package outside the plan reads as stable")
+}
+
+func TestAncestryFailed(t *testing.T) {
+	cp := &computation{}
+	assert.NoError(t, cp.ancestryFailed())
+	cp.ancErr = assert.AnError
+	err := cp.ancestryFailed()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ancestry query failed")
+}
+
+func TestResolveChannelValue(t *testing.T) {
+	stable, beta := ccme.ChannelStable, "beta"
+
+	p := resolveChannelValue(ccme.ChannelValue{To: beta}, stable, "", false)
+	assert.Equal(t, beta, p.target, "a plain channel proposes itself")
+
+	p = resolveChannelValue(ccme.ChannelValue{To: beta}, beta, "", false)
+	assert.Empty(t, p.target)
+	assert.Equal(t, CodeChannelRedundant, p.code, "already there proposes nothing")
+
+	p = resolveChannelValue(ccme.ChannelValue{To: stable}, beta, "", false)
+	assert.Empty(t, p.target)
+	assert.Equal(t, CodeChannelNoGraduate, p.code,
+		"a propagated stable never graduates a train by accident")
+
+	p = resolveChannelValue(ccme.ChannelValue{To: stable}, beta, "", true)
+	assert.Equal(t, stable, p.target, "a direct directive does graduate")
+
+	p = resolveChannelValue(ccme.ChannelValue{From: beta, To: stable}, beta, "", false)
+	assert.Equal(t, stable, p.target, "a transition graduates even propagated")
+
+	p = resolveChannelValue(ccme.ChannelValue{From: beta, To: stable}, "rc", "", false)
+	assert.Equal(t, CodeTransitionUnmatched, p.code, "wrong train, no proposal")
+
+	p = resolveChannelValue(ccme.ChannelValue{From: beta, To: beta}, beta, "", false)
+	assert.Equal(t, CodeTransitionInert, p.code)
+
+	p = resolveChannelValue(ccme.ChannelValue{Word: ccme.ChannelInherit}, stable, beta, false)
+	assert.Equal(t, beta, p.target, "inherit resolves to the origin's channel")
+
+	p = resolveChannelValue(ccme.ChannelValue{Word: ccme.ChannelNone}, stable, beta, false)
+	assert.Equal(t, noProposal, p)
+
+	p = resolveChannelValue(ccme.ChannelValue{Word: ccme.ChannelInherit}, stable, "", false)
+	assert.Equal(t, noProposal, p, "inherit with no origin proposes nothing")
+}
+
+func TestOriginChannel(t *testing.T) {
+	cp := &computation{rel: map[string]*Release{
+		"a": {BaselineChannel: "beta"},
+		"b": {BaselineChannel: ccme.ChannelStable},
+	}}
+	rec := &commitRec{key: "k"}
+	u := &ccme.Unit{}
+
+	assert.Equal(t, ccme.ChannelStable, cp.originChannel(u, nil, rec),
+		"no sources reads as stable")
+	assert.Equal(t, "beta", cp.originChannel(u, map[string]bool{"a": true}, rec),
+		"one source: its baseline channel")
+
+	got := cp.originChannel(u, map[string]bool{"a": true, "b": true}, rec)
+	assert.Equal(t, "beta", got, "disagreeing sources resolve to the first by name")
+	require.NotEmpty(t, cp.diags)
+	assert.Equal(t, CodePropagatedChannelConflict, cp.diags[len(cp.diags)-1].Code)
+}
