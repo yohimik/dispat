@@ -106,16 +106,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	if len(pkgs) == 0 {
 		return nil
 	}
-	// commit.include: the shared artifacts regenerated outside every package
-	// folder (a workspace lockfile a syncLock rewrote, say) belong in the same
-	// release commit as the package folders. A configured path that does not
-	// exist is simply not staged — `git add` would refuse an empty pathspec.
-	for _, p := range a.cfg.Commit.Include {
-		full := filepath.Join(a.root, filepath.FromSlash(p))
-		if _, err := os.Stat(full); err == nil {
-			dirs = append(dirs, full)
-		}
-	}
+	dirs = a.appendIncludeDirs(dirs, a.cfg.Commit.Include)
 
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
 	fin.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
@@ -131,7 +122,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	for _, rel := range rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
-		if err := release.CreateReleaseTag(ctx, a.git, rel); err != nil {
+		if err := release.CreateReleaseTag(ctx, a.git, rel, a.log); err != nil {
 			a.log.Error().Err(err).Str("tag", rel.TagName()).Msg("tagging failed")
 			return err
 		}
@@ -175,6 +166,21 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		}
 	}
 	return nil
+}
+
+// appendIncludeDirs appends the commit.include paths onto the staging list:
+// the shared artifacts regenerated outside every package folder (a workspace
+// lockfile a syncLock rewrote, say) belong in the same release commit as the
+// package folders. A configured path that does not exist is simply not
+// staged — `git add` would refuse an empty pathspec.
+func (a *App) appendIncludeDirs(dirs []string, include []string) []string {
+	for _, p := range include {
+		full := filepath.Join(a.root, filepath.FromSlash(p))
+		if _, err := os.Stat(full); err == nil {
+			dirs = append(dirs, full)
+		}
+	}
+	return dirs
 }
 
 // defaultCommitMessageFormat is the release commit's message template when

@@ -228,3 +228,43 @@ func TestRenderSectionsPrereleaseUsesOnlyItsChangeset(t *testing.T) {
 		"a graduation collects every prerelease's changes")
 	assert.Contains(t, sections, "fix new in beta.1")
 }
+
+func TestFileWriterSkipsExistingEntry(t *testing.T) {
+	// The entry-exists check is the idempotence of the whole record path: a
+	// second write of the same tag changes nothing (W222), while a different
+	// tag still prepends above the existing entry.
+	dir := t.TempDir()
+	rel := testRelease(dir, ccme.Version{Major: 1, Minor: 3})
+	w := &FileWriter{Now: func() time.Time { return time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC) }}
+	require.NoError(t, w.Record(context.Background(), rel))
+	first, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+
+	already, err := w.HasEntryFor(rel)
+	require.NoError(t, err)
+	assert.True(t, already)
+	require.NoError(t, w.Record(context.Background(), rel))
+	second, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(second), "a repeated write is byte-identical")
+	assert.Equal(t, 1, strings.Count(string(second), "## core@1.3.0 ("), "exactly one header")
+
+	next := testRelease(dir, ccme.Version{Major: 1, Minor: 4})
+	require.NoError(t, w.Record(context.Background(), next))
+	third, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(third), "## core@1.4.0 ("))
+	assert.Equal(t, 1, strings.Count(string(third), "## core@1.3.0 ("), "the older entry survives below")
+	assert.Less(t, strings.Index(string(third), "core@1.4.0"), strings.Index(string(third), "core@1.3.0"))
+}
+
+func TestHasEntryIsLineAnchored(t *testing.T) {
+	// Quoted or indented header text in a body must not suppress a write, and
+	// a tag that extends another must not match its prefix.
+	body := []byte("# Changelog\n\n## core@1.3.0-beta.1 (2026-08-09)\n\n- see `## core@9.9.9 (` in docs\n  ## core@2.0.0 (indented)\n")
+	assert.True(t, HasEntry(body, "core@1.3.0-beta.1"))
+	assert.False(t, HasEntry(body, "core@1.3.0"), "a prefix of an existing tag does not match")
+	assert.False(t, HasEntry(body, "core@9.9.9"), "mid-line mention does not count")
+	assert.False(t, HasEntry(body, "core@2.0.0"), "indented text does not count")
+	assert.False(t, HasEntry(nil, "core@1.0.0"), "an absent file has no entries")
+}

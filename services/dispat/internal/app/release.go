@@ -231,12 +231,13 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 		return nil, fmt.Errorf("no token found in $%s", tokenEnv)
 	}
 	return &github.Releaser{
-		APIURL: spec.APIURL,
-		Owner:  owner,
-		Repo:   repo,
-		Token:  token,
-		Format: changelog.SpecFormat(spec.Format),
-		Log:    log,
+		APIURL:      spec.APIURL,
+		AllPackages: spec.AllPackages,
+		Owner:       owner,
+		Repo:        repo,
+		Token:       token,
+		Format:      changelog.SpecFormat(spec.Format),
+		Log:         log,
 	}, nil
 }
 

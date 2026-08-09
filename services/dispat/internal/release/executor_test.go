@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -1502,4 +1503,60 @@ func TestTaggingFailureFailsThePackage(t *testing.T) {
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Equal(t, "publish", res["a"].FailedStage)
 	assert.Contains(t, res["a"].Err.Error(), "tag refused")
+}
+
+// inspectingTagger is a Tagger with the tagInspector extension: it reports a
+// preset existing tag and records whether CreateTag was reached.
+type inspectingTagger struct {
+	fakeTagger
+	existing gitx.Tags
+	resolved map[string]string // rev -> sha
+}
+
+func (f *inspectingTagger) Tags(_ context.Context, _ string, _ gitx.TagFormat) (gitx.Tags, error) {
+	return f.existing, nil
+}
+
+func (f *inspectingTagger) ResolveCommit(_ context.Context, rev string) (string, error) {
+	if sha, ok := f.resolved[rev]; ok {
+		return sha, nil
+	}
+	return "", errors.New("unknown rev " + rev)
+}
+
+func TestCreateReleaseTagSkipsIdenticalExistingTag(t *testing.T) {
+	// A flow that tagged early (dispat commit --tag) must not fail the outer
+	// run: the tag at the release's target commit is the durable record the
+	// tagging exists to create, so finding it is a W223 skip.
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	rel := p.Releases["a"]
+	rel.Outputs = []plan.Output{{Name: "PACKAGE_A", Value: "abc123"}}
+	tg := &inspectingTagger{
+		existing: gitx.Tags{{Name: rel.TagName(), Commit: "fullsha"}},
+		resolved: map[string]string{"abc123": "fullsha"},
+	}
+	require.NoError(t, CreateReleaseTag(context.Background(), tg, rel, zerolog.Nop()))
+	assert.Empty(t, tg.tags, "no CreateTag call for an identical existing tag")
+}
+
+func TestCreateReleaseTagRejectsTagAtDifferentCommit(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	rel := p.Releases["a"]
+	tg := &inspectingTagger{
+		existing: gitx.Tags{{Name: rel.TagName(), Commit: "elsewhere"}},
+		resolved: map[string]string{"HEAD": "fullsha"},
+	}
+	err := CreateReleaseTag(context.Background(), tg, rel, zerolog.Nop())
+	require.Error(t, err, "a tag at another commit would corrupt every future baseline")
+	assert.Contains(t, err.Error(), "already exists at")
+	assert.Empty(t, tg.tags)
+}
+
+func TestCreateReleaseTagWithoutInspectorUnchanged(t *testing.T) {
+	// A plain Tagger keeps the strict behaviour: no probe, straight to
+	// CreateTag — the right default for fakes and custom taggers.
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	tg := &fakeTagger{}
+	require.NoError(t, CreateReleaseTag(context.Background(), tg, p.Releases["a"], zerolog.Nop()))
+	assert.Equal(t, []string{"a@1.0.1"}, tg.tags)
 }

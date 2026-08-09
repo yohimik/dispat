@@ -121,6 +121,10 @@ dispat test build core      # run the top-level "build" script once inside packa
 dispat preview              # pending release notes for every package with something pending
 dispat preview core         # print core's pending release notes (breaking changes,
                             # features, fixes): what its next changelog entry would say
+dispat changelog            # write pending changelog entries now (custom flows;
+                            # the release skips entries already written)
+dispat autoversion          # reconcile manifests to the planned versions
+dispat commit --tag --push  # per-package release commit, tag and push
 dispat --concurrency 4,2    # override build/publish parallelism
 dispat run lint --concurrency 8       # dispat run uses the build (first) value as its budget
 dispat --log-format json    # machine-readable logs for CI

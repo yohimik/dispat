@@ -230,17 +230,27 @@ func (c *ChangelogConfig) IsEnabled() bool { return c == nil || c.Enabled == nil
 
 // GitHubConfig customises (or disables) GitHub release creation.
 type GitHubConfig struct {
-	Enabled           *bool  `mapstructure:"enabled" json:"enabled,omitempty"`   // default true
-	Owner             string `mapstructure:"owner" json:"owner,omitempty"`       // default: derived from $GITHUB_REPOSITORY
-	Repo              string `mapstructure:"repo" json:"repo,omitempty"`         // default: derived from $GITHUB_REPOSITORY
-	APIURL            string `mapstructure:"apiUrl" json:"apiUrl,omitempty"`     // default https://api.github.com
-	TokenEnv          string `mapstructure:"tokenEnv" json:"tokenEnv,omitempty"` // env var holding the token, default GITHUB_TOKEN
+	Enabled  *bool  `mapstructure:"enabled" json:"enabled,omitempty"`   // default true
+	Owner    string `mapstructure:"owner" json:"owner,omitempty"`       // default: derived from $GITHUB_REPOSITORY
+	Repo     string `mapstructure:"repo" json:"repo,omitempty"`         // default: derived from $GITHUB_REPOSITORY
+	APIURL   string `mapstructure:"apiUrl" json:"apiUrl,omitempty"`     // default https://api.github.com
+	TokenEnv string `mapstructure:"tokenEnv" json:"tokenEnv,omitempty"` // env var holding the token, default GITHUB_TOKEN
+	// AllPackages creates a GitHub release for every published package, even
+	// when no script exported DISPAT_EXPORT_GITHUB (the export then only adds
+	// assets). Default false: the export stays the per-package opt-in.
+	AllPackages       *bool `mapstructure:"allPackages" json:"allPackages,omitempty"`
 	EntryFormatConfig `mapstructure:",squash"`
 }
 
 // IsEnabled reports whether GitHub releases are created (default true; still
 // requires a resolvable repository and token at runtime). Nil-safe.
 func (c *GitHubConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
+
+// AllPackagesEnabled reports whether every published package gets a GitHub
+// release regardless of the DISPAT_EXPORT_GITHUB export. Nil-safe.
+func (c *GitHubConfig) AllPackagesEnabled() bool {
+	return c != nil && c.AllPackages != nil && *c.AllPackages
+}
 
 // CommitConfig customises the finalize phase: a single release commit created
 // at the end of a successful run, capturing changelog and version-script
@@ -270,6 +280,11 @@ type CommitConfig struct {
 	// must stay inside the repository (no absolute paths, no "..") and may
 	// name files that do not exist yet.
 	Include []string `mapstructure:"include" json:"include,omitempty"`
+	// Name and Email, when set, are the git identity every commit and
+	// annotated tag dispat creates is authored under, so a CI run needs no
+	// `git config` step. Empty values fall back to git's own configuration.
+	Name  string `mapstructure:"name" json:"name,omitempty"`
+	Email string `mapstructure:"email" json:"email,omitempty"`
 }
 
 // IsEnabled reports whether the release commit is created (default false).

@@ -403,3 +403,33 @@ func TestRecordsCommitModeGithubFinalize(t *testing.T) {
 	assert.Equal(t, source, releases[0].TargetCommitish,
 		"the exported hash is the target_commitish even without a push")
 }
+
+// TestRecordsGitHubAllPackages: with github.allPackages, every published
+// package gets a release without exporting DISPAT_EXPORT_GITHUB — the export
+// then only adds assets — while the default keeps the export as the opt-in.
+func TestRecordsGitHubAllPackages(t *testing.T) {
+	type ghRelease struct {
+		TagName string `json:"tag_name"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: buildPublish()}}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core,utils): bootstrap both")
+
+	r.ReleaseOK()
+	releases := decodeAll[ghRelease](t, bodies())
+	require.Len(t, releases, 2, "one release per published package, no export needed")
+	tags := []string{releases[0].TagName, releases[1].TagName}
+	assert.ElementsMatch(t, []string{"core@0.1.0", "utils@0.1.0"}, tags)
+}

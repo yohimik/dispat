@@ -37,7 +37,13 @@ type App struct {
 
 // New assembles an App for one monorepo.
 func New(root string, cfg *config.File, log zerolog.Logger) *App {
-	return &App{root: root, cfg: cfg, log: log, git: &gitx.CLI{Dir: root}, scan: scanner.New()}
+	git := &gitx.CLI{Dir: root}
+	if cfg.Commit != nil {
+		// The configured identity covers every commit and annotated tag the
+		// run creates, so CI needs no `git config` step.
+		git.Name, git.Email = cfg.Commit.Name, cfg.Commit.Email
+	}
+	return &App{root: root, cfg: cfg, log: log, git: git, scan: scanner.New()}
 }
 
 // Status computes the plan and reports it — diagnostics, then the full graph

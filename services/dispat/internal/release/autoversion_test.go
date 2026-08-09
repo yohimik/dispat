@@ -479,3 +479,52 @@ func TestAutoVersionWriteFailureFailsTheVersionStage(t *testing.T) {
 	assert.Equal(t, "version", res["core"].FailedStage)
 	assert.Equal(t, 0, r.countPrefix("build"), "a failed version stage stops the package before its build")
 }
+
+func TestAutoVersionPackagesStandalone(t *testing.T) {
+	// The standalone entry point reconciles exactly like the version stage,
+	// reports what changed, and converges: a second pass rewrites nothing.
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true})
+	seedFile(t, root, "core/package.json", `{"name": "core", "version": "1.0.0"}`)
+	seedFile(t, root, "web/package.json", `{"name": "web", "version": "1.0.0", "dependencies": {"core": "^1.0.0"}}`)
+	p := avPlan(root, space, "core", "web")
+	p.Providers["web"] = []string{"core"}
+
+	changed, err := AutoVersionPackages(context.Background(), p, []string{"core", "web"}, nil, zerolog.Nop(), nil)
+	require.NoError(t, err)
+	assert.True(t, changed["core"], "the own-version write counts as a change")
+	assert.True(t, changed["web"])
+	assert.Contains(t, fileText(t, root, "web/package.json"), `"core": "^1.0.1"`)
+	assert.Contains(t, fileText(t, root, "web/package.json"), `"version": "1.0.1"`)
+
+	changed, err = AutoVersionPackages(context.Background(), p, []string{"core", "web"}, nil, zerolog.Nop(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, changed, "already-reconciled manifests change nothing")
+}
+
+func TestAutoVersionPackagesSkipsSpacesWithoutPolicy(t *testing.T) {
+	root := t.TempDir()
+	space := &model.Space{Name: "libs"} // no autoVersion block
+	seedFile(t, root, "core/package.json", `{"name": "core", "version": "1.0.0"}`)
+	p := avPlan(root, space, "core")
+	changed, err := AutoVersionPackages(context.Background(), p, []string{"core"}, nil, zerolog.Nop(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, changed)
+	assert.Contains(t, fileText(t, root, "core/package.json"), `"version": "1.0.0"`, "untouched")
+}
+
+func TestAutoVersionPackagesPolicyOverride(t *testing.T) {
+	// The policy callback replaces the space's block for the invocation: a
+	// no-block space reconciles under the supplied policy.
+	root := t.TempDir()
+	space := &model.Space{Name: "libs"}
+	seedFile(t, root, "core/package.json", `{"name": "core", "version": "1.0.0"}`)
+	p := avPlan(root, space, "core")
+	policy := func(*plan.Release) *model.AutoVersion {
+		return &model.AutoVersion{Kinds: allKinds(), WriteVersion: true}
+	}
+	changed, err := AutoVersionPackages(context.Background(), p, []string{"core"}, nil, zerolog.Nop(), policy)
+	require.NoError(t, err)
+	assert.True(t, changed["core"])
+	assert.Contains(t, fileText(t, root, "core/package.json"), `"version": "1.0.1"`)
+}

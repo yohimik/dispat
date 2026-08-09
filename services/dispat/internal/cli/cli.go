@@ -30,6 +30,14 @@ const (
 	cmdTest    = "test"    // run one top-level script inside one package
 	cmdPreview = "preview" // print one package's pending release notes
 	cmdCompute = "compute" // derive the dependency graph from manifests
+
+	// The standalone step commands, exposing the release pipeline's native
+	// steps to custom flows. Like every command word (and unlike --version),
+	// each permanently shadows a run script of the same name: `dispat
+	// changelog` is never `dispat run changelog`.
+	cmdChangelog   = "changelog"   // write pending changelog entries now
+	cmdAutoversion = "autoversion" // native manifest reconciliation, plus syncLock
+	cmdCommit      = "commit"      // per-package release commit (--tag, --push)
 )
 
 // Version is the dispat version `--version` reports. The default marks a
@@ -99,6 +107,36 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"compute command: confirm each suggestion before applying it")
 	computeCheck := fs.Bool("check", false,
 		"compute command: report only and exit 1 when suggestions exist (CI gate)")
+	commitTag := fs.Bool("tag", false,
+		"commit command: also create the annotated release tag at the resulting commit; an identical existing tag is skipped")
+	commitPush := fs.Bool("push", false,
+		"commit command: push the branch, and with --tag the tag(s); tags already on the remote are skipped")
+	commitName := fs.String("name", "",
+		"commit command: override the commit.name committer identity")
+	commitEmail := fs.String("email", "",
+		"commit command: override the commit.email committer identity")
+	commitRemote := fs.String("remote", "",
+		"commit command: override the commit.remote push target")
+	commitMessage := fs.String("message-format", "",
+		"commit command: override the commit.messageFormat template ({tags}, {packages})")
+	commitInclude := fs.StringSlice("include", nil,
+		"commit command: override the commit.include extra staged paths")
+	clFile := fs.String("file", "",
+		"changelog command: override the changelog.file name")
+	clTitle := fs.String("title", "",
+		"changelog command: override the changelog.title first line")
+	clDateFormat := fs.String("date-format", "",
+		"changelog command: override the changelog.dateFormat entry date layout")
+	avRange := fs.String("range", "",
+		"autoversion command: override the autoVersion.range write policy")
+	avMatch := fs.StringSlice("match", nil,
+		"autoversion command: override the autoVersion.match range globs")
+	avManifests := fs.String("manifests", "",
+		"autoversion command: override autoVersion.manifests (root or all)")
+	avWriteVersion := fs.Bool("write-version", true,
+		"autoversion command: override autoVersion.writeVersion")
+	avSyncLock := fs.Bool("sync-lock", true,
+		"autoversion command: run the space's syncLock scripts for changed packages")
 	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `%s
@@ -120,6 +158,13 @@ commands:
   preview [package]        print the pending release notes (breaking changes,
                            features, fixes) for one package, or for every
                            package with something pending when none is named
+  changelog [package]      write the pending changelog entry now, so a custom
+                           flow can land it inside the release commit;
+                           already-written entries are skipped
+  autoversion [package]    reconcile manifests to the planned versions (native
+                           auto-versioning) and run syncLock where they changed
+  commit [package]         create the per-package release commit; --tag tags
+                           it, --push pushes the branch and tags
   compute                  scan every package's manifests (package.json, go.mod,
                            Cargo.toml, pyproject.toml, composer.json, pom.xml,
                            *.csproj, pubspec.yaml, requirements*.txt), derive
@@ -239,6 +284,38 @@ flags:
 		default:
 			fmt.Fprintf(stdout, "no pending changes for %s\n", testPkg)
 		}
+	case cmdChangelog:
+		if a.Changelog(ctx, app.ChangelogOptions{Package: testPkg, Dir: *root,
+			File: *clFile, Title: *clTitle, DateFormat: *clDateFormat}) != nil {
+			return 1
+		}
+	case cmdAutoversion:
+		opts := app.AutoVersionOptions{Package: testPkg, Dir: *root,
+			Range: *avRange, Match: *avMatch, SyncLock: *avSyncLock}
+		switch *avManifests {
+		case "":
+		case "all":
+			v := true
+			opts.AllManifests = &v
+		case "root":
+			v := false
+			opts.AllManifests = &v
+		default:
+			bootLog.Error().Str("manifests", *avManifests).Msg("unknown --manifests value (want root or all)")
+			return 2
+		}
+		if fs.Changed("write-version") {
+			opts.WriteVersion = avWriteVersion
+		}
+		if a.AutoVersion(ctx, opts) != nil {
+			return 1
+		}
+	case cmdCommit:
+		if a.Commit(ctx, app.CommitOptions{Package: testPkg, Dir: *root,
+			Tag: *commitTag, Push: *commitPush, Name: *commitName, Email: *commitEmail,
+			Remote: *commitRemote, Message: *commitMessage, Include: *commitInclude}) != nil {
+			return 1
+		}
 	case cmdCompute:
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
 			Write:       *computeWrite,
@@ -305,14 +382,14 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 			return inv, true
 		}
 		inv.script, inv.pkg = rest[1], rest[2]
-	case cmdPreview:
+	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit:
 		if len(rest) > 2 {
-			log.Error().Msg("preview takes at most one argument: the package name")
+			log.Error().Msgf("%s takes at most one argument: the package name", inv.cmd)
 			usage()
 			return inv, true
 		}
 		if len(rest) == 2 {
-			inv.pkg = rest[1] // no argument: preview every package
+			inv.pkg = rest[1] // no argument: cover every releasing package
 		}
 	default:
 		// Not a command name: treat the word as a run script, so

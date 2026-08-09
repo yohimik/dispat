@@ -573,3 +573,34 @@ func TestGlobAndMatchesUnsplittableFormat(t *testing.T) {
 		t.Error("an uncompilable format parses nothing")
 	}
 }
+
+func TestConfiguredCommitterIdentity(t *testing.T) {
+	// The configured identity covers every commit and annotated tag the CLI
+	// creates, without any `git config` in the repository.
+	root, cli := initRepo(t)
+	cli.Name, cli.Email = "release bot", "bot@dispat.test"
+	pkg := filepath.Join(root, "packages", "core")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "new.txt"), []byte("x"), 0o644))
+	committed, err := cli.CommitDirs(context.Background(), []string{pkg}, "chore(release): core 1.0.0")
+	require.NoError(t, err)
+	require.True(t, committed)
+	out, err := cli.run(context.Background(), "log", "-1", "--format=%cn <%ce>")
+	require.NoError(t, err)
+	assert.Equal(t, "release bot <bot@dispat.test>", strings.TrimSpace(out))
+
+	require.NoError(t, cli.CreateTag(context.Background(), "core@1.0.0", "release core@1.0.0", ""))
+	out, err = cli.run(context.Background(), "for-each-ref", "--format=%(taggername) %(taggeremail)", "refs/tags/core@1.0.0")
+	require.NoError(t, err)
+	assert.Equal(t, "release bot <bot@dispat.test>", strings.TrimSpace(out))
+}
+
+func TestResolveCommit(t *testing.T) {
+	_, cli := initRepo(t)
+	full, err := cli.HeadSHA(context.Background())
+	require.NoError(t, err)
+	short, err := cli.ResolveCommit(context.Background(), full[:8])
+	require.NoError(t, err)
+	assert.Equal(t, full, short, "a short SHA peels to the full commit")
+	_, err = cli.ResolveCommit(context.Background(), "doesnotexist")
+	assert.Error(t, err)
+}

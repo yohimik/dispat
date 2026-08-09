@@ -48,8 +48,11 @@ type Releaser struct {
 	Owner  string
 	Repo   string
 	Token  string
-	Format changelog.Format
-	Client *http.Client // default: 30s-timeout client
+	// AllPackages creates a release for every recorded package, even without
+	// the DISPAT_EXPORT_GITHUB export (which then only adds assets).
+	AllPackages bool
+	Format      changelog.Format
+	Client      *http.Client // default: 30s-timeout client
 	// Log carries the skip notices and the invalid-attachment warnings. The
 	// zero value discards them.
 	Log zerolog.Logger
@@ -159,12 +162,13 @@ func (r *Releaser) Verify(ctx context.Context) error {
 }
 
 // Record implements release.ReleaseRecorder. A package whose scripts did not
-// export plan.GitHubExport gets no GitHub release: the export is the opt-in,
-// per package and per run, and its value names the files to attach.
+// export plan.GitHubExport gets no GitHub release unless AllPackages is set:
+// the export is the per-package opt-in, and its value names the files to
+// attach.
 func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	tag := rel.TagName()
 	export, ok := rel.Output(plan.GitHubExport)
-	if !ok {
+	if !ok && !r.AllPackages {
 		r.Log.Info().Str("package", rel.Pkg.Name).Str("tag", tag).
 			Msgf("github release skipped: no script exported %s", plan.GitHubExport)
 		return nil

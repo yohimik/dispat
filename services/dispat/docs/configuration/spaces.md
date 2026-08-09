@@ -244,6 +244,10 @@ scripts:
   npm-install: npm install --package-lock-only
 ```
 
+The same reconciliation is callable outside a release as
+[`dispat autoversion`](../cli.md#the-step-commands), with flags overriding the block's policy for the invocation; a
+custom flow uses it to reconcile at the moment it needs, and the version stage later finds nothing left to rewrite.
+
 Four warnings narrate what the rewrite did that the commit log alone cannot explain. `W192`: the manifest's declared own
 version disagreed with the baseline (tags are authoritative; the computed version is written over it). `W197`: a range
 was caught up to a provider released outside this run (the reconciliation rule's catch-up case). `W203`: a stable
@@ -266,7 +270,9 @@ spaces:
       preview: "echo \"$DISPAT_PACKAGE -> $DISPAT_NEW_VERSION\""
 ```
 
-Unlike the stage entries, the values are **shell commands themselves**, not references into `scripts`. `dispat run
+Unlike the stage entries, the values are **shell commands themselves**, not references into `scripts`. Command names
+are reserved: a run script named after any dispat command (`status`, `commit`, `changelog`, ...) is shadowed by the
+command in the `dispat <name>` shorthand and only reachable as `dispat run <name>`. `dispat run
 <name>` (or the shorthand `dispat <name>`, whenever `<name>` is not a command name) computes the plan and executes the
 named script inside each **changed** package (the packages a release would process), honouring the dependency graph:
 a package's script starts only after every changed provider's finished, and independent packages run concurrently within

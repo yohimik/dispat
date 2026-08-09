@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -55,8 +56,7 @@ func workspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log z
 // version field is updated (§12.4). Runs inside the version stage frame,
 // after beforeVersion and before any flow.version script, and its failure
 // fails the stage.
-func (tc *taskCtx) autoVersion(ctx context.Context) error {
-	av := tc.rel.Pkg.Space.AutoVersion
+func (tc *taskCtx) autoVersion(ctx context.Context, av *model.AutoVersion) error {
 	var (
 		mans []scanner.Manifest
 		err  error
@@ -230,6 +230,45 @@ func (tc *taskCtx) providerVersion(name string) (version string, prerelease, rel
 		return pr.Baseline.String(), len(pr.Baseline.Prerelease) > 0, false
 	}
 	return pr.Current.String(), len(pr.Current.Prerelease) > 0, false
+}
+
+// AutoVersionPackages runs the version stage's native manifest
+// reconciliation for the named packages outside a release run, in the given
+// order. A package whose space does not enable autoVersion is skipped with a
+// debug notice. The returned set records which packages' manifests actually
+// changed — what a caller keys syncLock off, exactly as the executor does.
+//
+// With no run in progress there are no per-package results, so every
+// releasing provider counts as live — the same semantics CommandEnv gives
+// `dispat run` scripts. Reconciliation is naturally idempotent: rewriting
+// already-reconciled manifests yields zero edits. A nil scanner defaults to
+// the filesystem scanner.
+// policy, when non-nil, supplies each target's effective autoVersion block
+// in place of its space's (how the CLI's flag overrides flatten in); a nil
+// return skips the package.
+func AutoVersionPackages(ctx context.Context, p *plan.Plan, pkgs []string, sc scanner.Scanner, log zerolog.Logger, policy func(*plan.Release) *model.AutoVersion) (changed map[string]bool, err error) {
+	if sc == nil {
+		sc = scanner.New()
+	}
+	r := &run{Executor: &Executor{Log: log}, plan: p, scan: sc, avChanged: make(map[string]bool)}
+	r.avNames, r.avDirs = workspaceNames(ctx, sc, p, log)
+	for _, pkg := range pkgs {
+		rel := p.Releases[pkg]
+		av := rel.Pkg.Space.AutoVersion
+		if policy != nil {
+			av = policy(rel)
+		}
+		if av == nil {
+			log.Debug().Str("package", pkg).Msg("space has no autoVersion block, nothing to reconcile")
+			continue
+		}
+		tc := &taskCtx{run: r, t: task{pkg, taskVersion}, rel: rel,
+			log: log.With().Str("package", pkg).Str("stage", "version").Logger()}
+		if err := tc.autoVersion(ctx, av); err != nil {
+			return r.avChanged, fmt.Errorf("%s: %w", pkg, err)
+		}
+	}
+	return r.avChanged, nil
 }
 
 // lastNameSegment is a declared name's final /- or :-separated segment: the

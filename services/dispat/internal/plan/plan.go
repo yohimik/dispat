@@ -175,6 +175,19 @@ const (
 	// still fail. `dispat compute` derives the missing edge.
 	CodeUnscheduledRewriteEdge = "W221"
 
+	// --- standalone step commands and re-runs ---
+
+	// CodeChangelogEntryExists marks a changelog write skipped because the
+	// file already carries the entry for the planned tag: a `dispat
+	// changelog` invocation ran earlier in the flow (or the recorder is
+	// re-running), and writing again would duplicate the entry.
+	CodeChangelogEntryExists = "W222"
+	// CodeTagExists marks a tag creation skipped because the release tag
+	// already exists at the release's target commit: the flow tagged early
+	// (`dispat commit --tag`), and the record the tag exists to be is already
+	// durable. A tag at a different commit stays a hard error.
+	CodeTagExists = "W223"
+
 	// --- release outcomes, repository-scoped (§16) ---
 
 	// CodeBadPrereleaseTag rejects an existing prerelease tag whose counter is

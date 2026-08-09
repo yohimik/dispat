@@ -314,6 +314,9 @@ func overlayGitHub(base, over *GitHubConfig) *GitHubConfig {
 	if over.TokenEnv != "" {
 		out.TokenEnv = over.TokenEnv
 	}
+	if over.AllPackages != nil {
+		out.AllPackages = over.AllPackages
+	}
 	out.EntryFormatConfig = overlayFormat(out.EntryFormatConfig, over.EntryFormatConfig)
 	return &out
 }
@@ -366,12 +369,13 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 		gc = &GitHubConfig{}
 	}
 	return model.GitHubSpec{
-		Enabled:  gc.IsEnabled(),
-		Owner:    gc.Owner,
-		Repo:     gc.Repo,
-		APIURL:   gc.APIURL,
-		TokenEnv: gc.TokenEnv,
-		Format:   recordFormat(gc.EntryFormatConfig),
+		Enabled:     gc.IsEnabled(),
+		AllPackages: gc.AllPackagesEnabled(),
+		Owner:       gc.Owner,
+		Repo:        gc.Repo,
+		APIURL:      gc.APIURL,
+		TokenEnv:    gc.TokenEnv,
+		Format:      recordFormat(gc.EntryFormatConfig),
 	}
 }
 

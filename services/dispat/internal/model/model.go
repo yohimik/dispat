@@ -197,12 +197,15 @@ type ChangelogSpec struct {
 // be empty here: the runtime fallback to $GITHUB_REPOSITORY stays with the
 // releaser resolution, which is where "unresolvable" is an outcome.
 type GitHubSpec struct {
-	Enabled  bool
-	Owner    string
-	Repo     string
-	APIURL   string // empty means the public GitHub API
-	TokenEnv string // empty means GITHUB_TOKEN
-	Format   RecordFormat
+	Enabled bool
+	// AllPackages creates a release for every published package, even without
+	// the DISPAT_EXPORT_GITHUB export (which then only adds assets).
+	AllPackages bool
+	Owner       string
+	Repo        string
+	APIURL      string // empty means the public GitHub API
+	TokenEnv    string // empty means GITHUB_TOKEN
+	Format      RecordFormat
 }
 
 // DepKind is the manifest dependency field a graph edge stands for (§8.4).

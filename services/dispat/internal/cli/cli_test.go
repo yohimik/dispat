@@ -71,6 +71,9 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"status", "extra"},                   // status takes no arguments
 		{"bogus", "extra"},                    // more than one non-command word
 		{"run", "x", "--on-error", "explode"}, // unknown --on-error value
+		{"changelog", "a", "b"},               // step commands take at most one package
+		{"autoversion", "a", "b"},
+		{"commit", "a", "b"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
@@ -145,4 +148,18 @@ func TestNewLoggerFallsBackOnUnknownLevel(t *testing.T) {
 	log.Debug().Msg("hidden")
 	assert.Contains(t, buf.String(), "visible")
 	assert.NotContains(t, buf.String(), "hidden", "the fallback level is info")
+}
+
+func TestStepCommandWordsAreNotRunScripts(t *testing.T) {
+	// The step command words are reserved: `dispat commit` parses as the
+	// commit command (which reaches config loading and fails there in this
+	// bare folder), never as `dispat run commit` (whose two-word spelling
+	// stays available). The bare-word case exiting 1, not 2, is what proves
+	// the word was taken as a command.
+	root := t.TempDir()
+	for _, word := range []string{"changelog", "autoversion", "commit"} {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{word, "--root", root}, &stdout, &stderr)
+		assert.Equal(t, 1, code, "%s must parse as a command, not a run script", word)
+	}
 }

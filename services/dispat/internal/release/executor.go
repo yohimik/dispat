@@ -16,6 +16,7 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/pkg/scanner"
 
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
@@ -585,7 +586,7 @@ func (r *run) execute(ctx context.Context, t task) {
 	case taskVersion:
 		frame = stage{commands: space.VersionScript, before: space.BeforeVersionScript, after: space.PostVersionScript}
 		if space.AutoVersion != nil {
-			frame.native = tc.autoVersion
+			frame.native = func(ctx context.Context) error { return tc.autoVersion(ctx, space.AutoVersion) }
 		}
 	case taskBuild:
 		frame = stage{commands: space.BuildScript, before: space.BeforeBuildScript, after: space.PostBuildScript}
@@ -739,7 +740,7 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error
 		}
 	}
 	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
-		if err := CreateReleaseTag(recCtx, tc.Tagger, rel); err != nil {
+		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.log); err != nil {
 			fail(err, "tagging failed")
 			return
 		}
@@ -773,12 +774,50 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error
 	_ = tc.hook(ctx, "postAnnounce", space.PostAnnounceScript, false)
 }
 
+// tagInspector is the optional Tagger extension the same-commit tag skip
+// needs; *gitx.CLI implements it. A Tagger without it keeps the strict
+// pre-existing-tag-is-an-error behaviour, which is the right default for test
+// doubles and custom taggers.
+type tagInspector interface {
+	Tags(ctx context.Context, pkg string, format gitx.TagFormat) (gitx.Tags, error)
+	ResolveCommit(ctx context.Context, rev string) (string, error)
+}
+
 // CreateReleaseTag creates rel's annotated release tag — the one place the
 // tag message is rendered and the PACKAGE_<KEY> export is honoured, shared by
 // the in-run tagging above and the finalize phase's deferred tagging: an
 // exported commit pins the tag there instead of HEAD (or the release commit).
-func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release) error {
+//
+// A tag that already exists at the release's target commit is a skip (W223),
+// not an error: the flow tagged early — a `dispat commit --tag` inside a
+// stage script — and the durable record the tag exists to be is already
+// there. A tag at any other commit stays a hard error, because a wrong tag
+// silently accepted would corrupt every future baseline.
+func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, log zerolog.Logger) error {
 	tag := rel.TagName()
+	if insp, ok := tagger.(tagInspector); ok {
+		if tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat()); err == nil {
+			for _, t := range tags {
+				if t.Name != tag {
+					continue
+				}
+				target := rel.ExportedCommit()
+				if target == "" {
+					target = "HEAD"
+				}
+				sha, err := insp.ResolveCommit(ctx, target)
+				if err != nil {
+					return fmt.Errorf("tag %s already exists and the release target %q cannot be resolved: %w", tag, target, err)
+				}
+				if sha == t.Commit {
+					log.Warn().Str("code", plan.CodeTagExists).Str("tag", tag).
+						Msg("tag already exists at the release commit, skipped")
+					return nil
+				}
+				return fmt.Errorf("tag %s already exists at %s, not at the release commit %s", tag, t.Commit, sha)
+			}
+		}
+	}
 	return tagger.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit())
 }
 

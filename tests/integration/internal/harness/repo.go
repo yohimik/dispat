@@ -223,6 +223,23 @@ func (r *Repo) requireOK(res RunResult) RunResult {
 	return res
 }
 
+// CommandEnv runs an arbitrary dispat invocation with extra environment
+// pairs appended — how a scenario hands the binary a stage-script
+// environment (DISPAT_OUTPUT and friends) it would otherwise only see inside
+// a release run.
+func (r *Repo) CommandEnv(env []string, args ...string) RunResult {
+	r.T.Helper()
+	return r.runAtEnv(r.Root, env, args...)
+}
+
+// DispatCommand renders a shell command invoking the dispat binary under
+// test with the given arguments — what a scenario writes into a config
+// script slot so a release stage runs a nested dispat command, exactly as a
+// real flow would.
+func (r *Repo) DispatCommand(args ...string) string {
+	return shQuote(r.dispatBin) + " " + strings.Join(args, " ")
+}
+
 // run executes the dispat binary against this repository, always appending
 // --root. It fails the test only when the binary could not be launched at
 // all — a non-zero exit is a normal outcome most scenarios assert on.
@@ -234,11 +251,18 @@ func (r *Repo) run(args ...string) RunResult {
 // runAt is run with an explicit --root value.
 func (r *Repo) runAt(root string, args ...string) RunResult {
 	r.T.Helper()
+	return r.runAtEnv(root, nil, args...)
+}
+
+// runAtEnv is runAt with extra environment pairs appended.
+func (r *Repo) runAtEnv(root string, env []string, args ...string) RunResult {
+	r.T.Helper()
 	full := append(append([]string{}, args...), "--root", root)
 	cmd := exec.Command(r.dispatBin, full...)
+	cmd.Env = append(os.Environ(), env...)
 	if dir := coverDir(); dir != "" {
 		// The instrumented binary (see binary.go) writes its counters here.
-		cmd.Env = append(os.Environ(), "GOCOVERDIR="+dir)
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

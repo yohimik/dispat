@@ -72,8 +72,23 @@ func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 		d.Log.Debug().Str("package", rel.Pkg.Name).Msg("changelog file disabled by config")
 		return nil
 	}
-	w := &FileWriter{File: spec.File, Title: spec.Title, Format: SpecFormat(spec.Format), Now: d.Now}
+	w := &FileWriter{File: spec.File, Title: spec.Title, Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log}
 	return w.Record(ctx, rel)
+}
+
+// HasEntry reports whether content already carries the release entry for tag:
+// a line beginning "## <tag> (". The match is line-anchored so body text that
+// merely quotes a header does not count, and the trailing " (" keeps a tag
+// that is a prefix of another (core@1.2.0 vs core@1.2.0-beta.1) from matching
+// its extension.
+func HasEntry(content []byte, tag string) bool {
+	marker := "## " + tag + " ("
+	for _, line := range strings.Split(string(content), "\n") {
+		if strings.HasPrefix(line, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // RenderSections renders the grouped commit sections of a release (breaking
@@ -143,6 +158,31 @@ type FileWriter struct {
 	Title  string // first line of the file, default "# Changelog"
 	Format Format
 	Now    func() time.Time // injectable clock; defaults to time.Now
+	Log    zerolog.Logger   // carries the entry-exists skip notice; zero value discards
+}
+
+// path resolves the changelog file the writer targets for rel, with the
+// file-name default applied.
+func (w *FileWriter) path(rel *plan.Release) string {
+	file := w.File
+	if file == "" {
+		file = "CHANGELOG.md"
+	}
+	return filepath.Join(rel.Pkg.Dir, file)
+}
+
+// HasEntryFor reports whether the writer's file already carries the entry
+// for rel's planned tag — what Record's own skip checks, exposed so a caller
+// can tell a fresh write from a skip. A missing file has no entries.
+func (w *FileWriter) HasEntryFor(rel *plan.Release) (bool, error) {
+	existing, err := os.ReadFile(w.path(rel))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("changelog: %w", err)
+	}
+	return HasEntry(existing, rel.TagName()), nil
 }
 
 // Record writes the release entry for rel at the top of the package
@@ -152,22 +192,27 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	if w.Now != nil {
 		now = w.Now
 	}
-	file := w.File
-	if file == "" {
-		file = "CHANGELOG.md"
-	}
 	title := w.Title
 	if title == "" {
 		title = "# Changelog"
 	}
 	header := title + "\n"
 
-	path := filepath.Join(rel.Pkg.Dir, file)
+	path := w.path(rel)
 	entry := RenderEntry(rel, now().UTC(), w.Format)
 
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("changelog: %w", err)
+	}
+	if HasEntry(existing, rel.TagName()) {
+		// The entry was written earlier — by a `dispat changelog` step in the
+		// flow, or by a previous run. Writing again would duplicate it, so
+		// this write, wherever it comes from, is a skip.
+		w.Log.Info().Str("code", plan.CodeChangelogEntryExists).
+			Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
+			Msg("changelog entry already exists, skipped")
+		return nil
 	}
 	body := strings.TrimPrefix(string(existing), header)
 	body = strings.TrimLeft(body, "\n")

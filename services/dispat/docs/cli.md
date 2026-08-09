@@ -14,6 +14,9 @@ dispat [command] [flags]
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
 | `test <script> <package>` | Run one top-level script in one package under the release environment; see [The test command](#the-test-command). |
 | `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
+| `changelog [package]`     | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
+| `autoversion [package]`   | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
+| `commit [package]`        | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).        |
 
 ## Flags
@@ -32,6 +35,15 @@ dispat [command] [flags]
 | `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                    |
 | `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                    |
 | `--check`             |             | `compute` only: report only and exit `1` when suggestions exist: the CI gate for a config lagging the manifests. Overrides both apply modes.                                                           |
+| `--tag`               |             | `commit` only: also create the annotated release tag at the resulting commit; an identical existing tag is skipped.        |
+| `--push`              |             | `commit` only: push the branch, and with `--tag` the tags; tags already on the remote are skipped.                         |
+| `--name`, `--email`   | from config | `commit` only: override the `commit.name` / `commit.email` committer identity.                                             |
+| `--remote`            | from config | `commit` only: override the `commit.remote` push target.                                                                   |
+| `--message-format`    | from config | `commit` only: override the `commit.messageFormat` template.                                                               |
+| `--include`           | from config | `commit` only: override the `commit.include` extra staged paths.                                                           |
+| `--file`, `--title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation.          |
+| `--range`, `--match`, `--manifests`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation.     |
+| `--sync-lock`         | `true`      | `autoversion` only: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them.         |
 | `--version`           |             | Print the dispat logo and version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                        |
 | `--help`              |             | Print the logo and usage.                                                                                                                                                                              |
 
@@ -87,6 +99,39 @@ plus provider updates that the next release's changelog entry and GitHub release
 the preview covers that package; without one it covers every package that has something pending, in publish order. It
 follows the [release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only its
 own changeset. Prints `no pending changes` when nothing is.
+
+## The step commands
+
+`dispat changelog`, `dispat autoversion` and `dispat commit` expose the release pipeline's native steps to custom
+flows: a stage script can run a step at the moment the flow needs it, and the release stage later finds the work done
+and skips it. All three share the run command's selection: an explicit `[package]` targets one package (an unknown
+name is an error; a package that is not releasing is a logged no-op, so a flow never fails over a converged or held
+package); invoked from inside a package folder, the command narrows to that package; from the monorepo root it covers
+every releasing package in dependency order. The three command words are reserved: like every command name, each
+shadows a [run script](./configuration/spaces.md#runscripts-and-dispat-run) of the same name, so `dispat commit` is
+never `dispat run commit`.
+
+Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
+[flags table](#flags).
+
+**`dispat changelog [package]`** writes each covered package's pending changelog entry, exactly what the release
+stage's recorder would write. An entry that already exists in the file is a skip (`W222`), and the same check makes
+the release stage skip entries this command already wrote. That is the point of running it early: a changelog written
+in a `beforePublish` script, before `dispat commit`, lands inside the tagged commit.
+
+**`dispat autoversion [package]`** runs the native manifest reconciliation of the version stage: declared workspace
+ranges rewritten to the planned versions, own versions updated, and the space's `syncLock` scripts run for each
+package whose manifests actually changed. Rewriting already-reconciled manifests changes nothing, so re-running is
+safe. A space without an `autoVersion` block is skipped unless a policy flag forces one, which then starts from the
+defaults.
+
+**`dispat commit [package]`** creates each covered package's release commit: the package folder staged together with
+the `commit.include` paths, the message rendered from `commit.messageFormat` with that one package's name and tag.
+A package with nothing to stage is a clean no-op. With `--tag`, the annotated release tag is created at the resulting
+commit; a tag that already exists there is a skip (`W223`), while a tag at any other commit is an error. With
+`--push`, the branch is pushed once after all packages, and with `--tag` the tags too, skipping any already on the
+remote. When the command runs inside a release stage script (the environment carries `DISPAT_OUTPUT`), each package's
+commit is exported as `PACKAGE_<KEY>`, pinning the outer run's tag and GitHub release to it.
 
 ## The compute command
 

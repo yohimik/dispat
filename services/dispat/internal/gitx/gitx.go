@@ -356,12 +356,25 @@ func (NoAncestry) IsAncestor(context.Context, string, string) (bool, error) {
 // CLI is the Git implementation backed by the git executable.
 type CLI struct {
 	Dir string // repository root
+	// Name and Email, when set, are the identity every commit and annotated
+	// tag is created under (passed as `-c user.name/-c user.email`), so a CI
+	// run needs no `git config` step. Empty fields fall back to git's own
+	// configuration.
+	Name  string
+	Email string
 }
 
 var _ Git = (*CLI)(nil)
 
 func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", c.Dir}, args...)...)
+	base := []string{"-C", c.Dir}
+	if c.Name != "" {
+		base = append(base, "-c", "user.name="+c.Name)
+	}
+	if c.Email != "" {
+		base = append(base, "-c", "user.email="+c.Email)
+	}
+	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
@@ -593,7 +606,13 @@ func (c *CLI) CommitDirs(ctx context.Context, dirs []string, message string) (bo
 
 // HeadSHA returns the full SHA of the current HEAD commit.
 func (c *CLI) HeadSHA(ctx context.Context) (string, error) {
-	out, err := c.run(ctx, "rev-parse", "HEAD")
+	return c.ResolveCommit(ctx, "HEAD")
+}
+
+// ResolveCommit resolves any commit-ish (a short SHA, a ref, HEAD) to its
+// full commit SHA, peeling tags on the way.
+func (c *CLI) ResolveCommit(ctx context.Context, rev string) (string, error) {
+	out, err := c.run(ctx, "rev-parse", rev+"^{commit}")
 	if err != nil {
 		return "", err
 	}
