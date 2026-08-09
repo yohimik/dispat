@@ -120,7 +120,9 @@ Acting on the provider does nothing: its version is already public, and cancella
 
 **Per released package**, up to four stages, each optional to script:
 
-1. **version**: only when the package is bumped due to provider updates; runs right before the build. With
+1. **version**: when the package is bumped due to provider updates, and for every releasing package of a space with
+   [`autoVersion`](./configuration/spaces.md#autoversion) (native reconciliation checks the baselines too); runs right
+   before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with
    `false` it waits for the provider's *build* only.
 2. **build**: the package's build command. Like every script it may export outputs by appending

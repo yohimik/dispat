@@ -6,36 +6,87 @@ dispat [command] [flags]
 
 ## Commands
 
-| Command                   | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `run <script> [package]`  | Plan, then execute the named [space run script](./configuration/spaces.md#runscripts-and-dispat-run) inside each changed package, honouring the dependency graph. With `[package]` the run narrows to exactly that package (changed or not; the graph plays no part), and naming an unknown package, or one whose space does not define the script, is an error. Nothing is released or tagged. `dispat <script>` is a shorthand when `<script>` is not a command name; it takes no package argument (but accepts `--since`), but invoked from inside a package folder (or any subdirectory of it) it narrows to that package, while from the monorepo top it covers every changed package. |
-| `init`                    | Write a starter config file into `--root` (`dispat.json`, or `dispat.yaml` / `dispat.toml` with `--format`) and exit. An existing file is never overwritten; that is an error, as is a `--root` that is not a git repository root (no `.git`): the config establishes the effective monorepo root, so it belongs next to `.git`. Needs no config file.                                                                                                                                                                                                                                                                                                                                      |
-| `test <script> <package>` | Plan, then run the named **top-level** script (a key of `scripts`) once, inside the package's folder, with the package's full [`DISPAT_*` environment](./environment.md) (`DISPAT_STAGE` is `test:<script>`). Nothing is released, tagged or written; it is a way to try a script under exactly the input a stage would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as both the old and new version.                                                                                                                                                                                                                          |
-| `preview [package]`       | Plan, then print pending release notes (the breaking-changes/features/fixes sections plus provider updates the next release's changelog entry and GitHub release body would carry) and exit. With a package name the preview covers that package; without one it covers every package that has something pending, in publish order. Follows the [release-notes windowing](./configuration/records.md#changelog): a pending prerelease previews only its own changeset. Prints `no pending changes` when nothing is.                                                                                                                                                                         |
-| `compute`                 | Derive the dependency graph from the packages' own manifests and diff it against the config's `dependencies` list. By default the suggestions are only printed; `--write` applies them, `--interactive` confirms each, `--check` gates CI. Needs no git history. The full behaviour is described under [The compute command](#the-compute-command) below.                                                                                                                                                                                                                                                                                                                                   |
+| Command                   | Effect                                                                                                              |
+|---------------------------|---------------------------------------------------------------------------------------------------------------------|
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.              |
+| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.            |
+| `run <script> [package]`  | Execute a space run script over the changed packages, graph-ordered; see [The run command](#the-run-command).       |
+| `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                    |
+| `test <script> <package>` | Run one top-level script in one package under the release environment; see [The test command](#the-test-command).   |
+| `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                              |
+| `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).          |
 
 ## Flags
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-|-----------------------|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--root`              | `.`         | Where to start config resolution, usually where you stand. The *effective* monorepo root is the directory the config file is found in (see `--config`), so the CLI works from inside a package folder.                                                                                                                                                                                                                                                                                                                                 |
-| `--config`            | auto        | Config file name, relative to `--root`. When not set, the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in `--root` is used, or, failing that, the first found in any parent directory up to the filesystem root — a found file only stops the ascent when it declares `spaces` or `packages`, so a package's own [in-folder override file](./configuration/packages.md#in-folder-configuration-files) never masquerades as the root config; an explicit name is used as-is (no fallback, no ascent). |
-| `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents. `skip` them (transitively) or `continue` running them. Either way the command exits `1` on any failure.                                                                                                                                                                                                                                                                                                                                                     |
-| `--since`, `-s`       |             | `run` only: select the packages **the commits since a git revision address** instead of the release window: `HEAD~1` (the last commit), `origin/main` (this branch's own commits), a release tag, or `all` for every package. Selection follows the planner's scope semantics: a commit's written scopes are authoritative, and only scopeless units fall back to the files they changed (§6.2). Graph ordering and output carrying still apply; mutually exclusive with an explicit `[package]`.                                      |
-| `--consumers`         |             | `run` only: additionally run every package that **transitively depends** on a selected one — a consumer pulled in brings its own consumers — so downstream packages are re-run with the change a window alone would not reach. The added packages run whether or not they changed, after their selected providers, with the ordinary `--on-error` cascade. Mutually exclusive with an explicit `[package]`; overrides the folder shorthand's narrowing like `--since` does.                                                            |
-| `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `--log-format`        | from config | Override: `pretty` or `json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `--format`            | `json`      | `init` only: the config file format to write (`json`, `yaml` or `toml`).                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `--check`             |             | `compute` only: report only and exit `1` when suggestions exist: the CI gate for a config lagging the manifests. Overrides both apply modes.                                                                                                                                                                                                                                                                                                                                                                                           |
-| `--version`           |             | Print the dispat logo and version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                                                                                                                                                                                                                                                                                                                                                        |
-| `--help`              |             | Print the logo and usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Flag                  | Default     | Effect                                                                                                                                                                                                 |
+|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--root`              | `.`         | Where to start config resolution, usually where you stand. The *effective* monorepo root is the directory the config file is found in (see `--config`), so the CLI works from inside a package folder. |
+| `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.   |
+| `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
+| `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                          |
+| `--since`, `-s`       |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
+| `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
+| `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
+| `--log-format`        | from config | Override: `pretty` or `json`.                                                                                                                                                                          |
+| `--format`            | `json`      | `init` only: the config file format to write (`json`, `yaml` or `toml`).                                                                                                                               |
+| `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                    |
+| `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                    |
+| `--check`             |             | `compute` only: report only and exit `1` when suggestions exist: the CI gate for a config lagging the manifests. Overrides both apply modes.                                                           |
+| `--version`           |             | Print the dispat logo and version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                        |
+| `--help`              |             | Print the logo and usage.                                                                                                                                                                              |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
+
+## The run command
+
+`dispat run <script>` plans, then executes the named
+[space run script](./configuration/spaces.md#runscripts-and-dispat-run) inside each changed package, honouring the
+dependency graph. Nothing is released or tagged. A failing script's dependents are skipped or kept running per
+`--on-error`.
+
+Four ways to select what it covers:
+
+- **Default**: the changed packages, the same set a release would process.
+- **A target**: `dispat run <script> <package>` runs in exactly that package, changed or not, with no graph. Naming an
+  unknown package, or one whose space does not define the script, is an error: a targeted run that runs nothing is how
+  a typo hides.
+- **A window**: `--since <rev>` (`-s`) selects the packages the commits in `rev..HEAD` address: `HEAD~1` for the last
+  commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or `all` for
+  every package. Selection follows the planner's [scope semantics](./commits.md#scope-sets): a commit's written scopes
+  are authoritative, and only scopeless units fall back to the files they changed.
+- **Downstream expansion**: `--consumers` additionally selects every package that transitively depends on a selected
+  one (a consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone
+  would not reach. The added packages run whether or not they changed, after their selected providers, with the
+  ordinary `--on-error` cascade.
+
+`--since` and `--consumers` are each mutually exclusive with an explicit `[package]`.
+
+`dispat <script>` is a shorthand whenever `<script>` is not a command name. It takes no package argument, but invoked
+from inside a package folder (or any subdirectory of it) it narrows to that package; from the monorepo top it covers
+every changed package. `--since` and `--consumers` override the folder narrowing: an explicit flag beats inference.
+
+## The init command
+
+`dispat init` writes a starter config file into `--root` (`dispat.json`, or `dispat.yaml` / `dispat.toml` with
+`--format`) and exits. An existing file is never overwritten; that is an error. So is a `--root` that is not a git
+repository root (no `.git`): the config establishes the effective monorepo root, so it belongs next to `.git`. Needs
+no config file.
+
+## The test command
+
+`dispat test <script> <package>` plans, then runs the named top-level script (a key of `scripts`) once, inside the
+package's folder, with the package's full [`DISPAT_*` environment](./environment.md) (`DISPAT_STAGE` is
+`test:<script>`). Nothing is released, tagged or written; it is a way to try a script under exactly the input a stage
+would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as
+both the old and new version.
+
+## The preview command
+
+`dispat preview [package]` plans, then prints the pending release notes: the breaking-changes/features/fixes sections
+plus provider updates that the next release's changelog entry and GitHub release body would carry. With a package name
+the preview covers that package; without one it covers every package that has something pending, in publish order.
+It follows the [release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only
+its own changeset. Prints `no pending changes` when nothing is.
 
 ## The compute command
 
@@ -43,7 +94,8 @@ Flag precedence (via viper): explicitly set flag > config file > flag default > 
 declared edges, so the graph does not have to be maintained by hand. It diffs the manifests against the **merged**
 declaration list: the top-level `dependencies` key plus every
 [package-declared list](./configuration/packages.md#package-dependencies) (a `packages` entry's or an in-folder config
-file's).
+file's). By default the suggestions are only printed; `--write` applies them, `--interactive` confirms each, `--check`
+gates CI. Needs no git history.
 
 **What it reads.** Every package folder is scanned for manifests: `package.json`, `go.mod`, `Cargo.toml`,
 `pyproject.toml` (PEP 621 and Poetry), `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml` and
@@ -69,8 +121,8 @@ listing says which file an applied change would touch.
 
 **How changes are applied.** Nothing is written by default. `--write` applies every suggestion, `--interactive` asks
 `y`/`N` per suggestion on stdin. Each change is applied to the file that holds the declaration: additions append to the
-root config's top-level `dependencies` list, a removal edits the declaring source — the root list, the
-`packages.<name>.dependencies` entry, or the package's own in-folder config file — and a kind correction on a
+root config's top-level `dependencies` list, a removal edits the declaring source (the root list, the
+`packages.<name>.dependencies` entry, or the package's own in-folder config file), and a kind correction on a
 package-declared edge moves it to the root list (the provider-string form cannot carry a kind). Every edited file is
 first copied to `<name>.backup` (untracked files worth a `.gitignore` entry; overwritten on every applying run), and
 each write is atomic. A TOML file is not rewritten in place: `--write` prints a paste-ready block for it and fails

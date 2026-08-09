@@ -1,5 +1,8 @@
 # Architecture
 
+`§N.N` references throughout this page point into the conventional-commits specification the parser implements,
+[`pkg/ccme/SPEC.md`](../../../pkg/ccme/SPEC.md).
+
 ## Runtime steps
 
 Steps 1-2 are the command-line controller (`internal/cli`, behind the thin `main.go` of the dispat binary); everything
@@ -57,8 +60,10 @@ callable without a command line.
 
 ## Planning
 
-The planner is a pure function of (history, graph, configuration). It never consults wall-clock time, tag creation dates
-or the outcome of any previous run, which is what makes re-running after a partial publish deterministic.
+The planner is a pure function of (history, graph, configuration). It never consults wall-clock time or the outcome of
+any previous run, which is what makes re-running after a partial publish deterministic. The one date-derived input is
+git's newest-first tag ordering (which tag counts as a package's latest), and that is itself a fixed property of the
+repository, the same on every re-run.
 
 **Windows.** Every question of the form "does this commit still count?" is answered against a *pending window*: the
 commits from a package's last **stable** tag to `HEAD`. Which package's window is consulted depends on the purpose, and
