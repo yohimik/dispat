@@ -1,5 +1,12 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.3 (2026-08-09)
+
+### Fixes
+
+- load ancestry dag once, parallel tag reads
+
+
 ## services/dispat/v1.0.0-rc.2 (2026-08-09)
 
 ### Breaking Changes
