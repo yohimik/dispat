@@ -1,10 +1,11 @@
 name: Release
 
-# Trigger only when a tag matching v* is pushed (e.g. v1.0.0, v1.2.3)
+# Trigger only when a release tag of the CLI is pushed: dispat's own tag
+# format, "services/dispat@<version>" (e.g. services/dispat@1.0.0-rc.0).
 on:
   push:
     tags:
-      - 'v*'
+      - 'services/dispat@*'
 
 permissions:
   contents: write
@@ -70,16 +71,17 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-          # The version baked into `dispat --version`: the release tag without
-          # its v prefix (v1.2.3 -> 1.2.3). Local builds default to "dev".
-          DISPAT_VERSION: ${{ github.ref_name }}
         run: |
+          # The version baked into `dispat --version`: the tag's version
+          # section (services/dispat@1.0.0-rc.0 -> 1.0.0-rc.0). Local builds
+          # default to "dev".
+          VERSION="${GITHUB_REF_NAME#*@}"
           mkdir -p dist
           OUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
           go build -C services/dispat -trimpath \
-            -ldflags="-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${DISPAT_VERSION#v}" \
+            -ldflags="-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${VERSION}" \
             -o "${PWD}/dist/${OUT_NAME}" .
-          echo "Built dist/${OUT_NAME} (version ${DISPAT_VERSION#v})"
+          echo "Built dist/${OUT_NAME} (version ${VERSION})"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -102,11 +104,17 @@ jobs:
       - name: List collected binaries
         run: ls -lh dist
 
+      - name: Resolve the version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#*@}" >> "$GITHUB_ENV"
+
       - name: Create release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          name: dispat ${{ env.VERSION }}
+          # A version with a prerelease section (1.0.0-rc.0) is marked as a
+          # GitHub prerelease, keeping it off the "latest" badge.
+          prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
           files: dist/*
         env:

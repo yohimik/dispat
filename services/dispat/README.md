@@ -8,7 +8,7 @@ What the tool is and why it exists is in the [repository README](../../README.md
 Point one config file at your packages, write commits as usual, and dispat works out the rest:
 
 ```sh
-$ go install github.com/yohimik/dispat@latest
+$ go install github.com/yohimik/dispat/services/dispat@latest
 $ dispat init                       # starter dispat.json (--format yaml/toml)
 
 $ git log --oneline -2

@@ -5,9 +5,15 @@ the release into CI.
 
 ## Install
 
+The CLI lives in the `services/dispat` module of the repository (the binary installs as `dispat`):
+
 ```sh
-go install github.com/yohimik/dispat@latest
+go install github.com/yohimik/dispat/services/dispat@latest
 ```
+
+Prebuilt binaries for Linux, macOS and Windows are attached to every
+[GitHub release](https://github.com/yohimik/dispat/releases); download one and put it on your `PATH` if you prefer not
+to build from source.
 
 ## First configuration
 
