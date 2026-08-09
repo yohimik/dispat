@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/yohimik/dispat/pkg/ccme"
 
@@ -1067,13 +1068,38 @@ func (cp *computation) loadTagsAndWindows() error {
 	// Per-package commit lists, kept so the union can be ranked afterwards.
 	lists := make([][]gitx.Commit, 0, len(cp.pkgs))
 
-	for _, p := range cp.pkgs {
+	// The tag queries are independent per-package git reads, so they are
+	// fetched concurrently (bounded, for monorepos with hundreds of
+	// packages) and then assembled strictly in package order below — the
+	// diagnostics, windows and union ranking stay deterministic because
+	// nothing after this block runs concurrently.
+	tagsFor := make([]gitx.Tags, len(cp.pkgs))
+	tagsErr := make([]error, len(cp.pkgs))
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for i, p := range cp.pkgs {
+		wg.Add(1)
+		go func(i int, p *model.Package) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			tagsFor[i], tagsErr[i] = cp.git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
+		}(i, p)
+	}
+	wg.Wait()
+
+	// Windows are one `git log` per DISTINCT starting tag: packages that
+	// share a window origin (every never-stably-released package shares the
+	// whole history) share the listing instead of re-reading it.
+	commitsBySince := make(map[string][]gitx.Commit)
+
+	for i, p := range cp.pkgs {
 		rel := &Release{Pkg: p}
 
 		// One tag query per package. Both baselines of §12.3 are selections
 		// over the same list, so asking for them separately would double the
 		// tag work for an answer that comes from identical output.
-		tags, err := cp.git.Tags(cp.ctx, p.Name, rel.TagFormat())
+		tags, err := tagsFor[i], tagsErr[i]
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
 		}
@@ -1129,9 +1155,13 @@ func (cp *computation) loadTagsAndWindows() error {
 		}
 		cp.rel[p.Name] = rel
 
-		commits, err := cp.git.Commits(cp.ctx, since)
-		if err != nil {
-			return fmt.Errorf("plan: %s: %w", p.Name, err)
+		commits, ok := commitsBySince[since]
+		if !ok {
+			commits, err = cp.git.Commits(cp.ctx, since)
+			if err != nil {
+				return fmt.Errorf("plan: %s: %w", p.Name, err)
+			}
+			commitsBySince[since] = commits
 		}
 		w := make(map[string]bool, len(commits))
 		for _, c := range commits {

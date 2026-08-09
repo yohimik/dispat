@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -317,7 +318,9 @@ func (t Tags) highest(keep func(Tag) bool) (Tag, bool) {
 type Git interface {
 	// Tags returns every reachable tag of the package under format, newest
 	// first by creation date. Callers select a baseline from it with
-	// Tags.Baseline or Tags.StableBaseline.
+	// Tags.Baseline or Tags.StableBaseline. The planner calls it for many
+	// packages concurrently, so implementations must be safe for concurrent
+	// use.
 	Tags(ctx context.Context, pkg string, format TagFormat) (Tags, error)
 	// Commits lists commit messages lines reachable from HEAD, newest first.
 	// When sinceTag is non-empty only commits after that tag are listed;
@@ -362,6 +365,14 @@ type CLI struct {
 	// configuration.
 	Name  string
 	Email string
+
+	// The ancestry DAG, loaded lazily by the first IsAncestor and shared by
+	// every later one. Loaded once per CLI value: a release run creates
+	// commits after planning, but planning's ancestry questions are all
+	// asked against the history that existed when it started.
+	dagOnce sync.Once
+	dag     map[string][]string
+	dagErr  error
 }
 
 var _ Git = (*CLI)(nil)
@@ -455,6 +466,69 @@ func (c *CLI) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 	if a == b {
 		return true, nil
 	}
+	// One `git rev-list --parents HEAD` loads the whole reachable DAG, after
+	// which every ancestry question is an in-process walk. Planning asks this
+	// question hundreds of times per run (baseline containment, cancels,
+	// train windows), and paying a git process per question was the single
+	// largest cost of `dispat status`.
+	parents, err := c.commitDAG(ctx)
+	if err != nil {
+		return false, err
+	}
+	pa, pb := parents[a], parents[b]
+	if pa != nil && pb != nil {
+		return dagIsAncestor(parents, a, b), nil
+	}
+	// A commit outside HEAD's ancestry (or an abbreviated SHA): answer the
+	// one question authoritatively instead of guessing from a partial graph.
+	return c.mergeBaseIsAncestor(ctx, a, b)
+}
+
+// commitDAG returns the parent pointers of every commit reachable from HEAD,
+// loaded once per CLI and reused for every ancestry question.
+func (c *CLI) commitDAG(ctx context.Context) (map[string][]string, error) {
+	c.dagOnce.Do(func() {
+		out, err := c.run(ctx, "rev-list", "--parents", "HEAD")
+		if err != nil {
+			c.dagErr = err
+			return
+		}
+		dag := make(map[string][]string)
+		for line := range strings.Lines(out) {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			dag[fields[0]] = fields[1:]
+		}
+		c.dag = dag
+	})
+	return c.dag, c.dagErr
+}
+
+// dagIsAncestor walks b's ancestry looking for a. The DAG is the repository's
+// own history, so a plain iterative DFS with a seen-set is enough.
+func dagIsAncestor(parents map[string][]string, a, b string) bool {
+	seen := make(map[string]bool)
+	stack := []string{b}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if cur == a {
+			return true
+		}
+		if seen[cur] {
+			continue
+		}
+		seen[cur] = true
+		stack = append(stack, parents[cur]...)
+	}
+	return false
+}
+
+// mergeBaseIsAncestor is the per-question fallback for commits the loaded DAG
+// does not cover.
+func (c *CLI) mergeBaseIsAncestor(ctx context.Context, a, b string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", c.Dir,
 		"merge-base", "--is-ancestor", a, b)
 	var stderr bytes.Buffer

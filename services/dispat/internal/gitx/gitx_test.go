@@ -342,6 +342,17 @@ func TestIsAncestor(t *testing.T) {
 		require.NoError(t, aerr, tc.why)
 		assert.Equal(t, tc.want, got, tc.why)
 	}
+
+	// A commit created after the ancestry DAG was first loaded is answered
+	// through the per-question git fallback, not the stale cache.
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "third.txt"), []byte("y"), 0o644))
+	_, err = cli.CommitDirs(ctx, []string{pkg}, "fix(core): third")
+	require.NoError(t, err)
+	third, err := cli.HeadSHA(ctx)
+	require.NoError(t, err)
+	ok, err := cli.IsAncestor(ctx, second, third)
+	require.NoError(t, err)
+	assert.True(t, ok, "the fallback answers for commits the cached DAG has never seen")
 }
 
 func TestCommitsCarrySHAsParentsAndFullMessages(t *testing.T) {

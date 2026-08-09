@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,9 +123,11 @@ func (f *fakeGit) CreateTag(context.Context, string, string, string) error { ret
 
 func (f *fakeGit) IsShallow(context.Context) (bool, error) { return f.shallow, nil }
 
-// countingGit records how many git queries planning makes per package.
+// countingGit records how many git queries planning makes per package. The
+// planner fetches tags concurrently, so the counters take a lock.
 type countingGit struct {
 	*fakeGit
+	mu         sync.Mutex
 	tagQueries map[string]int
 	logQueries map[string]int
 }
@@ -134,12 +137,16 @@ func counted(f *fakeGit) *countingGit {
 }
 
 func (c *countingGit) Tags(ctx context.Context, pkg string, format gitx.TagFormat) (gitx.Tags, error) {
+	c.mu.Lock()
 	c.tagQueries[pkg]++
+	c.mu.Unlock()
 	return c.fakeGit.Tags(ctx, pkg, format)
 }
 
 func (c *countingGit) Commits(ctx context.Context, sinceTag string) ([]gitx.Commit, error) {
+	c.mu.Lock()
 	c.logQueries[sinceTag]++
+	c.mu.Unlock()
 	return c.fakeGit.Commits(ctx, sinceTag)
 }
 

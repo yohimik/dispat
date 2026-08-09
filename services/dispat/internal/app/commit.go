@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
@@ -45,7 +46,9 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		return err
 	}
 
-	git := *a.git
+	// A fresh CLI, not a struct copy: the CLI carries lazily built cache
+	// state (a sync.Once) that must not be copied.
+	git := &gitx.CLI{Dir: a.git.Dir, Name: a.git.Name, Email: a.git.Email}
 	if opts.Name != "" {
 		git.Name = opts.Name
 	}
@@ -87,14 +90,14 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 			log.Debug().Msg("nothing to commit")
 		}
 		if opts.Tag {
-			if err := release.CreateReleaseTag(ctx, &git, rel, log); err != nil {
+			if err := release.CreateReleaseTag(ctx, git, rel, log); err != nil {
 				log.Error().Err(err).Msg("tagging failed")
 				return err
 			}
 			tags = append(tags, rel.TagName())
 		}
 		if out := os.Getenv(release.OutputEnvVar); out != "" {
-			if err := exportPackageCommit(ctx, &git, out, name); err != nil {
+			if err := exportPackageCommit(ctx, git, out, name); err != nil {
 				log.Error().Err(err).Msg("exporting the commit pin failed")
 				return err
 			}
