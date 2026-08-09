@@ -1,5 +1,12 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.2 (2026-08-09)
+
+### Breaking Changes
+
+- replace the channel sigil with percent
+
+
 ## services/dispat/v1.0.0-rc.1 (2026-08-09)
 
 ### Features
