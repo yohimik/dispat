@@ -36,11 +36,6 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Configure the release committer
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
       - name: Build dispat from the checkout
         run: go build -C services/dispat -o "$PWD/dispat" .
 
@@ -56,4 +51,10 @@ jobs:
           # own modules directly from the repository, skipping the proxy and
           # the sum database, both of which lag fresh tags.
           GOPRIVATE: github.com/yohimik/dispat
-        run: ./dispat --log-format json
+        # The checkout dir leads PATH so the nested `dispat changelog` /
+        # `dispat commit` invocations inside the stage scripts resolve the
+        # same freshly built binary this release ships. The committer
+        # identity comes from commit.name/commit.email in dispat.json.
+        run: |
+          export PATH="$PWD:$PATH"
+          ./dispat --log-format json

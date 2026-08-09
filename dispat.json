@@ -1,7 +1,8 @@
 {
   "scripts": {
     "go-mod-tidy": "go mod tidy",
-    "commit-module": "sh ../../scripts/commit-module.sh",
+    "changelog": "dispat changelog",
+    "commit": "dispat commit --tag --push",
     "build-dispat": "sh ../../scripts/build-dispat.sh"
   },
   "packages": {
@@ -32,7 +33,10 @@
         ]
       },
       "flow": {
-        "beforePublish": "commit-module"
+        "beforePublish": [
+          "changelog",
+          "commit"
+        ]
       }
     },
     "services": {
@@ -45,7 +49,10 @@
         ]
       },
       "flow": {
-        "beforePublish": "commit-module"
+        "beforePublish": [
+          "changelog",
+          "commit"
+        ]
       }
     }
   },
@@ -92,10 +99,13 @@
   },
   "commit": {
     "enabled": true,
-    "push": true
+    "push": true,
+    "name": "github-actions[bot]",
+    "email": "github-actions[bot]@users.noreply.github.com"
   },
   "github": {
-    "enabled": true
+    "enabled": true,
+    "allPackages": true
   },
   "versionGroups": {
     "manifests": {
