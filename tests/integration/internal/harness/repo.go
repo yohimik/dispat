@@ -254,6 +254,55 @@ func (r *Repo) runAt(root string, args ...string) RunResult {
 	return RunResult{Code: code, Stdout: stdout.String(), Stderr: stderr.String(), Events: ParseEvents(stdout.String())}
 }
 
+// Proc is a dispat invocation started but not waited for — the fixture of the
+// interruption scenarios, which signal the process mid-run and then assert on
+// its outcome.
+type Proc struct {
+	repo           *Repo
+	cmd            *exec.Cmd
+	stdout, stderr *bytes.Buffer
+}
+
+// StartRelease launches `dispat release` (with --root appended, coverage
+// wiring included) and returns without waiting. The caller drives the process
+// through Signal and collects the outcome with Wait.
+func (r *Repo) StartRelease(flags ...string) *Proc {
+	r.T.Helper()
+	full := append(append([]string{}, flags...), "--root", r.Root)
+	cmd := exec.Command(r.dispatBin, full...)
+	if dir := coverDir(); dir != "" {
+		cmd.Env = append(os.Environ(), "GOCOVERDIR="+dir)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	require.NoError(r.T, cmd.Start(), "launching dispat")
+	return &Proc{repo: r, cmd: cmd, stdout: &stdout, stderr: &stderr}
+}
+
+// Signal delivers sig to the running dispat process (os.Interrupt is what a
+// Ctrl-C or a CI cancellation sends).
+func (p *Proc) Signal(sig os.Signal) {
+	p.repo.T.Helper()
+	require.NoError(p.repo.T, p.cmd.Process.Signal(sig))
+}
+
+// Wait blocks until the process exits and returns the run's outcome. The
+// output buffers are only read here, after the process is gone, so the
+// harness needs no synchronisation around them.
+func (p *Proc) Wait() RunResult {
+	p.repo.T.Helper()
+	err := p.cmd.Wait()
+	code := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			p.repo.T.Fatalf("waiting for dispat: %v", err)
+		}
+		code = exitErr.ExitCode()
+	}
+	return RunResult{Code: code, Stdout: p.stdout.String(), Stderr: p.stderr.String(), Events: ParseEvents(p.stdout.String())}
+}
+
 // shQuote single-quotes s for safe interpolation into a /bin/sh -c command
 // line (the shell every script in these tests runs through by default).
 func shQuote(s string) string {
