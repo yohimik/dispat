@@ -6,7 +6,9 @@ package release
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -206,11 +208,14 @@ type Sequence struct {
 // Run executes the sequence's commands in order inside its directory.
 func (s Sequence) Run(ctx context.Context) error {
 	for _, command := range s.Commands {
-		stdout := newLineWriter(s.Log, zerolog.InfoLevel)
-		stderr := newLineWriter(s.Log, zerolog.WarnLevel)
-		err := s.Runner.Run(ctx, s.Dir, command, s.Env, stdout, stderr)
-		stdout.Flush()
-		stderr.Flush()
+		err := func() error {
+			stdout := newLineWriter(s.Log, zerolog.InfoLevel)
+			stderr := newLineWriter(s.Log, zerolog.WarnLevel)
+			// Deferred so a panicking runner still logs the partial lines.
+			defer stderr.Flush()
+			defer stdout.Flush()
+			return s.Runner.Run(ctx, s.Dir, command, s.Env, stdout, stderr)
+		}()
 		if err == nil {
 			continue
 		}
@@ -267,8 +272,11 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// Build the task graph. The scheduler owns the dependency bookkeeping —
 	// registration, in-degrees, the became-ready cascade — and this loop only
 	// states the edges; AddEdge registers its nodes as a side effect.
+	// Sorted iteration: the scheduler hands nodes out in insertion order, so
+	// building the edges in name order is what makes launch order — not just
+	// completion semantics — deterministic run to run (§17.2).
 	sched := graph.NewScheduler[task]()
-	for name := range changed {
+	for _, name := range slices.Sorted(maps.Keys(changed)) {
 		b, pub := task{name, taskBuild}, task{name, taskPublish}
 		sched.AddEdge(b, pub)
 		// Packages bumped because of provider updates run a version task

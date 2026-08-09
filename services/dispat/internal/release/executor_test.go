@@ -1455,3 +1455,30 @@ func TestRunOutcomeScriptsSilentOnSuccess(t *testing.T) {
 	assert.Equal(t, 0, r.countPrefix("on-fail"))
 	assert.Equal(t, 0, r.countPrefix("on-skip"))
 }
+
+func TestRunLaunchOrderDeterministic(t *testing.T) {
+	// The task graph is built in sorted name order and the scheduler is FIFO,
+	// so with a serialising budget the launch order is a pure function of the
+	// plan: two identical runs produce identical event sequences, in sorted
+	// order — not whatever order the changed-set map iterates in.
+	spec := planSpec{Names: []string{"c", "a", "b"}}
+	runOnce := func() []string {
+		r := &fakeRunner{}
+		res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), mkPlan(spec))
+		for n, re := range res {
+			require.Equal(t, StatusPublished, re.Status, "%s: %v", n, re.Err)
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		var builds []string
+		for _, e := range r.events {
+			if strings.HasPrefix(e, "build ") {
+				builds = append(builds, e)
+			}
+		}
+		return builds
+	}
+	first := runOnce()
+	assert.Equal(t, []string{"build a", "build b", "build c"}, first)
+	assert.Equal(t, first, runOnce(), "identical plans launch identically")
+}

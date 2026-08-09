@@ -138,6 +138,19 @@ func TestBaselineUnderPrereleaseFormat(t *testing.T) {
 		"the stable baseline skips the prerelease shape of the same format")
 }
 
+func TestRenderInvalidFormatFallsBack(t *testing.T) {
+	// Unreachable through the CLI (every configured format is validated at
+	// load), but the fallback contract is part of Render's API: a format that
+	// cannot compile renders the normative default rather than nothing, and
+	// RenderVersion falls back to the SemVer string.
+	v := ccme.Version{Major: 1, Minor: 2, Patch: 3, Prerelease: []string{"beta", "4"}}
+	f := TagFormat("no placeholders at all")
+	require.Error(t, f.Validate())
+	assert.Equal(t, DefaultTagFormat.Render("core", v), f.Render("core", v))
+	assert.Equal(t, "core@1.2.3-beta.4", f.Render("core", v))
+	assert.Equal(t, v.String(), f.RenderVersion(v))
+}
+
 func TestRenderVersion(t *testing.T) {
 	// The version section of the tag alone: {version} through {counter} with
 	// the literals between them, nothing of the name or the decoration glued

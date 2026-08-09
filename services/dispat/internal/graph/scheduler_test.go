@@ -7,6 +7,7 @@ package graph
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -73,6 +74,63 @@ func TestDrainZeroWeightCostsOne(t *testing.T) {
 	peakSlots, peakNodes := weighted(t, 2, map[string]int{"a": 0, "b": 0, "c": 0})
 	assert.LessOrEqual(t, peakSlots, 2)
 	assert.LessOrEqual(t, peakNodes, 2)
+}
+
+func TestDrainFIFOWithinClass(t *testing.T) {
+	// Under a serialising budget, independent nodes run in the order they
+	// became ready — the queue is a queue, not a stack.
+	s := NewScheduler[string]()
+	for _, n := range []string{"a", "b", "c"} {
+		s.Add(n)
+	}
+	var order []string
+	var mu sync.Mutex
+	err := Drain(context.Background(), s,
+		func(string) int { return 0 },
+		func(int) int { return 1 },
+		func(string) int { return 1 },
+		func(n string) {
+			mu.Lock()
+			order = append(order, n)
+			mu.Unlock()
+		})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b", "c"}, order)
+}
+
+func TestDrainHeavyHeadNotOvertaken(t *testing.T) {
+	// The head-of-line discipline: a heavy node waiting for slots is not
+	// overtaken by a lighter node that became ready after it. With p1 (weight
+	// 1) holding a slot of the budget of 2, q's completion readies heavy
+	// (weight 2, does not fit) and then l1 (weight 1, would fit); l1 must
+	// still wait its turn behind heavy. The assertion is structural — in no
+	// interleaving does FIFO start l1 first, whereas a stack pops l1 first
+	// whenever p1 is still running.
+	s := NewScheduler[string]()
+	s.Add("p1")
+	s.Add("q")
+	s.AddEdge("q", "heavy")
+	s.AddEdge("q", "l1")
+	weights := map[string]int{"p1": 1, "q": 1, "heavy": 2, "l1": 1}
+	dwell := map[string]time.Duration{"p1": 150 * time.Millisecond, "q": 10 * time.Millisecond}
+	var order []string
+	var mu sync.Mutex
+	err := Drain(context.Background(), s,
+		func(string) int { return 0 },
+		func(int) int { return 2 },
+		func(n string) int { return weights[n] },
+		func(n string) {
+			mu.Lock()
+			order = append(order, n)
+			mu.Unlock()
+			time.Sleep(dwell[n])
+		})
+	require.NoError(t, err)
+	iHeavy := slices.Index(order, "heavy")
+	iLight := slices.Index(order, "l1")
+	require.GreaterOrEqual(t, iHeavy, 0)
+	require.GreaterOrEqual(t, iLight, 0)
+	assert.Less(t, iHeavy, iLight, "heavy waits at the head; l1 does not overtake it")
 }
 
 func TestDrainWeightedRespectsEdges(t *testing.T) {

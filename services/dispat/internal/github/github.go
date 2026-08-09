@@ -131,7 +131,13 @@ func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, error) {
 		return nil, fmt.Errorf("github: %s: %w", call.What, err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	if err != nil {
+		// A truncated success body would corrupt what the caller parses out
+		// of it (a created release's upload URL), so it fails the call even
+		// when the status looked right.
+		return nil, fmt.Errorf("github: %s: reading response: %w", call.What, err)
+	}
 	if resp.StatusCode != call.WantStatus {
 		return nil, fmt.Errorf("github: %s: unexpected status %s: %s",
 			call.What, resp.Status, strings.TrimSpace(string(data)))

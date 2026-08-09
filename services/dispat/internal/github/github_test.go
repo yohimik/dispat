@@ -231,6 +231,26 @@ func TestRecordAPIError(t *testing.T) {
 	assert.Contains(t, err.Error(), "Validation Failed")
 }
 
+func TestDoBodyReadError(t *testing.T) {
+	// A response that dies mid-body must fail the call even when the status
+	// looked right: the caller may parse the body (a created release's
+	// upload URL), and a truncated read is not a success.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short"))
+		// The handler returns with 95 promised bytes unsent; the client sees
+		// an unexpected EOF while reading the body.
+	}))
+	defer srv.Close()
+
+	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	err := rel.Verify(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading response")
+	assert.Contains(t, err.Error(), "verifying acme/mono")
+}
+
 func TestRecordConnectionError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	srv.Close() // immediately closed: connection refused

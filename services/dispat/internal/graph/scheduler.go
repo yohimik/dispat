@@ -153,12 +153,12 @@ func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], cla
 				queue := ready[c]
 				limit := max(1, budget(c))
 				for len(queue) > 0 {
-					n := queue[len(queue)-1]
+					n := queue[0]
 					w := cost(n, limit)
 					if inFlight[c]+w > limit {
 						break // head of line waits; nothing overtakes it
 					}
-					queue = queue[:len(queue)-1]
+					queue = queue[1:]
 					inFlight[c] += w
 					inFlightTotal++
 					go func(n N) {

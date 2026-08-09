@@ -175,7 +175,9 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		changed[pkg] = pl.Releases[pkg]
 		sched.Add(pkg)
 	}
-	for pkg := range changed {
+	// selected, not the changed map: its plan order keeps the scheduler's
+	// insertion order — and with it the launch order — deterministic.
+	for _, pkg := range selected {
 		for _, prov := range pl.Providers[pkg] {
 			if _, ok := changed[prov]; ok {
 				sched.AddEdge(prov, pkg)

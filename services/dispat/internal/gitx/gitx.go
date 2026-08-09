@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/yohimik/dispat/pkg/ccme"
 )
@@ -364,6 +365,9 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
+	// git spawns no long-lived children here, but if one ever held the output
+	// pipes past its exit, WaitDelay turns a silent hang into an error.
+	cmd.WaitDelay = 10 * time.Second
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %w: %s",
 			strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
@@ -442,6 +446,7 @@ func (c *CLI) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 		"merge-base", "--is-ancestor", a, b)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = 10 * time.Second // same backstop as run()
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
