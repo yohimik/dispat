@@ -304,7 +304,8 @@ it: the `flow` stages and hooks, `autoVersion.syncLock`, and `dispat run`.
 means the packages a release would process. The dependency graph is respected: a package's script starts only after
 every changed provider's script has finished, and independent packages run side by side within the build concurrency
 budget (the first value of `--concurrency`). `dispat <name>` is a shorthand for the same thing whenever `<name>` is not
-a command name.
+a command name. [`--package` / `--space`](#choosing-the-packages), or the folder you invoke it from, narrow that to
+part of the monorepo.
 
 Because the lookup is per package, the level you define a name at is what decides how far the run reaches:
 
@@ -333,40 +334,66 @@ Every script receives the package's full [DISPAT_* environment](../environment.m
 naming: dispat's own command words (`status`, `commit`, `changelog` and the rest) win the shorthand, so a script called
 `commit` is reachable as `dispat run commit` but never as `dispat commit`.
 
-### Narrowing to one package
+### Choosing the packages
 
-`dispat run <name> <package>` runs the script in that package alone, with no graph, whether or not the package changed.
-Naming a package that does not exist, or one with no command for that name, is an error for the same reason as above: a
-run aimed at one package should not silently do nothing.
-
-This is also how you try a single script by hand under exactly the environment its stage would give it, without
-releasing anything:
+Two flags narrow a run to part of the monorepo: `--package` (`-p`) names packages, `--space` (`-s`) names spaces and
+selects every package they hold. Both are repeatable and comma-separated, matched case-insensitively, and both accept
+`*` globs:
 
 ```sh
-dispat run build core     # runs the build script in packages/core and stops there
+dispat run lint -p core             # one package
+dispat run lint -p core,web         # several
+dispat run lint -s libs             # every package of a space
+dispat run lint -p '@acme/*'        # a glob (quoted: the shell must not expand it)
+dispat run lint -p '*'              # every package
 ```
 
-The shorthand narrows the same way when you call it from inside a package folder, or any folder below it. dispat finds
-the monorepo root by walking up to the config file, so `cd packages/core && dispat lint` lints `core` and nothing else.
-From the top of the repository the shorthand covers every changed package as usual. It takes no package argument.
+No word is reserved, so a package named `all` is selected by `all` and by nothing else. A term matching nothing is an
+error listing what was discovered — the same reason an unknown script name is one — and the error looks across the
+other flag: a space named in `--package`, or a package named in `--space`, says so and points at the flag that reaches
+it. A [standalone package](./packages.md#standalone-packages-path) belongs to no space, so `-p <name>` or `-p '*'` is
+the only way to name one; `-s '*'` means every configured space and leaves it out.
 
-A third selection axis is `--since <rev>` (`-s`): instead of the release window, select the packages the commits in
-`rev..HEAD` address: `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),
-`-s origin/main` over this branch's own commits (PR pipelines; the base moving on does not widen the set),
-`-s <tag>` since a release, and the reserved `-s all` selects every package. Selection follows the same scope semantics
-as planning: a commit's written scopes are authoritative (globs, exclusions and `nonPackageScopes`
-included), and only a unit with no scope-set falls back to the files it changed (longest path prefix; see
+With no terms, the folder you are standing in is the selection. dispat finds the monorepo root by walking up to the
+config file, so `cd packages/core && dispat lint` lints `core` and nothing else, and so does any folder below it.
+Standing in a space folder — `cd packages && dispat lint` — covers that space; standing at the top of the repository,
+or anywhere outside every space, covers the usual set. The deepest match wins, so a standalone package nested inside
+another package's folder still selects itself, and a flag on the command line always beats the folder it was typed in.
+
+Every command that acts on a subset of packages reads the same two flags and the same folder rule: `dispat run`,
+`preview`, `changelog`, `autoversion`, `commit` and `compute`.
+
+### Windows: `--since` and `--consumers`
+
+The filter narrows; a **window** decides what there is to narrow. By default the window is the release window — the
+changed packages. `--since <rev>` replaces it with the packages the commits in `rev..HEAD` address:
+`--since HEAD~1` runs the script over what the last commit addressed (per-commit CI), `--since origin/main` over this
+branch's own commits (PR pipelines; the base moving on does not widen the set), `--since <tag>` since a release, and
+the reserved `--since all` selects every package, changed or not. Selection follows the same scope semantics as
+planning: a commit's written scopes are authoritative (globs, exclusions and `nonPackageScopes` included), and only a
+unit with no scope-set falls back to the files it changed (longest path prefix; see
 [scope sets](../commits.md#scope-sets)). Ordering, concurrency and output carrying apply to the selected set exactly as
-to the changed one. `--since` is mutually exclusive with an explicit `<package>` and overrides the shorthand's folder
-inference.
+to the changed one.
 
-A window (`--since` or the release window) covers only the packages the commits **address**, never the packages a change
-*affects*: `dispat run test -s HEAD~1` re-tests the changed provider, not the consumers that depend on it. The
-`--consumers` flag closes that gap: it additionally selects every package that **transitively depends** on a selected
-one; a consumer pulled in brings its own consumers, all the way down the graph. The added packages run whether or not
-they changed, after their selected providers, and a failing provider's script skips them under the default
-`--on-error skip` exactly like any selected dependent. `--consumers` is mutually exclusive with an explicit
-`<package>` (a targeted run is exactly one package) and, like `--since`, overrides the shorthand's folder inference.
+The window comes first and the filter picks from it, which is what makes the two compose:
+
+```sh
+dispat run test --since HEAD~1 -s libs    # what the last commit addressed, inside libs
+dispat run build --since all -p core      # core, whether or not it changed
+dispat run build -p core                  # core, and only if it changed
+```
+
+That last line is worth reading twice: a filter never widens a window, so `--since all` is how you reach a package the
+window does not cover — the way to try one script by hand under exactly the environment its stage would give it,
+without releasing anything.
+
+A window covers only the packages the commits **address**, never the packages a change *affects*:
+`dispat run test --since HEAD~1` re-tests the changed provider, not the consumers that depend on it. The `--consumers`
+flag closes that gap: it additionally selects every package that **transitively depends** on a selected one; a consumer
+pulled in brings its own consumers, all the way down the graph. The expansion happens after the filter and is not
+filtered back out — `-p core --consumers` is a request for core's dependents, so it reaches packages the filter never
+named. The added packages run whether or not they changed, after their selected providers, and a failing provider's
+script skips them under the default `--on-error skip` exactly like any selected dependent.
 
 What a failure does is the `--on-error` flag: under `skip` (the default) the failed package's changed dependents are
 skipped, transitively (the same shape a release gives a failed provider), while independent packages keep running; under

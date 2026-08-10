@@ -118,10 +118,14 @@ dispat run lint             # run the "lint" script in every changed package tha
                             # space in that space, on a package in that package alone
 dispat lint                 # the same: an unknown command word means "run <word>"
 dispat run lint --on-error continue   # keep running dependents of a failed package
-dispat run build core       # run the "build" script once inside packages/core with core's
-                            # full DISPAT_* environment, changed or not; releases nothing
+dispat run lint -p core,web # narrow to named packages; -s libs narrows to a space's,
+                            # -p '*' covers every one. Standing in packages/core, plain
+                            # "dispat lint" narrows to core the same way
+dispat run build --since all -p core  # run "build" inside packages/core with core's full
+                            # DISPAT_* environment whether or not it changed; releases
+                            # nothing. A filter narrows the window, --since all opens it
 dispat preview              # pending release notes for every package with something pending
-dispat preview core         # print core's pending release notes (breaking changes,
+dispat preview -p core      # print core's pending release notes (breaking changes,
                             # features, fixes): what its next changelog entry would say
 dispat changelog            # write pending changelog entries now (custom flows;
                             # the release skips entries already written)

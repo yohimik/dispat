@@ -40,10 +40,10 @@ A few more moves:
 
 ```sh
 $ dispat compute                    # derive the dependency graph from the manifests; --write applies
-$ dispat preview                    # pending release notes, all packages (preview core: just one)
+$ dispat preview                    # pending release notes, all packages (-p core: just one)
 $ dispat scanner packages/core      # what that folder's manifests declare; no config or git needed
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
-$ dispat run build core             # try the build script in packages/core with the real DISPAT_* env
+$ dispat run build --since all -p core   # try the build script in packages/core with the real DISPAT_* env
 $ dispat lint                       # run a script in every changed package that has it, in graph order
 $ git commit -m "feat(core)%beta: try it out"
 $ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)%stable:

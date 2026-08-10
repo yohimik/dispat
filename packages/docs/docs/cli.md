@@ -10,12 +10,12 @@ dispat [command] [flags]
 |---------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.            |
 | `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.          |
-| `run <script> [package]`  | Run a script in every changed package that has it, graph-ordered; see [The run command](#the-run-command).        |
+| `run <script>`            | Run a script in every changed package that has it, graph-ordered; see [The run command](#the-run-command).        |
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
-| `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
-| `changelog [package]`     | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
-| `autoversion [package]`   | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
-| `commit [package]`        | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
+| `preview`                 | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
+| `changelog`               | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
+| `autoversion`             | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
+| `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).        |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The manifest commands](#the-manifest-commands).                     |
 | `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The manifest commands](#the-manifest-commands).                  |
@@ -28,7 +28,9 @@ dispat [command] [flags]
 | `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.  |
 | `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
 | `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
-| `--since`, `-s`       |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
+| `--package`, `-p`     |             | `run`, `preview`, `changelog`, `autoversion`, `commit` and `compute`: narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
+| `--space`, `-s`       |             | The same six commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
+| `--since`             |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
 | `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
 | `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
 | `--log-format`        | from config | Override: `pretty` or `json`.                                                                                                                                                                          |
@@ -67,27 +69,47 @@ is therefore what decides the reach: a file-level script runs in every changed p
 packages, a package's in that package alone. A selected package with no command for the name does nothing. Exit `1`
 means either that no level defines the name, or that none of the selected packages have it.
 
-Four ways to select what it covers:
+Selection happens in three steps, in this order:
 
-- **Default**: the changed packages, the same set a release would process.
-- **A target**: `dispat run <script> <package>` runs in that package alone, changed or not, with no graph. This is how
-  you try one script under the exact input its stage would give it (`dispat run build core`) without releasing
-  anything. An unchanged package carries its baseline as both the old and the new version. Naming an unknown package,
-  or one with no command for that name, is an error, since a run aimed at one package should not silently do nothing.
-- **A window**: `--since <rev>` (`-s`) selects the packages the commits in `rev..HEAD` address: `HEAD~1` for the last
-  commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or `all` for every
-  package. Selection follows the planner's [scope semantics](./commits.md#scope-sets): a commit's written scopes are
-  authoritative, and only scopeless units fall back to the files they changed.
-- **Downstream expansion**: `--consumers` additionally selects every package that transitively depends on a selected one
-  (a consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone would
-  not reach. The added packages run whether or not they changed, after their selected providers, with the ordinary
-  `--on-error` cascade.
+1. **A window** decides which packages are on the table. By default that is the changed packages, the same set a
+   release would process. `--since <rev>` instead selects the packages the commits in `rev..HEAD` address: `HEAD~1`
+   for the last commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or
+   the reserved `all` for every package, changed or not. Selection follows the planner's
+   [scope semantics](./commits.md#scope-sets): a commit's written scopes are authoritative, and only scopeless units
+   fall back to the files they changed.
+2. **The filter** picks from that window: `--package` / `--space`, or the folder you are standing in, as described in
+   [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core when
+   core changed and nothing at all when it did not. `--since all -p core` is how you run a script in a package
+   regardless — the way to try one script under the exact input its stage would give it, without releasing anything.
+   An unchanged package carries its baseline as both the old and the new version.
+3. **`--consumers`** then expands the result with every package that transitively depends on a selected one (a
+   consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone would
+   not reach. The expansion is deliberately not filtered back out: asking for a package's consumers is asking for
+   packages you did not name. The added packages run whether or not they changed, after their selected providers, with
+   the ordinary `--on-error` cascade.
 
-`--since` and `--consumers` are each mutually exclusive with an explicit `[package]`.
+`dispat <script>` is a shorthand whenever `<script>` is not a command name. Both spellings take the same flags and
+narrow to the same folders.
 
-`dispat <script>` is a shorthand whenever `<script>` is not a command name. It takes no package argument, but invoked
-from inside a package folder (or any subdirectory of it) it narrows to that package; from the monorepo top it covers
-every changed package. `--since` and `--consumers` override the folder narrowing: an explicit flag beats inference.
+### Choosing the packages
+
+`--package` (`-p`) names packages and `--space` (`-s`) names spaces; every package of a named space is selected. Both
+are repeatable and comma-separated (`-p core,web`, `-p core -p web`), matched case-insensitively, and both accept `*`
+globs — `-p '@acme/*'` for a prefix, `-p '*'` for every package, `-s '*'` for every space. Quote a glob, or the shell
+expands it first. No word is reserved: a package named `all` is selected by `all` and by nothing else.
+
+A term that matches nothing is an error, never an empty selection, because a command that quietly acts on nothing is
+how a typo hides. The error names what was discovered, and looks across the other flag: naming a space in `--package`,
+or a package in `--space`, says so and points at the flag that reaches it. A
+[standalone package](./configuration/packages.md#standalone-packages-path) belongs to no space, so `--package` (or
+`-p '*'`) is the only way to name one; `-s '*'` means every configured space and leaves it out.
+
+With no terms at all, the folder the command was invoked from is the selection: inside a package folder (or any
+subdirectory of it) that package, inside a space folder that space, anywhere else — the monorepo root included —
+nothing, so the command covers its usual set. The deepest match wins, so a standalone package nested inside another
+package's folder still selects itself. A term on the command line always beats the folder it was typed in.
+
+The same six commands read the same selection: `run`, `preview`, `changelog`, `autoversion`, `commit` and `compute`.
 
 ## The init command
 
@@ -98,38 +120,39 @@ config file.
 
 ## The preview command
 
-`dispat preview [package]` plans, then prints the pending release notes: the breaking-changes/features/fixes sections
-plus provider updates that the next release's changelog entry and GitHub release body would carry. With a package name
-the preview covers that package; without one it covers every package that has something pending, in publish order. It
-follows the [release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only its
-own changeset. Prints `no pending changes` when nothing is.
+`dispat preview` plans, then prints the pending release notes: the breaking-changes/features/fixes sections plus
+provider updates that the next release's changelog entry and GitHub release body would carry. It covers every package
+that has something pending, in publish order, narrowed by
+[`--package` / `--space` or the invocation folder](#choosing-the-packages). It follows the
+[release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only its own
+changeset. Prints `no pending changes` when nothing is — naming the selection when there was one.
 
 ## The step commands
 
 `dispat changelog`, `dispat autoversion` and `dispat commit` expose the release pipeline's native steps to custom
 flows: a stage script can run a step at the moment the flow needs it, and the release stage later finds the work done
-and skips it. All three share the run command's selection: an explicit `[package]` targets one package (an unknown
-name is an error; a package that is not releasing is a logged no-op, so a flow never fails over a converged or held
-package); invoked from inside a package folder, the command narrows to that package; from the monorepo root it covers
-every releasing package in dependency order. The three command words are reserved: like every command name, each wins
+and skips it. All three share the run command's [selection](#choosing-the-packages): with no terms they cover every
+releasing package in dependency order, and `--package`, `--space` or the invocation folder narrows that. A term
+matching no package is an error; a *selected* package that is not releasing is a logged no-op, so a flow never fails
+over a converged or held package. The three command words are reserved: like every command name, each wins
 the `dispat <script>` shorthand over a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name, so
 `dispat commit` is always the command. Spelling it out as `dispat run commit` still reaches the script.
 
 Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
 [flags table](#flags).
 
-**`dispat changelog [package]`** writes each covered package's pending changelog entry, exactly what the release
+**`dispat changelog`** writes each covered package's pending changelog entry, exactly what the release
 stage's recorder would write. An entry that already exists in the file is a skip (`W222`), and the same check makes
 the release stage skip entries this command already wrote. That is the point of running it early: a changelog written
 in a `beforePublish` script, before `dispat commit`, lands inside the tagged commit.
 
-**`dispat autoversion [package]`** runs the native manifest reconciliation of the version stage: declared workspace
+**`dispat autoversion`** runs the native manifest reconciliation of the version stage: declared workspace
 ranges rewritten to the planned versions, own versions updated, and the space's `syncLock` scripts run for each
 package whose manifests actually changed. Rewriting already-reconciled manifests changes nothing, so re-running is
 safe. A space without an `autoVersion` block is skipped unless a policy flag forces one, which then starts from the
 defaults.
 
-**`dispat commit [package]`** creates each covered package's release commit: the package folder staged together with
+**`dispat commit`** creates each covered package's release commit: the package folder staged together with
 the `commit.include` paths, the message rendered from `commit.messageFormat` with that one package's name and tag.
 A package with nothing to stage is a clean no-op. With `--tag`, the annotated release tag is created at the resulting
 commit; a tag that already exists there is a skip (`W223`), while a tag at any other commit is an error. With
@@ -145,6 +168,11 @@ declaration list: the top-level `dependencies` key plus every
 [package-declared list](./configuration/packages.md#package-dependencies) (a `packages` entry's or an in-folder config
 file's). By default the suggestions are only printed; `--write` applies them, `--interactive` confirms each, `--check`
 gates CI. Needs no git history.
+
+[`--package` / `--space`](#choosing-the-packages) scope the report to the selected packages' own declarations.
+Detection still reads every package's manifests whichever way you narrow: the workspace name index is what resolves a
+declared dependency onto a provider, so an edge onto a package outside the selection stays recognised rather than
+being proposed for removal.
 
 **What it reads.** Every package folder is scanned for manifests: `package.json`, `go.mod`, `Cargo.toml`,
 `pyproject.toml` (PEP 621 and Poetry), `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml` and

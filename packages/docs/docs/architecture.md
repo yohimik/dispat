@@ -9,17 +9,18 @@ Steps 1-2 are the command-line controller (`internal/cli`, behind the thin `main
 from discovery on is the `app` package's `Status` (steps 3-6) and `Release` (all of them), so the same operations are
 callable without a command line.
 
-1. Parse the command line (pflag); dispatch `release`, `status`, `run <script> [package]`, `init` or
-   `preview [package]`. An unknown command word is `run`'s shorthand (`dispat lint`).
+1. Parse the command line (pflag); dispatch `release`, `status`, `run <script>`, `init` or `preview`. An unknown
+   command word is `run`'s shorthand (`dispat lint`).
    `init` writes a starter config and exits before anything else (there is no config to load yet), refusing a `--root`
    that is not a git repository root. The run command computes the plan, then runs the script inside each changed
    package that has one (looked up in the package's `scripts`, then its space's, then the file's) over the dependency
    graph (build concurrency budget; `--on-error` decides whether a failure skips the failed package's dependents) and
-   stops; with an explicit `[package]` (or, for the shorthand, when invoked from inside a package's folder) the run
-   narrows to that one package, changed or not, with no graph; `--since <rev>` (or `all`) instead selects what the
-   commits since a revision address: scopes first, changed files for scopeless units (§6.2). Nothing below step 6
-   applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (one
-   package's, or every pending package's in publish order when none is named), and stops. `scanner` and `writer` also
+   stops. Which packages that covers is decided in three steps by the shared `internal/filter` resolver: a window
+   (the release window, what `--since <rev>` addresses — scopes first, changed files for scopeless units, §6.2 — or
+   every package for `--since all`), then the `--package` / `--space` terms narrowing it (the invocation folder
+   standing in for the terms nobody typed), then `--consumers` expanding the result downstream. Nothing below step 6
+   applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (every
+   pending package's in publish order, under the same filter), and stops. `scanner` and `writer` also
    answer before any config is loaded, and for the same reason as `init`: they are the `pkg/scanner` and `pkg/writer`
    libraries exposed directly (see [Manifest tools](./manifests.md)), reading nothing but the paths named on the
    command line, so a monorepo root, a plan and a git history are all beside the point.
@@ -150,7 +151,8 @@ sections below.
 | `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
 | `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits.                                                                                                                               |
 | `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
-| `internal/globx`     | The one glob matcher scope terms, `autoVersion.match` and `.dispatignore` share.                                                                                                                             |
+| `internal/filter`    | The one package/space selection resolver every package-selecting command shares: `--package` / `--space` terms, their globs, and the invocation folder that stands in for them.                              |
+| `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatignore` and the selection terms share.                                                                                                        |
 
 ## Graph algorithms
 
