@@ -102,12 +102,22 @@
   }
 }
 
-/* Three cards, so they auto-fit instead of leaving one alone on a second row of
-   the two-column feature grid. */
+/* The commit parser stands alone on the first row, full width; the manifest pair
+   shares the second, which is also how they relate to each other. */
 .libraries {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 1.5rem;
+}
+
+.libraries > :first-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 996px) {
+  .libraries {
+    grid-template-columns: 1fr;
+  }
 }
 
 .feature {
