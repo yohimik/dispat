@@ -49,11 +49,14 @@ type Space struct {
 	// value means the space's own group. Only read when Versioning is
 	// shared.
 	VersionGroup string
-	// RunScripts are the space's named `dispat run <name>` scripts: raw shell
-	// commands (not script references), keyed by lowercased name. `dispat run
-	// <name>` executes the command inside each changed package of the space in
-	// topological order with the package's full DISPAT_* environment.
-	RunScripts map[string]string
+	// Scripts is the effective script map of the package this Space was
+	// derived for: the file's scripts, overlaid with the space's, overlaid
+	// with the package's, keyed by lowercased name and holding shell commands.
+	// It is what every script name resolves through — the flow entries below
+	// were resolved from it, and `dispat run <name>` looks the name up here,
+	// executing the command inside each changed package that has one, in
+	// topological order, with the package's full DISPAT_* environment.
+	Scripts map[string]string
 	// BuildWaitsPublish: when true, consumers of packages from this space may
 	// only start building after the provider has been published (not merely
 	// built).

@@ -10,9 +10,8 @@ dispat [command] [flags]
 |---------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.            |
 | `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.          |
-| `run <script> [package]`  | Execute a space run script over the changed packages, graph-ordered; see [The run command](#the-run-command).     |
+| `run <script> [package]`  | Execute a script over the changed packages that define it, graph-ordered; see [The run command](#the-run-command). |
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
-| `test <script> <package>` | Run one top-level script in one package under the release environment; see [The test command](#the-test-command). |
 | `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
 | `changelog [package]`     | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
 | `autoversion [package]`   | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
@@ -52,16 +51,22 @@ Flag precedence (via viper): explicitly set flag > config file > flag default > 
 ## The run command
 
 `dispat run <script>` plans, then executes the named
-[space run script](./configuration/spaces.md#runscripts-and-dispat-run) inside each changed package, honouring the
+[script](./configuration/spaces.md#scripts-and-dispat-run) inside each changed package that defines it, honouring the
 dependency graph. Nothing is released or tagged. A failing script's dependents are skipped or kept running per
 `--on-error`.
+
+Each package resolves the name through its own `scripts`, then its space's, then the top level's, so the level a name
+is defined at decides the reach: a top-level script runs in every changed package, a space's in that space's, a
+package's in that package alone. A selected package that resolves nothing is a no-op; a name nothing defines, or that
+none of the selected packages define, exits `1`.
 
 Four ways to select what it covers:
 
 - **Default**: the changed packages, the same set a release would process.
-- **A target**: `dispat run <script> <package>` runs in exactly that package, changed or not, with no graph. Naming an
-  unknown package, or one whose space does not define the script, is an error: a targeted run that runs nothing is how a
-  typo hides.
+- **A target**: `dispat run <script> <package>` runs in exactly that package, changed or not, with no graph — the way to
+  try one script under exactly the input its stage would hand it (`dispat run build core`), releasing nothing. An
+  unchanged package carries its baseline as both the old and the new version. Naming an unknown package, or one that
+  does not resolve the script, is an error: a targeted run that runs nothing is how a typo hides.
 - **A window**: `--since <rev>` (`-s`) selects the packages the commits in `rev..HEAD` address: `HEAD~1` for the last
   commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or `all` for every
   package. Selection follows the planner's [scope semantics](./commits.md#scope-sets): a commit's written scopes are
@@ -84,14 +89,6 @@ every changed package. `--since` and `--consumers` override the folder narrowing
 repository root (no `.git`): the config establishes the effective monorepo root, so it belongs next to `.git`. Needs no
 config file.
 
-## The test command
-
-`dispat test <script> <package>` plans, then runs the named top-level script (a key of `scripts`) once, inside the
-package's folder, with the package's full [`DISPAT_*` environment](./environment.md) (`DISPAT_STAGE` is
-`test:<script>`). Nothing is released, tagged or written; it is a way to try a script under exactly the input a stage
-would hand it. The package does not have to be changed: an unchanged package's environment carries its baseline as both
-the old and new version.
-
 ## The preview command
 
 `dispat preview [package]` plans, then prints the pending release notes: the breaking-changes/features/fixes sections
@@ -108,8 +105,8 @@ and skips it. All three share the run command's selection: an explicit `[package
 name is an error; a package that is not releasing is a logged no-op, so a flow never fails over a converged or held
 package); invoked from inside a package folder, the command narrows to that package; from the monorepo root it covers
 every releasing package in dependency order. The three command words are reserved: like every command name, each
-shadows a [run script](./configuration/spaces.md#runscripts-and-dispat-run) of the same name, so `dispat commit` is
-never `dispat run commit`.
+shadows a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name in the `dispat <script>`
+shorthand, so `dispat commit` is never `dispat run commit`. The two-word spelling still reaches the script.
 
 Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
 [flags table](#flags).

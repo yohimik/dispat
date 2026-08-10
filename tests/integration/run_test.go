@@ -1,15 +1,19 @@
 package integration
 
-// Area 6: the `dispat run <script>` command. A space's runScripts entries
-// are raw shell commands (not references into `scripts`); `dispat run x`
-// (or the shorthand `dispat x`, when x is not a command name) executes x
-// inside each *changed* package with the package's full DISPAT_* environment,
+// Area 6: the `dispat run <script>` command. `dispat run x` (or the shorthand
+// `dispat x`, when x is not a command name) executes the script named x inside
+// each *changed* package with the package's full DISPAT_* environment,
 // honouring the dependency graph — providers before consumers, independent
-// packages in parallel within the build concurrency budget. A changed
-// package whose space does not define x completes as a no-op; a name no
-// space defines is an error. What a failure does to the failed package's
-// dependents is the --on-error flag: "skip" (default) or "continue"; any
-// failure makes the command exit 1.
+// packages in parallel within the build concurrency budget.
+//
+// A package resolves x through its own `scripts`, then its space's, then the
+// file's, so the level x is defined at is what a run covers: a top-level
+// script reaches every changed package, a space's reaches that space's, a
+// package's reaches that package alone. A changed package that resolves
+// nothing completes as a no-op; a name nothing defines, and a selection in
+// which no package resolves it, are both errors. What a failure does to the
+// failed package's dependents is the --on-error flag: "skip" (default) or
+// "continue"; any failure makes the command exit 1.
 
 import (
 	"os"
@@ -25,17 +29,15 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// runScriptsRepo builds the shared fixture of this file: a "libs" space
-// (core <- app, by a dependency edge) defining the "lint", "record" and
-// "fail" run scripts, and a "tools" space (tool) defining none of them. The
-// commit changes all three packages, so every one of them is in the plan.
-func runScriptsRepo(t *testing.T) *harness.Repo {
-	t.Helper()
-	r := harness.New(t)
+// runConfig is the configuration of this file's shared fixture: a
+// "libs" space (core <- app, by a dependency edge) defining the "lint",
+// "record" and "fail" scripts, and a "tools" space (tool) defining none of
+// them. The level tests rewrite it to move a name between the three levels.
+func runConfig() models.File {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
 			"lint":   "echo $DISPAT_PACKAGE >> ../../run.log",
 			"record": `env | grep '^DISPAT_' | sort > run-env.txt`,
 			"fail":   `[ "$DISPAT_PACKAGE" != "core" ] && echo $DISPAT_PACKAGE >> ../../run.log`,
@@ -43,7 +45,15 @@ func runScriptsRepo(t *testing.T) *harness.Repo {
 		"tools": {Path: "tools", Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
-	r.WriteConfigModel(cfg)
+	return cfg
+}
+
+// runRepo lays runConfig out as a repository whose one commit
+// changes all three packages, so every one of them is in the plan.
+func runRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	r.WriteConfigModel(runConfig())
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "app")
 	r.SeedPackage("tools", "tool")
@@ -64,7 +74,7 @@ func runLog(r *harness.Repo) []string {
 // changed package of the defining space, providers before consumers, and the
 // space without the script is skipped rather than failed.
 func TestRunExecutesChangedPackagesInTopologicalOrder(t *testing.T) {
-	r := runScriptsRepo(t)
+	r := runRepo(t)
 
 	r.RunScriptOK("lint")
 	assert.Equal(t, []string{"core", "app"}, runLog(r),
@@ -75,7 +85,7 @@ func TestRunExecutesChangedPackagesInTopologicalOrder(t *testing.T) {
 // TestRunShorthandCommand: `dispat lint` is `dispat run lint` when "lint" is
 // not a command name.
 func TestRunShorthandCommand(t *testing.T) {
-	r := runScriptsRepo(t)
+	r := runRepo(t)
 
 	res := r.Release("lint") // Release passes raw args: this runs `dispat lint`
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -88,7 +98,7 @@ func TestRunShorthandCommand(t *testing.T) {
 // stage ("run:<name>") and the workspace listing — so scripts are movable
 // between stages and run scripts.
 func TestRunReceivesTheFullPackageEnvironment(t *testing.T) {
-	r := runScriptsRepo(t)
+	r := runRepo(t)
 
 	r.RunScriptOK("record")
 	data, err := os.ReadFile(r.Path("packages", "core", "run-env.txt"))
@@ -101,12 +111,132 @@ func TestRunReceivesTheFullPackageEnvironment(t *testing.T) {
 	assert.Contains(t, env, "DISPAT_WORKSPACE_APP_VERSION=0.1.0", "the workspace listing travels too")
 }
 
-// TestRunUnknownScriptFails: a name no space defines is an error — running
+// TestRunUnknownScriptFails: a name nothing defines is an error — running
 // nothing silently is how a typo hides.
 func TestRunUnknownScriptFails(t *testing.T) {
-	r := runScriptsRepo(t)
+	r := runRepo(t)
 	res := r.RunScript("format")
 	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+}
+
+// TestRunTopLevelScriptReachesEveryPackage: a name defined at the top level
+// resolves in every package, so the run covers every changed package of every
+// space — including the "tools" space, which defines no scripts of its own.
+func TestRunTopLevelScriptReachesEveryPackage(t *testing.T) {
+	r := runRepo(t)
+	cfg := runConfig()
+	cfg.Scripts["stamp"] = "echo $DISPAT_PACKAGE >> ../../run.log"
+	r.WriteConfigModel(cfg)
+	r.Commit("chore(core,app,tool): add a top-level script")
+
+	r.RunScriptOK("stamp")
+	assert.ElementsMatch(t, []string{"core", "app", "tool"}, runLog(r))
+}
+
+// TestRunSpaceScriptStaysInItsSpace: the same run, with the name defined on
+// one space instead, reaches that space's changed packages alone. Together
+// with the top-level case above, this is the whole selection rule.
+func TestRunSpaceScriptStaysInItsSpace(t *testing.T) {
+	r := runRepo(t)
+	cfg := runConfig()
+	tools := cfg.Spaces["tools"]
+	tools.Scripts = map[string]string{"stamp": "echo $DISPAT_PACKAGE >> ../../run.log"}
+	cfg.Spaces["tools"] = tools
+	r.WriteConfigModel(cfg)
+	r.Commit("chore(core,app,tool): add a space script")
+
+	r.RunScriptOK("stamp")
+	assert.Equal(t, []string{"tool"}, runLog(r),
+		"only the defining space's packages run; the others are no-ops")
+}
+
+// TestRunPackageScriptRunsInThatPackageAlone: a name only one package defines
+// reaches that package and no other, even though its sibling is changed and
+// in the same space.
+func TestRunPackageScriptRunsInThatPackageAlone(t *testing.T) {
+	r := runRepo(t)
+	cfg := runConfig()
+	cfg.Packages = map[string]models.PackageConfig{
+		"app": {Scripts: map[string]string{"stamp": "echo $DISPAT_PACKAGE >> ../../run.log"}},
+	}
+	r.WriteConfigModel(cfg)
+	r.Commit("chore(core,app,tool): add a package script")
+
+	r.RunScriptOK("stamp")
+	assert.Equal(t, []string{"app"}, runLog(r))
+}
+
+// TestRunResolvesTheMostLocalScript: one name defined at all three levels
+// resolves per package — the package's own first, then its space's, then the
+// file's — so each changed package records which level answered for it.
+func TestRunResolvesTheMostLocalScript(t *testing.T) {
+	r := runRepo(t)
+	cfg := runConfig()
+	stamp := func(level string) string {
+		return "echo " + level + "-$DISPAT_PACKAGE >> ../../run.log"
+	}
+	cfg.Scripts["stamp"] = stamp("top")
+	libs := cfg.Spaces["libs"]
+	libs.Scripts["stamp"] = stamp("space")
+	cfg.Spaces["libs"] = libs
+	cfg.Packages = map[string]models.PackageConfig{
+		"app": {Scripts: map[string]string{"stamp": stamp("package")}},
+	}
+	r.WriteConfigModel(cfg)
+	r.Commit("chore(core,app,tool): define stamp at every level")
+
+	r.RunScriptOK("stamp")
+	assert.ElementsMatch(t, []string{"package-app", "space-core", "top-tool"}, runLog(r),
+		"app takes its own, core takes its space's, tool takes the file's")
+}
+
+// TestRunNoSelectedPackageDefinesIt: the name exists — so this is not the
+// typo guard — but nowhere in the selection, which would otherwise run
+// nothing and report success. The mismatch between the name's level and the
+// selection is an error.
+func TestRunNoSelectedPackageDefinesIt(t *testing.T) {
+	r := runRepo(t)
+	cfg := runConfig()
+	cfg.Packages = map[string]models.PackageConfig{
+		"tool": {Scripts: map[string]string{"stamp": "echo $DISPAT_PACKAGE >> ../../run.log"}},
+	}
+	r.WriteConfigModel(cfg)
+	r.Commit("chore(core,app,tool): give tool a script of its own")
+	r.ReleaseOK() // closes the window, so the next commit alone selects
+	r.CommitEmpty("fix(core): only core changes now")
+
+	res := r.RunScript("stamp")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Empty(t, runLog(r))
+
+	// The same name over a selection that does contain tool is fine.
+	r.RunScriptOK("stamp", "--since", "all")
+	assert.Equal(t, []string{"tool"}, runLog(r))
+}
+
+// TestRunTargetsAPackageWithATopLevelScript: `dispat run <script> <package>`
+// runs one top-level script inside one package's folder under the release
+// environment, releasing nothing, whether or not the package changed.
+func TestRunTargetsAPackageWithATopLevelScript(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["probe"] = `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`
+	cfg.Scripts["boom"] = "exit 7"
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	r.ReleaseOK() // core is now unchanged: a target does not have to be
+
+	r.RunScriptOK("probe", "core")
+	data, err := os.ReadFile(r.Path("packages", "core", "probe.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "core@0.1.0 run:probe\n", string(data),
+		"an unchanged package carries its baseline as the new version")
+	assert.Equal(t, []string{"core@0.1.0"}, r.TagList(), "a targeted run releases nothing new")
+
+	assert.Equal(t, 1, r.RunScript("ghost", "core").Code, "unknown script")
+	assert.Equal(t, 1, r.RunScript("probe", "ghost").Code, "unknown package")
+	assert.Equal(t, 1, r.RunScript("boom", "core").Code, "a failing script fails the command")
 }
 
 // TestRunOnErrorPolicies: the "fail" script exits non-zero for core, the
@@ -115,19 +245,19 @@ func TestRunUnknownScriptFails(t *testing.T) {
 // never swallowed.
 func TestRunOnErrorPolicies(t *testing.T) {
 	t.Run("skip_dependents_by_default", func(t *testing.T) {
-		r := runScriptsRepo(t)
+		r := runRepo(t)
 		res := r.RunScript("fail")
 		assert.Equal(t, 1, res.Code)
 		assert.Empty(t, runLog(r), "app is a dependent of the failed core and must be skipped")
 	})
 	t.Run("continue_still_runs_dependents", func(t *testing.T) {
-		r := runScriptsRepo(t)
+		r := runRepo(t)
 		res := r.RunScript("fail", "--on-error", "continue")
 		assert.Equal(t, 1, res.Code, "the failure still fails the command")
 		assert.Equal(t, []string{"app"}, runLog(r), "app runs despite core's failure")
 	})
 	t.Run("unknown_policy_is_a_usage_error", func(t *testing.T) {
-		r := runScriptsRepo(t)
+		r := runRepo(t)
 		res := r.RunScript("lint", "--on-error", "explode")
 		assert.Equal(t, 2, res.Code)
 	})
@@ -143,7 +273,7 @@ func TestRunConcurrencyBudget(t *testing.T) {
 		cfg := harness.BaseFile(1)
 		cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 		cfg.Spaces = map[string]models.SpaceConfig{
-			"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{
+			"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
 				"mark": r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 200*time.Millisecond),
 			}},
 		}
@@ -169,10 +299,12 @@ func TestRunConcurrencyBudget(t *testing.T) {
 }
 
 // TestRunSkipsUnchangedPackages: after a release nothing is changed, so the
-// run script executes zero times — `dispat run` targets the current plan's
-// changed packages, not the whole workspace.
+// script executes zero times — `dispat run` targets the current plan's
+// changed packages, not the whole workspace. An empty selection succeeds:
+// unlike a selection none of whose packages define the script, there was
+// nowhere to look in the first place.
 func TestRunSkipsUnchangedPackages(t *testing.T) {
-	r := runScriptsRepo(t)
+	r := runRepo(t)
 	r.ReleaseOK()
 
 	r.RunScriptOK("lint")
@@ -193,7 +325,7 @@ func TestRunInFixedSpaceIncludesRides(t *testing.T) {
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish(),
-			RunScripts: map[string]string{"lint": "echo $DISPAT_PACKAGE >> ../../run.log"}},
+			Scripts: map[string]string{"lint": "echo $DISPAT_PACKAGE >> ../../run.log"}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -216,7 +348,7 @@ func TestRunGraphOrderingUnderConcurrency(t *testing.T) {
 	cfg := harness.BaseFile(3)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
 			"mark": r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 150*time.Millisecond),
 		}},
 	}
@@ -260,7 +392,7 @@ func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 		` echo "DISPAT_OUTPUT_FROM_BASE=hello-from-base" >> "$DISPAT_OUTPUT";` +
 		` else echo "$DISPAT_PACKAGE sees $DISPAT_OUTPUT_FROM_BASE from $DISPAT_OUTPUT_SOURCE_FROM_BASE" >> ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"outer":  {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{"carry": carry}},
+		"outer":  {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{"carry": carry}},
 		"middle": {Path: "middle", Flow: buildPublish()}, // no run scripts: a silent carrier
 	}
 	cfg.Dependencies = []models.DependencyConfig{
@@ -292,7 +424,7 @@ func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 		` echo "MARK=exported-before-failing" >> "$DISPAT_OUTPUT"; exit 1;` +
 		` else echo "app sees $DISPAT_OUTPUT_MARK" > ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), RunScripts: map[string]string{"failcarry": failCarry}},
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{"failcarry": failCarry}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -317,7 +449,7 @@ func TestRunTargetsANamedPackage(t *testing.T) {
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish(),
-			RunScripts: map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}},
+			Scripts: map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}},
 		"apps": {Path: "apps", Flow: buildPublish()}, // defines no lint
 	}
 	r.WriteConfigModel(cfg)
@@ -354,7 +486,7 @@ func TestRunShorthandNarrowsToTheInvokedPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	withRunScript := cfg.Spaces["libs"]
-	withRunScript.RunScripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
+	withRunScript.Scripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
 	cfg.Spaces["libs"] = withRunScript
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -394,7 +526,7 @@ func consumersRepo(t *testing.T) *harness.Repo {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	spc := cfg.Spaces["libs"]
-	spc.RunScripts = map[string]string{
+	spc.Scripts = map[string]string{
 		"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`,
 		"fail": `[ "$DISPAT_PACKAGE" != "core" ] && echo "$DISPAT_PACKAGE" >> ../../lint.log`,
 	}
@@ -512,7 +644,7 @@ func TestRunSinceSelectsByCommitScopes(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	withRunScript := cfg.Spaces["libs"]
-	withRunScript.RunScripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
+	withRunScript.Scripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
 	cfg.Spaces["libs"] = withRunScript
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")

@@ -25,9 +25,8 @@ import (
 const (
 	cmdRelease = "release" // build and publish changed packages (default)
 	cmdStatus  = "status"  // only print the graph and new versions
-	cmdRun     = "run"     // run a space run script inside each changed package
+	cmdRun     = "run"     // run a script inside each changed package that has it
 	cmdInit    = "init"    // write a starter config file; needs no config or git
-	cmdTest    = "test"    // run one top-level script inside one package
 	cmdPreview = "preview" // print one package's pending release notes
 	cmdCompute = "compute" // derive the dependency graph from manifests
 
@@ -146,15 +145,15 @@ usage: dispat [command] [flags]
 commands:
   release                  build and publish changed packages (default)
   status                   print the project graph and new versions, without building
-  run <script> [package]   run the named space run script inside each changed package,
-                           honouring the dependency graph — or inside the one named
-                           package only, changed or not; "dispat <script>" is a
-                           shorthand when <script> is not a command name, narrowing to
-                           the package it is invoked from inside a package folder
+  run <script> [package]   run the named script inside each changed package that
+                           defines it — its own scripts, then its space's, then the
+                           top-level ones — honouring the dependency graph; or inside
+                           the one named package only, changed or not. "dispat
+                           <script>" is a shorthand when <script> is not a command
+                           name, narrowing to the package it is invoked from inside a
+                           package folder
   init                     write a starter config file (--format json, yaml or toml)
                            at the git repository root, unless one already exists
-  test <script> <package>  run the named top-level script inside the package's
-                           folder with its full DISPAT_* environment; releases nothing
   preview [package]        print the pending release notes (breaking changes,
                            features, fixes) for one package, or for every
                            package with something pending when none is named
@@ -202,7 +201,7 @@ flags:
 	if badArgs {
 		return 2
 	}
-	cmd, runScript, testPkg := inv.cmd, inv.script, inv.pkg
+	cmd, runScript, argPkg := inv.cmd, inv.script, inv.pkg
 	if cmd == cmdRun && !app.ValidOnError(*onError) {
 		bootLog.Error().Str("on-error", *onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
@@ -267,30 +266,26 @@ flags:
 		if a.RunScript(ctx, runScript, opts) != nil {
 			return 1
 		}
-	case cmdTest:
-		if a.TestScript(ctx, runScript, testPkg) != nil {
-			return 1
-		}
 	case cmdPreview:
-		notes, err := a.Preview(ctx, testPkg)
+		notes, err := a.Preview(ctx, argPkg)
 		if err != nil {
 			return 1
 		}
 		switch {
 		case notes != "":
 			fmt.Fprint(stdout, notes)
-		case testPkg == "":
+		case argPkg == "":
 			fmt.Fprintln(stdout, "no pending changes")
 		default:
-			fmt.Fprintf(stdout, "no pending changes for %s\n", testPkg)
+			fmt.Fprintf(stdout, "no pending changes for %s\n", argPkg)
 		}
 	case cmdChangelog:
-		if a.Changelog(ctx, app.ChangelogOptions{Package: testPkg, Dir: *root,
+		if a.Changelog(ctx, app.ChangelogOptions{Package: argPkg, Dir: *root,
 			File: *clFile, Title: *clTitle, DateFormat: *clDateFormat}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
-		opts := app.AutoVersionOptions{Package: testPkg, Dir: *root,
+		opts := app.AutoVersionOptions{Package: argPkg, Dir: *root,
 			Range: *avRange, Match: *avMatch, SyncLock: *avSyncLock}
 		switch *avManifests {
 		case "":
@@ -311,7 +306,7 @@ flags:
 			return 1
 		}
 	case cmdCommit:
-		if a.Commit(ctx, app.CommitOptions{Package: testPkg, Dir: *root,
+		if a.Commit(ctx, app.CommitOptions{Package: argPkg, Dir: *root,
 			Tag: *commitTag, Push: *commitPush, Name: *commitName, Email: *commitEmail,
 			Remote: *commitRemote, Message: *commitMessage, Include: *commitInclude}) != nil {
 			return 1
@@ -342,8 +337,8 @@ flags:
 // positional arguments.
 type invocation struct {
 	cmd    string
-	script string // run: the script name; test: the script
-	pkg    string // run: the optional target package; test/preview: the package
+	script string // run: the script name
+	pkg    string // run: the optional target package; preview and the step commands: the package
 	// shorthand marks the `dispat <script>` spelling of the run command; only
 	// it narrows to the package the command was invoked from.
 	shorthand bool
@@ -367,7 +362,7 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		}
 	case cmdRun:
 		if len(rest) < 2 || len(rest) > 3 {
-			log.Error().Msg("run requires the run script name, optionally followed by one package")
+			log.Error().Msg("run requires the script name, optionally followed by one package")
 			usage()
 			return inv, true
 		}
@@ -375,13 +370,6 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		if len(rest) == 3 {
 			inv.pkg = rest[2]
 		}
-	case cmdTest:
-		if len(rest) != 3 {
-			log.Error().Msg("test requires exactly two arguments: the script name and the package")
-			usage()
-			return inv, true
-		}
-		inv.script, inv.pkg = rest[1], rest[2]
 	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit:
 		if len(rest) > 2 {
 			log.Error().Msgf("%s takes at most one argument: the package name", inv.cmd)
@@ -392,9 +380,9 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 			inv.pkg = rest[1] // no argument: cover every releasing package
 		}
 	default:
-		// Not a command name: treat the word as a run script, so
-		// `dispat lint` is `dispat run lint`. A name no space defines
-		// still fails cleanly later, which also catches command typos.
+		// Not a command name: treat the word as a script, so `dispat lint` is
+		// `dispat run lint`. A name nothing defines still fails cleanly
+		// later, which also catches command typos.
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			usage()

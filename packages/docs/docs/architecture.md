@@ -9,18 +9,17 @@ Steps 1-2 are the command-line controller (`internal/cli`, behind the thin `main
 from discovery on is the `app` package's `Status` (steps 3-6) and `Release` (all of them), so the same operations are
 callable without a command line.
 
-1. Parse the command line (pflag); dispatch `release`, `status`, `run <script> [package]`, `init`,
-   `test <script> <package>` or `preview [package]`. An unknown command word is `run`'s shorthand (`dispat lint`).
+1. Parse the command line (pflag); dispatch `release`, `status`, `run <script> [package]`, `init` or
+   `preview [package]`. An unknown command word is `run`'s shorthand (`dispat lint`).
    `init` writes a starter config and exits before anything else (there is no config to load yet), refusing a `--root`
-   that is not a git repository root. The run command computes the plan, then executes the named space run script inside
-   each changed package over the dependency graph (build concurrency budget; `--on-error` decides whether a failure
-   skips the failed package's dependents) and stops; with an explicit `[package]` (or, for the shorthand, when invoked
-   from inside a package's folder) the run narrows to that one package, changed or not, with no graph; `--since <rev>`
-   (or `all`) instead selects what the commits since a revision address: scopes first, changed files for scopeless units
-   (§6.2). Nothing below step 6 applies to it. `test` and `preview` compute the plan quietly (diagnostics, no graph),
-   then run one top-level script in one package's folder with its full
-   `DISPAT_*` environment / print the pending release notes (one package's, or every pending package's in publish order
-   when none is named), and stop.
+   that is not a git repository root. The run command computes the plan, then executes the script inside each changed
+   package that resolves the name — the package's `scripts`, then its space's, then the file's — over the dependency
+   graph (build concurrency budget; `--on-error` decides whether a failure skips the failed package's dependents) and
+   stops; with an explicit `[package]` (or, for the shorthand, when invoked from inside a package's folder) the run
+   narrows to that one package, changed or not, with no graph; `--since <rev>` (or `all`) instead selects what the
+   commits since a revision address: scopes first, changed files for scopeless units (§6.2). Nothing below step 6
+   applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (one
+   package's, or every pending package's in publish order when none is named), and stops.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root; a file without `spaces` or `packages` (a package's in-folder override) does not end the
    ascent), then load and validate it (viper; unknown keys rejected; flag bindings applied).

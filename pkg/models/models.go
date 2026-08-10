@@ -8,7 +8,12 @@
 // Every field carries both a mapstructure tag (how viper decodes the file) and
 // a json tag with the same key (how a model marshals back into a loadable
 // file). Viper treats keys case-insensitively and lowercases map keys, so
-// script, space and run-script names are matched case-insensitively.
+// script and space names are matched case-insensitively.
+//
+// `scripts` is one shape at three levels — the file, a space and a package —
+// and a package resolves a name through its own map first, then its space's,
+// then the file's. Every level's values are shell commands; `flow` entries and
+// `dispat run <name>` both name them.
 package models
 
 import (
@@ -347,12 +352,13 @@ type SpaceConfig struct {
 	// A declared group's versioning mode is authoritative, so a space naming
 	// one must not set versioning itself.
 	VersionGroup string `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
-	// RunScripts are the space's named `dispat run <name>` scripts. Unlike
-	// the stage entries, values are shell commands themselves, not references
-	// into `scripts`. `dispat run <name>` executes the script inside each
-	// changed package of the space, in topological order, with the package's
-	// full DISPAT_* environment; spaces without the name are skipped.
-	RunScripts map[string]string `mapstructure:"runScripts" json:"runScripts,omitempty"`
+	// Scripts are the space's named shell commands, the same shape as the
+	// file's own `scripts` and layered over it name by name: the space's
+	// packages resolve a name here before falling back to the top level.
+	// `flow` entries name them, and `dispat run <name>` executes the one it
+	// resolves inside each changed package of the space, in topological order,
+	// with the package's full DISPAT_* environment.
+	Scripts map[string]string `mapstructure:"scripts" json:"scripts,omitempty"`
 	// AutoVersion enables native manifest rewriting at the version stage:
 	// dispat itself updates the declared ranges of workspace dependencies
 	// (and the package's own version field) in package.json and go.mod,
@@ -398,9 +404,11 @@ type PackageConfig struct {
 	// VersionGroup names the shared-versioning group this package joins; see
 	// SpaceConfig.VersionGroup.
 	VersionGroup string `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
-	// RunScripts are merged into the space's map name by name; a name set
-	// here wins over the space's.
-	RunScripts  map[string]string  `mapstructure:"runScripts" json:"runScripts,omitempty"`
+	// Scripts are merged into the space's map name by name; a name set here
+	// wins over the space's, which wins over the file's. A name only this
+	// package defines is the package's alone: `dispat run <name>` reaches no
+	// other package with it.
+	Scripts     map[string]string  `mapstructure:"scripts" json:"scripts,omitempty"`
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
 	// Changelog and GitHub overlay the top-level objects field by field for
 	// this package's release records — flip enabled, rename the file, target
@@ -582,10 +590,11 @@ func (c *File) Script(ref string) (string, bool) {
 	return s, ok
 }
 
-// RunScript resolves a space's run script case-insensitively, for the same
-// viper reason as Script.
-func (s SpaceConfig) RunScript(name string) (string, bool) {
-	cmd, ok := s.RunScripts[strings.ToLower(name)]
+// Script resolves one of the space's own scripts case-insensitively, for the
+// same viper reason as File.Script. It looks no further than this level: the
+// fallback to the file's scripts belongs to the layer that knows the package.
+func (s SpaceConfig) Script(name string) (string, bool) {
+	cmd, ok := s.Scripts[strings.ToLower(name)]
 	return cmd, ok
 }
 

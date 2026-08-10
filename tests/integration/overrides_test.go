@@ -240,7 +240,7 @@ func TestOverridesRunShorthandFromPackageFolder(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	spc := cfg.Spaces["libs"]
-	spc.RunScripts = map[string]string{"greet": "echo greeted > greeted.txt"}
+	spc.Scripts = map[string]string{"greet": "echo greeted > greeted.txt"}
 	cfg.Spaces["libs"] = spc
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -253,22 +253,27 @@ func TestOverridesRunShorthandFromPackageFolder(t *testing.T) {
 		"the shorthand resolved the root config and ran in the package")
 }
 
-// TestOverridesRunScriptOnlyInPackage: a run script defined only in a
-// package folder's own config file exists nowhere in the loaded root config,
-// yet `dispat run` must find it — and run it in that package alone, siblings
-// skipping as they would any script their space does not define. A name no
-// space or package defines anywhere stays an error.
-func TestOverridesRunScriptOnlyInPackage(t *testing.T) {
+// TestOverridesScriptsAcrossTheLayers: a script defined only in a package
+// folder's own config file exists nowhere in the loaded root config, yet
+// `dispat run` must find it — and run it in that package alone, siblings
+// skipping as they would any script they do not resolve. The two levels above
+// it reach further in the same run, and a name nothing defines anywhere stays
+// an error.
+func TestOverridesScriptsAcrossTheLayers(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["stamp"] = "echo stamped > stamped.txt"
+	spc := cfg.Spaces["libs"]
+	spc.Scripts = map[string]string{"sweep": "echo swept > swept.txt"}
+	cfg.Spaces["libs"] = spc
 	cfg.Packages = map[string]models.PackageConfig{
-		"extra": {RunScripts: map[string]string{"buff": "echo buffed > buffed.txt"}},
+		"extra": {Scripts: map[string]string{"buff": "echo buffed > buffed.txt"}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "extra")
 	packageFile(t, r, "packages/core", models.PackageConfig{
-		RunScripts: map[string]string{"polish": "echo polished > polished.txt"},
+		Scripts: map[string]string{"polish": "echo polished > polished.txt"},
 	})
 	r.Commit("feat(core,extra): bootstrap both")
 
@@ -281,6 +286,14 @@ func TestOverridesRunScriptOnlyInPackage(t *testing.T) {
 	r.RunScriptOK("buff")
 	assert.FileExists(t, r.Path("packages", "extra", "buffed.txt"))
 	assert.NoFileExists(t, r.Path("packages", "core", "buffed.txt"))
+
+	// The space's and the file's own scripts reach both packages.
+	r.RunScriptOK("sweep")
+	assert.FileExists(t, r.Path("packages", "core", "swept.txt"))
+	assert.FileExists(t, r.Path("packages", "extra", "swept.txt"))
+	r.RunScriptOK("stamp")
+	assert.FileExists(t, r.Path("packages", "core", "stamped.txt"))
+	assert.FileExists(t, r.Path("packages", "extra", "stamped.txt"))
 
 	res := r.RunScript("ghost")
 	assert.NotEqual(t, 0, res.Code, "an undefined script stays a hard error")

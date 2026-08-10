@@ -486,12 +486,6 @@ func TestLoadErrors(t *testing.T) {
 		wantErr string
 	}{
 		{"no spaces", func(c *File) { c.Spaces = nil }, "at least one space"},
-		{"unknown script", func(c *File) { setBuild(c, "nope") }, "unknown script"},
-		{"unknown version script", func(c *File) {
-			libs := c.Spaces["libs"]
-			libs.Flow.Version = []string{"nope"}
-			c.Spaces["libs"] = libs
-		}, "unknown script"},
 		{"negative concurrency", func(c *File) { c.Concurrency = []int{-1} }, "concurrency"},
 		{"too many concurrency values", func(c *File) { c.Concurrency = []int{1, 2, 3} }, "at most two"},
 		{"bad level", func(c *File) { c.LogLevel = "loud" }, "logLevel"},
@@ -517,9 +511,6 @@ func TestLoadErrors(t *testing.T) {
 		{"autoVersion bad nameMatch", func(c *File) {
 			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{NameMatch: "fuzzy"} })
 		}, "nameMatch"},
-		{"autoVersion unknown syncLock script", func(c *File) {
-			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{SyncLock: []string{"nope"}} })
-		}, "unknown script"},
 		{"autoVersion negative syncLockConcurrency", func(c *File) {
 			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{SyncLockConcurrency: -1} })
 		}, "syncLockConcurrency"},
@@ -770,37 +761,21 @@ func TestLoadRunHooks(t *testing.T) {
 	assert.Equal(t, []string{"echo notify"}, loaded.Commands(loaded.Run.AfterPush))
 }
 
+// TestLoadScriptReferenceErrors covers the references that resolve at the
+// repository level: the run hooks run once at the root, with no package in
+// scope, so the top-level scripts are the whole scope and Load can check them.
 func TestLoadScriptReferenceErrors(t *testing.T) {
 	cases := []struct {
 		name    string
 		mutate  func(*File)
 		wantErr string
 	}{
-		{"unknown login script", func(c *File) {
-			libs := c.Spaces["libs"]
-			libs.Flow.Login = []string{"nope"}
-			c.Spaces["libs"] = libs
-		}, "flow.login references unknown script"},
-		{"unknown hook script", func(c *File) {
-			libs := c.Spaces["libs"]
-			libs.Flow.BeforeBuild = []string{"nope"}
-			c.Spaces["libs"] = libs
-		}, "flow.beforeBuild references unknown script"},
 		{"unknown run hook script", func(c *File) {
 			c.Run.PostAll = []string{"nope"}
 		}, "run.postAll references unknown script"},
 		{"unknown beforeAll run hook script", func(c *File) {
 			c.Run.BeforeAll = []string{"nope"}
 		}, "run.beforeAll references unknown script"},
-		{"unknown script in an array", func(c *File) {
-			setBuild(c, "build")
-			libs := c.Spaces["libs"]
-			libs.Flow.Build = []string{"build", "nope"}
-			c.Spaces["libs"] = libs
-		}, "flow.build references unknown script"},
-		{"empty space script reference", func(c *File) {
-			setBuild(c, "")
-		}, "empty script reference"},
 		{"empty run hook reference", func(c *File) {
 			c.Run.BeforePush = []string{""}
 		}, "empty script reference"},
@@ -812,6 +787,52 @@ func TestLoadScriptReferenceErrors(t *testing.T) {
 			_, err := loadModel(t, cfg)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}
+
+// TestDiscoverScriptReferenceErrors covers the references that resolve in a
+// package's scope — every flow entry and autoVersion.syncLock. They cannot be
+// checked at load: the levels below the space, which a package may be the
+// only one to define, are only known once packages are discovered.
+func TestDiscoverScriptReferenceErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*File)
+		wantErr string
+	}{
+		{"unknown build script", func(c *File) { setBuild(c, "nope") },
+			"flow.build references unknown script"},
+		{"unknown version script", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.Flow.Version = []string{"nope"} })
+		}, "flow.version references unknown script"},
+		{"unknown login script", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.Flow.Login = []string{"nope"} })
+		}, "flow.login references unknown script"},
+		{"unknown hook script", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.Flow.BeforeBuild = []string{"nope"} })
+		}, "flow.beforeBuild references unknown script"},
+		{"unknown script in an array", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.Flow.Build = []string{"build", "nope"} })
+		}, "flow.build references unknown script"},
+		{"empty space script reference", func(c *File) { setBuild(c, "") },
+			"empty script reference"},
+		{"autoVersion unknown syncLock script", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{SyncLock: []string{"nope"}} })
+		}, "autoVersion.syncLock references unknown script"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			c.mutate(&cfg)
+			root := writeModelRepo(t, cfg, "pkgs/core")
+			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.NoError(t, err, "a reference is not a load-time error")
+			_, _, err = Discover(loaded, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+			assert.Contains(t, err.Error(), `package "core"`,
+				"the error names the package whose scope the name had to resolve in")
 		})
 	}
 }
@@ -855,37 +876,39 @@ func TestLoadVersioning(t *testing.T) {
 	assert.Contains(t, err.Error(), "fixedSparse", "the message names the valid values")
 }
 
-func TestLoadRunScripts(t *testing.T) {
-	// runScripts values are shell commands, not references into `scripts`, so
-	// they need no scripts entry; keys are lowercased by viper and resolved
-	// case-insensitively; an empty command is rejected.
+func TestLoadSpaceScripts(t *testing.T) {
+	// A space's scripts hold shell commands, the same shape as the file's own;
+	// keys are lowercased by viper and resolved case-insensitively; an empty
+	// command is rejected.
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.RunScripts = map[string]string{"Lint": "echo linting", "test": "go test ./..."}
+		s.Scripts = map[string]string{"Lint": "echo linting", "test": "go test ./..."}
 	})
 	loaded, err := loadModel(t, cfg, "pkgs/core")
 	require.NoError(t, err)
 
-	cmd, ok := loaded.Spaces["libs"].RunScript("LINT")
-	require.True(t, ok, "run script names resolve case-insensitively")
+	cmd, ok := loaded.Spaces["libs"].Script("LINT")
+	require.True(t, ok, "script names resolve case-insensitively")
 	assert.Equal(t, "echo linting", cmd)
-	_, ok = loaded.Spaces["libs"].RunScript("format")
+	_, ok = loaded.Spaces["libs"].Script("format")
 	assert.False(t, ok)
 
 	bad := minimalConfig()
 	withLibs(&bad, func(s *SpaceConfig) {
-		s.RunScripts = map[string]string{"lint": "  "}
+		s.Scripts = map[string]string{"lint": "  "}
 	})
 	_, err = loadModel(t, bad, "pkgs/core")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `runScripts["lint"] is empty`)
+	assert.Contains(t, err.Error(), `scripts["lint"] is empty`)
 }
 
-func TestDiscoverCarriesVersioningAndRunScripts(t *testing.T) {
+func TestDiscoverCarriesVersioningAndScripts(t *testing.T) {
+	// The discovered space's Scripts is the package's effective map: the
+	// file's scripts underneath the space's own.
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
 		s.Versioning = "fixed"
-		s.RunScripts = map[string]string{"lint": "echo linting"}
+		s.Scripts = map[string]string{"lint": "echo linting"}
 	})
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -894,17 +917,165 @@ func TestDiscoverCarriesVersioningAndRunScripts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fixed", string(pkgs[0].Space.Versioning))
-	assert.Equal(t, map[string]string{"lint": "echo linting"}, pkgs[0].Space.RunScripts)
+	assert.Equal(t, map[string]string{"build": "echo b", "lint": "echo linting"},
+		pkgs[0].Space.Scripts)
 }
 
-func TestLoadRunScriptsEmptyNameRejected(t *testing.T) {
+// TestScriptValuesAreCheckedAtEveryLevel: one map, one set of rules. A
+// nameless entry or a name bound to no command is rejected wherever it sits,
+// so a package cannot smuggle in what a space may not hold.
+func TestScriptValuesAreCheckedAtEveryLevel(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*File)
+		wantErr string
+	}{
+		{"top-level empty name", func(c *File) { c.Scripts[""] = "echo nameless" },
+			"empty script name"},
+		{"top-level empty command", func(c *File) { c.Scripts["blank"] = "  " },
+			`scripts["blank"] is empty`},
+		{"space empty name", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.Scripts = map[string]string{"": "echo nameless"} })
+		}, "empty script name"},
+		{"space empty command", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) { s.Scripts = map[string]string{"blank": "  "} })
+		}, `scripts["blank"] is empty`},
+		{"package empty command", func(c *File) {
+			c.Packages = map[string]PackageConfig{"core": {Scripts: map[string]string{"blank": "  "}}}
+		}, `scripts["blank"] is empty`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			c.mutate(&cfg)
+			root := writeModelRepo(t, cfg, "pkgs/core")
+			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+			if err == nil {
+				// A package's map only exists once its layers are merged.
+				_, _, err = Discover(loaded, root)
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}
+
+// TestFlowResolvesThroughEveryLevel: a flow entry names a script, and the
+// package it runs for is what resolves the name — its own scripts first, then
+// its space's, then the file's. The same name at several levels resolves to
+// the most local command.
+func TestFlowResolvesThroughEveryLevel(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Scripts["deploy"] = "echo top"
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Scripts = map[string]string{"build": "echo space-build"}
+		s.Flow.Publish = []string{"deploy"}
+	})
+	cfg.Packages = map[string]PackageConfig{
+		"core": {Scripts: map[string]string{"build": "echo core-build"}},
+	}
+	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+
+	byName := map[string]*model.Package{}
+	for _, p := range pkgs {
+		byName[p.Name] = p
+	}
+	require.Len(t, byName, 2)
+	assert.Equal(t, []string{"echo core-build"}, byName["core"].Space.BuildScript,
+		"the package's own script wins")
+	assert.Equal(t, []string{"echo space-build"}, byName["app"].Space.BuildScript,
+		"the space's script wins over the file's")
+	assert.Equal(t, []string{"echo top"}, byName["app"].Space.PublishScript,
+		"a name no lower level defines falls through to the file's scripts")
+}
+
+// TestFlowRefNeedsThePackageScope: a name defined only in another space, or
+// only in another package, was never in scope, and the error says so against
+// the package whose scope failed.
+func TestFlowRefNeedsThePackageScope(t *testing.T) {
+	t.Run("defined only in another space", func(t *testing.T) {
+		cfg := minimalConfig()
+		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
+		cfg.Spaces["apps"] = SpaceConfig{Path: "apps", Flow: &SpaceFlowConfig{},
+			Scripts: map[string]string{"ship": "echo shipping"}}
+		root := writeModelRepo(t, cfg, "pkgs/core", "apps/web")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = Discover(loaded, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `package "core"`)
+		assert.Contains(t, err.Error(), `flow.publish references unknown script "ship"`)
+		assert.Contains(t, err.Error(), "no scripts entry in the package, its space or the top level")
+	})
+
+	t.Run("defined only in another package", func(t *testing.T) {
+		cfg := minimalConfig()
+		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
+		cfg.Packages = map[string]PackageConfig{
+			"core": {Scripts: map[string]string{"ship": "echo shipping"}},
+		}
+		root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = Discover(loaded, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `package "app"`, "core resolves it, app does not")
+	})
+
+	t.Run("every package supplies its own", func(t *testing.T) {
+		// The counterpart: a space flow entry no level above defines is fine
+		// as long as every package defines it, which is why the check is per
+		// package and not per space.
+		cfg := minimalConfig()
+		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
+		cfg.Packages = map[string]PackageConfig{
+			"core": {Scripts: map[string]string{"ship": "echo core-ship"}},
+			"app":  {Scripts: map[string]string{"ship": "echo app-ship"}},
+		}
+		root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		pkgs, _, err := Discover(loaded, root)
+		require.NoError(t, err)
+		require.Len(t, pkgs, 2)
+		for _, p := range pkgs {
+			assert.Equal(t, []string{"echo " + p.Name + "-ship"}, p.Space.PublishScript)
+		}
+	})
+}
+
+// TestSyncLockResolvesThroughThePackageScope: autoVersion.syncLock is a
+// script reference like any flow entry, so it resolves — and is checked — in
+// the package's scope too.
+func TestSyncLockResolvesThroughThePackageScope(t *testing.T) {
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.RunScripts = map[string]string{"": "echo nameless"}
+		s.Scripts = map[string]string{"tidy": "go mod tidy"}
+		s.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"tidy"}}
 	})
-	_, err := loadModel(t, cfg, "pkgs/core")
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.NotNil(t, pkgs[0].Space.AutoVersion)
+	assert.Equal(t, []string{"go mod tidy"}, pkgs[0].Space.AutoVersion.SyncLock)
+
+	bad := minimalConfig()
+	withLibs(&bad, func(s *SpaceConfig) {
+		s.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"tidy"}}
+	})
+	badRoot := writeModelRepo(t, bad, "pkgs/core")
+	loaded, err = Load(filepath.Join(badRoot, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, _, err = Discover(loaded, badRoot)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty script name")
+	assert.Contains(t, err.Error(), `autoVersion.syncLock references unknown script "tidy"`)
 }
 
 func TestDiscoverMissingSpaceFolder(t *testing.T) {

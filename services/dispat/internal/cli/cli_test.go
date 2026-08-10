@@ -66,7 +66,6 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 	for _, args := range [][]string{
 		{"run"},                               // run requires the script name
 		{"run", "a", "b", "c"},                // ...plus at most one package
-		{"test", "probe"},                     // test requires script and package
 		{"preview", "a", "b"},                 // preview takes at most one package
 		{"status", "extra"},                   // status takes no arguments
 		{"bogus", "extra"},                    // more than one non-command word
@@ -162,4 +161,13 @@ func TestStepCommandWordsAreNotRunScripts(t *testing.T) {
 		code := Run([]string{word, "--root", root}, &stdout, &stderr)
 		assert.Equal(t, 1, code, "%s must parse as a command, not a run script", word)
 	}
+}
+
+func TestTestIsAnOrdinaryScriptWord(t *testing.T) {
+	// "test" is not a command word, so `dispat test` is `dispat run test` like
+	// any other bare word: it reaches config loading (exit 1 here) rather than
+	// failing arity as a command would have.
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 1, Run([]string{"test", "--root", root}, &stdout, &stderr))
 }

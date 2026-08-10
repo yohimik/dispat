@@ -18,10 +18,12 @@ scripts:
   publish-go: "./scripts/release.sh"
   notify: "./scripts/notify.sh"
 
-# A space's `flow` object says what runs at which stage, referencing the named
-# scripts above. Every entry is optional (a stage without a script still runs,
-# keeping ordering, tags, changelogs and github releases; it just executes no shell
-# command) and accepts one name or an array of names run in order.
+# A space's `flow` object says what runs at which stage, referencing scripts by
+# name. Every entry is optional (a stage without a script still runs, keeping
+# ordering, tags, changelogs and github releases; it just executes no shell
+# command) and accepts one name or an array of names run in order. A name is
+# resolved by the package the stage runs for: its own `scripts`, then its
+# space's, then the ones above.
 spaces:
   libs:
     path: packages/libs
@@ -38,12 +40,16 @@ spaces:
     #   fixedSparse            the shared version, but unchanged members keep
     #                          their previous versions until they change
     versioning: independent
-    # Named shell commands (NOT references into `scripts`) for `dispat run
-    # <name>` (or just `dispat <name>`): executed inside each changed package
-    # over the dependency graph with the full DISPAT_* environment; nothing
-    # is released or tagged. --on-error picks skip/continue for dependents of
-    # a failed package; --concurrency's build value bounds the parallelism.
-    runScripts:
+    # The space's own scripts: the same shape as the top-level `scripts`,
+    # layered over them for this space's packages. `flow` entries name them,
+    # and so does `dispat run <name>` (or just `dispat <name>`), which executes
+    # the name inside each changed package that resolves it, over the
+    # dependency graph, with the full DISPAT_* environment and nothing released
+    # or tagged. A name defined here reaches this space's packages; one defined
+    # at the top level reaches every package. --on-error picks skip/continue
+    # for dependents of a failed package; --concurrency's build value bounds
+    # the parallelism.
+    scripts:
       lint: "npm run lint"
     # Native manifest rewriting at the version stage (package.json, go.mod):
     # declared workspace ranges are reconciled to end-of-run provider
@@ -96,7 +102,7 @@ spaces:
 # that package's space configuration: the space's options minus `path`, plus
 # changelog, github, concurrency and dependencies. Unset fields inherit; flow
 # merges entry by entry (flow.login excluded — login stays once per space),
-# runScripts name by name, autoVersion replaces wholesale, changelog/github
+# scripts name by name, autoVersion replaces wholesale, changelog/github
 # overlay the top-level objects field by field. A package folder may instead
 # carry its own dispat.json/.yaml/.toml with this same shape — the most local
 # layer. A .dispatignore file in a space folder (one name or *-glob per line)
@@ -108,6 +114,11 @@ spaces:
 packages:
   core:
     revertOnFail: false               # tri-state: absent inherits
+    # The most local scripts level: this name wins over the space's and the
+    # file's for this package alone, and a name only defined here makes
+    # `dispat run <name>` reach this package alone.
+    scripts:
+      lint: "npm run lint -- --strict"
     flow:
       build: build                    # replaces this entry alone
     versionGroup: platform            # join the declared group below

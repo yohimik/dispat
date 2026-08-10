@@ -28,8 +28,8 @@ Every script receives, on top of the parent environment:
 
 `DISPAT_STAGE` carries `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`,
 `postPublish`, `postAll`, ...) for a hook; `login` for the login; `syncLock` for an
-[`autoVersion.syncLock`](./configuration/spaces.md#autoversion) script; `run:<name>` for a
-[run script](./configuration/spaces.md#runscripts-and-dispat-run); and `test:<name>` for `dispat test`.
+[`autoVersion.syncLock`](./configuration/spaces.md#autoversion) script; and `run:<name>` for
+[`dispat run <name>`](./configuration/spaces.md#scripts-and-dispat-run).
 
 `DISPAT_TAG_VERSION` is the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no
 path). It equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.
@@ -143,8 +143,8 @@ was exported) and `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script each export ca
 `<package>:<stage>` (`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage
 scripts: a `beforeBuild` export reaches the build, the publish and everything after. The **login script's**
 exports are space-scoped: they reach every package of the space from its publish stage (the stage that waits for the
-login) onward. In [`dispat run`](./configuration/spaces.md#runscripts-and-dispat-run) outputs additionally carry across
-packages, from a provider's run script to its consumers'; in a release run they stay within the package (a consumer's
+login) onward. In [`dispat run`](./configuration/spaces.md#scripts-and-dispat-run) outputs additionally carry across
+packages, from a provider's script to its consumers'; in a release run they stay within the package (a consumer's
 release scripts read a provider's new version from the `DISPAT_UPDATED_*` listing, not the provider's outputs).
 Re-exporting a name overrides its earlier value and source, like a shell re-assignment.
 

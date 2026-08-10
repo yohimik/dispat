@@ -16,11 +16,11 @@ import (
 )
 
 // runPlan builds a minimal plan over absolute package folders under root: one
-// "libs" space defining the "lint" run script, packages in the given order,
-// providers as declared. Enough structure for the selection helpers, which
-// never execute anything.
+// "libs" space whose effective script map defines "lint", packages in the
+// given order, providers as declared. Enough structure for the selection
+// helpers, which never execute anything.
 func runPlan(root string, names []string, providers map[string][]string) *plan.Plan {
-	libs := &model.Space{Name: "libs", RunScripts: map[string]string{"lint": "run lint"}}
+	libs := &model.Space{Name: "libs", Scripts: map[string]string{"lint": "run lint"}}
 	pl := &plan.Plan{Releases: map[string]*plan.Release{}, Providers: providers}
 	for _, n := range names {
 		pl.Releases[n] = &plan.Release{
@@ -60,7 +60,7 @@ func TestRunTarget(t *testing.T) {
 
 	_, err = a.runTarget(pl, "absent", RunOptions{Package: "core"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `does not define run script "absent"`)
+	assert.Contains(t, err.Error(), `does not define script "absent"`)
 
 	target, err = a.runTarget(pl, "lint", RunOptions{Package: "core"})
 	require.NoError(t, err)

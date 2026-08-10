@@ -155,7 +155,7 @@ func validatePackageLayer(label string, po PackageConfig) error {
 
 // mergePackageOverride overlays one override layer onto a space-shaped
 // config. Versioning and versionGroup are one axis — a layer setting either
-// supersedes both inherited values — flow merges entry by entry, runScripts
+// supersedes both inherited values — flow merges entry by entry, scripts
 // name by name, and autoVersion replaces wholesale: its empty fields already
 // carry meaning relative to their siblings (no kinds means all four), so an
 // overlay could never express them against a non-empty base.
@@ -180,15 +180,15 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.Flow != nil {
 		sc.Flow = mergeFlow(sc.Flow, po.Flow)
 	}
-	if len(po.RunScripts) > 0 {
-		merged := make(map[string]string, len(sc.RunScripts)+len(po.RunScripts))
-		for k, v := range sc.RunScripts {
+	if len(po.Scripts) > 0 {
+		merged := make(map[string]string, len(sc.Scripts)+len(po.Scripts))
+		for k, v := range sc.Scripts {
 			merged[k] = v
 		}
-		for k, v := range po.RunScripts {
+		for k, v := range po.Scripts {
 			merged[k] = v
 		}
-		sc.RunScripts = merged
+		sc.Scripts = merged
 	}
 	if po.AutoVersion != nil {
 		sc.AutoVersion = po.AutoVersion

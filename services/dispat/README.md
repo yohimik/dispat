@@ -41,8 +41,8 @@ A few more moves:
 ```sh
 $ dispat compute                    # derive the dependency graph from the manifests; --write applies
 $ dispat preview                    # pending release notes, all packages (preview core: just one)
-$ dispat test build core            # try the build script in packages/core with the real DISPAT_* env
-$ dispat lint                       # run a script in every changed package, in graph order
+$ dispat run build core             # try the build script in packages/core with the real DISPAT_* env
+$ dispat lint                       # run a script in every changed package that has it, in graph order
 $ git commit -m "feat(core)%beta: try it out"
 $ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)%stable:
 ```
@@ -81,7 +81,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Concepts](https://yohimik.github.io/dispat/concepts)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
-| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, run scripts, `.dispatignore`.         |
+| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, `.dispatignore`.           |
 | [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides, standalone packages, package dependencies, in-folder config files.           |
 | [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
 | [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, the release commit.                                                    |

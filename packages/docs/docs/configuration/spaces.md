@@ -17,7 +17,7 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                                                                                                            |
 | `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space with `fixed`/`fixedSparse` versioning. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                 |
-| `runScripts`            | map name → shell command | no         | Named commands for `dispat run <name>`. Values are shell commands themselves, **not** references into `scripts`; see [`runScripts` and `dispat run`](#runscripts-and-dispat-run).                                                                                                                                                                                                       |
+| `scripts`               | map name → shell command | no         | The space's own named commands, layered over the top-level [`scripts`](./README.md#top-level-options) for this space's packages. `flow` entries name them, and so does `dispat run <name>`; see [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 
 A single package's departures from these options live in the top-level [`packages`](./packages.md) map, not on the
@@ -26,7 +26,9 @@ space.
 ## Stages and hooks
 
 The space's `flow` object, keyed by stage or hook name (every entry a script name or an array of names; see the
-[sequence rules](./README.md#script-sequences)):
+[sequence rules](./README.md#script-sequences)). A name is resolved by the package the stage runs for — its own
+`scripts`, then the space's, then the file's — so a space's `flow.build: build` can be satisfied once at the top or
+package by package; see [`scripts` and `dispat run`](#scripts-and-dispat-run):
 
 | Key              | Kind    | Description                                                                                                                                                                                  |
 |------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -258,38 +260,71 @@ release now ranges over a prerelease provider. And `W221`: a rewritten dependenc
 behind it, so nothing orders this package after that provider or skips it when the provider fails; the written version
 is optimistic about a publish still in flight. `dispat compute` derives the missing edge.
 
-## `runScripts` and `dispat run`
+## `scripts` and `dispat run`
 
-Each space may define `runScripts`: named shell commands for ad-hoc work over the packages a release *would* touch, like
-linting what is about to ship, printing diffs, or smoke-checking artefacts.
+`scripts` is one shape at three levels — the [file](./README.md#top-level-options), a space, and a
+[package](./packages.md) — each a map of names to shell commands:
 
 ```yaml
+scripts:
+  build: "npm run build"
+  publish: "npm publish --access public"
+  audit: "npm audit --omit=dev"          # every package has it
+
 spaces:
   libs:
     path: packages
     flow: { build: build, publish: publish }
-    runScripts:
-      lint: "npm run lint"
+    scripts:
+      lint: "npm run lint"               # this space's packages have it
       preview: "echo \"$DISPAT_PACKAGE -> $DISPAT_NEW_VERSION\""
+
+packages:
+  core:
+    scripts:
+      lint: "npm run lint -- --strict"   # core's own lint, overriding the space's
+      bench: "npm run bench"             # core alone has it
 ```
 
-Unlike the stage entries, the values are **shell commands themselves**, not references into `scripts`. Command names
-are reserved: a run script named after any dispat command (`status`, `commit`, `changelog`, ...) is shadowed by the
-command in the `dispat <name>` shorthand and only reachable as `dispat run <name>`. `dispat run
-<name>` (or the shorthand `dispat <name>`, whenever `<name>` is not a command name) computes the plan and executes the
-named script inside each **changed** package (the packages a release would process), honouring the dependency graph:
-a package's script starts only after every changed provider's finished, and independent packages run concurrently within
-the build concurrency budget (`--concurrency`'s first value). Each script gets the package's full
-[DISPAT_* environment](../environment.md) (`DISPAT_STAGE` is `run:<name>`), so a script moves freely between a stage and
-a run script. A changed package whose space does not define the name completes as a no-op; a name no space or
-[package entry](./packages.md) defines is an error (running nothing silently is how a typo hides).
+A package resolves a name through **its own scripts, then its space's, then the file's** — most local wins, name by
+name, so overriding one name leaves the other levels' names untouched. That one rule serves both readers of a script
+name: `flow` entries (and `autoVersion.syncLock`) name a script, and so does `dispat run`.
 
-The run can also be narrowed to a single package, in two ways. `dispat run <name> <package>` runs the script in exactly
-that package (changed or not, with no graph) and errors on an unknown package or on one whose space does not define the
-script, because a *targeted* run that runs nothing would be a typo hiding. And the shorthand, invoked from inside a
-package's folder (or any subdirectory of it), narrows to that package the same way (config resolution finds the monorepo
-root by ascending parent directories, so `cd packages/core && dispat lint` just works), while from the monorepo top it
-covers every changed package as usual. The shorthand takes no package argument.
+### What a run covers
+
+`dispat run <name>` — or the shorthand `dispat <name>`, whenever `<name>` is not a command name — computes the plan and
+executes the script inside each **changed** package (the packages a release would process) that resolves the name,
+honouring the dependency graph: a package's script starts only after every changed provider's finished, and independent
+packages run concurrently within the build concurrency budget (`--concurrency`'s first value).
+
+Because resolution is per package, **the level a name is defined at is what the run covers**:
+
+| Defined at         | `dispat run <name>` runs in                                     |
+|--------------------|------------------------------------------------------------------|
+| the top level      | every changed package                                            |
+| a space            | the changed packages of that space                               |
+| a package          | that package, when it changed                                    |
+
+A changed package that resolves nothing completes as a no-op. Two cases are errors instead, because running nothing
+silently is how a typo hides: a name **nothing** defines, and a name defined somewhere but in **none of the selected
+packages** (a package-level script when that package did not change, say). A selection that is empty to begin with —
+nothing changed at all — is an honest no-op and succeeds.
+
+Each script gets the package's full [DISPAT_* environment](../environment.md) (`DISPAT_STAGE` is `run:<name>`), which is
+why a script moves freely between a stage and a `dispat run`. Command names are reserved: a script named after any
+dispat command (`status`, `commit`, `changelog`, ...) is shadowed by the command in the `dispat <name>` shorthand and
+only reachable as `dispat run <name>`.
+
+### Narrowing to one package
+
+`dispat run <name> <package>` runs the script in exactly that package (changed or not, with no graph) and errors on an
+unknown package or on one that does not resolve the script, because a *targeted* run that runs nothing would be a typo
+hiding. This is how you try one script under exactly the environment its stage would hand it, releasing nothing:
+`dispat run build core`.
+
+The shorthand, invoked from inside a package's folder (or any subdirectory of it), narrows to that package the same way
+(config resolution finds the monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just
+works), while from the monorepo top it covers every changed package as usual. The shorthand takes no package argument.
 
 A third selection axis is `--since <rev>` (`-s`): instead of the release window, select the packages the commits in
 `rev..HEAD` address: `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),
@@ -302,7 +337,7 @@ to the changed one. `--since` is mutually exclusive with an explicit `<package>`
 inference.
 
 A window (`--since` or the release window) covers only the packages the commits **address**, never the packages a change
-*affects*: `dispat test -s HEAD~1` re-tests the changed provider, not the consumers that depend on it. The
+*affects*: `dispat run test -s HEAD~1` re-tests the changed provider, not the consumers that depend on it. The
 `--consumers` flag closes that gap: it additionally selects every package that **transitively depends** on a selected
 one; a consumer pulled in brings its own consumers, all the way down the graph. The added packages run whether or not
 they changed, after their selected providers, and a failing provider's script skips them under the default
@@ -314,9 +349,9 @@ skipped, transitively (the same shape a release gives a failed provider), while 
 `continue` the dependents run anyway. Any failure makes the command exit `1` either way. Nothing is released, tagged or
 written. Names are matched case-insensitively (viper lowercases map keys).
 
-Run scripts take part in [script outputs](../environment.md#script-outputs) too, with one extra rule: outputs carry
-across packages, down the dependency graph. Each run script gets `$DISPAT_OUTPUT` to export through, and a package's
-script receives the exports of its changed providers' scripts (transitively; a script-less package in the middle still
+`dispat run` takes part in [script outputs](../environment.md#script-outputs) too, with one extra rule: outputs carry
+across packages, down the dependency graph. Each script gets `$DISPAT_OUTPUT` to export through, and a package's
+script receives the exports of its changed providers' scripts (transitively; a package that resolves nothing still
 carries them through) as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` still naming the original exporter
 (`base:run:lint`). Providers merge in name order, the package's own re-export overrides, and under
 `--on-error continue` a failed provider's exports still reach its dependents, mirroring what the pipeline's `onFail`

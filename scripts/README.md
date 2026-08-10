@@ -17,19 +17,20 @@ docs snapshot is cut per minor rather than per patch, and why the deploy pushes 
 
 ## Running one by hand
 
-`dispat test <script> <package>` runs a script once with the exact environment its stage would hand it, releasing
-nothing:
+`dispat run <script> <package>` runs a script once inside that package, with the exact environment its stage would hand
+it, releasing nothing — the package does not have to be changed:
 
 ```sh
-dispat test build-dispat dispat        # cross-compiles into services/dispat/dist
-dispat test build-docs docs           # pnpm install + docusaurus build
-dispat test cut-docs-version docs     # writes a versioned_docs snapshot if the version warrants one
+dispat run build-dispat dispat        # cross-compiles into services/dispat/dist
+dispat run build-docs docs            # pnpm install + docusaurus build
+dispat run cut-docs-version docs      # writes a versioned_docs snapshot if the version warrants one
 ```
 
-`deploy-docs.sh` is the exception: **do not run it**, by hand or through `dispat test`. It force-pushes the live site,
+`deploy-docs.sh` is the exception: **do not run it**, by hand or through `dispat run`. It force-pushes the live site,
 and the tag dispat writes afterwards is the only record that the leg completed, so a deploy outside a release run
 publishes a working tree to production and leaves nothing behind saying so. The script refuses unless `CI=true` for
-exactly that reason.
+exactly that reason. Note that these are top-level `scripts`, so every changed package resolves them: naming no package
+(`dispat run deploy-docs`) would reach all of them at once.
 
 The scripts are POSIX `sh` with `set -eu`, and they are the release path itself: a change here is only really exercised
 by the [Release workflow](../.github/workflows/release.yml).

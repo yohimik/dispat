@@ -57,7 +57,7 @@ between packages under `dependencies` so bumps propagate and ordering is enforce
 That is a complete, working configuration. Everything else is optional and layered on top:
 
 - concurrency budgets, tag formats, log settings: the [top-level options](configuration/README.md);
-- build/publish ordering, hooks, login, versioning modes, run scripts: [spaces](configuration/spaces.md);
+- build/publish ordering, hooks, login, versioning modes, `scripts` and `dispat run`: [spaces](configuration/spaces.md);
 - changelogs, GitHub releases, the release commit: [release records](configuration/records.md);
 - commit-message policies and parser tweaks: [parsing options](configuration/parser.md).
 
@@ -112,12 +112,14 @@ dispat init                 # write a starter dispat.json (--format yaml/toml fo
 dispat status               # print the project graph and planned versions; changes nothing
 dispat                      # release (default command): full pipeline
 dispat release --root path  # same, explicit
-dispat run lint             # run the "lint" runScripts entry inside each changed
-                            # package, honouring the dependency graph; releases nothing
+dispat run lint             # run the "lint" script inside each changed package that
+                            # defines it, honouring the dependency graph; releases nothing.
+                            # A top-level script reaches every changed package, a space's
+                            # its space's, a package's that package alone
 dispat lint                 # the same: an unknown command word means "run <word>"
 dispat run lint --on-error continue   # keep running dependents of a failed package
-dispat test build core      # run the top-level "build" script once inside packages/core
-                            # with core's full DISPAT_* environment; releases nothing
+dispat run build core       # run the "build" script once inside packages/core with core's
+                            # full DISPAT_* environment, changed or not; releases nothing
 dispat preview              # pending release notes for every package with something pending
 dispat preview core         # print core's pending release notes (breaking changes,
                             # features, fixes): what its next changelog entry would say

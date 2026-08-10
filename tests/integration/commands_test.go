@@ -1,11 +1,10 @@
 package integration
 
-// Area 8: the init, test and preview commands through the compiled binary.
-// Each is a small command with an observable artefact — a starter config the
-// very next status can load, a script run inside a package folder with the
-// full DISPAT_* environment, pending release notes on stdout — and this file
-// pins exactly those artefacts plus the commands' exit codes over the
-// process boundary.
+// Area 8: the init and preview commands through the compiled binary. Each is
+// a small command with an observable artefact — a starter config the very
+// next status can load, pending release notes on stdout — and this file pins
+// exactly those artefacts plus the commands' exit codes over the process
+// boundary.
 
 import (
 	"os"
@@ -39,32 +38,6 @@ func TestCommandsInitThenStatusCompose(t *testing.T) {
 
 	res = r.Command("init", "--format", "toml")
 	assert.Equal(t, 1, res.Code, "an existing config must never be overwritten")
-}
-
-// TestCommandsTestScript: `dispat test <script> <package>` runs one
-// top-level script inside the package's folder with the package's full
-// DISPAT_* environment and releases nothing; unknown names and failing
-// scripts map onto exit 1.
-func TestCommandsTestScript(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["probe"] = `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`
-	cfg.Scripts["boom"] = "exit 7"
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): first release")
-
-	res := r.Command("test", "probe", "core")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	data, err := os.ReadFile(r.Path("packages", "core", "probe.txt"))
-	require.NoError(t, err, "the script must run inside the package folder")
-	assert.Equal(t, "core@0.1.0 test:probe\n", string(data),
-		"the script receives the package's planned version and the test stage name")
-	assert.Empty(t, r.TagList(), "test releases nothing")
-
-	assert.Equal(t, 1, r.Command("test", "nope", "core").Code, "an unknown script name is an error")
-	assert.Equal(t, 1, r.Command("test", "probe", "ghost").Code, "an unknown package is an error")
-	assert.Equal(t, 1, r.Command("test", "boom", "core").Code, "a failing script fails the command")
 }
 
 // TestCommandsPreviewNotesWindowing: `dispat preview <package>` prints the

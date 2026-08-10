@@ -60,12 +60,12 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 		t.Error("unknown scripts do not resolve")
 	}
 
-	sc := SpaceConfig{RunScripts: map[string]string{"lint": "npm run lint"}}
-	if s, ok := sc.RunScript("LINT"); !ok || s != "npm run lint" {
-		t.Errorf("RunScript(LINT) = %q, %v", s, ok)
+	sc := SpaceConfig{Scripts: map[string]string{"lint": "npm run lint"}}
+	if s, ok := sc.Script("LINT"); !ok || s != "npm run lint" {
+		t.Errorf("SpaceConfig.Script(LINT) = %q, %v", s, ok)
 	}
-	if _, ok := sc.RunScript("format"); ok {
-		t.Error("unknown run scripts do not resolve")
+	if _, ok := sc.Script("format"); ok {
+		t.Error("unknown scripts do not resolve")
 	}
 
 	pf := File{Packages: map[string]PackageConfig{"core": {TagFormat: "v{version}"}}}
@@ -102,8 +102,8 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 		Scripts: map[string]string{"build": "make"},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "packages", Versioning: VersioningFixed,
-				Flow:       &SpaceFlowConfig{Build: []string{"build"}},
-				RunScripts: map[string]string{"lint": "make lint"}},
+				Flow:    &SpaceFlowConfig{Build: []string{"build"}},
+				Scripts: map[string]string{"lint": "make lint"}},
 		},
 		Dependencies:     []DependencyConfig{{Consumer: "app", Provider: "core"}},
 		BuildConcurrency: 99, // resolved: must not marshal
@@ -117,7 +117,7 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	space := raw["spaces"].(map[string]any)["libs"].(map[string]any)
-	for _, key := range []string{"path", "versioning", "flow", "runScripts"} {
+	for _, key := range []string{"path", "versioning", "flow", "scripts"} {
 		if _, ok := space[key]; !ok {
 			t.Errorf("space is missing key %q: %v", key, space)
 		}

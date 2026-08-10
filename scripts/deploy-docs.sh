@@ -10,7 +10,7 @@
 set -eu
 
 # The tag is the record that this leg committed, so a deploy must only ever
-# happen inside the release run. Without this guard `dispat test deploy-docs
+# happen inside the release run. Without this guard `dispat run deploy-docs
 # docs` would publish a developer's working tree to the live site.
 if [ "${CI:-}" != "true" ]; then
   echo "refusing to deploy outside CI (set CI=true to override)" >&2

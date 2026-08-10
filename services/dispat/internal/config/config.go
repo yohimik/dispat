@@ -108,18 +108,100 @@ var validLevels = map[string]bool{
 	"trace": true, "debug": true, "info": true, "warn": true, "error": true,
 }
 
-// checkScriptRefs verifies that every labelled script reference is non-empty
-// and resolves, so validation and Commands resolution can never disagree
-// about a list. prefix locates the owner in the error ("space \"libs\": ").
-func checkScriptRefs(c *File, refs map[string][]string, prefix string) error {
-	for field, list := range refs {
-		for _, ref := range list {
+// scriptScope is where a script reference may resolve: the names in view,
+// plus the sentence an error uses to say where the name was looked for.
+// Keeping the two together is what stops a resolution site and its error
+// message from describing different sets of names.
+type scriptScope struct {
+	scripts map[string]string
+	hint    string
+}
+
+// packageScope is the scope a package's references resolve in: the file's
+// scripts overlaid with the space's, then the package's. sc arrives already
+// merged, so its own map carries both of the lower two levels and this only
+// has to add the top one underneath.
+func packageScope(c *File, sc SpaceConfig) scriptScope {
+	scripts := make(map[string]string, len(c.Scripts)+len(sc.Scripts))
+	for k, v := range c.Scripts {
+		scripts[k] = v
+	}
+	for k, v := range sc.Scripts {
+		scripts[k] = v
+	}
+	return scriptScope{scripts, "no scripts entry in the package, its space or the top level"}
+}
+
+// rootScope is the scope of the run hooks: they execute once at the
+// repository root, with no package in view, so only the file's scripts are.
+func rootScope(c *File) scriptScope {
+	return scriptScope{c.Scripts, "no top-level scripts entry"}
+}
+
+// commands resolves a sequence of script references into the shell commands
+// they name, preserving order. Unknown references were rejected by check, so
+// resolution cannot silently drop one.
+func (s scriptScope) commands(refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if cmd, ok := s.scripts[strings.ToLower(ref)]; ok {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+// check verifies that every labelled script reference is non-empty and
+// resolves in the scope, so validation and command resolution can never
+// disagree about a list. prefix locates the owner in the error ("space
+// \"libs\": "). Fields are checked in name order, so a config with several
+// mistakes always reports the same one first.
+func (s scriptScope) check(refs map[string][]string, prefix string) error {
+	fields := make([]string, 0, len(refs))
+	for field := range refs {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	for _, field := range fields {
+		for _, ref := range refs[field] {
 			if ref == "" {
 				return fmt.Errorf("%s%s contains an empty script reference", prefix, field)
 			}
-			if _, ok := c.Script(ref); !ok {
-				return fmt.Errorf("%s%s references unknown script %q", prefix, field, ref)
+			if _, ok := s.scripts[strings.ToLower(ref)]; !ok {
+				return fmt.Errorf("%s%s references unknown script %q (%s)", prefix, field, ref, s.hint)
 			}
+		}
+	}
+	return nil
+}
+
+// checkSpaceRefs verifies every script reference a space-shaped config makes
+// (its flow entries and its autoVersion.syncLock) against the scope of the
+// package it was merged for. It runs per package, not per space, because a
+// package may be the level that defines the script its space's flow names.
+func (s scriptScope) checkSpaceRefs(label string, sc SpaceConfig) error {
+	if err := s.check(scriptRefs(&sc), label+": "); err != nil {
+		return err
+	}
+	if sc.AutoVersion == nil {
+		return nil
+	}
+	return s.check(map[string][]string{"autoVersion.syncLock": sc.AutoVersion.SyncLock}, label+": ")
+}
+
+// checkScriptValues rejects the two ways a scripts map itself can be unusable,
+// at whichever level holds it: a nameless entry, and a name bound to no
+// command at all.
+func checkScriptValues(label string, scripts map[string]string) error {
+	for name, cmd := range scripts {
+		if name == "" {
+			return fmt.Errorf("%s: scripts contains an empty script name", label)
+		}
+		if strings.TrimSpace(cmd) == "" {
+			return fmt.Errorf("%s: scripts[%q] is empty", label, name)
 		}
 	}
 	return nil
@@ -530,7 +612,10 @@ func validate(c *File) error {
 			return fmt.Errorf("space %q: %w", name, err)
 		}
 	}
-	if err := checkScriptRefs(c, runHookRefs(c), ""); err != nil {
+	if err := checkScriptValues("config", c.Scripts); err != nil {
+		return err
+	}
+	if err := rootScope(c).check(runHookRefs(c), ""); err != nil {
 		return err
 	}
 	for i, d := range c.Dependencies {
@@ -609,8 +694,10 @@ func validateLogging(c *File) error {
 }
 
 // validateSpace checks one space — path, tag format, versioning mode,
-// runScripts, script references — and returns it with its versioning value
-// normalized.
+// scripts — and returns it with its versioning value normalized. What the
+// space's flow references is not checked here: a reference resolves in a
+// package's scope, which discovery knows and this does not, so
+// checkScriptScope owns that check.
 func validateSpace(c *File, name string, s SpaceConfig) (SpaceConfig, error) {
 	return validateSpaceAs(c, fmt.Sprintf("space %q", name), s)
 }
@@ -639,27 +726,20 @@ func validateSpaceAs(c *File, label string, s SpaceConfig) (SpaceConfig, error) 
 			label, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
 	}
 	s.Versioning = versioning
-	for scriptName, cmd := range s.RunScripts {
-		if scriptName == "" {
-			return s, fmt.Errorf("%s: runScripts contains an empty script name", label)
-		}
-		if strings.TrimSpace(cmd) == "" {
-			return s, fmt.Errorf("%s: runScripts[%q] is empty", label, scriptName)
-		}
-	}
-	if err := checkScriptRefs(c, scriptRefs(&s), label+": "); err != nil {
+	if err := checkScriptValues(label, s.Scripts); err != nil {
 		return s, err
 	}
-	if err := validateAutoVersion(c, label, s.AutoVersion); err != nil {
+	if err := validateAutoVersion(label, s.AutoVersion); err != nil {
 		return s, err
 	}
 	return s, nil
 }
 
-// validateAutoVersion checks an autoVersion object under the owner's error
-// label. The `only` names need the discovered packages and are checked in
-// Discover instead.
-func validateAutoVersion(c *File, label string, av *public.AutoVersionConfig) error {
+// validateAutoVersion checks an autoVersion object's own values under the
+// owner's error label. The `only` names need the discovered packages and are
+// checked in Discover instead; syncLock's references need a package's scope
+// and are checked in checkScriptScope.
+func validateAutoVersion(label string, av *public.AutoVersionConfig) error {
 	if av == nil {
 		return nil
 	}
@@ -687,12 +767,13 @@ func validateAutoVersion(c *File, label string, av *public.AutoVersionConfig) er
 	if av.SyncLockConcurrency < 0 {
 		return fmt.Errorf("%ssyncLockConcurrency must be >= 0, got %d", prefix, av.SyncLockConcurrency)
 	}
-	return checkScriptRefs(c, map[string][]string{"autoVersion.syncLock": av.SyncLock}, label+": ")
+	return nil
 }
 
 // resolveAutoVersion maps a validated autoVersion object onto the domain
-// policy; nil (or enabled: false) resolves to nil, feature off.
-func resolveAutoVersion(c *File, av *public.AutoVersionConfig) *model.AutoVersion {
+// policy; nil (or enabled: false) resolves to nil, feature off. scope is the
+// owning package's, which is where syncLock's references resolve.
+func resolveAutoVersion(scope scriptScope, av *public.AutoVersionConfig) *model.AutoVersion {
 	if !av.IsEnabled() {
 		return nil
 	}
@@ -723,7 +804,7 @@ func resolveAutoVersion(c *File, av *public.AutoVersionConfig) *model.AutoVersio
 		Match:               av.Match,
 		Range:               av.Range,
 		WriteVersion:        av.WriteVersionEnabled(),
-		SyncLock:            c.Commands(av.SyncLock),
+		SyncLock:            scope.commands(av.SyncLock),
 		SyncLockConcurrency: av.SyncLockConcurrency,
 	}
 }
@@ -865,10 +946,15 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	var ignoredDirs []ignoredDir
 	for _, sn := range spaceNames {
 		sc := c.Spaces[sn]
-		base, err := buildSpace(c, fmt.Sprintf("space %q", sn), sn, sc)
+		baseScope := packageScope(c, sc)
+		base, err := buildSpace(c, baseScope, fmt.Sprintf("space %q", sn), sn, sc)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
+		// Every package without an override layer shares the space's scope, so
+		// its references are the same question with the same answer: ask once,
+		// under the name of the first package that asked.
+		baseRefsChecked := false
 		dir := filepath.Join(root, sc.Path)
 		ignore, err := loadIgnore(dir)
 		if err != nil {
@@ -939,7 +1025,11 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				if err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
-				if pkg.Space, err = buildSpace(c, label, sn, merged); err != nil {
+				scope := packageScope(c, merged)
+				if err := scope.checkSpaceRefs(label, merged); err != nil {
+					return nil, nil, fmt.Errorf("config: %w", err)
+				}
+				if pkg.Space, err = buildSpace(c, scope, label, sn, merged); err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
 				if (hasEntry && entryPO.AutoVersion != nil) || filePO.AutoVersion != nil {
@@ -952,6 +1042,16 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				if ex.github != nil {
 					pkg.GitHub = githubSpec(ex.github)
 				}
+			} else if !baseRefsChecked {
+				// No override layer: the package resolves the space's own
+				// references, but the error still names the package, because
+				// the scope a reference has to resolve in is always a
+				// package's.
+				label := fmt.Sprintf("space %q: package %q", sn, name)
+				if err := baseScope.checkSpaceRefs(label, sc); err != nil {
+					return nil, nil, fmt.Errorf("config: %w", err)
+				}
+				baseRefsChecked = true
 			}
 			if hasEntry {
 				declared, err = collectPackageDeps(declared, name,
@@ -1056,7 +1156,11 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
-		if pkg.Space, err = buildSpace(c, label, key, merged); err != nil {
+		scope := packageScope(c, merged)
+		if err := scope.checkSpaceRefs(label, merged); err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		if pkg.Space, err = buildSpace(c, scope, label, key, merged); err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
 		if po.AutoVersion != nil || filePO.AutoVersion != nil {
@@ -1112,12 +1216,14 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 }
 
 // buildSpace resolves one validated space-shaped configuration onto the
-// domain Space: script references become shell commands, the tag format
-// falls back to the repository's, and the versioning mode and group key come
-// from the config's own versioning or the group it references. label locates
-// the owner in errors — the space itself, or the package whose merged
-// override this is.
-func buildSpace(c *File, label, spaceName string, sc SpaceConfig) (*model.Space, error) {
+// domain Space: script references become shell commands through the package's
+// scope (its scripts over the space's over the file's), the tag format falls
+// back to the repository's, and the versioning mode and group key come from
+// the config's own versioning or the group it references. label locates the
+// owner in errors: the space itself, or the package whose merged override
+// this is. The caller checked the same scope with checkSpaceRefs, so nothing
+// here can silently resolve to nothing.
+func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceConfig) (*model.Space, error) {
 	mode, group, err := resolveSpaceVersioning(c, spaceName, sc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
@@ -1133,25 +1239,25 @@ func buildSpace(c *File, label, spaceName string, sc SpaceConfig) (*model.Space,
 		RevertOnFail:         sc.RevertOnFail,
 		Versioning:           model.Versioning(mode),
 		VersionGroup:         group,
-		RunScripts:           sc.RunScripts,
-		BuildScript:          c.Commands(sc.Flow.Build),
-		PublishScript:        c.Commands(sc.Flow.Publish),
-		VersionScript:        c.Commands(sc.Flow.Version),
-		LoginScript:          c.Commands(sc.Flow.Login),
-		AnnounceScript:       c.Commands(sc.Flow.Announce),
-		BeforeAllScript:      c.Commands(sc.Flow.BeforeAll),
-		BeforeVersionScript:  c.Commands(sc.Flow.BeforeVersion),
-		PostVersionScript:    c.Commands(sc.Flow.PostVersion),
-		BeforeBuildScript:    c.Commands(sc.Flow.BeforeBuild),
-		PostBuildScript:      c.Commands(sc.Flow.PostBuild),
-		BeforePublishScript:  c.Commands(sc.Flow.BeforePublish),
-		PostPublishScript:    c.Commands(sc.Flow.PostPublish),
-		BeforeAnnounceScript: c.Commands(sc.Flow.BeforeAnnounce),
-		PostAnnounceScript:   c.Commands(sc.Flow.PostAnnounce),
-		OnFailScript:         c.Commands(sc.Flow.OnFail),
-		OnSkipScript:         c.Commands(sc.Flow.OnSkip),
+		Scripts:              scope.scripts,
+		BuildScript:          scope.commands(sc.Flow.Build),
+		PublishScript:        scope.commands(sc.Flow.Publish),
+		VersionScript:        scope.commands(sc.Flow.Version),
+		LoginScript:          scope.commands(sc.Flow.Login),
+		AnnounceScript:       scope.commands(sc.Flow.Announce),
+		BeforeAllScript:      scope.commands(sc.Flow.BeforeAll),
+		BeforeVersionScript:  scope.commands(sc.Flow.BeforeVersion),
+		PostVersionScript:    scope.commands(sc.Flow.PostVersion),
+		BeforeBuildScript:    scope.commands(sc.Flow.BeforeBuild),
+		PostBuildScript:      scope.commands(sc.Flow.PostBuild),
+		BeforePublishScript:  scope.commands(sc.Flow.BeforePublish),
+		PostPublishScript:    scope.commands(sc.Flow.PostPublish),
+		BeforeAnnounceScript: scope.commands(sc.Flow.BeforeAnnounce),
+		PostAnnounceScript:   scope.commands(sc.Flow.PostAnnounce),
+		OnFailScript:         scope.commands(sc.Flow.OnFail),
+		OnSkipScript:         scope.commands(sc.Flow.OnSkip),
 		TagFormat:            tagFormat,
-		AutoVersion:          resolveAutoVersion(c, sc.AutoVersion),
+		AutoVersion:          resolveAutoVersion(scope, sc.AutoVersion),
 	}, nil
 }
 

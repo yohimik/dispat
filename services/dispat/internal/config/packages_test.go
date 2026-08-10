@@ -644,25 +644,34 @@ func TestOverlayRecordFields(t *testing.T) {
 	assert.False(t, gh.IsEnabled())
 }
 
-// TestPackageOverrideRunScriptsUnion: runScripts merge name by name — the
-// override adds and shadows, the space's other names survive.
-func TestPackageOverrideRunScriptsUnion(t *testing.T) {
+// TestPackageOverrideScriptsUnion: scripts merge name by name across all
+// three levels — the package adds and shadows, the space's other names
+// survive, and the file's names stay underneath both. A name several levels
+// define resolves to the most local command.
+func TestPackageOverrideScriptsUnion(t *testing.T) {
 	cfg := validConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.RunScripts = map[string]string{"lint": "space lint", "fmt": "space fmt"}
+		s.Scripts = map[string]string{"lint": "space lint", "fmt": "space fmt", "build": "space build"}
 	})
 	cfg.Packages = map[string]PackageConfig{
-		"core": {RunScripts: map[string]string{"lint": "core lint", "extra": "core extra"}},
+		"core": {Scripts: map[string]string{"lint": "core lint", "extra": "core extra"}},
 	}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	byName := packagesByName(pkgs)
 
-	assert.Equal(t, map[string]string{"lint": "core lint", "fmt": "space fmt", "extra": "core extra"},
-		byName["core"].Space.RunScripts)
-	assert.Equal(t, map[string]string{"lint": "space lint", "fmt": "space fmt"},
-		byName["utils"].Space.RunScripts, "the space's own map is not mutated by the merge")
+	assert.Equal(t, map[string]string{"lint": "core lint", "fmt": "space fmt", "extra": "core extra",
+		"build": "space build", "publish": "echo publish"}, byName["core"].Space.Scripts)
+	assert.Equal(t, map[string]string{"lint": "space lint", "fmt": "space fmt",
+		"build": "space build", "publish": "echo publish"},
+		byName["utils"].Space.Scripts, "the space's own map is not mutated by the merge")
+	assert.Equal(t, map[string]string{"build": "echo build", "publish": "echo publish"},
+		byName["app"].Space.Scripts, "another space sees the file's scripts alone")
+
+	// The precedence is the one the flow resolution uses, not a separate rule.
+	assert.Equal(t, []string{"space build"}, byName["core"].Space.BuildScript)
+	assert.Equal(t, []string{"echo build"}, byName["app"].Space.BuildScript)
 }
 
 // TestStandalonePackage: a packages entry with a path is a package outside

@@ -42,9 +42,9 @@ type RunOptions struct {
 	OnError string
 	// Package, when set, targets exactly one package: the script runs there
 	// whether or not the package changed, and the dependency graph plays no
-	// part. Naming an unknown package is an error, as is a target whose space
-	// does not define the script — a targeted run that runs nothing would be
-	// how a typo hides.
+	// part. Naming an unknown package is an error, as is a target that does
+	// not resolve the script at any level — a targeted run that runs nothing
+	// would be how a typo hides.
 	Package string
 	// Dir, when set (the `dispat <script>` shorthand), narrows the run the
 	// same way when it points inside a package's folder; anywhere else — the
@@ -80,46 +80,23 @@ type RunOptions struct {
 	Consumers bool
 }
 
-// RunScript computes the plan and executes the named space run script inside
-// each changed package with the package's full DISPAT_* environment,
-// honouring the dependency graph: a package's script starts only after every
-// changed provider's has finished, and independent packages run concurrently
-// within the build concurrency budget. A changed package whose space does not
-// define the script completes as a no-op; a name no space defines at all is
-// an error, because running nothing silently is how a typo hides. opts can
-// narrow the run to one package (see RunOptions); any failure makes the
-// whole command fail.
+// RunScript computes the plan and executes the named script inside each
+// changed package that resolves it, with the package's full DISPAT_*
+// environment, honouring the dependency graph: a package's script starts only
+// after every changed provider's has finished, and independent packages run
+// concurrently within the build concurrency budget.
+//
+// A package resolves the name through its own scripts, then its space's, then
+// the top level's, so where a name is defined is what a run covers: a
+// top-level script reaches every changed package, a space's reaches that
+// space's, and a package's reaches that package alone. A selected package
+// that resolves nothing completes as a no-op — but a name nothing defines, or
+// a selection in which no package resolves it, is an error, because running
+// nothing silently is how a typo hides. opts can narrow the run to one
+// package (see RunOptions); any failure makes the whole command fail.
 func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error {
-	defined := false
-	for _, sc := range a.cfg.Spaces {
-		if _, ok := sc.RunScript(name); ok {
-			defined = true
-			break
-		}
-	}
-	for _, po := range a.cfg.Packages {
-		if defined {
-			break
-		}
-		if _, ok := po.RunScripts[strings.ToLower(name)]; ok {
-			defined = true
-		}
-	}
-	if !defined {
-		// A script defined only in a package folder's own config file is not
-		// in the loaded config at all; discovery reads those files, so the
-		// typo guard consults it before rejecting.
-		if pkgs, _, err := config.DiscoverPackages(a.cfg, a.root); err == nil {
-			for _, p := range pkgs {
-				if _, ok := p.Space.RunScripts[strings.ToLower(name)]; ok {
-					defined = true
-					break
-				}
-			}
-		}
-	}
-	if !defined {
-		msg := fmt.Sprintf("no space or package defines run script %q", name)
+	if !a.scriptDefinedAnywhere(name) {
+		msg := fmt.Sprintf("no script %q is defined at the top level, in a space or in a package", name)
 		if note, ok := lookupNote(name); ok {
 			msg = note
 		}
@@ -202,8 +179,11 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		func(pkg string) int { return pl.Releases[pkg].Pkg.BuildWeight },
 		func(pkg string) { run.execute(ctx, pkg) })
 
-	ran, failed, skipped := 0, 0, 0
+	ran, failed, skipped, resolved := 0, 0, 0, 0
 	for _, res := range run.results {
+		if res.defined {
+			resolved++
+		}
 		switch {
 		case res.failed:
 			failed++
@@ -219,15 +199,60 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		a.log.Warn().Err(drainErr).Msg("run interrupted")
 		return drainErr
 	}
+	// The script exists somewhere — the guard above said so — but not where
+	// this run looked. Silence here would read like a clean run of nothing,
+	// so the mismatch between the name's level and the selection is an error.
+	// A selection that is empty to begin with is not: nothing changed, and a
+	// run over no packages is an honest no-op.
+	if len(selected) > 0 && resolved == 0 {
+		err := fmt.Errorf("no selected package defines script %q (selected: %s)",
+			name, strings.Join(selected, ", "))
+		a.log.Error().Err(err).Msg("nothing to run")
+		return err
+	}
 	if failed > 0 {
 		return fmt.Errorf("%d run script(s) failed", failed)
 	}
 	return nil
 }
 
+// scriptDefinedAnywhere reports whether any level of the configuration binds
+// the name to a command. It is the typo guard, and it runs before the plan so
+// a misspelling costs nothing: a name that exists somewhere may still turn out
+// to reach none of the packages a run selects, which the run itself reports.
+// The three cheap levels are asked first; only a name none of them knows is
+// worth a package discovery, which is the one place a script defined solely in
+// a package folder's own config file can be seen.
+func (a *App) scriptDefinedAnywhere(name string) bool {
+	if _, ok := a.cfg.Script(name); ok {
+		return true
+	}
+	for _, sc := range a.cfg.Spaces {
+		if _, ok := sc.Script(name); ok {
+			return true
+		}
+	}
+	key := strings.ToLower(name)
+	for _, po := range a.cfg.Packages {
+		if _, ok := po.Scripts[key]; ok {
+			return true
+		}
+	}
+	pkgs, _, err := config.DiscoverPackages(a.cfg, a.root)
+	if err != nil {
+		return false
+	}
+	for _, p := range pkgs {
+		if _, ok := p.Space.Scripts[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // runTarget resolves the single package a run is narrowed to, or "" for the
 // ordinary changed-packages run. An explicit RunOptions.Package must exist
-// and its space must define the script; RunOptions.Dir narrows only when it
+// and must resolve the script; RunOptions.Dir narrows only when it
 // points inside some package's folder, and silently does not when it points
 // anywhere else (the monorepo root, a space folder, outside the tree) — or
 // when --since or --consumers is in play, because an explicit flag beats
@@ -244,9 +269,9 @@ func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, er
 	if rel == nil {
 		return "", fmt.Errorf("unknown package %q (discovered: %s)", target, strings.Join(pl.Order, ", "))
 	}
-	if _, ok := rel.Pkg.Space.RunScripts[strings.ToLower(name)]; !ok {
-		return "", fmt.Errorf("space %q of package %q does not define run script %q",
-			rel.Pkg.Space.Name, target, name)
+	if _, ok := rel.Pkg.Space.Scripts[strings.ToLower(name)]; !ok {
+		return "", fmt.Errorf("package %q does not define script %q (looked in the package, its space and the top level)",
+			target, name)
 	}
 	return target, nil
 }
@@ -330,8 +355,11 @@ func (a *App) packageAt(pl *plan.Plan, dir string) string {
 	return ""
 }
 
-// runOutcome is one package's terminal state within a `dispat run`.
-type runOutcome struct{ failed, skipped, ran bool }
+// runOutcome is one package's terminal state within a `dispat run`. defined
+// is independent of the other three: it records that the package resolved the
+// script at all, which is what tells a run that covered only packages without
+// it apart from one that genuinely ran nothing.
+type runOutcome struct{ failed, skipped, ran, defined bool }
 
 // scriptRun is the shared state of one RunScript invocation: the plan, the
 // changed packages, the per-package outcomes (mu guards results; everything
@@ -384,6 +412,12 @@ func (s *scriptRun) execute(ctx context.Context, pkg string) {
 		}
 	}
 
+	// The one resolution: the package's own scripts over its space's over the
+	// top level's, already merged into the effective map when the package's
+	// space was built.
+	cmd, ok := rel.Pkg.Space.Scripts[strings.ToLower(s.name)]
+	res.defined = ok
+
 	if s.onError == OnErrorSkip {
 		// Providers finished before this package was handed out, so their
 		// outcomes are final; a skipped provider cascades the skip.
@@ -398,10 +432,9 @@ func (s *scriptRun) execute(ctx context.Context, pkg string) {
 		}
 	}
 
-	cmd, ok := rel.Pkg.Space.RunScripts[strings.ToLower(s.name)]
 	if !ok {
 		s.app.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
-			Msgf("space does not define run script %q, skipping", s.name)
+			Msgf("package does not define script %q, skipping", s.name)
 		return
 	}
 	log := s.app.log.With().Str("package", pkg).Str("stage", s.stage).Logger()
