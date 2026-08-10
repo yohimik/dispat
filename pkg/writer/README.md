@@ -22,29 +22,29 @@ holds the ones the manifest does not declare at all, which usually means the cal
 
 ## Supported manifests
 
-| File                   | Rewrites dependency ranges                          | Rewrites the own `version` field    |
-|------------------------|-----------------------------------------------------|-------------------------------------|
-| `package.json`         | yes (byte-precise scalar splice)                    | yes                                 |
-| `go.mod`               | yes (`golang.org/x/mod/modfile`)                    | no such field                       |
-| `requirements*.txt`    | yes (per-line splice, comments and CRLF preserved)  | no such field                       |
-| `Info.plist`           | none to write                                       | yes (`CFBundleShortVersionString`)  |
-| `AndroidManifest.xml`  | none to write                                       | yes (`android:versionName`)         |
-| `project.pbxproj`      | none to write                                       | yes (`MARKETING_VERSION`, all configs) |
-| `libs.versions.toml`   | yes (through `version.ref` into `[versions]`)       | no such field                       |
-| `Podfile`              | yes (per-line splice, quote style preserved)        | no such field                       |
-| `*.podspec`            | yes (per-line splice)                               | yes (`s.version`)                   |
-| `build.gradle`(`.kts`) | yes (the version segment of a literal coordinate)   | yes (`versionName`)                 |
-| `Cargo.toml`           | yes (plain values and inline-table `version` keys)  | yes (`[package] version`)           |
-| `pyproject.toml`       | yes (PEP 508 array entries and Poetry tables)       | yes (`[project]`, else Poetry's)    |
-| `composer.json`        | yes (`require`, `require-dev`)                      | yes, where one is declared          |
-| `pom.xml`              | yes (each `<dependency>`'s `<version>`)             | yes (the project's own, not parent's) |
-| `*.csproj`/`.fsproj`/`.vbproj` | yes (`Version` attribute and child element) | yes (first `PropertyGroup`)      |
-| `*.nuspec`             | yes (each `<dependency>`'s version attribute)       | yes (`<metadata><version>`)         |
-| `Directory.Packages.props` | yes (each `PackageVersion`)                     | no such field                       |
-| `packages.config`      | yes (each `<package>`'s lower-case `version`)       | no such field                       |
-| `pubspec.yaml`         | yes (per-line scalar splice)                        | yes                                 |
-| `Gemfile`              | yes (per-line splice, quote style preserved)        | no such field                       |
-| `*.gemspec`            | yes (per-line splice)                               | yes (`spec.version`)                |
+| File                           | Rewrites dependency ranges                         | Rewrites the own `version` field       |
+|--------------------------------|----------------------------------------------------|----------------------------------------|
+| `package.json`                 | yes (byte-precise scalar splice)                   | yes                                    |
+| `go.mod`                       | yes (`golang.org/x/mod/modfile`)                   | no such field                          |
+| `requirements*.txt`            | yes (per-line splice, comments and CRLF preserved) | no such field                          |
+| `Info.plist`                   | none to write                                      | yes (`CFBundleShortVersionString`)     |
+| `AndroidManifest.xml`          | none to write                                      | yes (`android:versionName`)            |
+| `project.pbxproj`              | none to write                                      | yes (`MARKETING_VERSION`, all configs) |
+| `libs.versions.toml`           | yes (through `version.ref` into `[versions]`)      | no such field                          |
+| `Podfile`                      | yes (per-line splice, quote style preserved)       | no such field                          |
+| `*.podspec`                    | yes (per-line splice)                              | yes (`s.version`)                      |
+| `build.gradle`(`.kts`)         | yes (the version segment of a literal coordinate)  | yes (`versionName`)                    |
+| `Cargo.toml`                   | yes (plain values and inline-table `version` keys) | yes (`[package] version`)              |
+| `pyproject.toml`               | yes (PEP 508 array entries and Poetry tables)      | yes (`[project]`, else Poetry's)       |
+| `composer.json`                | yes (`require`, `require-dev`)                     | yes, where one is declared             |
+| `pom.xml`                      | yes (each `<dependency>`'s `<version>`)            | yes (the project's own, not parent's)  |
+| `*.csproj`/`.fsproj`/`.vbproj` | yes (`Version` attribute and child element)        | yes (first `PropertyGroup`)            |
+| `*.nuspec`                     | yes (each `<dependency>`'s version attribute)      | yes (`<metadata><version>`)            |
+| `Directory.Packages.props`     | yes (each `PackageVersion`)                        | no such field                          |
+| `packages.config`              | yes (each `<package>`'s lower-case `version`)      | no such field                          |
+| `pubspec.yaml`                 | yes (per-line scalar splice)                       | yes                                    |
+| `Gemfile`                      | yes (per-line splice, quote style preserved)       | no such field                          |
+| `*.gemspec`                    | yes (per-line splice)                              | yes (`spec.version`)                   |
 
 **Every ecosystem the scanner reads now has a writer.** `TestEveryScannedEcosystemHasAWriter` is the list that says so,
 and a format the scanner learns to read should fail it until it can be written too.
@@ -71,13 +71,13 @@ res, err := writer.Replace("services/svc/go.mod", []writer.Replacement{
 An empty `Path` removes the redirect instead of adding one, which is what a release does before publishing: a local
 replace that ships to consumers gives them a module they cannot resolve.
 
-| Format | Directive | How the redirect is spelled |
-|---|---|---|
-| `go.mod` | `replace` | `replace acme/core => ../core` |
-| `Cargo.toml` | `[patch.crates-io]` | `core = { path = "../core" }` |
-| `pubspec.yaml` | `dependency_overrides` | `core:` with an indented `path: ../core` under it |
-| `pyproject.toml` | `[tool.uv.sources]` | `core = { path = "../core" }` |
-| `package.json` | `overrides`, `resolutions` or `pnpm.overrides` | `"core": "file:../core"` |
+| Format           | Directive                                      | How the redirect is spelled                       |
+|------------------|------------------------------------------------|---------------------------------------------------|
+| `go.mod`         | `replace`                                      | `replace acme/core => ../core`                    |
+| `Cargo.toml`     | `[patch.crates-io]`                            | `core = { path = "../core" }`                     |
+| `pubspec.yaml`   | `dependency_overrides`                         | `core:` with an indented `path: ../core` under it |
+| `pyproject.toml` | `[tool.uv.sources]`                            | `core = { path = "../core" }`                     |
+| `package.json`   | `overrides`, `resolutions` or `pnpm.overrides` | `"core": "file:../core"`                          |
 
 `Replacement.Version` narrows the redirect to one required version, which only `go.mod` can express. The others key
 their directive on the name alone and ignore it.
