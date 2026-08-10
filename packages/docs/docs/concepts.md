@@ -73,7 +73,9 @@ feat(core)%beta: try streaming     ->  core@1.3.0-beta.0
 fix(core): edge case               ->  core@1.3.0-beta.1
 feat(core): second feature         ->  core@1.4.0-beta.0   (the train's target recomputes)
 release(core)%stable: promote      ->  core@1.4.0
-``` Release notes follow the train's shape: each
+```
+
+Release notes follow the train's shape: each
 prerelease's changelog entry and GitHub release document only its own changeset (`beta.1` does not repeat `beta.0`'s
 notes), and the graduation collects the whole train into the one entry the stable line's readers see, while the version
 is always computed over the whole train.
