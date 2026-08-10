@@ -18,6 +18,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/pkg/manifest"
+	"github.com/yohimik/dispat/pkg/writer"
+
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 )
 
@@ -73,6 +76,11 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"changelog", "a", "b"},               // step commands take at most one package
 		{"autoversion", "a", "b"},
 		{"commit", "a", "b"},
+		{"scanner", "a", "b"},                     // scanner takes at most one folder
+		{"writer"},                                // writer needs at least one manifest
+		{"writer", "go.mod"},                      // ...and something to write
+		{"writer", "go.mod", "--set", "nope"},     // a malformed edit spec
+		{"writer", "go.mod", "--replace", "nope"}, // ...and a malformed replacement
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
@@ -160,6 +168,74 @@ func TestStepCommandWordsAreNotRunScripts(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		code := Run([]string{word, "--root", root}, &stdout, &stderr)
 		assert.Equal(t, 1, code, "%s must parse as a command, not a run script", word)
+	}
+}
+
+func TestManifestCommandWordsAreNotRunScripts(t *testing.T) {
+	// The manifest command words are reserved like every other one, but they
+	// prove it differently: needing no config file, they run to completion in
+	// a bare folder. `dispat scanner` scans it and exits 0 (a run script by
+	// that name would have failed at config loading), and `dispat writer`
+	// fails arity at 2 rather than reaching a config at all.
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 0, Run([]string{"scanner", "--root", root}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "0 manifest(s)")
+	assert.Equal(t, 2, Run([]string{"writer", "--root", root}, &stdout, &stderr))
+}
+
+func TestParseEditSpec(t *testing.T) {
+	// The command-line spelling of an edit. Only the four kind words are read
+	// as a kind prefix, so a Maven coordinate keeps its colon, and the range
+	// starts after the first "=" so a PEP 508 range keeps its own.
+	for _, tc := range []struct {
+		spec string
+		want writer.Edit
+	}{
+		{"acme=1.2.3", writer.Edit{Name: "acme", Kind: manifest.KindDependencies, Range: "1.2.3"}},
+		{"dependencies:acme=1.2.3", writer.Edit{Name: "acme", Kind: manifest.KindDependencies, Range: "1.2.3"}},
+		{"devDependencies:acme=^1.2.3", writer.Edit{Name: "acme", Kind: manifest.KindDevDependencies, Range: "^1.2.3"}},
+		{"peerDependencies:acme=1", writer.Edit{Name: "acme", Kind: manifest.KindPeerDependencies, Range: "1"}},
+		{"optionalDependencies:acme=1", writer.Edit{Name: "acme", Kind: manifest.KindOptionalDependencies, Range: "1"}},
+		// A Maven coordinate: the prefix is not a kind word, so the whole
+		// thing stays the name.
+		{"com.acme:core=1.2.3", writer.Edit{Name: "com.acme:core", Kind: manifest.KindDependencies, Range: "1.2.3"}},
+		// A scoped npm name, and a range carrying its own "=".
+		{"@acme/core=workspace:*", writer.Edit{Name: "@acme/core", Kind: manifest.KindDependencies, Range: "workspace:*"}},
+		{"requests=>=1.0,<2.0", writer.Edit{Name: "requests", Kind: manifest.KindDependencies, Range: ">=1.0,<2.0"}},
+		{"devDependencies:com.acme:core=1", writer.Edit{Name: "com.acme:core", Kind: manifest.KindDevDependencies, Range: "1"}},
+	} {
+		got, err := parseEditSpec(tc.spec)
+		require.NoError(t, err, "spec: %s", tc.spec)
+		assert.Equal(t, tc.want, got, "spec: %s", tc.spec)
+	}
+
+	for _, spec := range []string{
+		"acme",             // no range at all
+		"acme=",            // an empty range writes nothing
+		"=1.2.3",           // no name
+		"devDependencies:", // a kind and nothing else
+		"",
+	} {
+		_, err := parseEditSpec(spec)
+		assert.Error(t, err, "spec %q must be rejected", spec)
+	}
+}
+
+func TestParseReplaceSpec(t *testing.T) {
+	// An empty path is the documented removal, so it is the one "empty" half
+	// a replacement spec accepts.
+	got, err := parseReplaceSpec("github.com/acme/core=../core")
+	require.NoError(t, err)
+	assert.Equal(t, writer.Replacement{Name: "github.com/acme/core", Path: "../core"}, got)
+
+	got, err = parseReplaceSpec("github.com/acme/core=")
+	require.NoError(t, err)
+	assert.Equal(t, writer.Replacement{Name: "github.com/acme/core"}, got)
+
+	for _, spec := range []string{"github.com/acme/core", "=../core", ""} {
+		_, err := parseReplaceSpec(spec)
+		assert.Error(t, err, "spec %q must be rejected", spec)
 	}
 }
 
