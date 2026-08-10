@@ -205,6 +205,39 @@ func TestScanReturnsPartialResultOnMalformedManifest(t *testing.T) {
 	}
 }
 
+func TestScanStepsOverAnUnreadableFolder(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
+	// A sub-tree the walk cannot enter is one more partial result, not the end
+	// of the scan: the manifests past it (sorted after it, so the walk really
+	// does have to continue) must still come back, with the failure reported.
+	dir := t.TempDir()
+	write(t, dir, "package.json", `{"name": "root"}`)
+	write(t, dir, "locked/package.json", `{"name": "hidden"}`)
+	write(t, dir, "zzz/package.json", `{"name": "past-it"}`)
+	locked := filepath.Join(dir, "locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	mans, err := New().Scan(context.Background(), dir)
+	if err == nil {
+		t.Fatal("want the unreadable folder reported")
+	}
+	var names []string
+	for _, m := range mans {
+		names = append(names, m.Name)
+	}
+	if !slices.Contains(names, "root") || !slices.Contains(names, "past-it") {
+		t.Errorf("the walk was truncated at the unreadable folder: %v", names)
+	}
+	if slices.Contains(names, "hidden") {
+		t.Errorf("nothing may be read out of the unreadable folder: %v", names)
+	}
+}
+
 func TestScanHonoursContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

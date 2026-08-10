@@ -120,7 +120,9 @@ type Manifest struct {
 // Scanner turns a folder into its parsed manifests. Both methods share one
 // error contract: a manifest that fails to parse is skipped, its error joined
 // into the returned error, and the successfully parsed manifests are returned
-// either way, so callers may report the error and keep the partial result.
+// either way, so callers may report the error and keep the partial result. A
+// folder Scan cannot read is stepped over on the same terms, so one
+// unreadable sub-tree costs its own manifests and no others.
 type Scanner interface {
 	// Scan returns every recognised manifest under dir in deterministic
 	// (path-sorted) order, descending into sub-folders but skipping
@@ -240,7 +242,13 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 			return ctxErr
 		}
 		if err != nil {
-			return err
+			// A folder the walk cannot read (permissions, a vanished entry) is
+			// reported and stepped over rather than ending the scan: the
+			// partial-result contract covers a whole sub-tree exactly as it
+			// covers one unparseable file, and truncating the walk here would
+			// silently leave the rest of the repository unscanned.
+			errs = append(errs, err)
+			return nil
 		}
 		name := d.Name()
 		if d.IsDir() {

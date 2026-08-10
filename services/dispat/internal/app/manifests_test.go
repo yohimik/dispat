@@ -202,6 +202,19 @@ func TestScanManifestsTitleWithoutAnIdentity(t *testing.T) {
 	assert.Contains(t, out.String(), "go.mod  gomod  github.com/acme/core")
 	assert.NotContains(t, out.String(), "github.com/acme/core@")
 	assert.Contains(t, out.String(), "requirements.txt  python\n")
+
+	// And the other way round: a bundle that declares a version but no
+	// identifier is titled by its version alone.
+	root = manifestRepo(t, map[string]string{
+		"Info.plist": `<plist version="1.0"><dict>
+  <key>CFBundleShortVersionString</key><string>3.4.5</string>
+</dict></plist>`,
+	})
+	out.Reset()
+	require.NoError(t, ScanManifests(context.Background(), ScanOptions{
+		Root: root, Out: &out, Log: zerolog.Nop(),
+	}))
+	assert.Contains(t, out.String(), "Info.plist  plist  3.4.5")
 }
 
 func TestScanManifestsReportsPartialParseFailures(t *testing.T) {
@@ -420,6 +433,16 @@ func TestWriteManifestsAttemptsEveryManifestAndJoinsTheFailures(t *testing.T) {
 	data, readErr := os.ReadFile(filepath.Join(root, "package.json"))
 	require.NoError(t, readErr)
 	assert.Contains(t, string(data), `"version": "1.3.0"`, "the usable manifest was still written")
+
+	// A redirect aimed at the same unusable path fails on its own, without a
+	// rewrite ahead of it to fail first.
+	out.Reset()
+	err = WriteManifests(context.Background(), WriteOptions{
+		Root: root, Paths: []string{"notes.txt"},
+		Replacements: []writer.Replacement{{Name: "acme", Path: "../acme"}},
+		Out:          &out, Log: zerolog.New(&logs),
+	})
+	assert.ErrorIs(t, err, writer.ErrUnsupportedManifest)
 }
 
 func TestWriteManifestsJSONEvents(t *testing.T) {
@@ -457,6 +480,36 @@ func TestWriteManifestsJSONEvents(t *testing.T) {
 	assert.Equal(t, "write complete", evs[1]["message"])
 	assert.Equal(t, float64(1), evs[1]["applied"])
 	assert.Equal(t, float64(1), evs[1]["missing"])
+}
+
+func TestWriteManifestsJSONCarriesTheReplacements(t *testing.T) {
+	// Redirects travel in their own half of the event, split the same three
+	// ways the edits are, so one manifest is still one line of output.
+	root := manifestRepo(t, map[string]string{
+		"go.mod": "module github.com/acme/web\n\ngo 1.26\n\nrequire github.com/acme/core v1.2.0\n",
+	})
+	var out bytes.Buffer
+	require.NoError(t, WriteManifests(context.Background(), WriteOptions{
+		Root: root, Paths: []string{"go.mod"},
+		Replacements: []writer.Replacement{
+			{Name: "github.com/acme/core", Path: "../core"},
+			{Name: "github.com/acme/gone"}, // a removal with nothing to remove
+		},
+		JSON: true, Out: &out, Log: zerolog.New(&out),
+	}))
+
+	evs := events(t, out.String())
+	require.Len(t, evs, 2)
+	repls := evs[0]["replacements"].(map[string]any)
+	applied := repls["applied"].([]any)
+	require.Len(t, applied, 1)
+	assert.Equal(t, "github.com/acme/core", applied[0].(map[string]any)["name"])
+	assert.Equal(t, "../core", applied[0].(map[string]any)["path"])
+	missing := repls["missing"].([]any)
+	require.Len(t, missing, 1)
+	assert.Equal(t, "github.com/acme/gone", missing[0].(map[string]any)["name"])
+	assert.NotContains(t, missing[0].(map[string]any), "path", "a removal carries no path")
+	assert.Equal(t, "manifest updated", evs[0]["message"])
 }
 
 func TestWriteManifestsSaysWhenNothingChanged(t *testing.T) {
