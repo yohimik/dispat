@@ -1,0 +1,9 @@
+{
+  "name": "root",
+  "private": true,
+  "version": null,
+  "scripts": {
+  },
+  "devDependencies": {
+  }
+}
