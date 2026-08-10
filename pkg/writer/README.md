@@ -57,6 +57,22 @@ guards stand in for one. A replacement carrying any byte that could end a litera
 The file's brace balance must come out unchanged. And the reader is run over the result, where it has to agree that
 every splice landed where it was aimed.
 
+## From the command line
+
+`dispat writer <manifest>...` is this package with a report attached, and it needs no dispat config file and no git
+repository:
+
+```sh
+dispat writer packages/web/package.json --set-version 1.3.0     # the own version
+dispat writer packages/web/package.json --set @acme/core=^1.3.0 # a declared range
+dispat writer services/api/go.mod --replace github.com/acme/core=../core
+dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a missing edit
+```
+
+`--set` takes `[kind:]name=range`, where the range starts after the first `=` and the kind prefix is only read as one
+for the four dependency fields, so a Maven `group:artifact` coordinate keeps its colon. The full guide is
+[Manifest tools](https://yohimik.github.io/dispat/manifests).
+
 ## Replacing a dependency with a local folder
 
 `go.mod` can point a dependency somewhere else, and a few other formats can too:

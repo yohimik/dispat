@@ -41,6 +41,8 @@ A few more moves:
 ```sh
 $ dispat compute                    # derive the dependency graph from the manifests; --write applies
 $ dispat preview                    # pending release notes, all packages (preview core: just one)
+$ dispat scanner packages/core      # what that folder's manifests declare; no config or git needed
+$ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
 $ dispat run build core             # try the build script in packages/core with the real DISPAT_* env
 $ dispat lint                       # run a script in every changed package that has it, in graph order
 $ git commit -m "feat(core)%beta: try it out"
@@ -86,6 +88,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
 | [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, the release commit.                                                    |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object.                                            |
+| [Manifest tools](https://yohimik.github.io/dispat/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
 | [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
 | [Script environment](https://yohimik.github.io/dispat/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
 | [Architecture](https://yohimik.github.io/dispat/architecture)                   | Modules, algorithms, execution model, design decisions, testing.                                    |

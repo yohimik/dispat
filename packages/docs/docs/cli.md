@@ -17,6 +17,8 @@ dispat [command] [flags]
 | `autoversion [package]`   | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
 | `commit [package]`        | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).        |
+| `scanner [folder]`        | Print what a folder's manifests declare; see [The manifest commands](#the-manifest-commands).                     |
+| `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The manifest commands](#the-manifest-commands).                  |
 
 ## Flags
 
@@ -43,6 +45,11 @@ dispat [command] [flags]
 | `--file`, `--title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation.          |
 | `--range`, `--match`, `--manifests`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation.     |
 | `--sync-lock`         | `true`      | `autoversion` only: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them.         |
+| `--root-only`         |             | `scanner` only: read the folder's own manifests without descending into sub-folders.                                       |
+| `--set-version`       |             | `writer` only: rewrite each named manifest's own version field.                                                            |
+| `--set`               |             | `writer` only: set one dependency's declared range, `[kind:]name=range`; repeatable.                                       |
+| `--replace`           |             | `writer` only: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable.          |
+| `--strict`            |             | `scanner` and `writer` only: exit `1` on a manifest that failed to parse, or an edit the manifest does not declare.        |
 | `--version`           |             | Print the dispat logo and version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                        |
 | `--help`              |             | Print the logo and usage.                                                                                                                                                                              |
 
@@ -170,6 +177,24 @@ first copied to `<name>.backup` (untracked files worth a `.gitignore` entry; ove
 each write is atomic. A TOML file is not rewritten in place: `--write` prints a paste-ready block for it and fails
 instead. `--check` overrides both apply modes: it writes nothing and exits `1` when any suggestion exists across any
 source, which is the CI gate for a config lagging the manifests.
+
+## The manifest commands
+
+`dispat scanner` and `dispat writer` expose the manifest libraries directly: the first prints what a folder's
+manifests declare, the second edits a declaration in place while preserving the file's formatting. Both need no config
+file, no git repository and no release plan, so they work on any checkout. Positional paths resolve against `--root`,
+and `--log-format json` swaps each command's listing for one event per manifest.
+
+`dispat scanner [folder]` walks the folder (`--root-only` stays out of sub-folders) and prints each manifest's
+identity, ecosystem and dependency declarations. A manifest that fails to parse is reported while the rest are still
+listed, and `--strict` turns that into exit `1`.
+
+`dispat writer <manifest>...` applies `--set-version`, `--set` and `--replace` to each named manifest. Every edit ends
+as applied, skipped (a version deferring to something outside the file, which is normal and never fails the command)
+or missing (a dependency the manifest does not declare, which fails only under `--strict`). A path no writer covers
+always exits `1`.
+
+The full guide, with worked examples and the format list, is [Manifest tools](./manifests.md).
 
 ## Exit codes
 

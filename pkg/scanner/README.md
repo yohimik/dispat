@@ -60,6 +60,20 @@ rewrites it.
 Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, root manifests first, ambiguous
 names reported instead of guessed) and `ResolveLocalDir` (declared local path → owning package folder).
 
+## From the command line
+
+`dispat scanner [folder]` is this package with a listing attached, and it needs no dispat config file and no git
+repository:
+
+```sh
+dispat scanner packages/web              # every manifest under the folder
+dispat scanner packages/web --root-only  # only the folder's own
+dispat scanner --log-format json         # one JSON object per manifest
+dispat scanner --strict                  # exit 1 if any manifest failed to parse
+```
+
+The full guide is [Manifest tools](https://yohimik.github.io/dispat/manifests).
+
 ## Not read today
 
 The goal is full coverage of every package manager. These gaps are written down so nobody meets them for the first time

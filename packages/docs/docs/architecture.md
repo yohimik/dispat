@@ -19,7 +19,10 @@ callable without a command line.
    narrows to that one package, changed or not, with no graph; `--since <rev>` (or `all`) instead selects what the
    commits since a revision address: scopes first, changed files for scopeless units (§6.2). Nothing below step 6
    applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (one
-   package's, or every pending package's in publish order when none is named), and stops.
+   package's, or every pending package's in publish order when none is named), and stops. `scanner` and `writer` also
+   answer before any config is loaded, and for the same reason as `init`: they are the `pkg/scanner` and `pkg/writer`
+   libraries exposed directly (see [Manifest tools](./manifests.md)), reading nothing but the paths named on the
+   command line, so a monorepo root, a plan and a git history are all beside the point.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root; a file without `spaces` or `packages` (a package's in-folder override) does not end the
    ascent), then load and validate it (viper; unknown keys rejected; flag bindings applied).
@@ -134,10 +137,10 @@ sections below.
 | `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). |
 | `pkg/models`         | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values.                                 |
 | `pkg/manifest`       | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically.                                |
-| `pkg/scanner`        | Deliberately lightweight manifest reader (own module): npm, Go, Cargo, Python, Composer, Maven, .NET, pub, RubyGems and the mobile formats parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors. No lockfile resolution, no network. |
-| `pkg/writer`         | Format-preserving manifest writer (own module): byte-precise range and version rewrites for **every** manifest the scanner reads, atomic writes, and a result separating applied edits from ones deliberately left alone (a Maven property, a workspace inheritance).                                                          |
+| `pkg/scanner`        | Deliberately lightweight manifest reader (own module): npm, Go, Cargo, Python, Composer, Maven, .NET, pub, RubyGems and the mobile formats parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors. No lockfile resolution, no network. Exposed on its own as `dispat scanner`. |
+| `pkg/writer`         | Format-preserving manifest writer (own module): byte-precise range and version rewrites for **every** manifest the scanner reads, atomic writes, and a result separating applied edits from ones deliberately left alone (a Maven property, a workspace inheritance). Exposed on its own as `dispat writer`. |
 | `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
-| `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, the finalize phase and run-level hooks; wires every other package together.                                     |
+| `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the finalize phase and run-level hooks; wires every other package together.  |
 | `internal/config`    | Config resolution, loading, validation, package discovery, per-package override merging, `.dispatignore`, format-preserving config editing for `compute --write`.                                            |
 | `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, fixed groups; a pure function of history, graph and configuration.                                                                          |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |

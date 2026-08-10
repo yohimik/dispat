@@ -49,7 +49,9 @@ $ dispat
   wholesale; `--check` gates CI on a drifted graph, and `keep: true` marks deliberate relations no manifest declares,
   such as a Docker chain. A space with an `autoVersion` block goes further: dispat rewrites its manifests at the version
   stage, reconciling declared ranges to end-of-run versions format-preservingly, with `syncLock` scripts (`npm install`)
-  regenerating lock files between version and build.
+  regenerating lock files between version and build. The same two libraries are also commands of their own: `dispat
+  scanner` prints what a folder's manifests declare and `dispat writer` edits one in place, neither needing a config
+  file or a git repository.
 - **A release is treated as what it really is: a distributed transaction.** Publishing a graph of packages means
   irreversible writes across independent services (an npm registry, a Docker registry, GitHub) with no rollback to fall
   back on. dispat handles that the way distributed systems do. Each package's leg commits by durably recording its
@@ -91,9 +93,10 @@ dispat stands on the shoulders of two things:
   pyproject.toml, composer.json, pom.xml, the .NET project/nuspec/packages family, pubspec.yaml, Gemfile, .gemspec and
   requirements files parsed into one ecosystem-neutral shape, plus the mobile platforms — Info.plist, project.pbxproj,
   Podfile and .podspec on iOS, AndroidManifest.xml, Gradle version catalogs and build scripts on Android; the library
-  behind `dispat compute` and auto-versioning.
+  behind `dispat compute`, auto-versioning and the `dispat scanner` command.
 - **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for **every** manifest
-  the scanner reads, with atomic writes and validated output.
+  the scanner reads, with atomic writes and validated output; the library behind auto-versioning and the `dispat
+  writer` command.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 - **[docs](./packages/docs)**: the documentation site itself, released by dispat like any other package: how to run it

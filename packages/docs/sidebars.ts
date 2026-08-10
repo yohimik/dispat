@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'configuration/parser',
       ],
     },
+    {type: 'doc', id: 'manifests', label: 'Manifest tools'},
     {type: 'doc', id: 'commits', label: 'Commit messages'},
     {type: 'doc', id: 'environment', label: 'Script environment'},
     'architecture',
