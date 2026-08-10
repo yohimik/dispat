@@ -114,6 +114,7 @@ func ScanManifests(ctx context.Context, opts ScanOptions) error {
 		opts.Log.Error().Err(err).Msg("cannot scan the folder")
 		return err
 	}
+	out := listing(opts.Out)
 	sc := opts.Scanner
 	if sc == nil {
 		sc = scanner.New()
@@ -141,13 +142,13 @@ func ScanManifests(ctx context.Context, opts ScanOptions) error {
 			logManifest(opts.Log, m)
 			continue
 		}
-		printManifest(opts.Out, m)
+		printManifest(out, m)
 	}
 	if opts.JSON {
 		opts.Log.Info().Int("manifests", len(mans)).Int("dependencies", deps).
 			Int("failed", len(failed)).Msg("scan complete")
 	} else {
-		fmt.Fprintf(opts.Out, "%d manifest(s), %d dependency declaration(s)\n", len(mans), deps)
+		fmt.Fprintf(out, "%d manifest(s), %d dependency declaration(s)\n", len(mans), deps)
 	}
 
 	if opts.Strict && len(failed) > 0 {
@@ -228,6 +229,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 		errs                      []error
 		applied, skipped, missing int
 	)
+	out := listing(opts.Out)
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -246,7 +248,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 			logWrite(opts.Log, rel, res, replRes)
 			continue
 		}
-		printWrite(opts.Out, rel, res, replRes)
+		printWrite(out, rel, res, replRes)
 	}
 
 	if opts.JSON {
@@ -254,7 +256,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 			Int("applied", applied).Int("skipped", skipped).Int("missing", missing).
 			Msg("write complete")
 	} else {
-		fmt.Fprintf(opts.Out, "%d manifest(s): %d applied, %d skipped, %d missing\n",
+		fmt.Fprintf(out, "%d manifest(s): %d applied, %d skipped, %d missing\n",
 			len(opts.Paths), applied, skipped, missing)
 	}
 
@@ -367,6 +369,16 @@ func replaceViews(repls []writer.Replacement) []replaceView {
 	out := make([]replaceView, 0, len(repls))
 	for _, r := range repls {
 		out = append(out, replaceView{Name: r.Name, Version: r.Version, Path: r.Path})
+	}
+	return out
+}
+
+// listing is the writer the human-readable output goes to, matching how the
+// compute command treats its own: a caller that wants no listing at all (a
+// JSON run, a test) may leave Out unset rather than having to supply a sink.
+func listing(out io.Writer) io.Writer {
+	if out == nil {
+		return io.Discard
 	}
 	return out
 }

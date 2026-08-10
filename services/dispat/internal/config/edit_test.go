@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -250,4 +251,76 @@ func TestEditAtomicWriteErrors(t *testing.T) {
 	entries, readErr = os.ReadDir(dir2)
 	require.NoError(t, readErr)
 	assert.Len(t, entries, 1, "only the pre-existing folder remains")
+}
+
+func TestReplaceRefusesWhatItCannotEditSafely(t *testing.T) {
+	// The editor rewrites the user's own config file, so every input it does
+	// not fully understand has to come back as an error with the file
+	// untouched. A silent no-op would leave `compute --write` claiming a
+	// change it never made; a partial write would corrupt the config.
+	deps := []DependencyConfig{{Consumer: "web", Provider: "core"}}
+
+	t.Run("a format with no in-place editor", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.ini", "[deps]\n")
+		require.Error(t, ReplaceDependencies(path, []string{"dependencies"}, deps))
+		assert.Equal(t, "[deps]\n", readFile(t, path))
+		assert.NoFileExists(t, path+BackupSuffix, "a refused edit writes no backup either")
+	})
+
+	t.Run("a file that is not there", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "dispat.json")
+		require.Error(t, ReplaceDependencies(missing, []string{"dependencies"}, deps))
+	})
+
+	t.Run("a config that is not an object", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.json", `["not", "an", "object"]`)
+		err := ReplaceDependencies(path, []string{"dependencies"}, deps)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "top level is not an object")
+	})
+
+	t.Run("a config that is not JSON at all", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.json", "{ this is not json")
+		require.Error(t, ReplaceDependencies(path, []string{"dependencies"}, deps))
+		assert.Equal(t, "{ this is not json", readFile(t, path))
+	})
+
+	t.Run("an ancestor that is not an object", func(t *testing.T) {
+		// packages.web is a string here, so descending into it would mean
+		// replacing a value the caller never looked at.
+		path := writeConfigFile(t, "dispat.json", `{"packages": {"web": "not-an-object"}}`)
+		err := ReplaceStringList(path, []string{"packages", "web", "dependencies"}, []string{"core"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is not an object")
+	})
+}
+
+func TestRenderTOMLFallbacks(t *testing.T) {
+	// A TOML config is refused for in-place editing, so the command prints a
+	// paste-ready block instead. It has to be valid TOML carrying exactly the
+	// fields the config model reads back.
+	block, err := RenderDependenciesTOML([]DependencyConfig{
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "api", Provider: "core", Kind: "devDependencies", Keep: true},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, block, "[[dependencies]]")
+	assert.NotContains(t, block, "keep = false", "a false keep is left out, as the model reads it")
+
+	// Pasted back, the block has to parse into exactly what was rendered:
+	// string matching would pass on a block no TOML reader accepts.
+	var back struct {
+		Dependencies []DependencyConfig `toml:"dependencies"`
+	}
+	require.NoError(t, toml.Unmarshal([]byte(block), &back))
+	assert.Equal(t, []DependencyConfig{
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "api", Provider: "core", Kind: "devDependencies", Keep: true},
+	}, back.Dependencies)
+
+	nested, err := RenderStringListTOML([]string{"packages", "web", "dependencies"}, []string{"core", "utils"})
+	require.NoError(t, err)
+	var nestedBack map[string]map[string]map[string][]string
+	require.NoError(t, toml.Unmarshal([]byte(nested), &nestedBack))
+	assert.Equal(t, []string{"core", "utils"}, nestedBack["packages"]["web"]["dependencies"])
 }
