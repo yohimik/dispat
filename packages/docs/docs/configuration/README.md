@@ -32,7 +32,7 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 
 | Key                | Type                                       | Required | Description                                                                                                                                                            |
 |--------------------|--------------------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `scripts`          | map name → shell command                   | no       | Named shell commands, like package.json scripts. The same key also exists on a space and on a package, and a package resolves a name most-local-first; see [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run). |
+| `scripts`          | map name → shell command                   | no       | Named shell commands, like package.json scripts. The same key also exists on a space and on a package, and a package looks up a name in the closest level first. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run). |
 | `spaces`           | map name → space                           | see note | Package groups sharing build/publish behaviour; see [Spaces](./spaces.md). At least one space **or** one `packages` entry is required.                                 |
 | `packages`         | map name → package                         | no       | Per-package configuration: overrides for space packages (key = folder name), and standalone packages outside every space via `path`; see [Packages](./packages.md).    |
 | `versionGroups`    | map name → `{versioning}`                  | no       | Shared-versioning groups that cut across spaces, joined by name via a space's or package's `versionGroup` key; see [Versioning groups](./spaces.md#versioning-groups). |
@@ -76,11 +76,12 @@ manifest declares, such as a Docker base-image chain. The planner treats kept ed
 ## Script sequences
 
 `scripts` defines named commands; the top-level `run` object and each space's `flow` object say **what runs when**,
-referencing those names. A `flow` name is resolved by the package the stage runs for — the package's `scripts`, then
-its space's, then the file's — while the `run` hooks execute once at the repository root, with no package in scope, so
-they resolve against the top-level `scripts` alone. A `flow` name that resolves at none of a package's three levels is
-a configuration error naming that package, which is what catches a script defined only in *another* space or package.
-Every entry of either object accepts a single script name or an array of names executed
+referencing those names. A `flow` name is looked up against the package the stage is running for, closest level first:
+the package's `scripts`, then its space's, then the file's. The `run` hooks are different, because they execute once at
+the repository root with no package involved, so they only ever see the file's `scripts`. If a `flow` name is missing
+from all three of a package's levels, the config is rejected with an error naming that package, which is how a script
+defined only in some *other* space or package gets caught. Every entry of either object accepts a single script name or
+an array of names executed
 **sequentially, in order**; a scalar is simply a one-element sequence. How a failure inside a sequence behaves depends
 on what the sequence gates:
 

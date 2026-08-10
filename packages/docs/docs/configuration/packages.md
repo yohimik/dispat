@@ -63,14 +63,14 @@ per-field rules follow from what each object means:
 - The boolean options (`isBuildWaitingPublish`, `revertOnFail`) are tri-state in an override: absent inherits, an
   explicit `false` overrides a space's `true`.
 - `flow` merges **entry by entry**: an overridden stage or hook replaces that entry's list, every other entry inherits,
-  and an explicit empty array (`"build": []`) clears an inherited entry. References resolve in *this package's* scope —
-  its `scripts`, then its space's, then the file's — so a package can keep its space's `flow.build: build` and supply
-  its own `build` command. A reference resolving at none of the three levels is an error naming the package.
-  `flow.login` cannot be set per package: login runs [once per space, in the space folder](./spaces.md#flowlogin),
-  gating every publish of the space, and a per-package login would contradict all three.
-- `scripts` merges **name by name**: an overridden name wins, the space's other names survive, and the file's names stay
-  under both. A name only this package defines is its own — `dispat run <name>` reaches no other package with it; see
-  [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run).
+  and an explicit empty array (`"build": []`) clears an inherited entry. The names inside are looked up against this
+  package first, then its space, then the file, so a package can keep its space's `flow.build: build` and still supply
+  its own `build` command. A name missing from all three levels is an error naming the package. `flow.login` cannot be
+  set per package: login runs [once per space, in the space folder](./spaces.md#flowlogin), gating every publish of the
+  space, and a per-package login would contradict all three.
+- `scripts` merges **name by name**: a name set here wins, the space's other names survive, and the file's names stay
+  under both. A name only this package defines belongs to this package alone, so `dispat run <name>` reaches no other
+  package with it. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run).
 - `versioning`/`versionGroup` are one axis: a layer setting either supersedes both inherited values (so a package sets
   `versioning: independent` to opt out of its space's group, or `versionGroup: <name>` to join another). Setting both in
   one layer is a contradiction and is rejected.

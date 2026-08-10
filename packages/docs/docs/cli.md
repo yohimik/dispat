@@ -10,7 +10,7 @@ dispat [command] [flags]
 |---------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.            |
 | `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.          |
-| `run <script> [package]`  | Execute a script over the changed packages that define it, graph-ordered; see [The run command](#the-run-command). |
+| `run <script> [package]`  | Run a script in every changed package that has it, graph-ordered; see [The run command](#the-run-command).        |
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
 | `preview [package]`       | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
 | `changelog [package]`     | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
@@ -50,23 +50,23 @@ Flag precedence (via viper): explicitly set flag > config file > flag default > 
 
 ## The run command
 
-`dispat run <script>` plans, then executes the named
-[script](./configuration/spaces.md#scripts-and-dispat-run) inside each changed package that defines it, honouring the
+`dispat run <script>` plans, then runs the named
+[script](./configuration/spaces.md#scripts-and-dispat-run) inside each changed package that has one, honouring the
 dependency graph. Nothing is released or tagged. A failing script's dependents are skipped or kept running per
 `--on-error`.
 
-Each package resolves the name through its own `scripts`, then its space's, then the top level's, so the level a name
-is defined at decides the reach: a top-level script runs in every changed package, a space's in that space's, a
-package's in that package alone. A selected package that resolves nothing is a no-op; a name nothing defines, or that
-none of the selected packages define, exits `1`.
+Each package looks the name up in its own `scripts`, then its space's, then the file's. The level you define a name at
+is therefore what decides the reach: a file-level script runs in every changed package, a space's in that space's
+packages, a package's in that package alone. A selected package with no command for the name does nothing. Exit `1`
+means either that no level defines the name, or that none of the selected packages have it.
 
 Four ways to select what it covers:
 
 - **Default**: the changed packages, the same set a release would process.
-- **A target**: `dispat run <script> <package>` runs in exactly that package, changed or not, with no graph — the way to
-  try one script under exactly the input its stage would hand it (`dispat run build core`), releasing nothing. An
-  unchanged package carries its baseline as both the old and the new version. Naming an unknown package, or one that
-  does not resolve the script, is an error: a targeted run that runs nothing is how a typo hides.
+- **A target**: `dispat run <script> <package>` runs in that package alone, changed or not, with no graph. This is how
+  you try one script under the exact input its stage would give it (`dispat run build core`) without releasing
+  anything. An unchanged package carries its baseline as both the old and the new version. Naming an unknown package,
+  or one with no command for that name, is an error, since a run aimed at one package should not silently do nothing.
 - **A window**: `--since <rev>` (`-s`) selects the packages the commits in `rev..HEAD` address: `HEAD~1` for the last
   commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or `all` for every
   package. Selection follows the planner's [scope semantics](./commits.md#scope-sets): a commit's written scopes are
@@ -104,9 +104,9 @@ flows: a stage script can run a step at the moment the flow needs it, and the re
 and skips it. All three share the run command's selection: an explicit `[package]` targets one package (an unknown
 name is an error; a package that is not releasing is a logged no-op, so a flow never fails over a converged or held
 package); invoked from inside a package folder, the command narrows to that package; from the monorepo root it covers
-every releasing package in dependency order. The three command words are reserved: like every command name, each
-shadows a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name in the `dispat <script>`
-shorthand, so `dispat commit` is never `dispat run commit`. The two-word spelling still reaches the script.
+every releasing package in dependency order. The three command words are reserved: like every command name, each wins
+the `dispat <script>` shorthand over a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name, so
+`dispat commit` is always the command. Spelling it out as `dispat run commit` still reaches the script.
 
 Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
 [flags table](#flags).

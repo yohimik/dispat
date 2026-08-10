@@ -112,10 +112,10 @@ dispat init                 # write a starter dispat.json (--format yaml/toml fo
 dispat status               # print the project graph and planned versions; changes nothing
 dispat                      # release (default command): full pipeline
 dispat release --root path  # same, explicit
-dispat run lint             # run the "lint" script inside each changed package that
-                            # defines it, honouring the dependency graph; releases nothing.
-                            # A top-level script reaches every changed package, a space's
-                            # its space's, a package's that package alone
+dispat run lint             # run the "lint" script in every changed package that has one,
+                            # in dependency order; releases nothing. Where you define the
+                            # script decides the reach: at the top it runs everywhere, on a
+                            # space in that space, on a package in that package alone
 dispat lint                 # the same: an unknown command word means "run <word>"
 dispat run lint --on-error continue   # keep running dependents of a failed package
 dispat run build core       # run the "build" script once inside packages/core with core's

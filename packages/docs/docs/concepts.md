@@ -195,9 +195,9 @@ Build and publish have independent concurrency budgets (`concurrency: [build, pu
 budget. A stage without a configured script still runs, keeping ordering, statuses, tags and release records intact; it
 just executes no shell command.
 
-Outside the release pipeline, `dispat run <name>` (or just `dispat <name>`) executes the
-[script](./configuration/spaces.md#scripts-and-dispat-run) that name resolves to inside each changed package that has
-one, honouring the dependency graph within the build concurrency budget (the configured value, or `--concurrency`'s
-first value when given; `--on-error` decides whether a failure skips the dependents), with the same `DISPAT_*`
-environment and nothing released or tagged. The same three-level `scripts` map the stages resolve through serves it, so
-where a name is defined — the file, a space, a package — is what decides how far the run reaches.
+Outside the release pipeline, `dispat run <name>` (or just `dispat <name>`) runs the
+[script](./configuration/spaces.md#scripts-and-dispat-run) of that name inside each changed package that has one,
+honouring the dependency graph within the build concurrency budget (the configured value, or `--concurrency`'s first
+value when given; `--on-error` decides whether a failure skips the dependents), with the same `DISPAT_*` environment
+and nothing released or tagged. It uses the same three-level `scripts` lookup the stages use, so where you define a
+name (the file, a space, or one package) is what decides how far the run reaches.

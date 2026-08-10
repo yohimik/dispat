@@ -17,7 +17,7 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                                                                                                            |
 | `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space with `fixed`/`fixedSparse` versioning. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                 |
-| `scripts`               | map name → shell command | no         | The space's own named commands, layered over the top-level [`scripts`](./README.md#top-level-options) for this space's packages. `flow` entries name them, and so does `dispat run <name>`; see [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
+| `scripts`               | map name → shell command | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 
 A single package's departures from these options live in the top-level [`packages`](./packages.md) map, not on the
@@ -26,9 +26,10 @@ space.
 ## Stages and hooks
 
 The space's `flow` object, keyed by stage or hook name (every entry a script name or an array of names; see the
-[sequence rules](./README.md#script-sequences)). A name is resolved by the package the stage runs for — its own
-`scripts`, then the space's, then the file's — so a space's `flow.build: build` can be satisfied once at the top or
-package by package; see [`scripts` and `dispat run`](#scripts-and-dispat-run):
+[sequence rules](./README.md#script-sequences)). Each name is looked up against the package the stage is running for,
+first in that package's `scripts`, then the space's, then the file's. So one `flow.build: build` can mean a single
+shared command, or a different command per package, depending on where you write `build`. See
+[`scripts` and `dispat run`](#scripts-and-dispat-run):
 
 | Key              | Kind    | Description                                                                                                                                                                                  |
 |------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -226,7 +227,7 @@ by provider updates. Second, a rewriting failure fails the version stage, and
 | `match`               | array of globs   | any      | Rewrite only declared ranges matching one of the globs, e.g. `["workspace:*"]`, so a range pinned by hand is never overridden. `*` matches any run of characters (slashes included, same as scope globs), so `file:../core` is matched by `file:*` and by `*`.                                                                                                                                                                                                                                     |
 | `range`               | string           | `caret`  | The write policy: `caret` (`^1.2.3`), `tilde` (`~1.2.3`), `exact` (`1.2.3`), a `{version}` template (`>={version}`), or any other literal written verbatim (`workspace:*`). Ecosystems with their own version spelling override the keywords: `go.mod` always receives exact canonical `vX.Y.Z`, Python files always receive `==X.Y.Z`; templates and literals pass through everywhere.                                                                                                            |
 | `writeVersion`        | bool             | `true`   | Also write the package's own new version into its manifest's version field (§12.4). Applies to the package's **root** manifests only: a nested manifest (an example, a fixture) keeps its own version even under `manifests: all`.                                                                                                                                                                                                                                                                 |
-| `syncLock`            | array of names   | none     | References into `scripts`, run inside the package folder after its manifests were rewritten and before its build: the slot for `npm install` and friends, so lock files follow the manifests. Skipped for a package whose version stage changed nothing, so a quiet release does not regenerate locks for no reason. A lock file living at the repo root is outside every package folder: list it under [`commit.include`](./records.md#commit) so the release commit carries it. That is optional for npm and Yarn workspaces and unavoidable for pnpm, whose `pnpm-lock.yaml` is always the workspace root's. |
+| `syncLock`            | array of names   | none     | Script names, resolved per package like every other name (see [`scripts` and `dispat run`](#scripts-and-dispat-run)), run inside the package folder after its manifests were rewritten and before its build: the slot for `npm install` and friends, so lock files follow the manifests. Skipped for a package whose version stage changed nothing, so a quiet release does not regenerate locks for no reason. A lock file living at the repo root is outside every package folder: list it under [`commit.include`](./records.md#commit) so the release commit carries it. That is optional for npm and Yarn workspaces and unavoidable for pnpm, whose `pnpm-lock.yaml` is always the workspace root's. |
 | `syncLockConcurrency` | int              | `1`      | Run-wide cap on simultaneously running `syncLock` scripts. Shared lock files corrupt under parallel writers, hence the serial default; when spaces disagree, the smallest configured value wins.                                                                                                                                                                                                                                                                                                   |
 
 Under `nameMatch: substring`, a declared name whose last `/`- or `:`-separated segment equals a package's folder name
@@ -262,69 +263,92 @@ is optimistic about a publish still in flight. `dispat compute` derives the miss
 
 ## `scripts` and `dispat run`
 
-`scripts` is one shape at three levels — the [file](./README.md#top-level-options), a space, and a
-[package](./packages.md) — each a map of names to shell commands:
+A script is a name bound to a shell command. You can write that binding at three levels, and all three use the same
+`scripts` key: the config file itself, a space, and a single package.
 
 ```yaml
 scripts:
   build: "npm run build"
   publish: "npm publish --access public"
-  audit: "npm audit --omit=dev"          # every package has it
+  audit: "npm audit --omit=dev"          # every package has this one
 
 spaces:
   libs:
     path: packages
     flow: { build: build, publish: publish }
     scripts:
-      lint: "npm run lint"               # this space's packages have it
+      lint: "npm run lint"               # only this space's packages have it
       preview: "echo \"$DISPAT_PACKAGE -> $DISPAT_NEW_VERSION\""
 
 packages:
   core:
     scripts:
-      lint: "npm run lint -- --strict"   # core's own lint, overriding the space's
-      bench: "npm run bench"             # core alone has it
+      lint: "npm run lint -- --strict"   # core's own lint, replacing the space's
+      bench: "npm run bench"             # only core has it
 ```
 
-A package resolves a name through **its own scripts, then its space's, then the file's** — most local wins, name by
-name, so overriding one name leaves the other levels' names untouched. That one rule serves both readers of a script
-name: `flow` entries (and `autoVersion.syncLock`) name a script, and so does `dispat run`.
+When dispat needs the command behind a name, it asks the package that is about to run it, and looks in three places in
+order:
+
+1. the package's own `scripts`,
+2. its space's `scripts`,
+3. the file's `scripts`.
+
+The first hit wins, and the lookup happens one name at a time. Redefining `lint` for `core` therefore leaves `audit`
+and `preview` exactly as they were. This is the only resolution rule in dispat, and everything that names a script uses
+it: the `flow` stages and hooks, `autoVersion.syncLock`, and `dispat run`.
 
 ### What a run covers
 
-`dispat run <name>` — or the shorthand `dispat <name>`, whenever `<name>` is not a command name — computes the plan and
-executes the script inside each **changed** package (the packages a release would process) that resolves the name,
-honouring the dependency graph: a package's script starts only after every changed provider's finished, and independent
-packages run concurrently within the build concurrency budget (`--concurrency`'s first value).
+`dispat run <name>` computes the plan, then runs that script inside every **changed** package that has one. Changed
+means the packages a release would process. The dependency graph is respected: a package's script starts only after
+every changed provider's script has finished, and independent packages run side by side within the build concurrency
+budget (the first value of `--concurrency`). `dispat <name>` is a shorthand for the same thing whenever `<name>` is not
+a command name.
 
-Because resolution is per package, **the level a name is defined at is what the run covers**:
+Because the lookup is per package, the level you define a name at is what decides how far the run reaches:
 
-| Defined at         | `dispat run <name>` runs in                                     |
-|--------------------|------------------------------------------------------------------|
-| the top level      | every changed package                                            |
-| a space            | the changed packages of that space                               |
-| a package          | that package, when it changed                                    |
+| Where the name is defined | `dispat run <name>` runs it in    |
+|---------------------------|-----------------------------------|
+| the file                  | every changed package             |
+| a space                   | that space's changed packages     |
+| a package                 | that package, when it changed     |
 
-A changed package that resolves nothing completes as a no-op. Two cases are errors instead, because running nothing
-silently is how a typo hides: a name **nothing** defines, and a name defined somewhere but in **none of the selected
-packages** (a package-level script when that package did not change, say). A selection that is empty to begin with —
-nothing changed at all — is an honest no-op and succeeds.
+That is the whole selection rule. Put `audit` at the top and it sweeps the release; put `bench` on `core` and only
+`core` ever runs it.
 
-Each script gets the package's full [DISPAT_* environment](../environment.md) (`DISPAT_STAGE` is `run:<name>`), which is
-why a script moves freely between a stage and a `dispat run`. Command names are reserved: a script named after any
-dispat command (`status`, `commit`, `changelog`, ...) is shadowed by the command in the `dispat <name>` shorthand and
-only reachable as `dispat run <name>`.
+A changed package that finds no command for the name simply does nothing, which is what lets one script skip the
+packages it does not apply to. Two situations are errors instead, because a command that quietly runs nothing is how a
+typo survives:
+
+- **no level defines the name at all**, which is almost always a misspelling;
+- **the name exists, but none of the selected packages have it**, such as asking for `bench` in a release where `core`
+  did not change.
+
+An empty selection is not an error. If nothing changed, there was nothing to look in, and the run succeeds having done
+nothing.
+
+Every script receives the package's full [DISPAT_* environment](../environment.md), with `DISPAT_STAGE` set to
+`run:<name>`. That is why the same script works as a stage and as a `dispat run` without being rewritten. One caveat on
+naming: dispat's own command words (`status`, `commit`, `changelog` and the rest) win the shorthand, so a script called
+`commit` is reachable as `dispat run commit` but never as `dispat commit`.
 
 ### Narrowing to one package
 
-`dispat run <name> <package>` runs the script in exactly that package (changed or not, with no graph) and errors on an
-unknown package or on one that does not resolve the script, because a *targeted* run that runs nothing would be a typo
-hiding. This is how you try one script under exactly the environment its stage would hand it, releasing nothing:
-`dispat run build core`.
+`dispat run <name> <package>` runs the script in that package alone, with no graph, whether or not the package changed.
+Naming a package that does not exist, or one with no command for that name, is an error for the same reason as above: a
+run aimed at one package should not silently do nothing.
 
-The shorthand, invoked from inside a package's folder (or any subdirectory of it), narrows to that package the same way
-(config resolution finds the monorepo root by ascending parent directories, so `cd packages/core && dispat lint` just
-works), while from the monorepo top it covers every changed package as usual. The shorthand takes no package argument.
+This is also how you try a single script by hand under exactly the environment its stage would give it, without
+releasing anything:
+
+```sh
+dispat run build core     # runs the build script in packages/core and stops there
+```
+
+The shorthand narrows the same way when you call it from inside a package folder, or any folder below it. dispat finds
+the monorepo root by walking up to the config file, so `cd packages/core && dispat lint` lints `core` and nothing else.
+From the top of the repository the shorthand covers every changed package as usual. It takes no package argument.
 
 A third selection axis is `--since <rev>` (`-s`): instead of the release window, select the packages the commits in
 `rev..HEAD` address: `-s HEAD~1` runs the script over what the last commit addressed (per-commit CI),

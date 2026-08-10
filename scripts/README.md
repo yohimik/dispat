@@ -18,7 +18,7 @@ docs snapshot is cut per minor rather than per patch, and why the deploy pushes 
 ## Running one by hand
 
 `dispat run <script> <package>` runs a script once inside that package, with the exact environment its stage would hand
-it, releasing nothing — the package does not have to be changed:
+it, releasing nothing. The package does not have to be changed:
 
 ```sh
 dispat run build-dispat dispat        # cross-compiles into services/dispat/dist
