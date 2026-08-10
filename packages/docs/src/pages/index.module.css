@@ -1,0 +1,94 @@
+/**
+ * Landing page only. Everything here is scoped through the CSS module, and the
+ * colours come from Infima variables so light and dark modes both work without
+ * a second rule set.
+ */
+
+.hero {
+  padding: 3rem 0 2rem;
+  text-align: center;
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.logo {
+  height: 128px;
+  width: 128px;
+}
+
+.title {
+  margin-bottom: 0.5rem;
+  font-size: 3rem;
+}
+
+.tagline {
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--ifm-color-primary);
+}
+
+/* Readable line length for the two long paragraphs on an otherwise wide page. */
+.lead,
+.sectionLead {
+  max-width: 52rem;
+  margin: 0 auto 1.5rem;
+  font-size: 1.05rem;
+}
+
+.buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-bottom: 2rem;
+}
+
+/* The transcript is the hero's evidence, so it stays narrow enough to read and
+   left-aligned inside the centred column. */
+.transcript {
+  max-width: 44rem;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.sectionTitle {
+  text-align: center;
+  font-size: 2rem;
+}
+
+.sectionLead {
+  text-align: center;
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+@media (max-width: 996px) {
+  .features {
+    grid-template-columns: 1fr;
+  }
+
+  .title {
+    font-size: 2.25rem;
+  }
+}
+
+.feature {
+  padding: 1.5rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: var(--ifm-global-radius);
+  background: var(--ifm-background-surface-color);
+}
+
+.featureTitle {
+  font-size: 1.15rem;
+}
+
+.reference {
+  max-width: 52rem;
+  margin: 0 auto;
+  line-height: 1.9;
+}

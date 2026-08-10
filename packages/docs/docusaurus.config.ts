@@ -49,6 +49,17 @@ const config: Config = {
         theme: {
           customCss: './src/css/custom.css',
         },
+        sitemap: {
+          // The sitemap is the only crawl entry point a GitHub Pages *project*
+          // site really has: robots.txt is served under /dispat/, which no
+          // crawler reads (see static/robots.txt). lastmod is off by default.
+          lastmod: 'date',
+          changefreq: 'weekly',
+          priority: 0.5,
+          // Patterns match full route paths, baseUrl included. /search is a
+          // client-side view of the index, not a page.
+          ignorePatterns: ['/dispat/search'],
+        },
       } satisfies Preset.Options,
     ],
   ],
@@ -66,12 +77,72 @@ const config: Config = {
         docsRouteBasePath: '/',
         highlightSearchTermsOnTargetPage: true,
         searchResultLimits: 8,
+        // `indexPages: true` is deliberately absent: it cannot work here. The
+        // plugin classifies a route as a doc when it sits under
+        // docsRouteBasePath, and '/' is the parent of everything
+        // (processDocInfos.js: `parentRoute === "" || ...`), so the landing page
+        // is treated as a doc, found in no version's doc list, and dropped
+        // before the pages branch is ever reached. The offline index therefore
+        // covers the docs only; the landing page is indexed by search engines,
+        // through the sitemap and the metadata below.
       },
     ],
   ],
 
+  // Structured data for the site root, so a crawler gets the project's identity
+  // and its feature list without having to infer them from the prose.
+  headTags: [
+    {
+      tagName: 'script',
+      attributes: {type: 'application/ld+json'},
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareSourceCode',
+        name: 'dispat',
+        description:
+          'A monorepo release manager: reads conventional commits, computes semantic versions with propagation to ' +
+          'dependants, and builds and publishes packages in dependency order, in parallel, with changelogs, git tags ' +
+          'and GitHub releases.',
+        url: 'https://yohimik.github.io/dispat/',
+        codeRepository: GITHUB,
+        programmingLanguage: 'Go',
+        license: 'https://opensource.org/licenses/MIT',
+        author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
+        keywords: [
+          'monorepo',
+          'release automation',
+          'conventional commits',
+          'semantic versioning',
+          'changelog',
+          'npm',
+          'docker',
+          'go modules',
+        ],
+      }),
+    },
+  ],
+
   themeConfig: {
     image: 'logo.png',
+    metadata: [
+      {
+        name: 'description',
+        content:
+          'dispat releases monorepos: conventional commits in, ordered parallel publishes out, with changelogs, git ' +
+          'tags and GitHub releases.',
+      },
+      {
+        name: 'keywords',
+        content:
+          'monorepo, release, conventional commits, semantic versioning, changelog, git tags, github releases, npm, ' +
+          'docker, go modules, lerna alternative',
+      },
+      // og:title/og:image/og:description come from the page title, themeConfig
+      // image and each page's description. A 1200x630 social card would render
+      // better than the square logo; imgs/ has only the logo today.
+      {property: 'og:type', content: 'website'},
+      {name: 'twitter:card', content: 'summary_large_image'},
+    ],
     navbar: {
       title: 'dispat',
       logo: {alt: 'dispat logo', src: 'logo.png'},

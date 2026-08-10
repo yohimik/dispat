@@ -1,0 +1,13 @@
+# Crawlers only read robots.txt from the domain root, and this is a GitHub
+# Pages *project* site: the file they fetch is yohimik.github.io/robots.txt,
+# which belongs to the user-page repository, not to this one. So the copy served
+# at /dispat/robots.txt is advisory until the site gets its own domain, and what
+# actually gets the pages crawled is the sitemap below (submit it once in
+# Search Console; it is generated on every build by @docusaurus/plugin-sitemap).
+User-agent: *
+Allow: /
+
+# Search results are a client-side view of the index, not content.
+Disallow: /dispat/search
+
+Sitemap: https://yohimik.github.io/dispat/sitemap.xml

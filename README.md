@@ -96,6 +96,8 @@ dispat stands on the shoulders of two things:
   the scanner reads, with atomic writes and validated output.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
+- **[docs](./packages/docs)**: the documentation site itself, released by dispat like any other package: how to run it
+  locally, why its build is the link checker, and how a version snapshot and a deploy are cut.
 
 ## Planned features
 
