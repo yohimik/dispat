@@ -5,9 +5,21 @@
 // spelling for dependency kinds.
 //
 // Writers exist for package.json (byte-precise JSON scalar replacement),
-// go.mod (via golang.org/x/mod/modfile, format-preserving by design) and
-// requirements files (per-line splicing); every other ecosystem is read-only
-// here, and only package.json has an own-version field to write.
+// go.mod (via golang.org/x/mod/modfile, format-preserving by design),
+// requirements files (per-line splicing) and the mobile manifests: Info.plist,
+// AndroidManifest.xml, project.pbxproj, Gradle version catalogs and build
+// scripts, Podfiles and podspecs. The remaining scanner-supported ecosystems
+// (Cargo, pyproject, composer, Maven, NuGet, pub) are read-only here.
+//
+// Every writer proves its output parses before a byte lands on disk. The three
+// formats with no cheap grammar to check against — the Xcode project file, the
+// CocoaPods manifests and the Gradle build scripts — instead refuse any
+// replacement carrying a byte that could end a literal, require the file's
+// brace balance to be unchanged, and re-run the reader over the result.
+//
+// Build numbers (CFBundleVersion, android:versionCode,
+// CURRENT_PROJECT_VERSION) are deliberately not written: they are monotonic
+// counters rather than semantic versions.
 package writer
 
 import (
@@ -15,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yohimik/dispat/pkg/manifest"
 )
@@ -72,6 +85,20 @@ func dispatch(base string) (rewriteFunc, bool) {
 		return func(path, _ string, edits []Edit) (Result, error) { return rewriteGoMod(path, edits) }, true
 	case isRequirementsFile(base):
 		return func(path, _ string, edits []Edit) (Result, error) { return rewriteRequirements(path, edits) }, true
+	case base == "Info.plist":
+		return rewritePlist, true
+	case base == "AndroidManifest.xml":
+		return rewriteAndroidManifest, true
+	case base == "libs.versions.toml":
+		return func(path, _ string, edits []Edit) (Result, error) { return rewriteGradleCatalog(path, edits) }, true
+	case base == "project.pbxproj":
+		return rewriteXcodeProj, true
+	case base == "Podfile":
+		return func(path, _ string, edits []Edit) (Result, error) { return rewritePodfile(path, edits) }, true
+	case strings.HasSuffix(base, ".podspec"):
+		return rewritePodspec, true
+	case base == "build.gradle", base == "build.gradle.kts":
+		return rewriteGradleBuild, true
 	}
 	return nil, false
 }

@@ -32,6 +32,24 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | `*.csproj`          | nuget     | `PackageId`/`AssemblyName`, `PackageReference`, `ProjectReference` as local paths                 |
 | `pubspec.yaml`      | pub       | name, version, dependencies, `dependency_overrides` folded onto their declarations                |
 
+The mobile platforms are covered too. Four of these declare an identity and a version but no dependencies at all — they
+feed auto-versioning rather than the dependency graph — and every Java-world coordinate is spelled `group:artifact`, so a
+version-catalog entry, a build script's literal notation and a `pom.xml` dependency all name the same package.
+
+| File                   | Ecosystem | Reads                                                                                        |
+|------------------------|-----------|----------------------------------------------------------------------------------------------|
+| `Info.plist`           | plist     | `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion` as the build number    |
+| `project.pbxproj`      | xcode     | `PRODUCT_BUNDLE_IDENTIFIER`, `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`, first config wins |
+| `Podfile`              | cocoapods | `pod` declarations, `:path` local pods, a `…Tests` target's pods onto devDependencies         |
+| `*.podspec`            | cocoapods | `name`, `version`, `dependency` declarations, including subspec and platform-scoped ones      |
+| `AndroidManifest.xml`  | android   | `package`, `android:versionName`, `android:versionCode` as the build number                  |
+| `libs.versions.toml`   | gradle    | `[libraries]` by Maven coordinate, `version.ref` resolved through `[versions]`                |
+| `build.gradle`(`.kts`) | gradle    | `applicationId`/`namespace`, `versionName`, `versionCode`, literal coordinates, `project(…)`  |
+
+`Manifest.BuildNumber` carries the monotonic counter these formats keep beside their marketing version
+(`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`). It is not a semantic version, and no writer
+rewrites it.
+
 Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, root manifests first, ambiguous
 names reported instead of guessed) and `ResolveLocalDir` (declared local path → owning package folder).
 
@@ -43,6 +61,21 @@ npm `workspaces`, `overrides` and
 `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and `<modules>`; Poetry multi-constraint
 dependency lists; PEP 735 `include-group`; NuGet Central Package Management (`Directory.Packages.props`). Version text
 is always kept verbatim, so name matching still carries the graph where the version is indirected.
+
+The mobile formats are read by recognising the statement shapes that declare something, so anything a single file cannot
+resolve is dropped rather than guessed at — which on modern Android projects is a great deal. Not read: version-catalog
+accessors (`implementation libs.retrofit`), interpolated versions (`"…:$coreVersion"` and `#{...}` in a Podfile),
+`ext` properties, and a `versionName` computed from a properties file. A Gradle `project(':core')` reference is recorded
+by its last path segment with **no** local path — a project path is relative to the build's root, which one build file
+does not reveal, and guessing at the folder could resolve to a real but unrelated package; `settings.gradle`
+`projectDir` remapping is likewise invisible. `[plugins]` and `[bundles]` catalog tables are not dependencies. Subspec
+dependencies are collected but not attributed to their subspec, and `.podspec.json` is a different (JSON) grammar. Only
+the legacy pre-namespacing attributes are read from an `AndroidManifest.xml`, so a modern project correctly reads empty
+there and declares its versions in `build.gradle` instead. Apple build-setting references are kept verbatim where a
+version is expected, matching the Maven `${property}` rule, but a `$(PRODUCT_BUNDLE_IDENTIFIER)`-shaped *identifier*
+reads as empty: every project spells it identically, and `NameIndex` would report the shared literal as an ambiguous
+name. `Info.plist` is matched by exact name, so the legacy `MyApp-Info.plist` spelling is not recognised. Swift Package
+Manager dependencies are out of scope by construction — `Package.swift` is executable Swift, not a manifest.
 
 ## Requirements
 

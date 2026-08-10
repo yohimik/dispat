@@ -71,16 +71,24 @@ type DeclaredDep struct {
 	LocalPath string
 }
 
-// Ecosystems the built-in parsers recognise.
+// Ecosystems the built-in parsers recognise. The names are spelled after the
+// manifest format rather than the platform that ships it: Info.plist is Apple
+// bundle metadata on macOS and tvOS as much as on iOS, and a Gradle build
+// script is not exclusively Android.
 const (
-	EcosystemNpm      = "npm"      // package.json
-	EcosystemGoMod    = "gomod"    // go.mod
-	EcosystemCargo    = "cargo"    // Cargo.toml
-	EcosystemPython   = "python"   // pyproject.toml (PEP 621 and Poetry)
-	EcosystemComposer = "composer" // composer.json
-	EcosystemMaven    = "maven"    // pom.xml
-	EcosystemNuGet    = "nuget"    // *.csproj
-	EcosystemPub      = "pub"      // pubspec.yaml
+	EcosystemNpm       = "npm"       // package.json
+	EcosystemGoMod     = "gomod"     // go.mod
+	EcosystemCargo     = "cargo"     // Cargo.toml
+	EcosystemPython    = "python"    // pyproject.toml (PEP 621 and Poetry)
+	EcosystemComposer  = "composer"  // composer.json
+	EcosystemMaven     = "maven"     // pom.xml
+	EcosystemNuGet     = "nuget"     // *.csproj
+	EcosystemPub       = "pub"       // pubspec.yaml
+	EcosystemPlist     = "plist"     // Info.plist
+	EcosystemCocoaPods = "cocoapods" // Podfile, *.podspec
+	EcosystemXcode     = "xcode"     // project.pbxproj
+	EcosystemAndroid   = "android"   // AndroidManifest.xml
+	EcosystemGradle    = "gradle"    // libs.versions.toml, build.gradle(.kts)
 )
 
 // Manifest is one parsed manifest file.
@@ -95,6 +103,11 @@ type Manifest struct {
 	// Version is the package's declared own version; empty when absent
 	// (go.mod has none by design).
 	Version string
+	// BuildNumber is the monotonic build counter the mobile formats carry
+	// beside their marketing version — CFBundleVersion, android:versionCode,
+	// CURRENT_PROJECT_VERSION. It is not a semantic version and no writer
+	// rewrites it; empty for every format without one.
+	BuildNumber string
 	// Deps are the manifest's declared dependencies, sorted by field then
 	// name for deterministic output.
 	Deps []DeclaredDep
@@ -124,21 +137,32 @@ type parseFunc func(rel string, data []byte) (Manifest, error)
 
 // parsers maps exact manifest file names onto their parsers.
 var parsers = map[string]parseFunc{
-	"package.json":   parseNpm,
-	"go.mod":         parseGoMod,
-	"Cargo.toml":     parseCargo,
-	"pyproject.toml": parsePython,
-	"composer.json":  parseComposer,
-	"pom.xml":        parseMaven,
-	"pubspec.yaml":   parsePubspec,
-	"pubspec.yml":    parsePubspec,
+	"package.json":        parseNpm,
+	"go.mod":              parseGoMod,
+	"Cargo.toml":          parseCargo,
+	"pyproject.toml":      parsePython,
+	"composer.json":       parseComposer,
+	"pom.xml":             parseMaven,
+	"pubspec.yaml":        parsePubspec,
+	"pubspec.yml":         parsePubspec,
+	"Info.plist":          parsePlist,
+	"AndroidManifest.xml": parseAndroidManifest,
+	// Gradle version catalogs live at gradle/libs.versions.toml by
+	// convention, but settings.gradle may declare one anywhere, so the base
+	// name is the honest match.
+	"libs.versions.toml": parseGradleCatalog,
+	"project.pbxproj":    parseXcodeProj,
+	"Podfile":            parsePodfile,
+	"build.gradle":       parseGradleBuild,
+	"build.gradle.kts":   parseGradleBuild,
 }
 
 // suffixParsers recognise manifests by file extension — .NET projects name
 // the file after the project (App.csproj), so an exact-name table cannot
 // hold them.
 var suffixParsers = map[string]parseFunc{
-	".csproj": parseCsproj,
+	".csproj":  parseCsproj,
+	".podspec": parsePodspec,
 }
 
 // patternParsers recognise manifests by an arbitrary name predicate — the
@@ -172,7 +196,10 @@ func parserFor(name string) (parseFunc, bool) {
 // virtual environments and build output, where copied or generated manifests
 // describe third-party code rather than the workspace (a `dist/package.json`
 // is a build artifact; a Python venv contains thousands of third-party
-// manifests under site-packages). Dot-folders are skipped separately.
+// manifests under site-packages). Dot-folders are skipped separately, which
+// already covers .gradle, SwiftPM's .build and Flutter's .symlinks; Gradle's
+// own output folder is literally "build", listed here. An .xcodeproj is
+// deliberately absent — project.pbxproj lives inside one.
 var skipDirs = map[string]bool{
 	"node_modules":     true,
 	"bower_components": true,
@@ -187,6 +214,9 @@ var skipDirs = map[string]bool{
 	"env":              true,
 	"__pycache__":      true,
 	"Pods":             true,
+	"Carthage":         true,
+	"DerivedData":      true,
+	"xcuserdata":       true,
 }
 
 // maxManifestBytes caps a single manifest read. A manifest is a hand-written

@@ -89,9 +89,10 @@ dispat stands on the shoulders of two things:
   normalisation) that keeps the scanner and writer halves in perfect agreement.
 - **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library: package.json, go.mod, Cargo.toml,
   pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml and requirements files parsed into one ecosystem-neutral
-  shape; the library behind `dispat compute` and auto-versioning.
+  shape, plus the mobile platforms — Info.plist, project.pbxproj, Podfile and .podspec on iOS, AndroidManifest.xml,
+  Gradle version catalogs and build scripts on Android; the library behind `dispat compute` and auto-versioning.
 - **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for package.json,
-  go.mod and requirements files, with atomic writes and validated output.
+  go.mod, requirements files and every mobile manifest the scanner reads, with atomic writes and validated output.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 

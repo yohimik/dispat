@@ -8,14 +8,17 @@ import (
 	"strings"
 )
 
-// decodeXML unmarshals an XML manifest, tolerating the single-byte encodings
-// legacy Maven and Visual Studio files still declare (ISO-8859-1,
-// windows-1252): Go's decoder refuses any non-UTF-8 declaration when no
-// CharsetReader is set, and a scanner should read what the tools wrote.
-// windows-1252 is treated as latin-1; the 0x80-0x9F range differs between the
-// two, but identifiers never use it and mojibake in free text is harmless
-// here.
-func decodeXML(data []byte, v any) error {
+// newXMLDecoder builds the charset-tolerant decoder every XML format in the
+// package reads through, tolerating the single-byte encodings legacy Maven
+// and Visual Studio files still declare (ISO-8859-1, windows-1252): Go's
+// decoder refuses any non-UTF-8 declaration when no CharsetReader is set, and
+// a scanner should read what the tools wrote. windows-1252 is treated as
+// latin-1; the 0x80-0x9F range differs between the two, but identifiers never
+// use it and mojibake in free text is harmless here.
+//
+// The struct-decoding formats go through decodeXML; the plist walk drives the
+// token stream itself, because only the top-level dictionary's keys count.
+func newXMLDecoder(data []byte) *xml.Decoder {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	dec.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
 		switch strings.ToLower(charset) {
@@ -35,7 +38,12 @@ func decodeXML(data []byte, v any) error {
 		}
 		return nil, fmt.Errorf("unsupported XML encoding %q", charset)
 	}
-	return dec.Decode(v)
+	return dec
+}
+
+// decodeXML unmarshals an XML manifest through the shared decoder.
+func decodeXML(data []byte, v any) error {
+	return newXMLDecoder(data).Decode(v)
 }
 
 // mavenManifest is the subset of pom.xml the scanner reads. groupId and
