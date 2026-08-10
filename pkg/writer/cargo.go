@@ -44,7 +44,7 @@ var cargoTables = []struct {
 // `package` key, and the scanner reports the real name, so the writer resolves
 // an edit back through that rename. A dependency that inherits from the
 // workspace (`serde = { workspace = true }`) or carries no version at all has
-// nothing to replace and is reported missing; adding a version to it would
+// nothing to replace and is reported skipped; adding a version to it would
 // override the workspace on purpose, which is dependency management rather
 // than version syncing.
 func rewriteCargo(path, version string, edits []Edit) (Result, error) {
@@ -172,10 +172,23 @@ func cargoDependencyName(key string, value any) (name string, writable bool) {
 
 // cargoVersionSpan locates the version literal for one table entry: the whole
 // value when it is a plain string, or the inline table's `version` key.
+//
+// Cargo spells a detailed dependency two ways. The inline one keeps it on the
+// entry's own line, and the sub-table one gives it a header of its own:
+//
+//	[dependencies]
+//	serde = { version = "1.0", features = ["derive"] }
+//
+//	[dependencies.serde]
+//	version = "1.0"
+//	features = ["derive"]
+//
+// Both are ordinary in real crates, so both are searched: the entry first,
+// then a `version` key under `[<table>.<key>]`.
 func cargoVersionSpan(lines []string, table, key string) (idx, start, end int, ok bool) {
 	idx, afterEq, ok := catalogEntryLine(lines, table, key)
 	if !ok {
-		return 0, 0, 0, false
+		return catalogEntryValueSpan(lines, table+"."+key, "version")
 	}
 	body := stripTOMLComment(lines[idx])
 	i := afterEq

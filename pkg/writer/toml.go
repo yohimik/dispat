@@ -129,3 +129,15 @@ func tomlInlineValueSpan(line string, from int, key string) (start, end int, ok 
 func isTOMLKeyBoundary(c byte) bool {
 	return c == '{' || c == ',' || c == ' ' || c == '\t'
 }
+
+// catalogEntryValueSpan measures a plain string value assigned to key inside
+// the named table. It is the sub-table lookup: where catalogEntryLine finds a
+// key on an entry line, this finds one under a header of its own.
+func catalogEntryValueSpan(lines []string, table, key string) (idx, start, end int, ok bool) {
+	idx, afterEq, ok := catalogEntryLine(lines, table, key)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	start, end, ok = tomlQuotedSpan(stripTOMLComment(lines[idx]), afterEq)
+	return idx, start, end, ok
+}

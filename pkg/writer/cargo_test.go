@@ -99,3 +99,47 @@ func TestCargoRewriteNoChangeLeavesFileAlone(t *testing.T) {
 		t.Error("no-op rewrite touched the file")
 	}
 }
+
+func TestCargoRewriteSubTableDependencyForm(t *testing.T) {
+	// The sub-table spelling is as ordinary as the inline one in real crates,
+	// and the scanner reads both, so the writer has to reach both.
+	src := `[package]
+name = "acme"
+version = "1.0.0"
+
+[dependencies]
+serde = "1.0"
+
+[dependencies.tokio]
+version = "1.35"
+features = ["full"]
+
+[dev-dependencies.insta]
+version = "1.34"
+
+[dependencies.renamed]
+package = "acme-real"
+version = "0.1"
+`
+	path := seed(t, "Cargo.toml", src)
+	res, err := Rewrite(path, "2.0.0", []Edit{
+		{Name: "tokio", Range: "1.40"},
+		{Name: "insta", Kind: "devDependencies", Range: "1.40"},
+		{Name: "acme-real", Range: "0.2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.NewReplacer(
+		"version = \"1.0.0\"", "version = \"2.0.0\"",
+		"version = \"1.35\"", "version = \"1.40\"",
+		"version = \"1.34\"", "version = \"1.40\"",
+		"version = \"0.1\"", "version = \"0.2\"",
+	).Replace(src)
+	if got := read(t, path); got != want {
+		t.Errorf("file mismatch:\n got: %q\nwant: %q", got, want)
+	}
+	if !res.VersionWritten || len(res.Applied) != 3 || len(res.Missing) != 0 || len(res.Skipped) != 0 {
+		t.Errorf("result mismatch: %+v", res)
+	}
+}
