@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
@@ -30,29 +30,31 @@ func (a *App) stepPlan(ctx context.Context) (*plan.Plan, error) {
 	return pl, nil
 }
 
-// stepTargets resolves which packages a step command covers, mirroring the
-// run command's narrowing: an explicit pkg targets exactly that package
-// (unknown is an error; known but not releasing is a logged no-op, so a flow
-// does not fail over a package the planner held or converged). With no pkg,
-// dir narrows to the package whose folder it points inside, under the same
-// not-releasing rule; anywhere else (the monorepo root included) the command
-// covers every releasing package, in dependency order.
-func (a *App) stepTargets(pl *plan.Plan, pkg, dir string) ([]string, error) {
-	if pkg == "" && dir != "" {
-		pkg = a.packageAt(pl, dir)
-	} else if pkg != "" && pl.Releases[pkg] == nil {
-		return nil, fmt.Errorf("unknown package %q (discovered: %s)", pkg, strings.Join(pl.Order, ", "))
+// stepTargets resolves which packages a step command covers, through the same
+// filter as the run command: the releasing packages in dependency order,
+// narrowed by --package, --space or the folder the command was invoked from. A
+// term matching no package is an error; a selected package the planner held or
+// converged is a logged no-op, so a custom flow never fails over one.
+func (a *App) stepTargets(pl *plan.Plan, f filter.Filter) ([]string, error) {
+	sel, err := a.selectPackages(a.planWorkspace(pl), f)
+	if err != nil {
+		return nil, err
 	}
-	if pkg != "" {
-		if !pl.Releases[pkg].Releasing() {
-			a.log.Info().Str("package", pkg).Msg("package is not releasing, nothing to do")
-			return nil, nil
-		}
-		return []string{pkg}, nil
-	}
-	var targets []string
+	var releasing []string
 	for _, rel := range pl.Releasing() {
-		targets = append(targets, rel.Pkg.Name)
+		releasing = append(releasing, rel.Pkg.Name)
+	}
+	targets := sel.Keep(releasing)
+	if sel.Active() {
+		kept := make(map[string]bool, len(targets))
+		for _, name := range targets {
+			kept[name] = true
+		}
+		for _, name := range sel.Names {
+			if !kept[name] {
+				a.log.Info().Str("package", name).Msg("package is not releasing, nothing to do")
+			}
+		}
 	}
 	return targets, nil
 }

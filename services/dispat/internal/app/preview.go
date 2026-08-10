@@ -7,50 +7,57 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
+
+// PreviewResult is what Preview rendered, plus the scope it rendered for, so
+// a caller reporting "nothing pending" can say what it was nothing for.
+type PreviewResult struct {
+	// Notes are the rendered sections; empty when no covered package has
+	// anything pending.
+	Notes string
+	// Scope names the selection the notes cover, empty when the preview
+	// covered the whole monorepo.
+	Scope string
+}
 
 // Preview computes the plan and renders pending release notes: the
 // breaking-changes, features and fixes sections (plus provider updates) the
 // next release's changelog entry and GitHub release body would carry, under
 // the configured changelog format. Nothing is executed, tagged or written.
 //
-// With a package name, the preview covers that one package and an empty
-// string means it has nothing pending. With pkg empty, the preview covers
-// every package that has something pending, in publish order, and an empty
-// string means none does. The sections follow the release-notes windowing: a
-// pending prerelease previews only its own changeset, a pending stable
-// release the whole window since the last stable tag.
-func (a *App) Preview(ctx context.Context, pkg string) (string, error) {
+// The preview covers every package with something pending, in publish order,
+// narrowed by the filter — named packages or spaces, or the folder the command
+// was invoked from. Empty notes mean no covered package has anything pending.
+// The sections follow the release-notes windowing: a pending prerelease
+// previews only its own changeset, a pending stable release the whole window
+// since the last stable tag.
+func (a *App) Preview(ctx context.Context, f filter.Filter) (PreviewResult, error) {
 	pl, err := a.plan(ctx)
 	if err != nil {
-		return "", err
+		return PreviewResult{}, err
 	}
 	a.printDiagnostics(pl)
 	if pl.Fatal() {
 		a.log.Error().Msg("refusing to preview: the repository cannot produce a correct plan")
-		return "", errors.New("no correct plan exists")
+		return PreviewResult{}, errors.New("no correct plan exists")
+	}
+	sel, err := a.selectPackages(a.planWorkspace(pl), f)
+	if err != nil {
+		a.log.Error().Err(err).Msg("cannot preview")
+		return PreviewResult{}, err
 	}
 
-	if pkg != "" {
-		rel := pl.Releases[pkg]
-		if rel == nil {
-			err := fmt.Errorf("unknown package %q (discovered: %s)", pkg, strings.Join(pl.Order, ", "))
-			a.log.Error().Err(err).Msg("unknown package")
-			return "", err
-		}
-		return a.previewOne(rel), nil
-	}
-
-	// Every package with something pending, in publish order, so the combined
-	// preview reads in the order the releases would happen.
+	// Every covered package with something pending, in publish order, so the
+	// combined preview reads in the order the releases would happen.
 	var parts []string
-	for _, name := range pl.Order {
+	for _, name := range sel.Keep(pl.Order) {
 		if notes := a.previewOne(pl.Releases[name]); notes != "" {
 			parts = append(parts, notes)
 		}
 	}
-	return strings.Join(parts, "\n"), nil
+	return PreviewResult{Notes: strings.Join(parts, "\n"), Scope: sel.Description}, nil
 }
 
 // previewOne renders one package's pending notes; empty when nothing is

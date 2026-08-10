@@ -19,6 +19,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/app"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 )
 
 // Commands accepted by Run.
@@ -100,10 +101,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	logFormat := fs.String("log-format", "", "override the configured logFormat (pretty, json)")
 	onError := fs.String("on-error", app.OnErrorSkip,
 		"run command: what a failing script does to the failed package's dependents (skip or continue)")
-	since := fs.StringP("since", "s", "",
+	since := fs.String("since", "",
 		"run command: select the packages the commits since the git revision address (scopes first, changed files for scopeless commits; e.g. HEAD~1, origin/main, a tag; 'all' selects every package) instead of the release window")
 	consumers := fs.Bool("consumers", false,
 		"run command: additionally run every package that transitively depends on a selected one, so downstream consumers are re-run with the change")
+	pkgFilter := fs.StringSliceP("package", "p", nil,
+		"run, preview, changelog, autoversion, commit and compute commands: narrow to the named packages (repeatable and comma-separated; '*' globs, so -p '*' is every package and -p '@acme/*' a prefix); without it, the package folder the command was invoked from")
+	spaceFilter := fs.StringSliceP("space", "s", nil,
+		"run, preview, changelog, autoversion, commit and compute commands: narrow to every package of the named spaces (repeatable, comma-separated, '*' globs); a standalone package belongs to no space, so --package is the only way to name one")
 	initFormat := fs.String("format", "json",
 		"init command: config file format (json, yaml or toml)")
 	computeWrite := fs.Bool("write", false,
@@ -161,24 +166,24 @@ usage: dispat [command] [flags]
 commands:
   release                  build and publish changed packages (default)
   status                   print the project graph and new versions, without building
-  run <script> [package]   run the named script inside each changed package that
+  run <script>             run the named script inside each changed package that
                            defines it — its own scripts, then its space's, then the
-                           top-level ones — honouring the dependency graph; or inside
-                           the one named package only, changed or not. "dispat
-                           <script>" is a shorthand when <script> is not a command
-                           name, narrowing to the package it is invoked from inside a
-                           package folder
+                           top-level ones — honouring the dependency graph.
+                           --package and --space narrow that to part of the
+                           monorepo, as does the package or space folder the
+                           command is invoked from. "dispat <script>" is a
+                           shorthand when <script> is not a command name
   init                     write a starter config file (--format json, yaml or toml)
                            at the git repository root, unless one already exists
-  preview [package]        print the pending release notes (breaking changes,
-                           features, fixes) for one package, or for every
-                           package with something pending when none is named
-  changelog [package]      write the pending changelog entry now, so a custom
+  preview                  print the pending release notes (breaking changes,
+                           features, fixes) for every package with something
+                           pending, or for the selected ones
+  changelog                write the pending changelog entry now, so a custom
                            flow can land it inside the release commit;
                            already-written entries are skipped
-  autoversion [package]    reconcile manifests to the planned versions (native
+  autoversion              reconcile manifests to the planned versions (native
                            auto-versioning) and run syncLock where they changed
-  commit [package]         create the per-package release commit; --tag tags
+  commit                   create the per-package release commit; --tag tags
                            it, --push pushes the branch and tags
   compute                  scan every package's manifests (package.json, go.mod,
                            Cargo.toml, pyproject.toml, composer.json, pom.xml,
@@ -186,7 +191,8 @@ commands:
                            the dependency graph and suggest config changes;
                            --write applies all, --interactive confirms each,
                            --check gates CI; an edge marked keep: true is
-                           never suggested for removal
+                           never suggested for removal, and --package/--space
+                           scope the suggestions to those packages' edges
   scanner [folder]         print what the folder's manifests declare: identity,
                            ecosystem and every dependency with its range;
                            --root-only stays out of sub-folders. Needs no
@@ -225,18 +231,10 @@ flags:
 	if badArgs {
 		return 2
 	}
-	cmd, runScript, argPkg := inv.cmd, inv.script, inv.pkg
+	cmd, runScript := inv.cmd, inv.script
 	if cmd == cmdRun && !app.ValidOnError(*onError) {
 		bootLog.Error().Str("on-error", *onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
-		return 2
-	}
-	if cmd == cmdRun && inv.pkg != "" && *since != "" {
-		bootLog.Error().Msg("--since and an explicit package are mutually exclusive: the package already names the whole selection")
-		return 2
-	}
-	if cmd == cmdRun && inv.pkg != "" && *consumers {
-		bootLog.Error().Msg("--consumers and an explicit package are mutually exclusive: a targeted run is exactly one package")
 		return 2
 	}
 	if cmd == cmdInit {
@@ -260,7 +258,7 @@ flags:
 		defer stop()
 		if cmd == cmdScanner {
 			if app.ScanManifests(ctx, app.ScanOptions{
-				Root: *root, Dir: inv.pkg, RootOnly: *scanRootOnly, Strict: *strict,
+				Root: *root, Dir: inv.dir, RootOnly: *scanRootOnly, Strict: *strict,
 				JSON: *logFormat == "json", Out: stdout, Log: log,
 			}) != nil {
 				return 1
@@ -307,6 +305,12 @@ flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The one selection every package-selecting command shares. Dir is --root
+	// as the user spelled it — where they stood — and not the resolved
+	// monorepo root the ascent just found: the difference between the two is
+	// exactly what narrows a command to the folder it was invoked from.
+	sel := filter.Filter{Packages: *pkgFilter, Spaces: *spaceFilter, Dir: *root}
+
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.
 	a := app.New(resolvedRoot, cfg, log)
@@ -316,36 +320,30 @@ flags:
 			return 1
 		}
 	case cmdRun:
-		opts := app.RunOptions{OnError: *onError, Package: inv.pkg, Since: *since, Consumers: *consumers}
-		if inv.shorthand {
-			// The shorthand narrows to the package the command was invoked
-			// from: --root (default ".") is where the user stood, and the
-			// ascent just told us where the monorepo root actually is.
-			opts.Dir = *root
-		}
-		if a.RunScript(ctx, runScript, opts) != nil {
+		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *onError,
+			Filter: sel, Since: *since, Consumers: *consumers}) != nil {
 			return 1
 		}
 	case cmdPreview:
-		notes, err := a.Preview(ctx, argPkg)
+		res, err := a.Preview(ctx, sel)
 		if err != nil {
 			return 1
 		}
 		switch {
-		case notes != "":
-			fmt.Fprint(stdout, notes)
-		case argPkg == "":
+		case res.Notes != "":
+			fmt.Fprint(stdout, res.Notes)
+		case res.Scope == "":
 			fmt.Fprintln(stdout, "no pending changes")
 		default:
-			fmt.Fprintf(stdout, "no pending changes for %s\n", argPkg)
+			fmt.Fprintf(stdout, "no pending changes for %s\n", res.Scope)
 		}
 	case cmdChangelog:
-		if a.Changelog(ctx, app.ChangelogOptions{Package: argPkg, Dir: *root,
+		if a.Changelog(ctx, app.ChangelogOptions{Filter: sel,
 			File: *clFile, Title: *clTitle, DateFormat: *clDateFormat}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
-		opts := app.AutoVersionOptions{Package: argPkg, Dir: *root,
+		opts := app.AutoVersionOptions{Filter: sel,
 			Range: *avRange, Match: *avMatch, SyncLock: *avSyncLock}
 		switch *avManifests {
 		case "":
@@ -366,7 +364,7 @@ flags:
 			return 1
 		}
 	case cmdCommit:
-		if a.Commit(ctx, app.CommitOptions{Package: argPkg, Dir: *root,
+		if a.Commit(ctx, app.CommitOptions{Filter: sel,
 			Tag: *commitTag, Push: *commitPush, Name: *commitName, Email: *commitEmail,
 			Remote: *commitRemote, Message: *commitMessage, Include: *commitInclude}) != nil {
 			return 1
@@ -376,6 +374,7 @@ flags:
 			Write:       *computeWrite,
 			Interactive: *computeInteractive,
 			Check:       *computeCheck,
+			Filter:      sel,
 			In:          os.Stdin,
 			Out:         stdout,
 		})
@@ -397,14 +396,9 @@ flags:
 // positional arguments.
 type invocation struct {
 	cmd    string
-	script string // run: the script name
-	pkg    string // run: the optional target package; preview and the step commands: the package
-	// scanner reuses pkg for its optional folder, since both are "the one
-	// thing this command may be pointed at".
-	paths []string // writer: the manifest files to edit
-	// shorthand marks the `dispat <script>` spelling of the run command; only
-	// it narrows to the package the command was invoked from.
-	shorthand bool
+	script string   // run: the script name
+	dir    string   // scanner: the optional folder to scan
+	paths  []string // writer: the manifest files to edit
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
@@ -424,23 +418,18 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 			return inv, true
 		}
 	case cmdRun:
-		if len(rest) < 2 || len(rest) > 3 {
-			log.Error().Msg("run requires the script name, optionally followed by one package")
+		if len(rest) != 2 {
+			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package or --space)")
 			usage()
 			return inv, true
 		}
 		inv.script = rest[1]
-		if len(rest) == 3 {
-			inv.pkg = rest[2]
-		}
 	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit:
-		if len(rest) > 2 {
-			log.Error().Msgf("%s takes at most one argument: the package name", inv.cmd)
+		if len(rest) > 1 {
+			log.Error().Strs("args", rest[1:]).
+				Msgf("%s takes no arguments (select packages with --package or --space)", inv.cmd)
 			usage()
 			return inv, true
-		}
-		if len(rest) == 2 {
-			inv.pkg = rest[1] // no argument: cover every releasing package
 		}
 	case cmdScanner:
 		if len(rest) > 2 {
@@ -449,7 +438,7 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 			return inv, true
 		}
 		if len(rest) == 2 {
-			inv.pkg = rest[1] // no argument: scan --root itself
+			inv.dir = rest[1] // no argument: scan --root itself
 		}
 	case cmdWriter:
 		if len(rest) < 2 {
@@ -467,7 +456,7 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 			usage()
 			return inv, true
 		}
-		inv.script, inv.cmd, inv.shorthand = inv.cmd, cmdRun, true
+		inv.script, inv.cmd = inv.cmd, cmdRun
 	}
 	return inv, false
 }

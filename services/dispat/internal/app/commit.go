@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+
 	"fmt"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"os"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -14,14 +16,13 @@ import (
 // when set, replace the corresponding commit.* config values for this
 // invocation.
 type CommitOptions struct {
-	Package string // explicit target, or ""
-	Dir     string // where the command was invoked; narrows inside a package folder
-	Tag     bool   // also create the annotated release tag
-	Push    bool   // push the branch, and with Tag the tags
-	Name    string // overrides commit.name (committer identity)
-	Email   string // overrides commit.email
-	Remote  string // overrides commit.remote
-	Message string // overrides commit.messageFormat
+	Filter  filter.Filter // which packages the command covers
+	Tag     bool          // also create the annotated release tag
+	Push    bool          // push the branch, and with Tag the tags
+	Name    string        // overrides commit.name (committer identity)
+	Email   string        // overrides commit.email
+	Remote  string        // overrides commit.remote
+	Message string        // overrides commit.messageFormat
 	Include []string
 }
 
@@ -40,7 +41,7 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 	if err != nil {
 		return err
 	}
-	targets, err := a.stepTargets(pl, opts.Package, opts.Dir)
+	targets, err := a.stepTargets(pl, opts.Filter)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot commit")
 		return err

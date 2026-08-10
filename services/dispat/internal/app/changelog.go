@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
+
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 )
 
@@ -11,11 +13,10 @@ import (
 // every package of the invocation — an explicit flag beats the layered
 // per-package configuration.
 type ChangelogOptions struct {
-	Package    string // explicit target, or ""
-	Dir        string // where the command was invoked; narrows inside a package folder
-	File       string // overrides changelog.file
-	Title      string // overrides changelog.title
-	DateFormat string // overrides changelog.dateFormat
+	Filter     filter.Filter // which packages the command covers
+	File       string        // overrides changelog.file
+	Title      string        // overrides changelog.title
+	DateFormat string        // overrides changelog.dateFormat
 }
 
 // Changelog writes each covered package's pending changelog entry now — the
@@ -28,7 +29,7 @@ func (a *App) Changelog(ctx context.Context, opts ChangelogOptions) error {
 	if err != nil {
 		return err
 	}
-	targets, err := a.stepTargets(pl, opts.Package, opts.Dir)
+	targets, err := a.stepTargets(pl, opts.Filter)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot write the changelog")
 		return err

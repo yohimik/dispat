@@ -13,6 +13,7 @@ import (
 	"github.com/yohimik/dispat/pkg/scanner"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -27,6 +28,13 @@ type ComputeOptions struct {
 	// Check only reports: the CLI exits non-zero when suggestions remain,
 	// which is the CI gate for a drifted dependencies list.
 	Check bool
+	// Filter scopes the suggestions to the selected packages' own edges —
+	// named packages or spaces, or the folder the command was invoked from.
+	// Detection still reads every package's manifests: the workspace name
+	// index is what resolves a declared dependency onto a provider, so
+	// narrowing the scan would turn a perfectly good edge into a removal
+	// suggestion.
+	Filter filter.Filter
 	// In answers interactive prompts (the CLI passes stdin).
 	In io.Reader
 	// Out receives the suggestion listing (the CLI passes stdout).
@@ -79,16 +87,49 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	for _, p := range pkgs {
 		known[p.Name] = true
 	}
+	sel, err := a.selectPackages(a.discoveredWorkspace(pkgs), opts.Filter)
+	if err != nil {
+		a.log.Error().Err(err).Msg("cannot compute the dependency graph")
+		return 0, err
+	}
+	// Every package is scanned whatever the filter says — see ComputeOptions
+	// — and only the findings are scoped, by the consumer whose declaration
+	// they are about.
 	detected, hasManifest := a.detectEdges(ctx, pkgs)
-	sugs := a.diffEdges(detected, hasManifest, known, declared)
+	scoped, scopedManifest, scopedDeclared := detected, hasManifest, declared
+	if sel.Active() {
+		scoped = nil
+		for _, e := range detected {
+			if sel.Has(e.dep.Consumer) {
+				scoped = append(scoped, e)
+			}
+		}
+		scopedManifest = make(map[string]bool, len(hasManifest))
+		for name := range hasManifest {
+			if sel.Has(name) {
+				scopedManifest[name] = true
+			}
+		}
+		scopedDeclared = nil
+		for _, d := range declared {
+			if sel.Has(d.Consumer) {
+				scopedDeclared = append(scopedDeclared, d)
+			}
+		}
+	}
+	sugs := a.diffEdges(scoped, scopedManifest, known, scopedDeclared)
 
 	out := opts.Out
 	if out == nil {
 		out = io.Discard
 	}
 	if len(sugs) == 0 {
-		fmt.Fprintf(out, "dependencies are in sync: %d detected edge(s), %d declared\n",
-			len(detected), len(declared))
+		scope := ""
+		if sel.Active() {
+			scope = " for " + sel.Description
+		}
+		fmt.Fprintf(out, "dependencies are in sync%s: %d detected edge(s), %d declared\n",
+			scope, len(scoped), len(scopedDeclared))
 		return 0, nil
 	}
 	apply, err := a.selectSuggestions(sugs, opts, out)

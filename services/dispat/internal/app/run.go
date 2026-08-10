@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -40,43 +40,37 @@ type RunOptions struct {
 	// OnError is the failure policy for the failed package's dependents:
 	// OnErrorSkip (the default when empty) or OnErrorContinue.
 	OnError string
-	// Package, when set, targets exactly one package: the script runs there
-	// whether or not the package changed, and the dependency graph plays no
-	// part. Naming an unknown package is an error, as is a target that does
-	// not resolve the script at any level — a targeted run that runs nothing
-	// would be how a typo hides.
-	Package string
-	// Dir, when set (the `dispat <script>` shorthand), narrows the run the
-	// same way when it points inside a package's folder; anywhere else — the
-	// monorepo root itself, or outside every package — the run covers the
-	// changed packages as usual.
-	Dir string
-	// Since replaces the "changed since the last release" selection with
-	// "what the commits since this git revision address" (rev..HEAD, so a
-	// branch base counts only this branch's own commits). Selection follows
-	// the planner's scope semantics: a commit's written scopes are
-	// authoritative, and only scopeless units fall back to the files the
-	// commit changed (§6.2):
+	// Filter narrows the run to named packages or spaces (--package,
+	// --space), or to the package or space folder the command was invoked
+	// from. It only ever narrows: the window below decides which packages are
+	// on the table, and the filter picks from them.
+	Filter filter.Filter
+	// Since replaces the "changed since the last release" window with "what
+	// the commits since this git revision address" (rev..HEAD, so a branch
+	// base counts only this branch's own commits). Selection follows the
+	// planner's scope semantics: a commit's written scopes are authoritative,
+	// and only scopeless units fall back to the files the commit changed
+	// (§6.2):
 	//
 	//	HEAD~1        what the last commit addressed (per-commit CI)
 	//	origin/main   what this branch addressed (PR pipelines)
 	//	core@1.2.0    everything since a release tag
 	//	all           every package, changed or not (SinceAll)
 	//
-	// Graph ordering and output carrying still apply within the selected set.
-	// Since is mutually exclusive with Package (the CLI rejects the pair) and
-	// overrides Dir's implicit narrowing — an explicit flag beats inference.
+	// SinceAll is the one way to switch the changed-package window off
+	// entirely, which is what makes `--since all --package core` run core
+	// whether or not it changed. Graph ordering and output carrying still
+	// apply within the selected set.
 	Since string
 	// Consumers additionally selects every package that transitively depends
-	// on a selected one, for the windowed runs — the release window or a
-	// --since window. A window alone covers only what the commits address,
-	// so without this flag nothing re-runs the downstream packages a
-	// provider change affects; with it, a consumer pulled in brings its own
-	// consumers, all the way down the graph. The added packages run whether
-	// or not they changed, after their selected providers, with the same
-	// skip cascade as any selected package. Consumers is mutually exclusive
-	// with Package (the CLI rejects the pair — a targeted run is exactly one
-	// package) and, like Since, overrides Dir's implicit narrowing.
+	// on a selected one. A window covers only what the commits address, so
+	// without this flag nothing re-runs the downstream packages a provider
+	// change affects; with it, a consumer pulled in brings its own consumers,
+	// all the way down the graph. The expansion happens after the filter, on
+	// purpose: `--package core --consumers` is a request for core's
+	// dependents, and re-filtering them away would make the pair a no-op. The
+	// added packages run whether or not they changed, after their selected
+	// providers, with the same skip cascade as any selected package.
 	Consumers bool
 }
 
@@ -92,8 +86,8 @@ type RunOptions struct {
 // space's, and a package's reaches that package alone. A selected package
 // that resolves nothing completes as a no-op — but a name nothing defines, or
 // a selection in which no package resolves it, is an error, because running
-// nothing silently is how a typo hides. opts can narrow the run to one
-// package (see RunOptions); any failure makes the whole command fail.
+// nothing silently is how a typo hides. opts decides which packages the run
+// covers (see RunOptions); any failure makes the whole command fail.
 func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error {
 	if !a.scriptDefinedAnywhere(name) {
 		msg := fmt.Sprintf("no script %q is defined at the top level, in a space or in a package", name)
@@ -117,30 +111,10 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return errors.New("no correct plan exists")
 	}
-	target, err := a.runTarget(pl, name, opts)
+	selected, err := a.runSelection(ctx, pl, opts)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot run the script")
 		return err
-	}
-
-	// What the run covers: one named package (targeted, changed or not), the
-	// packages --since selects, or the packages a release would touch.
-	var selected []string
-	switch {
-	case target != "":
-		selected = []string{target}
-	case opts.Since != "":
-		if selected, err = a.sincePackages(ctx, pl, opts.Since); err != nil {
-			a.log.Error().Err(err).Msg("cannot run the script")
-			return err
-		}
-	default:
-		for _, rel := range pl.Releasing() {
-			selected = append(selected, rel.Pkg.Name)
-		}
-	}
-	if opts.Consumers {
-		selected = withConsumers(pl, selected)
 	}
 
 	// The task graph: one node per selected package, edges from every
@@ -250,30 +224,32 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 	return false
 }
 
-// runTarget resolves the single package a run is narrowed to, or "" for the
-// ordinary changed-packages run. An explicit RunOptions.Package must exist
-// and must resolve the script; RunOptions.Dir narrows only when it
-// points inside some package's folder, and silently does not when it points
-// anywhere else (the monorepo root, a space folder, outside the tree) — or
-// when --since or --consumers is in play, because an explicit flag beats
-// inference.
-func (a *App) runTarget(pl *plan.Plan, name string, opts RunOptions) (string, error) {
-	target := opts.Package
-	if target == "" && opts.Dir != "" && opts.Since == "" && !opts.Consumers {
-		target = a.packageAt(pl, opts.Dir)
+// runSelection is the whole selection rule, in one place: a window decides
+// which packages are on the table — the packages --since addresses, every
+// package for --since all, the release window otherwise — the filter narrows
+// that window, and --consumers then expands the result downstream. A selection
+// the filter empties is an honest no-op, not an error; only a term that
+// matches no package at all is one.
+func (a *App) runSelection(ctx context.Context, pl *plan.Plan, opts RunOptions) ([]string, error) {
+	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
+	if err != nil {
+		return nil, err
 	}
-	if target == "" {
-		return "", nil
+	var window []string
+	if opts.Since != "" {
+		if window, err = a.sincePackages(ctx, pl, opts.Since); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, rel := range pl.Releasing() {
+			window = append(window, rel.Pkg.Name)
+		}
 	}
-	rel := pl.Releases[target]
-	if rel == nil {
-		return "", fmt.Errorf("unknown package %q (discovered: %s)", target, strings.Join(pl.Order, ", "))
+	selected := sel.Keep(window)
+	if opts.Consumers {
+		selected = withConsumers(pl, selected)
 	}
-	if _, ok := rel.Pkg.Space.Scripts[strings.ToLower(name)]; !ok {
-		return "", fmt.Errorf("package %q does not define script %q (looked in the package, its space and the top level)",
-			target, name)
-	}
-	return target, nil
+	return selected, nil
 }
 
 // withConsumers expands a selection with every package that transitively
@@ -328,31 +304,6 @@ func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]s
 		return nil, fmt.Errorf("resolving --since %q: %w", rev, err)
 	}
 	return selected, nil
-}
-
-// packageAt returns the package whose folder contains dir, or "" when dir is
-// not inside any package (the root itself included). Both sides are compared
-// absolute, so the relative --root default and absolute package dirs meet on
-// equal terms.
-func (a *App) packageAt(pl *plan.Plan, dir string) string {
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return ""
-	}
-	for _, name := range pl.Order {
-		rel := pl.Releases[name]
-		if rel == nil {
-			continue
-		}
-		pkgDir, err := filepath.Abs(rel.Pkg.Dir)
-		if err != nil {
-			continue
-		}
-		if absDir == pkgDir || strings.HasPrefix(absDir, pkgDir+string(filepath.Separator)) {
-			return name
-		}
-	}
-	return ""
 }
 
 // runOutcome is one package's terminal state within a `dispat run`. defined

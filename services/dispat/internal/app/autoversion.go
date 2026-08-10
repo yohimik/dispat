@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
+
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -16,13 +18,12 @@ import (
 // then starts from the defaults (every dependency kind, any range, write the
 // own version).
 type AutoVersionOptions struct {
-	Package      string   // explicit target, or ""
-	Dir          string   // where the command was invoked; narrows inside a package folder
-	Range        string   // overrides autoVersion.range
-	Match        []string // overrides autoVersion.match
-	AllManifests *bool    // overrides autoVersion.manifests (true = all)
-	WriteVersion *bool    // overrides autoVersion.writeVersion
-	SyncLock     bool     // run the space's syncLock scripts for changed packages
+	Filter       filter.Filter // which packages the command covers
+	Range        string        // overrides autoVersion.range
+	Match        []string      // overrides autoVersion.match
+	AllManifests *bool         // overrides autoVersion.manifests (true = all)
+	WriteVersion *bool         // overrides autoVersion.writeVersion
+	SyncLock     bool          // run the space's syncLock scripts for changed packages
 }
 
 // hasPolicy reports whether any policy override was set, which is what makes
@@ -40,7 +41,7 @@ func (a *App) AutoVersion(ctx context.Context, opts AutoVersionOptions) error {
 	if err != nil {
 		return err
 	}
-	targets, err := a.stepTargets(pl, opts.Package, opts.Dir)
+	targets, err := a.stepTargets(pl, opts.Filter)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot auto-version")
 		return err
