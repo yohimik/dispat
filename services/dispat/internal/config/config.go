@@ -595,7 +595,7 @@ func validate(c *File) error {
 		return err
 	}
 	for name, s := range c.Spaces {
-		validated, err := validateSpace(c, name, s)
+		validated, err := validateSpace(name, s)
 		if err != nil {
 			return err
 		}
@@ -697,15 +697,15 @@ func validateLogging(c *File) error {
 // scripts — and returns it with its versioning value normalized. What the
 // space's flow references is not checked here: a reference resolves in a
 // package's scope, which discovery knows and this does not, so
-// checkScriptScope owns that check.
-func validateSpace(c *File, name string, s SpaceConfig) (SpaceConfig, error) {
-	return validateSpaceAs(c, fmt.Sprintf("space %q", name), s)
+// checkSpaceRefs owns that check.
+func validateSpace(name string, s SpaceConfig) (SpaceConfig, error) {
+	return validateSpaceAs(fmt.Sprintf("space %q", name), s)
 }
 
 // validateSpaceAs is validateSpace under an explicit error label, so the
 // same checks validate a package's merged override config ("space "libs":
 // package "core"") — an override is space-shaped and held to space rules.
-func validateSpaceAs(c *File, label string, s SpaceConfig) (SpaceConfig, error) {
+func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	if s.Path == "" {
 		return s, fmt.Errorf("%s: path is required", label)
 	}
@@ -1021,7 +1021,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 					merged = mergePackageOverride(merged, filePO)
 					ex.apply(c, filePO)
 				}
-				merged, err = validateSpaceAs(c, label, merged)
+				merged, err = validateSpaceAs(label, merged)
 				if err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
@@ -1152,7 +1152,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			merged = mergePackageOverride(merged, filePO)
 			ex.apply(c, filePO)
 		}
-		merged, err = validateSpaceAs(c, label, merged)
+		merged, err = validateSpaceAs(label, merged)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
