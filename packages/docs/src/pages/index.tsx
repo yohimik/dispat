@@ -180,25 +180,44 @@ const MANIFESTS: [language: string, files: string][] = [
   ['Kotlin, Java — Android, Gradle', 'AndroidManifest.xml, libs.versions.toml, build.gradle(.kts)'],
 ];
 
-// The manifest halves are separate Go modules, usable with no dispat in sight,
-// and nothing on the site said so. Links point at GitHub because these are
-// packages rather than pages.
+// dispat's pieces are separate Go modules, usable with no dispat in sight, and
+// nothing on the site said so. Links point at GitHub because these are packages
+// rather than pages.
 function Libraries(): React.ReactElement {
   return (
     <section className="container margin-bottom--xl">
       <Heading as="h2" className={styles.sectionTitle}>
-        Lightweight manifest libraries, usable on their own
+        Lightweight libraries, usable on their own
       </Heading>
       <p className={styles.sectionLead}>
-        Reading and rewriting dependency manifests is a problem far older than releases, so dispat keeps both halves as
-        standalone Go modules with no dependency on the CLI, on git or on a network. They share their vocabulary through{' '}
+        Parsing commit messages and reading and rewriting dependency manifests are problems far older than releases, so
+        dispat keeps all three as standalone Go modules with no dependency on the CLI, on git or on a network. The
+        manifest pair shares its vocabulary through{' '}
         <Link to={`${GITHUB}/tree/main/pkg/manifest`}>
           <code>pkg/manifest</code>
         </Link>{' '}
         — dependency kinds, manifest file-name rules, PEP 503 normalisation — so the reader and the writer can never
         drift apart.
       </p>
-      <div className={styles.features}>
+      <div className={styles.libraries}>
+        <div className={styles.feature}>
+          <Heading as="h3" className={styles.featureTitle}>
+            <Link to={`${GITHUB}/tree/main/pkg/ccme`}>
+              <code>pkg/ccme</code>
+            </Link>{' '}
+            — the commit parser
+          </Heading>
+          <p>
+            Conventional Commits, Monorepo Extension: a strict superset of Conventional Commits 1.0.0 that adds scopes as
+            packages, propagation depth and prerelease channels. No regular expressions — one left-to-right index scan
+            with a byte of lookahead, no backtracking, no recursion, O(n) time and O(1) working space, which is what
+            matters when the input is untrusted commit messages in CI. The specification is vendored beside it as{' '}
+            <Link to={`${GITHUB}/blob/main/pkg/ccme/SPEC.md`}>
+              <code>SPEC.md</code>
+            </Link>
+            , and every section reference in the code points into it.
+          </p>
+        </div>
         <div className={styles.feature}>
           <Heading as="h3" className={styles.featureTitle}>
             <Link to={`${GITHUB}/tree/main/pkg/scanner`}>
@@ -229,7 +248,7 @@ function Libraries(): React.ReactElement {
         </div>
       </div>
       <Heading as="h3" className={styles.tableTitle}>
-        Languages and manifests both halves support
+        Languages and manifests the reader and the writer support
       </Heading>
       <div className={styles.manifests}>
         <table>

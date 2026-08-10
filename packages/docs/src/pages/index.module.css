@@ -89,6 +89,14 @@
   }
 }
 
+/* Three cards, so they auto-fit instead of leaving one alone on a second row of
+   the two-column feature grid. */
+.libraries {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: 1.5rem;
+}
+
 .feature {
   padding: 1.5rem;
   border: 1px solid var(--ifm-color-emphasis-200);

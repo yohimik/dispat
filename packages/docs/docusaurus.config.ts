@@ -169,7 +169,8 @@ const config: Config = {
           items: [
             {label: 'GitHub', href: GITHUB},
             {label: 'Releases', href: `${GITHUB}/releases`},
-            {label: 'ccme parser', href: `${GITHUB}/tree/main/pkg/ccme`},
+            // The Go modules are listed on the landing page, beside the
+            // manifest reader and writer, rather than one of them here.
             {label: 'License', href: `${GITHUB}/blob/main/LICENSE.md`},
           ],
         },
