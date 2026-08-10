@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against fifteen goals, one test file each:
+The suite was designed against sixteen goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -73,6 +73,13 @@ The suite was designed against fifteen goals, one test file each:
     commit and the outer run skips the pre-written entry (W222) and the pre-created tag (W223), the `--tag`/`--push`
     committer identity and remote delivery, the `DISPAT_OUTPUT` commit pin export, and autoversion's reconcile-once
     plus syncLock-once convergence.
+16. **The manifest commands** (`manifests_test.go`): `dispat scanner` and `dispat writer`, the `pkg/scanner` and
+    `pkg/writer` libraries exposed as commands. What only the binary can witness: that they run with no config file, no
+    commit and no plan at all; that the folder and manifest paths a shell hands them resolve against `--root`; that the
+    scanner's partial-result contract and the three writer outcomes reach the process exit code, plainly and under
+    `--strict`; that a format-preserving rewrite really does leave every other byte alone on disk; that the scanner
+    reads back what the writer just wrote; and that the two new command words did not cost the run shorthand a script
+    of the same name.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -140,6 +147,7 @@ tests/integration/
   packages_test.go          goal 13
   interrupt_test.go         goal 14
   standalone_test.go        goal 15
+  manifests_test.go         goal 16
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -382,6 +390,18 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestStandaloneAutoversionFlagOverridesExistingBlock` | A flag override starts from the space's own block and replaces only the flagged field: `--range exact` changes the range while the block's `writeVersion` default still applies.                                                                       |
 | `TestStandaloneCommitMessageAndIncludeFlags`    | `--message-format` renders `{packages}`/`{tags}` into the subject and `--include` stages an extra path outside the package folder alongside the folder's own changes.                                                                                        |
 | `TestStandaloneCommitPushWithoutRemoteFails`    | `--push` without a remote exits 1, while the local commit and tag it had already made survive.                                                                                                                                                               |
+
+### Goal 16: the manifest commands (`manifests_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                                          |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestManifestsScannerNeedsNoConfig`             | The scanner runs with no config file, no commit and no plan: the listing carries each manifest's identity, ecosystem and declarations (local paths included), the walk descends while `--root-only` does not, installed dependencies are never scanned, the positional folder resolves against `--root` and a folder that is not there exits 1. |
+| `TestManifestsScannerJSONEvents`                | `--log-format json` is this command's machine contract too: one event per manifest carrying path, ecosystem, identity and every declaration with its kind spelled out, plus the summary counts.                                       |
+| `TestManifestsScannerStrictGatesBrokenManifests` | The partial-result contract reaching the exit code: a broken manifest is reported while the healthy ones are still listed and the run exits 0; `--strict` refuses the same repository with the partial result still printed.          |
+| `TestManifestsWriterEditsInPlace`                | A two-ecosystem batch rewrites only the version text being changed, byte-for-byte elsewhere, in `package.json` (own version plus two fields) and `go.mod` (a require, no own version to write); re-running the same edits converges to `manifest unchanged`. |
+| `TestManifestsWriterRedirects`                   | `--replace` adds the local-folder directive and an empty path removes it, and the scanner reads back what the writer just wrote, which is the pair's whole contract.                                                                  |
+| `TestManifestsWriterOutcomesReachTheExitCode`    | The three outcomes mapped onto exit codes: missing is tolerated (0) until `--strict` (1); a path no writer covers exits 1 while the usable manifests of the same batch are still written; a malformed `--set`, an invocation with nothing to write, and one with no manifest are usage errors (2). |
+| `TestManifestsCommandWordsKeepTheirScripts`      | The two new command words are reserved: the bare `dispat scanner` is the command even where the config defines a `scanner` script, while `dispat run scanner` still reaches the script.                                               |
 
 ## Regression fences
 
