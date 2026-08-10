@@ -5,7 +5,7 @@ package cli
 // config, only a .git entry marking the repository root — faked here with a
 // bare directory, so these stay unit tests), and the logger constructor.
 // Everything the controller only
-// composes — release flows, hooks, records, the run/test/preview commands
+// composes — release flows, hooks, records, the run and preview commands
 // against real repositories — is pinned by the black-box suite in
 // tests/integration, driving the compiled binary.
 

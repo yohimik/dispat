@@ -75,3 +75,34 @@ func TestInterruptGracefulShutdown(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "b end", "the catch-up run built b to completion")
 }
+
+// TestInterruptStopsARunCommand: `dispat run` is interruptible on the same
+// terms as a release. It executes the same scheduler, so a SIGINT mid-script
+// stops the in-flight package, never launches the ones behind it, and makes
+// the command exit non-zero rather than report a clean sweep. Nothing is
+// released either way, so the only thing to get wrong here is the exit code.
+func TestInterruptStopsARunCommand(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
+		Scripts: map[string]string{"mark": r.TsmarkScript("run.tsmark", "$DISPAT_PACKAGE", 1500*time.Millisecond)}}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "b", Provider: "a"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+	r.Commit("feat(a,b): bootstrap both packages")
+
+	proc := r.StartRelease("run", "mark") // raw args: `dispat run mark`
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(r.Path("run.tsmark"))
+		return err == nil && strings.Contains(string(data), "a start")
+	}, 15*time.Second, 20*time.Millisecond, "a's script never started")
+	proc.Signal(os.Interrupt)
+	res := proc.Wait()
+
+	assert.NotEqual(t, 0, res.Code, "an interrupted run does not exit 0")
+	data, err := os.ReadFile(r.Path("run.tsmark"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "b start", "the package behind the interrupted one never launches")
+	assert.Empty(t, r.TagList(), "dispat run releases nothing, interrupted or not")
+}

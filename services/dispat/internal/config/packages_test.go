@@ -501,6 +501,90 @@ func TestPackageRecordSpecsOverlay(t *testing.T) {
 	assert.Empty(t, byName["utils"].GitHub.Owner)
 }
 
+// TestPackageRecordSpecsOverlayBothLayers: records overlay layer by layer
+// like everything else. The entry starts from the repository's objects, and
+// the in-folder file then starts from the entry's result rather than from the
+// repository's, so each layer only has to state what it changes.
+func TestPackageRecordSpecsOverlayBothLayers(t *testing.T) {
+	cfg := validConfig()
+	cfg.Changelog = &ChangelogConfig{File: "GLOBAL.md", Title: "# Global"}
+	cfg.GitHub = &GitHubConfig{Owner: "acme", Repo: "mono", TokenEnv: "GLOBAL_TOKEN"}
+	cfg.Packages = map[string]PackageConfig{
+		"core": {
+			Changelog: &ChangelogConfig{File: "ENTRY.md"},
+			GitHub:    &GitHubConfig{Repo: "entry-repo"},
+		},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{
+		Changelog: &ChangelogConfig{Title: "# Local"},
+		GitHub:    &GitHubConfig{APIURL: "https://ghe"},
+	})
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+
+	assert.Equal(t, "ENTRY.md", core.Changelog.File, "the entry's value survives the second layer")
+	assert.Equal(t, "# Local", core.Changelog.Title, "which sets only what it names")
+	assert.Equal(t, "entry-repo", core.GitHub.Repo)
+	assert.Equal(t, "https://ghe", core.GitHub.APIURL)
+	assert.Equal(t, "acme", core.GitHub.Owner, "and the repository's values are still underneath both")
+	assert.Equal(t, "GLOBAL_TOKEN", core.GitHub.TokenEnv)
+}
+
+// TestPackageRecordSpecsWithoutGlobals: a package may configure records the
+// repository never configured at all. With no top-level object to overlay,
+// the package's own object is the whole policy and the defaults fill the rest.
+func TestPackageRecordSpecsWithoutGlobals(t *testing.T) {
+	cfg := validConfig() // no changelog, no github
+	cfg.Packages = map[string]PackageConfig{
+		"core": {
+			Changelog: &ChangelogConfig{File: "NOTES.md"},
+			GitHub:    &GitHubConfig{Enabled: models.Bool(true), Owner: "acme", Repo: "solo"},
+		},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.Equal(t, "NOTES.md", byName["core"].Changelog.File)
+	assert.True(t, byName["core"].Changelog.Enabled, "the default survives an overlay onto nothing")
+	assert.Equal(t, "acme", byName["core"].GitHub.Owner)
+	assert.Equal(t, "solo", byName["core"].GitHub.Repo)
+	assert.True(t, byName["core"].GitHub.Enabled)
+	assert.NotEqual(t, "NOTES.md", byName["utils"].Changelog.File, "the sibling is untouched")
+}
+
+// TestPackageGitHubAllPackagesOverride: `github.allPackages` is a tri-state
+// like the other booleans, so a package can opt itself into (or out of) the
+// repository's blanket-release policy while every other field inherits.
+func TestPackageGitHubAllPackagesOverride(t *testing.T) {
+	cfg := validConfig()
+	cfg.GitHub = &GitHubConfig{Owner: "acme", Repo: "mono", AllPackages: models.Bool(true)}
+	cfg.Packages = map[string]PackageConfig{
+		"core": {GitHub: &GitHubConfig{AllPackages: models.Bool(false)}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.False(t, byName["core"].GitHub.AllPackages, "the package opts out")
+	assert.Equal(t, "acme", byName["core"].GitHub.Owner, "everything else still inherits")
+	assert.True(t, byName["utils"].GitHub.AllPackages, "the sibling keeps the repository policy")
+}
+
+// TestPackagesEntryEmptyKey: a nameless `packages` key configures nothing and
+// can match no folder, so it is rejected at load rather than silently ignored.
+func TestPackagesEntryEmptyKey(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"": {TagFormat: "v{version}"}}
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "package name must not be empty")
+}
+
 // TestResolveFileSkipsPackageConfig: the parent ascent must not stop at a
 // package's in-folder override file — only a file declaring spaces ends it —
 // while a repository whose only config is spaces-less still resolves to that
@@ -738,6 +822,103 @@ func TestStandalonePackageMissingFolder(t *testing.T) {
 	_, err = discoverPackages(t, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not a folder")
+}
+
+// TestStandaloneEntryCarriesThePackageOnlyKeys: a standalone entry is the
+// package's whole configuration, so the keys that are not space-shaped —
+// records, weights, autoVersion — take effect from it exactly as they would
+// from an override on a space package.
+func TestStandaloneEntryCarriesThePackageOnlyKeys(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"cli": {
+			Path:        "tools/cli",
+			Scripts:     map[string]string{"tidy": "go mod tidy"},
+			AutoVersion: &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"tidy"}},
+			Changelog:   &ChangelogConfig{File: "CLI.md"},
+			GitHub:      &GitHubConfig{Enabled: models.Bool(true), Owner: "acme", Repo: "cli"},
+			Concurrency: []int{3, 2},
+		},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/cli")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	cli := packagesByName(pkgs)["cli"]
+	require.NotNil(t, cli)
+
+	require.NotNil(t, cli.Space.AutoVersion, "the entry's autoVersion block is the package's")
+	assert.Equal(t, []string{"go mod tidy"}, cli.Space.AutoVersion.SyncLock,
+		"and its syncLock resolves against the entry's own scripts")
+	assert.Equal(t, "CLI.md", cli.Changelog.File)
+	assert.Equal(t, "cli", cli.GitHub.Repo)
+	assert.True(t, cli.GitHub.Enabled)
+	assert.Equal(t, 3, cli.BuildWeight)
+	assert.Equal(t, 2, cli.PublishWeight)
+}
+
+// TestStandaloneEntryIsHeldToSpaceRules: a standalone entry is the whole
+// configuration of its package, so every rule a space-shaped config obeys
+// applies to it — the override-layer rules, the value rules, and the script
+// references, which resolve in the package's own scope like anywhere else.
+func TestStandaloneEntryIsHeldToSpaceRules(t *testing.T) {
+	cases := []struct {
+		name    string
+		entry   PackageConfig
+		wantErr string
+	}{
+		{"login cannot be per package",
+			PackageConfig{Path: "tools/cli", Flow: &SpaceFlowConfig{Login: []string{"build"}}},
+			"flow.login cannot be overridden per package"},
+		{"an empty script command is rejected",
+			PackageConfig{Path: "tools/cli", Scripts: map[string]string{"lint": "  "}},
+			`scripts["lint"] is empty`},
+		{"a flow reference must resolve in the package's own scope",
+			PackageConfig{Path: "tools/cli", Flow: &SpaceFlowConfig{Build: []string{"ghost"}}},
+			`flow.build references unknown script "ghost"`},
+		{"and so must a syncLock reference",
+			PackageConfig{Path: "tools/cli",
+				AutoVersion: &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"ghost"}}},
+			`autoVersion.syncLock references unknown script "ghost"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Packages = map[string]PackageConfig{"cli": c.entry}
+			root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/cli")
+			_, err := discoverPackages(t, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+			assert.Contains(t, err.Error(), `package "cli"`, "the error names the standalone package")
+		})
+	}
+
+	// The same reference resolves once the package itself supplies the script,
+	// which is the point of checking in the package's scope rather than the
+	// file's.
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"cli": {
+		Path:    "tools/cli",
+		Flow:    &SpaceFlowConfig{Build: []string{"ghost"}},
+		Scripts: map[string]string{"ghost": "echo boo"},
+	}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/cli")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"echo boo"}, packagesByName(pkgs)["cli"].Space.BuildScript)
+}
+
+// TestStandaloneInFolderLayerIsValidatedToo: the in-folder file is a layer
+// like any other, so its own mistakes are caught under a label naming the
+// file that holds them.
+func TestStandaloneInFolderLayerIsValidatedToo(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"cli": {Path: "tools/cli"}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/cli")
+	writePackageFile(t, root, "tools/cli", PackageConfig{Flow: &SpaceFlowConfig{Login: []string{"build"}}})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flow.login cannot be overridden per package")
+	assert.Contains(t, err.Error(), "dispat.json", "the label names the file the layer came from")
 }
 
 // TestStandalonePathValidation: a standalone path must stay inside the

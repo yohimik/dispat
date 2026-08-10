@@ -119,6 +119,30 @@ func TestRunUnknownScriptFails(t *testing.T) {
 	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 }
 
+// TestRunWhenDiscoveryItselfFails: a space pointing at a folder that is not
+// there loads as config but cannot be discovered. Both halves of the run
+// command have to survive that: the guard that decides whether a name exists
+// anywhere (it consults discovery for scripts only a package folder declares)
+// and the plan the run is selected from. Neither may panic, and both report a
+// plain failure.
+func TestRunWhenDiscoveryItselfFails(t *testing.T) {
+	r := harness.New(t)
+	cfg := runConfig()
+	cfg.Spaces["ghosts"] = models.SpaceConfig{Path: "nowhere", Flow: buildPublish()}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.SeedPackage("tools", "tool")
+	r.Commit("feat(core,app,tool): a space points at a missing folder")
+
+	unknown := r.RunScript("format")
+	assert.Equal(t, 1, unknown.Code, "an unknown name is still a clean error, not a crash")
+
+	known := r.RunScript("lint")
+	assert.Equal(t, 1, known.Code, "and a known name cannot be planned either")
+	assert.Empty(t, runLog(r), "nothing runs when the workspace cannot be read")
+}
+
 // TestRunTopLevelScriptReachesEveryPackage: a name defined at the top level
 // resolves in every package, so the run covers every changed package of every
 // space — including the "tools" space, which defines no scripts of its own.

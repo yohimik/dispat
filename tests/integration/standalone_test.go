@@ -222,6 +222,16 @@ func TestStandaloneAutoversionPolicyFlags(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(web), `"core": "~0.1.0"`, "the overridden range policy applies")
 	assert.Contains(t, string(web), `"version": "0.0.0"`, "own-version write disabled by flag")
+
+	// --manifests is the one policy flag with a closed set of values, so it is
+	// also the one that can be misspelled. Both spellings are accepted and
+	// anything else is a usage error, checked after the config loads.
+	for _, value := range []string{"root", "all"} {
+		res = r.Command("autoversion", "--manifests", value, "--sync-lock=false")
+		assert.Equal(t, 0, res.Code, "--manifests %s: stderr:\n%s", value, res.Stderr)
+	}
+	res = r.Command("autoversion", "--manifests", "several")
+	assert.Equal(t, 2, res.Code, "an unknown --manifests value is a usage error")
 }
 
 func TestStandaloneCommitMessageAndIncludeFlags(t *testing.T) {
