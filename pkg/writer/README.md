@@ -57,6 +57,52 @@ guards stand in for one. A replacement carrying any byte that could end a litera
 The file's brace balance must come out unchanged. And the reader is run over the result, where it has to agree that
 every splice landed where it was aimed.
 
+## Replacing a dependency with a local folder
+
+`go.mod` can point a dependency somewhere else, and a few other formats can too:
+
+```go
+res, err := writer.Replace("services/svc/go.mod", []writer.Replacement{
+{Name: "github.com/acme/core", Path: "../../pkg/core"},
+})
+// res.Applied, res.Skipped, res.Missing, res.Path
+```
+
+An empty `Path` removes the redirect instead of adding one, which is what a release does before publishing: a local
+replace that ships to consumers gives them a module they cannot resolve.
+
+| Format | Directive | How the redirect is spelled |
+|---|---|---|
+| `go.mod` | `replace` | `replace acme/core => ../core` |
+| `Cargo.toml` | `[patch.crates-io]` | `core = { path = "../core" }` |
+| `pubspec.yaml` | `dependency_overrides` | `core:` with an indented `path: ../core` under it |
+| `pyproject.toml` | `[tool.uv.sources]` | `core = { path = "../core" }` |
+
+`Replacement.Version` narrows the redirect to one required version, which only `go.mod` can express. The others key
+their directive on the name alone and ignore it.
+
+`SupportsReplace` answers in advance whether a file has anywhere to put one. Every other format writes nothing and
+reports each replacement in `Skipped`.
+
+The test a format has to pass is narrow: it must point a **package at a local folder**, through a **separate,
+package-keyed directive**. Forcing a version across the dependency tree is a different feature. `package.json` fails on
+that count, because `overrides`, and Yarn's `resolutions`, set a version and cannot name a folder. npm's way to point at
+a folder is `"dependencies": {"core": "file:../core"}`, an option on the declaration itself, which is the same reason
+`Gemfile`, `Podfile`, `requirements*.txt`, Poetry tables and `.csproj` are out: their redirect is part of a declaration
+rather than a directive to manage.
+
+`pom.xml` has no redirect at all. Gradle can substitute in `resolutionStrategy` or `settings.gradle`, but only as
+statements inside a closure, which is the one place this package will not write. Version catalogs, `Info.plist`,
+`AndroidManifest.xml`, `project.pbxproj`, `.nuspec`, `packages.config` and `Directory.Packages.props` have nothing of
+the kind.
+
+One thing worth knowing: `composer.json` has a literal `"replace"` key and it does not mean this. It declares that the
+package provides another one, which is how forks and metapackages tell Composer not to install the original. Writing a
+redirect there would be wrong, so Composer is left alone.
+
+The pyproject table is uv's, and only uv's. Poetry spells the same idea on the declaration and PEP 621 has no
+equivalent, so a project not using uv gains a table its tooling will ignore.
+
 ## Not written today
 
 Build numbers are read but never written. `CFBundleVersion`, `android:versionCode` and `CURRENT_PROJECT_VERSION` are

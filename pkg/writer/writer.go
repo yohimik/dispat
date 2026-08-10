@@ -29,6 +29,11 @@
 // Build numbers (CFBundleVersion, android:versionCode,
 // CURRENT_PROJECT_VERSION) are deliberately not written: they are monotonic
 // counters rather than semantic versions.
+//
+// Replace is the other half of the package. Where Rewrite changes the version
+// text a manifest declares, Replace manages the directive that points a
+// dependency at a local folder, the way a go.mod replace does. Four formats
+// have such a directive; SupportsReplace reports which.
 package writer
 
 import (

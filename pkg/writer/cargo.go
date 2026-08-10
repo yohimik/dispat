@@ -203,3 +203,16 @@ func cargoVersionSpan(index tomlIndex, lines []string, table, key string) (idx, 
 	start, end, ok = tomlQuotedSpan(body, afterEq)
 	return idx, start, end, ok
 }
+
+// cargoPatchTable is where Cargo keeps redirects for crates.io dependencies.
+// A patch for another registry or a git source lives under its own table, and
+// this writer does not go looking for those: the workspace case is a local
+// path standing in for the published crate.
+const cargoPatchTable = "patch.crates-io"
+
+// replaceCargo points crates at local folders through [patch.crates-io], which
+// is Cargo's equivalent of a go.mod replace. The older [replace] table does
+// the same job and is deprecated, so a redirect is always written as a patch.
+func replaceCargo(path string, replacements []Replacement) (ReplaceResult, error) {
+	return tomlReplace(path, cargoPatchTable, replacements)
+}

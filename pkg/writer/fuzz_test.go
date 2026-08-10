@@ -343,3 +343,48 @@ func FuzzRewriteNuGetLists(f *testing.F) {
 		}
 	})
 }
+
+// FuzzReplace hammers the insertion path across every format that has a
+// redirect. Insertion can change a file's structure where a splice cannot, so
+// the contract is the same but the risk is higher: a failed replace never
+// modifies the file, and a successful one never turns a parseable manifest
+// into an unparseable one.
+func FuzzReplace(f *testing.F) {
+	seeds := []string{
+		"module m\n\ngo 1.25.0\n\nreplace example.com/dep => ../dep\n",
+		"[package]\nname = \"a\"\n\n[patch.crates-io]\nserde = { path = \"../serde\" }\n",
+		"name: a\ndependency_overrides:\n  http:\n    path: ../http\n",
+		"[project]\nname = \"a\"\n\n[tool.uv.sources]\nrequests = { path = \"../r\" }\n",
+		"[patch.crates-io]\n", "dependency_overrides:\n", "", "[",
+	}
+	for _, s := range seeds {
+		f.Add(s, "dep", "../elsewhere")
+	}
+	f.Fuzz(func(t *testing.T, content, name, path string) {
+		for _, file := range []string{"go.mod", "Cargo.toml", "pubspec.yaml", "pyproject.toml"} {
+			dir := t.TempDir()
+			p := filepath.Join(dir, file)
+			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+				t.Skip()
+			}
+			_, err := Replace(p, []Replacement{{Name: name, Path: path}})
+			data, readErr := os.ReadFile(p)
+			if readErr != nil {
+				t.Fatalf("%s: manifest vanished: %v", file, readErr)
+			}
+			if err != nil {
+				if string(data) != content {
+					t.Fatalf("%s: a failed replace modified the file:\n in: %q\nout: %q", file, content, data)
+				}
+				continue
+			}
+			switch file {
+			case "Cargo.toml", "pyproject.toml":
+				var in, out map[string]any
+				if toml.Unmarshal([]byte(content), &in) == nil && toml.Unmarshal(data, &out) != nil {
+					t.Fatalf("%s: replace corrupted valid TOML:\n in: %q\nout: %q", file, content, data)
+				}
+			}
+		}
+	})
+}

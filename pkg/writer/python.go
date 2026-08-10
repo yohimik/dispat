@@ -295,3 +295,16 @@ func pyBracketDelta(body string) int {
 	}
 	return depth
 }
+
+// uvSourcesTable is where uv keeps redirects. It is the only per-package path
+// redirect a pyproject.toml has: PEP 621 defines none, and Poetry spells the
+// same idea as a path on the declaration itself, which is a declaration to
+// rewrite rather than a directive to manage.
+const uvSourcesTable = "tool.uv.sources"
+
+// replacePyproject points distributions at local folders through
+// [tool.uv.sources]. A project not using uv gains the table, which is inert
+// for any other tool reading the file.
+func replacePyproject(path string, replacements []Replacement) (ReplaceResult, error) {
+	return tomlReplace(path, uvSourcesTable, replacements)
+}

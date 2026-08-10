@@ -221,3 +221,243 @@ func yamlScalarSpan(line string, from int) (start, end int, ok bool) {
 func isYAMLWritable(value string) bool {
 	return value != "" && !strings.ContainsAny(value, "\n\r\"'#:")
 }
+
+// pubspecOverrides is the block Dart redirects through. An entry names a
+// package and nests the folder under it:
+//
+//	dependency_overrides:
+//	  core:
+//	    path: ../core
+const pubspecOverrides = "dependency_overrides"
+
+// replacePubspec points packages at local folders through
+// dependency_overrides, which is pub's equivalent of a go.mod replace. The
+// scanner already folds these onto the declarations they override, so a
+// dependency showing a LocalPath is one of these.
+//
+// Indentation follows the file. A pubspec written with four spaces keeps four,
+// because the block's own entries decide the width rather than a constant here.
+func replacePubspec(path string, replacements []Replacement) (ReplaceResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	var (
+		res     ReplaceResult
+		lines   = strings.Split(string(data), "\n")
+		changed bool
+	)
+	for _, r := range replacements {
+		entry, found := pubspecOverrideEntry(lines, r.Name)
+		switch {
+		case r.Path == "" && !found:
+			res.Missing = append(res.Missing, r)
+		case r.Path == "":
+			lines = pubspecDropOverride(lines, entry)
+			res.Applied = append(res.Applied, r)
+			changed = true
+		case found:
+			if entry.path == r.Path {
+				break // already pointing there
+			}
+			if entry.pathLine < 0 {
+				// Declared as something other than a path (a git or hosted
+				// override). Replacing the whole entry is the honest edit.
+				lines = pubspecDropOverride(lines, entry)
+				lines = pubspecInsertOverride(lines, r.Name, r.Path)
+			} else {
+				l := lines[entry.pathLine]
+				lines[entry.pathLine] = l[:entry.pathStart] + r.Path + l[entry.pathEnd:]
+			}
+			res.Applied = append(res.Applied, r)
+			changed = true
+		default:
+			lines = pubspecInsertOverride(lines, r.Name, r.Path)
+			res.Applied = append(res.Applied, r)
+			changed = true
+		}
+	}
+	if !changed {
+		return res, nil
+	}
+
+	out := []byte(strings.Join(lines, "\n"))
+	if err := pubspecVerifyOverrides(out, res.Applied); err != nil {
+		return res, fmt.Errorf("%s: internal error: %w", path, err)
+	}
+	return res, atomicWrite(path, out)
+}
+
+// pubspecOverride is one entry of the overrides block: the line naming the
+// package, the run of lines nested under it, and the path it declares.
+type pubspecOverride struct {
+	nameLine  int
+	end       int // one past the entry's last nested line
+	indent    int // the column the entry's own key sits at
+	pathLine  int // -1 when the entry declares no path
+	pathStart int
+	pathEnd   int
+	path      string
+}
+
+// pubspecOverrideEntry finds one package inside the overrides block.
+func pubspecOverrideEntry(lines []string, name string) (pubspecOverride, bool) {
+	start, end, ok := pubspecBlockBounds(lines, pubspecOverrides)
+	if !ok {
+		return pubspecOverride{pathLine: -1}, false
+	}
+	// The block's own entries all sit at one indent, fixed by the first of
+	// them. Anything deeper belongs to an entry, and "path" is both a package
+	// name and the key an entry nests its folder under, so a lookup that
+	// ignored depth would find the wrong line.
+	depth := pubspecEntryIndent(lines, start, end)
+	for i := start; i < end; i++ {
+		line := stripYAMLComment(lines[i])
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent != depth {
+			continue
+		}
+		key, valueStart, ok := yamlKey(line)
+		if !ok || key != name {
+			continue
+		}
+		entry := pubspecOverride{nameLine: i, indent: indent, pathLine: -1, end: i + 1}
+		// A path on the same line is legal YAML but not how pub writes it;
+		// either way the nested form is what follows.
+		if s, e, scalar := yamlScalarSpan(line, valueStart); scalar {
+			entry.pathLine, entry.pathStart, entry.pathEnd = i, s, e
+			entry.path = line[s:e]
+			return entry, true
+		}
+		for j := i + 1; j < end; j++ {
+			nested := stripYAMLComment(lines[j])
+			if strings.TrimSpace(nested) == "" {
+				entry.end = j + 1
+				continue
+			}
+			if len(nested)-len(strings.TrimLeft(nested, " \t")) <= indent {
+				break
+			}
+			entry.end = j + 1
+			k, vs, ok := yamlKey(nested)
+			if !ok || k != "path" {
+				continue
+			}
+			if s, e, scalar := yamlScalarSpan(nested, vs); scalar {
+				entry.pathLine, entry.pathStart, entry.pathEnd = j, s, e
+				entry.path = nested[s:e]
+			}
+		}
+		return entry, true
+	}
+	return pubspecOverride{pathLine: -1}, false
+}
+
+// pubspecEntryIndent reports the column a block's own entries sit at, taken
+// from the first of them. An empty block reports the two-space default pub
+// itself writes.
+func pubspecEntryIndent(lines []string, start, end int) int {
+	for i := start; i < end; i++ {
+		line := stripYAMLComment(lines[i])
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		return len(line) - len(strings.TrimLeft(line, " \t"))
+	}
+	return 2
+}
+
+// pubspecBlockBounds finds a top-level block's first and last nested lines.
+func pubspecBlockBounds(lines []string, block string) (start, end int, ok bool) {
+	for i, raw := range lines {
+		line := stripYAMLComment(raw)
+		if strings.TrimSpace(line) == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		key, _, keyed := yamlKey(line)
+		if !keyed || key != block {
+			continue
+		}
+		end = len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			body := stripYAMLComment(lines[j])
+			if strings.TrimSpace(body) == "" {
+				continue
+			}
+			if body[0] != ' ' && body[0] != '\t' {
+				end = j
+				break
+			}
+		}
+		return i + 1, end, true
+	}
+	return 0, 0, false
+}
+
+// pubspecInsertOverride writes a new entry, creating the block when the file
+// has none.
+func pubspecInsertOverride(lines []string, name, path string) []string {
+	start, end, ok := pubspecBlockBounds(lines, pubspecOverrides)
+	if !ok {
+		out := append([]string{}, lines...)
+		for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+			out = out[:len(out)-1]
+		}
+		return append(out, "", pubspecOverrides+":", "  "+name+":", "    path: "+path, "")
+	}
+	// Match the width the block's existing entries use.
+	indent := strings.Repeat(" ", pubspecEntryIndent(lines, start, end))
+	at := end
+	for at > start && strings.TrimSpace(lines[at-1]) == "" {
+		at--
+	}
+	out := make([]string, 0, len(lines)+2)
+	out = append(out, lines[:at]...)
+	out = append(out, indent+name+":", indent+indent+"path: "+path)
+	return append(out, lines[at:]...)
+}
+
+// pubspecDropOverride removes one entry, and the block with it when that entry
+// was the last thing it held.
+func pubspecDropOverride(lines []string, entry pubspecOverride) []string {
+	out := make([]string, 0, len(lines))
+	out = append(out, lines[:entry.nameLine]...)
+	out = append(out, lines[entry.end:]...)
+
+	start, end, ok := pubspecBlockBounds(out, pubspecOverrides)
+	if !ok {
+		return out
+	}
+	for i := start; i < end; i++ {
+		if strings.TrimSpace(stripYAMLComment(out[i])) != "" {
+			return out
+		}
+	}
+	stop := end
+	for stop > start && strings.TrimSpace(out[stop-1]) == "" {
+		stop--
+	}
+	return append(out[:start-1], out[stop:]...)
+}
+
+// pubspecVerifyOverrides re-reads the written bytes and checks every applied
+// redirect reads back as the path it asked for.
+func pubspecVerifyOverrides(out []byte, applied []Replacement) error {
+	lines := strings.Split(string(out), "\n")
+	for _, r := range applied {
+		entry, found := pubspecOverrideEntry(lines, r.Name)
+		if r.Path == "" {
+			if found {
+				return fmt.Errorf("rewrite left %s still overridden", r.Name)
+			}
+			continue
+		}
+		if !found || entry.path != r.Path {
+			return fmt.Errorf("rewrite left %s pointing at %q, want %q", r.Name, entry.path, r.Path)
+		}
+	}
+	return nil
+}

@@ -226,3 +226,52 @@ func TestRealRailsGemfileRoundTrip(t *testing.T) {
 		t.Errorf("result mismatch: %+v", res)
 	}
 }
+
+func TestRealFlutterPubspecReplaceRoundTrip(t *testing.T) {
+	// The pubspec that already carries a block dependency, which is the shape
+	// an override lookup has to tell apart from a package actually named path.
+	path := seed(t, "pubspec.yaml", flutterPubspec)
+	res, err := Replace(path, []Replacement{{Name: "pigeon", Path: "../forks/pigeon"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, path)
+	if !strings.Contains(got, "dependency_overrides:") || !strings.Contains(got, "    path: ../forks/pigeon") {
+		t.Errorf("the override was not written:\n%s", got)
+	}
+	// The existing analysis_defaults path dependency is untouched.
+	if !strings.Contains(got, "path: ../../../analysis_defaults") {
+		t.Error("an existing block dependency's folder was disturbed")
+	}
+	if len(res.Applied) != 1 {
+		t.Errorf("result mismatch: %+v", res)
+	}
+	// Removing it returns the file to exactly what it was.
+	if _, err := Replace(path, []Replacement{{Name: "pigeon"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); got != flutterPubspec {
+		t.Errorf("round trip did not return the original:\n got: %q\nwant: %q", got, flutterPubspec)
+	}
+}
+
+func TestRealTokioCargoReplaceRoundTrip(t *testing.T) {
+	path := seed(t, "Cargo.toml", tokioCargoToml)
+	if _, err := Replace(path, []Replacement{{Name: "pin-project-lite", Path: "../forks/pin-project-lite"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, path)
+	if !strings.Contains(got, "[patch.crates-io]") {
+		t.Errorf("the patch table was not created:\n%s", got)
+	}
+	// The release checklist comment between the name and the version survives.
+	if !strings.Contains(got, "# - Create \"v1.x.y\" git tag.") {
+		t.Error("the comment block was disturbed")
+	}
+	if _, err := Replace(path, []Replacement{{Name: "pin-project-lite"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); got != tokioCargoToml {
+		t.Errorf("round trip did not return the original:\n got: %q\nwant: %q", got, tokioCargoToml)
+	}
+}
