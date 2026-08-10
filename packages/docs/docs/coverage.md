@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **94.7%** of the workspace's statements (unit layer alone: 87.9%; the integration
-layer's instrumented binary: 81.3%).
+The whole test suite currently covers **94.8%** of the workspace's statements (unit layer alone: 88.9%; the integration
+layer's instrumented binary: 82.0%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -12,28 +12,33 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-09** (after the step commands landed) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
+**2026-08-11** (after the manifest commands landed) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
 | Module / package                        | Statement coverage                                                                       |
 |-----------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                     | **94.3%**                                                                                |
+| **workspace total**                     | **94.8%**                                                                                |
 | `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)            | 100%                                                                                     |
 | `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
-| `pkg/scanner` (manifest reader)         | **94.9%**, plus two fuzz targets over every registered parser                            |
-| `pkg/writer` (manifest writer)          | **85.4%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
-| `services/dispat` (all packages)        | **93.9%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| `pkg/scanner` (manifest reader)         | **96.2%**, plus two fuzz targets over every registered parser                            |
+| `pkg/writer` (manifest writer)          | **92.6%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
+| `services/dispat` (all packages)        | **94.8%** aggregate, `main.go` included (the integration suite runs the real binary)     |
 | - `main.go`, `globx`, `model`           | 100%                                                                                     |
+| - `cli` (controller)                    | 98.6%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
+| - `plan` (planner)                      | 96.4%                                                                                    |
 | - `changelog`                           | 96.3%                                                                                    |
-| - `plan` (planner)                      | 96.3%                                                                                    |
 | - `release` (executor)                  | 95.1%                                                                                    |
-| - `cli` (controller)                    | 94.4%                                                                                    |
-| - `gitx`                                | 93.9%                                                                                    |
-| - `config`                              | 93.2%                                                                                    |
+| - `config`                              | 95.0%                                                                                    |
 | - `github`                              | 93.0%                                                                                    |
+| - `app`                                 | 92.8%                                                                                    |
+| - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |
-| - `app`                                 | 90.1%                                                                                    |
+
+The statements still uncovered are almost entirely single-line defensive branches: a `write`/`fsync`/`chmod` failing
+mid-atomic-write, a git subprocess failing for a reason its caller cannot produce on purpose, and internal
+"this cannot happen" guards behind data the same function already validated. Reaching them would mean asserting on
+error text rather than on behaviour, so they are left uncovered deliberately.
 
 The per-package test inventory (what each package's suite actually asserts) is in
 [Architecture / Testing](./architecture.md#testing).
@@ -65,7 +70,7 @@ the same `go tool cover -func | tail -n 1` on the filtered profile.
 
 ## What each layer contributes
 
-The unit layer covers every package against in-memory fakes; on its own it reaches ~88%, because the composition (the
+The unit layer covers every package against in-memory fakes; on its own it reaches ~89%, because the composition (the
 compiled binary, the finalize phase, the run/test/preview commands, real git over a process boundary, SIGINT handling)
 lives exclusively in the [black-box integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md), which asserts behaviour
 (git state, JSON log events, execution timelines) rather than statements. Instrumenting the binary it drives is what
