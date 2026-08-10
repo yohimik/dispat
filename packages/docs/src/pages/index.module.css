@@ -78,8 +78,11 @@
 .problems {
   max-width: 52rem;
   margin: 0 auto 1.5rem;
-  padding-left: 1.25rem;
+  padding-left: 0;
   font-size: 1.05rem;
+  text-align: center;
+  /* Same reason as .reference: the numbers stay with the centred text. */
+  list-style-position: inside;
 }
 
 .problems li + li {
@@ -125,6 +128,7 @@
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: var(--ifm-global-radius);
   background: var(--ifm-background-surface-color);
+  text-align: center;
 }
 
 .featureTitle {
@@ -149,6 +153,13 @@
   width: 100%;
 }
 
+/* Infima left-aligns table headers; centre them with the rest of the page. */
+.manifests th,
+.manifests td,
+.manifests p {
+  text-align: center;
+}
+
 .manifests code {
   font-size: 0.85em;
 }
@@ -157,4 +168,9 @@
   max-width: 52rem;
   margin: 0 auto;
   line-height: 1.9;
+  text-align: center;
+  /* Centred text with markers hanging outside the box reads as misaligned, so
+     the bullets flow with the line instead. */
+  list-style-position: inside;
+  padding-left: 0;
 }
