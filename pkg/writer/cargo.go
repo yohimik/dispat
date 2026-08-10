@@ -89,6 +89,7 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 	var (
 		res     Result
 		lines   = strings.Split(string(data), "\n")
+		index   = buildTOMLIndex(lines)
 		changed bool
 	)
 	for _, e := range edits {
@@ -106,7 +107,7 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 			}
 			continue
 		}
-		idx, start, end, ok := cargoVersionSpan(lines, s.table, s.key)
+		idx, start, end, ok := cargoVersionSpan(index, lines, s.table, s.key)
 		if !ok {
 			res.Skipped = append(res.Skipped, e)
 			continue
@@ -121,7 +122,7 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 
 	if version != "" {
 		if _, inherited := raw.Package.Version.(map[string]any); !inherited {
-			if idx, start, end, ok := cargoVersionSpan(lines, "package", "version"); ok && lines[idx][start:end] != version {
+			if idx, start, end, ok := cargoVersionSpan(index, lines, "package", "version"); ok && lines[idx][start:end] != version {
 				res.VersionWritten = true
 				lines[idx] = lines[idx][:start] + version + lines[idx][end:]
 				changed = true
@@ -185,10 +186,10 @@ func cargoDependencyName(key string, value any) (name string, writable bool) {
 //
 // Both are ordinary in real crates, so both are searched: the entry first,
 // then a `version` key under `[<table>.<key>]`.
-func cargoVersionSpan(lines []string, table, key string) (idx, start, end int, ok bool) {
-	idx, afterEq, ok := catalogEntryLine(lines, table, key)
+func cargoVersionSpan(index tomlIndex, lines []string, table, key string) (idx, start, end int, ok bool) {
+	idx, afterEq, ok := index.entry(table, key)
 	if !ok {
-		return catalogEntryValueSpan(lines, table+"."+key, "version")
+		return catalogEntryValueSpan(index, lines, table+"."+key, "version")
 	}
 	body := stripTOMLComment(lines[idx])
 	i := afterEq

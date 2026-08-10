@@ -69,9 +69,10 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 // punctuation is untouched, and every assignment the locator found before
 // still parses and now reads the intended version.
 func pbxVerify(before, after []byte, version string, count int) error {
-	for _, brace := range []byte{'{', '}', '(', ')'} {
-		if b, a := countByte(before, brace), countByte(after, brace); b != a {
-			return fmt.Errorf("rewrite changed the %q balance (%d -> %d)", brace, b, a)
+	was, now := countTokens(before), countTokens(after)
+	for i, token := range structuralTokens {
+		if was[i] != now[i] {
+			return fmt.Errorf("rewrite changed the %q balance (%d -> %d)", token, was[i], now[i])
 		}
 	}
 	seen := 0
@@ -91,12 +92,20 @@ func pbxVerify(before, after []byte, version string, count int) error {
 	return nil
 }
 
-// countByte counts one byte's occurrences.
-func countByte(data []byte, c byte) int {
-	n := 0
+// structuralTokens are the bytes whose balance a splice must not disturb.
+var structuralTokens = [...]byte{'{', '}', '(', ')'}
+
+// countTokens tallies every structural token in one pass. The naive form ran
+// the file once per token and once per side, eight times over what can be a
+// multi-megabyte project file.
+func countTokens(data []byte) [len(structuralTokens)]int {
+	var n [len(structuralTokens)]int
 	for _, b := range data {
-		if b == c {
-			n++
+		for i, token := range structuralTokens {
+			if b == token {
+				n[i]++
+				break
+			}
 		}
 	}
 	return n

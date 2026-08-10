@@ -44,7 +44,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 		found       = make(map[int]bool, len(edits))
 		applied     = make(map[int]bool, len(edits))
 		versionSpan *span
-		path0       []string
+		elements    []string
 		dec         = xml.NewDecoder(bytes.NewReader(data))
 	)
 	for {
@@ -58,15 +58,15 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 		}
 		switch t := tok.(type) {
 		case xml.EndElement:
-			if len(path0) > 0 {
-				path0 = path0[:len(path0)-1]
+			if len(elements) > 0 {
+				elements = elements[:len(elements)-1]
 			}
 		case xml.StartElement:
 			parent := ""
-			if len(path0) > 0 {
-				parent = path0[len(path0)-1]
+			if len(elements) > 0 {
+				parent = elements[len(elements)-1]
 			}
-			path0 = append(path0, t.Name.Local)
+			elements = append(elements, t.Name.Local)
 
 			switch {
 			case t.Name.Local == "dependency":
@@ -96,7 +96,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 				if err != nil {
 					return Result{}, fmt.Errorf("%s: %w", path, err)
 				}
-				path0 = path0[:len(path0)-1] // the span consumed the closing tag
+				elements = elements[:len(elements)-1] // the span consumed the closing tag
 				if spliceable && versionSpan == nil && !isDeferredValue(text) {
 					s := s
 					versionSpan = &s

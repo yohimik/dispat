@@ -131,13 +131,54 @@ func isTOMLKeyBoundary(c byte) bool {
 }
 
 // catalogEntryValueSpan measures a plain string value assigned to key inside
-// the named table. It is the sub-table lookup: where catalogEntryLine finds a
-// key on an entry line, this finds one under a header of its own.
-func catalogEntryValueSpan(lines []string, table, key string) (idx, start, end int, ok bool) {
-	idx, afterEq, ok := catalogEntryLine(lines, table, key)
+// the named table. It is the sub-table lookup: where the index finds a key on
+// an entry line, this finds one under a header of its own.
+func catalogEntryValueSpan(index tomlIndex, lines []string, table, key string) (idx, start, end int, ok bool) {
+	idx, afterEq, ok := index.entry(table, key)
 	if !ok {
 		return 0, 0, 0, false
 	}
 	start, end, ok = tomlQuotedSpan(stripTOMLComment(lines[idx]), afterEq)
 	return idx, start, end, ok
+}
+
+// tomlEntry is where one key inside one table sits.
+type tomlEntry struct {
+	line    int
+	afterEq int
+}
+
+// tomlIndex maps table and key onto the line declaring it. Building it once
+// per rewrite turns what was a scan of the whole file for every edit into one
+// scan plus a map lookup each, which matters on a version catalog with
+// hundreds of entries and as many edits.
+type tomlIndex map[string]tomlEntry
+
+// buildTOMLIndex walks the lines once, recording the first declaration of each
+// key. The first wins, matching what a repeated scan from the top would find.
+func buildTOMLIndex(lines []string) tomlIndex {
+	index := make(tomlIndex, len(lines))
+	table := ""
+	for i, raw := range lines {
+		body := stripTOMLComment(raw)
+		if trimmed := strings.TrimSpace(body); strings.HasPrefix(trimmed, "[") {
+			table = strings.TrimSpace(strings.Trim(trimmed, "[]"))
+			continue
+		}
+		key, eq, ok := tomlKeyValue(body)
+		if !ok {
+			continue
+		}
+		id := table + "\x00" + key
+		if _, taken := index[id]; !taken {
+			index[id] = tomlEntry{line: i, afterEq: eq}
+		}
+	}
+	return index
+}
+
+// entry looks one key up inside one table.
+func (t tomlIndex) entry(table, key string) (line, afterEq int, ok bool) {
+	e, ok := t[table+"\x00"+key]
+	return e.line, e.afterEq, ok
 }

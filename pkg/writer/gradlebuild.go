@@ -122,9 +122,10 @@ func isGradleWritable(value string) bool {
 // nesting is untouched, and the reader agrees every splice landed where it was
 // aimed.
 func gradleVerify(before, after string, applied []Edit, version string, versionWritten bool) error {
-	for _, brace := range []string{"{", "}", "(", ")"} {
-		if b, a := strings.Count(before, brace), strings.Count(after, brace); b != a {
-			return fmt.Errorf("rewrite changed the %q balance (%d -> %d)", brace, b, a)
+	was, now := countTokens([]byte(before)), countTokens([]byte(after))
+	for i, token := range structuralTokens {
+		if was[i] != now[i] {
+			return fmt.Errorf("rewrite changed the %q balance (%d -> %d)", token, was[i], now[i])
 		}
 	}
 	want := make(map[string]string, len(applied))

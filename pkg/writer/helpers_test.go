@@ -597,3 +597,38 @@ func TestPyBracketDelta(t *testing.T) {
 		}
 	}
 }
+
+func TestTOMLIndexFindsFirstDeclaration(t *testing.T) {
+	lines := []string{
+		"[package]",
+		"# a comment between the header and the key",
+		`version = "1.0"`,
+		"",
+		"[dependencies]",
+		`serde = "1.0"`,
+		`serde = "9.9"`, // a duplicate: the first wins, as a top-down scan would
+		"",
+		"[dependencies.tokio]",
+		`version = "1.35"`,
+	}
+	index := buildTOMLIndex(lines)
+	for _, tc := range []struct {
+		table, key string
+		line       int
+		ok         bool
+	}{
+		{"package", "version", 2, true},
+		{"dependencies", "serde", 5, true},
+		{"dependencies.tokio", "version", 9, true},
+		{"dependencies", "absent", 0, false},
+		{"absent", "serde", 0, false},
+	} {
+		line, afterEq, ok := index.entry(tc.table, tc.key)
+		if ok != tc.ok || (ok && line != tc.line) {
+			t.Errorf("entry(%q,%q) = %d,%v, want %d,%v", tc.table, tc.key, line, ok, tc.line, tc.ok)
+		}
+		if ok && (afterEq <= 0 || afterEq > len(lines[line])) {
+			t.Errorf("entry(%q,%q) offset %d out of range", tc.table, tc.key, afterEq)
+		}
+	}
+}

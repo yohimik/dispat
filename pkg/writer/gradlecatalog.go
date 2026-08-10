@@ -96,10 +96,11 @@ func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
 	}
 
 	lines := strings.Split(string(data), "\n")
+	index := buildTOMLIndex(lines)
 	changed := false
 	for _, id := range order {
 		t := wanted[id]
-		idx, start, end, ok := catalogVersionSpan(lines, t.slot)
+		idx, start, end, ok := catalogVersionSpan(index, lines, t.slot)
 		if !ok {
 			// The library is in the file; its version is not a literal this
 			// writer can reach.
@@ -190,8 +191,8 @@ func catalogSlotFor(alias string, value any) (coordinate string, slot catalogSlo
 
 // catalogVersionSpan locates the version literal for one slot: the line it
 // sits on and the byte range it occupies within that line.
-func catalogVersionSpan(lines []string, slot catalogSlot) (idx, start, end int, ok bool) {
-	idx, afterEq, ok := catalogEntryLine(lines, slot.table, slot.key)
+func catalogVersionSpan(index tomlIndex, lines []string, slot catalogSlot) (idx, start, end int, ok bool) {
+	idx, afterEq, ok := index.entry(slot.table, slot.key)
 	if !ok {
 		return 0, 0, 0, false
 	}
@@ -234,24 +235,4 @@ func catalogVersionSpan(lines []string, slot catalogSlot) (idx, start, end int, 
 		start += group + 1 + artifact + 1
 	}
 	return idx, start, end, true
-}
-
-// catalogEntryLine finds the entry for key inside the named table, returning
-// its line index and the offset just past its '='.
-func catalogEntryLine(lines []string, table, key string) (idx, afterEq int, ok bool) {
-	current := ""
-	for i, raw := range lines {
-		body := stripTOMLComment(raw)
-		if trimmed := strings.TrimSpace(body); strings.HasPrefix(trimmed, "[") {
-			current = strings.TrimSpace(strings.Trim(trimmed, "[]"))
-			continue
-		}
-		if current != table {
-			continue
-		}
-		if k, eq, found := tomlKeyValue(body); found && k == key {
-			return i, eq, true
-		}
-	}
-	return 0, 0, false
 }
