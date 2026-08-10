@@ -355,13 +355,16 @@ func FuzzReplace(f *testing.F) {
 		"[package]\nname = \"a\"\n\n[patch.crates-io]\nserde = { path = \"../serde\" }\n",
 		"name: a\ndependency_overrides:\n  http:\n    path: ../http\n",
 		"[project]\nname = \"a\"\n\n[tool.uv.sources]\nrequests = { path = \"../r\" }\n",
-		"[patch.crates-io]\n", "dependency_overrides:\n", "", "[",
+		`{"name":"a","overrides":{"dep":"file:../dep"}}`,
+		`{"name":"a","resolutions":{}}`,
+		`{"pnpm":{"overrides":{"dep":"file:../dep"}}}`,
+		"[patch.crates-io]\n", "dependency_overrides:\n", "", "[", "{}",
 	}
 	for _, s := range seeds {
 		f.Add(s, "dep", "../elsewhere")
 	}
 	f.Fuzz(func(t *testing.T, content, name, path string) {
-		for _, file := range []string{"go.mod", "Cargo.toml", "pubspec.yaml", "pyproject.toml"} {
+		for _, file := range []string{"go.mod", "Cargo.toml", "pubspec.yaml", "pyproject.toml", "package.json"} {
 			dir := t.TempDir()
 			p := filepath.Join(dir, file)
 			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
@@ -383,6 +386,10 @@ func FuzzReplace(f *testing.F) {
 				var in, out map[string]any
 				if toml.Unmarshal([]byte(content), &in) == nil && toml.Unmarshal(data, &out) != nil {
 					t.Fatalf("%s: replace corrupted valid TOML:\n in: %q\nout: %q", file, content, data)
+				}
+			case "package.json":
+				if json.Valid([]byte(content)) && !json.Valid(data) {
+					t.Fatalf("replace corrupted valid JSON:\n in: %q\nout: %q", content, data)
 				}
 			}
 		}

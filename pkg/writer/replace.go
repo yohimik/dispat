@@ -52,15 +52,14 @@ type replaceFunc func(path string, replacements []Replacement) (ReplaceResult, e
 
 // replacers maps each format onto its replace writer. Only formats that point
 // a package at a local folder through a separate, package-keyed directive
-// appear here. Forcing a version across the dependency tree is a different
-// feature: npm's `overrides` and Yarn's `resolutions` do that and cannot name
-// a folder, so package.json is absent by design rather than by omission.
+// appear here.
 //
 // Formats whose redirect is an option on the dependency line instead of a
 // directive of its own (a Gemfile's `path:`, a Podfile's `:path`, an editable
-// requirements install) are absent for the same reason: changing one means
-// rewriting a declaration, not managing a directive.
+// requirements install) are absent: changing one means rewriting a
+// declaration, not managing a directive.
 var replacers = map[manifest.Format]replaceFunc{
+	manifest.FormatNpm:       replaceNpm,
 	manifest.FormatGoMod:     replaceGoMod,
 	manifest.FormatCargo:     replaceCargo,
 	manifest.FormatPubspec:   replacePubspec,

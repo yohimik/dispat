@@ -77,6 +77,7 @@ replace that ships to consumers gives them a module they cannot resolve.
 | `Cargo.toml` | `[patch.crates-io]` | `core = { path = "../core" }` |
 | `pubspec.yaml` | `dependency_overrides` | `core:` with an indented `path: ../core` under it |
 | `pyproject.toml` | `[tool.uv.sources]` | `core = { path = "../core" }` |
+| `package.json` | `overrides`, `resolutions` or `pnpm.overrides` | `"core": "file:../core"` |
 
 `Replacement.Version` narrows the redirect to one required version, which only `go.mod` can express. The others key
 their directive on the name alone and ignore it.
@@ -84,12 +85,17 @@ their directive on the name alone and ignore it.
 `SupportsReplace` answers in advance whether a file has anywhere to put one. Every other format writes nothing and
 reports each replacement in `Skipped`.
 
+npm, Yarn and pnpm each name that map differently, so the field is chosen by reading the file rather than by guessing.
+An existing `resolutions` or `pnpm.overrides` wins, then a `packageManager` field naming yarn or pnpm, and npm's
+`overrides` is the default. All three read a `file:` specifier, which is the portable spelling, and the scanner reads it
+back out as a local path.
+
+One caveat is npm's alone: it refuses an override for a package the manifest depends on directly unless the two specs
+match exactly, so overrides there are aimed at transitive dependencies. Yarn and pnpm have no such rule.
+
 The test a format has to pass is narrow: it must point a **package at a local folder**, through a **separate,
-package-keyed directive**. Forcing a version across the dependency tree is a different feature. `package.json` fails on
-that count, because `overrides`, and Yarn's `resolutions`, set a version and cannot name a folder. npm's way to point at
-a folder is `"dependencies": {"core": "file:../core"}`, an option on the declaration itself, which is the same reason
-`Gemfile`, `Podfile`, `requirements*.txt`, Poetry tables and `.csproj` are out: their redirect is part of a declaration
-rather than a directive to manage.
+package-keyed directive**. `Gemfile`, `Podfile`, `requirements*.txt`, Poetry tables and `.csproj` are out because their
+redirect is part of a declaration rather than a directive to manage.
 
 `pom.xml` has no redirect at all. Gradle can substitute in `resolutionStrategy` or `settings.gradle`, but only as
 statements inside a closure, which is the one place this package will not write. Version catalogs, `Info.plist`,

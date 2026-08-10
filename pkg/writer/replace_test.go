@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -233,7 +234,6 @@ func TestReplaceOnFormatsWithoutRedirects(t *testing.T) {
 	// package.json is the one most likely to be mistaken for supporting this.
 	// Its overrides force a version across the tree; they cannot name a folder.
 	for _, tc := range []struct{ name, src string }{
-		{"package.json", `{"name":"a","dependencies":{"b":"^1.0.0"},"overrides":{"b":"1.0.0"}}`},
 		{"pom.xml", `<project><artifactId>a</artifactId></project>`},
 		{"Podfile", "target 'A' do\n  pod 'B', '~> 1.0'\nend\n"},
 		{"Gemfile", "gem 'rails', '~> 7.0'\n"},
@@ -282,7 +282,7 @@ func TestEveryFormatDeclaresReplaceSupport(t *testing.T) {
 	// Every format is either implemented or an explicit no-op. A new format
 	// fails here until someone decides which it is.
 	noRedirect := map[manifest.Format]bool{
-		manifest.FormatNpm: true, manifest.FormatComposer: true,
+		manifest.FormatComposer:     true,
 		manifest.FormatRequirements: true, manifest.FormatMaven: true,
 		manifest.FormatMSBuildProject: true, manifest.FormatNuSpec: true,
 		manifest.FormatPackagesProps: true, manifest.FormatPackagesConfig: true,
@@ -379,5 +379,155 @@ func TestReplaceOnAnUnreadableAndOversizedManifest(t *testing.T) {
 	}
 	if _, err := Replace(big, nil); !errors.Is(err, ErrManifestTooLarge) {
 		t.Errorf("an oversized manifest: got %v, want ErrManifestTooLarge", err)
+	}
+}
+
+func TestNpmReplaceUsesOverridesWithAFileSpec(t *testing.T) {
+	src := `{
+  "name": "@acme/web",
+  "version": "1.0.0",
+  "dependencies": {
+    "@acme/core": "^1.0.0",
+    "left-pad": "^1.3.0"
+  }
+}`
+	path := seed(t, "package.json", src)
+	res, err := Replace(path, []Replacement{{Name: "@acme/core", Path: "../core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, path)
+	if !strings.Contains(got, `"overrides": {`) || !strings.Contains(got, `"@acme/core": "file:../core"`) {
+		t.Errorf("the overrides map was not created:\n%s", got)
+	}
+	// The declarations are untouched: an override is a separate directive.
+	if !strings.Contains(got, `"@acme/core": "^1.0.0"`) {
+		t.Errorf("the dependency declaration was disturbed:\n%s", got)
+	}
+	if len(res.Applied) != 1 {
+		t.Errorf("result mismatch: %+v", res)
+	}
+	// Removing it returns the file to exactly what it was.
+	if _, err := Replace(path, []Replacement{{Name: "@acme/core"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); got != src {
+		t.Errorf("round trip did not return the original:\n got: %q\nwant: %q", got, src)
+	}
+}
+
+func TestNpmReplaceFollowsTheFileToYarnAndPnpm(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{
+			"an existing resolutions map wins",
+			"{\n  \"name\": \"a\",\n  \"resolutions\": {\n    \"old\": \"1.0.0\"\n  }\n}",
+			`"resolutions"`,
+		},
+		{
+			"an existing pnpm.overrides map wins",
+			"{\n  \"name\": \"a\",\n  \"pnpm\": {\n    \"overrides\": {\n      \"old\": \"1.0.0\"\n    }\n  }\n}",
+			`"pnpm"`,
+		},
+		{
+			"packageManager names yarn",
+			"{\n  \"name\": \"a\",\n  \"packageManager\": \"yarn@4.1.0\"\n}",
+			`"resolutions"`,
+		},
+		{
+			"packageManager names pnpm",
+			"{\n  \"name\": \"a\",\n  \"packageManager\": \"pnpm@9.0.0\"\n}",
+			`"pnpm"`,
+		},
+		{
+			"nothing to go on, npm's overrides",
+			"{\n  \"name\": \"a\"\n}",
+			`"overrides"`,
+		},
+	} {
+		path := seed(t, "package.json", tc.src)
+		if _, err := Replace(path, []Replacement{{Name: "core", Path: "../core"}}); err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		got := read(t, path)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%s: wanted %s in:\n%s", tc.name, tc.want, got)
+		}
+		if !strings.Contains(got, `"core": "file:../core"`) {
+			t.Errorf("%s: the redirect was not written:\n%s", tc.name, got)
+		}
+		// Whatever field it chose, removing returns the original bytes.
+		if _, err := Replace(path, []Replacement{{Name: "core"}}); err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if got := read(t, path); got != tc.src {
+			t.Errorf("%s: round trip did not return the original:\n got: %q\nwant: %q", tc.name, got, tc.src)
+		}
+	}
+}
+
+func TestNpmReplacePreservesEveryOtherByte(t *testing.T) {
+	// Tabs, an existing override, a trailing entry after the map, and no
+	// trailing newline. Only the map may change.
+	src := "{\n\t\"name\": \"@acme/web\",\n\t\"overrides\": {\n\t\t\"old\": \"file:../old\"\n\t},\n\t\"scripts\": {\"build\": \"tsc\"}\n}"
+	path := seed(t, "package.json", src)
+	res, err := Replace(path, []Replacement{
+		{Name: "old", Path: "../moved"}, // repoint
+		{Name: "new", Path: "../new"},   // add beside it
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src,
+		"\t\t\"old\": \"file:../old\"\n",
+		"\t\t\"old\": \"file:../moved\",\n\t\t\"new\": \"file:../new\"\n", 1)
+	if got := read(t, path); got != want {
+		t.Errorf("file mismatch:\n got: %q\nwant: %q", got, want)
+	}
+	if len(res.Applied) != 2 {
+		t.Errorf("result mismatch: %+v", res)
+	}
+}
+
+func TestNpmReplaceRemovalKeepsSiblingsAndDropsAnEmptyMap(t *testing.T) {
+	src := "{\n  \"name\": \"a\",\n  \"overrides\": {\n    \"one\": \"file:../one\",\n    \"two\": \"file:../two\"\n  }\n}"
+	path := seed(t, "package.json", src)
+	if _, err := Replace(path, []Replacement{{Name: "one"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, path)
+	if strings.Contains(got, `"one"`) || !strings.Contains(got, `"two": "file:../two"`) {
+		t.Errorf("the wrong entry went:\n%s", got)
+	}
+	if !json.Valid([]byte(got)) {
+		t.Errorf("removal left invalid JSON:\n%s", got)
+	}
+	// Taking the last one drops the map with it.
+	if _, err := Replace(path, []Replacement{{Name: "two"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); strings.Contains(got, "overrides") {
+		t.Errorf("an emptied map should go too:\n%s", got)
+	}
+}
+
+func TestNpmReplaceNoChangeLeavesFileAlone(t *testing.T) {
+	src := "{\n  \"overrides\": {\n    \"core\": \"file:../core\"\n  }\n}"
+	path := seed(t, "package.json", src)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Replace(path, []Replacement{{Name: "core", Path: "../core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 || read(t, path) != src || !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("no-op replace touched the file: %+v", res)
 	}
 }
