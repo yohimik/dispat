@@ -60,6 +60,19 @@
   text-align: center;
 }
 
+/* The two situations that break "build all, then publish all", in the same
+   numbered shape the repository README uses. */
+.problems {
+  max-width: 52rem;
+  margin: 0 auto 1.5rem;
+  padding-left: 1.25rem;
+  font-size: 1.05rem;
+}
+
+.problems li + li {
+  margin-top: 0.75rem;
+}
+
 .features {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -85,6 +98,28 @@
 
 .featureTitle {
   font-size: 1.15rem;
+}
+
+.tableTitle {
+  margin-top: 2rem;
+  text-align: center;
+  font-size: 1.25rem;
+}
+
+/* The manifest table is wide by nature: keep it readable and let it scroll on a
+   phone rather than squeezing the file names. */
+.manifests {
+  max-width: 60rem;
+  margin: 0 auto;
+  overflow-x: auto;
+}
+
+.manifests table {
+  width: 100%;
+}
+
+.manifests code {
+  font-size: 0.85em;
 }
 
 .reference {

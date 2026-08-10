@@ -18,6 +18,8 @@ import styles from './index.module.css';
 // routes with baseUrl already in them, so a bare "/getting-started" resolves
 // outside the site and hits the 404 page.
 
+const GITHUB = 'https://github.com/yohimik/dispat';
+
 const TRANSCRIPT = `$ dispat
 12:04:05 INF ● changed bump=minor package=core version="1.2.3 -> 1.3.0"
 12:04:05 INF ● changed bump=patch package=app dueToProviders=[core] version="0.8.1 -> 0.8.2"
@@ -125,10 +127,28 @@ function Features(): React.ReactElement {
         Why one more monorepo tool?
       </Heading>
       <p className={styles.sectionLead}>
-        Every major monorepo tool can topologically sort a dependency graph. Two situations break that model in practice:
-        an error in the middle of a run leaves half the packages published, and a consumer that can only be{' '}
-        <em>built</em> after its provider is <em>published</em> (a Docker image pulling its base) contradicts
-        &ldquo;build all, then publish all&rdquo;. dispat is built for that case.
+        Every major monorepo tool can topologically sort a dependency graph: build everything in order, then publish
+        everything, or publish only what changed, sequentially. Two situations break that model in practice.
+      </p>
+      <ol className={styles.problems}>
+        <li>
+          <strong>An error in the middle of a run.</strong> Half the packages are published, half are not. Most tools
+          either abort the whole run or plough on and leave you to reconstruct what shipped. Re-running tends to
+          re-release things that are already out, or you end up writing recovery scripts by hand.
+        </li>
+        <li>
+          <strong>
+            A consumer that can only be <em>built</em> after its provider is <em>published</em>.
+          </strong>{' '}
+          A Node package can be built before its consumers publish, but a Docker image is often buildable only by pulling
+          its base image from a registry, which means the provider must already be published. &ldquo;Build all, then
+          publish all&rdquo; assumes every ecosystem behaves like npm, and mixed graphs break it.
+        </li>
+      </ol>
+      <p className={styles.sectionLead}>
+        Modern projects are exactly that mix: many packages on different infrastructure (npm next to Docker next to Go)
+        wired into one dependency graph. dispat is built for that case, and{' '}
+        <Link to="/concepts">Concepts</Link> works both situations through end to end.
       </p>
       <div className={styles.features}>
         {FEATURES.map((feature) => (
@@ -139,6 +159,109 @@ function Features(): React.ReactElement {
             <p>{feature.body}</p>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+// One row per ecosystem, mirroring the tables in pkg/scanner's README. The
+// writer covers every manifest the reader does, so the list serves both.
+const MANIFESTS: [language: string, files: string][] = [
+  ['JavaScript, TypeScript — npm, pnpm, Yarn', 'package.json'],
+  ['Go', 'go.mod'],
+  ['Rust — Cargo', 'Cargo.toml'],
+  ['Python — PEP 621, PEP 735, Poetry, pip', 'pyproject.toml, requirements*.txt'],
+  ['PHP — Composer', 'composer.json'],
+  ['Java, Kotlin, Scala — Maven', 'pom.xml'],
+  ['C#, F#, VB — .NET, NuGet', '*.csproj, *.fsproj, *.vbproj, *.nuspec, Directory.Packages.props, packages.config'],
+  ['Dart, Flutter — pub', 'pubspec.yaml'],
+  ['Ruby — Bundler, RubyGems', 'Gemfile, *.gemspec'],
+  ['Swift, Objective-C — iOS, CocoaPods', 'Info.plist, project.pbxproj, Podfile, *.podspec'],
+  ['Kotlin, Java — Android, Gradle', 'AndroidManifest.xml, libs.versions.toml, build.gradle(.kts)'],
+];
+
+// The manifest halves are separate Go modules, usable with no dispat in sight,
+// and nothing on the site said so. Links point at GitHub because these are
+// packages rather than pages.
+function Libraries(): React.ReactElement {
+  return (
+    <section className="container margin-bottom--xl">
+      <Heading as="h2" className={styles.sectionTitle}>
+        Lightweight manifest libraries, usable on their own
+      </Heading>
+      <p className={styles.sectionLead}>
+        Reading and rewriting dependency manifests is a problem far older than releases, so dispat keeps both halves as
+        standalone Go modules with no dependency on the CLI, on git or on a network. They share their vocabulary through{' '}
+        <Link to={`${GITHUB}/tree/main/pkg/manifest`}>
+          <code>pkg/manifest</code>
+        </Link>{' '}
+        — dependency kinds, manifest file-name rules, PEP 503 normalisation — so the reader and the writer can never
+        drift apart.
+      </p>
+      <div className={styles.features}>
+        <div className={styles.feature}>
+          <Heading as="h3" className={styles.featureTitle}>
+            <Link to={`${GITHUB}/tree/main/pkg/scanner`}>
+              <code>pkg/scanner</code>
+            </Link>{' '}
+            — the manifest reader
+          </Heading>
+          <p>
+            Thin per-format parsers turning every manifest below into one ecosystem-neutral shape: declared identity,
+            dependencies, ranges and local-path signals. No SBOM machinery, no lockfile resolution, no network; bounded
+            reads, deterministic order, and a partial result even when one file fails to parse.
+          </p>
+        </div>
+        <div className={styles.feature}>
+          <Heading as="h3" className={styles.featureTitle}>
+            <Link to={`${GITHUB}/tree/main/pkg/writer`}>
+              <code>pkg/writer</code>
+            </Link>{' '}
+            — the manifest writer
+          </Heading>
+          <p>
+            Format-preserving in-place edits for every manifest the scanner reads: only the version text being changed
+            is replaced, and every other byte — indentation, key order, comments — survives verbatim. Writes are atomic
+            (temp file, fsync, rename) and skipped when nothing changed, and the result separates what was applied from
+            what was deliberately left alone, such as a value that defers to a Maven property or a workspace
+            inheritance.
+          </p>
+        </div>
+      </div>
+      <Heading as="h3" className={styles.tableTitle}>
+        Languages and manifests both halves support
+      </Heading>
+      <div className={styles.manifests}>
+        <table>
+          <thead>
+            <tr>
+              <th>Language / ecosystem</th>
+              <th>Manifests read and rewritten</th>
+            </tr>
+          </thead>
+          <tbody>
+            {MANIFESTS.map(([language, files]) => (
+              <tr key={language}>
+                <td>{language}</td>
+                <td>
+                  <code>{files}</code>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p>
+          The mobile formats also carry a build number beside their marketing version (<code>CFBundleVersion</code>,{' '}
+          <code>android:versionCode</code>, <code>CURRENT_PROJECT_VERSION</code>): the scanner reads it, and no writer
+          ever rewrites it. <Link to="/cli">
+            <code>dispat compute</code>
+          </Link>{' '}
+          derives a monorepo&apos;s dependency graph from these files, and{' '}
+          <Link to="/configuration/spaces#autoversion">
+            <code>autoVersion</code>
+          </Link>{' '}
+          rewrites them at the version stage.
+        </p>
       </div>
     </section>
   );
@@ -189,6 +312,7 @@ export default function Home(): React.ReactElement {
       <Hero />
       <main>
         <Features />
+        <Libraries />
         <Reference />
       </main>
     </Layout>
