@@ -24,6 +24,8 @@ if [ -d "versioned_docs/version-${MINOR}" ]; then
   exit 0
 fi
 
-npm ci
-npm run docusaurus docs:version "${MINOR}"
+# The version stage runs before the build, so the docusaurus CLI has to be
+# installed here. pnpm installs the whole workspace from any project in it.
+pnpm install --frozen-lockfile
+pnpm exec docusaurus docs:version "${MINOR}"
 echo "cut docs version ${MINOR} (from ${DISPAT_NEW_VERSION})"

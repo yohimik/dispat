@@ -13,11 +13,19 @@ on:
     paths:
       - 'packages/docs/**'
       - 'imgs/**'
+      # The workspace root: a dependency bump or a pnpm setting change belongs
+      # to this build as much as an edited page does.
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'packages/docs/**'
       - 'imgs/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -34,17 +42,21 @@ jobs:
         with:
           fetch-depth: 0      # showLastUpdateTime reads git history
 
+      # Before setup-node: its pnpm cache needs pnpm on PATH, and the version
+      # comes from packageManager in the root package.json.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version-file: packages/docs/.nvmrc
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
+      # The workspace root owns the lockfile, so the install runs there.
       - name: Install dependencies
-        run: npm ci
-        working-directory: packages/docs
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: npm run build
-        working-directory: packages/docs
+        run: pnpm --filter dispat-docs build

@@ -1,4 +1,7 @@
 packages:
-  - packages/*
+  - 'packages/*'
+
+# core-js's postinstall only prints a funding notice; nothing in the docs
+# build depends on it running.
 allowBuilds:
-  core-js: true
+  core-js: false

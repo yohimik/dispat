@@ -1,9 +1,15 @@
 {
-  "name": "root",
+  "name": "dispat-monorepo",
+  "version": "0.0.0",
   "private": true,
-  "version": null,
+  "description": "pnpm workspace root. The Go modules under pkg/ and services/ are unrelated to it; only packages/* live here.",
+  "packageManager": "pnpm@11.16.0",
   "scripts": {
+    "docs:start": "pnpm --filter dispat-docs start",
+    "docs:build": "pnpm --filter dispat-docs build",
+    "docs:typecheck": "pnpm --filter dispat-docs typecheck"
   },
-  "devDependencies": {
+  "engines": {
+    "node": ">=20.0"
   }
 }

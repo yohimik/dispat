@@ -36,14 +36,19 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      # The docs package's version/build/publish stages shell out to pnpm; the
+      # pnpm workspace at the repository root is the only Node in this project.
+      # action-setup takes its version from packageManager in package.json, and
+      # must run before setup-node, whose pnpm cache needs pnpm on PATH.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Set up Node
-        # The docs package's version/build/publish stages shell out to npm.
-        # Node lives nowhere else in this repository.
         uses: actions/setup-node@v4
         with:
           node-version-file: packages/docs/.nvmrc
-          cache: npm
-          cache-dependency-path: packages/docs/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Build dispat from the checkout
         run: go build -C services/dispat -o "$PWD/dispat" .

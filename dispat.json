@@ -4,7 +4,7 @@
     "changelog": "dispat changelog",
     "commit": "dispat commit --tag --push",
     "build-dispat": "sh ../../scripts/build-dispat.sh",
-    "build-docs": "npm ci && npm run build",
+    "build-docs": "pnpm install --frozen-lockfile && pnpm run build",
     "cut-docs-version": "sh ../../scripts/cut-docs-version.sh",
     "deploy-docs": "sh ../../scripts/deploy-docs.sh"
   },
