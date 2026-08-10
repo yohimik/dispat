@@ -31,33 +31,52 @@ Writes are atomic (same-folder temp file, fsync, rename) and skipped entirely wh
 | `Podfile`              | yes (per-line splice, quote style preserved)        | no such field                       |
 | `*.podspec`            | yes (per-line splice)                               | yes (`s.version`)                   |
 | `build.gradle`(`.kts`) | yes (the version segment of a literal coordinate)   | yes (`versionName`)                 |
+| `Cargo.toml`           | yes (plain values and inline-table `version` keys)  | yes (`[package] version`)           |
+| `pyproject.toml`       | yes (PEP 508 array entries and Poetry tables)       | yes (`[project]`, else Poetry's)    |
+| `composer.json`        | yes (`require`, `require-dev`)                      | yes, where one is declared          |
+| `pom.xml`              | yes (each `<dependency>`'s `<version>`)             | yes (the project's own, not parent's) |
+| `*.csproj`/`.fsproj`/`.vbproj` | yes (`Version` attribute and child element) | yes (first `PropertyGroup`)      |
+| `*.nuspec`             | yes (each `<dependency>`'s version attribute)       | yes (`<metadata><version>`)         |
+| `Directory.Packages.props` | yes (each `PackageVersion`)                     | no such field                       |
+| `packages.config`      | yes (each `<package>`'s lower-case `version`)       | no such field                       |
+| `pubspec.yaml`         | yes (per-line scalar splice)                        | yes                                 |
+| `Gemfile`              | yes (per-line splice, quote style preserved)        | no such field                       |
+| `*.gemspec`            | yes (per-line splice)                               | yes (`spec.version`)                |
 
-Every writer proves its output before a byte lands: `json.Valid` for npm, `modfile.Parse` for go.mod, a re-parse for the
-XML formats, `toml.Unmarshal` for the version catalog. `project.pbxproj`, the CocoaPods manifests and the Gradle build
-scripts have no cheap grammar to re-parse against, so three guards stand in for one — a replacement carrying any byte
-that could end a literal or open a block is refused outright, the file's brace balance must be unchanged, and the reader
-is re-run over the result and must agree every splice landed where it was aimed.
+**Every ecosystem the scanner reads now has a writer.** `TestEveryScannedEcosystemHasAWriter` is the list that says so,
+and a format the scanner learns to read should fail it until it can be written too.
+
+Every writer proves its output before a byte lands: `json.Valid` for the JSON formats, `modfile.Parse` for go.mod, a
+re-parse for the XML formats, `toml.Unmarshal` for the TOML ones. `project.pbxproj`, the Ruby manifests and the Gradle
+build scripts have no cheap grammar to re-parse against, so three guards stand in for one — a replacement carrying any
+byte that could end a literal or open a block is refused outright, the file's brace balance must be unchanged, and the
+reader is re-run over the result and must agree every splice landed where it was aimed.
 
 ## Not written today
-
-The goal is a writer per scanner-supported ecosystem; the ones without one (Cargo, pyproject, composer, Maven, NuGet,
-pub) are read-only, and their reconciliation belongs to a `flow.version` script.
 
 Build numbers are read but never written. `CFBundleVersion`, `android:versionCode` and `CURRENT_PROJECT_VERSION` are
 monotonic counters rather than semantic versions, and nothing upstream computes one; bumping them belongs to a
 `flow.version` script.
 
 Three behaviours are worth knowing before turning these on. A `[versions]` entry several catalog libraries share **fans
-out** — changing one coordinate changes every library pinned to that ref, which follows from the file the author wrote —
+out**: changing one coordinate changes every library pinned to that ref, which follows from the file the author wrote,
 and two edits landing on one shared entry with different text are refused with `ErrConflictingEdits` rather than letting
 the last one win. `MARKETING_VERSION` is written to *every* build configuration, because leaving Debug and Release
 disagreeing is worse than either alternative; a project deliberately holding two targets at different versions is the
 case this cannot serve. And a coordinate declared under several Gradle configurations is updated in all of them.
 
-Nothing is ever added, only replaced: a pod with no version requirement, a git- or path-pinned pod, a constraint spread
-across two literals (`pod 'X', '>= 1.0', '< 2.0'`), a catalog library with no version, a computed `s.version =
-Acme::VERSION` and an `$(MARKETING_VERSION)` build-setting reference are all reported missing and left exactly as they
-are. Overwriting the last of those would silently sever the Xcode indirection the project relies on.
+A value that defers to something outside the file is left alone rather than replaced with a literal, because overwriting
+it would sever the indirection it exists for: a Maven `${property}`, a Cargo `{ workspace = true }`, an Xcode
+`$(MARKETING_VERSION)`, a nuspec's `$version$` pack-time token, and the `spec.version = Acme::VERSION` constant nearly
+every published gem uses to keep its library and its packaging in step. A Maven `<parent>`'s version is never written
+either — it selects which POM this one inherits from, so moving it would repoint the build rather than release the
+module.
+
+Nothing is added where a declaration deliberately carries no version: a pod or gem with no requirement, one pinned to a
+git revision or a path, a constraint spread across two literals (`gem 'pg', '>= 0.18', '< 2.0'`), and a catalog library
+with no version are all reported missing. The one exception follows an older precedent — a bare PEP 508 entry gains its
+first specifier, in `pyproject.toml` as in a requirements file, since there a name with no specifier is an unpinned
+dependency rather than a deliberate choice.
 
 ## Requirements
 

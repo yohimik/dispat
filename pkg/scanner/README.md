@@ -30,7 +30,13 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | `composer.json`     | composer  | name, version, require/require-dev (platform requirements filtered)                               |
 | `pom.xml`           | maven     | `groupId:artifactId` coordinates, scopes onto dependency kinds                                    |
 | `*.csproj`          | nuget     | `PackageId`/`AssemblyName`, `PackageReference`, `ProjectReference` as local paths                 |
+| `*.fsproj`/`*.vbproj` | nuget   | the same SDK-style schema, since F# and VB projects share it                                      |
+| `*.nuspec`          | nuget     | `id`, `version`, dependencies flat or inside targetFramework groups                                |
+| `Directory.Packages.props` | nuget | Central Package Management: every `PackageVersion` the repository pins                        |
+| `packages.config`   | nuget     | the legacy list, with `developmentDependency` onto devDependencies                                 |
 | `pubspec.yaml`      | pub       | name, version, dependencies, `dependency_overrides` folded onto their declarations                |
+| `Gemfile`           | rubygems  | `gem` declarations, `:path` local gems, development and test groups onto devDependencies          |
+| `*.gemspec`         | rubygems  | name, version, `add_dependency`/`add_runtime_dependency`/`add_development_dependency`             |
 
 The mobile platforms are covered too. Four of these declare an identity and a version but no dependencies at all — they
 feed auto-versioning rather than the dependency graph — and every Java-world coordinate is spelled `group:artifact`, so a
@@ -59,8 +65,12 @@ The goal is full coverage of every package manager; these known gaps are listed 
 npm `workspaces`, `overrides` and
 `resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and target-specific tables; Maven
 `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and `<modules>`; Poetry multi-constraint
-dependency lists; PEP 735 `include-group`; NuGet Central Package Management (`Directory.Packages.props`). Version text
-is always kept verbatim, so name matching still carries the graph where the version is indirected.
+dependency lists; PEP 735 `include-group`; `Directory.Build.props` and NuGet lock files; Bundler's
+alternative `gems.rb` spelling and its `Gemfile.lock`. A `.nuspec` packed from a project is a template whose `$id$` and
+`$version$` tokens NuGet fills in at pack time: a token version is kept verbatim, a token identifier reads as empty for
+the same reason an Xcode `$(PRODUCT_BUNDLE_IDENTIFIER)` does. Version text is always kept verbatim, so name matching
+still carries the graph where the version is indirected — including the `Acme::VERSION` constant nearly every gemspec
+assigns its version from, which reads as no version at all because the number lives in a Ruby source file.
 
 The mobile formats are read by recognising the statement shapes that declare something, so anything a single file cannot
 resolve is dropped rather than guessed at — which on modern Android projects is a great deal. Not read: version-catalog

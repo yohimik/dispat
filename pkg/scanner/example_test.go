@@ -137,3 +137,54 @@ retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit
 	// gradle/libs.versions.toml (gradle)
 	//   dependencies com.squareup.retrofit2:retrofit "2.9.0"
 }
+
+// Example_ruby reads a Ruby project's manifests: the gemspec that declares the
+// library's own identity and the Gemfile that declares what an application
+// installs. A gemspec assigning its version from a constant reports no version
+// — the number lives in a Ruby source file this package does not evaluate.
+func Example_ruby() {
+	dir, _ := os.MkdirTemp("", "scanner-ruby-")
+	defer os.RemoveAll(dir)
+	_ = os.WriteFile(filepath.Join(dir, "Gemfile"), []byte(`source 'https://rubygems.org'
+
+gem 'rails', '~> 7.0.4'
+gem 'local', path: '../local'
+
+group :development, :test do
+  gem 'rspec-rails', '~> 6.0'
+end`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "acme.gemspec"), []byte(`Gem::Specification.new do |spec|
+  spec.name    = "acme"
+  spec.version = "1.2.3"
+
+  spec.add_dependency "rails", "~> 7.0"
+  spec.add_development_dependency "rspec", "~> 3.0"
+end`), 0o644)
+
+	mans, err := scanner.New().Scan(context.Background(), dir)
+	if err != nil {
+		fmt.Println("partial scan:", err)
+	}
+	for _, m := range mans {
+		fmt.Printf("%s (%s)\n", m.Path, m.Ecosystem)
+		if m.Name != "" {
+			fmt.Printf("  %s@%s\n", m.Name, m.Version)
+		}
+		for _, d := range m.Deps {
+			fmt.Printf("  %s %s %q", d.Kind, d.Name, d.Range)
+			if d.LocalPath != "" {
+				fmt.Printf(" -> %s", d.LocalPath)
+			}
+			fmt.Println()
+		}
+	}
+	// Output:
+	// Gemfile (rubygems)
+	//   dependencies local "" -> ../local
+	//   dependencies rails "~> 7.0.4"
+	//   devDependencies rspec-rails "~> 6.0"
+	// acme.gemspec (rubygems)
+	//   acme@1.2.3
+	//   dependencies rails "~> 7.0"
+	//   devDependencies rspec "~> 3.0"
+}

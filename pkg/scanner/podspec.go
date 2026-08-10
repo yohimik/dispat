@@ -61,31 +61,5 @@ func podspecDependency(line string) (DeclaredDep, bool) {
 	if !ok {
 		return DeclaredDep{}, false
 	}
-	start, end, ok := rubyQuoted(line, args)
-	if !ok {
-		return DeclaredDep{}, false
-	}
-	dep := DeclaredDep{Name: line[start:end], Kind: KindDependencies}
-	if dep.Name == "" {
-		return DeclaredDep{}, false
-	}
-	var requirements []string
-	for i := end + 1; i < len(line); {
-		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
-			i++
-		}
-		if i >= len(line) || line[i] != ',' {
-			break
-		}
-		start, end, ok := rubyQuoted(line, i+1)
-		if !ok {
-			break
-		}
-		requirements = append(requirements, line[start:end])
-		i = end + 1
-	}
-	if text := strings.Join(requirements, ", "); isRubyLiteral(text) {
-		dep.Range = text
-	}
-	return dep, true
+	return rubyDeclaration(line, args, KindDependencies)
 }

@@ -52,51 +52,12 @@ func isTestTargetName(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), "tests")
 }
 
-// podDeclaration reads one `pod 'Name'` line, with its optional version
-// requirements and options. A pod pinned to a git revision or a podspec has no
-// version text at all; its name still carries the graph.
+// podDeclaration reads one `pod 'Name'` line. A pod pinned to a git revision
+// or a podspec has no version text at all; its name still carries the graph.
 func podDeclaration(line string, kind Kind) (DeclaredDep, bool) {
 	args, ok := rubyBareCall(line, "pod")
 	if !ok {
 		return DeclaredDep{}, false
 	}
-	start, end, ok := rubyQuoted(line, args)
-	if !ok {
-		return DeclaredDep{}, false
-	}
-	dep := DeclaredDep{Name: line[start:end], Kind: kind}
-	if dep.Name == "" {
-		return DeclaredDep{}, false
-	}
-
-	// Any number of version requirements may follow the name, each its own
-	// argument: `pod 'X', '>= 1.0', '< 2.0'`. They are one constraint, so they
-	// are reported as one range.
-	var requirements []string
-	for i := end + 1; i < len(line); {
-		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
-			i++
-		}
-		if i >= len(line) || line[i] != ',' {
-			break
-		}
-		start, end, ok := rubyQuoted(line, i+1)
-		if !ok {
-			break // an option hash, not another requirement
-		}
-		requirements = append(requirements, line[start:end])
-		i = end + 1
-	}
-	if text := strings.Join(requirements, ", "); isRubyLiteral(text) {
-		dep.Range = text
-	}
-
-	// A local pod points at a folder in the same repository — the strongest
-	// workspace signal a Podfile carries.
-	if start, end, ok := rubyOption(line, "path"); ok {
-		if path := line[start:end]; isRubyLiteral(path) {
-			dep.LocalPath = path
-		}
-	}
-	return dep, true
+	return rubyDeclaration(line, args, kind)
 }

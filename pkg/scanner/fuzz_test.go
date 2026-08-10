@@ -18,6 +18,9 @@ var fuzzManifestNames = []string{
 	"Info.plist", "AndroidManifest.xml", "libs.versions.toml",
 	"project.pbxproj", "Podfile", "Acme.podspec",
 	"build.gradle", "build.gradle.kts",
+	"Gemfile", "acme.gemspec",
+	"Acme.nuspec", "Directory.Packages.props", "packages.config",
+	"App.fsproj", "App.vbproj",
 }
 
 func FuzzParsers(f *testing.F) {
@@ -42,6 +45,11 @@ func FuzzParsers(f *testing.F) {
 		"Pod::Spec.new do |s|\n  s.name = 'A'\n  s.version = '1.0'\n  s.dependency 'B', '~> 1'\nend\n",
 		"android {\n defaultConfig {\n versionName \"1.0\"\n }\n}\ndependencies {\n implementation 'g:a:1'\n}\n",
 		"dependencies {\n implementation(project(\":core\"))\n /* unterminated",
+		"source 'https://rubygems.org'\ngem 'rails', '~> 7.0'\ngroup :test do\n gem 'rspec'\nend\n",
+		"Gem::Specification.new do |s|\n s.name = 'a'\n s.version = A::VERSION\n s.add_dependency 'b', '~> 1'\nend\n",
+		"<package><metadata><id>$id$</id><version>1</version><dependencies><group><dependency id=\"a\" version=\"1\"/></group></dependencies></metadata></package>",
+		"<Project><ItemGroup><PackageVersion Include=\"a\" Version=\"1\"/></ItemGroup></Project>",
+		"<packages><package id=\"a\" version=\"1\" developmentDependency=\"true\"/></packages>",
 	}
 	for _, s := range seeds {
 		f.Add(s)

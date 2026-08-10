@@ -264,7 +264,46 @@ func TestGradleBuildRewriteNoChangeLeavesFileAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Applied) != 0 || read(t, path) != src || !after.ModTime().Equal(before.ModTime()) {
-		t.Errorf("no-op rewrite touched the file: %+v", res)
+	// Nothing was written, so nothing may be reported as written — and a
+	// declaration that was already correct is neither applied nor missing.
+	if len(res.Applied) != 0 || res.VersionWritten || len(res.Missing) != 0 {
+		t.Errorf("no-op rewrite reported work: %+v", res)
+	}
+	if read(t, path) != src || !after.ModTime().Equal(before.ModTime()) {
+		t.Error("no-op rewrite touched the file")
+	}
+}
+
+func TestGradleBuildRewriteSeparatesChangedFromAlreadyCorrect(t *testing.T) {
+	// One edit moves, one is already at the wanted range. Only the mover is
+	// applied, and neither is missing — the same split rewriteNpm reports.
+	src := `android {
+    defaultConfig {
+        versionName "2.0.0"
+    }
+}
+
+dependencies {
+    implementation 'com.acme:moves:1.0.0'
+    implementation 'com.acme:stays:9.9.9'
+}
+`
+	path := seed(t, "build.gradle", src)
+	res, err := Rewrite(path, "2.0.0", []Edit{
+		{Name: "com.acme:moves", Range: "2.0.0"},
+		{Name: "com.acme:stays", Range: "9.9.9"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 1 || res.Applied[0].Name != "com.acme:moves" {
+		t.Errorf("only the changed edit is applied: %+v", res.Applied)
+	}
+	if len(res.Missing) != 0 {
+		t.Errorf("an already-correct declaration is not missing: %+v", res.Missing)
+	}
+	// The version already read 2.0.0, so nothing was written for it.
+	if res.VersionWritten {
+		t.Error("an unchanged version must not report as written")
 	}
 }

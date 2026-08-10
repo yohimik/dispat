@@ -208,14 +208,32 @@ func TestRequirementsRewritePreservesLayoutAndComments(t *testing.T) {
 }
 
 func TestRewriteDispatch(t *testing.T) {
-	if !Supported("a/b/package.json") || !Supported("go.mod") || Supported("Cargo.toml") {
+	if !Supported("a/b/package.json") || !Supported("go.mod") || Supported("settings.gradle") {
 		t.Error("Supported dispatches on the file name")
 	}
 	if !Supported("requirements.txt") || !Supported("dev-requirements.txt") || Supported("readme.txt") {
 		t.Error("requirements files are recognised by pattern")
 	}
-	if _, err := Rewrite("Cargo.toml", "", nil); !errors.Is(err, ErrUnsupportedManifest) {
+	if _, err := Rewrite("settings.gradle", "", nil); !errors.Is(err, ErrUnsupportedManifest) {
 		t.Errorf("unsupported manifests must return ErrUnsupportedManifest, got %v", err)
+	}
+}
+
+func TestEveryScannedEcosystemHasAWriter(t *testing.T) {
+	// The two halves are meant to cover the same ground; this is the list that
+	// says so. A format the scanner learns to read should fail here until it
+	// can be written too.
+	for _, name := range []string{
+		"package.json", "go.mod", "requirements.txt", "Cargo.toml", "pyproject.toml",
+		"composer.json", "pom.xml", "App.csproj", "pubspec.yaml", "pubspec.yml",
+		"Info.plist", "AndroidManifest.xml", "libs.versions.toml", "project.pbxproj",
+		"Podfile", "Alamofire.podspec", "build.gradle", "build.gradle.kts",
+		"Gemfile", "acme.gemspec", "Acme.nuspec", "Directory.Packages.props",
+		"packages.config", "App.fsproj", "App.vbproj",
+	} {
+		if !Supported(name) {
+			t.Errorf("%s is scanned but has no writer", name)
+		}
 	}
 }
 

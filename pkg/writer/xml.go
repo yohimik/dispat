@@ -28,6 +28,38 @@ func xmlWellFormed(data []byte) error {
 	}
 }
 
+// xmlElementTextSpan measures the content of the element the decoder has just
+// entered, consuming through its closing tag. A self-closing element has no
+// content bytes to splice into — writing after the tag would land the value
+// outside the element — so it reports spliceable=false, as does an element
+// holding anything other than text.
+func xmlElementTextSpan(dec *xml.Decoder, data []byte) (s span, text string, spliceable bool, err error) {
+	start := dec.InputOffset()
+	var b []byte
+	for {
+		prev := dec.InputOffset()
+		tok, err := dec.Token()
+		if err != nil {
+			return span{}, "", false, err
+		}
+		switch t := tok.(type) {
+		case xml.CharData:
+			b = append(b, t...)
+		case xml.StartElement:
+			// A nested element means this is not a text value; skip it whole
+			// and give up on splicing here.
+			if err := dec.Skip(); err != nil {
+				return span{}, "", false, err
+			}
+		case xml.EndElement:
+			if !bytes.HasPrefix(data[prev:], []byte("</")) {
+				return span{}, "", false, nil // self-closing
+			}
+			return span{start: start, end: prev}, string(b), true, nil
+		}
+	}
+}
+
 // attrValueSpan locates the quoted value of the named attribute inside one
 // element's raw bytes: the window is a single start tag, already known to
 // carry the attribute, so the scan cannot stray into the rest of the document.

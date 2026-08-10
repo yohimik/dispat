@@ -17,11 +17,21 @@ type span struct{ start, end int64 }
 // value's exact span, then the spans are spliced back to front. Everything
 // else — indentation, key order, trailing newline — is untouched bytes.
 func rewriteNpm(path, version string, edits []Edit) (Result, error) {
+	// A package.json names its dependency objects after the kinds themselves,
+	// so the field an edit targets is just the kind spelled out.
+	return rewriteJSON(path, version, edits, func(e Edit) string { return e.Kind.String() })
+}
+
+// rewriteJSON is the byte-precise JSON splice shared by package.json and
+// composer.json. The two formats differ only in what their dependency objects
+// are called, which fieldOf resolves; everything else — the single tokenising
+// pass, the back-to-front splice, the re-validation — is identical.
+func rewriteJSON(path, version string, edits []Edit, fieldOf func(Edit) string) (Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{}, err
 	}
-	spans, versionSpan, err := npmSpans(data, edits)
+	spans, versionSpan, err := npmSpans(data, edits, fieldOf)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -86,14 +96,18 @@ func quote(s string) []byte {
 
 // npmSpans locates, in one pass over the token stream, the value span of the
 // manifest's own top-level "version" and of each edit's dependency entry
-// inside its field object. Returned spans are keyed by edit index.
-func npmSpans(data []byte, edits []Edit) (map[int]span, *span, error) {
+// inside its field object. fieldOf names the object an edit targets. Returned
+// spans are keyed by edit index.
+func npmSpans(data []byte, edits []Edit, fieldOf func(Edit) string) (map[int]span, *span, error) {
 	// Which top-level field objects hold edits, and which names inside them.
 	type target struct{ field, name string }
 	wanted := make(map[target]int, len(edits))
 	fields := make(map[string]bool, len(edits))
 	for i, e := range edits {
-		f := e.Kind.String() // spells the zero kind out as "dependencies"
+		f := fieldOf(e)
+		if f == "" {
+			continue // a kind this format has no object for
+		}
 		wanted[target{f, e.Name}] = i
 		fields[f] = true
 	}

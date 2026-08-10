@@ -88,11 +88,12 @@ dispat stands on the shoulders of two things:
 - **[manifest](./pkg/manifest)**: the shared manifest vocabulary (dependency kinds, manifest file-name rules, name
   normalisation) that keeps the scanner and writer halves in perfect agreement.
 - **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library: package.json, go.mod, Cargo.toml,
-  pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml and requirements files parsed into one ecosystem-neutral
-  shape, plus the mobile platforms — Info.plist, project.pbxproj, Podfile and .podspec on iOS, AndroidManifest.xml,
-  Gradle version catalogs and build scripts on Android; the library behind `dispat compute` and auto-versioning.
-- **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for package.json,
-  go.mod, requirements files and every mobile manifest the scanner reads, with atomic writes and validated output.
+  pyproject.toml, composer.json, pom.xml, the .NET project/nuspec/packages family, pubspec.yaml, Gemfile, .gemspec and
+  requirements files parsed into one ecosystem-neutral shape, plus the mobile platforms — Info.plist, project.pbxproj,
+  Podfile and .podspec on iOS, AndroidManifest.xml, Gradle version catalogs and build scripts on Android; the library
+  behind `dispat compute` and auto-versioning.
+- **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for **every** manifest
+  the scanner reads, with atomic writes and validated output.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 
@@ -100,9 +101,9 @@ dispat stands on the shoulders of two things:
 
 - **Extendable config.** Configuration will be splittable across multiple files, so large monorepos don't have to keep
   every space and package declaration in one flat file.
-- **Auto versioning for more languages.** Native manifest writers beyond `package.json`, `go.mod` and
-  `requirements*.txt` (Cargo.toml, pyproject.toml, ...), so more ecosystems get automatic bump treatment without
-  hand-rolled scripts.
+- **Build numbers for mobile releases.** The mobile manifests carry a monotonic counter beside their marketing version
+  (`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`). The scanner reads it, but nothing computes one
+  yet, so bumping it still belongs to a `flow.version` script.
 
 ## Projects using dispat (Real-world examples)
 

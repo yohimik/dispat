@@ -146,9 +146,43 @@ func TestRewriteDispatchCoversMobileManifests(t *testing.T) {
 			t.Errorf("%s should have a writer", name)
 		}
 	}
-	for _, name := range []string{"Cargo.toml", "pom.xml", "Podfilex", "notes.podspec.txt"} {
+	// The suffix and exact-name rules must not over-match: a file that merely
+	// contains a manifest's name is not one.
+	for _, name := range []string{"Podfilex", "notes.podspec.txt", "settings.gradle", "Gemfile.lock"} {
 		if Supported(name) {
 			t.Errorf("%s should not have a writer", name)
 		}
+	}
+}
+
+func TestPodfileRewriteSeparatesChangedFromAlreadyCorrect(t *testing.T) {
+	// A pod declared in both an app target and its test target is spliced in
+	// both places but is one edit, so it is reported once. The pod that was
+	// already at the wanted requirement is neither applied nor missing.
+	src := `target 'Acme' do
+  pod 'Shared', '~> 1.0'
+  pod 'Stays', '9.9.9'
+
+  target 'AcmeTests' do
+    pod 'Shared', '~> 1.0'
+  end
+end
+`
+	path := seed(t, "Podfile", src)
+	res, err := Rewrite(path, "", []Edit{
+		{Name: "Shared", Range: "~> 2.0"},
+		{Name: "Stays", Range: "9.9.9"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(read(t, path), "'~> 2.0'") != 2 {
+		t.Errorf("both declarations must be spliced: %q", read(t, path))
+	}
+	if len(res.Applied) != 1 || res.Applied[0].Name != "Shared" {
+		t.Errorf("one edit, reported once: %+v", res.Applied)
+	}
+	if len(res.Missing) != 0 {
+		t.Errorf("an already-correct declaration is not missing: %+v", res.Missing)
 	}
 }

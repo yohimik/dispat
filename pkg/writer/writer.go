@@ -4,18 +4,27 @@
 // writing counterpart of the scanner package and shares its field-name
 // spelling for dependency kinds.
 //
-// Writers exist for package.json (byte-precise JSON scalar replacement),
-// go.mod (via golang.org/x/mod/modfile, format-preserving by design),
-// requirements files (per-line splicing) and the mobile manifests: Info.plist,
-// AndroidManifest.xml, project.pbxproj, Gradle version catalogs and build
-// scripts, Podfiles and podspecs. The remaining scanner-supported ecosystems
-// (Cargo, pyproject, composer, Maven, NuGet, pub) are read-only here.
+// Every ecosystem the scanner reads has a writer here: package.json and
+// composer.json (byte-precise JSON scalar replacement), go.mod (via
+// golang.org/x/mod/modfile, format-preserving by design), Cargo.toml,
+// pyproject.toml and Gradle version catalogs (TOML span splicing), pom.xml and
+// .csproj (XML span splicing), requirements files, pubspec.yaml, Podfiles,
+// podspecs, Gemfiles and gemspecs (per-line splicing), and the platform
+// manifests Info.plist, AndroidManifest.xml, project.pbxproj and Gradle build
+// scripts.
 //
-// Every writer proves its output parses before a byte lands on disk. The three
+// Every writer proves its output parses before a byte lands on disk. The
 // formats with no cheap grammar to check against — the Xcode project file, the
-// CocoaPods manifests and the Gradle build scripts — instead refuse any
-// replacement carrying a byte that could end a literal, require the file's
-// brace balance to be unchanged, and re-run the reader over the result.
+// Ruby manifests and the Gradle build scripts — instead refuse any replacement
+// carrying a byte that could end a literal, require the file's brace balance to
+// be unchanged, and re-run the reader over the result.
+//
+// A value deferring to something outside the file is left alone rather than
+// replaced with a literal, since overwriting it would sever the indirection it
+// exists for: a Maven ${property}, a Cargo workspace inheritance, an Xcode
+// $(MARKETING_VERSION), a gemspec's version constant, and a pom's parent
+// version, which selects what the module inherits from rather than what it
+// ships.
 //
 // Build numbers (CFBundleVersion, android:versionCode,
 // CURRENT_PROJECT_VERSION) are deliberately not written: they are monotonic
@@ -99,16 +108,40 @@ func dispatch(base string) (rewriteFunc, bool) {
 		return rewritePodspec, true
 	case base == "build.gradle", base == "build.gradle.kts":
 		return rewriteGradleBuild, true
+	case base == "Gemfile":
+		return func(path, _ string, edits []Edit) (Result, error) { return rewriteGemfile(path, edits) }, true
+	case strings.HasSuffix(base, ".gemspec"):
+		return rewriteGemspec, true
+	case base == "Cargo.toml":
+		return rewriteCargo, true
+	// F# and VB projects share the SDK-style schema the C# writer handles.
+	case strings.HasSuffix(base, ".csproj"), strings.HasSuffix(base, ".fsproj"),
+		strings.HasSuffix(base, ".vbproj"):
+		return rewriteCsproj, true
+	case strings.HasSuffix(base, ".nuspec"):
+		return rewriteNuspec, true
+	case base == "Directory.Packages.props":
+		return func(path, _ string, edits []Edit) (Result, error) { return rewritePackagesProps(path, edits) }, true
+	case base == "packages.config":
+		return func(path, _ string, edits []Edit) (Result, error) { return rewritePackagesConfig(path, edits) }, true
+	case base == "composer.json":
+		return rewriteComposer, true
+	case base == "pom.xml":
+		return rewriteMaven, true
+	case base == "pubspec.yaml", base == "pubspec.yml":
+		return rewritePubspec, true
+	case base == "pyproject.toml":
+		return rewritePyproject, true
 	}
 	return nil, false
 }
 
 // Rewrite applies the edits to the manifest file at path, dispatching on the
-// file name (package.json, go.mod, requirements*.txt). version, when
-// non-empty, also rewrites the manifest's own version field where the format
-// has one (go.mod and requirements files have none; the parameter is ignored
-// for them and Result.VersionWritten stays false). The file is rewritten only
-// when something changed.
+// file name. version, when non-empty, also rewrites the manifest's own version
+// field where the format has one — go.mod, requirements files, Podfiles,
+// Gemfiles and the flat NuGet dependency lists have none, so the parameter is
+// ignored for them and Result.VersionWritten stays false. The file is
+// rewritten only when something changed.
 func Rewrite(path, version string, edits []Edit) (Result, error) {
 	for _, e := range edits {
 		// The long spelling "dependencies" is accepted as a convenience for

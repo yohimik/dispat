@@ -82,13 +82,14 @@ const (
 	EcosystemPython    = "python"    // pyproject.toml (PEP 621 and Poetry)
 	EcosystemComposer  = "composer"  // composer.json
 	EcosystemMaven     = "maven"     // pom.xml
-	EcosystemNuGet     = "nuget"     // *.csproj
+	EcosystemNuGet     = "nuget"     // *.csproj, *.nuspec, packages.config
 	EcosystemPub       = "pub"       // pubspec.yaml
 	EcosystemPlist     = "plist"     // Info.plist
 	EcosystemCocoaPods = "cocoapods" // Podfile, *.podspec
 	EcosystemXcode     = "xcode"     // project.pbxproj
 	EcosystemAndroid   = "android"   // AndroidManifest.xml
 	EcosystemGradle    = "gradle"    // libs.versions.toml, build.gradle(.kts)
+	EcosystemRubyGems  = "rubygems"  // Gemfile, *.gemspec
 )
 
 // Manifest is one parsed manifest file.
@@ -155,14 +156,23 @@ var parsers = map[string]parseFunc{
 	"Podfile":            parsePodfile,
 	"build.gradle":       parseGradleBuild,
 	"build.gradle.kts":   parseGradleBuild,
+	"Gemfile":            parseGemfile,
+	// The two NuGet formats that are dependency lists rather than projects.
+	"Directory.Packages.props": parsePackagesProps,
+	"packages.config":          parsePackagesConfig,
 }
 
 // suffixParsers recognise manifests by file extension — .NET projects name
 // the file after the project (App.csproj), so an exact-name table cannot
 // hold them.
 var suffixParsers = map[string]parseFunc{
+	// F# and VB projects share the SDK-style schema the C# parser reads.
 	".csproj":  parseCsproj,
+	".fsproj":  parseCsproj,
+	".vbproj":  parseCsproj,
+	".nuspec":  parseNuspec,
 	".podspec": parsePodspec,
+	".gemspec": parseGemspec,
 }
 
 // patternParsers recognise manifests by an arbitrary name predicate — the

@@ -184,6 +184,53 @@ func rubyOption(line, key string) (start, end int, ok bool) {
 	return 0, 0, false
 }
 
+// rubyDeclaration reads a dependency statement whose arguments begin at args:
+// a quoted name, any number of version requirements, then an option hash. Both
+// package managers this package reads spell it the same way — CocoaPods'
+// `pod 'A', '~> 1'` and Bundler's `gem 'a', '~> 1'` differ only in the method
+// name — and so do a podspec's `dependency` and a gemspec's `add_dependency`.
+func rubyDeclaration(line string, args int, kind Kind) (DeclaredDep, bool) {
+	start, end, ok := rubyQuoted(line, args)
+	if !ok {
+		return DeclaredDep{}, false
+	}
+	dep := DeclaredDep{Name: line[start:end], Kind: kind}
+	if dep.Name == "" {
+		return DeclaredDep{}, false
+	}
+
+	// Any number of requirements may follow the name, each its own argument:
+	// `gem 'pg', '>= 0.18', '< 2.0'`. They are one constraint, so they are
+	// reported as one range.
+	var requirements []string
+	for i := end + 1; i < len(line); {
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i++
+		}
+		if i >= len(line) || line[i] != ',' {
+			break
+		}
+		start, end, ok := rubyQuoted(line, i+1)
+		if !ok {
+			break // an option hash, not another requirement
+		}
+		requirements = append(requirements, line[start:end])
+		i = end + 1
+	}
+	if text := strings.Join(requirements, ", "); isRubyLiteral(text) {
+		dep.Range = text
+	}
+
+	// A local dependency points at a folder in the same repository — the
+	// strongest workspace signal either format carries.
+	if start, end, ok := rubyOption(line, "path"); ok {
+		if path := line[start:end]; isRubyLiteral(path) {
+			dep.LocalPath = path
+		}
+	}
+	return dep, true
+}
+
 // isRubyNameByte reports a byte that may appear in a Ruby identifier.
 func isRubyNameByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'

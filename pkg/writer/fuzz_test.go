@@ -188,3 +188,158 @@ func FuzzRewriteGradleBuild(f *testing.F) {
 		}
 	})
 }
+
+func FuzzRewriteCargo(f *testing.F) {
+	for _, s := range []string{
+		"[package]\nversion = \"1.0\"\n[dependencies]\nserde = \"1.0\"\n",
+		"[dependencies]\ncore = { path = \"../core\", version = \"0.3\" }\n",
+		"[dependencies]\np = { package = \"real\", version = \"1\" }\n",
+		"[dependencies]\nw = { workspace = true }\n",
+		"[package]\nversion = { workspace = true }\n", "[", "", "a = ",
+	} {
+		f.Add(s, "serde", "2.0", "9.9")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "Cargo.toml", content, version, []Edit{{Name: name, Range: rng}})
+		var in, out map[string]any
+		if ok && toml.Unmarshal([]byte(content), &in) == nil && toml.Unmarshal(data, &out) != nil {
+			t.Fatalf("rewrite corrupted valid TOML:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewritePyproject(f *testing.F) {
+	for _, s := range []string{
+		"[project]\nversion = \"1.0\"\ndependencies = [\n  \"requests>=2.0\",\n]\n",
+		"[project]\ndependencies = [\"a\", \"b>=1\"]\n",
+		"[project.optional-dependencies]\ncli = [\"rich>=13\"]\n",
+		"[tool.poetry.dependencies]\nhttpx = \"^0.27\"\n",
+		"[tool.poetry.group.test.dependencies]\np = { version = \"^8\" }\n",
+		"[project]\ndependencies = [", "[", "", "dependencies = ]",
+	} {
+		f.Add(s, "requests", ">=3", "9.9")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "pyproject.toml", content, version, []Edit{{Name: name, Range: rng}})
+		var in, out map[string]any
+		if ok && toml.Unmarshal([]byte(content), &in) == nil && toml.Unmarshal(data, &out) != nil {
+			t.Fatalf("rewrite corrupted valid TOML:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteComposer(f *testing.F) {
+	for _, s := range []string{
+		`{"version":"1.0","require":{"a/b":"^1.0"},"require-dev":{"c/d":"^2"}}`,
+		`{"require":{"a/b":{"version":"1"}}}`, `{"require":[]}`, `{`, ``, `{"version":1}`,
+	} {
+		f.Add(s, "a/b", "^2.0", "2.0")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "composer.json", content, version, []Edit{{Name: name, Range: rng}})
+		if ok && json.Valid([]byte(content)) && !json.Valid(data) {
+			t.Fatalf("rewrite corrupted valid JSON:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteMaven(f *testing.F) {
+	for _, s := range []string{
+		"<project><version>1.0</version><dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId><version>1</version></dependency></dependencies></project>",
+		"<project><parent><version>1</version></parent><version>2</version></project>",
+		"<project><dependencies><dependency><groupId>g</groupId><artifactId>a</artifactId><version>${p}</version></dependency></dependencies></project>",
+		"<project/>", "<project", "", "<project><version/></project>",
+	} {
+		f.Add(s, "g:a", "2.0", "9.9")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "pom.xml", content, version, []Edit{{Name: name, Range: rng}})
+		if ok && xmlWellFormed([]byte(content)) == nil && xmlWellFormed(data) != nil {
+			t.Fatalf("rewrite corrupted well-formed XML:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteCsproj(f *testing.F) {
+	for _, s := range []string{
+		`<Project><PropertyGroup><Version>1.0</Version></PropertyGroup><ItemGroup><PackageReference Include="A" Version="1.0" /></ItemGroup></Project>`,
+		`<Project><ItemGroup><PackageReference Include="A"><Version>1.0</Version></PackageReference></ItemGroup></Project>`,
+		`<Project><ItemGroup><PackageReference Include="A" /></ItemGroup></Project>`,
+		`<Project/>`, `<Project`, ``,
+	} {
+		f.Add(s, "A", "2.0", "9.9")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "A.csproj", content, version, []Edit{{Name: name, Range: rng}})
+		if ok && xmlWellFormed([]byte(content)) == nil && xmlWellFormed(data) != nil {
+			t.Fatalf("rewrite corrupted well-formed XML:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewritePubspec(f *testing.F) {
+	for _, s := range []string{
+		"name: a\nversion: 1.0.0\ndependencies:\n  http: ^1.0.0\n",
+		"dependencies:\n  q: \"^2.0\"\n  local:\n    path: ../l\n",
+		"dev_dependencies:\n  test: ^1.0\n", "version:", "", ":\n",
+	} {
+		f.Add(s, "http", "^2.0", "2.0.0")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "pubspec.yaml", content, version, []Edit{{Name: name, Range: rng}})
+		if ok && strings.Count(content, "\n") != strings.Count(string(data), "\n") {
+			t.Fatalf("rewrite changed the line count:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteGemfile(f *testing.F) {
+	for _, s := range []string{
+		"source 'https://rubygems.org'\ngem 'rails', '~> 7.0'\n",
+		"group :development do\n  gem 'rspec', '~> 3.0'\nend\n",
+		"gem 'a', path: '../a'\n", "gem 'a'\n", "gem '", "",
+	} {
+		f.Add(s, "rails", "~> 7.1")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng string) {
+		data, ok := fuzzRewrite(t, "Gemfile", content, "", []Edit{{Name: name, Range: rng}})
+		if ok && strings.Count(content, "\n") != strings.Count(string(data), "\n") {
+			t.Fatalf("rewrite changed the line count:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteNuspec(f *testing.F) {
+	for _, s := range []string{
+		`<package><metadata><id>A</id><version>1.0</version><dependencies><dependency id="B" version="1"/></dependencies></metadata></package>`,
+		`<package><metadata><version>$version$</version></metadata></package>`,
+		`<package><metadata><dependencies><group><dependency id="B" version="1"/></group></dependencies></metadata></package>`,
+		`<package><metadata><version/></metadata></package>`, `<package`, ``,
+	} {
+		f.Add(s, "B", "2.0", "2.0.0")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		data, ok := fuzzRewrite(t, "A.nuspec", content, version, []Edit{{Name: name, Range: rng}})
+		if ok && xmlWellFormed([]byte(content)) == nil && xmlWellFormed(data) != nil {
+			t.Fatalf("rewrite corrupted well-formed XML:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteNuGetLists(f *testing.F) {
+	for _, s := range []string{
+		`<Project><ItemGroup><PackageVersion Include="A" Version="1.0"/></ItemGroup></Project>`,
+		`<packages><package id="A" version="1.0"/></packages>`,
+		`<packages><package id="A"/></packages>`, `<Project/>`, `<packages`, ``,
+	} {
+		f.Add(s, "A", "2.0")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng string) {
+		for _, file := range []string{"Directory.Packages.props", "packages.config"} {
+			data, ok := fuzzRewrite(t, file, content, "", []Edit{{Name: name, Range: rng}})
+			if ok && xmlWellFormed([]byte(content)) == nil && xmlWellFormed(data) != nil {
+				t.Fatalf("%s: rewrite corrupted well-formed XML:\n in: %q\nout: %q", file, content, data)
+			}
+		}
+	})
+}

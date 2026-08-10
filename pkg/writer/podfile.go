@@ -39,7 +39,12 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 		}
 	}
 
+	// found records the declarations located, which decides what is missing;
+	// applied records the ones a splice actually moved. Indexing both by edit
+	// keeps a pod declared in several targets — an app's and its test target's,
+	// the ordinary case — from being reported twice.
 	var res Result
+	found := make(map[int]bool, len(edits))
 	applied := make(map[int]bool, len(edits))
 	lines := strings.Split(string(data), "\n")
 	changed := false
@@ -80,19 +85,24 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 		if !spliceable {
 			continue // left for the missing sweep below
 		}
-		applied[i] = true
+		found[i] = true
 		if current := line[req.start:req.end]; current == edits[i].Range {
 			continue // already the wanted text: no change, not missing
 		}
 		if !isRubyWritable(edits[i].Range) {
 			return res, fmt.Errorf("%s: refusing to write %q into a Ruby literal", path, edits[i].Range)
 		}
-		res.Applied = append(res.Applied, edits[i])
+		applied[i] = true
 		lines[li] = raw[:req.start] + edits[i].Range + raw[req.end:]
 		changed = true
 	}
+	// Reported in edit order rather than line order, so the result does not
+	// depend on where in the file a declaration happens to sit.
 	for i, e := range edits {
-		if !applied[i] {
+		switch {
+		case applied[i]:
+			res.Applied = append(res.Applied, e)
+		case !found[i]:
 			res.Missing = append(res.Missing, e)
 		}
 	}

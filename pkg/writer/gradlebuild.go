@@ -38,28 +38,38 @@ func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
 		wanted[e.Name] = i
 	}
 
+	// found records the declarations located, which decides what is missing;
+	// applied records the ones a splice actually moved. Keeping them apart is
+	// what lets a caller tell "already correct" from "rewritten" the way every
+	// other writer here does, and indexing both by edit keeps one coordinate
+	// declared under several configurations from being reported twice.
 	var (
-		res       Result
-		scope     []string
-		inComment bool
-		applied   = make(map[int]bool, len(edits))
-		lines     = strings.Split(string(data), "\n")
-		changed   bool
+		res          Result
+		scope        []string
+		inComment    bool
+		found        = make(map[int]bool, len(edits))
+		applied      = make(map[int]bool, len(edits))
+		versionFound bool
+		lines        = strings.Split(string(data), "\n")
+		changed      bool
 	)
 	for li, raw := range lines {
 		var masked string
 		masked, inComment = gradleMask(raw, inComment)
 
 		switch {
-		case version != "" && !res.VersionWritten && gradleScopeHas(scope, "defaultConfig"):
+		case version != "" && !versionFound && gradleScopeHas(scope, "defaultConfig"):
 			start, end, ok := gradlePropertySpan(masked, "versionName")
-			if ok && raw[start:end] != version {
-				lines[li] = raw[:start] + version + raw[end:]
-				res.VersionWritten = true
-				changed = true
-			} else if ok {
-				res.VersionWritten = true // already the wanted text
+			if !ok {
+				break
 			}
+			versionFound = true
+			if raw[start:end] == version {
+				break // already the wanted text: no change
+			}
+			lines[li] = raw[:start] + version + raw[end:]
+			res.VersionWritten = true
+			changed = true
 		case gradleScopeHas(scope, "dependencies") && !gradleScopeHas(scope, "buildscript"):
 			name, start, end, ok := gradleCoordinateSpan(raw, masked)
 			if !ok {
@@ -69,24 +79,27 @@ func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
 			if !want {
 				break
 			}
-			applied[i] = true
+			found[i] = true
 			if raw[start:end] == edits[i].Range {
 				break // already the wanted text: no change, not missing
 			}
+			applied[i] = true
 			lines[li] = raw[:start] + edits[i].Range + raw[end:]
 			changed = true
 		}
 		scope = gradleUpdateScope(scope, raw, masked)
 	}
+	// Reported in edit order rather than line order, so the result does not
+	// depend on where in the file a declaration happens to sit.
 	for i, e := range edits {
-		if applied[i] {
+		switch {
+		case applied[i]:
 			res.Applied = append(res.Applied, e)
-			continue
+		case !found[i]:
+			res.Missing = append(res.Missing, e)
 		}
-		res.Missing = append(res.Missing, e)
 	}
 	if !changed {
-		res.Applied = nil
 		return res, nil
 	}
 
