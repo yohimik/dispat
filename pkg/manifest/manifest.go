@@ -37,20 +37,6 @@ func (k Kind) Valid() bool {
 	return false
 }
 
-// IsRequirementsFile reports a pip requirements file: a .txt whose base name
-// starts or ends with the word "requirements" (requirements.txt,
-// requirements-dev.txt, dev-requirements.txt). A name merely containing the
-// word somewhere in the middle (OLD-REQUIREMENTS-NOTES.txt) is prose, not a
-// manifest.
-func IsRequirementsFile(name string) bool {
-	lower := strings.ToLower(name)
-	if !strings.HasSuffix(lower, ".txt") {
-		return false
-	}
-	words := NameWords(strings.TrimSuffix(lower, ".txt"))
-	return len(words) > 0 && (words[0] == "requirements" || words[len(words)-1] == "requirements")
-}
-
 // NameWords splits a file's base name into its separator-delimited words.
 func NameWords(base string) []string {
 	return strings.FieldsFunc(base, func(r rune) bool {

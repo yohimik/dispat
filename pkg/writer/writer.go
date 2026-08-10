@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/yohimik/dispat/pkg/manifest"
 )
@@ -96,56 +95,59 @@ const maxManifestBytes = 16 << 20
 // rewriteFunc rewrites one manifest format.
 type rewriteFunc func(path, version string, edits []Edit) (Result, error)
 
-// dispatch resolves a manifest file name onto its writer: the one table
-// Supported and Rewrite share, so the two can never disagree.
+// rewriters maps each format pkg/manifest recognises onto its writer. It is
+// the one table Supported and Rewrite share, so the two can never disagree,
+// and it is keyed by the same formats the scanner reads, so a format gaining a
+// reader without a writer leaves a visible hole here.
+var rewriters = map[manifest.Format]rewriteFunc{
+	manifest.FormatNpm:             rewriteNpm,
+	manifest.FormatComposer:        rewriteComposer,
+	manifest.FormatCargo:           rewriteCargo,
+	manifest.FormatPyProject:       rewritePyproject,
+	manifest.FormatMaven:           rewriteMaven,
+	manifest.FormatMSBuildProject:  rewriteCsproj,
+	manifest.FormatNuSpec:          rewriteNuspec,
+	manifest.FormatPubspec:         rewritePubspec,
+	manifest.FormatPlist:           rewritePlist,
+	manifest.FormatAndroidManifest: rewriteAndroidManifest,
+	manifest.FormatXcodeProject:    rewriteXcodeProj,
+	manifest.FormatGradleBuild:     rewriteGradleBuild,
+	manifest.FormatPodspec:         rewritePodspec,
+	manifest.FormatGemspec:         rewriteGemspec,
+
+	// These formats declare no version of their own, so Rewrite's version
+	// argument has no target and is dropped here rather than inside each one.
+	manifest.FormatGoMod: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteGoMod(path, edits)
+	},
+	manifest.FormatRequirements: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteRequirements(path, edits)
+	},
+	manifest.FormatGradleCatalog: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteGradleCatalog(path, edits)
+	},
+	manifest.FormatPackagesProps: func(path, _ string, edits []Edit) (Result, error) {
+		return rewritePackagesProps(path, edits)
+	},
+	manifest.FormatPackagesConfig: func(path, _ string, edits []Edit) (Result, error) {
+		return rewritePackagesConfig(path, edits)
+	},
+	manifest.FormatPodfile: func(path, _ string, edits []Edit) (Result, error) {
+		return rewritePodfile(path, edits)
+	},
+	manifest.FormatGemfile: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteGemfile(path, edits)
+	},
+}
+
+// dispatch resolves a manifest file name onto its writer.
 func dispatch(base string) (rewriteFunc, bool) {
-	switch {
-	case base == "package.json":
-		return rewriteNpm, true
-	case base == "go.mod":
-		return func(path, _ string, edits []Edit) (Result, error) { return rewriteGoMod(path, edits) }, true
-	case isRequirementsFile(base):
-		return func(path, _ string, edits []Edit) (Result, error) { return rewriteRequirements(path, edits) }, true
-	case base == "Info.plist":
-		return rewritePlist, true
-	case base == "AndroidManifest.xml":
-		return rewriteAndroidManifest, true
-	case base == "libs.versions.toml":
-		return func(path, _ string, edits []Edit) (Result, error) { return rewriteGradleCatalog(path, edits) }, true
-	case base == "project.pbxproj":
-		return rewriteXcodeProj, true
-	case base == "Podfile":
-		return func(path, _ string, edits []Edit) (Result, error) { return rewritePodfile(path, edits) }, true
-	case strings.HasSuffix(base, ".podspec"):
-		return rewritePodspec, true
-	case base == "build.gradle", base == "build.gradle.kts":
-		return rewriteGradleBuild, true
-	case base == "Gemfile":
-		return func(path, _ string, edits []Edit) (Result, error) { return rewriteGemfile(path, edits) }, true
-	case strings.HasSuffix(base, ".gemspec"):
-		return rewriteGemspec, true
-	case base == "Cargo.toml":
-		return rewriteCargo, true
-	// F# and VB projects share the SDK-style schema the C# writer handles.
-	case strings.HasSuffix(base, ".csproj"), strings.HasSuffix(base, ".fsproj"),
-		strings.HasSuffix(base, ".vbproj"):
-		return rewriteCsproj, true
-	case strings.HasSuffix(base, ".nuspec"):
-		return rewriteNuspec, true
-	case base == "Directory.Packages.props":
-		return func(path, _ string, edits []Edit) (Result, error) { return rewritePackagesProps(path, edits) }, true
-	case base == "packages.config":
-		return func(path, _ string, edits []Edit) (Result, error) { return rewritePackagesConfig(path, edits) }, true
-	case base == "composer.json":
-		return rewriteComposer, true
-	case base == "pom.xml":
-		return rewriteMaven, true
-	case base == "pubspec.yaml", base == "pubspec.yml":
-		return rewritePubspec, true
-	case base == "pyproject.toml":
-		return rewritePyproject, true
+	format, ok := manifest.FormatOf(base)
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	rewrite, ok := rewriters[format]
+	return rewrite, ok
 }
 
 // Rewrite applies the edits to the manifest file at path, dispatching on the

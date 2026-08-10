@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // write lays a file down under dir, creating parents.
@@ -319,5 +322,20 @@ func TestScanRootErrorPaths(t *testing.T) {
 	cancel()
 	if _, err := New().ScanRoot(ctx, dir); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled scan: got %v, want context.Canceled", err)
+	}
+}
+
+func TestEveryFormatHasAParser(t *testing.T) {
+	// pkg/manifest names the formats; this is the reader's half of covering
+	// them. The writer keeps the matching list, so the two cannot drift.
+	for _, f := range manifest.Formats {
+		if _, ok := parsers[f]; !ok {
+			t.Errorf("format %q has no parser", f)
+		}
+	}
+	for f := range parsers {
+		if !slices.Contains(manifest.Formats, f) {
+			t.Errorf("parser registered for %q, which pkg/manifest does not list", f)
+		}
 	}
 }

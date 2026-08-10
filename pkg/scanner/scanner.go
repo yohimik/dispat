@@ -136,70 +136,42 @@ type Scanner interface {
 // relative to the scanned folder (slash-separated).
 type parseFunc func(rel string, data []byte) (Manifest, error)
 
-// parsers maps exact manifest file names onto their parsers.
-var parsers = map[string]parseFunc{
-	"package.json":        parseNpm,
-	"go.mod":              parseGoMod,
-	"Cargo.toml":          parseCargo,
-	"pyproject.toml":      parsePython,
-	"composer.json":       parseComposer,
-	"pom.xml":             parseMaven,
-	"pubspec.yaml":        parsePubspec,
-	"pubspec.yml":         parsePubspec,
-	"Info.plist":          parsePlist,
-	"AndroidManifest.xml": parseAndroidManifest,
-	// Gradle version catalogs live at gradle/libs.versions.toml by
-	// convention, but settings.gradle may declare one anywhere, so the base
-	// name is the honest match.
-	"libs.versions.toml": parseGradleCatalog,
-	"project.pbxproj":    parseXcodeProj,
-	"Podfile":            parsePodfile,
-	"build.gradle":       parseGradleBuild,
-	"build.gradle.kts":   parseGradleBuild,
-	"Gemfile":            parseGemfile,
-	// The two NuGet formats that are dependency lists rather than projects.
-	"Directory.Packages.props": parsePackagesProps,
-	"packages.config":          parsePackagesConfig,
+// parsers maps each format pkg/manifest recognises onto its reader. The file
+// names themselves live there, shared with the writer, so a format cannot be
+// readable here and unwritable there without one of the two lists visibly
+// lacking an entry.
+var parsers = map[manifest.Format]parseFunc{
+	manifest.FormatNpm:             parseNpm,
+	manifest.FormatGoMod:           parseGoMod,
+	manifest.FormatCargo:           parseCargo,
+	manifest.FormatPyProject:       parsePython,
+	manifest.FormatRequirements:    parseRequirements,
+	manifest.FormatComposer:        parseComposer,
+	manifest.FormatMaven:           parseMaven,
+	manifest.FormatMSBuildProject:  parseCsproj,
+	manifest.FormatNuSpec:          parseNuspec,
+	manifest.FormatPackagesProps:   parsePackagesProps,
+	manifest.FormatPackagesConfig:  parsePackagesConfig,
+	manifest.FormatPubspec:         parsePubspec,
+	manifest.FormatPlist:           parsePlist,
+	manifest.FormatAndroidManifest: parseAndroidManifest,
+	manifest.FormatGradleCatalog:   parseGradleCatalog,
+	manifest.FormatGradleBuild:     parseGradleBuild,
+	manifest.FormatXcodeProject:    parseXcodeProj,
+	manifest.FormatPodfile:         parsePodfile,
+	manifest.FormatPodspec:         parsePodspec,
+	manifest.FormatGemfile:         parseGemfile,
+	manifest.FormatGemspec:         parseGemspec,
 }
 
-// suffixParsers recognise manifests by file extension, .NET projects name the
-// file after the project (App.csproj), so an exact-name table cannot hold
-// them.
-var suffixParsers = map[string]parseFunc{
-	// F# and VB projects share the SDK-style schema the C# parser reads.
-	".csproj":  parseCsproj,
-	".fsproj":  parseCsproj,
-	".vbproj":  parseCsproj,
-	".nuspec":  parseNuspec,
-	".podspec": parsePodspec,
-	".gemspec": parseGemspec,
-}
-
-// patternParsers recognise manifests by an arbitrary name predicate: the
-// line-by-line manifest families whose file names vary (requirements.txt,
-// requirements-dev.txt, ...).
-var patternParsers = []struct {
-	match func(name string) bool
-	parse parseFunc
-}{
-	{isRequirementsFile, parseRequirements},
-}
-
-// parserFor resolves a file name onto its parser: by exact name, then by
-// suffix, then by pattern.
+// parserFor resolves a file name onto its parser.
 func parserFor(name string) (parseFunc, bool) {
-	if parse, ok := parsers[name]; ok {
-		return parse, true
+	format, ok := manifest.FormatOf(name)
+	if !ok {
+		return nil, false
 	}
-	if parse, ok := suffixParsers[filepath.Ext(name)]; ok {
-		return parse, true
-	}
-	for _, p := range patternParsers {
-		if p.match(name) {
-			return p.parse, true
-		}
-	}
-	return nil, false
+	parse, ok := parsers[format]
+	return parse, ok
 }
 
 // skipDirs are folder names never descended into: installed dependencies,

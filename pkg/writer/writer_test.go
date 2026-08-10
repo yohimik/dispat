@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // seed writes a manifest into a temp folder and returns its path.
@@ -288,5 +291,21 @@ func TestAtomicWriteErrors(t *testing.T) {
 	}
 	if string(data) != `{"name":"x"}` {
 		t.Errorf("target modified by a failed write: %s", data)
+	}
+}
+
+func TestEveryFormatHasARewriter(t *testing.T) {
+	// pkg/manifest names the formats; this is the writer's half of covering
+	// them. A format added there fails here until it can be written, which is
+	// the drift the shared table exists to prevent.
+	for _, f := range manifest.Formats {
+		if _, ok := rewriters[f]; !ok {
+			t.Errorf("format %q has no writer", f)
+		}
+	}
+	for f := range rewriters {
+		if !slices.Contains(manifest.Formats, f) {
+			t.Errorf("writer registered for %q, which pkg/manifest does not list", f)
+		}
 	}
 }
