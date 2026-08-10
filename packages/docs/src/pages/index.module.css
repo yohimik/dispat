@@ -36,6 +36,19 @@
   font-size: 1.05rem;
 }
 
+.badges {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.badges img {
+  display: block;
+  height: 20px;
+}
+
 .buttons {
   display: flex;
   gap: 1rem;

@@ -99,6 +99,22 @@ function Hero(): React.ReactElement {
           {siteConfig.title}
         </Heading>
         <p className={styles.tagline}>{siteConfig.tagline}</p>
+        {/* The same two badges the repository README carries: the tests workflow
+            and the coverage endpoint the coverage job publishes to the badges
+            branch. The coverage one links to the page that explains the number
+            rather than back to the workflow. */}
+        <div className={styles.badges}>
+          <Link to={`${GITHUB}/actions/workflows/tests.yml`}>
+            <img src={`${GITHUB}/actions/workflows/tests.yml/badge.svg`} alt="tests workflow status" height={20} />
+          </Link>
+          <Link to="/coverage">
+            <img
+              src="https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json"
+              alt="statement coverage"
+              height={20}
+            />
+          </Link>
+        </div>
         <p className={styles.lead}>
           dispat reads conventional commits to track changed packages, computes their next semantic versions
           (propagating bumps to dependants), and builds and publishes them in the right order, in parallel, with
