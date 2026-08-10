@@ -37,6 +37,12 @@ const (
 	cmdChangelog   = "changelog"   // write pending changelog entries now
 	cmdAutoversion = "autoversion" // native manifest reconciliation, plus syncLock
 	cmdCommit      = "commit"      // per-package release commit (--tag, --push)
+
+	// The manifest commands, exposing the pkg/scanner and pkg/writer
+	// libraries directly. Like init, they need no config file and no git
+	// repository: they only ever look at the files they are pointed at.
+	cmdScanner = "scanner" // read what a folder's manifests declare
+	cmdWriter  = "writer"  // edit manifests in place, format-preserving
 )
 
 // Version is the dispat version `--version` reports. The default marks a
@@ -90,8 +96,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	cfgName := fs.String("config", "dispat.json",
 		"config file name, relative to --root; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")
-	fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
-	fs.String("log-format", "", "override the configured logFormat (pretty, json)")
+	logLevel := fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
+	logFormat := fs.String("log-format", "", "override the configured logFormat (pretty, json)")
 	onError := fs.String("on-error", app.OnErrorSkip,
 		"run command: what a failing script does to the failed package's dependents (skip or continue)")
 	since := fs.StringP("since", "s", "",
@@ -136,6 +142,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"autoversion command: override autoVersion.writeVersion")
 	avSyncLock := fs.Bool("sync-lock", true,
 		"autoversion command: run the space's syncLock scripts for changed packages")
+	scanRootOnly := fs.Bool("root-only", false,
+		"scanner command: read only the manifests sitting directly in the folder, without descending")
+	wrSetVersion := fs.String("set-version", "",
+		"writer command: rewrite each manifest's own version field to this version")
+	wrSet := fs.StringArray("set", nil,
+		"writer command: set one dependency's declared range, [kind:]name=range (repeatable)")
+	wrReplace := fs.StringArray("replace", nil,
+		"writer command: point a dependency at a local folder, name=path; an empty path removes the redirect (repeatable)")
+	strict := fs.Bool("strict", false,
+		"scanner and writer commands: exit 1 on a manifest that failed to parse, or an edit the manifest does not declare")
 	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `%s
@@ -171,6 +187,14 @@ commands:
                            --write applies all, --interactive confirms each,
                            --check gates CI; an edge marked keep: true is
                            never suggested for removal
+  scanner [folder]         print what the folder's manifests declare: identity,
+                           ecosystem and every dependency with its range;
+                           --root-only stays out of sub-folders. Needs no
+                           config file and no git repository
+  writer <manifest>...     edit manifests in place, preserving their formatting:
+                           --set-version rewrites the own version, --set sets a
+                           dependency's range, --replace points one at a local
+                           folder. Needs no config file and no git repository
 
 flags:
 %s`, logo, fs.FlagUsages())
@@ -224,6 +248,42 @@ flags:
 			return 1
 		}
 		fmt.Fprintf(stdout, "created %s\n", name)
+		return 0
+	}
+	if cmd == cmdScanner || cmd == cmdWriter {
+		// Also before config loading: these two are the manifest libraries
+		// themselves, and they read nothing but the files named on the
+		// command line. Their logger comes from the flags alone, since there
+		// is no config file behind them to take a level or a format from.
+		log := newLogger(orDefault(*logLevel, "info"), orDefault(*logFormat, "pretty"), stdout)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if cmd == cmdScanner {
+			if app.ScanManifests(ctx, app.ScanOptions{
+				Root: *root, Dir: inv.pkg, RootOnly: *scanRootOnly, Strict: *strict,
+				JSON: *logFormat == "json", Out: stdout, Log: log,
+			}) != nil {
+				return 1
+			}
+			return 0
+		}
+		edits, repls, err := parseEditSpecs(*wrSet, *wrReplace)
+		if err != nil {
+			bootLog.Error().Err(err).Msg("invalid edit")
+			return 2
+		}
+		if *wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
+			bootLog.Error().Msg("writer needs something to write: --set-version, --set or --replace")
+			fs.Usage()
+			return 2
+		}
+		if app.WriteManifests(ctx, app.WriteOptions{
+			Root: *root, Paths: inv.paths, Version: *wrSetVersion,
+			Edits: edits, Replacements: repls, Strict: *strict,
+			JSON: *logFormat == "json", Out: stdout, Log: log,
+		}) != nil {
+			return 1
+		}
 		return 0
 	}
 
@@ -339,6 +399,9 @@ type invocation struct {
 	cmd    string
 	script string // run: the script name
 	pkg    string // run: the optional target package; preview and the step commands: the package
+	// scanner reuses pkg for its optional folder, since both are "the one
+	// thing this command may be pointed at".
+	paths []string // writer: the manifest files to edit
 	// shorthand marks the `dispat <script>` spelling of the run command; only
 	// it narrows to the package the command was invoked from.
 	shorthand bool
@@ -379,6 +442,22 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		if len(rest) == 2 {
 			inv.pkg = rest[1] // no argument: cover every releasing package
 		}
+	case cmdScanner:
+		if len(rest) > 2 {
+			log.Error().Msg("scanner takes at most one argument: the folder to scan")
+			usage()
+			return inv, true
+		}
+		if len(rest) == 2 {
+			inv.pkg = rest[1] // no argument: scan --root itself
+		}
+	case cmdWriter:
+		if len(rest) < 2 {
+			log.Error().Msg("writer requires at least one manifest file to edit")
+			usage()
+			return inv, true
+		}
+		inv.paths = rest[1:]
 	default:
 		// Not a command name: treat the word as a script, so `dispat lint` is
 		// `dispat run lint`. A name nothing defines still fails cleanly
@@ -391,6 +470,15 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		inv.script, inv.cmd, inv.shorthand = inv.cmd, cmdRun, true
 	}
 	return inv, false
+}
+
+// orDefault answers with fallback when the flag was left at its empty
+// "take it from the config" default and there is no config to take it from.
+func orDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // newLogger builds the run logger at the configured level. Format "pretty"
