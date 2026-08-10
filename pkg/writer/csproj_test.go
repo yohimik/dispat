@@ -54,8 +54,13 @@ func TestCsprojRewriteBothVersionForms(t *testing.T) {
 	if !strings.Contains(read(t, path), "<Version>0.0.0-debug</Version>") {
 		t.Error("a later PropertyGroup version was rewritten")
 	}
-	if !res.VersionWritten || len(res.Applied) != 2 || len(res.Missing) != 3 {
+	if !res.VersionWritten || len(res.Applied) != 2 {
 		t.Errorf("result mismatch: %+v", res)
+	}
+	// NoVersion is declared with nothing to replace; the ProjectReference and
+	// the absent package are genuinely not declared as package references.
+	if len(res.Skipped) != 1 || res.Skipped[0].Name != "NoVersion" || len(res.Missing) != 2 {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 

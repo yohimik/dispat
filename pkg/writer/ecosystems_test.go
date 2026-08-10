@@ -92,8 +92,13 @@ func TestMavenRewriteDependencyAndProjectVersion(t *testing.T) {
 	if !strings.Contains(read(t, path), "${acme.version}") {
 		t.Error("a property reference was overwritten with a literal")
 	}
-	if !res.VersionWritten || len(res.Applied) != 1 || len(res.Missing) != 2 {
+	// Both unwritten dependencies are declared: one defers to a property, the
+	// other has no version element. Neither is missing.
+	if !res.VersionWritten || len(res.Applied) != 1 {
 		t.Errorf("result mismatch: %+v", res)
+	}
+	if len(res.Skipped) != 2 || len(res.Missing) != 0 {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 
@@ -139,8 +144,13 @@ dev_dependencies:
 	if !strings.Contains(read(t, path), "sdk: '>=3.0.0 <4.0.0'") {
 		t.Error("the environment constraint was rewritten")
 	}
-	if !res.VersionWritten || len(res.Applied) != 3 || len(res.Missing) != 2 {
+	if !res.VersionWritten || len(res.Applied) != 3 {
 		t.Errorf("result mismatch: %+v", res)
+	}
+	// local is declared as a block, so it is skipped; absent is not declared.
+	if len(res.Skipped) != 1 || res.Skipped[0].Name != "local" ||
+		len(res.Missing) != 1 || res.Missing[0].Name != "absent" {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 

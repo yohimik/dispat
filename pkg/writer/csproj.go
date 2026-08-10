@@ -40,7 +40,7 @@ func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 			wanted[e.Name] = i
 		}
 	}
-	spans, versionSpan, err := csprojSpans(data, wanted)
+	spans, declared, versionSpan, err := csprojSpans(data, wanted)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -56,7 +56,11 @@ func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 	for i, e := range edits {
 		s, ok := spans[i]
 		if !ok {
-			res.Missing = append(res.Missing, e)
+			if declared[i] {
+				res.Skipped = append(res.Skipped, e)
+			} else {
+				res.Missing = append(res.Missing, e)
+			}
 			continue
 		}
 		if string(data[s.start:s.end]) == e.Range {
@@ -93,11 +97,12 @@ func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 
 // csprojSpans locates, in one pass over the token stream, the version span of
 // each wanted PackageReference and of the project's own Version property.
-func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error) {
+func csprojSpans(data []byte, wanted map[string]int) (map[int]span, map[int]bool, *span, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var (
 		path        []string
 		spans       = make(map[int]span)
+		declared    = make(map[int]bool)
 		versionSpan *span
 		pending     = -1 // the PackageReference awaiting its <Version> child
 	)
@@ -105,10 +110,10 @@ func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error
 		prev := dec.InputOffset()
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
-			return spans, versionSpan, nil
+			return spans, declared, versionSpan, nil
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		switch t := tok.(type) {
 		case xml.EndElement:
@@ -131,6 +136,7 @@ func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error
 				if !want {
 					break
 				}
+				declared[i] = true
 				// The attribute form is complete on the start tag itself; the
 				// element form is picked up by the <Version> child below.
 				if xmlHasAttr(t, "Version") {
@@ -145,7 +151,7 @@ func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error
 			case t.Name.Local == "Version" && parent == "PropertyGroup":
 				s, text, spliceable, err := xmlElementTextSpan(dec, data)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 				path = path[:len(path)-1] // the span consumed the closing tag
 				if spliceable && versionSpan == nil && !isDeferredValue(text) {
@@ -156,7 +162,7 @@ func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error
 			case t.Name.Local == "Version" && parent == "PackageReference" && pending >= 0:
 				s, text, spliceable, err := xmlElementTextSpan(dec, data)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 				path = path[:len(path)-1]
 				if spliceable && !isDeferredValue(text) {

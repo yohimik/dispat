@@ -60,6 +60,10 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 	// Resolve each edit to the table and key its version literal sits under.
 	type slot struct{ table, key string }
 	slots := make(map[string]slot, len(edits))
+	// declared holds every entry, writable or not, so an edit naming a
+	// workspace-inherited or version-less dependency is reported as skipped
+	// rather than missing.
+	declared := make(map[string]bool, len(edits))
 	for _, t := range cargoTables {
 		keys := make([]string, 0, len(cargoTableOf(&raw, t.table)))
 		for key := range cargoTableOf(&raw, t.table) {
@@ -68,10 +72,14 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 		sort.Strings(keys) // a name two keys declare resolves the same way each run
 		for _, key := range keys {
 			name, writable := cargoDependencyName(key, cargoTableOf(&raw, t.table)[key])
-			if !writable {
+			if name == "" {
 				continue
 			}
 			id := string(t.kind) + "\x00" + name
+			declared[id] = true
+			if !writable {
+				continue
+			}
 			if _, taken := slots[id]; !taken {
 				slots[id] = slot{table: t.table, key: key}
 			}
@@ -88,14 +96,19 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 		if kind == "dependencies" {
 			kind = manifest.KindDependencies
 		}
-		s, ok := slots[string(kind)+"\x00"+e.Name]
+		id := string(kind) + "\x00" + e.Name
+		s, ok := slots[id]
 		if !ok {
-			res.Missing = append(res.Missing, e)
+			if declared[id] {
+				res.Skipped = append(res.Skipped, e)
+			} else {
+				res.Missing = append(res.Missing, e)
+			}
 			continue
 		}
 		idx, start, end, ok := cargoVersionSpan(lines, s.table, s.key)
 		if !ok {
-			res.Missing = append(res.Missing, e)
+			res.Skipped = append(res.Skipped, e)
 			continue
 		}
 		if lines[idx][start:end] == e.Range {

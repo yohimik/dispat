@@ -44,8 +44,11 @@ end
 	if len(res.Applied) != 2 || res.VersionWritten {
 		t.Errorf("result mismatch: %+v", res)
 	}
-	if len(res.Missing) != 4 {
-		t.Errorf("everything unspliceable must be reported missing: %+v", res.Missing)
+	// Only the undeclared pod is missing. The two-literal constraint, the
+	// path-pinned pod and the one with no requirement are all declared, so
+	// they are skipped instead.
+	if len(res.Skipped) != 3 || len(res.Missing) != 1 || res.Missing[0].Name != "Ghost" {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 

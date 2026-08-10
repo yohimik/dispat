@@ -43,8 +43,10 @@ end
 	if len(res.Applied) != 2 || res.VersionWritten {
 		t.Errorf("result mismatch: %+v", res)
 	}
-	if len(res.Missing) != 4 {
-		t.Errorf("everything unspliceable must be missing: %+v", res.Missing)
+	// Only the undeclared gem is missing; the git-pinned, unversioned and
+	// two-literal gems are declared and skipped.
+	if len(res.Skipped) != 3 || len(res.Missing) != 1 || res.Missing[0].Name != "ghost" {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 

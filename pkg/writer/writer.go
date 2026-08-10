@@ -63,9 +63,21 @@ type Result struct {
 	Path string
 	// Applied are the edits that changed the file.
 	Applied []Edit
-	// Missing are the edits whose dependency was not declared in the
-	// targeted field; the file is written without them.
+	// Missing are the edits whose dependency the manifest does not declare in
+	// the targeted field. The caller asked for something that is not there.
 	Missing []Edit
+	// Skipped are the edits whose dependency is declared but whose version
+	// cannot be written: it defers to something outside the file (a Maven
+	// ${property}, a Cargo workspace inheritance, an MSBuild or Xcode
+	// property, a NuGet pack-time token), it is pinned to a git revision or a
+	// folder instead of a version, or the format spreads the constraint across
+	// several literals.
+	//
+	// Skipped is separate from Missing because the two call for different
+	// responses. Missing usually means the caller and the manifest disagree
+	// about what is declared. Skipped is the normal state of a healthy
+	// manifest, and warning about it would be noise.
+	Skipped []Edit
 	// VersionWritten reports that the manifest's own version field was
 	// rewritten.
 	VersionWritten bool

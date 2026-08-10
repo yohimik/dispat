@@ -51,8 +51,17 @@ cc = "1.0"
 	if got := read(t, path); got != want {
 		t.Errorf("file mismatch:\n got: %q\nwant: %q", got, want)
 	}
-	if !res.VersionWritten || len(res.Applied) != 5 || len(res.Missing) != 3 {
+	// The workspace-inherited and version-less entries are declared but carry
+	// nothing to write, so they are skipped. Only the wrong-kind edit names
+	// something the file does not declare.
+	if !res.VersionWritten || len(res.Applied) != 5 {
 		t.Errorf("result mismatch: %+v", res)
+	}
+	// insta is declared under [dev-dependencies] only, so the edit naming it as
+	// a plain dependency is asking for something the file does not declare.
+	if len(res.Skipped) != 2 || len(res.Missing) != 1 ||
+		res.Missing[0].Name != "insta" || res.Missing[0].Kind != "" {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 

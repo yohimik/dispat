@@ -39,12 +39,15 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 		}
 	}
 
-	// found records the declarations located, which decides what is missing;
-	// applied records the ones a splice actually moved. Indexing both by edit
-	// keeps a pod declared in several targets — an app's and its test target's,
-	// the ordinary case — from being reported twice.
+	// Three states, tracked separately. seen means the statement is in the
+	// file at all, which is what separates Missing from Skipped. writable
+	// means it also carries a version literal to replace. applied means a
+	// splice moved it. Indexing all three by edit keeps a pod declared in
+	// several targets, an app's and its test target's, from being reported
+	// twice.
 	var res Result
-	found := make(map[int]bool, len(edits))
+	seen := make(map[int]bool, len(edits))
+	writable := make(map[int]bool, len(edits))
 	applied := make(map[int]bool, len(edits))
 	lines := strings.Split(string(data), "\n")
 	changed := false
@@ -82,10 +85,11 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 		if !want {
 			continue
 		}
+		seen[i] = true
 		if !spliceable {
-			continue // left for the missing sweep below
+			continue // declared, but nothing here is a version to replace
 		}
-		found[i] = true
+		writable[i] = true
 		if current := line[req.start:req.end]; current == edits[i].Range {
 			continue // already the wanted text: no change, not missing
 		}
@@ -102,7 +106,9 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 		switch {
 		case applied[i]:
 			res.Applied = append(res.Applied, e)
-		case !found[i]:
+		case seen[i] && !writable[i]:
+			res.Skipped = append(res.Skipped, e)
+		case !seen[i]:
 			res.Missing = append(res.Missing, e)
 		}
 	}

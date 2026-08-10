@@ -36,7 +36,7 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 		// coordinate alone identifies the declaration.
 		wanted[e.Name] = i
 	}
-	spans, versionSpan, err := mavenSpans(data, wanted)
+	spans, declared, versionSpan, err := mavenSpans(data, wanted)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -52,7 +52,11 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 	for i, e := range edits {
 		s, ok := spans[i]
 		if !ok {
-			res.Missing = append(res.Missing, e)
+			if declared[e.Name] {
+				res.Skipped = append(res.Skipped, e)
+			} else {
+				res.Missing = append(res.Missing, e)
+			}
 			continue
 		}
 		if string(data[s.start:s.end]) == e.Range {
@@ -88,20 +92,21 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 
 // mavenSpans locates the version span of each wanted dependency and of the
 // project's own version element.
-func mavenSpans(data []byte, wanted map[string]int) (map[int]span, *span, error) {
+func mavenSpans(data []byte, wanted map[string]int) (map[int]span, map[string]bool, *span, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var (
 		path        []string
 		spans       = make(map[int]span)
+		declared    = make(map[string]bool)
 		versionSpan *span
 	)
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
-			return spans, versionSpan, nil
+			return spans, declared, versionSpan, nil
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		switch t := tok.(type) {
 		case xml.EndElement:
@@ -119,9 +124,10 @@ func mavenSpans(data []byte, wanted map[string]int) (map[int]span, *span, error)
 			case t.Name.Local == "dependency":
 				coordinate, s, ok, err := mavenDependencyVersion(dec, data)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 				path = path[:len(path)-1] // the scan consumed the closing tag
+				declared[coordinate] = true
 				if i, want := wanted[coordinate]; ok && want {
 					spans[i] = s
 				}
@@ -131,7 +137,7 @@ func mavenSpans(data []byte, wanted map[string]int) (map[int]span, *span, error)
 			case t.Name.Local == "version" && parent == "project" && len(path) == 2:
 				s, text, spliceable, err := xmlElementTextSpan(dec, data)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 				path = path[:len(path)-1]
 				if spliceable && versionSpan == nil && !isDeferredValue(text) {

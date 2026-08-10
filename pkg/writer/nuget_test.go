@@ -39,8 +39,12 @@ func TestNuspecRewriteVersionAndDependencies(t *testing.T) {
 	if got := read(t, path); got != want {
 		t.Errorf("file mismatch:\n got: %q\nwant: %q", got, want)
 	}
-	if !res.VersionWritten || len(res.Applied) != 2 || len(res.Missing) != 2 {
+	if !res.VersionWritten || len(res.Applied) != 2 {
 		t.Errorf("result mismatch: %+v", res)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Name != "NoVersion" ||
+		len(res.Missing) != 1 || res.Missing[0].Name != "Ghost" {
+		t.Errorf("skipped/missing split wrong: skipped=%+v missing=%+v", res.Skipped, res.Missing)
 	}
 }
 

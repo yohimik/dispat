@@ -40,6 +40,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 	var (
 		res         Result
 		patches     []patch
+		seen        = make(map[int]bool, len(edits))
 		found       = make(map[int]bool, len(edits))
 		applied     = make(map[int]bool, len(edits))
 		versionSpan *span
@@ -70,7 +71,11 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 			switch {
 			case t.Name.Local == "dependency":
 				i, want := wanted[xmlAttr(t, "id")]
-				if !want || !xmlHasAttr(t, "version") {
+				if !want {
+					break
+				}
+				seen[i] = true
+				if !xmlHasAttr(t, "version") {
 					break
 				}
 				s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, "version")
@@ -104,7 +109,10 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 		switch {
 		case applied[i]:
 			res.Applied = append(res.Applied, e)
-		case !found[i]:
+		case found[i]:
+		case seen[i]:
+			res.Skipped = append(res.Skipped, e)
+		default:
 			res.Missing = append(res.Missing, e)
 		}
 	}

@@ -101,7 +101,9 @@ func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
 		t := wanted[id]
 		idx, start, end, ok := catalogVersionSpan(lines, t.slot)
 		if !ok {
-			res.Missing = append(res.Missing, t.edits...)
+			// The library is in the file; its version is not a literal this
+			// writer can reach.
+			res.Skipped = append(res.Skipped, t.edits...)
 			continue
 		}
 		if lines[idx][start:end] == t.text {

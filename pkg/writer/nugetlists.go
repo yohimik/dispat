@@ -57,6 +57,7 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 	var (
 		res     Result
 		patches []patch
+		seen    = make(map[int]bool, len(edits))
 		found   = make(map[int]bool, len(edits))
 		applied = make(map[int]bool, len(edits))
 		dec     = xml.NewDecoder(bytes.NewReader(data))
@@ -75,7 +76,11 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 			continue
 		}
 		i, want := wanted[xmlAttr(start, idAttr)]
-		if !want || !xmlHasAttr(start, versionAttr) {
+		if !want {
+			continue
+		}
+		seen[i] = true
+		if !xmlHasAttr(start, versionAttr) {
 			continue
 		}
 		s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, versionAttr)
@@ -95,7 +100,10 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 		switch {
 		case applied[i]:
 			res.Applied = append(res.Applied, e)
-		case !found[i]:
+		case found[i]:
+		case seen[i]:
+			res.Skipped = append(res.Skipped, e)
+		default:
 			res.Missing = append(res.Missing, e)
 		}
 	}

@@ -52,6 +52,7 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 	const noBlock = -1
 	var (
 		res     Result
+		seen    = make(map[int]bool, len(edits))
 		found   = make(map[int]bool, len(edits))
 		lines   = strings.Split(string(data), "\n")
 		changed bool
@@ -106,9 +107,10 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		if !want {
 			continue
 		}
+		seen[i] = true
 		start, end, ok := yamlScalarSpan(line, valueStart)
 		if !ok {
-			continue // a nested block, not a constraint
+			continue // declared as a block (path, git, sdk): no constraint here
 		}
 		found[i] = true
 		if line[start:end] == edits[i].Range {
@@ -122,7 +124,11 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		changed = true
 	}
 	for i, e := range edits {
-		if !found[i] {
+		switch {
+		case found[i]:
+		case seen[i]:
+			res.Skipped = append(res.Skipped, e)
+		default:
 			res.Missing = append(res.Missing, e)
 		}
 	}

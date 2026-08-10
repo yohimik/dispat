@@ -56,6 +56,7 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 	var (
 		res            Result
 		found          = make(map[int]bool, len(edits))
+		seen           = make(map[int]bool, len(edits))
 		lines          = strings.Split(string(data), "\n")
 		changed        bool
 		table          string
@@ -130,6 +131,7 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 		if !want {
 			continue
 		}
+		seen[idx] = true
 		start, end, ok := pyPoetryValueSpan(body, afterEq)
 		if !ok {
 			continue // a table of constraints, not a scalar
@@ -154,7 +156,11 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 		}
 	}
 	for i, e := range edits {
-		if !found[i] {
+		switch {
+		case found[i]:
+		case seen[i]:
+			res.Skipped = append(res.Skipped, e)
+		default:
 			res.Missing = append(res.Missing, e)
 		}
 	}
