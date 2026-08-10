@@ -68,14 +68,14 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 	root := t.TempDir()
 	for _, args := range [][]string{
 		{"run"},                               // run requires the script name
-		{"run", "a", "b", "c"},                // ...plus at most one package
-		{"preview", "a", "b"},                 // preview takes at most one package
+		{"run", "a", "b"},                     // ...and nothing else: packages are flags
+		{"preview", "a"},                      // preview takes no arguments either
 		{"status", "extra"},                   // status takes no arguments
 		{"bogus", "extra"},                    // more than one non-command word
 		{"run", "x", "--on-error", "explode"}, // unknown --on-error value
-		{"changelog", "a", "b"},               // step commands take at most one package
-		{"autoversion", "a", "b"},
-		{"commit", "a", "b"},
+		{"changelog", "a"},                    // nor do the step commands
+		{"autoversion", "a"},
+		{"commit", "a"},
 		{"scanner", "a", "b"},                     // scanner takes at most one folder
 		{"writer"},                                // writer needs at least one manifest
 		{"writer", "go.mod"},                      // ...and something to write
@@ -86,6 +86,39 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		code := Run(append(args, "--root", root), &stdout, &stderr)
 		assert.Equal(t, 2, code, "args: %v", args)
 	}
+}
+
+func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
+	// The selection flags parse for all six commands that take them, in both
+	// spellings, and compose with the window flags they used to be rejected
+	// alongside. Exit 1 (config not found in this bare folder) rather than 2
+	// is what proves the command line itself was accepted.
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"run", "x", "--package", "core", "--space", "libs"},
+		{"run", "x", "-p", "core,web", "-s", "libs"},
+		{"run", "x", "-p", "core", "--since", "HEAD~1", "--consumers"},
+		{"run", "x", "-p", "*"},
+		{"preview", "-p", "core"},
+		{"changelog", "--space", "libs"},
+		{"autoversion", "-p", "core"},
+		{"commit", "-s", "libs"},
+		{"compute", "-p", "core"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := Run(append(args, "--root", root), &stdout, &stderr)
+		assert.Equal(t, 1, code, "args: %v — stderr: %s", args, stderr.String())
+	}
+}
+
+func TestSinceHasNoShorthand(t *testing.T) {
+	// -s belongs to --space, so the two selection flags own the two
+	// shorthands. A `-s` value is a space term and reaches config loading
+	// (exit 1); nothing silently reads it as a git revision.
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 1, Run([]string{"run", "x", "-s", "HEAD~1", "--root", root}, &stdout, &stderr))
+	assert.NotContains(t, stderr.String(), "unknown flag")
 }
 
 func TestInvalidConfig(t *testing.T) {

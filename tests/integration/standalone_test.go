@@ -25,7 +25,7 @@ func TestStandaloneChangelogWritesAndIsIdempotent(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): first feature")
 
-	res := r.Command("changelog", "core")
+	res := r.Command("changelog", "--package", "core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	log := r.Path("packages", "core", "CHANGELOG.md")
 	data, err := os.ReadFile(log)
@@ -35,7 +35,7 @@ func TestStandaloneChangelogWritesAndIsIdempotent(t *testing.T) {
 	assert.Empty(t, r.TagList(), "the changelog command releases nothing")
 
 	// A second invocation is a W222 skip and changes nothing.
-	res = r.Command("changelog", "core")
+	res = r.Command("changelog", "--package", "core")
 	require.Equal(t, 0, res.Code)
 	assert.True(t, harness.HasCodeForPackage(res.Events, "W222", "core"))
 	after, err := os.ReadFile(log)
@@ -51,8 +51,8 @@ func TestStandaloneChangelogWritesAndIsIdempotent(t *testing.T) {
 	assert.Equal(t, 1, r.TagCount("core@"))
 
 	// An unknown package is an error; a known but unreleasing one is not.
-	assert.Equal(t, 1, r.Command("changelog", "ghost").Code)
-	assert.Equal(t, 0, r.Command("changelog", "core").Code, "converged package: a logged no-op")
+	assert.Equal(t, 1, r.Command("changelog", "--package", "ghost").Code)
+	assert.Equal(t, 0, r.Command("changelog", "--package", "core").Code, "converged package: a logged no-op")
 }
 
 func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
@@ -100,7 +100,7 @@ func TestStandaloneCommitPushAndNothingToCommit(t *testing.T) {
 
 	// A clean folder commits nothing but --tag still records the release at
 	// HEAD, and --push delivers branch and tag with the configured identity.
-	res := r.Command("commit", "core", "--tag", "--push", "--name", "release bot", "--email", "bot@dispat.test")
+	res := r.Command("commit", "--package", "core", "--tag", "--push", "--name", "release bot", "--email", "bot@dispat.test")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Equal(t, 1, r.TagCount("core@"))
 	assert.Equal(t, "tag", r.Git("cat-file", "-t", "core@0.1.0"), "the release tag is annotated")
@@ -112,7 +112,7 @@ func TestStandaloneCommitPushAndNothingToCommit(t *testing.T) {
 	// baseline, so the package is no longer releasing and the command is a
 	// clean no-op. (The W223 tag-exists skip belongs to the in-flow case,
 	// where the outer run's plan predates the tag.)
-	res = r.Command("commit", "core", "--tag")
+	res = r.Command("commit", "--package", "core", "--tag")
 	require.Equal(t, 0, res.Code)
 	assert.Equal(t, 1, r.TagCount("core@"))
 }
@@ -122,7 +122,7 @@ func TestStandaloneCommitExportsPinWhenDispatOutputSet(t *testing.T) {
 	r.Commit("feat(core): pinned feature")
 	out := r.Path("outputs.txt")
 
-	res := r.CommandEnv([]string{"DISPAT_OUTPUT=" + out}, "commit", "core")
+	res := r.CommandEnv([]string{"DISPAT_OUTPUT=" + out}, "commit", "--package", "core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	data, err := os.ReadFile(out)
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestStandaloneChangelogOverrideFlags(t *testing.T) {
 	// for the invocation.
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): flagged feature")
-	res := r.Command("changelog", "core", "--file", "HISTORY.md", "--title", "# History", "--date-format", "2006")
+	res := r.Command("changelog", "--package", "core", "--file", "HISTORY.md", "--title", "# History", "--date-format", "2006")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	data, err := os.ReadFile(r.Path("packages", "core", "HISTORY.md"))
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestStandaloneCommitMessageAndIncludeFlags(t *testing.T) {
 	r.WriteFile("shared.lock", "regenerated again\n") // dirty include path
 	r.WriteFile("packages/core/generated.txt", "artifact\n")
 
-	res := r.Command("commit", "core", "--message-format", "release: {packages} at {tags}", "--include", "shared.lock")
+	res := r.Command("commit", "--package", "core", "--message-format", "release: {packages} at {tags}", "--include", "shared.lock")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Equal(t, "release: core at core@0.1.0", r.Git("log", "-1", "--format=%s"))
 	shown := r.Git("show", "--stat", "--format=", "HEAD")
@@ -255,7 +255,7 @@ func TestStandaloneChangelogRespectsDisabledConfig(t *testing.T) {
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(false)}
 	r.WriteConfigModel(cfg)
 	r.Commit("feat(core): quiet feature")
-	res := r.Command("changelog", "core")
+	res := r.Command("changelog", "--package", "core")
 	require.Equal(t, 0, res.Code, "a disabled changelog is a clean no-op")
 	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
 }
@@ -287,7 +287,7 @@ func TestStandaloneAutoversionFlagOverridesExistingBlock(t *testing.T) {
 func TestStandaloneCommitPushWithoutRemoteFails(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): unpushable")
-	res := r.Command("commit", "core", "--tag", "--push")
+	res := r.Command("commit", "--package", "core", "--tag", "--push")
 	assert.Equal(t, 1, res.Code, "pushing without a remote fails loudly")
 	assert.Equal(t, 1, r.TagCount("core@"), "the local work before the push still happened")
 }

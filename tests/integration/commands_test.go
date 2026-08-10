@@ -40,7 +40,7 @@ func TestCommandsInitThenStatusCompose(t *testing.T) {
 	assert.Equal(t, 1, res.Code, "an existing config must never be overwritten")
 }
 
-// TestCommandsPreviewNotesWindowing: `dispat preview <package>` prints the
+// TestCommandsPreviewNotesWindowing: `dispat preview --package <name>` prints the
 // package's pending release notes, and across a prerelease train the notes
 // narrow to the fresh changeset — each prerelease's preview and changelog
 // entry documents only its own changes, while the graduation collects the
@@ -50,7 +50,7 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): first release")
 
-	res := r.Command("preview", "core")
+	res := r.Command("preview", "--package", "core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "## core@0.1.0", "the header names the pending tag")
 	assert.Contains(t, res.Stdout, "### Features")
@@ -58,10 +58,10 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 
 	// Release, then preview again: the window is empty.
 	r.ReleaseOK()
-	res = r.Command("preview", "core")
+	res = r.Command("preview", "--package", "core")
 	require.Equal(t, 0, res.Code)
 	assert.Contains(t, res.Stdout, "no pending changes for core")
-	assert.Equal(t, 1, r.Command("preview", "ghost").Code, "an unknown package is an error")
+	assert.Equal(t, 1, r.Command("preview", "-p", "ghost").Code, "an unknown package is an error")
 
 	// entry returns the changelog entry for the given tag: the text between
 	// its "## <tag> " header and the next entry header.
@@ -86,7 +86,7 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 
 	r.CommitEmpty("fix(core): fix B")
 	// The preview of beta.1 already narrows to the fresh changeset.
-	res = r.Command("preview", "core")
+	res = r.Command("preview", "--package", "core")
 	require.Equal(t, 0, res.Code)
 	assert.Contains(t, res.Stdout, "fix B")
 	assert.NotContains(t, res.Stdout, "feature A",
@@ -105,7 +105,7 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 	assert.Contains(t, graduated, "fix B")
 }
 
-// TestCommandsPreviewAllPackages: `dispat preview` with no package name
+// TestCommandsPreviewAllPackages: `dispat preview` with no filter
 // renders every package that has something pending, in publish order, and
 // says "no pending changes" once nothing does. Packages with an empty window
 // stay out of the combined preview instead of adding noise.
@@ -136,6 +136,6 @@ func TestCommandsPreviewAllPackages(t *testing.T) {
 	assert.Contains(t, res.Stdout, "no pending changes")
 	assert.NotContains(t, res.Stdout, "##", "no headers when nothing is pending")
 
-	// Too many arguments stays a usage error.
-	assert.Equal(t, 2, r.Command("preview", "core", "web").Code)
+	// A positional package is a usage error: the selection is a flag.
+	assert.Equal(t, 2, r.Command("preview", "core").Code)
 }

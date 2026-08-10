@@ -238,10 +238,10 @@ func TestRunNoSelectedPackageDefinesIt(t *testing.T) {
 	assert.Equal(t, []string{"tool"}, runLog(r))
 }
 
-// TestRunTargetsAPackageWithATopLevelScript: `dispat run <script> <package>`
-// runs one top-level script inside one package's folder under the release
-// environment, releasing nothing, whether or not the package changed.
-func TestRunTargetsAPackageWithATopLevelScript(t *testing.T) {
+// TestRunFilterRunsATopLevelScriptInOnePackage: a filtered run executes one
+// top-level script inside one package's folder under the release environment,
+// releasing nothing — reaching an unchanged package through `--since all`.
+func TestRunFilterRunsATopLevelScriptInOnePackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["probe"] = `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`
@@ -249,18 +249,19 @@ func TestRunTargetsAPackageWithATopLevelScript(t *testing.T) {
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
-	r.ReleaseOK() // core is now unchanged: a target does not have to be
+	r.ReleaseOK() // core is now unchanged: --since all reaches it anyway
 
-	r.RunScriptOK("probe", "core")
+	r.RunScriptOK("probe", "--since", "all", "-p", "core")
 	data, err := os.ReadFile(r.Path("packages", "core", "probe.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "core@0.1.0 run:probe\n", string(data),
 		"an unchanged package carries its baseline as the new version")
-	assert.Equal(t, []string{"core@0.1.0"}, r.TagList(), "a targeted run releases nothing new")
+	assert.Equal(t, []string{"core@0.1.0"}, r.TagList(), "a filtered run releases nothing new")
 
-	assert.Equal(t, 1, r.RunScript("ghost", "core").Code, "unknown script")
-	assert.Equal(t, 1, r.RunScript("probe", "ghost").Code, "unknown package")
-	assert.Equal(t, 1, r.RunScript("boom", "core").Code, "a failing script fails the command")
+	assert.Equal(t, 1, r.RunScript("ghost", "-p", "core").Code, "unknown script")
+	assert.Equal(t, 1, r.RunScript("probe", "-p", "ghost").Code, "unknown package")
+	assert.Equal(t, 1, r.RunScript("boom", "--since", "all", "-p", "core").Code,
+		"a failing script fails the command")
 }
 
 // TestRunOnErrorPolicies: the "fail" script exits non-zero for core, the
@@ -463,11 +464,12 @@ func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 	assert.Equal(t, "app sees exported-before-failing\n", string(data))
 }
 
-// TestRunTargetsANamedPackage: `dispat run <script> <package>` narrows the
-// run to exactly that package — changed or not, the graph plays no part —
-// while naming an unknown package or one whose space does not define the
-// script fails instead of silently running nothing.
-func TestRunTargetsANamedPackage(t *testing.T) {
+// TestRunFilterNarrowsToANamedPackage: --package narrows the run to that
+// package within the window, while naming an unknown package or one whose
+// space does not define the script fails instead of silently running nothing.
+// The filter narrows, never widens: reaching an unchanged package takes a
+// window that covers it.
+func TestRunFilterNarrowsToANamedPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
@@ -482,31 +484,38 @@ func TestRunTargetsANamedPackage(t *testing.T) {
 	r.SeedPackage("apps", "web")
 	r.Commit("feat(a,b,web): all three change")
 
-	// Both a and b changed; the target narrows the run to b alone.
-	res := r.Command("run", "lint", "b")
+	// Both a and b changed; the filter narrows the run to b alone.
+	res := r.Command("run", "lint", "--package", "b")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	data, err := os.ReadFile(r.Path("lint.log"))
 	require.NoError(t, err)
 	assert.Equal(t, "b\n", string(data), "only the named package runs")
 
-	assert.Equal(t, 1, r.Command("run", "lint", "ghost").Code, "an unknown package is an error")
-	assert.Equal(t, 1, r.Command("run", "lint", "web").Code,
-		"a target whose space does not define the script is an error, not a silent no-op")
+	assert.Equal(t, 1, r.Command("run", "lint", "-p", "ghost").Code, "an unknown package is an error")
+	assert.Equal(t, 1, r.Command("run", "lint", "-p", "web").Code,
+		"a selection whose space does not define the script is an error, not a silent no-op")
 
-	// A targeted run does not require the package to be changed.
+	// The filter narrows the window rather than replacing it.
 	r.ReleaseOK() // consume every pending change
-	res = r.Command("run", "lint", "a")
+	res = r.Command("run", "lint", "-p", "a")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	data, err = os.ReadFile(r.Path("lint.log"))
 	require.NoError(t, err)
-	assert.Equal(t, "b\na\n", string(data), "the unchanged target still runs")
+	assert.Equal(t, "b\n", string(data), "an unchanged package is out of the window")
+
+	res = r.Command("run", "lint", "--since", "all", "-p", "a")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err = os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "b\na\n", string(data), "a window covering every package reaches it")
 }
 
-// TestRunShorthandNarrowsToTheInvokedPackage: `dispat <script>` invoked from
-// inside a package folder (or any subdirectory of it) runs the script for
-// that package alone — riding the config ascent to find the root — while the
-// same shorthand from the monorepo top still covers every changed package.
-func TestRunShorthandNarrowsToTheInvokedPackage(t *testing.T) {
+// TestRunNarrowsToTheInvokedPackage: invoked from inside a package folder (or
+// any subdirectory of it), a run covers that package alone — riding the config
+// ascent to find the root — while from the monorepo top it still covers every
+// changed package. Both spellings behave the same: the folder is the filter,
+// not a property of the shorthand.
+func TestRunNarrowsToTheInvokedPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	withRunScript := cfg.Spaces["libs"]
@@ -531,6 +540,20 @@ func TestRunShorthandNarrowsToTheInvokedPackage(t *testing.T) {
 	data, err = os.ReadFile(r.Path("lint.log"))
 	require.NoError(t, err)
 	assert.Equal(t, "a\na\n", string(data))
+
+	// The two-word spelling narrows identically.
+	res = r.CommandAt("packages/a", "run", "lint")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err = os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "a\na\na\n", string(data))
+
+	// An explicit term beats the folder it was typed in.
+	res = r.CommandAt("packages/a", "lint", "-p", "b")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	data, err = os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "a\na\na\nb\n", string(data))
 
 	// From the monorepo top the shorthand still covers every changed package.
 	r.Remove("lint.log")
@@ -589,17 +612,17 @@ func TestRunConsumersExpandTransitively(t *testing.T) {
 	r := consumersRepo(t)
 
 	// The gap being fixed: the window alone re-runs nothing downstream.
-	r.RunScriptOK("lint", "-s", "HEAD~1")
+	r.RunScriptOK("lint", "--since", "HEAD~1")
 	assert.Equal(t, []string{"core"}, consumersLog(t, r), "the window covers what the commit addressed")
 
 	r.Remove("lint.log")
-	r.RunScriptOK("lint", "-s", "HEAD~1", "--consumers")
+	r.RunScriptOK("lint", "--since", "HEAD~1", "--consumers")
 	assert.Equal(t, []string{"core", "mid", "app"}, consumersLog(t, r),
 		"consumers are pulled in transitively (app only depends on core through mid), in graph order")
 
 	// Everything already selected: the expansion is a no-op.
 	r.Remove("lint.log")
-	r.RunScriptOK("lint", "-s", "all", "--consumers")
+	r.RunScriptOK("lint", "--since", "all", "--consumers")
 	assert.ElementsMatch(t, []string{"core", "mid", "app", "extra"}, consumersLog(t, r))
 }
 
@@ -634,28 +657,32 @@ func TestRunConsumersOnReleaseWindow(t *testing.T) {
 func TestRunConsumersSkipCascade(t *testing.T) {
 	r := consumersRepo(t)
 
-	res := r.RunScript("fail", "-s", "HEAD~1", "--consumers")
+	res := r.RunScript("fail", "--since", "HEAD~1", "--consumers")
 	assert.Equal(t, 1, res.Code, "a failing script fails the command")
 	assert.Empty(t, consumersLog(t, r), "mid and app are skipped transitively behind core's failure")
 
-	res = r.RunScript("fail", "-s", "HEAD~1", "--consumers", "--on-error", "continue")
+	res = r.RunScript("fail", "--since", "HEAD~1", "--consumers", "--on-error", "continue")
 	assert.Equal(t, 1, res.Code)
 	assert.Equal(t, []string{"mid", "app"}, consumersLog(t, r), "continue still runs the dependents, in order")
 }
 
-// TestRunConsumersRejectsTarget: a targeted run is exactly one package, so
-// --consumers refuses to combine with it — and overrides the folder
-// shorthand's narrowing instead, the way --since does.
-func TestRunConsumersRejectsTarget(t *testing.T) {
+// TestRunConsumersComposeWithAFilter: --consumers expands the filtered
+// selection rather than refusing it, and the expansion is not filtered back
+// out — asking for a package's consumers is asking for packages the filter
+// itself never named. The folder spelling behaves identically.
+func TestRunConsumersComposeWithAFilter(t *testing.T) {
 	r := consumersRepo(t)
 
-	res := r.Command("run", "lint", "mid", "--consumers")
-	assert.Equal(t, 2, res.Code, "--consumers and an explicit package are mutually exclusive")
-
-	res = r.CommandAt("packages/mid", "lint", "--consumers")
+	res := r.Command("run", "lint", "--since", "all", "-p", "mid", "--consumers")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.ElementsMatch(t, []string{"core", "mid", "app", "extra"}, consumersLog(t, r),
-		"the shorthand is not narrowed under --consumers: the whole window (plus consumers) runs")
+	assert.Equal(t, []string{"mid", "app"}, consumersLog(t, r),
+		"mid and its dependents, in graph order; core and extra stay out")
+
+	r.Remove("lint.log")
+	res = r.CommandAt("packages/mid", "lint", "--since", "all", "--consumers")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, []string{"mid", "app"}, consumersLog(t, r),
+		"the invocation folder is the same filter, so it expands the same way")
 }
 
 // TestRunSinceSelectsByCommitScopes: --since re-scopes the run from the
@@ -663,7 +690,7 @@ func TestRunConsumersRejectsTarget(t *testing.T) {
 // planner's own scope semantics — a written scope is authoritative even when
 // the files say otherwise, and only a scopeless unit falls back to the files
 // it changed (§6.2). "all" selects every package, an unknown revision fails
-// loudly, and the flag refuses to combine with an explicit package target.
+// loudly, and a package filter narrows the window the flag chose.
 func TestRunSinceSelectsByCommitScopes(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
@@ -695,29 +722,36 @@ func TestRunSinceSelectsByCommitScopes(t *testing.T) {
 	r.RunScriptOK("lint", "--since", "HEAD~1")
 	assert.Equal(t, []string{"b"}, lintLog(), "only the package the commit touched")
 
-	// The short spelling and the reserved "all" value.
+	// The reserved "all" value.
 	r.Remove("lint.log")
-	r.RunScriptOK("lint", "-s", "all")
+	r.RunScriptOK("lint", "--since", "all")
 	assert.ElementsMatch(t, []string{"a", "b", "c"}, lintLog(), "'all' selects every package")
 
 	res := r.RunScript("lint", "--since", "no-such-rev")
 	assert.Equal(t, 1, res.Code, "an unknown revision must fail, not silently select nothing")
 
-	res = r.Command("run", "lint", "b", "--since", "HEAD~1")
-	assert.Equal(t, 2, res.Code, "--since and an explicit package are mutually exclusive")
+	// A filter narrows whichever window the flag chose.
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "--since", "all", "-p", "a,c")
+	assert.Equal(t, []string{"a", "c"}, lintLog(), "the filter narrows the window")
 
 	// Scopes are authoritative: a commit whose files sit under c but whose
 	// scope names a selects a, not c.
 	r.WriteFile("packages/c/scoped-elsewhere.txt", "x")
 	r.Commit("fix(a): scoped to a, files under c")
 	r.Remove("lint.log")
-	r.RunScriptOK("lint", "-s", "HEAD~1")
+	r.RunScriptOK("lint", "--since", "HEAD~1")
 	assert.Equal(t, []string{"a"}, lintLog(), "the written scope wins over the changed files")
 
 	// A scopeless unit falls back to the files it changed (§6.2).
 	r.WriteFile("packages/c/derived.txt", "x")
 	r.Commit("fix: no scope written, files under c")
 	r.Remove("lint.log")
-	r.RunScriptOK("lint", "-s", "HEAD~1")
+	r.RunScriptOK("lint", "--since", "HEAD~1")
 	assert.Equal(t, []string{"c"}, lintLog(), "a scopeless unit derives its packages from its files")
+
+	// A filter that empties the window runs nothing, and says so by exiting 0.
+	r.Remove("lint.log")
+	r.RunScriptOK("lint", "--since", "HEAD~1", "-p", "a")
+	assert.NoFileExists(t, r.Path("lint.log"), "a package outside the window is an honest no-op")
 }

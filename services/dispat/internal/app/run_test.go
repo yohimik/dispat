@@ -11,6 +11,7 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -44,56 +45,58 @@ func TestWithConsumers(t *testing.T) {
 		"the union comes out in plan order, not selection order")
 }
 
-func TestRunTarget(t *testing.T) {
+// TestRunSelection pins the whole rule: a window decides what is on the table,
+// the filter narrows it, --consumers expands the result.
+func TestRunSelection(t *testing.T) {
 	root := t.TempDir()
-	pl := runPlan(root, []string{"core", "web"}, map[string][]string{})
-	a := New(root, &config.File{}, zerolog.Nop())
+	// b consumes a, c consumes b, d is independent; a and c are releasing.
+	pl := runPlan(root, []string{"a", "b", "c", "d"},
+		map[string][]string{"b": {"a"}, "c": {"b"}})
+	for _, n := range []string{"a", "c"} {
+		pl.Releases[n].Pinned = true
+	}
+	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: "libs"}}}
+	app := New(root, cfg, zerolog.Nop())
+	ctx := context.Background()
 
-	target, err := a.runTarget(pl, "lint", RunOptions{})
-	require.NoError(t, err)
-	assert.Empty(t, target, "no narrowing options, no target")
+	for name, tc := range map[string]struct {
+		opts RunOptions
+		want []string
+	}{
+		"no filter is the release window": {
+			RunOptions{}, []string{"a", "c"}},
+		"a package term narrows the window": {
+			RunOptions{Filter: filter.Filter{Packages: []string{"a"}}}, []string{"a"}},
+		"a term outside the window selects nothing": {
+			RunOptions{Filter: filter.Filter{Packages: []string{"b"}}}, []string{}},
+		"a glob term narrows the window": {
+			RunOptions{Filter: filter.Filter{Packages: []string{"*"}}}, []string{"a", "c"}},
+		"a space term narrows the window": {
+			RunOptions{Filter: filter.Filter{Spaces: []string{"libs"}}}, []string{"a", "c"}},
+		"the invocation folder narrows the window": {
+			RunOptions{Filter: filter.Filter{Dir: filepath.Join(root, "libs", "c")}}, []string{"c"}},
+		"since all covers every package": {
+			RunOptions{Since: SinceAll}, []string{"a", "b", "c", "d"}},
+		"since all plus a filter runs an unchanged package": {
+			RunOptions{Since: SinceAll, Filter: filter.Filter{Packages: []string{"b"}}}, []string{"b"}},
+		"consumers expand past the filter": {
+			RunOptions{Filter: filter.Filter{Packages: []string{"a"}}, Consumers: true},
+			[]string{"a", "b", "c"}},
+		"the selection keeps plan order, not term order": {
+			RunOptions{Since: SinceAll, Filter: filter.Filter{Packages: []string{"d", "b"}}},
+			[]string{"b", "d"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			selected, err := app.runSelection(ctx, pl, tc.opts)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, selected)
+		})
+	}
 
-	_, err = a.runTarget(pl, "lint", RunOptions{Package: "nope"})
+	_, err := app.runSelection(ctx, pl, RunOptions{Filter: filter.Filter{Packages: []string{"nope"}}})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `unknown package "nope"`)
-	assert.Contains(t, err.Error(), "core, web", "the error lists what was discovered")
-
-	_, err = a.runTarget(pl, "absent", RunOptions{Package: "core"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `does not define script "absent"`)
-
-	target, err = a.runTarget(pl, "lint", RunOptions{Package: "core"})
-	require.NoError(t, err)
-	assert.Equal(t, "core", target)
-
-	// The dispat <script> shorthand narrows through the invocation folder.
-	dir := filepath.Join(root, "libs", "web")
-	target, err = a.runTarget(pl, "lint", RunOptions{Dir: dir})
-	require.NoError(t, err)
-	assert.Equal(t, "web", target)
-
-	// An explicit window beats the folder inference.
-	target, err = a.runTarget(pl, "lint", RunOptions{Dir: dir, Since: "HEAD~1"})
-	require.NoError(t, err)
-	assert.Empty(t, target, "--since suppresses folder narrowing")
-
-	target, err = a.runTarget(pl, "lint", RunOptions{Dir: dir, Consumers: true})
-	require.NoError(t, err)
-	assert.Empty(t, target, "--consumers suppresses folder narrowing")
-}
-
-func TestPackageAt(t *testing.T) {
-	root := t.TempDir()
-	pl := runPlan(root, []string{"core"}, map[string][]string{})
-	a := New(root, &config.File{}, zerolog.Nop())
-
-	core := filepath.Join(root, "libs", "core")
-	assert.Equal(t, "core", a.packageAt(pl, core), "the folder itself")
-	assert.Equal(t, "core", a.packageAt(pl, filepath.Join(core, "src", "deep")), "a nested folder")
-	assert.Empty(t, a.packageAt(pl, root), "the monorepo root is not inside any package")
-	assert.Empty(t, a.packageAt(pl, filepath.Join(root, "libs", "core-extra")),
-		"a sibling sharing the name prefix is not inside the package")
-	assert.Empty(t, a.packageAt(pl, filepath.Join(root, "elsewhere")))
+	assert.Contains(t, err.Error(), `--package "nope" matches no package`)
+	assert.Contains(t, err.Error(), "a, b, c, d", "the error lists what was discovered")
 }
 
 func TestSincePackagesAll(t *testing.T) {

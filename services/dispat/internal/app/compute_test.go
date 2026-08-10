@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -281,6 +282,70 @@ func TestComputeSuggestsRemovalOfStaleEndpoints(t *testing.T) {
 	_, _, err = config.Discover(a.cfg, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
+}
+
+func TestComputeFilterScopesSuggestionsToTheSelectedConsumers(t *testing.T) {
+	// Two drifted packages and one stale edge belonging to a third. A filter
+	// scopes the findings to the selected consumers' own declarations —
+	// nothing is proposed about a package the invocation did not name.
+	cfg := libsConfig(config.DependencyConfig{Consumer: "svc", Provider: "ghost"})
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
+	seedManifest(t, root, "packages/svc/package.json",
+		`{"name": "@acme/svc", "dependencies": {"@acme/core": "workspace:*"}}`)
+
+	var out bytes.Buffer
+	open, err := a.Compute(context.Background(), cfgPath,
+		ComputeOptions{Filter: filter.Filter{Packages: []string{"web"}}, Out: &out})
+	require.NoError(t, err)
+	assert.Equal(t, 1, open)
+	assert.Contains(t, out.String(), "+ add    web -> core")
+	assert.NotContains(t, out.String(), "svc", "another consumer's drift is out of scope")
+
+	// The space term reaches the same packages the space holds.
+	out.Reset()
+	open, err = a.Compute(context.Background(), cfgPath,
+		ComputeOptions{Filter: filter.Filter{Spaces: []string{"libs"}}, Out: &out})
+	require.NoError(t, err)
+	assert.Equal(t, 3, open, "web -> core, svc -> core, and svc's stale edge")
+
+	// A selection with nothing to say reports being in sync, and says for what.
+	out.Reset()
+	open, err = a.Compute(context.Background(), cfgPath,
+		ComputeOptions{Filter: filter.Filter{Packages: []string{"core"}}, Out: &out})
+	require.NoError(t, err)
+	assert.Zero(t, open)
+	assert.Contains(t, out.String(), "dependencies are in sync for core")
+
+	_, err = a.Compute(context.Background(), cfgPath,
+		ComputeOptions{Filter: filter.Filter{Packages: []string{"nope"}}, Out: &out})
+	require.Error(t, err, "an unmatched term is a typo, not an empty scope")
+}
+
+func TestComputeFilterStillDetectsAgainstTheWholeWorkspace(t *testing.T) {
+	// The fence: detection reads every package's manifests whatever the
+	// filter says. Scanning only "web" would leave "@acme/core" resolving to
+	// no provider, turning a perfectly good declared edge into a removal
+	// suggestion — the exact opposite of what a scoped compute is for.
+	cfg := libsConfig(config.DependencyConfig{Consumer: "web", Provider: "core"})
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/tools/package.json", `{"name": "@acme/tools"}`)
+	seedManifest(t, root, "packages/web/package.json", `{
+		"name": "@acme/web",
+		"dependencies": {"@acme/core": "workspace:*"},
+		"devDependencies": {"@acme/tools": "workspace:*"}
+	}`)
+
+	var out bytes.Buffer
+	open, err := a.Compute(context.Background(), cfgPath,
+		ComputeOptions{Filter: filter.Filter{Packages: []string{"web"}}, Out: &out})
+	require.NoError(t, err)
+	assert.Equal(t, 1, open)
+	assert.NotContains(t, out.String(), "- remove", "the declared edge is supported by a manifest")
+	assert.Contains(t, out.String(), "+ add    web -> tools (devDependencies)")
 }
 
 func TestComputeInteractiveNeedsInput(t *testing.T) {

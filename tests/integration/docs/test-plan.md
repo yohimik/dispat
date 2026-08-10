@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against sixteen goals, one test file each:
+The suite was designed against seventeen goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -27,8 +27,9 @@ The suite was designed against sixteen goals, one test file each:
    prerelease train, failed-ride catch-up, holds/pins under a shared version, and no bleed between modes.
 6. **The `dispat run` command** (`run_test.go`): a script executed inside changed packages over the dependency graph
    with the full environment, resolved per package through the three `scripts` levels (package, space, file) so the
-   level a name is defined at decides what the run covers, the `dispat <script>` shorthand (including its narrowing to
-   the package it is invoked from), the single-package target (`run <script> <package>`), the `--since` selection, the
+   level a name is defined at decides what the run covers, the `dispat <script>` shorthand and the two-word
+   spelling narrowing alike to the folder they are invoked from, the `--package`/`--space` selection, the `--since`
+   selection and how the two compose (a window is picked, the filter narrows it), the
    `--consumers` expansion (transitive dependents of the window, full members of the skip cascade), the `--on-error`
    skip/continue policies, the concurrency budget (including graph ordering *under* concurrency), cross-package output
    carrying, skipping and error cases.
@@ -68,7 +69,8 @@ The suite was designed against sixteen goals, one test file each:
     nothing is tagged for work that did not finish, and the next run releases the cancelled packages at the version they
     were owed.
 15. **The standalone step commands** (`standalone_test.go`): `dispat changelog`, `dispat autoversion` and
-    `dispat commit` through the binary: the shared package selection (explicit, folder-narrowed, root-wide), the
+    `dispat commit` through the binary: the shared package selection (`--package`/`--space` terms, folder-narrowed,
+    root-wide), the
     W222 changelog idempotence, the in-flow scenario where nested step commands land the changelog inside the tagged
     commit and the outer run skips the pre-written entry (W222) and the pre-created tag (W223), the `--tag`/`--push`
     committer identity and remote delivery, the `DISPAT_OUTPUT` commit pin export, and autoversion's reconcile-once
@@ -80,6 +82,16 @@ The suite was designed against sixteen goals, one test file each:
     `--strict`; that a format-preserving rewrite really does leave every other byte alone on disk; that the scanner
     reads back what the writer just wrote; and that the two new command words did not cost the run shorthand a script
     of the same name.
+17. **The `--package` / `--space` selection** (`filter_test.go`): the one selection every package command shares,
+    through the binary: name, comma-separated, repeated, glob and case-insensitive terms; a space term staying inside
+    its space; a standalone package belonging to no space and reachable only through `--package`; an unmatched term
+    failing with the mirror hint that names the other flag; the invocation folder standing in for the terms nobody
+    typed (a package folder, a nested subfolder, a space folder, the root, outside everything, and the deepest match
+    winning over an enclosing one) while an explicit term always beats it; the filter narrowing a window and never
+    widening it (`--since all` being what reaches an unchanged package) and composing with `--consumers`; the same
+    terms and folder inference on `preview`, the step commands and `compute`, whose suggestions are scoped to the
+    selected consumers while detection still reads every package's manifests; and a positional package name now being
+    a usage error.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -148,6 +160,7 @@ tests/integration/
   interrupt_test.go         goal 14
   standalone_test.go        goal 15
   manifests_test.go         goal 16
+  filter_test.go            goal 17
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -272,7 +285,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestRunPackageScriptRunsInThatPackageAlone`       | A name only one package defines reaches that package and no other, even though its space mate is changed too.                                                                                                                                                                                              |
 | `TestRunResolvesTheMostLocalScript`                | One name defined at all three levels resolves per package: the package's own wins, then its space's, then the file's, each changed package recording which level answered.                                                                                                                                  |
 | `TestRunNoSelectedPackageDefinesIt`                | A name that exists but nowhere in the selection exits 1 rather than reporting a clean run of nothing; the same name over a selection that does contain its package succeeds.                                                                                                                                |
-| `TestRunTargetsAPackageWithATopLevelScript`        | `run <script> <package>` runs one top-level script inside one package's folder under the release environment (`DISPAT_STAGE=run:<name>`, the baseline as the new version), releasing nothing, whether or not the package changed; unknown script, unknown package and a failing script all exit 1.          |
+| `TestRunFilterRunsATopLevelScriptInOnePackage`     | A filtered run executes one top-level script inside one package's folder under the release environment (`DISPAT_STAGE=run:<name>`, the baseline as the new version), releasing nothing, an unchanged package reached through `--since all`; unknown script, unknown package and a failing script all exit 1. |
 | `TestRunOnErrorPolicies`                           | Under the default `--on-error=skip` a failed provider's dependents are skipped; under `continue` they still run; both exit 1; an unknown policy is a usage error (exit 2).                                                                                                                                  |
 | `TestRunConcurrencyBudget`                         | Independent packages' scripts overlap under `--concurrency 3` (measured, three independent checks) and serialise under the config's budget of 1.                                                                                                                                                            |
 | `TestRunGraphOrderingUnderConcurrency`             | Both scheduling promises in one graph: three providers' scripts pairwise overlap at the full budget while their shared consumer's script never starts before every provider's ended.                                                                                                                        |
@@ -280,13 +293,13 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestRunCarriesOutputsFromAFailedProvider`         | Under `--on-error continue` a failed provider's dependents still run and still receive what the failed script exported before dying.                                                                                                                                                                        |
 | `TestRunSkipsUnchangedPackages`                    | After a release nothing is changed and the script runs zero times (an empty selection is a success, unlike one no package resolves the name in); a fresh change narrows the run to exactly the changed package.                                                                                             |
 | `TestRunInFixedSpaceIncludesRides`                 | In a fixed space a ride is a changed package, so the run script executes in every member.                                                                                                                                                                                                                   |
-| `TestRunTargetsANamedPackage`                      | `run <script> <package>` runs exactly the named package (changed or not, no graph) and errors on an unknown package or one that does not resolve the script.                                                                                                                                                |
-| `TestRunShorthandNarrowsToTheInvokedPackage`       | `dispat <script>` from inside a package folder (or a nested subdirectory) runs only that package, riding the config ascent; from the monorepo top it still covers every changed package.                                                                                                                    |
-| `TestRunSinceSelectsByCommitScopes`                | `--since HEAD~1` narrows the run to what the last commit addressed (the written scope wins over the changed files, a scopeless unit derives from its files, §6.2), `-s all` selects every package, an unknown revision exits 1, and combining `--since` with an explicit package is a usage error (exit 2). |
-| `TestRunConsumersExpandTransitively`               | `--consumers` widens a `--since` window with every transitive dependent (the far end of a three-link chain is reached through the middle package, providers still first) while packages nothing depends on stay out, and `-s all --consumers` is a no-op expansion.                                         |
+| `TestRunFilterNarrowsToANamedPackage`              | `--package` runs exactly the named package within the window and errors on an unknown package or one that does not resolve the script; an unchanged package needs `--since all`, because the filter narrows the window rather than replacing it.                                                            |
+| `TestRunNarrowsToTheInvokedPackage`                | Both spellings from inside a package folder (or a nested subdirectory) run only that package, riding the config ascent; from the monorepo top they still cover every changed package; an explicit `-p` beats the folder it was typed in.                                                                    |
+| `TestRunSinceSelectsByCommitScopes`                | `--since HEAD~1` narrows the run to what the last commit addressed (the written scope wins over the changed files, a scopeless unit derives from its files, §6.2), `--since all` selects every package, an unknown revision exits 1, and a package filter narrows whichever window the flag chose — to nothing, honestly, when the two do not meet. |
+| `TestRunConsumersExpandTransitively`               | `--consumers` widens a `--since` window with every transitive dependent (the far end of a three-link chain is reached through the middle package, providers still first) while packages nothing depends on stay out, and `--since all --consumers` is a no-op expansion.                                    |
 | `TestRunConsumersOnReleaseWindow`                  | The default release window has the same gap under depth-0 propagation, and `--consumers` closes it there too: a `feat(core)` window runs core alone plainly, core + its transitive consumers with the flag.                                                                                                 |
 | `TestRunConsumersSkipCascade`                      | An expanded consumer is a full member of the run: a failing provider script skips it transitively under the default `--on-error skip` (exit 1), and `--on-error continue` runs it anyway.                                                                                                                   |
-| `TestRunConsumersRejectsTarget`                    | Combining `--consumers` with an explicit package is a usage error (exit 2), and the folder shorthand is not narrowed under the flag: the whole window plus its consumers runs.                                                                                                                              |
+| `TestRunConsumersComposeWithAFilter`               | `--consumers` expands a filtered selection instead of refusing it, and the expansion is not filtered back out: `-p mid --consumers` runs mid and its dependents, in graph order, with core and extra staying out. The folder spelling behaves identically.                                                  |
 
 ### Goal 7: release records (`records_test.go`)
 
@@ -311,8 +324,8 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | Test                                | Claim proven                                                                                                                                                                                                                                                                                 |
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestCommandsInitThenStatusCompose` | `dispat init --format toml` then a plain `dispat status`: the fallback finds `dispat.toml` with no `--config` anywhere, the starter config loads and discovers the package, and a second `init` refuses to overwrite (exit 1).                                                               |
-| `TestCommandsPreviewNotesWindowing` | `dispat preview <pkg>` prints the pending notes (header, sections, entries), reports "no pending changes" once released, errors on an unknown package; and across a prerelease train the preview and each entry narrow to the fresh changeset while the graduation collects the whole train. |
-| `TestCommandsPreviewAllPackages`    | `dispat preview` with no package renders every package with something pending in publish order, keeps quiet packages out, reports "no pending changes" once nothing is pending, and rejects more than one argument (exit 2).                                                                 |
+| `TestCommandsPreviewNotesWindowing` | `dispat preview --package <name>` prints the pending notes (header, sections, entries), reports "no pending changes" once released, errors on an unknown package; and across a prerelease train the preview and each entry narrow to the fresh changeset while the graduation collects the whole train. |
+| `TestCommandsPreviewAllPackages`    | `dispat preview` with no filter renders every package with something pending in publish order, keeps quiet packages out, reports "no pending changes" once nothing is pending, and rejects a positional package name (exit 2).                                                               |
 
 ### Goal 9: repository-scoped fatal errors (`fatal_test.go`)
 
@@ -402,6 +415,23 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestManifestsWriterRedirects`                   | `--replace` adds the local-folder directive and an empty path removes it, and the scanner reads back what the writer just wrote, which is the pair's whole contract.                                                                  |
 | `TestManifestsWriterOutcomesReachTheExitCode`    | The three outcomes mapped onto exit codes: missing is tolerated (0) until `--strict` (1); a path no writer covers exits 1 while the usable manifests of the same batch are still written; a malformed `--set`, an invocation with nothing to write, and one with no manifest are usage errors (2). |
 | `TestManifestsCommandWordsKeepTheirScripts`      | The two new command words are reserved: the bare `dispat scanner` is the command even where the config defines a `scanner` script, while `dispat run scanner` still reaches the script.                                               |
+
+### Goal 17: the `--package` / `--space` selection (`filter_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                                                     |
+|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestFilterSelectsNamedPackages`                | Every `--package` spelling — one name, comma-separated, repeated, upper-case, a glob, `'*'` — narrows the window to exactly those packages, in graph order.                                                                                       |
+| `TestFilterNarrowsTheWindowNeverWidensIt`       | After a release a filtered run does nothing and exits 0, while `--since all` puts every package on the table for the same filter to pick from.                                                                                                    |
+| `TestFilterUnmatchedTermsAreErrors`             | A term matching no package exits 1 listing what was discovered — a literal and a glob alike — and each flag's miss names the other when the term belongs there: a space in `--package`, a package (a standalone one included) in `--space`.       |
+| `TestFilterSpaceTermStaysInItsSpace`            | A `--space` term selects that space's packages and no others; several terms, a glob and `'*'` union the spaces they match; a package term unions on top.                                                                                          |
+| `TestFilterStandalonePackageBelongsToNoSpace`   | A `packages` entry with a path is reachable through `--package` and `--package '*'` and never through `--space`, not even the space whose folder it sits under; naming it in `--space` exits 1.                                                   |
+| `TestFilterInfersFromTheInvocationFolder`       | With no terms the folder is the selection: a package folder or any subfolder of it, a space folder, the root and a folder outside every space each select what they should, and the deepest match wins over an enclosing one.                     |
+| `TestFilterExplicitTermsBeatTheFolder`          | A term typed on the command line is the whole answer, whichever folder it was typed in — for both flags.                                                                                                                                          |
+| `TestFilterRefusesASelectionWithoutTheScript`   | A filter reaching only packages that resolve no command for the name exits 1, the same guard a whole-monorepo run applies.                                                                                                                        |
+| `TestFilterStepCommandsSelect`                  | The step commands take the same terms and the same folder inference; a selected package the plan is not releasing is a logged no-op, not a failure; an unmatched term exits 1.                                                                    |
+| `TestFilterPreviewSelects`                      | Preview takes the same terms and folder inference, and names the selection it found nothing pending for.                                                                                                                                          |
+| `TestFilterComputeScopesSuggestions`            | Compute reports and writes only the selected consumers' edges while still detecting against every package's manifests, so a declared edge onto an unselected provider is never proposed for removal; the in-sync line names the scope.            |
+| `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
 
 ## Regression fences
 
