@@ -3,8 +3,8 @@ package scanner
 import "strings"
 
 // parsePodfile reads a CocoaPods Podfile: the pods an application depends on.
-// A Podfile declares no identity of its own — it is a consumption manifest, the
-// same shape as a pip requirements file — so only its dependencies are read.
+// A Podfile declares no identity of its own (it is a consumption manifest, the
+// same shape as a pip requirements file) so only its dependencies are read.
 //
 // Pods are attributed to the nearest preceding `target '...' do` line, and a
 // target whose name ends in "Tests" contributes development dependencies.

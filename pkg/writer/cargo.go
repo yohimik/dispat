@@ -37,7 +37,7 @@ var cargoTables = []struct {
 
 // rewriteCargo edits a Cargo.toml by replacing only the bytes of the version
 // literals being changed: the package's own `version`, and each dependency's
-// version wherever it is spelled — as the whole value (`serde = "1.0"`) or as
+// version wherever it is spelled, as the whole value (`serde = "1.0"`) or as
 // the `version` key of an inline table.
 //
 // A renamed dependency is keyed by its alias but declares its real name in the
@@ -153,8 +153,8 @@ func cargoTableOf(raw *cargoManifest, table string) map[string]any {
 	return raw.Dependencies
 }
 
-// cargoDependencyName reports the name the scanner would give one entry — the
-// `package` key of a renamed dependency, otherwise the table key — and whether
+// cargoDependencyName reports the name the scanner would give one entry (the
+// `package` key of a renamed dependency, otherwise the table key) and whether
 // it declares a version literal at all.
 func cargoDependencyName(key string, value any) (name string, writable bool) {
 	switch v := value.(type) {

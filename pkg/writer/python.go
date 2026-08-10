@@ -36,7 +36,7 @@ type pyLocation struct {
 // non-main Poetry group are development.
 //
 // The own version is written to [project] when that table declares one and to
-// [tool.poetry] otherwise — the same precedence the scanner reads it with. An
+// [tool.poetry] otherwise: the same precedence the scanner reads it with. An
 // entry whose value is a table of constraints rather than a scalar, or whose
 // text the requirement reader cannot make sense of, is reported missing.
 func rewritePyproject(path, version string, edits []Edit) (Result, error) {

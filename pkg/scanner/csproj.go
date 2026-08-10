@@ -27,12 +27,12 @@ type csprojManifest struct {
 	} `xml:"ItemGroup"`
 }
 
-// parseCsproj reads an SDK-style .csproj. The package name is PackageId,
-// then AssemblyName, then the file's base name — the same fallback NuGet
-// applies. PackageReference entries are registry dependencies;
-// ProjectReference entries are in-repo couplings, declared as the referenced
-// project's base name with the (slash-normalised) relative path as the
-// local-path signal — the strongest workspace evidence a .NET solution has.
+// parseCsproj reads an SDK-style .csproj. The package name is PackageId, then
+// AssemblyName, then the file's base name: the same fallback NuGet applies.
+// PackageReference entries are registry dependencies; ProjectReference entries
+// are in-repo couplings, declared as the referenced project's base name with
+// the (slash-normalised) relative path as the local-path signal: the strongest
+// workspace evidence a .NET solution has.
 func parseCsproj(rel string, data []byte) (Manifest, error) {
 	var raw csprojManifest
 	if err := decodeXML(data, &raw); err != nil {

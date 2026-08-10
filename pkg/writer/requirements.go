@@ -7,8 +7,8 @@ import (
 	"github.com/yohimik/dispat/pkg/manifest"
 )
 
-// The line-by-line manifest shape: one "name specifier" per line, which
-// makes format-preserving rewriting a per-line splice — the name spelling,
+// The line-by-line manifest shape: one "name specifier" per line, which makes
+// format-preserving rewriting a per-line splice: the name spelling,
 // surrounding spacing and trailing comment all survive, only the specifier
 // text changes.
 
@@ -70,11 +70,11 @@ func rewriteRequirements(path string, edits []Edit) (Result, error) {
 	return res, atomicWrite(path, []byte(strings.Join(lines, "\n")))
 }
 
-// requirementSpans locates, in one requirement line, the declared name and
-// the byte range its version specifier occupies: [nameEnd, specEnd), where
-// specEnd stops at a trailing comment. ok is false for lines that declare
-// no requirement (comments, flags, paths, URLs, continuations — too odd to
-// splice safely).
+// requirementSpans locates, in one requirement line, the declared name and the
+// byte range its version specifier occupies: [nameEnd, specEnd), where specEnd
+// stops at a trailing comment. ok is false for lines that declare no
+// requirement (comments, flags, paths, URLs, continuations, too odd to splice
+// safely).
 func requirementSpans(line string) (name string, nameEnd, specEnd int, ok bool) {
 	trimmed := strings.TrimSpace(line)
 	switch {

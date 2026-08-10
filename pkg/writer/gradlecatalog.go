@@ -11,7 +11,7 @@ import (
 )
 
 // ErrConflictingEdits marks two edits that resolve onto one version literal
-// while asking for different text — a shared [versions] entry cannot be two
+// while asking for different text: a shared [versions] entry cannot be two
 // versions at once. Test with errors.Is.
 var ErrConflictingEdits = errors.New("writer: edits disagree on one shared version")
 

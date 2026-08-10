@@ -8,8 +8,8 @@ import "github.com/yohimik/dispat/pkg/manifest"
 // Composer has no peer or optional dependency field, so an edit carrying one
 // of those kinds names something the format cannot express and is missing.
 //
-// A composer.json usually declares no `version` of its own — Packagist derives
-// it from the git tag, and hard-coding one is discouraged — in which case there
+// A composer.json usually declares no `version` of its own (Packagist derives
+// it from the git tag, and hard-coding one is discouraged) in which case there
 // is nothing to write and Result.VersionWritten stays false. Where a package
 // does declare one it is rewritten like any other.
 func rewriteComposer(path, version string, edits []Edit) (Result, error) {

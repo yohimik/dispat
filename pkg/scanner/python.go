@@ -33,12 +33,12 @@ type pythonManifest struct {
 	} `toml:"tool"`
 }
 
-// parsePython reads a pyproject.toml. PEP 621 [project] wins the identity
-// when present, Poetry's [tool.poetry] otherwise. Kinds: [project.dependencies]
-// and Poetry's main group are runtime; [project.optional-dependencies]
-// (extras) are optionalDependencies; PEP 735 dependency groups and every
-// Poetry non-main group (dev, test, docs, ...) are devDependencies — they
-// install for contributors, not consumers. Names are normalised per PEP 503
+// parsePython reads a pyproject.toml. PEP 621 [project] wins the identity when
+// present, Poetry's [tool.poetry] otherwise. Kinds: [project.dependencies] and
+// Poetry's main group are runtime; [project.optional-dependencies] (extras)
+// are optionalDependencies; PEP 735 dependency groups and every Poetry
+// non-main group (dev, test, docs, ...) are devDependencies, they install for
+// contributors, not consumers. Names are normalised per PEP 503
 // (case-insensitive, runs of -_. collapse to -) on both the package and its
 // dependencies, so "acme_core" and "Acme.Core" meet as one name.
 func parsePython(rel string, data []byte) (Manifest, error) {
@@ -153,8 +153,8 @@ func pep508Dep(req string, kind Kind) DeclaredDep {
 // runs of -, _ and . collapsed to a single -.
 func normalizePyName(name string) string { return manifest.NormalizePyName(name) }
 
-// dedupeDeps drops exact duplicates — a package listed both in [project]
-// and a Poetry table during a migration should not become two declarations.
+// dedupeDeps drops exact duplicates: a package listed both in [project] and a
+// Poetry table during a migration should not become two declarations.
 func dedupeDeps(deps []DeclaredDep) []DeclaredDep {
 	seen := make(map[DeclaredDep]bool, len(deps))
 	out := deps[:0]

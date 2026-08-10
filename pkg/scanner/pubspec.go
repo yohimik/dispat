@@ -6,11 +6,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// pubspecManifest is the subset of pubspec.yaml the scanner reads.
-// Dependency values are a version string, or a map carrying path / sdk /
-// git / hosted details, so they decode as `any` — and so do the identity
-// fields, because YAML happily types `version: 1.0` as a float and a strict
-// string field would fail the whole manifest over it.
+// pubspecManifest is the subset of pubspec.yaml the scanner reads. Dependency
+// values are a version string, or a map carrying path / sdk / git / hosted
+// details, so they decode as `any`, and so do the identity fields, because
+// YAML happily types `version: 1.0` as a float and a strict string field would
+// fail the whole manifest over it.
 type pubspecManifest struct {
 	Name            any            `yaml:"name"`
 	Version         any            `yaml:"version"`
@@ -19,14 +19,13 @@ type pubspecManifest struct {
 	Overrides       map[string]any `yaml:"dependency_overrides"`
 }
 
-// parsePubspec reads a Dart/Flutter pubspec.yaml: name, version,
-// dependencies and dev_dependencies (devDependencies), plus
-// dependency_overrides — which is where monorepos point names at local
-// folders. An override *annotates* the declaration it overrides (its path
-// becomes the local-path signal) rather than appearing as a second
-// declaration of the same name; an override for an undeclared name is kept
-// as a plain dependency. sdk dependencies (flutter) carry no version and
-// match no workspace package, which keeps them inert.
+// parsePubspec reads a Dart/Flutter pubspec.yaml: name, version, dependencies
+// and dev_dependencies (devDependencies), plus dependency_overrides, which is
+// where monorepos point names at local folders. An override *annotates* the
+// declaration it overrides (its path becomes the local-path signal) rather
+// than appearing as a second declaration of the same name; an override for an
+// undeclared name is kept as a plain dependency. sdk dependencies (flutter)
+// carry no version and match no workspace package, which keeps them inert.
 func parsePubspec(rel string, data []byte) (Manifest, error) {
 	var raw pubspecManifest
 	if err := yaml.Unmarshal(data, &raw); err != nil {
@@ -94,7 +93,7 @@ func pubDeps(m *Manifest, table map[string]any, kind Kind) {
 	for name, value := range table {
 		dep := DeclaredDep{Name: name, Kind: kind}
 		switch v := value.(type) {
-		case nil: // `core:` — any version
+		case nil: // `core:` means any version
 		case string:
 			dep.Range = v
 		case map[string]any:

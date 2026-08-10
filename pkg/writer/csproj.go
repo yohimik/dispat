@@ -17,7 +17,7 @@ import (
 // (`<PackageReference Include="X" Version="1.0" />`) or as a child element
 // (`<Version>1.0</Version>`); both are spliced in place, and the file's own
 // formatting is otherwise untouched. A <ProjectReference> declares no version,
-// so an edit naming one is missing — as is any edit carrying a named kind,
+// so an edit naming one is missing, as is any edit carrying a named kind,
 // since a .csproj has one dependency field.
 //
 // A version spelled as an MSBuild property reference (`$(VersionPrefix)`) is
@@ -25,10 +25,10 @@ import (
 // or on the command line, and freezing it to a literal would stop the property
 // working.
 //
-// Where several PropertyGroups declare a Version — they are usually
-// conditioned on a configuration — only the first is written, which is exactly
-// the one the scanner reports, so the two halves cannot disagree about what
-// this project's version is.
+// Where several PropertyGroups declare a Version (they are usually conditioned
+// on a configuration) only the first is written, which is exactly the one the
+// scanner reports, so the two halves cannot disagree about what this project's
+// version is.
 func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

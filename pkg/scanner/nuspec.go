@@ -26,7 +26,7 @@ type nuspecDep struct {
 	Version string `xml:"version,attr"`
 }
 
-// parseNuspec reads a .nuspec — NuGet's own package manifest, the format that
+// parseNuspec reads a .nuspec, NuGet's own package manifest, the format that
 // actually describes a published package, where a .csproj describes the
 // project that builds one. It is the .NET analogue of a podspec or a gemspec:
 // full identity plus dependencies.

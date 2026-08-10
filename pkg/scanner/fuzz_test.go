@@ -7,7 +7,7 @@ import (
 // Fuzzing the hand-rolled parsers: none of them may panic on any input, and
 // the library-backed ones ride along for free through parserFor. Malformed
 // input must come back as an error (or a well-formed partial Manifest), never
-// as a crash — a scanner walks whatever a checkout contains.
+// as a crash: a scanner walks whatever a checkout contains.
 
 // fuzzManifestNames drives every registered parser: exact names, a suffix
 // name and a pattern name.

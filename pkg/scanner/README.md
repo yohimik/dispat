@@ -38,9 +38,10 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | `Gemfile`           | rubygems  | `gem` declarations, `:path` local gems, development and test groups onto devDependencies          |
 | `*.gemspec`         | rubygems  | name, version, `add_dependency`/`add_runtime_dependency`/`add_development_dependency`             |
 
-The mobile platforms are covered too. Four of these declare an identity and a version but no dependencies at all — they
-feed auto-versioning rather than the dependency graph — and every Java-world coordinate is spelled `group:artifact`, so a
-version-catalog entry, a build script's literal notation and a `pom.xml` dependency all name the same package.
+The mobile platforms are covered too. Four of these declare an identity and a version but no dependencies at all, so
+they feed auto-versioning rather than the dependency graph. Every Java-world coordinate is spelled `group:artifact`,
+which means a version-catalog entry, a build script's literal notation and a `pom.xml` dependency all name the same
+package.
 
 | File                   | Ecosystem | Reads                                                                                        |
 |------------------------|-----------|----------------------------------------------------------------------------------------------|
@@ -61,31 +62,42 @@ names reported instead of guessed) and `ResolveLocalDir` (declared local path �
 
 ## Not read today
 
-The goal is full coverage of every package manager; these known gaps are listed so nobody discovers them in production:
-npm `workspaces`, `overrides` and
-`resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and target-specific tables; Maven
-`${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and `<modules>`; Poetry multi-constraint
-dependency lists; PEP 735 `include-group`; `Directory.Build.props` and NuGet lock files; Bundler's
-alternative `gems.rb` spelling and its `Gemfile.lock`. A `.nuspec` packed from a project is a template whose `$id$` and
-`$version$` tokens NuGet fills in at pack time: a token version is kept verbatim, a token identifier reads as empty for
-the same reason an Xcode `$(PRODUCT_BUNDLE_IDENTIFIER)` does. Version text is always kept verbatim, so name matching
-still carries the graph where the version is indirected — including the `Acme::VERSION` constant nearly every gemspec
-assigns its version from, which reads as no version at all because the number lives in a Ruby source file.
+The goal is full coverage of every package manager. These gaps are written down so nobody meets them for the first time
+in production.
 
-The mobile formats are read by recognising the statement shapes that declare something, so anything a single file cannot
-resolve is dropped rather than guessed at — which on modern Android projects is a great deal. Not read: version-catalog
-accessors (`implementation libs.retrofit`), interpolated versions (`"…:$coreVersion"` and `#{...}` in a Podfile),
-`ext` properties, and a `versionName` computed from a properties file. A Gradle `project(':core')` reference is recorded
-by its last path segment with **no** local path — a project path is relative to the build's root, which one build file
-does not reveal, and guessing at the folder could resolve to a real but unrelated package; `settings.gradle`
-`projectDir` remapping is likewise invisible. `[plugins]` and `[bundles]` catalog tables are not dependencies. Subspec
-dependencies are collected but not attributed to their subspec, and `.podspec.json` is a different (JSON) grammar. Only
-the legacy pre-namespacing attributes are read from an `AndroidManifest.xml`, so a modern project correctly reads empty
-there and declares its versions in `build.gradle` instead. Apple build-setting references are kept verbatim where a
-version is expected, matching the Maven `${property}` rule, but a `$(PRODUCT_BUNDLE_IDENTIFIER)`-shaped *identifier*
-reads as empty: every project spells it identically, and `NameIndex` would report the shared literal as an ambiguous
-name. `Info.plist` is matched by exact name, so the legacy `MyApp-Info.plist` spelling is not recognised. Swift Package
-Manager dependencies are out of scope by construction — `Package.swift` is executable Swift, not a manifest.
+Not read: npm `workspaces`, `overrides` and `resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and
+target-specific tables; Maven `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and
+`<modules>`; Poetry multi-constraint dependency lists; PEP 735 `include-group`; `Directory.Build.props` and NuGet lock
+files; Bundler's alternative `gems.rb` spelling and its `Gemfile.lock`.
+
+A `.nuspec` packed from a project is a template. NuGet fills in its `$id$` and `$version$` tokens at pack time, so a
+token version is kept as written and a token identifier reads as empty. An Xcode `$(PRODUCT_BUNDLE_IDENTIFIER)` is
+treated the same way.
+
+Version text is always kept as written, so name matching still carries the graph when the version is indirected. The
+`Acme::VERSION` constant nearly every gemspec assigns its version from reads as no version at all, because the number
+lives in a Ruby source file rather than the manifest.
+
+The mobile formats are read by recognising the statement shapes that declare something. Anything a single file cannot
+resolve is dropped instead of guessed at, and on a modern Android project that is a great deal.
+
+Not read: version-catalog accessors (`implementation libs.retrofit`), interpolated versions (`"…:$coreVersion"`, and
+`#{...}` in a Podfile), `ext` properties, and a `versionName` computed from a properties file.
+
+A Gradle `project(':core')` reference is recorded by its last path segment with **no** local path. A project path is
+relative to the build's root, which one build file does not reveal, so guessing at the folder could land on a real but
+unrelated package. `settings.gradle` `projectDir` remapping is invisible for the same reason.
+
+`[plugins]` and `[bundles]` catalog tables are not dependencies. Subspec dependencies are collected but not attributed
+to their subspec, and `.podspec.json` is a different grammar in JSON. Only the legacy pre-namespacing attributes are
+read from an `AndroidManifest.xml`, so a modern project correctly reads empty there and declares its versions in
+`build.gradle` instead.
+
+Apple build-setting references are kept as written where a version is expected, matching the Maven `${property}` rule.
+A `$(PRODUCT_BUNDLE_IDENTIFIER)`-shaped *identifier* reads as empty instead: every project spells it identically, and
+`NameIndex` would report the shared literal as an ambiguous name. `Info.plist` is matched by exact name, so the legacy
+`MyApp-Info.plist` spelling is not recognised. Swift Package Manager dependencies are out of scope, because
+`Package.swift` is executable Swift rather than a manifest.
 
 ## Requirements
 

@@ -9,8 +9,8 @@ import (
 )
 
 // pubspecTables maps a kind onto the top-level block its declarations live in.
-// dependency_overrides is not a kind of its own — the scanner folds an override
-// onto the declaration it overrides — so it is not written here.
+// dependency_overrides is not a kind of its own (the scanner folds an override
+// onto the declaration it overrides) so it is not written here.
 var pubspecTables = map[manifest.Kind]string{
 	manifest.KindDependencies:    "dependencies",
 	manifest.KindDevDependencies: "dev_dependencies",
@@ -21,9 +21,9 @@ var pubspecTables = map[manifest.Kind]string{
 // scalar being changed is replaced, so indentation, comments, quoting and key
 // order all survive.
 //
-// A dependency whose value is a block rather than a scalar — a path, git or
-// sdk dependency spelled across several lines — has no constraint on its own
-// line to replace and is reported missing. So is a dependency in a block this
+// A dependency whose value is a block rather than a scalar (a path, git or sdk
+// dependency spelled across several lines) has no constraint on its own line
+// to replace and is reported missing. So is a dependency in a block this
 // format has no kind for.
 func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 	data, err := os.ReadFile(path)

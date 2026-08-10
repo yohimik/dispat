@@ -133,7 +133,7 @@ func mavenSpans(data []byte, wanted map[string]int) (map[int]span, map[string]bo
 				}
 
 			// The project's own version is a direct child of the root, so a
-			// <parent><version> — one level deeper — can never match.
+			// <parent><version> (one level deeper) can never match.
 			case t.Name.Local == "version" && parent == "project" && len(path) == 2:
 				s, text, spliceable, err := xmlElementTextSpan(dec, data)
 				if err != nil {

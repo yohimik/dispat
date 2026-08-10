@@ -10,7 +10,7 @@ import "strings"
 // recognise is reported missing rather than guessed at.
 
 // rubyStripComment cuts a trailing comment, ignoring '#' inside string
-// literals — which is also what keeps the '#' of a "#{...}" interpolation from
+// literals, which is also what keeps the '#' of a "#{...}" interpolation from
 // truncating the line. It only ever truncates, so offsets into the result stay
 // valid in the original.
 func rubyStripComment(line string) string {

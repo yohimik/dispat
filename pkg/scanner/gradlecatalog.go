@@ -7,9 +7,9 @@ import (
 )
 
 // gradleCatalog is the subset of a Gradle version catalog the scanner reads.
-// Both tables hold values that are either a string or an inline table, so
-// they decode as `any` and are coerced afterwards — the same shape the Cargo
-// parser uses for the identical reason.
+// Both tables hold values that are either a string or an inline table, so they
+// decode as `any` and are coerced afterwards: the same shape the Cargo parser
+// uses for the identical reason.
 type gradleCatalog struct {
 	Versions  map[string]any `toml:"versions"`
 	Libraries map[string]any `toml:"libraries"`
@@ -28,7 +28,7 @@ type gradleCatalog struct {
 // A catalog carries no identity of its own, and no kinds: which configuration
 // a library ends up in is decided by the build script that consumes the alias,
 // not here, so every entry is a plain dependency. [plugins] and [bundles] are
-// not read — a bundle is a list of aliases rather than a dependency, and a
+// not read: a bundle is a list of aliases rather than a dependency, and a
 // plugin is not a library coordinate.
 func parseGradleCatalog(rel string, data []byte) (Manifest, error) {
 	var raw gradleCatalog
@@ -77,9 +77,9 @@ func gradleLibraryDep(value any, versions map[string]any) (DeclaredDep, bool) {
 	return DeclaredDep{}, false
 }
 
-// gradleCoordinateDep splits a "group:artifact:version" coordinate — the
+// gradleCoordinateDep splits a "group:artifact:version" coordinate (the
 // catalog's shorthand entry form and a build script's literal notation are the
-// same spelling — tolerating the version being omitted.
+// same spelling) tolerating the version being omitted.
 func gradleCoordinateDep(coordinate string, kind Kind) (DeclaredDep, bool) {
 	parts := strings.Split(coordinate, ":")
 	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {

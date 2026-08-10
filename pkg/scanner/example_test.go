@@ -140,8 +140,9 @@ retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit
 
 // Example_ruby reads a Ruby project's manifests: the gemspec that declares the
 // library's own identity and the Gemfile that declares what an application
-// installs. A gemspec assigning its version from a constant reports no version
-// — the number lives in a Ruby source file this package does not evaluate.
+// installs. A gemspec assigning its version from a constant reports no
+// version: the number lives in a Ruby source file this package does not
+// evaluate.
 func Example_ruby() {
 	dir, _ := os.MkdirTemp("", "scanner-ruby-")
 	defer os.RemoveAll(dir)

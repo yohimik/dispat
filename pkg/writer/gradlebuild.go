@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// A Gradle build script is a Groovy or Kotlin program, so — as with the Xcode
-// project file — there is no grammar to re-parse a rewrite against. The writer
+// A Gradle build script is a Groovy or Kotlin program, so (as with the Xcode
+// project file) there is no grammar to re-parse a rewrite against. The writer
 // recognises exactly the statement shapes the scanner recognises, refuses a
 // replacement carrying any byte that could end a literal or open an
 // interpolation, checks the file's brace balance is unchanged, and re-runs the
@@ -169,7 +169,7 @@ func gradleVerify(before, after string, applied []Edit, version string, versionW
 }
 
 // gradlePropertySpan measures the string literal a property assigns, in either
-// dialect's spelling — `versionName "1.0"` and `versionName = "1.0"`.
+// dialect's spelling, `versionName "1.0"` and `versionName = "1.0"`.
 func gradlePropertySpan(masked, name string) (start, end int, ok bool) {
 	i := gradleSkipSpace(masked, 0)
 	if !strings.HasPrefix(masked[i:], name) {
@@ -188,8 +188,8 @@ func gradlePropertySpan(masked, name string) (start, end int, ok bool) {
 
 // gradleCoordinateSpan reads one dependency statement's literal coordinate,
 // returning its "group:artifact" name and the span its version segment
-// occupies. A statement naming no literal three-part coordinate — a catalog
-// accessor, a project reference, an interpolated string — reports nothing.
+// occupies. A statement naming no literal three-part coordinate (a catalog
+// accessor, a project reference, an interpolated string) reports nothing.
 func gradleCoordinateSpan(line, masked string) (name string, start, end int, ok bool) {
 	i := gradleSkipSpace(masked, 0)
 	nameStart := i

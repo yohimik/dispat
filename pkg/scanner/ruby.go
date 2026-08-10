@@ -5,12 +5,12 @@ import "strings"
 // The CocoaPods manifests are Ruby, and a Podfile in the wild really does run
 // arbitrary code: shelling out, branching on the environment, defining methods
 // that targets call. Parsing that properly means a Ruby interpreter, so this
-// package does the opposite — it recognises the handful of statement shapes
+// package does the opposite, it recognises the handful of statement shapes
 // that declare dependencies and ignores everything else. A line it does not
 // understand contributes nothing rather than a guess.
 
 // rubyStripComment cuts a trailing comment, ignoring '#' inside string
-// literals — which is also what keeps the '#' of a "#{...}" interpolation from
+// literals, which is also what keeps the '#' of a "#{...}" interpolation from
 // truncating the line. It only ever truncates, so offsets into the result stay
 // valid in the original.
 func rubyStripComment(line string) string {
@@ -69,8 +69,8 @@ func rubyQuoted(line string, from int) (start, end int, ok bool) {
 
 // isRubyLiteral reports a string whose text is what it says: no "#{...}"
 // interpolation to resolve. An interpolated value names a variable this
-// package cannot evaluate — a path like "#{@prefix_path}/Libraries" resolves
-// to nothing on disk, and recording it would send ResolveLocalDir chasing a
+// package cannot evaluate: a path like "#{@prefix_path}/Libraries" resolves to
+// nothing on disk, and recording it would send ResolveLocalDir chasing a
 // folder that does not exist.
 func isRubyLiteral(value string) bool { return !strings.Contains(value, "#{") }
 
@@ -155,8 +155,8 @@ func rubyIdentChain(line string, i int) (chain []string, next int, ok bool) {
 	}
 }
 
-// rubyOption reads a hash option in either spelling — `:key => 'value'` and
-// the newer `key: 'value'` — returning the span of its string literal.
+// rubyOption reads a hash option in either spelling (`:key => 'value'` and the
+// newer `key: 'value'`) returning the span of its string literal.
 func rubyOption(line, key string) (start, end int, ok bool) {
 	for _, form := range []struct{ token, sep string }{{":" + key, "=>"}, {key + ":", ""}} {
 		i := strings.Index(line, form.token)
@@ -186,9 +186,9 @@ func rubyOption(line, key string) (start, end int, ok bool) {
 
 // rubyDeclaration reads a dependency statement whose arguments begin at args:
 // a quoted name, any number of version requirements, then an option hash. Both
-// package managers this package reads spell it the same way — CocoaPods'
-// `pod 'A', '~> 1'` and Bundler's `gem 'a', '~> 1'` differ only in the method
-// name — and so do a podspec's `dependency` and a gemspec's `add_dependency`.
+// package managers this package reads spell it the same way (CocoaPods' `pod
+// 'A', '~> 1'` and Bundler's `gem 'a', '~> 1'` differ only in the method name)
+// and so do a podspec's `dependency` and a gemspec's `add_dependency`.
 func rubyDeclaration(line string, args int, kind Kind) (DeclaredDep, bool) {
 	start, end, ok := rubyQuoted(line, args)
 	if !ok {
@@ -221,8 +221,8 @@ func rubyDeclaration(line string, args int, kind Kind) (DeclaredDep, bool) {
 		dep.Range = text
 	}
 
-	// A local dependency points at a folder in the same repository — the
-	// strongest workspace signal either format carries.
+	// A local dependency points at a folder in the same repository: the strongest
+	// workspace signal either format carries.
 	if start, end, ok := rubyOption(line, "path"); ok {
 		if path := line[start:end]; isRubyLiteral(path) {
 			dep.LocalPath = path

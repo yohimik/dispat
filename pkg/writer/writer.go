@@ -1,8 +1,8 @@
 // Package writer rewrites dependency manifests in place, format-preserving:
 // only the version text being changed is replaced, every other byte of the
-// file — formatting, key order, comments — survives verbatim. It is the
-// writing counterpart of the scanner package and shares its field-name
-// spelling for dependency kinds.
+// file (formatting, key order, comments) survives verbatim. It is the writing
+// counterpart of the scanner package and shares its field-name spelling for
+// dependency kinds.
 //
 // Every ecosystem the scanner reads has a writer here: package.json and
 // composer.json (byte-precise JSON scalar replacement), go.mod (via
@@ -14,10 +14,10 @@
 // scripts.
 //
 // Every writer proves its output parses before a byte lands on disk. The
-// formats with no cheap grammar to check against — the Xcode project file, the
-// Ruby manifests and the Gradle build scripts — instead refuse any replacement
-// carrying a byte that could end a literal, require the file's brace balance to
-// be unchanged, and re-run the reader over the result.
+// formats with no cheap grammar to check against (the Xcode project file, the
+// Ruby manifests and the Gradle build scripts) instead refuse any replacement
+// carrying a byte that could end a literal, require the file's brace balance
+// to be unchanged, and re-run the reader over the result.
 //
 // A value deferring to something outside the file is left alone rather than
 // replaced with a literal, since overwriting it would sever the indirection it
@@ -46,10 +46,10 @@ import (
 type Edit struct {
 	// Name of the dependency as the manifest declares it.
 	Name string
-	// Kind is the manifest field holding the declaration — the shared
-	// pkg/manifest vocabulary, the same type the scanner reports. Only the
-	// four dependency kinds are valid; Rewrite rejects anything else rather
-	// than descend into an arbitrary part of the manifest.
+	// Kind is the manifest field holding the declaration: the shared pkg/manifest
+	// vocabulary, the same type the scanner reports. Only the four dependency
+	// kinds are valid; Rewrite rejects anything else rather than descend into an
+	// arbitrary part of the manifest.
 	Kind manifest.Kind
 	// Range is the new version text to write, verbatim: "1.2.3", "^1.2.3",
 	// "workspace:*", "v1.2.3".
@@ -96,7 +96,7 @@ const maxManifestBytes = 16 << 20
 // rewriteFunc rewrites one manifest format.
 type rewriteFunc func(path, version string, edits []Edit) (Result, error)
 
-// dispatch resolves a manifest file name onto its writer — the one table
+// dispatch resolves a manifest file name onto its writer: the one table
 // Supported and Rewrite share, so the two can never disagree.
 func dispatch(base string) (rewriteFunc, bool) {
 	switch {
@@ -150,7 +150,7 @@ func dispatch(base string) (rewriteFunc, bool) {
 
 // Rewrite applies the edits to the manifest file at path, dispatching on the
 // file name. version, when non-empty, also rewrites the manifest's own version
-// field where the format has one — go.mod, requirements files, Podfiles,
+// field where the format has one, go.mod, requirements files, Podfiles,
 // Gemfiles and the flat NuGet dependency lists have none, so the parameter is
 // ignored for them and Result.VersionWritten stays false. The file is
 // rewritten only when something changed.

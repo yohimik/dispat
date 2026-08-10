@@ -183,8 +183,8 @@ func plistNextValue(dec *xml.Decoder, data []byte) (plistValue, error) {
 }
 
 // plistStringValue measures the content of the <string> element the decoder
-// has just entered. A self-closing <string/> has no content to splice into —
-// writing after the tag would land the version outside the element — so the
+// has just entered. A self-closing <string/> has no content to splice into
+// (writing after the tag would land the version outside the element) so the
 // value counts as spliceable only when the bytes its content ends at really
 // are a closing tag.
 func plistStringValue(dec *xml.Decoder, data []byte) (plistValue, error) {

@@ -10,7 +10,7 @@ import (
 	"sort"
 )
 
-// rewriteNuspec edits a .nuspec — NuGet's own package manifest: the package's
+// rewriteNuspec edits a .nuspec, NuGet's own package manifest: the package's
 // <version> and the version attribute of each <dependency> matching an edit,
 // whether it sits flat or inside a targetFramework <group>.
 //
@@ -18,7 +18,7 @@ import (
 // `<version>$version$</version>` is a token NuGet fills in from the project at
 // pack time. Writing a literal over it would sever that link and freeze the
 // package at whatever was written, so a token value is left alone and reported
-// missing — the same rule the plist writer applies to $(MARKETING_VERSION).
+// missing: the same rule the plist writer applies to $(MARKETING_VERSION).
 func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

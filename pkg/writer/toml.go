@@ -6,9 +6,9 @@ import "strings"
 // go-toml's Marshal drops comments and normalises layout, and its offset-aware
 // parser lives in an "unstable" package whose own documentation disclaims
 // backward compatibility. A version catalog is a flat table of single-line
-// entries, so a per-line splice — the shape the requirements writer already
-// uses — preserves every other byte by construction. Anything that does not
-// fit on one line is declined rather than guessed at.
+// entries, so a per-line splice (the shape the requirements writer already
+// uses) preserves every other byte by construction. Anything that does not fit
+// on one line is declined rather than guessed at.
 
 // stripTOMLComment cuts a trailing comment, ignoring '#' inside strings. It
 // only ever truncates, so offsets into the result stay valid in the original.
@@ -100,7 +100,7 @@ func tomlQuotedSpan(line string, from int) (start, end int, ok bool) {
 
 // tomlInlineValueSpan measures the string literal assigned to key inside an
 // inline table. The key must sit on a boundary and be followed by '=', so
-// "version" never matches the "version" of a "version.ref" dotted key — which
+// "version" never matches the "version" of a "version.ref" dotted key, which
 // is exactly the distinction the catalog writer turns on.
 func tomlInlineValueSpan(line string, from int, key string) (start, end int, ok bool) {
 	for i := from; i < len(line); i++ {

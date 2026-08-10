@@ -15,10 +15,10 @@ import (
 // isRequirementsFile is pkg/manifest's rule, shared verbatim with the writer.
 func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(name) }
 
-// requirementsKind maps the file name onto the dependency field it stands
-// for: a dev/test requirements file installs for contributors, not consumers.
-// Whole words only — "requirements-latest.txt" contains the letters of
-// "test" but is not a test file.
+// requirementsKind maps the file name onto the dependency field it stands for:
+// a dev/test requirements file installs for contributors, not consumers. Whole
+// words only, "requirements-latest.txt" contains the letters of "test" but is
+// not a test file.
 func requirementsKind(name string) Kind {
 	words := manifest.NameWords(strings.TrimSuffix(strings.ToLower(name), ".txt"))
 	for _, w := range words {
@@ -30,12 +30,12 @@ func requirementsKind(name string) Kind {
 	return KindDependencies
 }
 
-// parseRequirements reads a requirements file: each non-empty line that is
-// not a comment, a pip flag (-r, --hash, ...), a bare path or a URL is one
-// PEP 508 requirement. An editable install of a local path (-e ./core) is a
-// workspace edge and yields a path-only declaration named after the folder.
-// The file declares no identity of its own — line manifests name their
-// dependencies, never themselves.
+// parseRequirements reads a requirements file: each non-empty line that is not
+// a comment, a pip flag (-r, --hash, ...), a bare path or a URL is one PEP 508
+// requirement. An editable install of a local path (-e ./core) is a workspace
+// edge and yields a path-only declaration named after the folder. The file
+// declares no identity of its own, line manifests name their dependencies,
+// never themselves.
 func parseRequirements(rel string, data []byte) (Manifest, error) {
 	kind := requirementsKind(filepath.Base(rel))
 	m := Manifest{Path: rel, Ecosystem: EcosystemPython, Root: isRoot(rel)}
@@ -53,7 +53,7 @@ func parseRequirements(rel string, data []byte) (Manifest, error) {
 
 // requirementLines yields the requirement lines of a pip-style file:
 // continuations joined, per-requirement pip options (--hash=..., the
-// pip-compile output) cut off, comments stripped, flags/paths/URLs dropped —
+// pip-compile output) cut off, comments stripped, flags/paths/URLs dropped,
 // except editable local paths (-e ./x), returned separately as workspace
 // edges.
 func requirementLines(text string) (reqs, editables []string) {

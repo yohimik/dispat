@@ -30,8 +30,8 @@ func xmlWellFormed(data []byte) error {
 
 // xmlElementTextSpan measures the content of the element the decoder has just
 // entered, consuming through its closing tag. A self-closing element has no
-// content bytes to splice into — writing after the tag would land the value
-// outside the element — so it reports spliceable=false, as does an element
+// content bytes to splice into (writing after the tag would land the value
+// outside the element) so it reports spliceable=false, as does an element
 // holding anything other than text.
 func xmlElementTextSpan(dec *xml.Decoder, data []byte) (s span, text string, spliceable bool, err error) {
 	start := dec.InputOffset()

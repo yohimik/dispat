@@ -13,7 +13,7 @@ import (
 // rewritePackagesProps edits a Directory.Packages.props: the central version
 // of each package matching an edit. Central Package Management is where a
 // repository pins every version once and its projects reference packages
-// without one, so this file is the only place those versions can be changed —
+// without one, so this file is the only place those versions can be changed,
 // and, like a Gradle version catalog, it declares no identity and no kinds.
 func rewritePackagesProps(path string, edits []Edit) (Result, error) {
 	return rewriteXMLPackageList(path, edits, "PackageVersion", "Include", "Version")
@@ -34,8 +34,8 @@ func rewritePackagesConfig(path string, edits []Edit) (Result, error) {
 // A version spelled as an MSBuild property reference (`$(SerilogVersion)`) is
 // left alone: freezing it to a literal would stop the property working.
 //
-// A package declared more than once — the same entry repeated under two
-// conditioned ItemGroups — is spliced in every place and reported once.
+// A package declared more than once (the same entry repeated under two
+// conditioned ItemGroups) is spliced in every place and reported once.
 func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr string) (Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -43,8 +43,8 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 	}
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
-		// These files have one dependency field, so a kinded edit — beyond the
-		// long spelling of the zero kind — names something they cannot express.
+		// These files have one dependency field, so a kinded edit (beyond the long
+		// spelling of the zero kind) names something they cannot express.
 		if e.Kind == "" || e.Kind == "dependencies" {
 			wanted[e.Name] = i
 		}

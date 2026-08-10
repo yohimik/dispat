@@ -21,8 +21,8 @@ const (
 // parsePlist reads an Info.plist: the bundle identifier as the package name,
 // the marketing version (CFBundleShortVersionString) as the version, and the
 // build counter (CFBundleVersion) as the build number. A plist declares no
-// dependencies, so this is an identity-only manifest — it feeds versioning,
-// not the dependency graph.
+// dependencies, so this is an identity-only manifest, it feeds versioning, not
+// the dependency graph.
 //
 // Xcode routinely writes these values as build-setting references
 // ($(MARKETING_VERSION), $(PRODUCT_BUNDLE_IDENTIFIER)). A referenced version
@@ -48,8 +48,8 @@ func parsePlist(rel string, data []byte) (Manifest, error) {
 	return m, nil
 }
 
-// isBuildSettingRef reports an Xcode build-setting reference — $(NAME) or
-// ${NAME} — rather than a literal value.
+// isBuildSettingRef reports an Xcode build-setting reference ($(NAME) or
+// ${NAME}) rather than a literal value.
 func isBuildSettingRef(v string) bool {
 	v = strings.TrimSpace(v)
 	return strings.HasPrefix(v, "$(") && strings.HasSuffix(v, ")") ||
@@ -138,8 +138,8 @@ func plistSeekRootDict(dec *xml.Decoder) (found bool, err error) {
 }
 
 // plistNextValue consumes the element following a <key> and returns its text
-// when it is a <string>. Every other value type — dictionaries, arrays,
-// integers, booleans — is skipped whole and reported as an empty string, so a
+// when it is a <string>. Every other value type (dictionaries, arrays,
+// integers, booleans) is skipped whole and reported as an empty string, so a
 // nested container never leaks its own keys into the walk. ok is false once
 // the enclosing dictionary closes.
 func plistNextValue(dec *xml.Decoder) (value string, ok bool, err error) {

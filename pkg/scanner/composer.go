@@ -15,10 +15,10 @@ type composerManifest struct {
 
 // parseComposer reads a composer.json: vendor/package name, the (rarely
 // declared) version, require and require-dev. Platform requirements (php,
-// ext-*, lib-*, composer-*) are constraints on the runtime, not packages,
-// and are skipped. Composer's path repositories are declared per repository,
-// not per dependency, so no local-path signal is attributable to a specific
-// requirement — workspace edges come from name matching alone here.
+// ext-*, lib-*, composer-*) are constraints on the runtime, not packages, and
+// are skipped. Composer's path repositories are declared per repository, not
+// per dependency, so no local-path signal is attributable to a specific
+// requirement, workspace edges come from name matching alone here.
 func parseComposer(rel string, data []byte) (Manifest, error) {
 	var raw composerManifest
 	if err := json.Unmarshal(data, &raw); err != nil {

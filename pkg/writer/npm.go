@@ -15,7 +15,7 @@ type span struct{ start, end int64 }
 // rewriteNpm edits a package.json by replacing only the bytes of the version
 // strings being changed: the file is tokenised once to find each target
 // value's exact span, then the spans are spliced back to front. Everything
-// else — indentation, key order, trailing newline — is untouched bytes.
+// else (indentation, key order, trailing newline) is untouched bytes.
 func rewriteNpm(path, version string, edits []Edit) (Result, error) {
 	// A package.json names its dependency objects after the kinds themselves,
 	// so the field an edit targets is just the kind spelled out.
@@ -24,8 +24,8 @@ func rewriteNpm(path, version string, edits []Edit) (Result, error) {
 
 // rewriteJSON is the byte-precise JSON splice shared by package.json and
 // composer.json. The two formats differ only in what their dependency objects
-// are called, which fieldOf resolves; everything else — the single tokenising
-// pass, the back-to-front splice, the re-validation — is identical.
+// are called, which fieldOf resolves; everything else (the single tokenising
+// pass, the back-to-front splice, the re-validation) is identical.
 func rewriteJSON(path, version string, edits []Edit, fieldOf func(Edit) string) (Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -176,8 +176,8 @@ func npmSpans(data []byte, edits []Edit, fieldOf func(Edit) string) (map[int]spa
 
 // scalarSpan consumes the value after a key token and returns its byte span:
 // from the first non-space byte after the colon to the decoder's offset once
-// the value is read. Only scalars qualify — a composite value is an error
-// where a version string belongs.
+// the value is read. Only scalars qualify: a composite value is an error where
+// a version string belongs.
 func scalarSpan(data []byte, dec *json.Decoder, afterKey int64) (span, error) {
 	tok, err := dec.Token()
 	if err != nil {

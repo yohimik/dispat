@@ -8,13 +8,13 @@ import (
 
 // rewritePodfile edits a CocoaPods Podfile line by line: a `pod 'Name', '...'`
 // statement whose name matches an edit gets its version requirement replaced,
-// and every other byte — the quote style, the surrounding spacing, the trailing
-// comment, the option hash — survives verbatim.
+// and every other byte (the quote style, the surrounding spacing, the trailing
+// comment, the option hash) survives verbatim.
 //
 // A Podfile declares no version of its own, so Rewrite's version argument has
-// no target here. Statements the reader cannot splice safely — a pod with no
+// no target here. Statements the reader cannot splice safely (a pod with no
 // requirement, a git- or path-pinned pod, a constraint spread across two
-// literals — are reported missing rather than rewritten on a guess.
+// literals) are reported missing rather than rewritten on a guess.
 func rewritePodfile(path string, edits []Edit) (Result, error) {
 	return rewriteRubyPods(path, edits, func(line string) (int, bool) {
 		return rubyBareCall(line, "pod")

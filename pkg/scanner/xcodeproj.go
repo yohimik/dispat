@@ -18,12 +18,12 @@ const (
 // that actually matter here. Instead it scans for those settings' assignments
 // directly.
 //
-// A setting repeats once per build configuration (Debug, Release, and
-// whatever else a project defines), so the first non-empty value wins — the
-// rule the .csproj parser already applies to properties repeated across
-// PropertyGroups. Where configurations genuinely disagree the writer is the
-// half that has to care; a reader reporting one of them is enough to place the
-// project in the graph.
+// A setting repeats once per build configuration (Debug, Release, and whatever
+// else a project defines), so the first non-empty value wins: the rule the
+// .csproj parser already applies to properties repeated across PropertyGroups.
+// Where configurations genuinely disagree the writer is the half that has to
+// care; a reader reporting one of them is enough to place the project in the
+// graph.
 //
 // The project file declares no dependencies. Swift Package Manager
 // requirements live in Package.swift, which is executable Swift rather than a

@@ -15,16 +15,17 @@ var gemspecDependencyMethods = []struct {
 }
 
 // parseGemspec reads a RubyGems gemspec: the gem's own name and version plus
-// the gems it depends on. It is the library-side counterpart of the Gemfile —
-// full identity where the Gemfile has none — and the Ruby analogue of a
+// the gems it depends on. It is the library-side counterpart of the Gemfile
+// (full identity where the Gemfile has none) and the Ruby analogue of a
 // package.json.
 //
 // The block parameter is matched by shape rather than by name, because
-// `Gem::Specification.new do |spec|` is a convention rather than a rule. Nearly
-// every published gem assigns its version from a constant
-// (`spec.version = Acme::VERSION`) so that the library and its packaging agree;
-// that is not a literal and yields no version, which is the honest answer —
-// the number lives in a Ruby source file this package does not evaluate.
+// `Gem::Specification.new do |spec|` is a convention rather than a rule.
+// Nearly every published gem assigns its version from a constant
+// (`spec.version = Acme::VERSION`) so that the library and its packaging
+// agree; that is not a literal and yields no version, which is the honest
+// answer: the number lives in a Ruby source file this package does not
+// evaluate.
 func parseGemspec(rel string, data []byte) (Manifest, error) {
 	m := Manifest{Path: rel, Ecosystem: EcosystemRubyGems, Root: isRoot(rel)}
 	for _, raw := range strings.Split(string(data), "\n") {

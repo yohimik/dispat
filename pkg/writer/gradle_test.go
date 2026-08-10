@@ -53,7 +53,7 @@ networking = ["retrofit", "gson"]
 func TestGradleCatalogRewriteSharedRefFansOut(t *testing.T) {
 	// Two libraries pinned to one [versions] entry cannot move independently.
 	// That follows from the file the author wrote, so it is a contract rather
-	// than a surprise — and both edits count as applied.
+	// than a surprise, and both edits count as applied.
 	src := `[versions]
 kotlin = "1.9.0"
 
@@ -264,7 +264,7 @@ func TestGradleBuildRewriteNoChangeLeavesFileAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Nothing was written, so nothing may be reported as written — and a
+	// Nothing was written, so nothing may be reported as written, and a
 	// declaration that was already correct is neither applied nor missing.
 	if len(res.Applied) != 0 || res.VersionWritten || len(res.Missing) != 0 {
 		t.Errorf("no-op rewrite reported work: %+v", res)
@@ -276,7 +276,7 @@ func TestGradleBuildRewriteNoChangeLeavesFileAlone(t *testing.T) {
 
 func TestGradleBuildRewriteSeparatesChangedFromAlreadyCorrect(t *testing.T) {
 	// One edit moves, one is already at the wanted range. Only the mover is
-	// applied, and neither is missing — the same split rewriteNpm reports.
+	// applied, and neither is missing: the same split rewriteNpm reports.
 	src := `android {
     defaultConfig {
         versionName "2.0.0"

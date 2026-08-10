@@ -45,9 +45,9 @@ func TestAndroidManifestNamespacedProjectReadsEmpty(t *testing.T) {
 }
 
 func TestAndroidManifestRejectsForeignRootElement(t *testing.T) {
-	// The file name is an exact match, so a document that is not a <manifest>
-	// is a broken file — and an error is the only way to tell it apart from a
-	// modern project that legitimately declares nothing.
+	// The file name is an exact match, so a document that is not a <manifest> is
+	// a broken file, and an error is the only way to tell it apart from a modern
+	// project that legitimately declares nothing.
 	dir := t.TempDir()
 	write(t, dir, "AndroidManifest.xml", `<?xml version="1.0"?><resources><string name="x">y</string></resources>`)
 	if _, err := New().Scan(t.Context(), dir); err == nil {

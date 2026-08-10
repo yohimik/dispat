@@ -9,15 +9,15 @@ import (
 // parseGoMod reads a go.mod: the module path is the package's name (go.mod
 // declares no own version), direct require directives are its dependencies.
 // Indirect requires are transitive bookkeeping, not declarations, and are
-// skipped — unless a replace directive points the module at a relative
+// skipped, unless a replace directive points the module at a relative
 // filesystem path, which is a deliberate local wiring worth an edge either
 // way. Go declares exact versions, so Range is the required version verbatim.
 func parseGoMod(rel string, data []byte) (Manifest, error) {
 	// Parse first for full fidelity (ParseLax drops replace directives, and
 	// relative replaces are this parser's strongest workspace signal). When
-	// strict parsing fails — typically a directive newer than the vendored
-	// x/mod — fall back to ParseLax rather than refuse the manifest: the
-	// requires survive, only replace-derived local paths are lost.
+	// strict parsing fails (typically a directive newer than the vendored x/mod)
+	// fall back to ParseLax rather than refuse the manifest: the requires
+	// survive, only replace-derived local paths are lost.
 	f, err := modfile.Parse(rel, data, nil)
 	if err != nil {
 		var laxErr error

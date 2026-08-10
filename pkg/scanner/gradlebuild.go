@@ -3,7 +3,7 @@ package scanner
 import "strings"
 
 // A Gradle build script is a Groovy or Kotlin program, so this parser does not
-// try to understand it — it recognises the handful of statement shapes that
+// try to understand it, it recognises the handful of statement shapes that
 // declare an identity, a version or a dependency, scoped by brace nesting, and
 // ignores everything else. A shape it does not recognise contributes nothing
 // rather than a guess, which matters more here than anywhere else in the
@@ -190,8 +190,8 @@ func gradleScopeTop(scope []string) string {
 	return scope[len(scope)-1]
 }
 
-// gradleProperty matches `name "value"` and `name = "value"` — the Groovy and
-// Kotlin spellings of one property assignment — and reports the literal it
+// gradleProperty matches `name "value"` and `name = "value"` (the Groovy and
+// Kotlin spellings of one property assignment) and reports the literal it
 // assigns. A value that is computed rather than written out (Gradle's own
 // `versionName project.findProperty(…)`) has no literal and reports nothing.
 func gradleProperty(line, masked, name string) (string, bool) {
@@ -309,7 +309,7 @@ func gradleProjectPath(line, masked string, i int) (string, bool) {
 // annotation processors, which run at build time and ship nothing. compileOnly
 // is the closest thing Gradle has to a peer dependency: present while
 // compiling, absent from what the consumer receives. Nothing here maps onto
-// optionalDependencies, which is no loss — go.mod uses one kind of four.
+// optionalDependencies, which is no loss, go.mod uses one kind of four.
 func gradleKind(config string) (Kind, bool) {
 	lower := strings.ToLower(config)
 	switch {

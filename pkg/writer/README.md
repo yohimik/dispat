@@ -10,12 +10,15 @@ package managers**; each ecosystem gains a writer once its rewrite can be made b
 res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
 {Name: "@acme/core", Kind: "dependencies", Range: "^1.3.0"},
 })
-// res.Applied, res.Missing, res.VersionWritten, res.Path
+// res.Applied, res.Skipped, res.Missing, res.VersionWritten, res.Path
 ```
 
-Writes are atomic (same-folder temp file, fsync, rename) and skipped entirely when nothing changed; a rewritten
-`package.json` is re-validated as JSON before a single byte lands on disk. Reads are capped at 16 MiB
-(`ErrManifestTooLarge`); an unsupported path is `ErrUnsupportedManifest`.
+Writes are atomic, through a same-folder temp file, an fsync and a rename, and are skipped entirely when nothing
+changed. Reads are capped at 16 MiB (`ErrManifestTooLarge`), and an unsupported path gives `ErrUnsupportedManifest`.
+
+The result separates three outcomes. `Applied` holds the edits that changed the file. `Skipped` holds the ones whose
+dependency is declared but whose version cannot be written, which is the normal state of a healthy manifest. `Missing`
+holds the ones the manifest does not declare at all, which usually means the caller and the file disagree.
 
 ## Supported manifests
 
@@ -47,10 +50,12 @@ Writes are atomic (same-folder temp file, fsync, rename) and skipped entirely wh
 and a format the scanner learns to read should fail it until it can be written too.
 
 Every writer proves its output before a byte lands: `json.Valid` for the JSON formats, `modfile.Parse` for go.mod, a
-re-parse for the XML formats, `toml.Unmarshal` for the TOML ones. `project.pbxproj`, the Ruby manifests and the Gradle
-build scripts have no cheap grammar to re-parse against, so three guards stand in for one — a replacement carrying any
-byte that could end a literal or open a block is refused outright, the file's brace balance must be unchanged, and the
-reader is re-run over the result and must agree every splice landed where it was aimed.
+re-parse for the XML formats, `toml.Unmarshal` for the TOML ones.
+
+`project.pbxproj`, the Ruby manifests and the Gradle build scripts have no cheap grammar to re-parse against, so three
+guards stand in for one. A replacement carrying any byte that could end a literal or open a block is refused outright.
+The file's brace balance must come out unchanged. And the reader is run over the result, where it has to agree that
+every splice landed where it was aimed.
 
 ## Not written today
 
@@ -58,25 +63,32 @@ Build numbers are read but never written. `CFBundleVersion`, `android:versionCod
 monotonic counters rather than semantic versions, and nothing upstream computes one; bumping them belongs to a
 `flow.version` script.
 
-Three behaviours are worth knowing before turning these on. A `[versions]` entry several catalog libraries share **fans
-out**: changing one coordinate changes every library pinned to that ref, which follows from the file the author wrote,
-and two edits landing on one shared entry with different text are refused with `ErrConflictingEdits` rather than letting
-the last one win. `MARKETING_VERSION` is written to *every* build configuration, because leaving Debug and Release
-disagreeing is worse than either alternative; a project deliberately holding two targets at different versions is the
-case this cannot serve. And a coordinate declared under several Gradle configurations is updated in all of them.
+Three behaviours are worth reading before turning these on.
 
-A value that defers to something outside the file is left alone rather than replaced with a literal, because overwriting
-it would sever the indirection it exists for: a Maven `${property}`, a Cargo `{ workspace = true }`, an Xcode
-`$(MARKETING_VERSION)`, a nuspec's `$version$` pack-time token, and the `spec.version = Acme::VERSION` constant nearly
-every published gem uses to keep its library and its packaging in step. A Maven `<parent>`'s version is never written
-either — it selects which POM this one inherits from, so moving it would repoint the build rather than release the
-module.
+A `[versions]` entry that several catalog libraries share **fans out**. Changing one coordinate changes every library
+pinned to that ref, which follows from the file the author wrote. Two edits landing on one shared entry with different
+text are refused with `ErrConflictingEdits` instead of letting the last one win.
 
-Nothing is added where a declaration deliberately carries no version: a pod or gem with no requirement, one pinned to a
+`MARKETING_VERSION` is written to *every* build configuration, since leaving Debug and Release disagreeing is worse than
+either alternative. A project holding two targets at different versions on purpose is the case this cannot serve.
+
+A coordinate declared under several Gradle configurations is updated in all of them.
+
+A value that defers to something outside the file is left alone rather than replaced with a literal. Overwriting it
+would sever the indirection it exists for. That covers a Maven `${property}`, a Cargo `{ workspace = true }`, an MSBuild
+or Xcode `$(...)` property, a nuspec `$version$` pack-time token, and the `spec.version = Acme::VERSION` constant nearly
+every published gem uses to keep its library and its packaging in step.
+
+A Maven `<parent>`'s version is never written either. It selects which POM this one inherits from, so moving it would
+repoint the build instead of releasing the module.
+
+Nothing is added where a declaration carries no version on purpose. A pod or gem with no requirement, one pinned to a
 git revision or a path, a constraint spread across two literals (`gem 'pg', '>= 0.18', '< 2.0'`), and a catalog library
-with no version are all reported missing. The one exception follows an older precedent — a bare PEP 508 entry gains its
-first specifier, in `pyproject.toml` as in a requirements file, since there a name with no specifier is an unpinned
-dependency rather than a deliberate choice.
+with no version are all reported in `Skipped`.
+
+There is one exception, and it follows an older precedent. A bare PEP 508 entry gains its first specifier, in
+`pyproject.toml` as in a requirements file, because a name with no specifier there is an unpinned dependency rather than
+a choice.
 
 ## Requirements
 

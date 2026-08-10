@@ -1,8 +1,8 @@
-// Package scanner reads dependency manifests — package.json, go.mod,
-// Cargo.toml — into one ecosystem-neutral shape: the package's declared
-// identity (name, version) and its declared dependencies with their ranges
-// and manifest fields. It only reads; rewriting manifests is the writer
-// package's job.
+// Package scanner reads dependency manifests (package.json, go.mod,
+// Cargo.toml) into one ecosystem-neutral shape: the package's declared
+// identity (name, version) and its declared dependencies with their ranges and
+// manifest fields. It only reads; rewriting manifests is the writer package's
+// job.
 //
 // The scanner is deliberately lightweight: a handful of file-name probes and
 // thin per-format parsers, no SBOM machinery. The recognised manifest names
@@ -23,7 +23,7 @@ import (
 	"github.com/yohimik/dispat/pkg/manifest"
 )
 
-// Kind is the manifest dependency field a declaration came from — the shared
+// Kind is the manifest dependency field a declaration came from: the shared
 // pkg/manifest vocabulary, aliased so the reader and the writer can never
 // disagree on what a kind is called.
 type Kind = manifest.Kind
@@ -63,11 +63,11 @@ type DeclaredDep struct {
 	Range string
 	// Kind is the manifest field the declaration sits in.
 	Kind Kind
-	// LocalPath is the declared filesystem path when the dependency points
-	// into the same repository — an npm "file:"/"link:" range, a go.mod
-	// replace to a relative path, a Cargo `path` key — relative to the
-	// manifest's folder. Empty otherwise. It is the strongest workspace-edge
-	// signal: it survives name mismatches between folder and manifest.
+	// LocalPath is the declared filesystem path when the dependency points into
+	// the same repository (an npm "file:"/"link:" range, a go.mod replace to a
+	// relative path, a Cargo `path` key) relative to the manifest's folder. Empty
+	// otherwise. It is the strongest workspace-edge signal: it survives name
+	// mismatches between folder and manifest.
 	LocalPath string
 }
 
@@ -104,8 +104,8 @@ type Manifest struct {
 	// Version is the package's declared own version; empty when absent
 	// (go.mod has none by design).
 	Version string
-	// BuildNumber is the monotonic build counter the mobile formats carry
-	// beside their marketing version — CFBundleVersion, android:versionCode,
+	// BuildNumber is the monotonic build counter the mobile formats carry beside
+	// their marketing version, CFBundleVersion, android:versionCode,
 	// CURRENT_PROJECT_VERSION. It is not a semantic version and no writer
 	// rewrites it; empty for every format without one.
 	BuildNumber string
@@ -127,8 +127,8 @@ type Scanner interface {
 	// dependency and build-output folders (node_modules, vendor, dist, ...,
 	// and every dot-folder).
 	Scan(ctx context.Context, dir string) ([]Manifest, error)
-	// ScanRoot parses only the manifests sitting directly in dir — the files
-	// that declare the folder's own identity — without descending anywhere.
+	// ScanRoot parses only the manifests sitting directly in dir (the files that
+	// declare the folder's own identity) without descending anywhere.
 	ScanRoot(ctx context.Context, dir string) ([]Manifest, error)
 }
 
@@ -162,9 +162,9 @@ var parsers = map[string]parseFunc{
 	"packages.config":          parsePackagesConfig,
 }
 
-// suffixParsers recognise manifests by file extension — .NET projects name
-// the file after the project (App.csproj), so an exact-name table cannot
-// hold them.
+// suffixParsers recognise manifests by file extension, .NET projects name the
+// file after the project (App.csproj), so an exact-name table cannot hold
+// them.
 var suffixParsers = map[string]parseFunc{
 	// F# and VB projects share the SDK-style schema the C# parser reads.
 	".csproj":  parseCsproj,
@@ -175,7 +175,7 @@ var suffixParsers = map[string]parseFunc{
 	".gemspec": parseGemspec,
 }
 
-// patternParsers recognise manifests by an arbitrary name predicate — the
+// patternParsers recognise manifests by an arbitrary name predicate: the
 // line-by-line manifest families whose file names vary (requirements.txt,
 // requirements-dev.txt, ...).
 var patternParsers = []struct {
@@ -209,7 +209,7 @@ func parserFor(name string) (parseFunc, bool) {
 // manifests under site-packages). Dot-folders are skipped separately, which
 // already covers .gradle, SwiftPM's .build and Flutter's .symlinks; Gradle's
 // own output folder is literally "build", listed here. An .xcodeproj is
-// deliberately absent — project.pbxproj lives inside one.
+// deliberately absent, project.pbxproj lives inside one.
 var skipDirs = map[string]bool{
 	"node_modules":     true,
 	"bower_components": true,
@@ -362,7 +362,7 @@ type Owner struct {
 // under one rule shared by every consumer of the mapping: root manifests bind
 // before nested ones (a package's own identity beats a vendored or example
 // manifest deeper inside another package), and a name two packages declare at
-// root priority is ambiguous — returned in ambiguous (sorted) instead of
+// root priority is ambiguous, returned in ambiguous (sorted) instead of
 // mapped, because deriving relations from it would be guessing.
 func NameIndex(owners []Owner) (names map[string]string, ambiguous []string) {
 	names = make(map[string]string)

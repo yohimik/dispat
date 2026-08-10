@@ -4,7 +4,7 @@ import "strings"
 
 // parsePodspec reads a CocoaPods podspec: the library's own name and version
 // plus the pods it depends on. It is the library-side counterpart of the
-// Podfile — full identity where the Podfile has none — and the closest iOS
+// Podfile (full identity where the Podfile has none) and the closest iOS
 // analogue of a package.json.
 //
 // The block parameter is matched by shape rather than by name, because

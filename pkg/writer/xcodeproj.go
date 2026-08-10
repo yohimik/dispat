@@ -103,12 +103,12 @@ func countByte(data []byte, c byte) int {
 }
 
 // pbxSetting splits one `KEY = VALUE;` assignment, reporting the value and the
-// byte range it occupies in the line — the span excludes the quotes of a
-// quoted value, so a splice preserves the file's existing quoting style. It
-// mirrors the scanner's reader exactly, including requiring the terminating
-// semicolon so a container opener (`buildSettings = {`) never reads as a
-// setting, and skipping a conditional assignment
-// (`MARKETING_VERSION[sdk=iphoneos*] = 1.0;`) whose bracket is not a name byte.
+// byte range it occupies in the line: the span excludes the quotes of a quoted
+// value, so a splice preserves the file's existing quoting style. It mirrors
+// the scanner's reader exactly, including requiring the terminating semicolon
+// so a container opener (`buildSettings = {`) never reads as a setting, and
+// skipping a conditional assignment (`MARKETING_VERSION[sdk=iphoneos*] =
+// 1.0;`) whose bracket is not a name byte.
 func pbxSetting(line string) (key, value string, span [2]int, ok bool) {
 	i := 0
 	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {

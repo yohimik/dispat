@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// FuzzRewriteNpm hammers the byte-splice path: whatever the input file held,
-// a rewrite either errors or leaves valid JSON behind — never a torn or
-// corrupted manifest. That is the writer's whole contract.
+// FuzzRewriteNpm hammers the byte-splice path: whatever the input file held, a
+// rewrite either errors or leaves valid JSON behind, never a torn or corrupted
+// manifest. That is the writer's whole contract.
 func FuzzRewriteNpm(f *testing.F) {
 	seeds := []string{
 		`{"name":"a","version":"1.0.0","dependencies":{"b":"^1.0.0"}}`,

@@ -20,10 +20,10 @@ type cargoManifest struct {
 
 // parseCargo reads a Cargo.toml: [package] name/version plus the three
 // dependency tables. dev-dependencies map onto devDependencies;
-// build-dependencies count as plain dependencies — a build dependency's
-// change still forces the consumer to rebuild, which is exactly what the
-// runtime kind propagates. A renamed dependency (`alias = { package = "real"
-// }`) is declared under its real package name.
+// build-dependencies count as plain dependencies: a build dependency's change
+// still forces the consumer to rebuild, which is exactly what the runtime kind
+// propagates. A renamed dependency (`alias = { package = "real" }`) is
+// declared under its real package name.
 func parseCargo(rel string, data []byte) (Manifest, error) {
 	var raw cargoManifest
 	if err := toml.Unmarshal(data, &raw); err != nil {
@@ -65,9 +65,9 @@ func cargoDeps(m *Manifest, kind Kind, table map[string]any) {
 				dep.LocalPath = p
 			}
 		default:
-			// An unrecognised value shape (a bool, a number) drops this entry
-			// alone, matching how the python and pubspec parsers treat the
-			// same situation — one odd declaration must not void a manifest.
+			// An unrecognised value shape (a bool, a number) drops this entry alone,
+			// matching how the python and pubspec parsers treat the same situation: one
+			// odd declaration must not void a manifest.
 			continue
 		}
 		m.Deps = append(m.Deps, dep)

@@ -3,9 +3,9 @@ package scanner
 import "strings"
 
 // parseGemfile reads a Bundler Gemfile: the gems an application depends on. A
-// Gemfile declares no identity of its own — it is a consumption manifest, the
-// same shape as a pip requirements file or a Podfile — so only its
-// dependencies are read.
+// Gemfile declares no identity of its own (it is a consumption manifest, the
+// same shape as a pip requirements file or a Podfile) so only its dependencies
+// are read.
 //
 // Gems are attributed to the nearest preceding `group ... do` line, and a
 // development or test group contributes development dependencies; the inline

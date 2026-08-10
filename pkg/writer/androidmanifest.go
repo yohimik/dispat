@@ -62,8 +62,8 @@ func rewriteAndroidManifest(path, version string, edits []Edit) (Result, error) 
 // androidVersionNameSpan locates the byte span of the root <manifest>
 // element's version attribute value and decodes its current text. Only the
 // root element is considered, and the raw-byte search is confined to that one
-// start tag, so the word appearing anywhere else in the document — in a
-// comment, in an attribute of some nested element — cannot be hit.
+// start tag, so the word appearing anywhere else in the document (in a
+// comment, in an attribute of some nested element) cannot be hit.
 func androidVersionNameSpan(data []byte) (s span, text string, found bool, err error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {

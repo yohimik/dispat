@@ -68,12 +68,11 @@ type mavenDep struct {
 }
 
 // parseMaven reads a pom.xml. Names are the full "groupId:artifactId"
-// coordinates — artifactId alone collides across groups. Kinds: scope test
-// maps onto devDependencies, an optional dependency onto
-// optionalDependencies, everything else (compile, provided, runtime) is a
-// plain dependency. Version text — including a ${property} reference — is
-// kept verbatim; name matching carries the graph even where the version is
-// indirected.
+// coordinates, artifactId alone collides across groups. Kinds: scope test maps
+// onto devDependencies, an optional dependency onto optionalDependencies,
+// everything else (compile, provided, runtime) is a plain dependency. Version
+// text (including a ${property} reference) is kept verbatim; name matching
+// carries the graph even where the version is indirected.
 func parseMaven(rel string, data []byte) (Manifest, error) {
 	var raw mavenManifest
 	if err := decodeXML(data, &raw); err != nil {

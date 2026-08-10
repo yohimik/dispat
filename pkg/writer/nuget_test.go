@@ -81,7 +81,7 @@ func TestPackagesPropsRewriteCentralVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Declared twice, spliced twice, reported once — and this file has no own
+	// Declared twice, spliced twice, reported once, and this file has no own
 	// version, so the version argument has no target.
 	if strings.Count(read(t, path), `Version="4.0.0"`) != 2 {
 		t.Errorf("both declarations must be spliced: %q", read(t, path))

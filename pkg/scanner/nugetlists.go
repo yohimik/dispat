@@ -21,9 +21,9 @@ type packagesProps struct {
 
 // parsePackagesProps reads a Directory.Packages.props: the central version for
 // every package the repository's projects consume. It carries no identity, and
-// no kinds — which configuration a package ends up in is decided by the
-// project that references it, not here — so every entry is a plain dependency,
-// exactly as in a Gradle version catalog.
+// no kinds (which configuration a package ends up in is decided by the project
+// that references it, not here) so every entry is a plain dependency, exactly
+// as in a Gradle version catalog.
 func parsePackagesProps(rel string, data []byte) (Manifest, error) {
 	var raw packagesProps
 	if err := decodeXML(data, &raw); err != nil {
@@ -53,7 +53,7 @@ type packagesConfig struct {
 	} `xml:"package"`
 }
 
-// parsePackagesConfig reads a legacy packages.config — the pre-PackageReference
+// parsePackagesConfig reads a legacy packages.config: the pre-PackageReference
 // way a project listed its packages. It declares no identity, and a package
 // flagged developmentDependency installs for the project's own build rather
 // than for its consumers, which is what devDependencies means everywhere else
