@@ -131,3 +131,50 @@ func TestNuGetWriterDispatch(t *testing.T) {
 		}
 	}
 }
+
+func TestNetWritersRefuseMSBuildPropertyReferences(t *testing.T) {
+	// The value lives in a Directory.Build.props or on the command line.
+	// Freezing it to a literal stops the property working, so all three .NET
+	// writers decline, matching the plist, pom and nuspec writers.
+	csproj := `<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>$(VersionPrefix)</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="$(SerilogVersion)" />
+    <PackageReference Include="Newtonsoft.Json">
+      <Version>$(JsonVersion)</Version>
+    </PackageReference>
+  </ItemGroup>
+</Project>
+`
+	path := seed(t, "A.csproj", csproj)
+	res, err := Rewrite(path, "2.0.0", []Edit{
+		{Name: "Serilog", Range: "4.0.0"},
+		{Name: "Newtonsoft.Json", Range: "13.0.3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.VersionWritten || len(res.Applied) != 0 || read(t, path) != csproj {
+		t.Errorf("csproj property references must survive: %+v", res)
+	}
+
+	props := "<Project>\n  <ItemGroup>\n    <PackageVersion Include=\"Serilog\" Version=\"$(SerilogVersion)\" />\n  </ItemGroup>\n</Project>\n"
+	path = seed(t, "Directory.Packages.props", props)
+	if res, err = Rewrite(path, "", []Edit{{Name: "Serilog", Range: "4.0.0"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 || read(t, path) != props {
+		t.Errorf("central property references must survive: %+v", res)
+	}
+
+	config := "<packages>\n  <package id=\"Serilog\" version=\"$(SerilogVersion)\" />\n</packages>\n"
+	path = seed(t, "packages.config", config)
+	if res, err = Rewrite(path, "", []Edit{{Name: "Serilog", Range: "4.0.0"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 || read(t, path) != config {
+		t.Errorf("packages.config property references must survive: %+v", res)
+	}
+}

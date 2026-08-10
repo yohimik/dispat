@@ -44,12 +44,19 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		wanted[target{block, e.Name}] = i
 	}
 
+	// depth is the indent of the open block's own entries, fixed by its first
+	// one. Anything deeper belongs to an entry rather than to the block, and
+	// must not be matched: a block dependency spells its folder as a nested
+	// "path:" key, and "path" is also an ordinary package name, so a writer
+	// that ignored depth would rewrite the folder into a version.
+	const noBlock = -1
 	var (
 		res     Result
 		found   = make(map[int]bool, len(edits))
 		lines   = strings.Split(string(data), "\n")
 		changed bool
 		block   string
+		depth   = noBlock
 	)
 	for li, raw := range lines {
 		line := stripYAMLComment(raw)
@@ -61,10 +68,10 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		if line[0] != ' ' && line[0] != '\t' {
 			key, valueStart, ok := yamlKey(line)
 			if !ok {
-				block = ""
+				block, depth = "", noBlock
 				continue
 			}
-			block = key
+			block, depth = key, noBlock
 			if key != "version" || version == "" {
 				continue
 			}
@@ -84,6 +91,13 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 			continue
 		}
 
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if depth == noBlock {
+			depth = indent // the block's first entry sets the level
+		}
+		if indent != depth {
+			continue // nested inside an entry, not an entry of the block
+		}
 		key, valueStart, ok := yamlKey(line)
 		if !ok {
 			continue

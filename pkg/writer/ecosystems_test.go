@@ -205,3 +205,42 @@ pytest = { version = "^8.0", python = ">=3.11" }
 		t.Errorf("result mismatch: applied=%d %+v", len(res.Applied), res)
 	}
 }
+
+func TestPubspecRewriteIgnoresKeysNestedInsideEntries(t *testing.T) {
+	// "path" is both an ordinary pub package and the key a block dependency
+	// spells its folder with. Matching by name alone rewrote the folder into a
+	// version and broke the local dependency.
+	src := `name: acme
+version: 1.0.0
+
+dependencies:
+  path: ^1.8.0
+  local:
+    path: ../local
+  from_git:
+    git:
+      url: https://example.com/g.git
+      path: packages/g
+
+dev_dependencies:
+  test: ^1.24.0
+`
+	path := seed(t, "pubspec.yaml", src)
+	res, err := Rewrite(path, "", []Edit{{Name: "path", Range: "^1.9.0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src, "  path: ^1.8.0", "  path: ^1.9.0", 1)
+	if got := read(t, path); got != want {
+		t.Errorf("file mismatch:\n got: %q\nwant: %q", got, want)
+	}
+	if !strings.Contains(read(t, path), "    path: ../local") {
+		t.Error("a block dependency's folder was rewritten into a version")
+	}
+	if !strings.Contains(read(t, path), "      path: packages/g") {
+		t.Error("a key two levels down was rewritten")
+	}
+	if len(res.Applied) != 1 {
+		t.Errorf("result mismatch: %+v", res)
+	}
+}

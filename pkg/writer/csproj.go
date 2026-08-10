@@ -20,6 +20,11 @@ import (
 // so an edit naming one is missing — as is any edit carrying a named kind,
 // since a .csproj has one dependency field.
 //
+// A version spelled as an MSBuild property reference (`$(VersionPrefix)`) is
+// left alone and reported missing: the value lives in a Directory.Build.props
+// or on the command line, and freezing it to a literal would stop the property
+// working.
+//
 // Where several PropertyGroups declare a Version — they are usually
 // conditioned on a configuration — only the first is written, which is exactly
 // the one the scanner reports, so the two halves cannot disagree about what
@@ -129,7 +134,8 @@ func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error
 				// The attribute form is complete on the start tag itself; the
 				// element form is picked up by the <Version> child below.
 				if xmlHasAttr(t, "Version") {
-					if s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, "Version"); ok {
+					s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, "Version")
+					if ok && !isDeferredValue(string(data[s.start:s.end])) {
 						spans[i] = s
 					}
 					break
@@ -137,23 +143,23 @@ func csprojSpans(data []byte, wanted map[string]int) (map[int]span, *span, error
 				pending = i
 
 			case t.Name.Local == "Version" && parent == "PropertyGroup":
-				s, _, spliceable, err := xmlElementTextSpan(dec, data)
+				s, text, spliceable, err := xmlElementTextSpan(dec, data)
 				if err != nil {
 					return nil, nil, err
 				}
 				path = path[:len(path)-1] // the span consumed the closing tag
-				if spliceable && versionSpan == nil {
+				if spliceable && versionSpan == nil && !isDeferredValue(text) {
 					s := s
 					versionSpan = &s
 				}
 
 			case t.Name.Local == "Version" && parent == "PackageReference" && pending >= 0:
-				s, _, spliceable, err := xmlElementTextSpan(dec, data)
+				s, text, spliceable, err := xmlElementTextSpan(dec, data)
 				if err != nil {
 					return nil, nil, err
 				}
 				path = path[:len(path)-1]
-				if spliceable {
+				if spliceable && !isDeferredValue(text) {
 					spans[pending] = s
 				}
 			}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 )
 
 // rewriteNuspec edits a .nuspec — NuGet's own package manifest: the package's
@@ -75,7 +74,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 					break
 				}
 				s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, "version")
-				if !ok || isNuspecToken(string(data[s.start:s.end])) {
+				if !ok || isDeferredValue(string(data[s.start:s.end])) {
 					break
 				}
 				found[i] = true
@@ -93,7 +92,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 					return Result{}, fmt.Errorf("%s: %w", path, err)
 				}
 				path0 = path0[:len(path0)-1] // the span consumed the closing tag
-				if spliceable && versionSpan == nil && !isNuspecToken(text) {
+				if spliceable && versionSpan == nil && !isDeferredValue(text) {
 					s := s
 					versionSpan = &s
 				}
@@ -132,11 +131,4 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 		return res, fmt.Errorf("%s: internal error: rewrite produced invalid XML: %w", path, err)
 	}
 	return res, atomicWrite(path, out)
-}
-
-// isNuspecToken reports a $token$ NuGet replaces at pack time rather than a
-// literal value. It mirrors the scanner's rule.
-func isNuspecToken(v string) bool {
-	v = strings.TrimSpace(v)
-	return len(v) > 2 && strings.HasPrefix(v, "$") && strings.HasSuffix(v, "$")
 }

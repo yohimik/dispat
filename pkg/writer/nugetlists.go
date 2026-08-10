@@ -31,6 +31,9 @@ func rewritePackagesConfig(path string, edits []Edit) (Result, error) {
 // replace the bytes between the quotes of its version attribute. The two
 // formats differ only in what those three names are called.
 //
+// A version spelled as an MSBuild property reference (`$(SerilogVersion)`) is
+// left alone: freezing it to a literal would stop the property working.
+//
 // A package declared more than once — the same entry repeated under two
 // conditioned ItemGroups — is spliced in every place and reported once.
 func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr string) (Result, error) {
@@ -76,7 +79,7 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 			continue
 		}
 		s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, versionAttr)
-		if !ok {
+		if !ok || isDeferredValue(string(data[s.start:s.end])) {
 			continue
 		}
 		found[i] = true

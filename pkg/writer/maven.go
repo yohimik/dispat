@@ -134,7 +134,7 @@ func mavenSpans(data []byte, wanted map[string]int) (map[int]span, *span, error)
 					return nil, nil, err
 				}
 				path = path[:len(path)-1]
-				if spliceable && versionSpan == nil && !isMavenProperty(text) {
+				if spliceable && versionSpan == nil && !isDeferredValue(text) {
 					s := s
 					versionSpan = &s
 				}
@@ -172,7 +172,7 @@ func mavenDependencyVersion(dec *xml.Decoder, data []byte) (coordinate string, s
 				if err != nil {
 					return "", span{}, false, err
 				}
-				if spliceable && !isMavenProperty(text) {
+				if spliceable && !isDeferredValue(text) {
 					s, ok = vs, true
 				}
 			default:
@@ -182,12 +182,6 @@ func mavenDependencyVersion(dec *xml.Decoder, data []byte) (coordinate string, s
 			}
 		}
 	}
-}
-
-// isMavenProperty reports a ${...} reference rather than a literal version.
-func isMavenProperty(v string) bool {
-	v = strings.TrimSpace(v)
-	return strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}")
 }
 
 // mavenCoord joins group and artifact into the canonical coordinate the

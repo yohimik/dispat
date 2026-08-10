@@ -47,7 +47,7 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 	// mean there is nothing safe to write. Overwriting $(MARKETING_VERSION)
 	// with a literal would silently sever the project's build-setting
 	// indirection, which is worse than leaving the file as it is.
-	if !ok || isBuildSettingRef(current) || current == version {
+	if !ok || isDeferredValue(current) || current == version {
 		return res, nil
 	}
 
@@ -67,14 +67,6 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 	}
 	res.VersionWritten = true
 	return res, atomicWrite(path, out)
-}
-
-// isBuildSettingRef reports an Xcode build-setting reference — $(NAME) or
-// ${NAME} — rather than a literal value. It mirrors the scanner's rule.
-func isBuildSettingRef(v string) bool {
-	v = strings.TrimSpace(v)
-	return strings.HasPrefix(v, "$(") && strings.HasSuffix(v, ")") ||
-		strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}")
 }
 
 // plistVersionSpan locates the byte span of the marketing version's <string>
