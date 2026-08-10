@@ -1,0 +1,50 @@
+name: docs
+
+# Build gate only. The site is deployed exclusively by the release run, from
+# the docs package's publish stage (scripts/deploy-docs.sh), so nothing here
+# touches gh-pages.
+#
+# The build is the link checker: docusaurus.config.ts sets onBrokenLinks,
+# onBrokenAnchors and onBrokenMarkdownLinks to 'throw', so a dead relative
+# link or a stale #anchor fails this job instead of shipping.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/docs/**'
+      - 'imgs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'packages/docs/**'
+      - 'imgs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the documentation site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # showLastUpdateTime reads git history
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/docs/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: packages/docs
+
+      - name: Build
+        run: npm run build
+        working-directory: packages/docs

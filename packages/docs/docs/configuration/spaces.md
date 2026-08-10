@@ -209,7 +209,7 @@ spacing and comments survive). The other ecosystems (Cargo, pyproject, Composer,
 `compute` and the graph, but their rewriting is `flow.version`'s job.
 
 Two consequences worth knowing before turning it on. First, the reconciliation rule (§9.4 of the
-[commit specification](../../../../pkg/ccme/SPEC.md)) covers *every* workspace dependency, including providers released
+[commit specification](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md)) covers *every* workspace dependency, including providers released
 by earlier runs, so an auto-versioning space runs a version task for **every** releasing package, not only those bumped
 by provider updates. Second, a rewriting failure fails the version stage, and
 `revertOnFail` rolls the half-edited folder back.

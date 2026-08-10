@@ -36,7 +36,7 @@ $ dispat
 - **Polyglot by construction.** Packages are just folders and stages are plain shell commands, so any language, build
   system, registry, CI or cache plugs in with zero integration work. Whatever a stage uses (BuildKit layers, an Nx or
   Bazel cache, a compiler cache) is the stage's business, and none of it can confuse the release computation. The
-  per-[space](./services/dispat/docs/concepts.md) `isBuildWaitingPublish` option states whether a consumer's build needs
+  per-[space](https://yohimik.github.io/dispat/concepts) `isBuildWaitingPublish` option states whether a consumer's build needs
   the provider merely *built* (node) or already *published* (docker), so a four-level npm-to-docker chain schedules
   correctly out of the box.
 - **Built around an error model, not a happy path.** A failure never aborts the run: the broken package's consumers are

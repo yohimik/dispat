@@ -3,12 +3,28 @@
     "go-mod-tidy": "go mod tidy",
     "changelog": "dispat changelog",
     "commit": "dispat commit --tag --push",
-    "build-dispat": "sh ../../scripts/build-dispat.sh"
+    "build-dispat": "sh ../../scripts/build-dispat.sh",
+    "build-docs": "npm ci && npm run build",
+    "cut-docs-version": "sh ../../scripts/cut-docs-version.sh",
+    "deploy-docs": "sh ../../scripts/deploy-docs.sh"
   },
   "packages": {
     "dispat": {
       "flow": {
         "build": "build-dispat"
+      }
+    },
+    "docs": {
+      "path": "packages/docs",
+      "tagFormat": "packages/docs/v{version}",
+      "flow": {
+        "version": "cut-docs-version",
+        "build": "build-docs",
+        "publish": "deploy-docs",
+        "beforePublish": [
+          "changelog",
+          "commit"
+        ]
       }
     },
     "manifest": {
@@ -88,6 +104,11 @@
     {
       "consumer": "writer",
       "provider": "manifest"
+    },
+    {
+      "consumer": "docs",
+      "provider": "dispat",
+      "keep": true
     }
   ],
   "concurrency": [

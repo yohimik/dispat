@@ -61,7 +61,7 @@ That is a complete, working configuration. Everything else is optional and layer
 - changelogs, GitHub releases, the release commit: [release records](configuration/records.md);
 - commit-message policies and parser tweaks: [parsing options](configuration/parser.md).
 
-[`dispat.example.json`](../dispat.example.json) and [`dispat.example.yaml`](../dispat.example.yaml) show every option in
+[`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json) and [`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml) show every option in
 one annotated file.
 
 ## Commit convention

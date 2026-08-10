@@ -24,7 +24,7 @@ either: the baseline comes from the optional top-level `initials` config map (pa
 
 ## Commits carry the intent
 
-Commit messages are parsed by [`pkg/ccme`](../../../pkg/ccme): Conventional Commits with a monorepo extension,
+Commit messages are parsed by [`pkg/ccme`](https://github.com/yohimik/dispat/tree/main/pkg/ccme): Conventional Commits with a monorepo extension,
 regex-free and single-pass. A commit may hold several `---`-separated units, each with its own scope, directives and
 footers:
 

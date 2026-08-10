@@ -67,10 +67,10 @@ the same `go tool cover -func | tail -n 1` on the filtered profile.
 
 The unit layer covers every package against in-memory fakes; on its own it reaches ~88%, because the composition (the
 compiled binary, the finalize phase, the run/test/preview commands, real git over a process boundary, SIGINT handling)
-lives exclusively in the [black-box integration suite](../../../tests/integration/README.md), which asserts behaviour
+lives exclusively in the [black-box integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md), which asserts behaviour
 (git state, JSON log events, execution timelines) rather than statements. Instrumenting the binary it drives is what
 folds that behaviour back into the statement numbers above without compromising the suite's black-box design: the
 harness only sets two environment knobs, and with `DISPAT_COVERDIR` unset (the default, and every local `go test`) the
 binary is built exactly as released. The suite's status and per-area summary live in
-[test results](../../../tests/integration/docs/test-results.md), with the claim-by-claim matrix in the
-[test plan](../../../tests/integration/docs/test-plan.md).
+[test results](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-results.md), with the claim-by-claim matrix in the
+[test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md).

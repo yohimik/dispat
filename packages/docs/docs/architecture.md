@@ -1,7 +1,7 @@
 # Architecture
 
 `§N.N` references throughout this page point into the conventional-commits specification the parser implements,
-[`pkg/ccme/SPEC.md`](../../../pkg/ccme/SPEC.md).
+[`pkg/ccme/SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md).
 
 ## Runtime steps
 
@@ -132,7 +132,7 @@ sections below.
 
 | Package              | Role                                                                                                                                                                                                         |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](../../../pkg/ccme/SPEC.md). |
+| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). |
 | `pkg/models`         | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values.                                 |
 | `pkg/manifest`       | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically.                                |
 | `pkg/scanner`        | Manifest reader (own module): nine ecosystems parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors.               |
@@ -365,12 +365,12 @@ the specification's own §9.4/§12.4 codes.
 
 `go test ./...` runs testify-based unit tests with in-memory fakes; every internal package and every `pkg/` module has
 its own suite. What each suite asserts, claim by claim, is catalogued in the
-[integration test plan](../../../tests/integration/docs/test-plan.md) and summarised per area in
-[test results](../../../tests/integration/docs/test-results.md); the statement-coverage snapshot per package is in
+[integration test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md) and summarised per area in
+[test results](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-results.md); the statement-coverage snapshot per package is in
 [coverage](./coverage.md).
 
 The composition claims (the compiled binary, real git over a process boundary, exit codes, scheduling under real
 concurrency, signal handling) live exclusively in the black-box
-[integration suite](../../../tests/integration/README.md), which builds the real binary and asserts on git state, JSON
+[integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md), which builds the real binary and asserts on git state, JSON
 log events and nanosecond execution timelines. `services/dispat` itself hosts no end-to-end tests; a test that could
 only be satisfied by faking what the suite can witness for real belongs there instead.

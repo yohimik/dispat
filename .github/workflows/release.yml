@@ -36,6 +36,15 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      - name: Set up Node
+        # The docs package's version/build/publish stages shell out to npm.
+        # Node lives nowhere else in this repository.
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/docs/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/docs/package-lock.json
+
       - name: Build dispat from the checkout
         run: go build -C services/dispat -o "$PWD/dispat" .
 

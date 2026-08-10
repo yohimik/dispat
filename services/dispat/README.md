@@ -34,7 +34,7 @@ done  published=0  unchanged=4
 
 (Output abridged.) If `api`'s build had failed, `core` and `utils` would still have shipped, the run would exit
 non-zero, and the next run would release `api` at the exact version it was owed. Runs are self-healing, and that failure
-model is the point of the tool; [Concepts](./docs/concepts.md) explains it.
+model is the point of the tool; [Concepts](https://yohimik.github.io/dispat/concepts) explains it.
 
 A few more moves:
 
@@ -60,9 +60,9 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Release control from commits.** `%beta` starts a prerelease train and `%beta>stable` graduates it;
   `Release-As: none` holds a package and `Release-As: auto` resumes it; `Release-As: 2.0.0` pins an exact version and
   `cancel(pkg)` discards pending work. It is all written in commits, so release decisions are reviewed and versioned
-  like code. [Details](./docs/commits.md#release-control).
+  like code. [Details](https://yohimik.github.io/dispat/commits#release-control).
 - **Any language, any registry, any tooling.** Stages are shell commands fed a rich
-  [`DISPAT_*` environment](./docs/environment.md), scripts pass values to each other through `$DISPAT_OUTPUT`, and
+  [`DISPAT_*` environment](https://yohimik.github.io/dispat/environment), scripts pass values to each other through `$DISPAT_OUTPUT`, and
   release state lives in git tags, so every build system, CI and caching layer works from inside a script unchanged.
   `dispat compute` derives the dependency graph from the packages' own manifests (npm, Go, Cargo, Python, Composer,
   Maven, .NET, Dart), and an `autoVersion` space has dispat rewrite its manifests natively at the version stage.
@@ -72,25 +72,25 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 
 ## Documentation
 
-Start with [Getting started](./docs/getting-started.md), then dip into the references as needed:
+Start with [Getting started](https://yohimik.github.io/dispat/getting-started), then dip into the references as needed:
 
-| Document                                                 | Contents                                                                                            |
-|----------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| [Getting started](./docs/getting-started.md)             | Install, first config, commit convention, commands, CI setup.                                       |
-| [Cookbook](./docs/cookbook.md)                           | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels. |
-| [Concepts](./docs/concepts.md)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
-| [CLI](./docs/cli.md)                                     | Every command, flag and exit code.                                                                  |
-| [Configuration file](./docs/configuration/README.md)     | Top-level options, script sequences, run-level hooks; links the pages below.                        |
-| [Spaces](./docs/configuration/spaces.md)                 | Space options, stages and hooks, versioning modes and groups, run scripts, `.dispatignore`.         |
-| [Packages](./docs/configuration/packages.md)             | Per-package overrides, standalone packages, package dependencies, in-folder config files.           |
-| [Tags and baselines](./docs/configuration/versions.md)   | `tagFormat` and `initials`.                                                                         |
-| [Release records](./docs/configuration/records.md)       | Changelogs, GitHub releases, the release commit.                                                    |
-| [Commit parsing options](./docs/configuration/parser.md) | `commitErrors`, `nonPackageScopes`, the `parser` object.                                            |
-| [Commit messages](./docs/commits.md)                     | Scope sets, directives, footers, channels, release control.                                         |
-| [Script environment](./docs/environment.md)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
-| [Architecture](./docs/architecture.md)                   | Modules, algorithms, execution model, design decisions, testing.                                    |
-| [Test coverage](./docs/coverage.md)                      | The per-package statement coverage table and how to reproduce it.                                   |
-| [Integration tests](../../tests/integration)             | The black-box suite: setup, running, results; links the test plan.                                  |
+| Document                                                                        | Contents                                                                                            |
+|---------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| [Getting started](https://yohimik.github.io/dispat/getting-started)             | Install, first config, commit convention, commands, CI setup.                                       |
+| [Cookbook](https://yohimik.github.io/dispat/cookbook)                           | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels. |
+| [Concepts](https://yohimik.github.io/dispat/concepts)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
+| [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
+| [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
+| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, run scripts, `.dispatignore`.         |
+| [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides, standalone packages, package dependencies, in-folder config files.           |
+| [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
+| [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, the release commit.                                                    |
+| [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object.                                            |
+| [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
+| [Script environment](https://yohimik.github.io/dispat/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
+| [Architecture](https://yohimik.github.io/dispat/architecture)                   | Modules, algorithms, execution model, design decisions, testing.                                    |
+| [Test coverage](https://yohimik.github.io/dispat/coverage)                      | The per-package statement coverage table and how to reproduce it.                                   |
+| [Integration tests](../../tests/integration)                                    | The black-box suite: setup, running, results; links the test plan.                                  |
 
 [`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) show every option in
 one annotated file.
@@ -103,4 +103,4 @@ fakes, and a black-box [integration suite](../../tests/integration) that compile
 disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
 Together they hold **94.7%** workspace statement coverage
-([per-package table](./docs/coverage.md), [test inventory](./docs/architecture.md#testing)).
+([per-package table](https://yohimik.github.io/dispat/coverage), [test inventory](https://yohimik.github.io/dispat/architecture#testing)).

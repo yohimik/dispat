@@ -26,7 +26,7 @@ This page covers the top level; the larger objects have their own pages:
 
 Related references: the [CLI](../cli.md), the [commit message format](../commits.md) and the
 [script environment variables](../environment.md). Annotated full examples:
-[`dispat.example.json`](../../dispat.example.json), [`dispat.example.yaml`](../../dispat.example.yaml).
+[`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json), [`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml).
 
 ## Top-level options
 

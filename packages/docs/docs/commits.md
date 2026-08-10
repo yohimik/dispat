@@ -1,6 +1,6 @@
 # Commit message reference
 
-Messages are parsed by [`pkg/ccme`](../../../pkg/ccme). A message holds one or more **units** separated by a line of
+Messages are parsed by [`pkg/ccme`](https://github.com/yohimik/dispat/tree/main/pkg/ccme). A message holds one or more **units** separated by a line of
 `---`; each has its own header, body and footers.
 
 ```
