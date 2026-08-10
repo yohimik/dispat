@@ -531,3 +531,73 @@ func TestNpmReplaceNoChangeLeavesFileAlone(t *testing.T) {
 		t.Errorf("no-op replace touched the file: %+v", res)
 	}
 }
+
+func TestPubspecReplaceHandlesAnInlineOverride(t *testing.T) {
+	// pub writes an override as a nested `path:` line, but the inline form is
+	// legal YAML and appears in hand-written pubspecs. It has to be recognised
+	// as the redirect it is, repointed in place, and removable, rather than
+	// read as "no override here" and quietly duplicated.
+	src := `name: app
+dependency_overrides:
+  core: ../core
+  other:
+    path: ../other
+`
+	path := seed(t, "pubspec.yaml", src)
+	res, err := Replace(path, []Replacement{{Name: "core", Path: "../vendor/core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 1 {
+		t.Fatalf("result mismatch: %+v", res)
+	}
+	got := read(t, path)
+	if !strings.Contains(got, "../vendor/core") || strings.Contains(got, "  core: ../core\n") {
+		t.Errorf("the inline override was not repointed:\n%s", got)
+	}
+	if !strings.Contains(got, "path: ../other") {
+		t.Errorf("the sibling override was disturbed:\n%s", got)
+	}
+
+	// And removing it leaves the sibling and the block behind.
+	if _, err := Replace(path, []Replacement{{Name: "core", Path: ""}}); err != nil {
+		t.Fatal(err)
+	}
+	got = read(t, path)
+	if strings.Contains(got, "core:") && !strings.Contains(got, "  other:") {
+		t.Errorf("removal did not land:\n%s", got)
+	}
+	if !strings.Contains(got, "dependency_overrides:") {
+		t.Errorf("the block must stay while it still holds an override:\n%s", got)
+	}
+}
+
+func TestPubspecReplaceDropsAnEmptiedBlockWithItsBlankLines(t *testing.T) {
+	// Removing the last override takes the now-pointless block with it, and
+	// the blank line that separated it, so the file does not accumulate
+	// leftovers across releases.
+	src := `name: app
+version: 1.0.0
+
+dependency_overrides:
+  core:
+    path: ../core
+
+dev_dependencies:
+  test: ^1.0.0
+`
+	path := seed(t, "pubspec.yaml", src)
+	if _, err := Replace(path, []Replacement{{Name: "core", Path: ""}}); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, path)
+	if strings.Contains(got, "dependency_overrides") {
+		t.Errorf("the emptied block must go:\n%s", got)
+	}
+	if !strings.Contains(got, "dev_dependencies:") || !strings.Contains(got, "version: 1.0.0") {
+		t.Errorf("everything else must survive:\n%s", got)
+	}
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("the removal must not leave a run of blank lines:\n%q", got)
+	}
+}

@@ -325,3 +325,81 @@ func TestStrongestKindFullRanking(t *testing.T) {
 	assert.Equal(t, model.KindDependencies,
 		strongestKind([]model.DepKind{model.KindDevDependencies, model.KindDependencies}))
 }
+
+// tomlComputeRepo is computeRepo for a TOML config: the same monorepo, but
+// the config file the write-back has to refuse to edit in place.
+func tomlComputeRepo(t *testing.T, body string) (string, string, *App) {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages"), 0o755))
+	cfgPath := filepath.Join(root, "dispat.toml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(body), 0o644))
+	loaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	return root, cfgPath, New(root, loaded, zerolog.Nop())
+}
+
+func TestComputeWriteOnTOMLPrintsAPasteReadyBlock(t *testing.T) {
+	// A TOML config has no in-place editor, so --write must not half-apply
+	// anything: it prints the block to paste, fails, and leaves the file as it
+	// found it. The alternative — a silent no-op — would have the command
+	// report suggestions applied that were not.
+	const body = `[scripts]
+build = "true"
+
+[spaces.libs]
+path = "packages"
+
+[spaces.libs.flow]
+build = "build"
+`
+	root, cfgPath, a := tomlComputeRepo(t, body)
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core", "version": "1.0.0"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "^1.0.0"}}`)
+
+	var out bytes.Buffer
+	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.ErrorIs(t, err, config.ErrTOMLEdit)
+	assert.Contains(t, out.String(), "# paste over the [[dependencies]] blocks in dispat.toml:")
+	assert.Contains(t, out.String(), "[[dependencies]]")
+	assert.Contains(t, out.String(), "web")
+	assert.Contains(t, out.String(), "core")
+
+	data, readErr := os.ReadFile(cfgPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, body, string(data), "a refused edit leaves the config untouched")
+	assert.NoFileExists(t, cfgPath+config.BackupSuffix, "and writes no backup")
+}
+
+func TestComputeWriteOnTOMLPackageListPrintsAPasteReadyBlock(t *testing.T) {
+	// The same refusal for the other kind of declaration: a list living in a
+	// packages entry, whose removal would have to edit that entry in place.
+	const body = `[scripts]
+build = "true"
+
+[spaces.libs]
+path = "packages"
+
+[spaces.libs.flow]
+build = "build"
+
+[packages.web]
+dependencies = ["core"]
+`
+	root, cfgPath, a := tomlComputeRepo(t, body)
+	// No manifests at all, so the declared edge has nothing supporting it and
+	// core does not exist on disk either: a removal, aimed at the packages
+	// entry that declares it.
+	seedManifest(t, root, "packages/web/main.txt", "web\n")
+
+	var out bytes.Buffer
+	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.ErrorIs(t, err, config.ErrTOMLEdit)
+	assert.Contains(t, out.String(), "# paste over the dependencies in dispat.toml:")
+	assert.Contains(t, out.String(), "[packages.web]")
+
+	data, readErr := os.ReadFile(cfgPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, body, string(data), "a refused edit leaves the config untouched")
+}
