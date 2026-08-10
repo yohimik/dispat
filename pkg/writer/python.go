@@ -44,6 +44,13 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// This writer works from a line scan rather than a decoded model, so it
+	// would otherwise splice happily into a file that was already broken and
+	// then blame itself when the result failed to parse.
+	var input map[string]any
+	if err := toml.Unmarshal(data, &input); err != nil {
+		return Result{}, fmt.Errorf("%s: %w", path, err)
+	}
 	wanted := make(map[pyTarget]int, len(edits))
 	for i, e := range edits {
 		kind := e.Kind

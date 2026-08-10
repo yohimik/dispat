@@ -35,7 +35,10 @@ func xmlWellFormed(data []byte) error {
 // holding anything other than text.
 func xmlElementTextSpan(dec *xml.Decoder, data []byte) (s span, text string, spliceable bool, err error) {
 	start := dec.InputOffset()
-	var b []byte
+	var (
+		b      []byte
+		nested bool
+	)
 	for {
 		prev := dec.InputOffset()
 		tok, err := dec.Token()
@@ -46,14 +49,17 @@ func xmlElementTextSpan(dec *xml.Decoder, data []byte) (s span, text string, spl
 		case xml.CharData:
 			b = append(b, t...)
 		case xml.StartElement:
-			// A nested element means this is not a text value; skip it whole
-			// and give up on splicing here.
+			// Markup inside the element means the content is not plain text.
+			// Splicing the span would delete the nested element along with the
+			// text, so the element is consumed to keep the caller's position
+			// right and then declined.
+			nested = true
 			if err := dec.Skip(); err != nil {
 				return span{}, "", false, err
 			}
 		case xml.EndElement:
-			if !bytes.HasPrefix(data[prev:], []byte("</")) {
-				return span{}, "", false, nil // self-closing
+			if nested || !bytes.HasPrefix(data[prev:], []byte("</")) {
+				return span{}, "", false, nil // nested markup, or self-closing
 			}
 			return span{start: start, end: prev}, string(b), true, nil
 		}
