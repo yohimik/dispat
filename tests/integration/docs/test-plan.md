@@ -54,8 +54,9 @@ The suite was designed against fifteen goals, one test file each:
     config file beating the entry (the tag proves it), `.dispatignore` exclusions (never released, unknown scope in
     commits), a declared `versionGroups` group spanning two spaces to one version (with the W210 ride) and its
     convergence, per-package changelog/GitHub record policies, the concurrency weight serialising a heavyweight build on
-    the tsmark timeline, the config ascent walking past an in-folder file for the run shorthand, and run scripts defined
-    only in an override (both layers).
+    the tsmark timeline, the config ascent walking past an in-folder file for the run shorthand, `scripts` defined at
+    each of the three levels (both override layers included), and one `flow.build` resolving to a different command per
+    package.
 13. **The top-level `packages` section: standalone packages and package dependencies** (`packages_test.go`): a
     `packages` entry with a `path` releasing as a full package outside every space (own flow, tag, changelog, and
     convergence), the standalone path config errors (escaping the root, naming no folder), provider lists declared in a
@@ -294,6 +295,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestRecordsPushVerifyDisabled`                                   | `commit.verify=false` switches the upfront ls-remote check off: the release work happens and only the push itself fails; asserted against the default in the same test, which fails fast before any work (no tags, no changelog).                                                                                                                              |
 | `TestRecordsChangelogDisabled`                                    | `changelog.enabled=false` switches the file recorder off without touching anything else: the release still publishes and tags, no changelog appears.                                                                                                                                                                                                           |
 | `TestRecordsCommitModeGithubFinalize`                             | GitHub in commit mode: releases created in the finalize phase, the body documenting the exact commit and tag, the recorder opt-in per package (no export, no release), a `PACKAGE_<KEY>` export overriding commit and `target_commitish`, and `commit.messageFormat` rendering `{packages}`/`{tags}`.                                                          |
+| `TestRecordsGitHubAllPackages`                                    | `github.allPackages` gives every published package a release without exporting `DISPAT_EXPORT_GITHUB`, leaving the export to add assets only; the default keeps the export as the per-package opt-in.                                                                                                                                                          |
 
 ### Goal 8: the init and preview commands (`commands_test.go`)
 
@@ -372,6 +374,12 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestStandaloneCommitExportsPinWhenDispatOutputSet` | With DISPAT_OUTPUT in the environment, the commit command exports `PACKAGE_<KEY>=<sha>` for the outer run's tag and GitHub-release pin.                                                                                                                  |
 | `TestStandaloneCommitFolderNarrowing`           | Invoked inside a package folder the command narrows to that package; from the root it covers every releasing package.                                                                                                                                        |
 | `TestStandaloneAutoversionReconcilesAndSyncLocks` | Ranges and own versions reconcile to the planned versions, syncLock runs once per changed package, and a second invocation rewrites nothing and regenerates nothing.                                                                                       |
+| `TestStandaloneChangelogOverrideFlags`          | `--file`, `--title` and `--date-format` override the matching `changelog.*` values for the invocation, and the default `CHANGELOG.md` is not written beside the configured file.                                                                             |
+| `TestStandaloneChangelogRespectsDisabledConfig` | `changelog.enabled=false` makes the command a clean no-op (exit 0, no file), not an error.                                                                                                                                                                   |
+| `TestStandaloneAutoversionPolicyFlags`          | The `autoVersion` policy flags override the space's block for the invocation, and impose the defaults on a space with no block at all.                                                                                                                       |
+| `TestStandaloneAutoversionFlagOverridesExistingBlock` | A flag override starts from the space's own block and replaces only the flagged field: `--range exact` changes the range while the block's `writeVersion` default still applies.                                                                       |
+| `TestStandaloneCommitMessageAndIncludeFlags`    | `--message-format` renders `{packages}`/`{tags}` into the subject and `--include` stages an extra path outside the package folder alongside the folder's own changes.                                                                                        |
+| `TestStandaloneCommitPushWithoutRemoteFails`    | `--push` without a remote exits 1, while the local commit and tag it had already made survive.                                                                                                                                                               |
 
 ## Regression fences
 
