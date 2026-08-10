@@ -13,6 +13,7 @@ package integration
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,80 @@ func TestOverridesFlowBuildPerPackage(t *testing.T) {
 	res := r.ReleaseOK()
 	assert.Equal(t, 0, res.Code)
 	assert.Equal(t, 2, len(r.TagList()), "a second run releases nothing new")
+}
+
+// TestOverridesFlowScriptResolvesPerPackage: one `flow.build: build`, three
+// commands. A flow entry names a script and the package the stage runs for
+// decides which command that name means: its own `scripts` first, then its
+// space's, then the file's. The release itself is the proof — this is the
+// resolution the pipeline uses, not a second rule that only `dispat run`
+// knows.
+func TestOverridesFlowScriptResolvesPerPackage(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	stamp := func(level string) string {
+		return "echo $DISPAT_PACKAGE:" + level + " >> ../../build.log"
+	}
+	cfg.Scripts = map[string]string{"build": stamp("file"), "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish(),
+			Scripts: map[string]string{"build": stamp("space")}},
+		"apps": {Path: "apps", Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core": {Scripts: map[string]string{"build": stamp("package")}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.SeedPackage("apps", "web")
+	r.Commit("feat(core,utils,web): bootstrap all three")
+
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("build.log"))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"core:package", "utils:space", "web:file"},
+		strings.Fields(string(data)),
+		"each package built with the command its own level resolved")
+	assert.Len(t, r.TagList(), 3, "all three still released")
+}
+
+// TestOverridesFlowScriptSuppliedByEveryPackage: a space's flow may name a
+// script no level above it defines, as long as every package of the space
+// supplies one. That is why an unresolved reference is reported per package
+// and not per space: the space alone cannot answer the question.
+func TestOverridesFlowScriptSuppliedByEveryPackage(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core":  {Scripts: map[string]string{"build": "echo core-build >> ../../build.log"}},
+		"utils": {Scripts: map[string]string{"build": "echo utils-build >> ../../build.log"}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core,utils): each package brings its own build")
+
+	r.ReleaseOK()
+	data, err := os.ReadFile(r.Path("build.log"))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"core-build", "utils-build"}, strings.Fields(string(data)))
+
+	// Take the answer away from one package and the config stops loading, with
+	// an error naming the package whose scope came up empty.
+	delete(cfg.Packages, "utils")
+	r.WriteConfigModel(cfg)
+	res := r.Release()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	// The fixture logs JSON, so the message's own quotes arrive escaped.
+	out := strings.ReplaceAll(res.Stdout+res.Stderr, `\"`, `"`)
+	assert.Contains(t, out, `package "utils"`, "the error names the package whose scope came up empty")
+	assert.Contains(t, out, `flow.build references unknown script "build"`)
 }
 
 // TestOverridesInFolderFileWins: the package folder's own config file is the

@@ -41,6 +41,14 @@ func TestFatalDependencyCycle(t *testing.T) {
 
 	// status refuses too: there is no plan to show.
 	assert.NotZero(t, r.Status().Code)
+
+	// So does `dispat run`, even though it releases nothing: it still needs to
+	// know which packages changed, and an unplannable repository cannot say.
+	// The script name is a real one, so this is the plan refusing and not the
+	// typo guard.
+	run := r.RunScript("build")
+	assert.NotZero(t, run.Code, "a run over an unplannable repository must refuse")
+	assert.Zero(t, buildRuns(r), "and still run nothing")
 }
 
 // TestFatalDuplicateVersionTags: two reachable tags parsing to the same
