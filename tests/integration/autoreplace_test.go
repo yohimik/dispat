@@ -199,6 +199,11 @@ func TestAutoReplaceOutcomesReachTheExitCode(t *testing.T) {
 	res = r.Command("autoreplace", "--since", "all", "--set", "nowhere=^1.0.0")
 	assert.Equal(t, 0, res.Code, "without --strict the same run is tolerated")
 
+	// An empty selection tried nothing, so --strict has nothing to call stale.
+	r.Command("commit", "--tag")
+	res = r.Command("autoreplace", "--package", "core", "--strict", "--set", "nowhere=^1.0.0")
+	assert.Equal(t, 0, res.Code, "a window that covered nothing is a clean no-op; stdout:\n%s", res.Stdout)
+
 	assert.Equal(t, 2, r.Command("autoreplace").Code, "nothing to write")
 	assert.Equal(t, 2, r.Command("autoreplace", "--set", "nope").Code, "a malformed edit spec")
 	assert.Equal(t, 2, r.Command("autoreplace", "--set-version", "1.0.0", "--manifests", "sideways").Code)

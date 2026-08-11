@@ -44,9 +44,7 @@ func (a *App) stepPlan(ctx context.Context) (*plan.Plan, error) {
 // case, so failing it would break the flow over a quiet day.
 func (a *App) sweepStep(ctx context.Context, pl *plan.Plan, covered []string,
 	work packageWork, onError, headline string) (sweepReport, error) {
-	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{
-		OnError: onError, Budget: budgetFor(work),
-	})
+	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: onError})
 	a.log.Info().Str("stage", work.stage()).Int("ran", rep.Ran).
 		Int("failed", rep.Failed).Int("skipped", rep.Skipped).Msg(headline + " finished")
 	if drainErr != nil {
@@ -57,21 +55,6 @@ func (a *App) sweepStep(ctx context.Context, pl *plan.Plan, covered []string,
 		return rep, fmt.Errorf("%s failed for %d package(s)", headline, rep.Failed)
 	}
 	return rep, nil
-}
-
-// serialWork marks the works that must not run two packages at once. The git
-// index is one file and a repository has one HEAD, so anything committing,
-// tagging or pushing is serial by nature; everything else writes only inside
-// the package folder it was handed and rides the build budget.
-type serialWork interface{ serial() bool }
-
-// budgetFor asks the work whether it is one of those, defaulting to the
-// configured build concurrency.
-func budgetFor(work packageWork) int {
-	if s, ok := work.(serialWork); ok && s.serial() {
-		return 1
-	}
-	return 0
 }
 
 // syncLock runs the named packages' syncLock scripts, serially and in the

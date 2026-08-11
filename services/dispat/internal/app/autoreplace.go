@@ -148,7 +148,11 @@ func (a *App) AutoReplace(ctx context.Context, opts AutoReplaceOptions) error {
 	if rep.Failed > 0 {
 		return fmt.Errorf("%d package(s) failed to rewrite", rep.Failed)
 	}
-	if opts.Strict {
+	// The strict gate asks whether an edit found its target, so it only has an
+	// answer once something was opened. A selection the window emptied tried
+	// nothing, and calling every edit stale for that would turn "nothing
+	// changed today" into a failure.
+	if opts.Strict && rep.Resolved > 0 {
 		if err := work.stale(); err != nil {
 			return err
 		}

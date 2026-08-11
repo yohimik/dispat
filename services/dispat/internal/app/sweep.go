@@ -113,6 +113,11 @@ func (a *App) runSweep(ctx context.Context, pl *plan.Plan, covered []string,
 
 	budget := opts.Budget
 	if budget == 0 {
+		// A work that must not run two packages at once says so itself, so no
+		// caller can lose that by forgetting to ask for it.
+		budget = budgetFor(work)
+	}
+	if budget == 0 {
 		budget = a.cfg.BuildConcurrency
 	}
 	// One class, one budget: a sweep reuses the executor's pump, build weights
@@ -125,6 +130,21 @@ func (a *App) runSweep(ctx context.Context, pl *plan.Plan, covered []string,
 		func(pkg string) { s.execute(ctx, pkg) })
 
 	return s.report(), drainErr
+}
+
+// serialWork marks the works that must not run two packages at once. The git
+// index is one file and a repository has one HEAD, so anything committing,
+// tagging or pushing is serial by nature; everything else writes only inside
+// the package folder it was handed and rides the build budget.
+type serialWork interface{ serial() bool }
+
+// budgetFor asks the work whether it is one of those, answering 0 — "no
+// opinion, take the configured budget" — when it is not.
+func budgetFor(work packageWork) int {
+	if s, ok := work.(serialWork); ok && s.serial() {
+		return 1
+	}
+	return 0
 }
 
 // coveredReleases indexes the covered packages by name, which is how both the
