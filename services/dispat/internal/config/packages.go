@@ -206,7 +206,7 @@ func refusePackageEntryKeys(label string, entries map[string]any) error {
 
 // sortedKeys returns a raw map's keys in order, so a config with several
 // mistakes always reports the same one first.
-func sortedKeys(m map[string]any) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -494,6 +494,19 @@ func overlayFormat(base, over EntryFormatConfig) EntryFormatConfig {
 	if over.DependenciesTitle != "" {
 		base.DependenciesTitle = over.DependenciesTitle
 	}
+	if over.ReleaseName != "" {
+		base.ReleaseName = over.ReleaseName
+	}
+	// A list replaces rather than merges, for the same reason manifestNames
+	// does: the layer nearest the package states what it writes, and adding to
+	// an inherited list could never take a line away again. Selecting which
+	// packages an inherited line reaches is what the line filters are for.
+	if len(over.Header) > 0 {
+		base.Header = over.Header
+	}
+	if len(over.Footer) > 0 {
+		base.Footer = over.Footer
+	}
 	return base
 }
 
@@ -508,8 +521,8 @@ func overlayChangelog(base, over *ChangelogConfig) *ChangelogConfig {
 	if over.File != "" {
 		out.File = over.File
 	}
-	if over.Title != "" {
-		out.Title = over.Title
+	if len(over.FileTitle) > 0 {
+		out.FileTitle = over.FileTitle
 	}
 	out.EntryFormatConfig = overlayFormat(out.EntryFormatConfig, over.EntryFormatConfig)
 	return &out
@@ -565,7 +578,24 @@ func recordFormat(f EntryFormatConfig) model.RecordFormat {
 		FeaturesTitle:     f.FeaturesTitle,
 		FixesTitle:        f.FixesTitle,
 		DependenciesTitle: f.DependenciesTitle,
+		ReleaseName:       f.ReleaseName,
+		Header:            entryLines(f.Header),
+		Footer:            entryLines(f.Footer),
 	}
+}
+
+// entryLines maps a configured line list onto the resolved model. Nil stays
+// nil so that "no lines" costs no allocation on the overwhelming majority of
+// packages, which configure none.
+func entryLines(lines []EntryLine) []model.EntryLine {
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]model.EntryLine, len(lines))
+	for i, l := range lines {
+		out[i] = model.EntryLine{Line: l.Line, Package: l.Package, Space: l.Space, Group: l.Group}
+	}
+	return out
 }
 
 // changelogSpec resolves a changelog config onto a package's record policy.
@@ -579,7 +609,7 @@ func changelogSpec(cc *ChangelogConfig) model.ChangelogSpec {
 		Enabled:    cc.IsEnabled(),
 		Prerelease: cc.PrereleaseEnabled(),
 		File:       cc.File,
-		Title:      cc.Title,
+		FileTitle:  entryLines(cc.FileTitle),
 		Format:     recordFormat(cc.EntryFormatConfig),
 	}
 }
@@ -625,9 +655,20 @@ func openFolderConfig(dir string) (*viper.Viper, string, error) {
 }
 
 // weakDecode is the decoding stance every in-folder file shares with the root
-// config: unknown keys are rejected, and weak typing lifts a scalar flow
-// entry into its slice.
-func weakDecode(dc *mapstructure.DecoderConfig) { dc.WeaklyTypedInput = true }
+// config: unknown keys are rejected, weak typing lifts a scalar flow entry
+// into its slice, and the shorthand hooks expand the abbreviated shapes.
+//
+// It is one stance rather than two on purpose. An in-folder package file may
+// carry the same changelog and github objects the root config does, and a
+// shorthand the root accepts must not be a syntax error one folder down.
+func weakDecode(dc *mapstructure.DecoderConfig) {
+	dc.WeaklyTypedInput = true
+	hooks := []mapstructure.DecodeHookFunc{dependencyShorthandHook, entryLinesHook}
+	if dc.DecodeHook != nil {
+		hooks = append(hooks, dc.DecodeHook)
+	}
+	dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(hooks...)
+}
 
 // refuseNestedRoot rejects a folder file declaring one of the keys only a
 // monorepo root may declare. The folder holds a repository of its own, and a

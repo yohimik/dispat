@@ -212,16 +212,25 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		return nil
 	}
 
-	body := changelog.RenderSections(rel, r.Format)
+	// One lookup for the whole release: the name and every configured line
+	// interpolate against the same variables.
+	look := changelog.ReleaseLookup(rel)
+	var release string
 	if sha != "" {
-		if body != "" {
-			body += "\n"
-		}
-		body += "### Release\n\n- commit: " + sha + "\n- tag: " + tag + "\n"
+		release = "### Release\n\n- commit: " + sha + "\n- tag: " + tag + "\n"
+	}
+	// The release section sits inside the body, before the footer: it belongs
+	// to the release the entry describes, and a footer is the last word.
+	body := changelog.RenderBody(rel, r.Format, look, release)
+	// The release is named after its tag unless the format says otherwise. The
+	// tag itself is never renamed: it is what the release hangs off.
+	name := tag
+	if configured := changelog.Expand(r.Format.ReleaseName, look); configured != "" {
+		name = configured
 	}
 	payload, err := json.Marshal(releaseRequest{
 		TagName:         tag,
-		Name:            tag,
+		Name:            name,
 		Body:            body,
 		TargetCommitish: commitish,
 		Prerelease:      rel.IsPrerelease(),

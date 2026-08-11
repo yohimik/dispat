@@ -256,12 +256,24 @@ logFormat: pretty
 changelog:
   enabled: true
   file: CHANGELOG.md
-  title: "# Changelog"
+  fileTitle: "# Changelog"          # heads the file, above every entry
   dateFormat: "2006-01-02"
   breakingTitle: "Breaking Changes"
   featuresTitle: "Features"
   fixesTitle: "Fixes"
   dependenciesTitle: "Dependencies"
+  # releaseName names the release: a sub-header under the entry's date line
+  # here, the release's own name on GitHub. $VAR and ${VAR} expand against the
+  # releasing package's DISPAT_* variables, its script outputs, and the
+  # environment.
+  releaseName: ""
+  # header and footer are written inside every entry, above the sections and
+  # after them. An element is a line, an array of lines, or an object whose
+  # package/space/group globs decide which packages get it.
+  footer:
+    - ""
+    - line: "Published from the acme monorepo."
+      space: libs
 
 # Optional finalize phase (disabled by default): one release commit capturing
 # changelog/manifest changes of all published packages (tags then point at
@@ -319,3 +331,7 @@ github:
   apiUrl: https://api.github.com
   tokenEnv: GITHUB_TOKEN
   featuresTitle: "Features"
+  releaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}"   # default: the tag
+  footer:
+    - ""
+    - "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"

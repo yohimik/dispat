@@ -1,7 +1,11 @@
 // Package model holds the domain types shared across the tool.
 package model
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 // Versioning is a space's versioning mode: how the versions of the space's
 // packages relate to each other.
@@ -307,6 +311,18 @@ func (p *Package) VersionGroupName() string {
 	return p.Space.Name // the zero value means the space's own group
 }
 
+// EntryLine is one block of record text with the filters deciding which
+// packages it is written for — the resolved counterpart of the config's line
+// shorthands, which have all been expanded into this one shape by the time it
+// gets here. Filters are case-insensitive glob patterns; empty means "every
+// package".
+type EntryLine struct {
+	Line    []string
+	Package []string
+	Space   []string
+	Group   []string
+}
+
 // RecordFormat customises how a release entry renders — the resolved
 // counterpart of the config's entry-format options, shared by the changelog
 // file and the GitHub release body. Empty fields mean the renderer defaults.
@@ -316,6 +332,13 @@ type RecordFormat struct {
 	FeaturesTitle     string
 	FixesTitle        string
 	DependenciesTitle string
+	// ReleaseName names the release: the GitHub release's name, or a
+	// sub-header in a changelog entry. Empty means the destination's own
+	// default (the tag on GitHub, nothing in a file).
+	ReleaseName string
+	// Header and Footer bracket the sections of every entry.
+	Header []EntryLine
+	Footer []EntryLine
 }
 
 // ChangelogSpec is a package's resolved changelog policy.
@@ -325,8 +348,9 @@ type ChangelogSpec struct {
 	// the file a record of stable releases alone.
 	Prerelease bool
 	File       string // empty means the writer default (CHANGELOG.md)
-	Title      string // empty means the writer default
-	Format     RecordFormat
+	// FileTitle heads the file; an empty list means the writer default.
+	FileTitle []EntryLine
+	Format    RecordFormat
 }
 
 // Records reports whether a release on this policy is written at all:
@@ -359,6 +383,37 @@ type GitHubSpec struct {
 // GitHub counterpart of ChangelogSpec.Records.
 func (s GitHubSpec) Records(isPrerelease bool) bool {
 	return s.Enabled && (s.Prerelease || !isPrerelease)
+}
+
+// Key identifies the releaser a policy needs: two packages whose specs share
+// a Key share one GitHub releaser, resolved and verified once and reused for
+// both. Everything a releaser is built from goes in, the entry format
+// included, since it shapes every body the releaser sends.
+//
+// It exists because the spec carries line lists and so cannot be a map key
+// itself. Values are quoted and separated by a byte no configuration can
+// contain, so no two distinct policies can encode alike.
+func (s GitHubSpec) Key() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%t\x00%t\x00%t\x00%q\x00%q\x00%q\x00%q", s.Enabled, s.Prerelease, s.AllPackages,
+		s.Owner, s.Repo, s.APIURL, s.TokenEnv)
+	s.Format.writeKey(&b)
+	return b.String()
+}
+
+// writeKey appends a format's contribution to a policy key.
+func (f RecordFormat) writeKey(b *strings.Builder) {
+	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q\x00%q", f.DateFormat, f.BreakingTitle, f.FeaturesTitle,
+		f.FixesTitle, f.DependenciesTitle, f.ReleaseName)
+	writeLinesKey(b, f.Header)
+	writeLinesKey(b, f.Footer)
+}
+
+func writeLinesKey(b *strings.Builder, lines []EntryLine) {
+	fmt.Fprintf(b, "\x00%d", len(lines))
+	for _, l := range lines {
+		fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q", l.Line, l.Package, l.Space, l.Group)
+	}
 }
 
 // DepKind is the manifest dependency field a graph edge stands for (§8.4).

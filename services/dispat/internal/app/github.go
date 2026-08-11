@@ -24,6 +24,9 @@ type GitHubOptions struct {
 	// exactly that commit or branch. Only safe once the commit exists on the
 	// remote; empty leaves the choice to GitHub (the default branch head).
 	Target string
+	// ReleaseName overrides github.releaseName, the release's name. It is
+	// interpolated like the configured value.
+	ReleaseName string
 }
 
 // GitHub creates each covered package's release now — the same release the
@@ -48,7 +51,7 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 	}
 
 	work := &githubWork{app: a, opts: opts, export: a.readExport(covered),
-		releasers: make(map[model.GitHubSpec]*github.Releaser)}
+		releasers: make(map[string]*github.Releaser)}
 	_, err = a.sweepStep(ctx, pl, covered, work, opts.OnError, "github release")
 	return err
 }
@@ -66,7 +69,7 @@ type githubWork struct {
 	app       *App
 	opts      GitHubOptions
 	export    stepExport
-	releasers map[model.GitHubSpec]*github.Releaser
+	releasers map[string]*github.Releaser
 }
 
 func (w *githubWork) stage() string { return "github" }
@@ -81,7 +84,7 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 		github.LogSkip(w.app.log, spec, rel)
 		return nil, nil
 	}
-	gh, seen := w.releasers[spec]
+	gh, seen := w.releasers[spec.Key()]
 	if !seen {
 		var err error
 		if gh, err = githubReleaser(spec, w.app.log); err != nil {
@@ -91,7 +94,7 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 			return nil, fmt.Errorf("github verification failed: %w", err)
 		}
 		gh.TargetCommitish = w.opts.Target
-		w.releasers[spec] = gh
+		w.releasers[spec.Key()] = gh
 	}
 	return func(ctx context.Context) error {
 		if w.export.covers(rel.Pkg.Name) {
@@ -120,6 +123,7 @@ func (a *App) githubSpec(spec model.GitHubSpec, opts GitHubOptions) model.GitHub
 	spec.Repo = firstOf(opts.Repo, spec.Repo)
 	spec.APIURL = firstOf(opts.APIURL, spec.APIURL)
 	spec.TokenEnv = firstOf(opts.TokenEnv, spec.TokenEnv)
+	spec.Format.ReleaseName = firstOf(opts.ReleaseName, spec.Format.ReleaseName)
 	return spec
 }
 

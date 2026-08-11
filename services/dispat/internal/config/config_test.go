@@ -25,6 +25,16 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
+// titleLine is the one-line, unfiltered record-line list the title tests use:
+// what the shorthand `"fileTitle": "# Changelog"` decodes into.
+func titleLine(s string) []EntryLine { return []EntryLine{{Line: []string{s}}} }
+
+// resolvedTitleLine is the same list after resolution, for the specs the
+// package layers produce.
+func resolvedTitleLine(s string) []model.EntryLine {
+	return []model.EntryLine{{Line: []string{s}}}
+}
+
 // validConfig is the canonical valid configuration the option tests start
 // from: two spaces, a dependency edge, one shared concurrency value.
 func validConfig() File {
@@ -391,9 +401,9 @@ func TestLoadChangelogGitHubDefaults(t *testing.T) {
 func TestLoadChangelogOptions(t *testing.T) {
 	cfg := validConfig()
 	cfg.Changelog = &ChangelogConfig{
-		Enabled: models.Bool(false),
-		File:    "HISTORY.md",
-		Title:   "# History",
+		Enabled:   models.Bool(false),
+		File:      "HISTORY.md",
+		FileTitle: titleLine("# History"),
 		EntryFormatConfig: EntryFormatConfig{
 			DateFormat:        "02.01.2006",
 			BreakingTitle:     "Breaking",
@@ -406,7 +416,7 @@ func TestLoadChangelogOptions(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, loaded.Changelog.IsEnabled())
 	assert.Equal(t, "HISTORY.md", loaded.Changelog.File)
-	assert.Equal(t, "# History", loaded.Changelog.Title)
+	assert.Equal(t, titleLine("# History"), loaded.Changelog.FileTitle)
 	assert.Equal(t, "02.01.2006", loaded.Changelog.DateFormat)
 	assert.Equal(t, "Breaking", loaded.Changelog.BreakingTitle)
 	assert.Equal(t, "Added", loaded.Changelog.FeaturesTitle)

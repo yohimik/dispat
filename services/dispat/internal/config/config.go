@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -36,6 +35,7 @@ type (
 	File                     = public.File
 	RunConfig                = public.RunConfig
 	EntryFormatConfig        = public.EntryFormatConfig
+	EntryLine                = public.EntryLine
 	ChangelogConfig          = public.ChangelogConfig
 	GitHubConfig             = public.GitHubConfig
 	CommitConfig             = public.CommitConfig
@@ -468,17 +468,9 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	var cfg File
 	// UnmarshalExact rejects unknown keys, catching config typos early.
 	// WeaklyTypedInput lets a scalar concurrency value decode into the slice,
-	// and the shorthand hook expands {consumer: provider(s)} dependency items
-	// into full entries before decoding.
-	weak := func(dc *mapstructure.DecoderConfig) {
-		dc.WeaklyTypedInput = true
-		if dc.DecodeHook != nil {
-			dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(dependencyShorthandHook, dc.DecodeHook)
-		} else {
-			dc.DecodeHook = mapstructure.DecodeHookFunc(dependencyShorthandHook)
-		}
-	}
-	if err := v.UnmarshalExact(&cfg, weak); err != nil {
+	// and the shorthand hooks expand {consumer: provider(s)} dependency items
+	// and bare record lines into full entries before decoding.
+	if err := v.UnmarshalExact(&cfg, weakDecode); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
 	if err := validate(&cfg); err != nil {
@@ -518,7 +510,7 @@ func dependencyShorthandHook(_, to reflect.Type, data any) (any, error) {
 		}
 		sort.Strings(consumers)
 		for _, consumer := range consumers {
-			providers, ok := providerNames(m[consumer])
+			providers, ok := stringList(m[consumer])
 			if !ok {
 				return nil, fmt.Errorf(
 					"dependencies[%d]: %q wants a provider name or an array of names", i, consumer)
@@ -527,6 +519,111 @@ func dependencyShorthandHook(_, to reflect.Type, data any) (any, error) {
 				out = append(out, map[string]any{"consumer": consumer, "provider": p})
 			}
 		}
+	}
+	return out, nil
+}
+
+// validateRecords checks the record-line lists of every layer that may carry
+// them: the two top-level objects and every package override, in the root
+// config and inside each space. In-folder files are checked where they are
+// loaded, alongside everything else those files say.
+func validateRecords(c *File) error {
+	if err := validateRecordObjects("changelog", "github", c.Changelog, c.GitHub); err != nil {
+		return err
+	}
+	for _, name := range sortedKeys(c.Packages) {
+		po := c.Packages[name]
+		label := fmt.Sprintf("packages[%q]", name)
+		if err := validateRecordObjects(label+": changelog", label+": github", po.Changelog, po.GitHub); err != nil {
+			return err
+		}
+	}
+	for _, sn := range sortedSpaceNames(c) {
+		for _, name := range sortedKeys(c.Spaces[sn].Packages) {
+			po := c.Spaces[sn].Packages[name]
+			label := fmt.Sprintf("spaces[%q]: packages[%q]", sn, name)
+			if err := validateRecordObjects(label+": changelog", label+": github", po.Changelog, po.GitHub); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateRecordObjects checks one layer's changelog and github objects, each
+// under the label naming where in the file it sits.
+func validateRecordObjects(clLabel, ghLabel string, cl *ChangelogConfig, gh *GitHubConfig) error {
+	if cl != nil {
+		if err := validateEntryLines(clLabel, "fileTitle", cl.FileTitle); err != nil {
+			return err
+		}
+		if err := validateEntryFormat(clLabel, cl.EntryFormatConfig); err != nil {
+			return err
+		}
+	}
+	if gh != nil {
+		if err := validateEntryFormat(ghLabel, gh.EntryFormatConfig); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEntryFormat(label string, f EntryFormatConfig) error {
+	if err := validateEntryLines(label, "header", f.Header); err != nil {
+		return err
+	}
+	return validateEntryLines(label, "footer", f.Footer)
+}
+
+// validateEntryLines refuses a line carrying only filters. Such an entry
+// selects packages and then writes nothing to them, which is always a mistake
+// rather than a way of writing nothing.
+func validateEntryLines(label, key string, lines []EntryLine) error {
+	for i, l := range lines {
+		if len(l.Line) == 0 {
+			return fmt.Errorf("%s: %s[%d]: line is required: an entry with nothing to write writes nothing",
+				label, key, i)
+		}
+	}
+	return nil
+}
+
+// entryLinesType is the decode target the record-line hook watches for: the
+// fileTitle, header and footer lists.
+var entryLinesType = reflect.TypeOf([]public.EntryLine(nil))
+
+// entryLinesHook expands the shorthand element shapes of a record-line list
+// before decoding. An element is a full object, a bare string, or a bare array
+// of strings; the two bare shapes are the common case — text with no filters —
+// and become a `line` holding it. A whole list given as a single string is the
+// same shorthand one level up ("header": "one line").
+//
+// Anything else is passed through untouched so that mapstructure reports it
+// against the field the user actually wrote, rather than this hook inventing a
+// message for a shape it does not understand.
+func entryLinesHook(_, to reflect.Type, data any) (any, error) {
+	if to != entryLinesType {
+		return data, nil
+	}
+	if s, ok := data.(string); ok {
+		return []any{map[string]any{"line": []string{s}}}, nil
+	}
+	items, ok := data.([]any)
+	if !ok {
+		return data, nil
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		if _, isMap := stringKeyMap(item); isMap {
+			out = append(out, item)
+			continue
+		}
+		if lines, ok := stringList(item); ok {
+			out = append(out, map[string]any{"line": lines})
+			continue
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -562,9 +659,9 @@ func isEdgeObject(m map[string]any) bool {
 	return false
 }
 
-// providerNames reads a shorthand value: one provider name or an array of
-// names.
-func providerNames(v any) ([]string, bool) {
+// stringList reads the config's recurring "one name or an array of names"
+// shape: a dependency shorthand's providers, a record line's text.
+func stringList(v any) ([]string, bool) {
 	switch x := v.(type) {
 	case string:
 		return []string{x}, true
@@ -721,6 +818,9 @@ func validate(c *File) error {
 		return errors.New("at least one space or package is required")
 	}
 	if err := validatePackageEntries(c); err != nil {
+		return err
+	}
+	if err := validateRecords(c); err != nil {
 		return err
 	}
 	if err := validateVersionGroups(c); err != nil {

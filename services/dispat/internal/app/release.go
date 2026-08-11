@@ -204,13 +204,13 @@ func (d *ghDispatch) empty() bool { return len(d.all) == 0 }
 // disables its packages with one warning per target.
 func (a *App) githubDispatch(pl *plan.Plan) *ghDispatch {
 	d := &ghDispatch{byPkg: make(map[string]*github.Releaser), log: a.log}
-	targets := make(map[model.GitHubSpec]*github.Releaser)
+	targets := make(map[string]*github.Releaser)
 	for _, name := range pl.Order {
 		spec := pl.Releases[name].Pkg.GitHub
 		if !spec.Enabled {
 			continue
 		}
-		gh, seen := targets[spec]
+		gh, seen := targets[spec.Key()]
 		if !seen {
 			var err error
 			if gh, err = githubReleaser(spec, a.log); err != nil {
@@ -218,7 +218,7 @@ func (a *App) githubDispatch(pl *plan.Plan) *ghDispatch {
 			} else {
 				d.all = append(d.all, gh)
 			}
-			targets[spec] = gh
+			targets[spec.Key()] = gh
 		}
 		if gh != nil {
 			d.byPkg[name] = gh

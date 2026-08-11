@@ -572,7 +572,7 @@ func TestPackageRecordSpecsOverlay(t *testing.T) {
 // repository's, so each layer only has to state what it changes.
 func TestPackageRecordSpecsOverlayBothLayers(t *testing.T) {
 	cfg := validConfig()
-	cfg.Changelog = &ChangelogConfig{File: "GLOBAL.md", Title: "# Global"}
+	cfg.Changelog = &ChangelogConfig{File: "GLOBAL.md", FileTitle: titleLine("# Global")}
 	cfg.GitHub = &GitHubConfig{Owner: "acme", Repo: "mono", TokenEnv: "GLOBAL_TOKEN"}
 	cfg.Packages = map[string]PackageConfig{
 		"core": {
@@ -582,7 +582,7 @@ func TestPackageRecordSpecsOverlayBothLayers(t *testing.T) {
 	}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	writePackageFile(t, root, "packages/libs/core", PackageConfig{
-		Changelog: &ChangelogConfig{Title: "# Local"},
+		Changelog: &ChangelogConfig{FileTitle: titleLine("# Local")},
 		GitHub:    &GitHubConfig{APIURL: "https://ghe"},
 	})
 	pkgs, err := discoverPackages(t, root)
@@ -590,7 +590,7 @@ func TestPackageRecordSpecsOverlayBothLayers(t *testing.T) {
 	core := packagesByName(pkgs)["core"]
 
 	assert.Equal(t, "ENTRY.md", core.Changelog.File, "the entry's value survives the second layer")
-	assert.Equal(t, "# Local", core.Changelog.Title, "which sets only what it names")
+	assert.Equal(t, resolvedTitleLine("# Local"), core.Changelog.FileTitle, "which sets only what it names")
 	assert.Equal(t, "entry-repo", core.GitHub.Repo)
 	assert.Equal(t, "https://ghe", core.GitHub.APIURL)
 	assert.Equal(t, "acme", core.GitHub.Owner, "and the repository's values are still underneath both")
@@ -777,9 +777,9 @@ func TestOverlayRecordFields(t *testing.T) {
 	assert.Equal(t, baseFormat, overlayFormat(baseFormat, EntryFormatConfig{}), "every unset field inherits")
 
 	cl := overlayChangelog(
-		&ChangelogConfig{File: "HISTORY.md", Title: "# H", EntryFormatConfig: baseFormat},
-		&ChangelogConfig{Title: "# Other"})
-	assert.Equal(t, "# Other", cl.Title)
+		&ChangelogConfig{File: "HISTORY.md", FileTitle: titleLine("# H"), EntryFormatConfig: baseFormat},
+		&ChangelogConfig{FileTitle: titleLine("# Other")})
+	assert.Equal(t, titleLine("# Other"), cl.FileTitle)
 	assert.Equal(t, "HISTORY.md", cl.File)
 	assert.Equal(t, baseFormat, cl.EntryFormatConfig)
 
@@ -1390,7 +1390,7 @@ func TestOverrideLadderWithoutTheNearestLayers(t *testing.T) {
 func TestSpaceLayersRecordPolicies(t *testing.T) {
 	cfg := validConfig()
 	cfg.Packages = map[string]PackageConfig{
-		"core": {Changelog: &ChangelogConfig{File: "ROOT.md", Title: "# Root"}, Concurrency: []int{2}},
+		"core": {Changelog: &ChangelogConfig{File: "ROOT.md", FileTitle: titleLine("# Root")}, Concurrency: []int{2}},
 	}
 	withLibs(&cfg, func(s *SpaceConfig) {
 		s.Packages = map[string]PackageConfig{
@@ -1406,7 +1406,7 @@ func TestSpaceLayersRecordPolicies(t *testing.T) {
 	core := packagesByName(pkgs)["core"]
 
 	assert.Equal(t, "SPACE.md", core.Changelog.File, "the nearer layer names the file")
-	assert.Equal(t, "# Root", core.Changelog.Title, "and the farther one still fills what it left unset")
+	assert.Equal(t, resolvedTitleLine("# Root"), core.Changelog.FileTitle, "and the farther one still fills what it left unset")
 	assert.Equal(t, 3, core.BuildWeight)
 	assert.Equal(t, 1, core.PublishWeight)
 	assert.Equal(t, []string{"acme:core"}, core.ManifestNames)

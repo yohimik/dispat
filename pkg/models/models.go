@@ -226,21 +226,59 @@ type RunConfig struct {
 	AfterPush    []string `mapstructure:"afterPush" json:"afterPush,omitempty"`
 }
 
+// EntryLine is one block of record text — a file title, a header or a footer
+// — optionally restricted to some packages. In a list a bare string is
+// shorthand for {"line": "<string>"} and a bare array of strings for
+// {"line": [...]}, so the common case needs no object at all.
+//
+// The filters are case-insensitive glob patterns, the same matching the
+// --package/--space/--group flags use. Several values under one key match any
+// of them; several keys must all match. A line with no filters is written for
+// every package.
+type EntryLine struct {
+	// Line is the text: one line, or several written consecutively.
+	Line []string `mapstructure:"line" json:"line,omitempty"`
+	// Package, Space and Group restrict which packages the line is written
+	// for. Group names a versioning group.
+	Package []string `mapstructure:"package" json:"package,omitempty"`
+	Space   []string `mapstructure:"space" json:"space,omitempty"`
+	Group   []string `mapstructure:"group" json:"group,omitempty"`
+}
+
 // EntryFormatConfig customises how a release entry is rendered; shared by the
 // changelog file and the GitHub release body. All fields are optional.
+//
+// ReleaseName, Header and Footer are interpolated: $VAR and ${VAR} are
+// replaced with the releasing package's DISPAT_* variables and script outputs,
+// falling back to the process environment, so one configured line can name the
+// package and tag it belongs to.
 type EntryFormatConfig struct {
 	DateFormat        string `mapstructure:"dateFormat" json:"dateFormat,omitempty"`               // Go time layout, default "2006-01-02"
 	BreakingTitle     string `mapstructure:"breakingTitle" json:"breakingTitle,omitempty"`         // default "Breaking Changes"
 	FeaturesTitle     string `mapstructure:"featuresTitle" json:"featuresTitle,omitempty"`         // default "Features"
 	FixesTitle        string `mapstructure:"fixesTitle" json:"fixesTitle,omitempty"`               // default "Fixes"
 	DependenciesTitle string `mapstructure:"dependenciesTitle" json:"dependenciesTitle,omitempty"` // default "Dependencies"
+	// ReleaseName is what the release is called. On GitHub it replaces the
+	// release name, which defaults to the tag; in a changelog it writes a
+	// sub-header under the entry's date line, and nothing when empty.
+	ReleaseName string `mapstructure:"releaseName" json:"releaseName,omitempty"`
+	// Header and Footer are written inside every entry, above the sections
+	// and after them.
+	Header []EntryLine `mapstructure:"header" json:"header,omitempty"`
+	Footer []EntryLine `mapstructure:"footer" json:"footer,omitempty"`
 }
 
 // ChangelogConfig customises (or disables) the per-package changelog file.
 type ChangelogConfig struct {
 	Enabled *bool  `mapstructure:"enabled" json:"enabled,omitempty"` // default true
 	File    string `mapstructure:"file" json:"file,omitempty"`       // default "CHANGELOG.md"
-	Title   string `mapstructure:"title" json:"title,omitempty"`     // default "# Changelog"
+	// FileTitle heads the file, above every entry. An absent list means the
+	// default "# Changelog"; [""] writes a blank first line instead. It takes
+	// the same shapes as Header and Footer, so a file can open with several
+	// lines and say something different per package — but unlike them it is
+	// written once and matched against on the next release, so it must not
+	// contain anything that varies from one release to the next.
+	FileTitle []EntryLine `mapstructure:"fileTitle" json:"fileTitle,omitempty"`
 	// Prerelease writes an entry for a prerelease version too (default true).
 	// Setting it false keeps the file a record of stable releases alone: the
 	// betas of a version leave nothing behind, and the graduation to stable

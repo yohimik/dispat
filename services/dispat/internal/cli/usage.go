@@ -127,7 +127,7 @@ Nothing is written and nothing is released.`,
 flow can land it inside the release commit instead of after it. An entry
 the file already carries is skipped (W222), which is also what makes the
 release stage skip the entries written here.`,
-		flags: append([]string{"file", "title", "date-format"}, windowFlags...),
+		flags: append([]string{"file", "file-title", "date-format", "release-name"}, windowFlags...),
 	},
 	{
 		name:  cmdAutoversion,
@@ -180,7 +180,8 @@ the end of the run. A release the repository already carries is skipped
 Meant for a stage script: the opt-in and the files to attach are read from
 DISPAT_EXPORT_GITHUB in the environment the stage handed the command, and
 github.allPackages is the configuration-level opt-in for everything else.`,
-		flags: append([]string{"owner", "repo", "api-url", "token-env", "target"}, windowFlags...),
+		flags: append([]string{"owner", "repo", "api-url", "token-env", "target", "release-name"},
+			windowFlags...),
 	},
 	{
 		name:  cmdCompute,

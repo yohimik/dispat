@@ -27,6 +27,14 @@ type Format struct {
 	FeaturesTitle     string // default "Features"
 	FixesTitle        string // default "Fixes"
 	DependenciesTitle string // default "Dependencies"
+	// ReleaseName names the release. In a changelog entry it writes a
+	// sub-header under the date line; empty writes none. The GitHub recorder
+	// reads it as the release's name instead.
+	ReleaseName string
+	// Header and Footer bracket the sections of an entry. They carry their
+	// own package filters, so one configured list serves a whole workspace.
+	Header []model.EntryLine
+	Footer []model.EntryLine
 }
 
 func (f Format) withDefaults() Format {
@@ -52,6 +60,9 @@ func SpecFormat(f model.RecordFormat) Format {
 		FeaturesTitle:     f.FeaturesTitle,
 		FixesTitle:        f.FixesTitle,
 		DependenciesTitle: f.DependenciesTitle,
+		ReleaseName:       f.ReleaseName,
+		Header:            f.Header,
+		Footer:            f.Footer,
 	}
 }
 
@@ -73,7 +84,7 @@ func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 		LogSkip(d.Log, spec, rel)
 		return nil
 	}
-	w := &FileWriter{File: spec.File, Title: spec.Title, Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log}
+	w := &FileWriter{File: spec.File, FileTitle: spec.FileTitle, Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log}
 	return w.Record(ctx, rel)
 }
 
@@ -156,26 +167,97 @@ func RenderSections(rel *plan.Release, f Format) string {
 	return strings.Join(parts, "\n")
 }
 
+// RenderBody assembles the body of one entry: the release-name sub-header,
+// the configured header lines, the grouped sections, any extra sections the
+// caller appends, and the configured footer lines. A nil look means the
+// release's own ReleaseLookup.
+//
+// Blocks are separated by exactly one blank line and empty ones are dropped,
+// so an entry reads the same whether none of the optional blocks are
+// configured or all of them are — and a body with none of them is byte for
+// byte the sections alone, as it was before they existed.
+func RenderBody(rel *plan.Release, f Format, look Lookup, extra ...string) string {
+	f = f.withDefaults()
+	if look == nil {
+		look = ReleaseLookup(rel)
+	}
+	blocks := make([]string, 0, len(extra)+4)
+	if name := Expand(f.ReleaseName, look); name != "" {
+		blocks = append(blocks, "### "+name+"\n")
+	}
+	blocks = appendBlock(blocks, RenderLines(f.Header, rel, look))
+	blocks = appendBlock(blocks, RenderSections(rel, f))
+	for _, e := range extra {
+		blocks = appendBlock(blocks, e)
+	}
+	blocks = appendBlock(blocks, RenderLines(f.Footer, rel, look))
+	return joinBlocks(blocks)
+}
+
+// appendBlock drops empty blocks instead of joining them, so an unconfigured
+// header costs no blank line.
+func appendBlock(blocks []string, s string) []string {
+	if s == "" {
+		return blocks
+	}
+	return append(blocks, s)
+}
+
+// joinBlocks puts exactly one blank line between blocks. A block is trimmed to
+// a single trailing newline before the separator is added, because what a
+// block ends with varies — a section carrying commit bodies ends differently
+// from one that does not, and a configured line list may end on a deliberate
+// blank line. The last block is left exactly as its renderer produced it.
+func joinBlocks(blocks []string) string {
+	var b strings.Builder
+	for i, block := range blocks {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if i == len(blocks)-1 {
+			b.WriteString(block)
+			continue
+		}
+		b.WriteString(strings.TrimRight(block, "\n"))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // RenderEntry renders one dated changelog entry: a "## pkg@version (date)"
-// header followed by the sections.
+// header followed by the body.
 func RenderEntry(rel *plan.Release, date time.Time, f Format) string {
 	f = f.withDefaults()
 	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), date.Format(f.DateFormat))
-	sections := RenderSections(rel, f)
-	if sections == "" {
+	body := RenderBody(rel, f, nil)
+	if body == "" {
 		return header
 	}
-	return header + "\n" + sections
+	return header + "\n" + body
 }
 
 // FileWriter prepends release entries to a changelog file inside a package.
 // It implements release.ReleaseRecorder.
 type FileWriter struct {
-	File   string // file name inside the package folder, default "CHANGELOG.md"
-	Title  string // first line of the file, default "# Changelog"
-	Format Format
-	Now    func() time.Time // injectable clock; defaults to time.Now
-	Log    zerolog.Logger   // carries the entry-exists skip notice; zero value discards
+	File string // file name inside the package folder, default "CHANGELOG.md"
+	// FileTitle heads the file, above every entry; an empty list means the
+	// default "# Changelog".
+	FileTitle []model.EntryLine
+	Format    Format
+	Now       func() time.Time // injectable clock; defaults to time.Now
+	Log       zerolog.Logger   // carries the entry-exists skip notice; zero value discards
+}
+
+// title renders the file's opening block for rel, with the default applied.
+// The same text heads a new file and is stripped off an existing one before
+// the new entry goes in, which is why a title that varies from one release to
+// the next does not belong here: the strip would miss and the old title would
+// survive inside the file.
+func (w *FileWriter) title(rel *plan.Release) string {
+	if len(w.FileTitle) == 0 {
+		return "# Changelog\n"
+	}
+	return RenderLines(w.FileTitle, rel, ReleaseLookup(rel))
 }
 
 // path resolves the changelog file the writer targets for rel, with the
@@ -209,11 +291,7 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	if w.Now != nil {
 		now = w.Now
 	}
-	title := w.Title
-	if title == "" {
-		title = "# Changelog"
-	}
-	header := title + "\n"
+	header := w.title(rel)
 
 	path := w.path(rel)
 	entry := RenderEntry(rel, now().UTC(), w.Format)

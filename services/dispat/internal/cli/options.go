@@ -47,7 +47,10 @@ type options struct {
 	ghOwner, ghRepo, ghAPIURL, ghTokenEnv, ghTarget *string
 
 	// changelog
-	clFile, clTitle, clDateFormat *string
+	clFile, clFileTitle, clDateFormat *string
+
+	// shared by the changelog and github step commands
+	releaseName *string
 
 	// autoversion and autoreplace
 	avRange, avManifests                    *string
@@ -130,10 +133,12 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"create the tag at this commit or branch (target_commitish); only safe once the commit is on the remote")
 	o.clFile = fs.String("file", "",
 		"override the changelog.file name")
-	o.clTitle = fs.String("title", "",
-		"override the changelog.title first line")
+	o.clFileTitle = fs.String("file-title", "",
+		"override the changelog.fileTitle with this single line")
 	o.clDateFormat = fs.String("date-format", "",
 		"override the changelog.dateFormat entry date layout")
+	o.releaseName = fs.String("release-name", "",
+		"override the releaseName: the GitHub release's name, or the sub-header of a changelog entry ($VAR and ${VAR} are expanded)")
 	o.avRange = fs.String("range", "",
 		"override the autoVersion.range write policy")
 	o.avMatch = fs.StringSlice("match", nil,

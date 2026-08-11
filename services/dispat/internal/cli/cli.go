@@ -349,7 +349,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	case cmdChangelog:
 		if a.Changelog(ctx, app.ChangelogOptions{Window: window, OnError: *o.onError,
-			File: *o.clFile, Title: *o.clTitle, DateFormat: *o.clDateFormat}) != nil {
+			File: *o.clFile, FileTitle: *o.clFileTitle, DateFormat: *o.clDateFormat,
+			ReleaseName: *o.releaseName}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
@@ -380,7 +381,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case cmdGithub:
 		if a.GitHub(ctx, app.GitHubOptions{Window: window, OnError: *o.onError,
 			Owner: *o.ghOwner, Repo: *o.ghRepo,
-			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget}) != nil {
+			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget,
+			ReleaseName: *o.releaseName}) != nil {
 			return 1
 		}
 	case cmdCompute:

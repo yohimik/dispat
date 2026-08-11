@@ -123,10 +123,10 @@ func TestRecordCreatesAndPrepends(t *testing.T) {
 func TestRecordCustomFileAndTitle(t *testing.T) {
 	dir := t.TempDir()
 	w := &FileWriter{
-		File:   "HISTORY.md",
-		Title:  "# History",
-		Format: Format{FeaturesTitle: "Added"},
-		Now:    func() time.Time { return testDate },
+		File:      "HISTORY.md",
+		FileTitle: titleLines("# History"),
+		Format:    Format{FeaturesTitle: "Added"},
+		Now:       func() time.Time { return testDate },
 	}
 	require.NoError(t, w.Record(context.Background(), testRelease(dir, ccme.Version{Major: 2})))
 
@@ -148,7 +148,7 @@ func TestDispatcherRoutesPerPackagePolicy(t *testing.T) {
 
 	enabled := testRelease(dirA, ccme.Version{Major: 2})
 	enabled.Pkg.Changelog = model.ChangelogSpec{
-		Enabled: true, File: "HISTORY.md", Title: "# History",
+		Enabled: true, File: "HISTORY.md", FileTitle: titleLines("# History"),
 		Format: model.RecordFormat{FeaturesTitle: "Added"},
 	}
 	disabled := testRelease(dirB, ccme.Version{Major: 2})

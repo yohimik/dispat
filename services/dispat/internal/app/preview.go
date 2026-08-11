@@ -63,16 +63,20 @@ func (a *App) Preview(ctx context.Context, f filter.Filter) (PreviewResult, erro
 // previewOne renders one package's pending notes; empty when nothing is
 // pending.
 func (a *App) previewOne(rel *plan.Release) string {
-	sections := changelog.RenderSections(rel, changelog.SpecFormat(rel.Pkg.Changelog.Format))
-	if sections == "" && !rel.Releasing() {
+	format := changelog.SpecFormat(rel.Pkg.Changelog.Format)
+	// Whether there is anything to preview is a question about the notes
+	// alone. A workspace-wide footer would otherwise give every unchanged
+	// package a body and put it in the preview.
+	if changelog.RenderSections(rel, format) == "" && !rel.Releasing() {
 		return ""
 	}
 	// The changelog entry's header carries the tag and a date; a preview has
 	// no date yet, so it shows the channel movement instead: the transition
 	// (§13.10) is the context a reader needs to judge the sections below.
 	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), rel.ChannelTransition())
-	if sections == "" {
+	body := changelog.RenderBody(rel, format, nil)
+	if body == "" {
 		return header
 	}
-	return header + "\n" + sections
+	return header + "\n" + body
 }

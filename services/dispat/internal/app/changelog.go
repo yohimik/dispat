@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
@@ -16,8 +17,11 @@ type ChangelogOptions struct {
 	Window     WindowOptions // which packages the command covers
 	OnError    string        // what a failure does to the failed package's dependents
 	File       string        // overrides changelog.file
-	Title      string        // overrides changelog.title
+	FileTitle  string        // overrides changelog.fileTitle, as a single line
 	DateFormat string        // overrides changelog.dateFormat
+	// ReleaseName overrides changelog.releaseName. It is interpolated like
+	// the configured value, so a flow can pass a name its own scripts built.
+	ReleaseName string
 }
 
 // Changelog writes each covered package's pending changelog entry now — the
@@ -59,13 +63,21 @@ func (w *changelogWork) resolve(_ context.Context, rel *plan.Release) (task, err
 		return nil, nil
 	}
 	fw := &changelog.FileWriter{
-		File:   firstOf(w.opts.File, spec.File),
-		Title:  firstOf(w.opts.Title, spec.Title),
-		Format: changelog.SpecFormat(spec.Format),
-		Log:    w.app.log,
+		File:      firstOf(w.opts.File, spec.File),
+		FileTitle: spec.FileTitle,
+		Format:    changelog.SpecFormat(spec.Format),
+		Log:       w.app.log,
+	}
+	// A flag states the whole title, the same way a nearer configuration layer
+	// does: one line, no filters, replacing whatever was configured.
+	if w.opts.FileTitle != "" {
+		fw.FileTitle = []model.EntryLine{{Line: []string{w.opts.FileTitle}}}
 	}
 	if w.opts.DateFormat != "" {
 		fw.Format.DateFormat = w.opts.DateFormat
+	}
+	if w.opts.ReleaseName != "" {
+		fw.Format.ReleaseName = w.opts.ReleaseName
 	}
 	return func(ctx context.Context) error {
 		already, err := fw.HasEntryFor(rel)

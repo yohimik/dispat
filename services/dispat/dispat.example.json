@@ -95,12 +95,16 @@
   "changelog": {
     "enabled": true,
     "file": "CHANGELOG.md",
-    "title": "# Changelog",
+    "fileTitle": "# Changelog",
     "dateFormat": "2006-01-02",
     "breakingTitle": "Breaking Changes",
     "featuresTitle": "Features",
     "fixesTitle": "Fixes",
-    "dependenciesTitle": "Dependencies"
+    "dependenciesTitle": "Dependencies",
+    "footer": [
+      "",
+      { "line": "Published from the acme monorepo.", "space": "libs" }
+    ]
   },
   "commit": {
     "enabled": false,
@@ -115,6 +119,8 @@
     "repo": "monorepo",
     "apiUrl": "https://api.github.com",
     "tokenEnv": "GITHUB_TOKEN",
-    "featuresTitle": "Features"
+    "featuresTitle": "Features",
+    "releaseName": "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
+    "footer": ["", "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"]
   }
 }
