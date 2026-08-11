@@ -460,6 +460,72 @@ func TestPartialGroupNeverPublishedVersionsIndependently(t *testing.T) {
 	assert.False(t, p.Releases["b"].Releasing(), "b has nothing to align to")
 }
 
+// TestDocumentedWorkedExample replays the table on the "Shared versions"
+// documentation page commit for commit: a group of core and ui starting at
+// 1.4.2 and 1.4.0, where only core ever changes. The page is what a reader
+// plans their repository against, so it is worth a fence of its own.
+func TestDocumentedWorkedExample(t *testing.T) {
+	history := []struct {
+		sha, message string
+		// want is the pair each mode ends the step at, "" meaning unchanged.
+		fixed, majorMinor, major [2]string
+	}{
+		{"c1", "fix(core): a patch",
+			[2]string{"1.4.3", "1.4.3"}, [2]string{"1.4.3", ""}, [2]string{"1.4.3", ""}},
+		{"c2", "fix(core): another patch",
+			[2]string{"1.4.4", "1.4.4"}, [2]string{"1.4.4", ""}, [2]string{"1.4.4", ""}},
+		{"c3", "feat(core): a feature",
+			[2]string{"1.5.0", "1.5.0"}, [2]string{"1.5.0", "1.5.0"}, [2]string{"1.5.0", ""}},
+		{"c4", "feat(core)!: a breaking change",
+			[2]string{"2.0.0", "2.0.0"}, [2]string{"2.0.0", "2.0.0"}, [2]string{"2.0.0", "2.0.0"}},
+	}
+	modes := []struct {
+		mode model.Versioning
+		col  func(int) [2]string
+	}{
+		{model.VersioningFixed, func(i int) [2]string { return history[i].fixed }},
+		{model.VersioningFixedMajorMinor, func(i int) [2]string { return history[i].majorMinor }},
+		{model.VersioningFixedMajor, func(i int) [2]string { return history[i].major }},
+	}
+
+	for _, m := range modes {
+		t.Run(string(m.mode), func(t *testing.T) {
+			// Each step replays the whole history with the tags the previous
+			// steps produced, which is what a repository actually looks like.
+			at := [2]string{"1.4.2", "1.4.0"}
+			for i := range history {
+				hist := make([]commit, 0, i+1)
+				for _, h := range history[:i+1] {
+					hist = append(hist, commit{sha: h.sha, message: h.message})
+				}
+				prev := "" // the first step's tags predate all recorded history
+				if i > 0 {
+					prev = history[i-1].sha
+				}
+				git := newFakeGit(hist...).tag("core", at[0], prev).tag("ui", at[1], prev)
+				pkgs := []*model.Package{
+					{Name: "core", Dir: "/r/pkgs/core", Space: &model.Space{Name: "g", Versioning: m.mode}},
+					{Name: "ui", Dir: "/r/pkgs/ui", Space: &model.Space{Name: "g", Versioning: m.mode}},
+				}
+				p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+				require.NoError(t, err)
+
+				want := m.col(i)
+				for k, name := range []string{"core", "ui"} {
+					rel := p.Releases[name]
+					if want[k] == "" {
+						assert.Falsef(t, rel.Releasing(), "step %d: %s must not release", i+1, name)
+						continue
+					}
+					require.Truef(t, rel.Releasing(), "step %d: %s must release", i+1, name)
+					assert.Equalf(t, want[k], rel.Next.String(), "step %d: %s", i+1, name)
+					at[k] = want[k]
+				}
+			}
+		})
+	}
+}
+
 func TestPartialModesNeverReleaseBelowTheirOwnBaseline(t *testing.T) {
 	// The invariant that outranks every rule above: whichever path a member
 	// takes, its next version must exceed what it last published.
