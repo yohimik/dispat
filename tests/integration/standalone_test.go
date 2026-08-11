@@ -514,3 +514,53 @@ func TestStandaloneGithubFailures(t *testing.T) {
 		assert.Contains(t, res.Stdout+res.Stderr, "github release failed")
 	})
 }
+
+// TestStandaloneStepsTakeTheWindowFlags: the step commands cover packages the
+// way `dispat run` does, so --since, --consumers and --on-error mean here what
+// they mean there.
+//
+// The pitfall this pins is the one every flow meets sooner or later: a step
+// command plans afresh every time, so once `dispat commit --tag` has tagged a
+// package the recomputed plan no longer releases it, and the next step over
+// the same package covers nothing at all. --since all is what puts it back on
+// the table.
+func TestStandaloneStepsTakeTheWindowFlags(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 2)
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.Commit("chore: set the repository up")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.Commit("feat(core,web): bootstrap")
+
+	// --since picks the window: what the last commit addressed.
+	res := r.Command("changelog", "--since", "HEAD~1")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.FileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+	assert.FileExists(t, r.Path("packages", "web", "CHANGELOG.md"))
+
+	// --consumers reaches web from core.
+	r.Remove("packages/web/CHANGELOG.md")
+	res = r.Command("changelog", "--package", "core", "--consumers")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.FileExists(t, r.Path("packages", "web", "CHANGELOG.md"), "the consumer was pulled in")
+
+	// --on-error parses and is validated on every sweeping command.
+	assert.Equal(t, 0, r.Command("changelog", "--on-error", "continue").Code)
+	assert.Equal(t, 2, r.Command("changelog", "--on-error", "explode").Code)
+
+	// The pitfall: commit --tag, and the package stops being on the window.
+	res = r.Command("commit", "--package", "core", "--tag")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+
+	res = r.Command("autoversion", "--package", "core")
+	require.Equal(t, 0, res.Code, "a package with nothing pending is a no-op, not a failure")
+	assert.Contains(t, res.Stdout, "outside the window, nothing to do")
+
+	res = r.Command("autoversion", "--package", "core", "--since", "all")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.NotContains(t, res.Stdout, "outside the window",
+		"--since all puts the released package back on the table")
+}
