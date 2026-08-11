@@ -23,6 +23,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
@@ -202,4 +203,18 @@ func decodeAll[T any](t *testing.T, bodies [][]byte) []T {
 		require.NoError(t, json.Unmarshal(b, &out[i]))
 	}
 	return out
+}
+
+// assertOrderedIn fails unless every marker appears in text, in the order
+// given — how a test states the shape of a rendered record without pinning
+// the bytes between the parts it cares about.
+func assertOrderedIn(t *testing.T, text string, markers ...string) {
+	t.Helper()
+	at := -1
+	for _, marker := range markers {
+		i := strings.Index(text, marker)
+		require.NotEqual(t, -1, i, "missing %q in:\n%s", marker, text)
+		assert.Greater(t, i, at, "%q is out of order in:\n%s", marker, text)
+		at = i
+	}
 }

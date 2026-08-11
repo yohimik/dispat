@@ -189,12 +189,14 @@ func TestStandaloneChangelogOverrideFlags(t *testing.T) {
 	// for the invocation.
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): flagged feature")
-	res := r.Command("changelog", "--package", "core", "--file", "HISTORY.md", "--title", "# History", "--date-format", "2006")
+	res := r.Command("changelog", "--package", "core", "--file", "HISTORY.md",
+		"--file-title", "# History", "--date-format", "2006", "--release-name", "${DISPAT_TAG} shipped")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	data, err := os.ReadFile(r.Path("packages", "core", "HISTORY.md"))
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(string(data), "# History\n"))
 	assert.Contains(t, string(data), "## core@0.1.0 (2026)", "the overridden date layout applies")
+	assert.Contains(t, string(data), "### core@0.1.0 shipped", "the flagged release name is interpolated")
 	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
 }
 

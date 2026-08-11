@@ -83,8 +83,8 @@ func TestRecordsChangelogCustomFileTitleAndSections(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Changelog = &models.ChangelogConfig{
-		File:  "HISTORY.md",
-		Title: "# History",
+		File:      "HISTORY.md",
+		FileTitle: recordLines("# History"),
 		EntryFormatConfig: models.EntryFormatConfig{
 			FeaturesTitle: "What's new",
 		},
@@ -531,4 +531,284 @@ func TestRecordsGitHubReleaseExistsIsASkip(t *testing.T) {
 	r.ReleaseOK()
 	assert.Len(t, bodies(), 1)
 	assert.True(t, r.HasTag("core@0.1.0"))
+}
+
+// recordLines is the unfiltered line list a bare string in a config file
+// decodes into — the typed spelling of the shorthand.
+func recordLines(text ...string) []models.EntryLine {
+	return []models.EntryLine{{Line: text}}
+}
+
+// TestRecordsHeaderAndFooterPerEntry: the header and footer belong to the
+// entry, not to the file. Two releases leave two of each, the file title is
+// written once, and the blocks bracket the sections in order.
+func TestRecordsHeaderAndFooterPerEntry(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{
+		FileTitle: recordLines("# Changelog", "", "Everything that shipped."),
+		EntryFormatConfig: models.EntryFormatConfig{
+			Header: recordLines("Built by CI."),
+			Footer: recordLines("", "---"),
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+
+	r.Commit("feat(core): add streaming")
+	r.ReleaseOK()
+	r.CommitEmpty("fix(core): close a leak")
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	log := string(data)
+
+	assert.True(t, strings.HasPrefix(log, "# Changelog\n\nEverything that shipped.\n"), log)
+	assert.Equal(t, 1, strings.Count(log, "Everything that shipped."), "the file title is written once")
+	assert.Equal(t, 2, strings.Count(log, "Built by CI."), "one header per entry")
+	assert.Equal(t, 2, strings.Count(log, "\n---\n"), "one footer per entry")
+
+	// Inside the newest entry, in order.
+	entry := log[strings.Index(log, "## core@0.1.1"):strings.Index(log, "## core@0.1.0")]
+	assertOrderedIn(t, entry, "Built by CI.", "### Fixes", "- close a leak", "---")
+}
+
+// TestRecordsReleaseNameSubHeader: releaseName writes a sub-header naming the
+// release under the entry's date line, and the entry stays recognisable, so a
+// re-run still skips it.
+func TestRecordsReleaseNameSubHeader(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{
+		EntryFormatConfig: models.EntryFormatConfig{ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): add streaming")
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assertOrderedIn(t, string(data), "## core@0.1.0 (", "### core 0.1.0", "### Features")
+
+	// The entry is still found by its tag line, so a second write skips it.
+	res := r.Release()
+	require.Equal(t, 0, res.Code, res.Stderr)
+	after, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Equal(t, string(data), string(after), "nothing pending, nothing rewritten")
+}
+
+// TestRecordsLineFiltersSelectPackages: one configured list serves the whole
+// workspace — package, space and group filters each write to their own
+// packages and to no others.
+func TestRecordsLineFiltersSelectPackages(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages/libs", Flow: buildPublish(), Versioning: "fixed"},
+		"apps": {Path: "packages/apps", Flow: buildPublish()},
+	}
+	cfg.Changelog = &models.ChangelogConfig{
+		EntryFormatConfig: models.EntryFormatConfig{
+			Footer: []models.EntryLine{
+				{Line: []string{"everyone"}},
+				{Line: []string{"core only"}, Package: []string{"core"}},
+				{Line: []string{"apps only"}, Space: []string{"apps"}},
+				{Line: []string{"grouped"}, Group: []string{"libs"}},
+			},
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/libs", "core")
+	r.SeedPackage("packages/libs", "utils")
+	r.SeedPackage("packages/apps", "web")
+	r.Commit("feat(core,utils,web): bootstrap")
+	r.ReleaseOK()
+
+	read := func(space, pkg string) string {
+		data, err := os.ReadFile(r.Path("packages", space, pkg, "CHANGELOG.md"))
+		require.NoError(t, err)
+		return string(data)
+	}
+	core, utils, web := read("libs", "core"), read("libs", "utils"), read("apps", "web")
+
+	for name, log := range map[string]string{"core": core, "utils": utils, "web": web} {
+		assert.Contains(t, log, "everyone", "%s: an unfiltered line reaches every package", name)
+	}
+	assert.Contains(t, core, "core only")
+	assert.NotContains(t, utils, "core only")
+	assert.NotContains(t, web, "core only")
+
+	assert.Contains(t, web, "apps only")
+	assert.NotContains(t, core, "apps only")
+
+	assert.Contains(t, core, "grouped", "libs versions as one group")
+	assert.Contains(t, utils, "grouped")
+	assert.NotContains(t, web, "grouped", "an independent space belongs to no group")
+}
+
+// TestRecordsTextExpandsVariables: the release's own variables, a script
+// output and the process environment all resolve in record text, in the
+// changelog file and in the GitHub release body alike. A name nothing
+// defines leaves nothing behind.
+func TestRecordsTextExpandsVariables(t *testing.T) {
+	type ghRelease struct {
+		Name string `json:"name"`
+		Body string `json:"body"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig("echo DISPAT_OUTPUT_IMAGE=acme/core:1 >> \"$DISPAT_OUTPUT\"", 1)
+	format := models.EntryFormatConfig{
+		ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
+		Footer: recordLines(
+			"tag: ${DISPAT_TAG}",
+			"image: ${DISPAT_OUTPUT_IMAGE}",
+			"built-by: ${DISPAT_IT_BUILDER}",
+			"missing: [${NOTHING_DEFINES_THIS}]",
+		),
+	}
+	cfg.Changelog = &models.ChangelogConfig{EntryFormatConfig: format}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		EntryFormatConfig: format,
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	t.Setenv("DISPAT_IT_BUILDER", "ci-runner")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): add streaming")
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	log := string(data)
+	assert.Contains(t, log, "### core 0.1.0")
+	assert.Contains(t, log, "tag: core@0.1.0")
+	assert.Contains(t, log, "image: acme/core:1", "a value the build script exported")
+	assert.Contains(t, log, "built-by: ci-runner", "and one from the environment")
+	assert.Contains(t, log, "missing: []", "an undefined name expands to nothing")
+
+	releases := decodeAll[ghRelease](t, bodies())
+	require.Len(t, releases, 1)
+	assert.Equal(t, "core 0.1.0", releases[0].Name, "releaseName renames the release")
+	assert.Contains(t, releases[0].Body, "tag: core@0.1.0")
+	assert.Contains(t, releases[0].Body, "image: acme/core:1")
+	assert.NotContains(t, releases[0].Body, "### core 0.1.0",
+		"on GitHub the name is the release's title, not a sub-header in its body")
+}
+
+// TestRecordsGitHubBodyOrder: with commit mode on, the release section
+// documenting the commit sits between the sections and the footer, and the
+// tag is still the tag whatever the release is called.
+func TestRecordsGitHubBodyOrder(t *testing.T) {
+	type ghRelease struct {
+		Name    string `json:"name"`
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Name: "dispat", Email: "dispat@example.com"}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		EntryFormatConfig: models.EntryFormatConfig{
+			ReleaseName: "Winter release",
+			Header:      recordLines("Built by CI."),
+			Footer:      recordLines("Questions? open an issue."),
+		},
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): add streaming")
+	r.ReleaseOK()
+
+	releases := decodeAll[ghRelease](t, bodies())
+	require.Len(t, releases, 1)
+	assert.Equal(t, "Winter release", releases[0].Name)
+	assert.Equal(t, "core@0.1.0", releases[0].TagName, "the tag is never renamed")
+	assertOrderedIn(t, releases[0].Body,
+		"Built by CI.", "### Features", "- add streaming", "### Release", "- commit: ",
+		"Questions? open an issue.")
+}
+
+// TestRecordsLineOverrideReplacesInherited: a package's own list states what
+// that package writes; it does not extend the inherited one.
+func TestRecordsLineOverrideReplacesInherited(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{
+		EntryFormatConfig: models.EntryFormatConfig{Footer: recordLines("global footer")},
+	}
+	cfg.Packages = map[string]models.PackageConfig{"core": {
+		Changelog: &models.ChangelogConfig{
+			EntryFormatConfig: models.EntryFormatConfig{Footer: recordLines("core footer")},
+		},
+	}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core,utils): bootstrap")
+	r.ReleaseOK()
+
+	core, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	utils, err := os.ReadFile(r.Path("packages", "utils", "CHANGELOG.md"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(core), "core footer")
+	assert.NotContains(t, string(core), "global footer", "the nearest layer states the whole list")
+	assert.Contains(t, string(utils), "global footer", "and the rest still inherit it")
+}
+
+// TestRecordsLineWithoutTextIsAConfigError: a line that selects packages and
+// writes nothing to them fails the load, naming where it sits.
+func TestRecordsLineWithoutTextIsAConfigError(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigRaw(map[string]any{
+		"scripts": map[string]any{"build": echoBuild, "publish": "echo publishing"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "packages", "flow": map[string]any{
+				"build": []any{"build"}, "publish": []any{"publish"}}},
+		},
+		"changelog": map[string]any{"footer": []any{map[string]any{"package": "core"}}},
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): add streaming")
+
+	res := r.Release()
+	assert.NotEqual(t, 0, res.Code, "a footer with nothing to write must not load")
+	assert.Contains(t, res.Stderr, "footer[0]")
+	assert.Contains(t, res.Stderr, "line is required")
+}
+
+// TestRecordsLineShorthandsInAPackageFolder: the shorthand shapes decode the
+// same in an in-folder package config as in the root config.
+func TestRecordsLineShorthandsInAPackageFolder(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/dispat.json", `{
+  "changelog": {
+    "fileTitle": "# Core",
+    "footer": ["one", ["two", "three"], {"line": "four", "package": "core"}]
+  }
+}`)
+	r.Commit("feat(core): add streaming")
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	log := string(data)
+	assert.True(t, strings.HasPrefix(log, "# Core\n"), log)
+	assertOrderedIn(t, log, "### Features", "one", "two", "three", "four")
 }
