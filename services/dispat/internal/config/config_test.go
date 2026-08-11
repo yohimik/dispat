@@ -871,7 +871,7 @@ func TestExampleConfigsAreValid(t *testing.T) {
 }
 
 func TestLoadVersioning(t *testing.T) {
-	// The three modes load and normalize case-insensitively; the default is
+	// Every mode loads and normalizes case-insensitively; the default is
 	// independent; an unknown value is rejected with the valid set named.
 	load := func(t *testing.T, versioning string) (*File, error) {
 		t.Helper()
@@ -883,12 +883,21 @@ func TestLoadVersioning(t *testing.T) {
 	}
 
 	for raw, want := range map[string]string{
-		"":            VersioningIndependent,
-		"independent": VersioningIndependent,
-		"fixed":       VersioningFixed,
-		"Fixed":       VersioningFixed,
-		"fixedSparse": VersioningFixedSparse,
-		"fixedsparse": VersioningFixedSparse,
+		"":                      VersioningIndependent,
+		"independent":           VersioningIndependent,
+		"fixed":                 VersioningFixed,
+		"Fixed":                 VersioningFixed,
+		"fixedSparse":           VersioningFixedSparse,
+		"fixedsparse":           VersioningFixedSparse,
+		"fixedMajor":            VersioningFixedMajor,
+		"fixedmajor":            VersioningFixedMajor,
+		"FIXEDMAJOR":            VersioningFixedMajor,
+		"fixedMajorSparse":      VersioningFixedMajorSparse,
+		"fixedmajorsparse":      VersioningFixedMajorSparse,
+		"fixedMajorMinor":       VersioningFixedMajorMinor,
+		"fixedmajorminor":       VersioningFixedMajorMinor,
+		"fixedMajorMinorSparse": VersioningFixedMajorMinorSparse,
+		"fixedmajorminorsparse": VersioningFixedMajorMinorSparse,
 	} {
 		cfg, err := load(t, raw)
 		require.NoError(t, err, "versioning %q", raw)
@@ -898,7 +907,33 @@ func TestLoadVersioning(t *testing.T) {
 	_, err := load(t, "locked")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown versioning "locked"`)
-	assert.Contains(t, err.Error(), "fixedSparse", "the message names the valid values")
+	for _, name := range versioningNames {
+		assert.Contains(t, err.Error(), name, "the message names every valid value")
+	}
+}
+
+// TestVersioningNamesCoverTheModel fences the one way the accepted list and
+// the domain model can drift apart: a mode added to model.Versioning but not
+// to versioningNames would be unwritable, and one added here but unknown to
+// the model would load as independent.
+func TestVersioningNamesCoverTheModel(t *testing.T) {
+	for _, name := range versioningNames {
+		normalized, ok := normalizeVersioning(name)
+		require.True(t, ok, "%q must normalize", name)
+		assert.Equal(t, name, normalized, "%q is already canonical", name)
+	}
+	assert.Equal(t, []string{
+		VersioningFixed, VersioningFixedSparse,
+		VersioningFixedMajorMinor, VersioningFixedMajorMinorSparse,
+		VersioningFixedMajor, VersioningFixedMajorSparse,
+	}, sharedVersioningNames(), "the shared list is the full one without independent")
+}
+
+func TestQuotedNames(t *testing.T) {
+	assert.Equal(t, `"a" or "b"`, quotedNames([]string{"a", "b"}))
+	assert.Equal(t, `"a", "b" or "c"`, quotedNames([]string{"a", "b", "c"}))
+	assert.Equal(t, `"a"`, quotedNames([]string{"a"}))
+	assert.Empty(t, quotedNames(nil))
 }
 
 func TestLoadSpaceScripts(t *testing.T) {

@@ -177,18 +177,33 @@ func TestRenderSectionsFallsBackToNamesWithoutVersions(t *testing.T) {
 }
 
 func TestRenderFixedRideNoChangesEntry(t *testing.T) {
-	// A fixed-versioning ride has no units and no provider updates: its
-	// entry states the bump-only nature instead of rendering empty sections.
-	rel := &plan.Release{
-		Pkg:       &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
-		Next:      ccme.Version{Major: 1, Minor: 1},
-		FixedRide: true,
+	// A shared-versioning ride has no units and no provider updates: its
+	// entry states the bump-only nature instead of rendering empty sections,
+	// and it names the part of the version the group actually holds in common
+	// so a fixedMajor reader is not told the whole version is shared.
+	cases := []struct {
+		mode model.Versioning
+		want string
+	}{
+		{model.VersioningFixed, "one version"},
+		{model.VersioningFixedSparse, "one version"},
+		{model.VersioningFixedMajorMinor, "one major and minor version"},
+		{model.VersioningFixedMajorMinorSparse, "one major and minor version"},
+		{model.VersioningFixedMajor, "one major version"},
+		{model.VersioningFixedMajorSparse, "one major version"},
 	}
-	sections := RenderSections(rel, Format{})
-	assert.Equal(t, "No changes — version bump to keep the versioning group on one version.\n", sections)
-
-	entry := RenderEntry(rel, testDate, Format{})
-	assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\nNo changes — version bump to keep the versioning group on one version.\n", entry)
+	for _, c := range cases {
+		t.Run(string(c.mode), func(t *testing.T) {
+			rel := &plan.Release{
+				Pkg:       &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs", Versioning: c.mode}},
+				Next:      ccme.Version{Major: 1, Minor: 1},
+				FixedRide: true,
+			}
+			line := "No changes — version bump to keep the versioning group on " + c.want + ".\n"
+			assert.Equal(t, line, RenderSections(rel, Format{}))
+			assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\n"+line, RenderEntry(rel, testDate, Format{}))
+		})
+	}
 }
 
 func TestRenderFixedMemberWithOwnUnitsIsOrdinary(t *testing.T) {

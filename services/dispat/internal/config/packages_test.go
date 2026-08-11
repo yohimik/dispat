@@ -373,6 +373,44 @@ func TestVersionGroupDeclarations(t *testing.T) {
 	loaded, err := loadModel(t, cfg)
 	require.NoError(t, err, "an unused group is inert")
 	assert.Equal(t, VersioningFixed, loaded.VersionGroups["core-group"].Versioning, "modes are normalized")
+
+	// Every shared mode is declarable, partial ones included.
+	for _, mode := range sharedVersioningNames() {
+		cfg.VersionGroups = map[string]VersionGroupConfig{"core-group": {Versioning: mode}}
+		loaded, err = loadModel(t, cfg)
+		require.NoErrorf(t, err, "versionGroups mode %q", mode)
+		assert.Equal(t, mode, loaded.VersionGroups["core-group"].Versioning)
+	}
+}
+
+// TestVersionGroupPartialModes: a group declared with a partial mode hands
+// that mode to everyone who joins, exactly as a full one does.
+func TestVersionGroupPartialModes(t *testing.T) {
+	cfg := validConfig()
+	cfg.VersionGroups = map[string]VersionGroupConfig{"core-group": {Versioning: VersioningFixedMajor}}
+	withLibs(&cfg, func(s *SpaceConfig) { s.VersionGroup = "core-group" })
+	cfg.Packages = map[string]PackageConfig{"app": {VersionGroup: "core-group"}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "packages/apps/web")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.Equal(t, model.VersioningFixedMajor, byName["core"].Space.Versioning)
+	assert.Equal(t, "core-group", byName["core"].Space.VersionGroup)
+	assert.Equal(t, model.VersioningFixedMajor, byName["app"].Space.Versioning,
+		"a package joins the declared group under the group's mode")
+	assert.Equal(t, model.VersioningIndependent, byName["web"].Space.Versioning)
+
+	// A space with its own partial mode is referenceable as an implicit group.
+	cfg = validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) { s.Versioning = VersioningFixedMajorMinorSparse })
+	cfg.Packages = map[string]PackageConfig{"app": {VersionGroup: "libs"}}
+	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "packages/apps/web")
+	pkgs, err = discoverPackages(t, root)
+	require.NoError(t, err)
+	byName = packagesByName(pkgs)
+	assert.Equal(t, "libs", byName["app"].Space.VersionGroup)
+	assert.Equal(t, model.VersioningFixedMajorMinorSparse, byName["app"].Space.Versioning)
 }
 
 // TestVersionGroupSpaceReference: versionGroup on a space joins a declared
