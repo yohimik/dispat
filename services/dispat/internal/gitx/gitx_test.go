@@ -615,3 +615,122 @@ func TestResolveCommit(t *testing.T) {
 	_, err = cli.ResolveCommit(context.Background(), "doesnotexist")
 	assert.Error(t, err)
 }
+
+// gitIn runs a git command in dir, failing the test on error.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+	return strings.TrimSpace(string(out))
+}
+
+func TestCurrentBranch(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+
+	// The host's init.defaultBranch differs between machines and CI runners,
+	// so the tests name the branch rather than inherit it.
+	gitIn(t, root, "checkout", "-q", "-B", "main")
+	branch, err := cli.CurrentBranch(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "main", branch)
+
+	gitIn(t, root, "checkout", "-q", "-B", "release/v2")
+	branch, err = cli.CurrentBranch(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "release/v2", branch, "a slashed branch keeps its full name")
+
+	// A detached HEAD has no branch, reported as "" rather than as git's own
+	// spelling of it, which is the literal word HEAD.
+	head, err := cli.HeadSHA(ctx)
+	require.NoError(t, err)
+	gitIn(t, root, "checkout", "-q", head)
+	branch, err = cli.CurrentBranch(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, branch, "detached HEAD has no branch name")
+}
+
+func TestCurrentBranchOutsideRepo(t *testing.T) {
+	cli := &CLI{Dir: t.TempDir()}
+	_, err := cli.CurrentBranch(context.Background())
+	assert.Error(t, err, "a folder that is not a repository is an error, not an empty branch")
+}
+
+func TestBehindRemote(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	gitIn(t, root, "checkout", "-q", "-B", "main")
+	bare := addBareRemote(t, root)
+
+	// A branch the remote does not have yet is not behind: the first push is
+	// what creates it, and refusing would make the first release impossible.
+	behind, err := cli.BehindRemote(ctx, "origin", "main")
+	require.NoError(t, err)
+	assert.False(t, behind, "a branch absent from the remote is not behind")
+
+	_, err = cli.Push(ctx, "origin", nil)
+	require.NoError(t, err)
+	behind, err = cli.BehindRemote(ctx, "origin", "main")
+	require.NoError(t, err)
+	assert.False(t, behind, "a checkout level with the remote is not behind")
+
+	// Ahead is not behind: local commits the remote has not seen are exactly
+	// what a release is about to push.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "extra.txt"), []byte("x"), 0o644))
+	gitIn(t, root, "add", ".")
+	gitIn(t, root, "commit", "-qm", "feat(core): local work")
+	behind, err = cli.BehindRemote(ctx, "origin", "main")
+	require.NoError(t, err)
+	assert.False(t, behind, "a checkout ahead of the remote is not behind")
+
+	// Another clone pushes: now the remote holds a commit this checkout has
+	// never fetched, which is the case the guard exists for.
+	other := t.TempDir()
+	out, err := exec.Command("git", "clone", "-q", "--branch", "main", bare, other).CombinedOutput()
+	require.NoError(t, err, "git clone: %s", out)
+	gitIn(t, other, "config", "user.email", "other@example.com")
+	gitIn(t, other, "config", "user.name", "Other")
+	gitIn(t, other, "commit", "-q", "--allow-empty", "-m", "chore: pushed elsewhere")
+	gitIn(t, other, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+	behind, err = cli.BehindRemote(ctx, "origin", "main")
+	require.NoError(t, err)
+	assert.True(t, behind, "an unfetched remote tip means the checkout is behind")
+
+	// Catching up clears it, even though the local commit is still ahead.
+	gitIn(t, root, "pull", "-q", "--rebase", "origin", "main")
+	behind, err = cli.BehindRemote(ctx, "origin", "main")
+	require.NoError(t, err)
+	assert.False(t, behind, "a rebased checkout contains the remote tip again")
+}
+
+// TestBehindRemoteIgnoresTailMatchingRefs: ls-remote arguments are
+// tail-matching patterns, so a branch literally named "x/refs/heads/main"
+// lists alongside "refs/heads/main". Only the exact ref may be read as the
+// tip, or an unrelated branch would decide whether the release proceeds.
+func TestBehindRemoteIgnoresTailMatchingRefs(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	gitIn(t, root, "checkout", "-q", "-B", "main")
+	addBareRemote(t, root)
+	_, err := cli.Push(ctx, "origin", nil)
+	require.NoError(t, err)
+
+	// The decoy carries a commit main does not have. Read as the tip it would
+	// make the checkout look behind; matched exactly, it is ignored.
+	gitIn(t, root, "checkout", "-q", "-b", "x/refs/heads/main")
+	gitIn(t, root, "commit", "-q", "--allow-empty", "-m", "chore: decoy")
+	gitIn(t, root, "push", "-q", "origin", "x/refs/heads/main")
+	gitIn(t, root, "checkout", "-q", "main")
+
+	behind, err := cli.BehindRemote(ctx, "origin", "main")
+	require.NoError(t, err)
+	assert.False(t, behind, "only refs/heads/main decides, not a branch whose name ends in it")
+}
+
+func TestBehindRemoteNoRemote(t *testing.T) {
+	root, cli := initRepo(t)
+	gitIn(t, root, "checkout", "-q", "-B", "main")
+	_, err := cli.BehindRemote(context.Background(), "origin", "main")
+	assert.Error(t, err, "an unreachable remote is an error, not a verdict")
+}

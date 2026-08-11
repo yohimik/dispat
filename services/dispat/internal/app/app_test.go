@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -153,4 +155,121 @@ func TestGithubReleaserResolution(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	_, err = githubReleaser(model.GitHubSpec{Owner: "acme", Repo: "mono"}, zerolog.Nop())
 	assert.ErrorContains(t, err, "GITHUB_TOKEN")
+}
+
+// guardRepo builds an App over a real one-commit repository on branch "main".
+// The host's init.defaultBranch differs between machines and CI runners, so
+// the branch is named rather than inherited.
+func guardRepo(t *testing.T, cfg *config.File) (string, *App) {
+	t.Helper()
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q")
+	git("symbolic-ref", "HEAD", "refs/heads/main")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644))
+	git("add", ".")
+	git("commit", "-qm", "feat(core): initial")
+	return root, New(root, cfg, zerolog.Nop())
+}
+
+func TestCheckBranchAllowed(t *testing.T) {
+	ctx := context.Background()
+	git := func(root string, args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+
+	t.Run("unset guard allows any branch", func(t *testing.T) {
+		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{}})
+		git(root, "checkout", "-q", "-b", "whatever")
+		require.NoError(t, a.checkBranchAllowed(ctx))
+	})
+
+	t.Run("listed branch is allowed", func(t *testing.T) {
+		_, a := guardRepo(t, &config.File{Run: &config.RunConfig{AllowBranch: []string{"main"}}})
+		require.NoError(t, a.checkBranchAllowed(ctx))
+	})
+
+	t.Run("glob reaches slashed names", func(t *testing.T) {
+		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{AllowBranch: []string{"release/*"}}})
+		git(root, "checkout", "-q", "-b", "release/v2/hotfix")
+		require.NoError(t, a.checkBranchAllowed(ctx),
+			"a * matches separators too, so release/* reaches a nested name")
+	})
+
+	t.Run("foreign branch is refused, naming both", func(t *testing.T) {
+		root, a := guardRepo(t, &config.File{
+			Run: &config.RunConfig{AllowBranch: []string{"main", "release/*"}}})
+		git(root, "checkout", "-q", "-b", "feature/tryout")
+		err := a.checkBranchAllowed(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `branch "feature/tryout" is not allowed`)
+		assert.Contains(t, err.Error(), "main, release/*",
+			"the message lists what would have been allowed")
+	})
+
+	t.Run("detached HEAD matches nothing", func(t *testing.T) {
+		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{AllowBranch: []string{"main"}}})
+		head, err := a.git.HeadSHA(ctx)
+		require.NoError(t, err)
+		git(root, "checkout", "-q", head)
+		err = a.checkBranchAllowed(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "HEAD is detached")
+	})
+}
+
+func TestCheckNotBehind(t *testing.T) {
+	ctx := context.Background()
+	git := func(root string, args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+
+	t.Run("detached HEAD is skipped", func(t *testing.T) {
+		// There is no branch to compare, and the push fails on its own terms
+		// there, so the guard has nothing honest to say.
+		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{}})
+		head, err := a.git.HeadSHA(ctx)
+		require.NoError(t, err)
+		git(root, "checkout", "-q", head)
+		require.NoError(t, a.checkNotBehind(ctx, "origin"),
+			"no remote is even contacted for a detached HEAD")
+	})
+
+	t.Run("behind the remote is refused", func(t *testing.T) {
+		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{}})
+		bare := t.TempDir()
+		out, err := exec.Command("git", "init", "-q", "--bare", bare).CombinedOutput()
+		require.NoError(t, err, "git init --bare: %s", out)
+		out, err = exec.Command("git", "-C", bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput()
+		require.NoError(t, err, "git symbolic-ref: %s", out)
+		git(root, "remote", "add", "origin", bare)
+		git(root, "push", "-q", "origin", "main")
+
+		require.NoError(t, a.checkNotBehind(ctx, "origin"), "level with the remote")
+
+		// Another clone moves the remote on.
+		other := t.TempDir()
+		out, err = exec.Command("git", "clone", "-q", "--branch", "main", bare, other).CombinedOutput()
+		require.NoError(t, err, "git clone: %s", out)
+		git(other, "config", "user.email", "other@example.com")
+		git(other, "config", "user.name", "Other")
+		git(other, "commit", "-q", "--allow-empty", "-m", "chore: elsewhere")
+		git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+		err = a.checkNotBehind(ctx, "origin")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "behind origin/main")
+		assert.Contains(t, err.Error(), "pull before releasing")
+	})
 }

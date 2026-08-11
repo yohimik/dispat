@@ -13,6 +13,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -57,6 +58,12 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		a.log.Error().Str("reason", blocked).Msg("refusing to release")
 		return nil, errors.New(blocked)
 	}
+	// The branch guard fires before any verification or hook: a run on the
+	// wrong branch is refused whatever its plan says.
+	if err := a.checkBranchAllowed(ctx); err != nil {
+		a.log.Error().Err(err).Msg("refusing to release")
+		return nil, err
+	}
 
 	commitMode := a.cfg.Commit.IsEnabled()
 	pushMode := a.cfg.Commit.PushEnabled()
@@ -76,6 +83,13 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if pushMode && a.cfg.Commit.VerifyEnabled() {
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
 			a.log.Error().Err(err).Str("remote", remote).Msg("git remote verification failed")
+			return nil, err
+		}
+		// Under the same flag as the reachability check, and for the same
+		// reason: this is another ls-remote, and commit.verify=false exists
+		// for remotes that reject one but accept pushes.
+		if err := a.checkNotBehind(ctx, remote); err != nil {
+			a.log.Error().Err(err).Str("remote", remote).Msg("refusing to release")
 			return nil, err
 		}
 	}
@@ -149,6 +163,53 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		return results, fmt.Errorf("%d package(s) failed", failed)
 	}
 	return results, nil
+}
+
+// checkBranchAllowed enforces run.allowBranch: when the guard is set, the
+// checked-out branch must match one of its globs. A detached HEAD has no
+// branch name and so matches nothing.
+func (a *App) checkBranchAllowed(ctx context.Context) error {
+	if len(a.cfg.Run.AllowBranch) == 0 {
+		return nil
+	}
+	branch, err := a.git.CurrentBranch(ctx)
+	if err != nil {
+		return err
+	}
+	allowed := strings.Join(a.cfg.Run.AllowBranch, ", ")
+	if branch == "" {
+		return fmt.Errorf("HEAD is detached and run.allowBranch is set; check out an allowed branch (%s)", allowed)
+	}
+	for _, pattern := range a.cfg.Run.AllowBranch {
+		if globx.Match(pattern, branch) {
+			return nil
+		}
+	}
+	return fmt.Errorf("branch %q is not allowed to release (run.allowBranch: %s)", branch, allowed)
+}
+
+// checkNotBehind refuses a push-mode release from a checkout that is behind
+// the remote branch it would push to. The plan was computed against the tags
+// this clone can see, so a stale checkout schedules versions another run may
+// already have released — and the push at the end would be rejected anyway,
+// after the work. A detached HEAD skips the check: there is no branch to
+// compare, and the push fails on its own terms there.
+func (a *App) checkNotBehind(ctx context.Context, remote string) error {
+	branch, err := a.git.CurrentBranch(ctx)
+	if err != nil {
+		return err
+	}
+	if branch == "" {
+		return nil
+	}
+	behind, err := a.git.BehindRemote(ctx, remote, branch)
+	if err != nil {
+		return err
+	}
+	if behind {
+		return fmt.Errorf("the checkout is behind %s/%s; pull before releasing", remote, branch)
+	}
+	return nil
 }
 
 // recorders assembles every per-publish release recorder this run records

@@ -700,6 +700,63 @@ func (c *CLI) VerifyRemote(ctx context.Context, remote string) error {
 	return err
 }
 
+// CurrentBranch returns the name of the checked-out branch, or "" when HEAD is
+// detached.
+func (c *CLI) CurrentBranch(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(out)
+	if name == "HEAD" { // rev-parse's spelling of "detached"
+		return "", nil
+	}
+	return name, nil
+}
+
+// BehindRemote reports whether the remote's tip of branch holds commits HEAD
+// does not: the checkout is stale, so a release planned here would be planned
+// against tags someone else has already moved past.
+//
+// Two cases are deliberately not "behind". A branch the remote does not have
+// yet is not behind, because the first push is what creates it. A remote tip
+// this clone has never fetched is behind by definition — that is exactly the
+// unfetched-someone-else's-commit case the check exists for — which is why a
+// failed ResolveCommit answers true rather than propagating: the object is
+// missing because it is new, and the caller's remedy (pull) is the same either
+// way.
+func (c *CLI) BehindRemote(ctx context.Context, remote, branch string) (bool, error) {
+	ref := "refs/heads/" + branch
+	out, err := c.run(ctx, "ls-remote", remote, ref)
+	if err != nil {
+		return false, err
+	}
+	// ls-remote arguments are tail-matching patterns, so a branch literally
+	// named "x/refs/heads/main" would list too: keep only the exact ref.
+	var tip string
+	for _, line := range strings.Split(out, "\n") {
+		if sha, name, ok := strings.Cut(strings.TrimSpace(line), "\t"); ok && name == ref {
+			tip = sha
+			break
+		}
+	}
+	if tip == "" {
+		return false, nil
+	}
+	if _, err := c.ResolveCommit(ctx, tip); err != nil {
+		return true, nil
+	}
+	head, err := c.HeadSHA(ctx)
+	if err != nil {
+		return false, err
+	}
+	contained, err := c.IsAncestor(ctx, tip, head)
+	if err != nil {
+		return false, err
+	}
+	return !contained, nil
+}
+
 // RemoteTags returns the names of the tags that exist on the remote.
 func (c *CLI) RemoteTags(ctx context.Context, remote string) (map[string]bool, error) {
 	out, err := c.run(ctx, "ls-remote", "--tags", remote)

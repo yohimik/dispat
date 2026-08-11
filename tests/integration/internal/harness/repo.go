@@ -36,10 +36,19 @@ func New(t testing.TB) *Repo {
 	dispatBin, tsmarkBin := Build(t)
 	r := &Repo{T: t, Root: t.TempDir(), dispatBin: dispatBin, tsmarkBin: tsmarkBin}
 	r.Git("init", "-q")
+	// Pin the branch name instead of inheriting the host's init.defaultBranch,
+	// which differs between developer machines and CI runners. Anything that
+	// pushes, clones or names a branch would otherwise pass in one environment
+	// and quietly prove nothing in the other.
+	r.Git("symbolic-ref", "HEAD", "refs/heads/"+DefaultBranch)
 	r.Git("config", "user.email", "integration@dispat.test")
 	r.Git("config", "user.name", "dispat integration")
 	return r
 }
+
+// DefaultBranch is the branch every harness repository and bare remote starts
+// on.
+const DefaultBranch = "main"
 
 // Path joins parts onto the repository root.
 func (r *Repo) Path(parts ...string) string {
@@ -90,6 +99,11 @@ func (r *Repo) AddBareRemote() string {
 	r.T.Helper()
 	bare := r.T.TempDir()
 	r.Git("init", "-q", "--bare", bare)
+	// Same reason as New: a bare repository's HEAD decides what a later clone
+	// checks out, and a clone landing on an unborn branch pushes somewhere the
+	// original never tracks.
+	out, err := exec.Command("git", "-C", bare, "symbolic-ref", "HEAD", "refs/heads/"+DefaultBranch).CombinedOutput()
+	require.NoError(r.T, err, "git symbolic-ref: %s", out)
 	r.Git("remote", "add", "origin", bare)
 	return bare
 }
