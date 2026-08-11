@@ -147,7 +147,7 @@ tests/integration/
                             there, folding the suite into the coverage badge
     repo.go                 Repo: git fixture (init, seed packages, commit, tags), config
                             writing, Release/ReleaseOK/Status/StatusOK/RunScript/
-                            RunScriptOK/Command/CommandAt -> RunResult;
+                            RunScriptOK/Command/CommandAt/CommandInput -> RunResult;
                             StartRelease -> Proc (Signal/Wait) for the
                             interruption scenarios
     config.go               BaseFile() (concurrency + JSON logs + GitHub disabled),
@@ -384,6 +384,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestComputeSeedsInitialsBeforeTheFirstCommit` | A repository with no commits yet (where adoption often starts) gets its baselines without a tag query, and the first release after committing continues from the manifest's version. |
 | `TestComputeVersionsItCannotUse`         | Two manifests disagreeing about one package's version report W225 and derive nothing, while a `1.0.0-SNAPSHOT` prerelease and a version that is not semver are passed over in silence. |
 | `TestComputeInitialsInYAMLAndTOMLConfigs` | The baselines are written like every other config edit: a YAML config gains the key and keeps its comments, a TOML config prints the paste-ready `[initials]` block, fails, and is left byte-identical with no backup. |
+| `TestComputeInteractiveChoosesAmongBothKinds` | `--interactive` over the real stdin walks edges and baselines in one pass, each answer standing alone: two accepted are written, the declined one is not, and it is offered again on the next run. |
 
 (The command's finer grain, meaning cross-ecosystem matching, interactive selection, the TOML snippet fallback,
 stale-endpoint removals, the manifest-rank and version-shape rules behind a baseline, and error paths, is unit-tested

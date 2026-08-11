@@ -419,3 +419,36 @@ func TestComputeSeedsInitialsBeforeTheFirstCommit(t *testing.T) {
 		}
 	}
 }
+
+// TestComputeInteractiveChoosesAmongBothKinds: the prompt walks the edges and
+// the baselines in one pass, and each answer stands on its own — taking the
+// graph now and leaving a version to think about is a supported way to adopt
+// dispat, so it has to survive the process boundary.
+func TestComputeInteractiveChoosesAmongBothKinds(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "1.4.2"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "2.1.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	// The edge, then core's baseline, then web's: take the first two.
+	res := r.CommandInput("y\ny\nn\n", "compute", "--interactive")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "applied 2 change(s)")
+
+	configAfter, err := os.ReadFile(r.Path("dispat.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(configAfter), `"provider": "core"`)
+	assert.Contains(t, string(configAfter), `"core": "1.4.2"`)
+	assert.NotContains(t, string(configAfter), `"web": "2.1.0"`, "the declined baseline was not written")
+
+	// What was declined is still offered next time, and nothing else is.
+	res = r.Command("compute")
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "+ initial web 2.1.0")
+	assert.NotContains(t, res.Stdout, "+ add")
+	assert.NotContains(t, res.Stdout, "+ initial core")
+}

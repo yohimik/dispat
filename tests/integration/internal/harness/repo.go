@@ -229,7 +229,16 @@ func (r *Repo) requireOK(res RunResult) RunResult {
 // a release run.
 func (r *Repo) CommandEnv(env []string, args ...string) RunResult {
 	r.T.Helper()
-	return r.runAtEnv(r.Root, env, args...)
+	return r.runAtEnv(r.Root, env, "", args...)
+}
+
+// CommandInput runs an arbitrary dispat invocation with stdin already holding
+// the answers — how a scenario drives an interactive prompt (`compute
+// --interactive`) through the process boundary rather than through the option
+// struct.
+func (r *Repo) CommandInput(stdin string, args ...string) RunResult {
+	r.T.Helper()
+	return r.runAtEnv(r.Root, nil, stdin, args...)
 }
 
 // DispatCommand renders a shell command invoking the dispat binary under
@@ -251,15 +260,19 @@ func (r *Repo) run(args ...string) RunResult {
 // runAt is run with an explicit --root value.
 func (r *Repo) runAt(root string, args ...string) RunResult {
 	r.T.Helper()
-	return r.runAtEnv(root, nil, args...)
+	return r.runAtEnv(root, nil, "", args...)
 }
 
-// runAtEnv is runAt with extra environment pairs appended.
-func (r *Repo) runAtEnv(root string, env []string, args ...string) RunResult {
+// runAtEnv is runAt with extra environment pairs appended and, for the
+// commands that ask questions, stdin already holding the answers.
+func (r *Repo) runAtEnv(root string, env []string, stdin string, args ...string) RunResult {
 	r.T.Helper()
 	full := append(append([]string{}, args...), "--root", root)
 	cmd := exec.Command(r.dispatBin, full...)
 	cmd.Env = append(os.Environ(), env...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	if dir := coverDir(); dir != "" {
 		// The instrumented binary (see binary.go) writes its counters here.
 		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
