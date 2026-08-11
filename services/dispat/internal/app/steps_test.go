@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,9 +32,12 @@ func stepApp(t *testing.T) (*App, *plan.Plan, *bytes.Buffer) {
 	return New(root, cfg, zerolog.New(buf)), pl, buf
 }
 
-func TestStepTargets(t *testing.T) {
+// TestStepCoverage pins what a step command covers: the releasing packages,
+// narrowed by the one selection every command shares.
+func TestStepCoverage(t *testing.T) {
 	a, pl, _ := stepApp(t)
 	root := a.root
+	ctx := context.Background()
 	for name, tc := range map[string]struct {
 		f    filter.Filter
 		want []string
@@ -52,35 +56,47 @@ func TestStepTargets(t *testing.T) {
 			filter.Filter{Packages: []string{"b"}}, []string{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			targets, err := a.stepTargets(pl, tc.f)
+			covered, err := a.coveredPackages(ctx, pl, WindowOptions{Filter: tc.f})
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, targets)
+			assert.Equal(t, tc.want, covered)
 		})
 	}
 }
 
-func TestStepTargetsLogsEverySelectedPackageThatIsNotReleasing(t *testing.T) {
+func TestStepCoverageLogsEverySelectedPackageOutsideTheWindow(t *testing.T) {
 	// A flow must not fail over a package the planner held or converged, so a
 	// selected non-releasing package is a logged no-op — one line each, so a
 	// filter covering several says which.
 	a, pl, buf := stepApp(t)
-	targets, err := a.stepTargets(pl, filter.Filter{Packages: []string{"b", "d", "c"}})
+	covered, err := a.coveredPackages(context.Background(), pl,
+		WindowOptions{Filter: filter.Filter{Packages: []string{"b", "d", "c"}}})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"c"}, targets)
+	assert.Equal(t, []string{"c"}, covered)
 	logged := buf.String()
 	assert.Contains(t, logged, `"package":"b"`)
 	assert.Contains(t, logged, `"package":"d"`)
-	assert.Contains(t, logged, "package is not releasing, nothing to do")
+	assert.Contains(t, logged, "package is outside the window, nothing to do")
 	assert.NotContains(t, logged, `"package":"c"`, "a releasing target is not a no-op")
 }
 
-func TestStepTargetsRejectsAnUnmatchedTerm(t *testing.T) {
+// TestStepReleasingReportsAPackageAWindowPulledIn: --since and --consumers can
+// put a package with nothing pending in front of a step command, and that is a
+// no-op it says out loud rather than a failure.
+func TestStepReleasingReportsAPackageAWindowPulledIn(t *testing.T) {
+	a, pl, buf := stepApp(t)
+	assert.True(t, a.releasing(pl.Releases["a"]), "a is releasing")
+	assert.False(t, a.releasing(pl.Releases["b"]), "b is not")
+	assert.Contains(t, buf.String(), "package is not releasing, nothing to do")
+}
+
+func TestStepCoverageRejectsAnUnmatchedTerm(t *testing.T) {
 	a, pl, _ := stepApp(t)
-	_, err := a.stepTargets(pl, filter.Filter{Packages: []string{"ghost"}})
+	ctx := context.Background()
+	_, err := a.coveredPackages(ctx, pl, WindowOptions{Filter: filter.Filter{Packages: []string{"ghost"}}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `--package "ghost" matches no package`)
 
-	_, err = a.stepTargets(pl, filter.Filter{Spaces: []string{"a"}})
+	_, err = a.coveredPackages(ctx, pl, WindowOptions{Filter: filter.Filter{Spaces: []string{"a"}}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "a is a package — select it with --package")
 }

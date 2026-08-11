@@ -41,10 +41,11 @@ type options struct {
 	// changelog
 	clFile, clTitle, clDateFormat *string
 
-	// autoversion
+	// autoversion and autoreplace
 	avRange, avManifests                    *string
 	avMatch                                 *[]string
 	avNoReplace, avWriteVersion, avSyncLock *bool
+	onlyUpdated                             *bool
 
 	// scanner, writer, replacer
 	scanRootOnly     *bool
@@ -68,7 +69,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.quietParser = fs.Bool("quiet-parser", false,
 		"hide the commit-message parser's diagnostics; --quiet-parser=false shows them again when parser.quiet is set")
 	o.onError = fs.String("on-error", app.OnErrorSkip,
-		"what a failing script does to the failed package's dependents (skip or continue)")
+		"what a failed package does to its dependents (skip or continue)")
 	o.since = fs.String("since", "",
 		"select the packages the commits since the git revision address (scopes first, changed files for scopeless commits; e.g. HEAD~1, origin/main, a tag; 'all' selects every package) instead of the release window")
 	o.consumers = fs.Bool("consumers", false,
@@ -122,7 +123,9 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.avMatch = fs.StringSlice("match", nil,
 		"override the autoVersion.match range globs")
 	o.avManifests = fs.String("manifests", "",
-		"override autoVersion.manifests (root, all or none)")
+		"which of a package's manifests are rewritten: root (the ones in the package folder), all (every manifest under it) or, for autoversion alone, none; empty takes autoVersion.manifests")
+	o.onlyUpdated = fs.Bool("only-updated", false,
+		"rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is")
 	o.avNoReplace = fs.Bool("no-replace", false,
 		"skip the autoVersion.replace rules for this invocation")
 	o.avWriteVersion = fs.Bool("write-version", true,
@@ -140,7 +143,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.rpSub = fs.StringArray("sub", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")
 	o.strict = fs.Bool("strict", false,
-		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, writer and replacer, a manifest that failed to parse, an edit the manifest does not declare, or a --sub that matched nothing")
+		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a substitution that matched nothing; for autoreplace, an edit that matched no manifest anywhere")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has

@@ -2,9 +2,9 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 
-	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -15,7 +15,8 @@ import (
 // override fields, when set, replace the corresponding github.* config
 // values for every package of the invocation.
 type GitHubOptions struct {
-	Filter   filter.Filter // which packages the command covers
+	Window   WindowOptions // which packages the command covers
+	OnError  string        // what a failure does to the failed package's dependents
 	Owner    string        // overrides github.owner
 	Repo     string        // overrides github.repo
 	APIURL   string        // overrides github.apiUrl
@@ -41,54 +42,75 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 	if err != nil {
 		return err
 	}
-	targets, err := a.stepTargets(pl, opts.Filter)
+	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot create the github release")
 		return err
 	}
 
-	export := a.readExport(targets)
-	// One releaser per distinct target the covered policies name, verified
-	// once each before any release work — the same shape githubDispatch
-	// builds for a run, minus the run.
-	releasers := make(map[model.GitHubSpec]*github.Releaser)
-	for _, name := range targets {
-		rel := pl.Releases[name]
-		spec := a.githubSpec(rel.Pkg.GitHub, opts)
-		if !spec.Records(rel.IsPrerelease()) {
-			github.LogSkip(a.log, spec, rel)
-			continue
+	work := &githubWork{app: a, opts: opts, export: a.readExport(covered),
+		releasers: make(map[model.GitHubSpec]*github.Releaser)}
+	_, err = a.sweepStep(ctx, pl, covered, work, opts.OnError, "github release")
+	return err
+}
+
+// githubWork is `dispat github`'s share of a sweep: one package's release
+// created through the API.
+//
+// It is serial. Nothing here would corrupt under two goroutines, but the
+// releases of one run land in a readable order this way, and a repository's
+// API budget is one shared resource whatever the build budget says. That is
+// also what lets the releaser cache be a plain map: one releaser per distinct
+// target the covered policies name, verified once each, exactly as a run's
+// dispatch builds it.
+type githubWork struct {
+	app       *App
+	opts      GitHubOptions
+	export    stepExport
+	releasers map[model.GitHubSpec]*github.Releaser
+}
+
+func (w *githubWork) stage() string { return "github" }
+func (w *githubWork) serial() bool  { return true }
+
+func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
+	if !w.app.releasing(rel) {
+		return nil, nil
+	}
+	spec := w.app.githubSpec(rel.Pkg.GitHub, w.opts)
+	if !spec.Records(rel.IsPrerelease()) {
+		github.LogSkip(w.app.log, spec, rel)
+		return nil, nil
+	}
+	gh, seen := w.releasers[spec]
+	if !seen {
+		var err error
+		if gh, err = githubReleaser(spec, w.app.log); err != nil {
+			return nil, err
 		}
-		gh, seen := releasers[spec]
-		if !seen {
-			if gh, err = githubReleaser(spec, a.log); err != nil {
-				a.log.Error().Err(err).Str("package", name).Msg("cannot create the github release")
-				return err
-			}
-			if err := gh.Verify(ctx); err != nil {
-				a.log.Error().Err(err).Msg("github verification failed")
-				return err
-			}
-			gh.TargetCommitish = opts.Target
-			releasers[spec] = gh
+		if err := gh.Verify(ctx); err != nil {
+			return nil, fmt.Errorf("github verification failed: %w", err)
 		}
-		if export.covers(name) {
+		gh.TargetCommitish = w.opts.Target
+		w.releasers[spec] = gh
+	}
+	return func(ctx context.Context) error {
+		if w.export.covers(rel.Pkg.Name) {
 			// A step invocation has no run behind it, so the release carries
 			// no outputs of its own; the stage's own environment supplies the
 			// opt-in and the attachment list. Without an export the package
 			// has not opted in, and only github.allPackages releases it —
 			// exactly as during a run.
-			rel.Outputs = append(rel.Outputs, plan.Output{Name: plan.GitHubExport, Value: export.value})
+			rel.Outputs = append(rel.Outputs, plan.Output{Name: plan.GitHubExport, Value: w.export.value})
 		}
 		// The releaser reports the outcome itself — created, or skipped with
 		// its reason — so every path through it reads the same in the log,
 		// whether a run or this command drove it.
 		if err := gh.Record(ctx, rel); err != nil {
-			a.log.Error().Err(err).Str("package", name).Msg("github release failed")
-			return err
+			return fmt.Errorf("github release failed: %w", err)
 		}
-	}
-	return nil
+		return nil
+	}, nil
 }
 
 // githubSpec overlays the invocation's flag overrides onto a package's

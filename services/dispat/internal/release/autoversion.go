@@ -21,13 +21,18 @@ import (
 // preserving via pkg/writer, so a failure mid-stage plus revertOnFail leaves
 // no half-edited manifest behind.
 
-// workspaceNames maps every package's manifest identity onto its package
+// WorkspaceNames maps every package's manifest identity onto its package
 // name, from the root manifests alone — a package's identity is declared at
 // its root, not in a vendored example three levels down. Also returns the
 // cleaned package-folder index for declared-local-path matching. The mapping
 // is scanner.NameIndex's, the same rule compute uses, so a name compute
 // refuses as ambiguous (W220) is never quietly rewritten here either.
-func workspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
+//
+// It is exported because it is the one place the workspace's manifest identity
+// is decided: `dispat autoreplace` resolves a dependency name onto a package
+// through this index too, and a second answer to "whose manifest name is this"
+// is exactly the kind of drift the index exists to prevent.
+func WorkspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
 	owners := make([]scanner.Owner, 0, len(p.Order))
 	dirs = make(map[string]string, len(p.Order))
 	for _, name := range p.Order {
@@ -185,6 +190,12 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 			continue // a hand-pinned range the policy protects
 		}
 		version, prerelease, releasing := tc.providerVersion(provider)
+		if av.OnlyUpdated && !releasing {
+			// The caller asked for the run's own updates only: a range that had
+			// fallen behind a provider released earlier stays as it is, and the
+			// catch-up below never has to explain itself.
+			continue
+		}
 		next := rangeText(av.Range, version, m.Ecosystem)
 		if next == d.Range {
 			continue
@@ -247,43 +258,59 @@ func (tc *taskCtx) providerVersion(name string) (version string, prerelease, rel
 	return pr.Current.String(), len(pr.Current.Prerelease) > 0, false
 }
 
-// AutoVersionPackages runs the version stage's native manifest
-// reconciliation for the named packages outside a release run, in the given
-// order. A package whose space does not enable autoVersion is skipped with a
-// debug notice. The returned set records which packages' manifests actually
-// changed — what a caller keys syncLock off, exactly as the executor does.
+// AutoVersioner runs the version stage's native manifest reconciliation
+// outside a release run, one package at a time and safely from several
+// goroutines at once. The workspace indexes it needs are built once, when it is
+// created, because deriving them per package would rescan every package's
+// manifests for every package reconciled.
 //
-// With no run in progress there are no per-package results, so every
-// releasing provider counts as live — the same semantics CommandEnv gives
-// `dispat run` scripts. Reconciliation is naturally idempotent: rewriting
-// already-reconciled manifests yields zero edits. A nil scanner defaults to
-// the filesystem scanner.
-// policy, when non-nil, supplies each target's effective autoVersion block
-// in place of its space's (how the CLI's flag overrides flatten in); a nil
-// return skips the package.
-func AutoVersionPackages(ctx context.Context, p *plan.Plan, pkgs []string, sc scanner.Scanner, log zerolog.Logger, policy func(*plan.Release) *model.AutoVersion) (changed map[string]bool, err error) {
+// With no run in progress there are no per-package results, so every releasing
+// provider counts as live — the same semantics CommandEnv gives `dispat run`
+// scripts. Reconciliation is naturally idempotent: rewriting already-reconciled
+// manifests yields zero edits.
+type AutoVersioner struct {
+	run *run
+	log zerolog.Logger
+}
+
+// NewAutoVersioner prepares the reconciliation for one plan. A nil scanner
+// defaults to the filesystem scanner.
+func NewAutoVersioner(ctx context.Context, p *plan.Plan, sc scanner.Scanner, log zerolog.Logger) *AutoVersioner {
 	if sc == nil {
 		sc = scanner.New()
 	}
 	r := &run{Executor: &Executor{Log: log}, plan: p, scan: sc, avChanged: make(map[string]bool)}
-	r.avNames, r.avDirs = workspaceNames(ctx, sc, p, log)
-	for _, pkg := range pkgs {
-		rel := p.Releases[pkg]
-		av := rel.Pkg.Space.AutoVersion
-		if policy != nil {
-			av = policy(rel)
-		}
-		if av == nil {
-			log.Debug().Str("package", pkg).Msg("space has no autoVersion block, nothing to reconcile")
-			continue
-		}
-		tc := &taskCtx{run: r, t: task{pkg, taskVersion}, rel: rel,
-			log: log.With().Str("package", pkg).Str("stage", "version").Logger()}
-		if err := tc.autoVersion(ctx, av); err != nil {
-			return r.avChanged, fmt.Errorf("%s: %w", pkg, err)
-		}
+	r.avNames, r.avDirs = WorkspaceNames(ctx, sc, p, log)
+	return &AutoVersioner{run: r, log: log}
+}
+
+// Package reconciles one package's manifests under the given policy. A nil
+// policy means the package's own space block; a policy that answers nil skips
+// the package, which is what a space with no autoVersion block does.
+func (v *AutoVersioner) Package(ctx context.Context, rel *plan.Release, policy func(*plan.Release) *model.AutoVersion) error {
+	pkg := rel.Pkg.Name
+	av := rel.Pkg.Space.AutoVersion
+	if policy != nil {
+		av = policy(rel)
 	}
-	return r.avChanged, nil
+	if av == nil {
+		v.log.Debug().Str("package", pkg).Msg("space has no autoVersion block, nothing to reconcile")
+		return nil
+	}
+	tc := &taskCtx{run: v.run, t: task{pkg, taskVersion}, rel: rel,
+		log: v.log.With().Str("package", pkg).Str("stage", "version").Logger()}
+	if err := tc.autoVersion(ctx, av); err != nil {
+		return fmt.Errorf("%s: %w", pkg, err)
+	}
+	return nil
+}
+
+// Changed reports whether the package's manifests were actually modified,
+// which is what a caller keys syncLock off, exactly as the executor does.
+func (v *AutoVersioner) Changed(pkg string) bool {
+	v.run.mu.Lock()
+	defer v.run.mu.Unlock()
+	return v.run.avChanged[pkg]
 }
 
 // lastNameSegment is a declared name's final /- or :-separated segment: the

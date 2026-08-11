@@ -343,7 +343,7 @@ func TestReplaceRulePropagatesCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	changed, err := AutoVersionPackages(ctx, p, []string{"web"}, nil, syncedLog(&bytes.Buffer{}), nil)
+	changed, err := autoVersionPackagesCtx(ctx, p, []string{"web"}, nil, syncedLog(&bytes.Buffer{}))
 	require.Error(t, err)
 	assert.Empty(t, changed)
 	assert.Equal(t, "1.0.0\n", fileText(t, root, "web/notes.txt"),

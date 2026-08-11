@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"fmt"
-	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"os"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -16,7 +15,8 @@ import (
 // when set, replace the corresponding commit.* config values for this
 // invocation.
 type CommitOptions struct {
-	Filter  filter.Filter // which packages the command covers
+	Window  WindowOptions // which packages the command covers
+	OnError string        // what a failure does to the failed package's dependents
 	Tag     bool          // also create the annotated release tag
 	Push    bool          // push the branch, and with Tag the tags
 	Name    string        // overrides commit.name (committer identity)
@@ -41,7 +41,7 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 	if err != nil {
 		return err
 	}
-	targets, err := a.stepTargets(pl, opts.Filter)
+	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot commit")
 		return err
@@ -74,49 +74,79 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		remote = "origin"
 	}
 
-	var tags []string
-	for _, name := range targets {
-		rel := pl.Releases[name]
-		log := a.log.With().Str("package", name).Str("tag", rel.TagName()).Logger()
-		dirs := a.appendIncludeDirs([]string{rel.Pkg.Dir}, include)
-		msg := renderCommitMessage(format, []string{name}, []string{rel.TagName()})
-		committed, err := git.CommitDirs(ctx, dirs, msg)
+	work := &commitWork{app: a, git: git, tag: opts.Tag, format: format, include: include}
+	rep, err := a.sweepStep(ctx, pl, covered, work, opts.OnError, "commit")
+	if err != nil {
+		return err
+	}
+	if !opts.Push || rep.Ran == 0 {
+		return nil
+	}
+	skipped, err := git.Push(ctx, remote, work.tags)
+	if err != nil {
+		a.log.Error().Err(err).Str("remote", remote).Msg("push failed")
+		return err
+	}
+	for _, tag := range skipped {
+		a.log.Warn().Str("tag", tag).Str("remote", remote).
+			Msg("tag already exists on the remote, skipped")
+	}
+	a.log.Info().Str("remote", remote).Strs("tags", work.tags).Msg("pushed")
+	return nil
+}
+
+// commitWork is `dispat commit`'s share of a sweep: one package's release
+// commit, its tag, and the commit pin it exports.
+//
+// It is serial, and not as a precaution: a repository has one index and one
+// HEAD, so two packages committing at once would stage each other's files.
+// That also makes tags a plain slice — only one package is ever inside Do.
+type commitWork struct {
+	app     *App
+	git     *gitx.CLI
+	tag     bool
+	format  string
+	include []string
+	tags    []string
+}
+
+func (w *commitWork) stage() string { return "commit" }
+func (w *commitWork) serial() bool  { return true }
+
+func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error) {
+	if !w.app.releasing(rel) {
+		return nil, nil
+	}
+	// The failures return rather than log: the sweep reports a failed package
+	// once, with the error, and an error that names what it was doing reads
+	// the same as the line this used to print itself.
+	return func(ctx context.Context) error {
+		name := rel.Pkg.Name
+		log := w.app.log.With().Str("package", name).Str("tag", rel.TagName()).Logger()
+		dirs := w.app.appendIncludeDirs([]string{rel.Pkg.Dir}, w.include)
+		msg := renderCommitMessage(w.format, []string{name}, []string{rel.TagName()})
+		committed, err := w.git.CommitDirs(ctx, dirs, msg)
 		if err != nil {
-			log.Error().Err(err).Msg("release commit failed")
-			return err
+			return fmt.Errorf("release commit failed: %w", err)
 		}
 		if committed {
 			log.Info().Str("message", msg).Msg("created release commit")
 		} else {
 			log.Debug().Msg("nothing to commit")
 		}
-		if opts.Tag {
-			if err := release.CreateReleaseTag(ctx, git, rel, log); err != nil {
-				log.Error().Err(err).Msg("tagging failed")
-				return err
+		if w.tag {
+			if err := release.CreateReleaseTag(ctx, w.git, rel, log); err != nil {
+				return fmt.Errorf("tagging failed: %w", err)
 			}
-			tags = append(tags, rel.TagName())
+			w.tags = append(w.tags, rel.TagName())
 		}
 		if out := os.Getenv(release.OutputEnvVar); out != "" {
-			if err := exportPackageCommit(ctx, git, out, name); err != nil {
-				log.Error().Err(err).Msg("exporting the commit pin failed")
-				return err
+			if err := exportPackageCommit(ctx, w.git, out, name); err != nil {
+				return fmt.Errorf("exporting the commit pin failed: %w", err)
 			}
 		}
-	}
-	if opts.Push && len(targets) > 0 {
-		skipped, err := git.Push(ctx, remote, tags)
-		if err != nil {
-			a.log.Error().Err(err).Str("remote", remote).Msg("push failed")
-			return err
-		}
-		for _, tag := range skipped {
-			a.log.Warn().Str("tag", tag).Str("remote", remote).
-				Msg("tag already exists on the remote, skipped")
-		}
-		a.log.Info().Str("remote", remote).Strs("tags", tags).Msg("pushed")
-	}
-	return nil
+		return nil
+	}, nil
 }
 
 // exportPackageCommit appends the package's HEAD as PACKAGE_<KEY>=<sha> to

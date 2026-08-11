@@ -322,7 +322,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			if r.scan == nil {
 				r.scan = scanner.New()
 			}
-			r.avNames, r.avDirs = workspaceNames(ctx, r.scan, p, e.Log)
+			r.avNames, r.avDirs = WorkspaceNames(ctx, r.scan, p, e.Log)
 			break
 		}
 	}

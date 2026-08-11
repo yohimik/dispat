@@ -37,6 +37,7 @@ const (
 	// changelog` is never `dispat run changelog`.
 	cmdChangelog   = "changelog"   // write pending changelog entries now
 	cmdAutoversion = "autoversion" // native manifest reconciliation, plus syncLock
+	cmdAutoreplace = "autoreplace" // the writer's edits, over the whole selection
 	cmdCommit      = "commit"      // per-package release commit (--tag, --push)
 	cmdGithub      = "github"      // per-package GitHub release, published now
 
@@ -53,6 +54,17 @@ const (
 // line, which is what makes them usable on any checkout.
 func manifestCommand(cmd string) bool {
 	return cmd == cmdScanner || cmd == cmdWriter || cmd == cmdReplacer
+}
+
+// sweepCommand reports the commands that cover a set of packages and execute
+// something in each of them, which is the group that reads --on-error, --since
+// and --consumers.
+func sweepCommand(cmd string) bool {
+	switch cmd {
+	case cmdRun, cmdAutoreplace, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
+		return true
+	}
+	return false
 }
 
 // Version is the dispat version `--version` reports. The default marks a
@@ -132,7 +144,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	cmd, runScript := inv.cmd, inv.script
-	if cmd == cmdRun && !app.ValidOnError(*o.onError) {
+	if sweepCommand(cmd) && !app.ValidOnError(*o.onError) {
 		bootLog.Error().Str("on-error", *o.onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
 		return 2
@@ -268,35 +280,58 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "no pending changes for %s\n", res.Scope)
 		}
 	case cmdChangelog:
-		if a.Changelog(ctx, app.ChangelogOptions{Filter: sel,
+		if a.Changelog(ctx, app.ChangelogOptions{Window: window, OnError: *o.onError,
 			File: *o.clFile, Title: *o.clTitle, DateFormat: *o.clDateFormat}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
-		opts := app.AutoVersionOptions{Filter: sel,
-			Range: *o.avRange, Match: *o.avMatch, SyncLock: *o.avSyncLock, NoReplace: *o.avNoReplace}
-		switch *o.avManifests {
-		case "", "root", "all", "none":
-			opts.Manifests = *o.avManifests
-		default:
+		if !validManifestScope(*o.avManifests, true) {
 			bootLog.Error().Str("manifests", *o.avManifests).
 				Msg("unknown --manifests value (want root, all or none)")
 			return 2
 		}
+		opts := app.AutoVersionOptions{Window: window, OnError: *o.onError,
+			Range: *o.avRange, Match: *o.avMatch, Manifests: *o.avManifests,
+			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, NoReplace: *o.avNoReplace}
 		if fs.Changed("write-version") {
 			opts.WriteVersion = o.avWriteVersion
 		}
 		if a.AutoVersion(ctx, opts) != nil {
 			return 1
 		}
+	case cmdAutoreplace:
+		if !validManifestScope(*o.avManifests, false) {
+			bootLog.Error().Str("manifests", *o.avManifests).
+				Msg("unknown --manifests value (want root or all)")
+			return 2
+		}
+		edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrReplace)
+		if err != nil {
+			bootLog.Error().Err(err).Msg("invalid edit")
+			return 2
+		}
+		if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
+			bootLog.Error().Msg("autoreplace needs something to write: --set-version, --set or --replace")
+			usageForCommand(cmd)
+			return 2
+		}
+		if a.AutoReplace(ctx, app.AutoReplaceOptions{
+			Window: window, OnError: *o.onError, Version: *o.wrSetVersion,
+			Edits: edits, Replacements: repls, Manifests: *o.avManifests,
+			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, Strict: *o.strict,
+			JSON: cfg.LogFormat == "json", Out: stdout,
+		}) != nil {
+			return 1
+		}
 	case cmdCommit:
-		if a.Commit(ctx, app.CommitOptions{Filter: sel,
+		if a.Commit(ctx, app.CommitOptions{Window: window, OnError: *o.onError,
 			Tag: *o.commitTag, Push: *o.commitPush, Name: *o.commitName, Email: *o.commitEmail,
 			Remote: *o.commitRemote, Message: *o.commitMessage, Include: *o.commitInclude}) != nil {
 			return 1
 		}
 	case cmdGithub:
-		if a.GitHub(ctx, app.GitHubOptions{Filter: sel, Owner: *o.ghOwner, Repo: *o.ghRepo,
+		if a.GitHub(ctx, app.GitHubOptions{Window: window, OnError: *o.onError,
+			Owner: *o.ghOwner, Repo: *o.ghRepo,
 			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget}) != nil {
 			return 1
 		}
@@ -355,7 +390,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 			return inv, true
 		}
 		inv.script = rest[1]
-	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
+	case cmdPreview, cmdChangelog, cmdAutoversion, cmdAutoreplace, cmdCommit, cmdGithub:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).
 				Msgf("%s takes no arguments (select packages with --package, --space or --group)", inv.cmd)
@@ -411,6 +446,21 @@ func commandWord(rest []string) string {
 		return rest[0]
 	}
 	return cmdRun
+}
+
+// validManifestScope reports whether the --manifests value is one the command
+// accepts. Both commands that read the flag take "root" and "all"; only
+// auto-versioning takes "none", because switching the parsing strategy off is
+// how a space asks for its replace rules alone, and a command whose whole job
+// is writing manifests has no such reading.
+func validManifestScope(value string, allowNone bool) bool {
+	switch value {
+	case "", "root", "all":
+		return true
+	case "none":
+		return allowNone
+	}
+	return false
 }
 
 // orDefault answers with fallback when the flag was left at its empty

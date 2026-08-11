@@ -169,6 +169,12 @@ func (tc *taskCtx) providerFacts(av *model.AutoVersion) []providerFacts {
 			continue // an edge to something outside the plan
 		}
 		version, prerelease, releasing := tc.providerVersion(name)
+		if av.OnlyUpdated && !releasing {
+			// The caller asked for the run's own updates only, so a rule
+			// scoped to a provider released outside this run expands into
+			// nothing and reconciles nothing.
+			continue
+		}
 		out = append(out, providerFacts{
 			name:       name,
 			version:    version,

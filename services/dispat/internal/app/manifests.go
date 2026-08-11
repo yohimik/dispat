@@ -257,12 +257,13 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 		applied, skipped, missing int
 	)
 	out := listing(opts.Out)
+	edit := manifestEdit{Version: opts.Version, Edits: opts.Edits, Replacements: opts.Replacements}
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
-		res, replRes, err := writeOne(path, opts)
+		res, replRes, err := edit.apply(path)
 		if err != nil {
 			opts.Log.Error().Err(err).Str("manifest", rel).Msg("manifest edit failed")
 			errs = append(errs, err)
@@ -299,23 +300,43 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 	return nil
 }
 
-// writeOne applies one manifest's share of the invocation. The rewrite runs
-// before the redirects so a range and the redirect for the same dependency
-// end up in one consistent file, and the second step is skipped entirely when
-// nothing asked for it.
-func writeOne(path string, opts WriteOptions) (writer.Result, writer.ReplaceResult, error) {
+// manifestEdit is one invocation's whole edit set, ready to be applied to a
+// file. It is the unit `dispat writer` builds once from its flags and `dispat
+// autoreplace` builds once per covered package, so both spell "what a write
+// does to a manifest" the same way.
+type manifestEdit struct {
+	// Version, when set, rewrites the manifest's own version field.
+	Version string
+	// Edits set declared dependency ranges.
+	Edits []writer.Edit
+	// Replacements point dependencies at local folders, or remove the redirect
+	// when their Path is empty.
+	Replacements []writer.Replacement
+}
+
+// empty reports an edit set with nothing in it, which is what makes a manifest
+// not worth opening at all.
+func (e manifestEdit) empty() bool {
+	return e.Version == "" && len(e.Edits) == 0 && len(e.Replacements) == 0
+}
+
+// apply writes one manifest's share of the invocation. The rewrite runs before
+// the redirects so a range and the redirect for the same dependency end up in
+// one consistent file, and each step is skipped entirely when nothing asked
+// for it.
+func (e manifestEdit) apply(path string) (writer.Result, writer.ReplaceResult, error) {
 	var (
 		res     writer.Result
 		replRes writer.ReplaceResult
 		err     error
 	)
-	if opts.Version != "" || len(opts.Edits) > 0 {
-		if res, err = writer.Rewrite(path, opts.Version, opts.Edits); err != nil {
+	if e.Version != "" || len(e.Edits) > 0 {
+		if res, err = writer.Rewrite(path, e.Version, e.Edits); err != nil {
 			return res, replRes, err
 		}
 	}
-	if len(opts.Replacements) > 0 {
-		if replRes, err = writer.Replace(path, opts.Replacements); err != nil {
+	if len(e.Replacements) > 0 {
+		if replRes, err = writer.Replace(path, e.Replacements); err != nil {
 			return res, replRes, err
 		}
 	}

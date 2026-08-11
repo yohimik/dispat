@@ -326,11 +326,12 @@ func TestFilterStepCommandsSelect(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.FileExists(t, r.Path("apps", "site", "CHANGELOG.md"), "the folder is the selection")
 
-	// web is committed and tagged, so it is no longer releasing: selecting it
-	// is a logged no-op, never a failure.
+	// web is committed and tagged, so the recomputed plan no longer releases
+	// it: selecting it is a logged no-op, never a failure. --since all is what
+	// puts it back on the table.
 	res = r.Command("changelog", "--package", "web")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	assert.Contains(t, res.Stderr+res.Stdout, "not releasing")
+	assert.Contains(t, res.Stderr+res.Stdout, "outside the window, nothing to do")
 
 	assert.Equal(t, 1, r.Command("autoversion", "-p", "ghost").Code, "an unmatched term is an error")
 }

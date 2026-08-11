@@ -153,7 +153,7 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 	require.Equal(t, 0, program.Code, "stderr:\n%s", program.Stderr)
 	assert.Contains(t, program.Stderr, "usage: dispat [command] [flags]")
 	for _, word := range []string{"release", "status", "run", "init", "preview", "changelog",
-		"autoversion", "commit", "github", "compute", "scanner", "writer", "replacer"} {
+		"autoversion", "autoreplace", "commit", "github", "compute", "scanner", "writer", "replacer"} {
 		assert.Contains(t, program.Stderr, word, "the command list names every command")
 	}
 	assert.Contains(t, program.Stderr, "global flags:")
@@ -172,8 +172,15 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 		},
 		"github": {
 			args: []string{"github", "--help"}, usage: "usage: dispat github [flags]",
-			has:    []string{"--owner", "--repo", "--token-env", "--target"},
-			hasNot: []string{"--on-error", "--set-version"},
+			// A step command sweeps packages like run does, window flags and all.
+			has:    []string{"--owner", "--repo", "--token-env", "--target", "--on-error", "--since"},
+			hasNot: []string{"--set-version", "--file"},
+		},
+		"autoreplace": {
+			args: []string{"autoreplace", "--help"}, usage: "usage: dispat autoreplace [flags]",
+			has: []string{"--set-version", "--set", "--replace", "--manifests",
+				"--only-updated", "--since", "--consumers"},
+			hasNot: []string{"--tag", "--owner", "--range"},
 		},
 		"writer": {
 			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",

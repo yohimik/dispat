@@ -214,6 +214,12 @@ type AutoVersion struct {
 	// Only restricts rewriting to declarations of these provider packages;
 	// nil means every workspace provider.
 	Only map[string]bool
+	// OnlyUpdated restricts rewriting to declarations naming a provider this
+	// run releases. Without it a declaration that had fallen behind a provider
+	// released earlier catches up too (W197), which is usually what a release
+	// wants and is not always what a standalone invocation does. Only is an
+	// allowlist of packages; this is a question about the run.
+	OnlyUpdated bool
 	// NameSubstring additionally matches a declared name onto the package
 	// whose folder name equals its last /- or :-separated segment, for
 	// packages whose manifests declare no name the workspace can learn.

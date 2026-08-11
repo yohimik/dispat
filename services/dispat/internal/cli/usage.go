@@ -44,6 +44,11 @@ type command struct {
 // selectionFlags are the three every package-selecting command shares.
 var selectionFlags = []string{"package", "space", "group"}
 
+// windowFlags are what a sweeping command adds to the selection: which
+// packages are on the table, how far downstream the answer reaches, and what a
+// failure does to the dependents.
+var windowFlags = append([]string{"since", "consumers", "on-error"}, selectionFlags...)
+
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
 var globalFlags = []string{"root", "config", "concurrency", "log-level", "log-format",
@@ -98,7 +103,7 @@ the package or space folder the command is invoked from. --since replaces
 the release window with the commits since a git revision.
 
 "dispat <script>" is a shorthand when <script> is not a command name.`,
-		flags: append([]string{"on-error", "since", "consumers"}, selectionFlags...),
+		flags: windowFlags,
 	},
 	{
 		name:  cmdInit,
@@ -122,16 +127,36 @@ Nothing is written and nothing is released.`,
 flow can land it inside the release commit instead of after it. An entry
 the file already carries is skipped (W222), which is also what makes the
 release stage skip the entries written here.`,
-		flags: append([]string{"file", "title", "date-format"}, selectionFlags...),
+		flags: append([]string{"file", "title", "date-format"}, windowFlags...),
 	},
 	{
 		name:  cmdAutoversion,
 		short: "reconcile manifests to the planned versions",
 		long: `Reconcile each covered package's manifests to the planned versions —
 native auto-versioning, the same work the version stage does — and run the
-space's syncLock scripts where the manifests changed.`,
-		flags: append([]string{"range", "match", "manifests", "no-replace", "write-version", "sync-lock"},
-			selectionFlags...),
+space's syncLock scripts where the manifests changed.
+
+--only-updated leaves a range that had fallen behind a provider released
+outside this run alone, so only the run's own updates are written.`,
+		flags: append([]string{"range", "match", "manifests", "only-updated",
+			"no-replace", "write-version", "sync-lock"}, windowFlags...),
+	},
+	{
+		name:  cmdAutoreplace,
+		short: "apply the writer's edits to every covered package",
+		long: `Apply one set of manifest edits to every covered package: --set-version,
+--set and --replace mean exactly what they mean for "dispat writer", but the
+manifests are found by scanning each package folder instead of being named on
+the command line, and the packages are the ones the plan selects.
+
+--manifests root edits the manifests in each package folder, all every
+manifest under it. A range may be written as {version}, which resolves to the
+planned version of the package the edit names, and --set-version {version} to
+the covered package's own. --only-updated drops every edit naming a package
+this run does not update, and --strict fails when an edit matched no manifest
+anywhere.`,
+		flags: append([]string{"set-version", "set", "replace", "manifests", "only-updated",
+			"sync-lock", "strict"}, windowFlags...),
 	},
 	{
 		name:  cmdCommit,
@@ -142,7 +167,7 @@ plus the commit.include paths, the message rendered per commit.messageFormat.
 --push pushes the branch and, with --tag, the tags. A tag that already
 exists at that commit is skipped (W223).`,
 		flags: append([]string{"tag", "push", "name", "email", "remote", "message-format", "include"},
-			selectionFlags...),
+			windowFlags...),
 	},
 	{
 		name:  cmdGithub,
@@ -155,7 +180,7 @@ the end of the run. A release the repository already carries is skipped
 Meant for a stage script: the opt-in and the files to attach are read from
 DISPAT_EXPORT_GITHUB in the environment the stage handed the command, and
 github.allPackages is the configuration-level opt-in for everything else.`,
-		flags: append([]string{"owner", "repo", "api-url", "token-env", "target"}, selectionFlags...),
+		flags: append([]string{"owner", "repo", "api-url", "token-env", "target"}, windowFlags...),
 	},
 	{
 		name:  cmdCompute,

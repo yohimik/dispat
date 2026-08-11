@@ -527,14 +527,14 @@ func TestAutoVersionPackagesStandalone(t *testing.T) {
 	p := avPlan(root, space, "core", "web")
 	p.Providers["web"] = []string{"core"}
 
-	changed, err := AutoVersionPackages(context.Background(), p, []string{"core", "web"}, nil, zerolog.Nop(), nil)
+	changed, err := autoVersionPackages(p, []string{"core", "web"}, nil)
 	require.NoError(t, err)
 	assert.True(t, changed["core"], "the own-version write counts as a change")
 	assert.True(t, changed["web"])
 	assert.Contains(t, fileText(t, root, "web/package.json"), `"core": "^1.0.1"`)
 	assert.Contains(t, fileText(t, root, "web/package.json"), `"version": "1.0.1"`)
 
-	changed, err = AutoVersionPackages(context.Background(), p, []string{"core", "web"}, nil, zerolog.Nop(), nil)
+	changed, err = autoVersionPackages(p, []string{"core", "web"}, nil)
 	require.NoError(t, err)
 	assert.Empty(t, changed, "already-reconciled manifests change nothing")
 }
@@ -544,7 +544,7 @@ func TestAutoVersionPackagesSkipsSpacesWithoutPolicy(t *testing.T) {
 	space := &model.Space{Name: "libs"} // no autoVersion block
 	seedFile(t, root, "core/package.json", `{"name": "core", "version": "1.0.0"}`)
 	p := avPlan(root, space, "core")
-	changed, err := AutoVersionPackages(context.Background(), p, []string{"core"}, nil, zerolog.Nop(), nil)
+	changed, err := autoVersionPackages(p, []string{"core"}, nil)
 	require.NoError(t, err)
 	assert.Empty(t, changed)
 	assert.Contains(t, fileText(t, root, "core/package.json"), `"version": "1.0.0"`, "untouched")
@@ -560,7 +560,7 @@ func TestAutoVersionPackagesPolicyOverride(t *testing.T) {
 	policy := func(*plan.Release) *model.AutoVersion {
 		return &model.AutoVersion{Kinds: allKinds(), WriteVersion: true}
 	}
-	changed, err := AutoVersionPackages(context.Background(), p, []string{"core"}, nil, zerolog.Nop(), policy)
+	changed, err := autoVersionPackages(p, []string{"core"}, policy)
 	require.NoError(t, err)
 	assert.True(t, changed["core"])
 	assert.Contains(t, fileText(t, root, "core/package.json"), `"version": "1.0.1"`)
@@ -636,4 +636,26 @@ func TestSyncLockOnlyBudgetConfigurable(t *testing.T) {
 		require.Equal(t, StatusPublished, res[n].Status, "%s: %v", n, res[n].Err)
 	}
 	assert.Greater(t, r.maxCur["locksync"], 1, "a configured budget lifts the serialisation here too")
+}
+
+// autoVersionPackages drives the standalone reconciler over several packages
+// in order, the way a sweep does, and reports which of them changed.
+func autoVersionPackages(p *plan.Plan, pkgs []string, policy func(*plan.Release) *model.AutoVersion) (map[string]bool, error) {
+	return autoVersionPackagesCtx(context.Background(), p, pkgs, policy, zerolog.Nop())
+}
+
+func autoVersionPackagesCtx(ctx context.Context, p *plan.Plan, pkgs []string, policy func(*plan.Release) *model.AutoVersion, log zerolog.Logger) (map[string]bool, error) {
+	v := NewAutoVersioner(context.Background(), p, nil, log)
+	changed := map[string]bool{}
+	for _, pkg := range pkgs {
+		if err := v.Package(ctx, p.Releases[pkg], policy); err != nil {
+			return changed, err
+		}
+	}
+	for _, pkg := range pkgs {
+		if v.Changed(pkg) {
+			changed[pkg] = true
+		}
+	}
+	return changed, nil
 }

@@ -3,12 +3,9 @@ package app
 import (
 	"context"
 
-	"github.com/yohimik/dispat/services/dispat/internal/filter"
-
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
-	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // AutoVersionOptions selects what AutoVersion covers and the policy it runs
@@ -18,19 +15,55 @@ import (
 // then starts from the defaults (every dependency kind, any range, write the
 // own version).
 type AutoVersionOptions struct {
-	Filter       filter.Filter // which packages the command covers
+	Window       WindowOptions // which packages the command covers
+	OnError      string        // what a failure does to the failed package's dependents
 	Range        string        // overrides autoVersion.range
 	Match        []string      // overrides autoVersion.match
 	Manifests    string        // overrides autoVersion.manifests (root, all or none)
 	WriteVersion *bool         // overrides autoVersion.writeVersion
 	NoReplace    bool          // skip the autoVersion.replace rules for this invocation
+	OnlyUpdated  bool          // rewrite only what this run updates
 	SyncLock     bool          // run the space's syncLock scripts for changed packages
 }
 
 // hasPolicy reports whether any policy override was set, which is what makes
 // the command act on a space without an autoVersion block.
 func (o AutoVersionOptions) hasPolicy() bool {
-	return o.Range != "" || len(o.Match) > 0 || o.Manifests != "" || o.WriteVersion != nil || o.NoReplace
+	return o.Range != "" || len(o.Match) > 0 || o.Manifests != "" ||
+		o.WriteVersion != nil || o.NoReplace || o.OnlyUpdated
+}
+
+// policy resolves each covered package's effective autoVersion block: its
+// space's, with this invocation's overrides laid over it. One resolver serves
+// the reconciliation and the syncLock pass alike — reading the space's block
+// directly in the second would mean a flag override reconciled files whose
+// lock nothing then regenerated.
+func (o AutoVersionOptions) policy() func(*plan.Release) *model.AutoVersion {
+	if !o.hasPolicy() {
+		return func(rel *plan.Release) *model.AutoVersion { return rel.Pkg.Space.AutoVersion }
+	}
+	return func(rel *plan.Release) *model.AutoVersion {
+		av := effectivePolicy(rel.Pkg.Space.AutoVersion)
+		if o.Range != "" {
+			av.Range = o.Range
+		}
+		if len(o.Match) > 0 {
+			av.Match = o.Match
+		}
+		if o.Manifests != "" {
+			av.Manifests = model.ManifestScope(o.Manifests)
+		}
+		if o.WriteVersion != nil {
+			av.WriteVersion = *o.WriteVersion
+		}
+		if o.NoReplace {
+			av.Replace = nil
+		}
+		if o.OnlyUpdated {
+			av.OnlyUpdated = true
+		}
+		return av
+	}
 }
 
 // AutoVersion runs the native manifest reconciliation for the covered
@@ -42,73 +75,68 @@ func (a *App) AutoVersion(ctx context.Context, opts AutoVersionOptions) error {
 	if err != nil {
 		return err
 	}
-	targets, err := a.stepTargets(pl, opts.Filter)
+	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot auto-version")
 		return err
 	}
 
-	// One policy resolver, used by the reconciliation and by the syncLock
-	// loop alike: reading the space's block directly in the second would mean
-	// a flag override reconciled files whose lock nothing then regenerated.
-	policy := func(rel *plan.Release) *model.AutoVersion { return rel.Pkg.Space.AutoVersion }
-	if opts.hasPolicy() {
-		policy = func(rel *plan.Release) *model.AutoVersion {
-			av := effectivePolicy(rel.Pkg.Space.AutoVersion)
-			if opts.Range != "" {
-				av.Range = opts.Range
-			}
-			if len(opts.Match) > 0 {
-				av.Match = opts.Match
-			}
-			if opts.Manifests != "" {
-				av.Manifests = model.ManifestScope(opts.Manifests)
-			}
-			if opts.WriteVersion != nil {
-				av.WriteVersion = *opts.WriteVersion
-			}
-			if opts.NoReplace {
-				av.Replace = nil
-			}
-			return av
-		}
+	work := &autoVersionWork{
+		app: a, versioner: release.NewAutoVersioner(ctx, pl, a.scan, a.log), policy: opts.policy(),
 	}
-
-	changed, err := release.AutoVersionPackages(ctx, pl, targets, a.scan, a.log, policy)
-	if err != nil {
-		a.log.Error().Err(err).Msg("auto-versioning failed")
+	if _, err := a.sweepStep(ctx, pl, covered, work, opts.OnError, "auto-versioning"); err != nil {
 		return err
 	}
 	if !opts.SyncLock {
 		return nil
 	}
-	// The serial loop is the syncLock budget of 1 by construction: shared
-	// lock files corrupt under parallel writers.
-	wsVars := release.WorkspaceEnv(pl, a.log)
-	runner := &script.ShellRunner{Shell: a.cfg.Shell}
-	for _, name := range targets {
-		rel := pl.Releases[name]
-		av := policy(rel)
+	return a.syncLock(ctx, pl, work.needSyncLock(pl, covered))
+}
+
+// autoVersionWork is `dispat autoversion`'s share of a sweep: one package's
+// manifests reconciled to the planned versions.
+type autoVersionWork struct {
+	app       *App
+	versioner *release.AutoVersioner
+	policy    func(*plan.Release) *model.AutoVersion
+}
+
+func (w *autoVersionWork) stage() string { return "autoversion" }
+
+func (w *autoVersionWork) resolve(_ context.Context, rel *plan.Release) (task, error) {
+	if !w.app.releasing(rel) {
+		return nil, nil
+	}
+	if w.policy(rel) == nil {
+		w.app.log.Debug().Str("package", rel.Pkg.Name).
+			Msg("space has no autoVersion block, nothing to reconcile")
+		return nil, nil
+	}
+	return func(ctx context.Context) error {
+		return w.versioner.Package(ctx, rel, w.policy)
+	}, nil
+}
+
+// needSyncLock lists, in the order they were covered, the packages whose lock
+// files have to be regenerated: the ones whose manifests this run actually
+// changed, plus the ones whose space reconciles nothing at all. A space with
+// neither strategy produces no change to key off, so its scripts run every
+// time, exactly as they do in a release.
+func (w *autoVersionWork) needSyncLock(pl *plan.Plan, covered []string) []string {
+	var out []string
+	for _, name := range covered {
+		av := w.policy(pl.Releases[name])
 		if av == nil || len(av.SyncLock) == 0 {
 			continue
 		}
-		// A space with neither reconciling strategy produces no change to key
-		// off, so its scripts run every time, exactly as they do in a release.
-		if !changed[name] && av.Reconciles() {
-			a.log.Debug().Str("package", name).Msg("syncLock: nothing was reconciled, nothing to regenerate")
+		if !w.versioner.Changed(name) && av.Reconciles() {
+			w.app.log.Debug().Str("package", name).
+				Msg("syncLock: nothing was reconciled, nothing to regenerate")
 			continue
 		}
-		log := a.log.With().Str("package", name).Str("stage", "syncLock").Logger()
-		seq := release.Sequence{Runner: runner, Dir: rel.Pkg.Dir, Stage: "syncLock",
-			Commands: av.SyncLock, Env: release.CommandEnv(pl, name, "syncLock", wsVars),
-			Log: log, FailFast: true}
-		if err := seq.Run(ctx); err != nil {
-			log.Error().Err(err).Msg("syncLock failed")
-			return err
-		}
-		log.Info().Msg("syncLock succeeded")
+		out = append(out, name)
 	}
-	return nil
+	return out
 }
 
 // effectivePolicy clones the space's autoVersion block as the base the flag

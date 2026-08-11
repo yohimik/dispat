@@ -81,13 +81,21 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		},
 		"commit": {
 			args: []string{"commit", "--help"}, usage: "usage: dispat commit [flags]",
-			has:    []string{"--tag", "--push", "--message-format", "--space"},
-			hasNot: []string{"--on-error", "--set-version"},
+			// The step commands sweep packages like run does, so they carry
+			// the same window flags.
+			has:    []string{"--tag", "--push", "--message-format", "--space", "--on-error", "--since"},
+			hasNot: []string{"--set-version", "--owner"},
 		},
 		"github": {
 			args: []string{"github", "--help"}, usage: "usage: dispat github [flags]",
 			has:    []string{"--owner", "--repo", "--api-url", "--token-env", "--target"},
 			hasNot: []string{"--tag", "--file"},
+		},
+		"autoreplace": {
+			args: []string{"autoreplace", "--help"}, usage: "usage: dispat autoreplace [flags]",
+			has: []string{"--set-version", "--set", "--replace", "--manifests",
+				"--only-updated", "--strict", "--since", "--package"},
+			hasNot: []string{"--tag", "--range", "--interactive"},
 		},
 		"writer, which would otherwise fail arity first": {
 			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",

@@ -406,7 +406,7 @@ func TestStandaloneGithubSelection(t *testing.T) {
 	res = r.CommandEnv([]string{"DISPAT_EXPORT_GITHUB="}, "github", "--package", "quiet")
 	assert.Equal(t, 0, res.Code)
 	assert.Len(t, bodies(), 1)
-	assert.Contains(t, res.Stdout, "package is not releasing, nothing to do")
+	assert.Contains(t, res.Stdout, "outside the window, nothing to do")
 
 	// An unknown term is an error, and a positional argument a usage error.
 	assert.Equal(t, 1, r.Command("github", "--package", "ghost").Code)
