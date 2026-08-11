@@ -46,7 +46,7 @@ func TestDockerComputeDerivesTheImageChain(t *testing.T) {
 
 	res := r.Command("compute")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "+ add    app -> base (dependencies)",
+	assert.Contains(t, res.Stdout, "+ add     app -> base (dependencies)",
 		"the FROM line is the edge")
 	assert.Contains(t, res.Stdout, "packages/app/Dockerfile",
 		"the suggestion says which file it came from")

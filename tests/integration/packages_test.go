@@ -143,10 +143,10 @@ func TestPackagesComputeRemoveFromInFolder(t *testing.T) {
 
 	res := r.Command("compute")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "- remove web -> core")
+	assert.Contains(t, res.Stdout, "- remove  web -> core")
 	assert.Contains(t, res.Stdout, "packages/web/dispat.json: dependencies[0]",
 		"the suggestion names the declaring file")
-	assert.Contains(t, res.Stdout, "+ add    app -> core")
+	assert.Contains(t, res.Stdout, "+ add     app -> core")
 	assert.Equal(t, 1, r.Command("compute", "--check").Code, "package-declared drift gates CI")
 
 	res = r.Command("compute", "--write")

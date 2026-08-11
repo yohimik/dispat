@@ -151,12 +151,12 @@ came from:
 
 ```console
 $ dispat compute
-+ add    web -> core (dependencies)  packages/web/package.json dependencies "@acme/core": "workspace:*"
++ add     web -> core (dependencies)  packages/web/package.json dependencies "@acme/core": "workspace:*"
 
 1 suggestion(s); apply all with --write, choose with --interactive
 
 $ dispat compute --write
-+ add    web -> core (dependencies)  packages/web/package.json dependencies "@acme/core": "workspace:*"
++ add     web -> core (dependencies)  packages/web/package.json dependencies "@acme/core": "workspace:*"
 
 applied 1 change(s) to dispat.json (previous copy at dispat.json.backup)
 

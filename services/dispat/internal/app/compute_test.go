@@ -82,9 +82,9 @@ func TestComputeSuggestsDetectedEdges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, open, "three additions suggested, none applied in preview mode")
 	listing := out.String()
-	assert.Contains(t, listing, "+ add    svc -> core (dependencies)")
-	assert.Contains(t, listing, "+ add    web -> core (dependencies)")
-	assert.Contains(t, listing, "+ add    web -> tools (devDependencies)")
+	assert.Contains(t, listing, "+ add     svc -> core (dependencies)")
+	assert.Contains(t, listing, "+ add     web -> core (dependencies)")
+	assert.Contains(t, listing, "+ add     web -> tools (devDependencies)")
 	assert.Contains(t, listing, `packages/web/package.json dependencies "@acme/core": "workspace:*"`)
 	assert.Contains(t, listing, "apply all with --write")
 
@@ -141,8 +141,8 @@ func TestComputeRemovalAndKeepAndKindChange(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, open)
 	listing := out.String()
-	assert.Contains(t, listing, "~ kind   web -> core (dependencies)")
-	assert.Contains(t, listing, "- remove web -> ghost (dependencies)")
+	assert.Contains(t, listing, "~ kind    web -> core (dependencies)")
+	assert.Contains(t, listing, "- remove  web -> ghost (dependencies)")
 	assert.Contains(t, listing, "keep: true silences")
 	assert.NotContains(t, listing, "docker", "kept edge never suggested")
 	assert.NotContains(t, listing, "img", "manifest-less consumer never suggested")
@@ -213,9 +213,9 @@ func TestComputeCrossEcosystemManifests(t *testing.T) {
 	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
 	require.NoError(t, err)
 	listing := out.String()
-	assert.Contains(t, listing, "+ add    pyapp -> pycore (dependencies)")
-	assert.Contains(t, listing, "+ add    japp -> jcore (devDependencies)", "maven test scope maps to devDependencies")
-	assert.Contains(t, listing, "+ add    napp -> ncore (dependencies)", "ProjectReference matched by local path")
+	assert.Contains(t, listing, "+ add     pyapp -> pycore (dependencies)")
+	assert.Contains(t, listing, "+ add     japp -> jcore (devDependencies)", "maven test scope maps to devDependencies")
+	assert.Contains(t, listing, "+ add     napp -> ncore (dependencies)", "ProjectReference matched by local path")
 	assert.Equal(t, 3, open)
 }
 
@@ -274,7 +274,7 @@ func TestComputeSuggestsRemovalOfStaleEndpoints(t *testing.T) {
 	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
 	require.NoError(t, err, "compute must tolerate the drift it exists to fix")
 	assert.Equal(t, 1, open)
-	assert.Contains(t, out.String(), `- remove app -> ghost`)
+	assert.Contains(t, out.String(), `- remove  app -> ghost`)
 	assert.Contains(t, out.String(), `no longer exists`)
 	assert.NotContains(t, out.String(), "gone -> app", "keep: true silences even a stale edge")
 
@@ -301,7 +301,7 @@ func TestComputeFilterScopesSuggestionsToTheSelectedConsumers(t *testing.T) {
 		ComputeOptions{Filter: filter.Filter{Packages: []string{"web"}}, Out: &out})
 	require.NoError(t, err)
 	assert.Equal(t, 1, open)
-	assert.Contains(t, out.String(), "+ add    web -> core")
+	assert.Contains(t, out.String(), "+ add     web -> core")
 	assert.NotContains(t, out.String(), "svc", "another consumer's drift is out of scope")
 
 	// The space term reaches the same packages the space holds.
@@ -317,7 +317,8 @@ func TestComputeFilterScopesSuggestionsToTheSelectedConsumers(t *testing.T) {
 		ComputeOptions{Filter: filter.Filter{Packages: []string{"core"}}, Out: &out})
 	require.NoError(t, err)
 	assert.Zero(t, open)
-	assert.Contains(t, out.String(), "dependencies are in sync for core")
+	assert.Contains(t, out.String(), "dependencies and baselines are in sync for core",
+		"core's manifests declare no version, so there is no baseline left to ask git about either")
 
 	_, err = a.Compute(context.Background(), cfgPath,
 		ComputeOptions{Filter: filter.Filter{Packages: []string{"nope"}}, Out: &out})
@@ -345,7 +346,7 @@ func TestComputeFilterStillDetectsAgainstTheWholeWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, open)
 	assert.NotContains(t, out.String(), "- remove", "the declared edge is supported by a manifest")
-	assert.Contains(t, out.String(), "+ add    web -> tools (devDependencies)")
+	assert.Contains(t, out.String(), "+ add     web -> tools (devDependencies)")
 }
 
 func TestComputeInteractiveNeedsInput(t *testing.T) {
@@ -497,7 +498,7 @@ func TestComputeStatedManifestNamesDeriveEdges(t *testing.T) {
 	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
 	require.NoError(t, err)
 	assert.Equal(t, 1, open)
-	assert.Contains(t, out.String(), "+ add    web -> gradlelib (dependencies)")
+	assert.Contains(t, out.String(), "+ add     web -> gradlelib (dependencies)")
 }
 
 func TestComputeStatedNameOutranksADeclaredOne(t *testing.T) {
@@ -518,6 +519,6 @@ func TestComputeStatedNameOutranksADeclaredOne(t *testing.T) {
 	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
 	require.NoError(t, err)
 	assert.Equal(t, 1, open)
-	assert.Contains(t, out.String(), "+ add    web -> renamed (dependencies)")
+	assert.Contains(t, out.String(), "+ add     web -> renamed (dependencies)")
 	assert.NotContains(t, logBuf.String(), plan.CodeAmbiguousManifestName)
 }

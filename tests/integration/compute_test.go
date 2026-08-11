@@ -37,7 +37,7 @@ func TestComputeDetectApplyStatus(t *testing.T) {
 	// Preview: the suggestion is printed, nothing changes.
 	res := r.Command("compute")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "+ add    web -> core (dependencies)")
+	assert.Contains(t, res.Stdout, "+ add     web -> core (dependencies)")
 	assert.Contains(t, res.Stdout, `packages/web/package.json dependencies "@acme/core": "workspace:*"`)
 	configBefore, err := os.ReadFile(r.Path("dispat.json"))
 	require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestComputeKeepAndRemoval(t *testing.T) {
 
 	res := r.Command("compute")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "- remove web -> ghost")
+	assert.Contains(t, res.Stdout, "- remove  web -> ghost")
 	assert.NotContains(t, res.Stdout, "web -> core", "keep: true silences the removal")
 
 	require.Equal(t, 0, r.Command("compute", "--write").Code)

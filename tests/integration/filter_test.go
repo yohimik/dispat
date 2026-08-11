@@ -340,7 +340,7 @@ func TestFilterComputeScopesSuggestions(t *testing.T) {
 
 	res = r.Command("compute", "--package", "web")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	assert.Contains(t, res.Stdout, "dependencies are in sync for web")
+	assert.Contains(t, res.Stdout, "dependencies and baselines are in sync for web")
 
 	res = r.Command("compute", "--space", "apps")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)

@@ -175,6 +175,11 @@ const (
 	// edges are derived from that name — by compute and by the executor's
 	// auto-versioning alike.
 	CodeAmbiguousManifestName = "W220"
+	// CodeAmbiguousManifestVersion marks one package whose manifests declare
+	// different versions for it. Which one the package is actually at is a
+	// question the files disagree about, so `dispat compute` derives no
+	// baseline from them and leaves the answer to the operator.
+	CodeAmbiguousManifestVersion = "W225"
 	// CodeUnscheduledRewriteEdge marks an auto-versioned manifest dependency
 	// with no configured `dependencies` edge behind it: the scheduler cannot
 	// order the consumer after this provider or skip it on the provider's
@@ -566,8 +571,16 @@ func (r *Release) Releasing() bool {
 // TagFormat is the release tag template of the package's space, or the
 // repository default when the space names none.
 func (r *Release) TagFormat() gitx.TagFormat {
-	if r.Pkg != nil && r.Pkg.Space != nil {
-		return gitx.TagFormat(r.Pkg.Space.TagFormat).WithDefault()
+	return TagFormatFor(r.Pkg)
+}
+
+// TagFormatFor is the same rule for a package with no release around it — the
+// commands that read tags without planning first. It is one function because
+// the format is what a run reads a package's baseline from: two callers
+// spelling it differently would give the package two histories.
+func TagFormatFor(p *model.Package) gitx.TagFormat {
+	if p != nil && p.Space != nil {
+		return gitx.TagFormat(p.Space.TagFormat).WithDefault()
 	}
 	return gitx.DefaultTagFormat
 }
