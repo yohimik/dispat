@@ -1599,3 +1599,49 @@ func TestResolveFileAncestorSpacesShapes(t *testing.T) {
 	assert.Equal(t, filepath.Join(outer, "dispat.json"), path)
 	assert.Equal(t, outer, resolvedRoot)
 }
+
+// TestResolveFileAncestorSpacesFromYAML: the ancestor's space paths are read
+// through the config reader, so the answer must not depend on the format the
+// root config happens to be written in.
+func TestResolveFileAncestorSpacesFromYAML(t *testing.T) {
+	outer := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outer, "dispat.yaml"),
+		[]byte("spaces:\n  libs:\n    path: packages\n"), 0o644))
+	inner := filepath.Join(outer, "packages")
+	require.NoError(t, os.MkdirAll(inner, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(inner, "dispat.yaml"),
+		[]byte("packages:\n  core:\n    tagFormat: v{version}\n"), 0o644))
+
+	path, resolvedRoot, err := ResolveFile(inner, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outer, "dispat.yaml"), path)
+	assert.Equal(t, outer, resolvedRoot)
+}
+
+// TestDiscoverPackagesIsRepeatable: discovery merges the space folder's file
+// into a copy, never into the loaded config, so a command that discovers more
+// than once (compute does) sees the same workspace every time.
+func TestDiscoverPackagesIsRepeatable(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"core": {TagFormat: "entry-{version}"}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{TagFormat: "file-{version}"})
+
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	first, _, err := DiscoverPackages(loaded, root)
+	require.NoError(t, err)
+	second, _, err := DiscoverPackages(loaded, root)
+	require.NoError(t, err)
+
+	assert.Equal(t, "file-{version}", packagesByName(second)["utils"].Space.TagFormat)
+	assert.Equal(t, "entry-{version}", packagesByName(second)["core"].Space.TagFormat)
+	assert.Equal(t, "packages/libs", loaded.Spaces["libs"].Path)
+	assert.Empty(t, loaded.Spaces["libs"].TagFormat, "the loaded config keeps saying what the file said")
+	require.Len(t, second, len(first))
+	for i := range first {
+		assert.Equal(t, first[i].Space.TagFormat, second[i].Space.TagFormat, first[i].Name)
+	}
+}

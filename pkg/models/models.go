@@ -416,10 +416,10 @@ type SpaceFile struct {
 // order, each overlaying the previous field by field and the one nearest the
 // package winning:
 //
-//	1. the file's top-level `packages` entry
-//	2. the space's `packages` entry (SpaceConfig.Packages)
-//	3. the space folder file's `packages` entry (SpaceFile.Packages)
-//	4. the package folder's own config file
+//  1. the file's top-level `packages` entry
+//  2. the space's `packages` entry (SpaceConfig.Packages)
+//  3. the space folder file's `packages` entry (SpaceFile.Packages)
+//  4. the package folder's own config file
 //
 // under the space's configuration, itself the root file's `spaces` entry
 // overlaid with the space folder file. A standalone package has no space, so

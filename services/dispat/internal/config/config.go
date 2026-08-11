@@ -1148,7 +1148,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		}
 		// The space's two package-level maps account for their keys against
 		// the folders of this space alone.
-		spaceIgnored := make([]ignoredDir, 0)
+		var spaceIgnored []ignoredDir
 		spaceConsumed := make(map[string][]string)
 		fileConsumed := make(map[string][]string)
 		for _, e := range entries {
