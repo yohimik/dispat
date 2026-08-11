@@ -1416,3 +1416,186 @@ func TestAutoVersionStrategies(t *testing.T) {
 		assert.Nil(t, resolve(t, &AutoVersionConfig{Enabled: models.Bool(false), Manifests: "none"}))
 	})
 }
+
+// TestResolveFileSkipsSpaceConfig: a space folder's file declares packages,
+// so it looks like a monorepo of standalone packages until the ancestor is
+// consulted. Running from inside a package of that space must still resolve
+// to the root, and the space folder itself must too.
+func TestResolveFileSkipsSpaceConfig(t *testing.T) {
+	cfg := validConfig()
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		Packages: map[string]PackageConfig{"core": {TagFormat: "v{version}"}},
+	})
+
+	for _, from := range []string{"packages/libs/core", "packages/libs"} {
+		path, resolvedRoot, err := ResolveFile(filepath.Join(root, from), "dispat.json", false)
+		require.NoError(t, err, from)
+		assert.Equal(t, filepath.Join(root, "dispat.json"), path, from)
+		assert.Equal(t, root, resolvedRoot, from)
+	}
+}
+
+// TestResolveFilePackagesOnlyRoot: a repository whose only config declares
+// packages and no spaces is its own root — nothing above claims its folder —
+// so the ascent stops there, from inside it as well.
+func TestResolveFilePackagesOnlyRoot(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Spaces = nil
+	cfg.Packages = map[string]PackageConfig{"tools": {Path: "tools"}}
+	root := writeModelRepo(t, cfg, "tools")
+
+	path, resolvedRoot, err := ResolveFile(filepath.Join(root, "tools"), "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "dispat.json"), path)
+	assert.Equal(t, root, resolvedRoot)
+}
+
+// TestResolveFilePackagesOnlyRootInsideAnother: the same repository vendored
+// inside a monorepo that does not claim its folder stays its own root. Only a
+// space folder yields to the root above it.
+func TestResolveFilePackagesOnlyRootInsideAnother(t *testing.T) {
+	outer := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app", "vendor/toolkit")
+	inner := filepath.Join(outer, "vendor/toolkit")
+	require.NoError(t, os.WriteFile(filepath.Join(inner, "dispat.json"),
+		[]byte(`{"packages":{"tools":{"path":"tools"}}}`), 0o644))
+
+	path, resolvedRoot, err := ResolveFile(inner, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(inner, "dispat.json"), path)
+	assert.Equal(t, inner, resolvedRoot)
+}
+
+// TestResolveFileBrokenConfigStopsTheAscent: a config that cannot be read is
+// where the ascent ends, so Load fails loudly on it instead of a parent's
+// file being used behind its back.
+func TestResolveFileBrokenConfigStopsTheAscent(t *testing.T) {
+	top := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(top, "dispat.json"), []byte(`{"spaces":{}}`), 0o644))
+	nested := filepath.Join(top, "packages")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nested, "dispat.json"), []byte("{oops"), 0o644))
+
+	path, resolvedRoot, err := ResolveFile(nested, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(nested, "dispat.json"), path)
+	assert.Equal(t, nested, resolvedRoot)
+}
+
+// TestResolveFileHonoursDispatignore: the ignore file next to the candidates
+// decides which of them the folder meant, and hiding every candidate leaves
+// the folder invisible to resolution.
+func TestResolveFileHonoursDispatignore(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"dispat.json", "dispat.yaml"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(`{"spaces":{}}`), 0o644))
+	}
+	path, _, err := ResolveFile(root, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "dispat.json"), path, "the name order decides on its own")
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, DispatignoreName), []byte("dispat.json\n"), 0o644))
+	path, _, err = ResolveFile(root, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "dispat.yaml"), path)
+
+	// An explicit --config is exact: it is used as named, ignored or not.
+	path, _, err = ResolveFile(root, "dispat.json", true)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "dispat.json"), path)
+
+	// Hiding every candidate leaves nothing to resolve, and the error names
+	// what was tried.
+	require.NoError(t, os.WriteFile(filepath.Join(root, DispatignoreName), []byte("dispat.*\n"), 0o644))
+	_, _, err = ResolveFile(root, "dispat.json", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no dispat config file found")
+}
+
+// TestResolveFileUnreadableIgnore: an ignore file that cannot be read leaves
+// it unknowable which config the folder meant, so resolution says so.
+func TestResolveFileUnreadableIgnore(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(`{"spaces":{}}`), 0o644))
+	path := filepath.Join(root, DispatignoreName)
+	require.NoError(t, os.WriteFile(path, []byte("dispat.json\n"), 0o644))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("running as a user that reads unreadable files")
+	}
+	_, _, err := ResolveFile(root, "dispat.json", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), DispatignoreName)
+}
+
+// TestDepSourceLabel: every declaration site renders as the key path that
+// holds it, however deep, so a suggestion listing says which file and which
+// entry an applied change would touch.
+func TestDepSourceLabel(t *testing.T) {
+	for _, tc := range []struct {
+		src  DepSource
+		want string
+	}{
+		{DepSource{KeyPath: []string{"dependencies"}, Index: 2}, "dependencies[2]"},
+		{DepSource{KeyPath: []string{"packages", "core", "dependencies"}},
+			`packages["core"]: dependencies[0]`},
+		{DepSource{KeyPath: []string{"spaces", "libs", "packages", "core", "dependencies"}, Index: 1},
+			`spaces["libs"]: packages["core"]: dependencies[1]`},
+		{DepSource{File: "packages/core/dispat.json", KeyPath: []string{"dependencies"}},
+			"packages/core/dispat.json: dependencies[0]"},
+		{DepSource{File: "packages/dispat.yaml", KeyPath: []string{"packages", "web", "dependencies"}},
+			`packages/dispat.yaml: packages["web"]: dependencies[0]`},
+		{DepSource{}, "dependencies"},
+	} {
+		assert.Equal(t, tc.want, tc.src.Label())
+	}
+	assert.True(t, DepSource{KeyPath: []string{"dependencies"}}.IsRootList())
+	assert.False(t, DepSource{KeyPath: []string{"spaces", "libs", "packages", "core", "dependencies"}}.IsRootList())
+}
+
+// TestResolveFileAncestorSpacesShapes: the ancestor's space paths are read
+// for one question only — does this root claim the candidate's folder — so a
+// shape it cannot answer from leaves the candidate its own root. Validation
+// of those values belongs to Load, which has not run yet.
+func TestResolveFileAncestorSpacesShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		outer string
+	}{
+		{"spaces is not a map", `{"spaces":[]}`},
+		{"a space is not an object", `{"spaces":{"libs":"packages/libs"}}`},
+		{"a space has no path", `{"spaces":{"libs":{"tagFormat":"v{version}"}}}`},
+		{"a space path does not exist", `{"spaces":{"libs":{"path":"nowhere"}}}`},
+		{"a space path is another folder", `{"spaces":{"libs":{"path":"other"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outer := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(outer, "dispat.json"), []byte(tc.outer), 0o644))
+			inner := filepath.Join(outer, "packages")
+			require.NoError(t, os.MkdirAll(filepath.Join(outer, "other"), 0o755))
+			require.NoError(t, os.MkdirAll(inner, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(inner, "dispat.json"),
+				[]byte(`{"packages":{"tools":{"path":"tools"}}}`), 0o644))
+
+			path, resolvedRoot, err := ResolveFile(inner, "dispat.json", false)
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(inner, "dispat.json"), path)
+			assert.Equal(t, inner, resolvedRoot)
+		})
+	}
+
+	// And the shape it can answer from: the ancestor claims the folder, so
+	// the candidate is that space's own file.
+	outer := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outer, "dispat.json"),
+		[]byte(`{"spaces":{"libs":{"path":"packages"}}}`), 0o644))
+	inner := filepath.Join(outer, "packages")
+	require.NoError(t, os.MkdirAll(inner, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(inner, "dispat.json"),
+		[]byte(`{"packages":{"core":{"tagFormat":"v{version}"}}}`), 0o644))
+	path, resolvedRoot, err := ResolveFile(inner, "dispat.json", false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outer, "dispat.json"), path)
+	assert.Equal(t, outer, resolvedRoot)
+}

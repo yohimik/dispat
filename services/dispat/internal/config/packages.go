@@ -379,7 +379,13 @@ func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
 // an override clears an inherited stage. Login is not merged; validation
 // rejects it on the override layer.
 func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
-	out := *base
+	var out SpaceFlowConfig
+	// Load fills every space's flow in, but discovery also serves callers that
+	// build a config by hand, and an absent object means the same as an empty
+	// one.
+	if base != nil {
+		out = *base
+	}
 	pick := func(dst *[]string, src []string) {
 		if src != nil {
 			*dst = src

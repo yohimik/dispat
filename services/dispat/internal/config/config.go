@@ -266,7 +266,9 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 		p := filepath.Join(dir, names[0])
 		switch classifyConfig(p) {
 		case configRoot:
-			if candidate != "" && ownsSpaceFolder(p, dir, candidateRoot) {
+			// A candidate below is a space folder's file when this root claims
+			// its folder, and a monorepo of its own when it does not.
+			if candidate != "" && !ownsSpaceFolder(p, dir, candidateRoot) {
 				return candidate, candidateRoot, nil
 			}
 			return p, dir, nil

@@ -57,9 +57,36 @@ func writePackageFile(t *testing.T, root, pkgDir string, po PackageConfig) {
 // writePackageRaw is writePackageFile for shapes the model cannot express.
 func writePackageRaw(t *testing.T, root, pkgDir string, po map[string]any) {
 	t.Helper()
-	data, err := json.MarshalIndent(po, "", "  ")
+	writeFolderConfig(t, root, pkgDir, "dispat.json", po)
+}
+
+// writeSpaceFile drops a space's own config file into the space folder — the
+// layer between the root file's space entry and anything said about one
+// package.
+func writeSpaceFile(t *testing.T, root, spaceDir string, sf SpaceFile) {
+	t.Helper()
+	writeFolderConfig(t, root, spaceDir, "dispat.json", sf)
+}
+
+// writeSpaceRaw is writeSpaceFile for shapes the model cannot express.
+func writeSpaceRaw(t *testing.T, root, spaceDir string, sf map[string]any) {
+	t.Helper()
+	writeFolderConfig(t, root, spaceDir, "dispat.json", sf)
+}
+
+// writeFolderConfig marshals any config value into a folder's config file,
+// under the name given — the seam the format and .dispatignore tests need.
+func writeFolderConfig(t *testing.T, root, dir, name string, value any) {
+	t.Helper()
+	data, err := json.MarshalIndent(value, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(root, pkgDir, "dispat.json"), data, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, dir, name), data, 0o644))
+}
+
+// writeIgnore drops a .dispatignore into a folder.
+func writeIgnore(t *testing.T, root, dir, body string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(root, dir, DispatignoreName), []byte(body), 0o644))
 }
 
 // TestPackagePathForSpacePackageRejected: a packages entry whose key matches
@@ -1140,4 +1167,572 @@ func TestStandaloneManifestNames(t *testing.T) {
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"com.acme:tools"}, packagesByName(pkgs)["tools"].ManifestNames)
+}
+
+// --- The space's own packages map and the space folder's config file ---
+//
+// Two layers join the ladder between a space and one of its packages: the
+// space's `packages` map in the root file, and a dispat config file in the
+// space folder (whose root object is the space, and whose `packages` map is a
+// layer of its own). Every claim below is made against the resolved
+// model.Space, the same seam the older override tests use.
+
+// TestSpacePackagesEntry: a space configures one of its own packages without
+// the root file's global map, and reaches no other package.
+func TestSpacePackagesEntry(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"core": {TagFormat: "core-{name}@{version}"}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.Equal(t, "core-{name}@{version}", byName["core"].Space.TagFormat)
+	assert.Equal(t, "{name}@{version}", byName["utils"].Space.TagFormat, "a sibling keeps the space's format")
+	assert.Equal(t, "{name}@{version}", byName["app"].Space.TagFormat, "another space is untouched")
+}
+
+// TestSpacePackagesEntryBeatsRootEntry: both maps name the same package, and
+// the space's entry wins — it is the nearer statement about the package.
+// Fields only one layer sets survive from both.
+func TestSpacePackagesEntryBeatsRootEntry(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"core": {TagFormat: "root-{name}@{version}", RevertOnFail: models.Bool(false)},
+	}
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{
+			"core": {TagFormat: "space-{name}@{version}", IsBuildWaitingPublish: models.Bool(false)},
+		}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+
+	assert.Equal(t, "space-{name}@{version}", core.Space.TagFormat)
+	assert.False(t, core.Space.RevertOnFail, "the root entry still applies where the space says nothing")
+	assert.False(t, core.Space.BuildWaitsPublish)
+}
+
+// TestSpaceFileOverridesRootSpace: the space folder's own config file is the
+// space, said again and nearer: it replaces what it names and inherits the
+// rest, for every package of the space.
+func TestSpaceFileOverridesRootSpace(t *testing.T) {
+	cfg := validConfig()
+	cfg.Scripts["space-build"] = "echo space-file build"
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		TagFormat:    "file-{name}@{version}",
+		RevertOnFail: models.Bool(false),
+		Flow:         &SpaceFlowConfig{Build: []string{"space-build"}},
+	})
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	for _, name := range []string{"core", "utils"} {
+		assert.Equal(t, "file-{name}@{version}", byName[name].Space.TagFormat, name)
+		assert.False(t, byName[name].Space.RevertOnFail, "an explicit false overrides the root's true")
+		assert.True(t, byName[name].Space.BuildWaitsPublish, "an unset key inherits")
+		assert.Equal(t, []string{"echo space-file build"}, byName[name].Space.BuildScript)
+		assert.Equal(t, []string{"echo publish"}, byName[name].Space.PublishScript, "an unset stage inherits")
+	}
+	assert.Equal(t, "{name}@{version}", byName["app"].Space.TagFormat, "another space is untouched")
+}
+
+// TestSpaceFileScriptsAndAutoVersion: a space file carries the space's whole
+// surface, scripts and autoVersion included, and its packages resolve flow
+// names through the merged map.
+func TestSpaceFileScriptsAndAutoVersion(t *testing.T) {
+	cfg := validConfig()
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		Scripts:     map[string]string{"build": "echo file build", "sync": "echo sync"},
+		AutoVersion: &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"sync"}},
+	})
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+
+	assert.Equal(t, []string{"echo file build"}, core.Space.BuildScript, "the file's script wins by name")
+	require.NotNil(t, core.Space.AutoVersion)
+	assert.Equal(t, []string{"echo sync"}, core.Space.AutoVersion.SyncLock)
+	assert.Nil(t, packagesByName(pkgs)["app"].Space.AutoVersion, "another space is untouched")
+}
+
+// TestOverrideLadder: all six layers name the same package and the same key,
+// and the nearest to the package wins. Each layer also sets a key only it
+// sets, proving every one of them was applied rather than skipped.
+func TestOverrideLadder(t *testing.T) {
+	cfg := validConfig()
+	cfg.Scripts["s1"] = "echo s1"
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.TagFormat = "s1-{name}@{version}"
+		s.Scripts = map[string]string{"space": "echo space"}
+		s.Packages = map[string]PackageConfig{
+			"core": {TagFormat: "p2-{name}@{version}", Scripts: map[string]string{"p2": "echo p2"}},
+		}
+	})
+	cfg.Packages = map[string]PackageConfig{
+		"core": {TagFormat: "p1-{name}@{version}", Scripts: map[string]string{"p1": "echo p1"}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		TagFormat: "s2-{name}@{version}",
+		Scripts:   map[string]string{"s2": "echo s2"},
+		Packages: map[string]PackageConfig{
+			"core": {TagFormat: "p3-{name}@{version}", Scripts: map[string]string{"p3": "echo p3"}},
+		},
+	})
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{
+		TagFormat: "p4-{name}@{version}",
+		Scripts:   map[string]string{"p4": "echo p4"},
+	})
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+
+	assert.Equal(t, "p4-{name}@{version}", core.Space.TagFormat, "the package's own file is nearest")
+	for _, name := range []string{"space", "s2", "p1", "p2", "p3", "p4"} {
+		assert.Contains(t, core.Space.Scripts, name, "layer %q was applied", name)
+	}
+}
+
+// TestOverrideLadderWithoutTheNearestLayers: the same ladder with the last
+// layers removed, so each one in turn is the winner. One repository per
+// prefix, because a layer cannot be unwritten.
+func TestOverrideLadderWithoutTheNearestLayers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		layers int // how many layers of the ladder are written
+		want   string
+	}{
+		{"space alone", 1, "s1-{name}@{version}"},
+		{"space file", 2, "s2-{name}@{version}"},
+		{"root entry", 3, "p1-{name}@{version}"},
+		{"space entry", 4, "p2-{name}@{version}"},
+		{"space file entry", 5, "p3-{name}@{version}"},
+		{"package file", 6, "p4-{name}@{version}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			withLibs(&cfg, func(s *SpaceConfig) {
+				s.TagFormat = "s1-{name}@{version}"
+				if tc.layers >= 4 {
+					s.Packages = map[string]PackageConfig{"core": {TagFormat: "p2-{name}@{version}"}}
+				}
+			})
+			if tc.layers >= 3 {
+				cfg.Packages = map[string]PackageConfig{"core": {TagFormat: "p1-{name}@{version}"}}
+			}
+			root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+			if tc.layers >= 2 {
+				sf := SpaceFile{TagFormat: "s2-{name}@{version}"}
+				if tc.layers >= 5 {
+					sf.Packages = map[string]PackageConfig{"core": {TagFormat: "p3-{name}@{version}"}}
+				}
+				writeSpaceFile(t, root, "packages/libs", sf)
+			}
+			if tc.layers >= 6 {
+				writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "p4-{name}@{version}"})
+			}
+			pkgs, err := discoverPackages(t, root)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, packagesByName(pkgs)["core"].Space.TagFormat)
+		})
+	}
+}
+
+// TestSpaceLayersRecordPolicies: the package-only keys travel the new layers
+// too, and in the same order as the space-shaped ones — a package's records
+// and its flow must never disagree about which layer won.
+func TestSpaceLayersRecordPolicies(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"core": {Changelog: &ChangelogConfig{File: "ROOT.md", Title: "# Root"}, Concurrency: []int{2}},
+	}
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{
+			"core": {Changelog: &ChangelogConfig{File: "SPACE.md"}, ManifestNames: []string{"acme:core"}},
+		}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		Packages: map[string]PackageConfig{"core": {Concurrency: []int{3, 1}}},
+	})
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+
+	assert.Equal(t, "SPACE.md", core.Changelog.File, "the nearer layer names the file")
+	assert.Equal(t, "# Root", core.Changelog.Title, "and the farther one still fills what it left unset")
+	assert.Equal(t, 3, core.BuildWeight)
+	assert.Equal(t, 1, core.PublishWeight)
+	assert.Equal(t, []string{"acme:core"}, core.ManifestNames)
+}
+
+// TestSpaceLayerDependencies: providers declared at the two new layers merge
+// into the one list, each carrying the source that would be edited.
+func TestSpaceLayerDependencies(t *testing.T) {
+	cfg := validConfig()
+	cfg.Dependencies = nil
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"utils": {Dependencies: []string{"core"}}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/libs/web",
+		"packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		Packages: map[string]PackageConfig{"web": {Dependencies: []string{"utils"}}},
+	})
+	_, declared, err := discoverAll(t, root)
+	require.NoError(t, err)
+
+	labels := make(map[string]string, len(declared))
+	for _, d := range declared {
+		labels[d.Consumer+"->"+d.Provider] = d.Source.Label()
+	}
+	assert.Equal(t, `spaces["libs"]: packages["utils"]: dependencies[0]`, labels["utils->core"])
+	assert.Equal(t, filepath.Join(root, "packages/libs", "dispat.json")+`: packages["web"]: dependencies[0]`,
+		labels["web->utils"])
+}
+
+// TestSpaceFileAtTheRepositoryRoot: a space rooted at the repository itself
+// has no space file — the file in that folder is the root config, and reading
+// one statement twice would refuse itself as a nested root.
+func TestSpaceFileAtTheRepositoryRoot(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Spaces = map[string]SpaceConfig{
+		"all": {Path: ".", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
+	}
+	root := writeModelRepo(t, cfg, "core")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core"}, packageNames(pkgs))
+}
+
+// packageNames lists discovered package names, for the cases where only the
+// membership is the claim.
+func packageNames(pkgs []*model.Package) []string {
+	out := make([]string, 0, len(pkgs))
+	for _, p := range pkgs {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
+// --- What the new layers may not say ---
+
+// TestSpacePackagesPathRejected: a space configures the packages inside its
+// folder and cannot move one elsewhere, so `path` is refused by name.
+func TestSpacePackagesPathRejected(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"core": {Path: "elsewhere"}}
+	})
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app", "elsewhere")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `spaces["libs"]: packages["core"]`)
+	assert.Contains(t, err.Error(), "path cannot be set")
+}
+
+// TestSpaceFilePackagesPathRejected: the same rule one level down, in the
+// space folder's own file.
+func TestSpaceFilePackagesPathRejected(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app", "elsewhere")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		Packages: map[string]PackageConfig{"core": {Path: "elsewhere"}},
+	})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "path cannot be set")
+	assert.Contains(t, err.Error(), filepath.Join("packages/libs", "dispat.json"))
+}
+
+// TestSpaceFilePathRejected: the file sits in the space folder, so the folder
+// it lives in already is the path; a file able to redefine it could point the
+// space somewhere it is not.
+func TestSpaceFilePathRejected(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writeSpaceRaw(t, root, "packages/libs", map[string]any{"path": "elsewhere"})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "path cannot be set in a space folder's config file")
+}
+
+// TestSpaceFileNestedRoot: a space file declaring spaces is another
+// repository's root config, not a layer of this one.
+func TestSpaceFileNestedRoot(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writeSpaceRaw(t, root, "packages/libs", map[string]any{
+		"spaces": map[string]any{"inner": map[string]any{"path": "pkgs"}},
+	})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "monorepo root of its own")
+	assert.Contains(t, err.Error(), "drop the space from the root config")
+}
+
+// TestSpaceFileUnknownKey: the file is decoded with the root config's stance,
+// so a typo is refused with the file named.
+func TestSpaceFileUnknownKey(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writeSpaceRaw(t, root, "packages/libs", map[string]any{"tagFormats": "v{version}"})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), filepath.Join("packages/libs", "dispat.json"))
+	assert.Contains(t, err.Error(), "tagformats", "viper lowercases the key it reports")
+}
+
+// TestSpaceFileInvalidValue: the merged space is held to the space rules, so
+// a bad value in the file fails the load with the file named.
+func TestSpaceFileInvalidValue(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{Versioning: "sometimes"})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown versioning")
+	assert.Contains(t, err.Error(), filepath.Join("packages/libs", "dispat.json"))
+}
+
+// TestPackageEntryHoldsNoSpaces: a package entry configures one package, so
+// spaces and packages are refused by name at every map that holds entries —
+// mapstructure's unknown-key error could not say why.
+func TestPackageEntryHoldsNoSpaces(t *testing.T) {
+	nested := map[string]any{
+		"core": map[string]any{"packages": map[string]any{"inner": map[string]any{}}},
+	}
+	spaced := map[string]any{
+		"core": map[string]any{"spaces": map[string]any{"inner": map[string]any{"path": "p"}}},
+	}
+	// The root file's own map first.
+	for _, tc := range []struct {
+		name    string
+		entries map[string]any
+		refused string
+		label   string
+	}{
+		{"root packages", nested, "packages", `packages["core"]`},
+		{"root packages, spaces", spaced, "spaces", `packages["core"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := rawValidConfig()
+			raw["packages"] = tc.entries
+			root := writeRawRepo(t, raw, "packages/libs/core", "packages/apps/app")
+			_, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.label)
+			assert.Contains(t, err.Error(), tc.refused+" cannot be set on a package entry")
+		})
+	}
+
+	t.Run("space packages", func(t *testing.T) {
+		raw := rawValidConfig()
+		raw["spaces"].(map[string]any)["libs"].(map[string]any)["packages"] = nested
+		root := writeRawRepo(t, raw, "packages/libs/core", "packages/apps/app")
+		_, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `spaces["libs"]: packages["core"]`)
+		assert.Contains(t, err.Error(), "packages cannot be set on a package entry")
+	})
+
+	t.Run("space file packages", func(t *testing.T) {
+		root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+		writeSpaceRaw(t, root, "packages/libs", map[string]any{"packages": nested})
+		_, err := discoverPackages(t, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "packages cannot be set on a package entry")
+	})
+
+	t.Run("package folder file", func(t *testing.T) {
+		root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+		writePackageRaw(t, root, "packages/libs/core", map[string]any{
+			"packages": map[string]any{"inner": map[string]any{}},
+		})
+		_, err := discoverPackages(t, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "monorepo root of its own")
+	})
+}
+
+// rawValidConfig is validConfig as a raw map, for the shapes the typed model
+// deliberately cannot express.
+func rawValidConfig() map[string]any {
+	return map[string]any{
+		"scripts": map[string]any{"build": "echo build", "publish": "echo publish"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "packages/libs",
+				"flow": map[string]any{"build": "build", "publish": "publish"}},
+			"apps": map[string]any{"path": "packages/apps",
+				"flow": map[string]any{"build": "build", "publish": "publish"}},
+		},
+	}
+}
+
+// TestSpacePackagesKeyMustMatchAFolder: a key naming nothing in the space is
+// the same class of typo as an unknown dependency endpoint, and the error
+// says where the package would have to be configured instead.
+func TestSpacePackagesKeyMustMatchAFolder(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"app": {TagFormat: "v{version}"}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `spaces["libs"]: packages["app"]`)
+	assert.Contains(t, err.Error(), `matches no folder of space "libs"`)
+}
+
+// TestSpaceFilePackagesKeyMustMatchAFolder: the same accounting for the space
+// file's map, named after the file that holds it.
+func TestSpaceFilePackagesKeyMustMatchAFolder(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		Packages: map[string]PackageConfig{"nope": {TagFormat: "v{version}"}},
+	})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), filepath.Join("packages/libs", "dispat.json"))
+	assert.Contains(t, err.Error(), `matches no folder of space "libs"`)
+}
+
+// TestSpacePackagesKeyExcluded: a key naming a folder the space's
+// .dispatignore hid gets the exclusion spelled out rather than the typo
+// message.
+func TestSpacePackagesKeyExcluded(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"sandbox": {TagFormat: "v{version}"}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/sandbox", "packages/apps/app")
+	writeIgnore(t, root, "packages/libs", "sandbox\n")
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "excluded by "+DispatignoreName)
+}
+
+// TestSpacePackagesKeyAmbiguous: one lowercased key matching two folders of
+// the space has no single package to configure.
+func TestSpacePackagesKeyAmbiguous(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"core": {TagFormat: "v{version}"}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	if err := os.Mkdir(filepath.Join(root, "packages/libs/Core"), 0o755); err != nil {
+		t.Skip("case-insensitive filesystem")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "packages/libs")); err == nil && len(entries) < 2 {
+		t.Skip("case-insensitive filesystem")
+	}
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguously")
+}
+
+// TestSpacePackagesEmptyKey: a nameless entry configures nothing.
+func TestSpacePackagesEmptyKey(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{"": {TagFormat: "v{version}"}}
+	})
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "package name must not be empty")
+}
+
+// TestSpacePackagesLoginRejected: login runs once per space, in the space
+// folder, so the override surface refuses it at the new layers too.
+func TestSpacePackagesLoginRejected(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Packages = map[string]PackageConfig{
+			"core": {Flow: &SpaceFlowConfig{Login: []string{"build"}}},
+		}
+	})
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flow.login cannot be overridden per package")
+	assert.Contains(t, err.Error(), `spaces["libs"]: packages["core"]`)
+}
+
+// TestSpaceFileAutoVersionOnlyUnknown: the merged space's autoVersion is held
+// to the same rule as the root file's, so an `only` naming no package fails.
+func TestSpaceFileAutoVersionOnlyUnknown(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{
+		AutoVersion: &AutoVersionConfig{Enabled: models.Bool(true), Only: []string{"ghost"}},
+	})
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "autoVersion.only: unknown package")
+}
+
+// --- .dispatignore over config file names ---
+
+// TestDispatignoreHidesAPackageConfig: a folder holding two config files says
+// which one is real by ignoring the other, and the surviving name decides the
+// package's override layer.
+func TestDispatignoreHidesAPackageConfig(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "json-{version}"})
+	writeFolderConfig(t, root, "packages/libs/core", "dispat.yaml", PackageConfig{TagFormat: "yaml-{version}"})
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, "json-{version}", packagesByName(pkgs)["core"].Space.TagFormat,
+		"without an ignore file the name order decides")
+
+	writeIgnore(t, root, "packages/libs/core", "# the json file is generated\ndispat.json\n")
+	pkgs, err = discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, "yaml-{version}", packagesByName(pkgs)["core"].Space.TagFormat)
+}
+
+// TestDispatignoreHidesASpaceConfig: the same rule in a space folder, where
+// the ignore file already decides which sub-folders are packages.
+func TestDispatignoreHidesASpaceConfig(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/libs/sandbox", "packages/apps/app")
+	writeSpaceFile(t, root, "packages/libs", SpaceFile{TagFormat: "json-{version}"})
+	writeFolderConfig(t, root, "packages/libs", "dispat.yaml", SpaceFile{TagFormat: "yaml-{version}"})
+	writeIgnore(t, root, "packages/libs", "sandbox\ndispat.json\n")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	assert.Equal(t, "yaml-{version}", byName["core"].Space.TagFormat)
+	assert.NotContains(t, byName, "sandbox", "the folder patterns still hold")
+}
+
+// TestDispatignoreHidesEveryConfig: ignoring every candidate leaves the
+// folder with nothing to say, which is not an error — the folder simply has
+// no override layer.
+func TestDispatignoreHidesEveryConfig(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "json-{version}"})
+	writeIgnore(t, root, "packages/libs/core", "dispat.*\n")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, "{name}@{version}", packagesByName(pkgs)["core"].Space.TagFormat)
+}
+
+// TestDispatignoreUnreadableHidingConfigs: an ignore file that cannot be read
+// leaves it unknowable which config the folder meant, so the load fails
+// instead of guessing.
+func TestDispatignoreUnreadableHidingConfigs(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "json-{version}"})
+	path := filepath.Join(root, "packages/libs/core", DispatignoreName)
+	require.NoError(t, os.WriteFile(path, []byte("dispat.json\n"), 0o644))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("running as a user that reads unreadable files")
+	}
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), DispatignoreName)
 }
