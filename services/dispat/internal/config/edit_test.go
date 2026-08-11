@@ -147,7 +147,7 @@ func TestReplaceStringListTOMLRefuses(t *testing.T) {
 	err := ReplaceStringList(path, []string{"packages", "core", "dependencies"}, []string{"util"})
 	assert.ErrorIs(t, err, ErrTOMLEdit)
 
-	snippet, err := RenderStringListTOML([]string{"packages", "core", "dependencies"}, []string{"util"})
+	snippet, err := RenderKeyTOML([]string{"packages", "core", "dependencies"}, []string{"util"})
 	require.NoError(t, err)
 	assert.Contains(t, snippet, "[packages]")
 	assert.Contains(t, snippet, "'util'")
@@ -318,9 +318,173 @@ func TestRenderTOMLFallbacks(t *testing.T) {
 		{Consumer: "api", Provider: "core", Kind: "devDependencies", Keep: true},
 	}, back.Dependencies)
 
-	nested, err := RenderStringListTOML([]string{"packages", "web", "dependencies"}, []string{"core", "utils"})
+	nested, err := RenderKeyTOML([]string{"packages", "web", "dependencies"}, []string{"core", "utils"})
 	require.NoError(t, err)
 	var nestedBack map[string]map[string]map[string][]string
 	require.NoError(t, toml.Unmarshal([]byte(nested), &nestedBack))
 	assert.Equal(t, []string{"core", "utils"}, nestedBack["packages"]["web"]["dependencies"])
+}
+
+// TestReplaceKeysOneWritePerFile: two keys of one file go through a single
+// call, so the backup is the file as it stood before either edit. Two
+// separate calls would save the first edit's output as the "previous" copy.
+func TestReplaceKeysOneWritePerFile(t *testing.T) {
+	src := `{
+  "spaces": {"libs": {"path": "pkgs"}},
+  "dependencies": []
+}
+`
+	path := writeConfigFile(t, "dispat.json", src)
+	require.NoError(t, ReplaceKeys(path, []Edit{
+		{KeyPath: []string{"dependencies"}, Value: []DependencyConfig{{Consumer: "web", Provider: "core"}}},
+		{KeyPath: []string{"initials"}, Value: map[string]string{"core": "1.4.2"}},
+	}))
+
+	got := readFile(t, path)
+	assert.Contains(t, got, `"provider": "core"`)
+	assert.Contains(t, got, `"initials": {`)
+	assert.Contains(t, got, `"core": "1.4.2"`)
+	assert.Equal(t, src, readFile(t, path+BackupSuffix), "one backup, from before both edits")
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	require.Len(t, cfg.Dependencies, 1)
+	assert.Equal(t, "1.4.2", cfg.InitialVersions["core"].String())
+}
+
+// TestReplaceKeysNoOps: an empty edit set and an edit whose value re-renders
+// to the bytes already there both leave the file, and the backup, alone.
+func TestReplaceKeysNoOps(t *testing.T) {
+	src := `{
+  "initials": {
+    "core": "1.0.0"
+  }
+}
+`
+	path := writeConfigFile(t, "dispat.json", src)
+
+	require.NoError(t, ReplaceKeys(path, nil))
+	require.NoError(t, ReplaceKeys(path, []Edit{
+		{KeyPath: []string{"initials"}, Value: map[string]string{"core": "1.0.0"}},
+	}))
+	assert.Equal(t, src, readFile(t, path))
+	_, statErr := os.Stat(path + BackupSuffix)
+	assert.True(t, os.IsNotExist(statErr), "an edit that changes nothing writes nothing")
+}
+
+// TestReplaceKeysFormats: YAML gains the absent key and keeps its comments,
+// TOML refuses whatever the edit says, an unknown extension is an error, and
+// a failing second edit leaves the file untouched because nothing is written
+// until every splice succeeded.
+func TestReplaceKeysFormats(t *testing.T) {
+	t.Run("yaml", func(t *testing.T) {
+		src := "# config\nspaces:\n  libs:\n    path: pkgs # keep me\n"
+		path := writeConfigFile(t, "dispat.yaml", src)
+		require.NoError(t, ReplaceKeys(path, []Edit{
+			{KeyPath: []string{"initials"}, Value: map[string]string{"core": "1.4.2"}},
+		}))
+		got := readFile(t, path)
+		assert.Contains(t, got, "# config")
+		assert.Contains(t, got, "# keep me")
+		assert.Contains(t, got, "core: 1.4.2")
+
+		err := ReplaceKeys(path, []Edit{{KeyPath: []string{"packages", "gone", "dependencies"}, Value: []string{"core"}}})
+		assert.ErrorContains(t, err, "not found", "a nested path YAML does not carry is a caller bug")
+	})
+
+	t.Run("toml", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.toml", "[initials]\ncore = \"1.0.0\"\n")
+		err := ReplaceKeys(path, []Edit{{KeyPath: []string{"initials"}, Value: map[string]string{"core": "2.0.0"}}})
+		assert.ErrorIs(t, err, ErrTOMLEdit)
+	})
+
+	t.Run("unknown format", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.ini", "x=1\n")
+		err := ReplaceKeys(path, []Edit{{KeyPath: []string{"initials"}, Value: map[string]string{}}})
+		assert.ErrorContains(t, err, "unknown config format")
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		err := ReplaceKeys(filepath.Join(t.TempDir(), "absent.json"), []Edit{
+			{KeyPath: []string{"initials"}, Value: map[string]string{}},
+		})
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("second edit fails", func(t *testing.T) {
+		src := `{"dependencies": []}`
+		path := writeConfigFile(t, "dispat.json", src)
+		err := ReplaceKeys(path, []Edit{
+			{KeyPath: []string{"dependencies"}, Value: []DependencyConfig{{Consumer: "web", Provider: "core"}}},
+			{KeyPath: []string{"packages", "gone", "dependencies"}, Value: []string{"core"}},
+		})
+		require.Error(t, err)
+		assert.Equal(t, src, readFile(t, path), "the first splice is discarded with the second's failure")
+		_, statErr := os.Stat(path + BackupSuffix)
+		assert.True(t, os.IsNotExist(statErr))
+	})
+}
+
+// TestStringMapAt: the initials map comes back spelled the way the file
+// spells it, in every format, because the loaded config cannot be written
+// back without renaming the user's keys.
+func TestStringMapAt(t *testing.T) {
+	t.Run("json keeps the author's case", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.json", `{"initials": {"@acme/Core": "1.4.2", "Web": "2.0.0"}}`)
+		got, err := StringMapAt(path, []string{"initials"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"@acme/Core": "1.4.2", "Web": "2.0.0"}, got)
+
+		// The key path itself is matched the way the splicing writers match
+		// theirs, so a config spelling it "Initials" resolves too.
+		got, err = StringMapAt(path, []string{"INITIALS"})
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+	})
+
+	t.Run("yaml and toml", func(t *testing.T) {
+		yamlPath := writeConfigFile(t, "dispat.yaml", "initials:\n  core: 1.4.2\n  web: \"2.0.0\"\n")
+		got, err := StringMapAt(yamlPath, []string{"initials"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"core": "1.4.2", "web": "2.0.0"}, got)
+
+		tomlPath := writeConfigFile(t, "dispat.toml", "[initials]\ncore = \"1.4.2\"\n")
+		got, err = StringMapAt(tomlPath, []string{"initials"})
+		require.NoError(t, err, "TOML is unwritable, but its current entries are still readable")
+		assert.Equal(t, map[string]string{"core": "1.4.2"}, got)
+	})
+
+	t.Run("absent key is not an error", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.json", `{"spaces": {}}`)
+		got, err := StringMapAt(path, []string{"initials"})
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("nested path", func(t *testing.T) {
+		path := writeConfigFile(t, "dispat.json", `{"spaces": {"libs": {"tagFormats": {"core": "{name}@{version}"}}}}`)
+		got, err := StringMapAt(path, []string{"spaces", "libs", "tagFormats"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"core": "{name}@{version}"}, got)
+	})
+
+	t.Run("wrong shapes", func(t *testing.T) {
+		list := writeConfigFile(t, "dispat.json", `{"initials": ["core"]}`)
+		_, err := StringMapAt(list, []string{"initials"})
+		assert.ErrorContains(t, err, "is not an object")
+
+		nested := writeConfigFile(t, "dispat.json", `{"initials": {"core": {"version": "1.0.0"}}}`)
+		_, err = StringMapAt(nested, []string{"initials"})
+		assert.ErrorContains(t, err, "is not a string")
+
+		broken := writeConfigFile(t, "dispat.json", `{"initials":`)
+		_, err = StringMapAt(broken, []string{"initials"})
+		assert.Error(t, err)
+
+		_, err = StringMapAt(writeConfigFile(t, "dispat.ini", "x=1\n"), []string{"initials"})
+		assert.ErrorContains(t, err, "unknown config format")
+
+		_, err = StringMapAt(filepath.Join(t.TempDir(), "absent.json"), []string{"initials"})
+		assert.True(t, os.IsNotExist(err))
+	})
 }

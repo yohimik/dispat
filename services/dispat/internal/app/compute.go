@@ -540,7 +540,7 @@ func (a *App) applySuggestions(cfgPath string, apply []suggestion, declared []co
 		}
 		err := config.ReplaceStringList(target, src.KeyPath, remaining)
 		if errors.Is(err, config.ErrTOMLEdit) {
-			snippet, renderErr := config.RenderStringListTOML(src.KeyPath, remaining)
+			snippet, renderErr := config.RenderKeyTOML(src.KeyPath, remaining)
 			if renderErr != nil {
 				return renderErr
 			}

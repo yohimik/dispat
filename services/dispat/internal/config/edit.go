@@ -21,6 +21,16 @@ var ErrTOMLEdit = errors.New("a TOML config cannot be rewritten in place")
 // BackupSuffix is appended to the config file name for the pre-edit copy.
 const BackupSuffix = ".backup"
 
+// Edit is one key of a config file and the value to write there.
+type Edit struct {
+	// KeyPath locates the key: ["dependencies"] for a top-level one,
+	// ["packages", <key>, "dependencies"] for a nested one. Only a top-level
+	// key may be created; a nested path must already exist.
+	KeyPath []string
+	// Value is rendered in the file's own format.
+	Value any
+}
+
 // ReplaceDependencies rewrites only the dependency list at keyPath of the
 // config file at path — ["dependencies"] for the file's own top-level list,
 // ["packages", <key>, "dependencies"] for a packages entry of the root
@@ -36,35 +46,50 @@ const BackupSuffix = ".backup"
 // read and this call is overwritten for that one key (every other key keeps
 // the concurrent edit).
 func ReplaceDependencies(path string, keyPath []string, deps []DependencyConfig) error {
-	return replaceKey(path, keyPath, deps)
+	return ReplaceKeys(path, []Edit{{KeyPath: keyPath, Value: deps}})
 }
 
 // ReplaceStringList is ReplaceDependencies for the package-level dependency
 // shape: a plain list of provider names.
 func ReplaceStringList(path string, keyPath []string, items []string) error {
-	return replaceKey(path, keyPath, items)
+	return ReplaceKeys(path, []Edit{{KeyPath: keyPath, Value: items}})
 }
 
-// replaceKey rewrites the value at keyPath of the config file at path with
-// the rendered value, backing the previous bytes up and writing atomically.
-func replaceKey(path string, keyPath []string, value any) error {
+// ReplaceKeys applies every edit to one config file in a single pass: the
+// file is read once, each value spliced onto the result of the previous
+// splice, one backup written and one atomic rename performed. Two keys of the
+// same file must go through one call rather than two — a second call would
+// read the already-edited file and save that as the backup, so the pre-edit
+// copy the user reaches for would be gone.
+//
+// Everything ReplaceDependencies documents about formats holds here: JSON
+// keeps every byte outside the spliced spans, YAML keeps its comments but is
+// re-encoded, TOML returns ErrTOMLEdit. An edit set that changes nothing
+// writes nothing.
+func ReplaceKeys(path string, edits []Edit) error {
+	if len(edits) == 0 {
+		return nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	var out []byte
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".json":
-		out, err = replaceValueJSON(data, keyPath, value)
-	case ".yaml", ".yml":
-		out, err = replaceValueYAML(data, keyPath, value)
-	case ".toml":
-		return ErrTOMLEdit
-	default:
-		return fmt.Errorf("%s: unknown config format", path)
-	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+	format := strings.ToLower(filepath.Ext(path))
+	out := data
+	for _, e := range edits {
+		switch format {
+		case ".json":
+			out, err = replaceValueJSON(out, e.KeyPath, e.Value)
+		case ".yaml", ".yml":
+			out, err = replaceValueYAML(out, e.KeyPath, e.Value)
+		case ".toml":
+			return ErrTOMLEdit
+		default:
+			return fmt.Errorf("%s: unknown config format", path)
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
 	}
 	if bytes.Equal(out, data) {
 		return nil
@@ -136,15 +161,82 @@ func RenderDependenciesTOML(deps []DependencyConfig) (string, error) {
 	return string(out), err
 }
 
-// RenderStringListTOML renders a package-level dependency list at its key
-// path — the paste-ready fallback for TOML configs.
-func RenderStringListTOML(keyPath []string, items []string) (string, error) {
-	var wrapped any = items
+// RenderKeyTOML renders one value nested under its key path — the paste-ready
+// fallback for TOML configs, used for a package-level dependency list and for
+// the initials map alike.
+func RenderKeyTOML(keyPath []string, value any) (string, error) {
+	wrapped := value
 	for i := len(keyPath) - 1; i >= 0; i-- {
 		wrapped = map[string]any{keyPath[i]: wrapped}
 	}
 	out, err := toml.Marshal(wrapped)
 	return string(out), err
+}
+
+// StringMapAt reads the string map at keyPath of the config file at path,
+// exactly as the file spells it. It exists because the loaded *File cannot be
+// written back: viper lowercases every map key, so round-tripping the parsed
+// `initials` through a write would rename the user's entries. A key the file
+// does not carry is no error and returns a nil map; a value that is not a map
+// of scalars is.
+//
+// Unlike the writers this reads TOML too: a TOML config still needs its
+// current entries to render the paste-ready block.
+func StringMapAt(path string, keyPath []string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]any
+	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	case ".json":
+		err = json.Unmarshal(data, &doc)
+	case ".yaml", ".yml":
+		err = yaml.Unmarshal(data, &doc)
+	case ".toml":
+		err = toml.Unmarshal(data, &doc)
+	default:
+		return nil, fmt.Errorf("%s: unknown config format", path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	node := doc
+	for depth, key := range keyPath {
+		value, ok := lookupFold(node, key)
+		if !ok {
+			return nil, nil
+		}
+		child, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s: %s is not an object", path, strings.Join(keyPath[:depth+1], "."))
+		}
+		node = child
+	}
+	out := make(map[string]string, len(node))
+	for key, value := range node {
+		// Every value dispat reads through this is written as a quoted string
+		// in each format it accepts, and a version the loader would reject —
+		// an unquoted YAML 1.0, which decodes as a number — never reaches a
+		// write, because the config carrying it does not load.
+		text, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s: %s.%s is not a string", path, strings.Join(keyPath, "."), key)
+		}
+		out[key] = text
+	}
+	return out, nil
+}
+
+// lookupFold finds a key case-insensitively, the way the splicing writers
+// match theirs.
+func lookupFold(node map[string]any, key string) (any, bool) {
+	for name, value := range node {
+		if strings.EqualFold(name, key) {
+			return value, true
+		}
+	}
+	return nil, false
 }
 
 // emptyList reports a zero-length (or nil) slice value, which must render as
