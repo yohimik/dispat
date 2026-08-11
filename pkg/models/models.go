@@ -94,6 +94,14 @@ type File struct {
 	// exemption every run would poison the next one.
 	NonPackageScopes []string `mapstructure:"nonPackageScopes" json:"nonPackageScopes,omitempty"`
 
+	// UpdateCheck asks dispat whether a newer stable release of dispat itself
+	// exists, and prints a one-line suggestion when there is one (default
+	// true). The check runs alongside the command and is dropped if it has
+	// not answered by the time the command is done, so it can never slow a
+	// run down; it is skipped entirely when logFormat is "json", since a
+	// machine reading the output cannot act on the suggestion.
+	UpdateCheck *bool `mapstructure:"updateCheck" json:"updateCheck,omitempty"`
+
 	// Run is the run-level hooks object; see RunConfig.
 	Run *RunConfig `mapstructure:"run" json:"run,omitempty"`
 
@@ -746,6 +754,13 @@ func DefaultNonPackageScopes() []string { return []string{"release"} }
 // fields (Changelog.Enabled, GitHub.Enabled, Commit.Enabled, Commit.Verify),
 // whose nil means "use the default".
 func Bool(b bool) *bool { return &b }
+
+// UpdateCheckEnabled reports whether dispat looks for a newer release of
+// itself (default true). Nil-safe, so a configuration that never mentions it
+// gets the default.
+func (c *File) UpdateCheckEnabled() bool {
+	return c == nil || c.UpdateCheck == nil || *c.UpdateCheck
+}
 
 // Script resolves a script reference case-insensitively, because viper
 // lowercases the keys of the scripts map.

@@ -64,6 +64,16 @@ func TestEnabledDefaults(t *testing.T) {
 	if (&CommitConfig{Verify: Bool(false)}).VerifyEnabled() {
 		t.Error("verification can be disabled")
 	}
+	if !(&File{}).UpdateCheckEnabled() {
+		t.Error("the update check defaults to enabled")
+	}
+	if (&File{UpdateCheck: Bool(false)}).UpdateCheckEnabled() {
+		t.Error("the update check can be disabled")
+	}
+	var nilFile *File
+	if !nilFile.UpdateCheckEnabled() {
+		t.Error("an absent file means every default")
+	}
 }
 
 func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
