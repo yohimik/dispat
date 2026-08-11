@@ -37,6 +37,21 @@ func TestFormatOfRecognisesEveryName(t *testing.T) {
 		{"Alamofire.podspec", FormatPodspec},
 		{"Gemfile", FormatGemfile},
 		{"acme.gemspec", FormatGemspec},
+		{"Dockerfile", FormatDockerfile},
+		{"dockerfile", FormatDockerfile},
+		{"Dockerfile.dev", FormatDockerfile},
+		{"api.Dockerfile", FormatDockerfile},
+		{"Containerfile", FormatDockerfile},
+		{"Containerfile.build", FormatDockerfile},
+		{"api.containerfile", FormatDockerfile},
+		{"compose.yaml", FormatCompose},
+		{"compose.yml", FormatCompose},
+		{"compose.override.yaml", FormatCompose},
+		{"compose.override.yml", FormatCompose},
+		{"docker-compose.yaml", FormatCompose},
+		{"docker-compose.yml", FormatCompose},
+		{"docker-compose.override.yaml", FormatCompose},
+		{"docker-compose.override.yml", FormatCompose},
 	} {
 		got, ok := FormatOf(tc.name)
 		if !ok || got != tc.want {
@@ -53,6 +68,9 @@ func TestFormatOfRejectsNearMisses(t *testing.T) {
 		"notes.podspec.txt", "settings.gradle", "packages.lock.json",
 		"Directory.Build.props", "package.json.bak", "my-go.mod",
 		"OLD-REQUIREMENTS-NOTES.txt", "requirements.md",
+		".dockerignore", ".dockerfile", "Dockerfile.md", "Dockerfile.txt",
+		"Dockerfile.", "dockerfile-notes.md", "docker-compose.prod.yml",
+		"compose.json", "my-compose.yaml", "Containerfile.rst",
 	} {
 		if f, ok := FormatOf(name); ok {
 			t.Errorf("FormatOf(%q) = %q, want no match", name, f)

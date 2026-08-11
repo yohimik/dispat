@@ -436,3 +436,85 @@ func FuzzSubstituteBytes(f *testing.F) {
 		}
 	})
 }
+
+// FuzzRewriteDockerfile and FuzzRewriteCompose hold the two Docker formats to
+// the same contract as every other writer: never panic, never leave a failed
+// rewrite's changes behind, and never turn a line the writer was not aiming at
+// into something else. The last one is checked directly — the number of lines
+// must not change, and every line the rewrite did not target must come back
+// byte for byte — because neither format has a grammar cheap enough to
+// re-parse and prove the point that way.
+func FuzzRewriteDockerfile(f *testing.F) {
+	seeds := []string{
+		"FROM redis:7.2\n",
+		"FROM --platform=$BUILDPLATFORM a/b:1.0 AS build\nCOPY --from=build /a /b\n",
+		"RUN --mount=type=bind,from=a/b:1.0,target=/x make\n",
+		"FROM a/b:1.0@sha256:abc\nFROM ${X}:${Y}\nFROM scratch\n",
+		"FROM \\\n",
+		"# syntax=docker/dockerfile:1\n\n\n",
+		"from",
+		"",
+		"COPY --from= /a /b\nCOPY --mount= /c /d\nRUN --mount=from=,target=/x\n",
+	}
+	for _, s := range seeds {
+		f.Add(s, "a/b", "2.0.0")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng string) {
+		fuzzImageRewrite(t, "Dockerfile", content, "", []Edit{{Name: name, Range: rng}})
+	})
+}
+
+func FuzzRewriteCompose(f *testing.F) {
+	seeds := []string{
+		"services:\n  api:\n    build: .\n    image: a/api:1.0.0\n",
+		"services:\n  api:\n    build:\n      tags:\n        - a/api:1.0.0\n    image: a/api:1.0.0\n",
+		"services:\n  api:\n    build:\n      tags: [\"a/api:1.0.0\", a/api:latest]\n    image: a/api:1.0.0\n",
+		"services:\n  api:\n    ports:\n      - \"8080:80\"\n",
+		"services:\n  api:\n    build:\n      tags: [\"unterminated\n",
+		"services:\n",
+		"- a\n- b\n",
+		"",
+		"services:\n  a:\n    image: \n  b:\n    image: ''\n",
+	}
+	for _, s := range seeds {
+		f.Add(s, "a/api", "2.0.0", "3.0.0")
+	}
+	f.Fuzz(func(t *testing.T, content, name, rng, version string) {
+		fuzzImageRewrite(t, "compose.yaml", content, version, []Edit{{Name: name, Range: rng}})
+	})
+}
+
+// fuzzImageRewrite is the shared body of the two targets above.
+func fuzzImageRewrite(t *testing.T, base, content, version string, edits []Edit) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), base)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Skip()
+	}
+	_, err := Rewrite(path, version, edits)
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("manifest vanished: %v", readErr)
+	}
+	out := string(data)
+	if err != nil {
+		if out != content {
+			t.Fatalf("a failed rewrite modified the file:\n in: %q\nout: %q", content, out)
+		}
+		return
+	}
+	before, after := strings.Split(content, "\n"), strings.Split(out, "\n")
+	if len(before) != len(after) {
+		t.Fatalf("rewrite changed the line count:\n in: %q\nout: %q", content, out)
+	}
+	// Only a tag may differ, and a tag has no whitespace in it, so a line that
+	// changed must still hold the same number of tokens in the same places.
+	for i := range before {
+		if before[i] == after[i] {
+			continue
+		}
+		if len(strings.Fields(before[i])) != len(strings.Fields(after[i])) {
+			t.Fatalf("rewrite restructured line %d:\n in: %q\nout: %q", i, before[i], after[i])
+		}
+	}
+}

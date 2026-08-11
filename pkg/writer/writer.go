@@ -126,6 +126,7 @@ var rewriters = map[manifest.Format]rewriteFunc{
 	manifest.FormatGradleBuild:     rewriteGradleBuild,
 	manifest.FormatPodspec:         rewritePodspec,
 	manifest.FormatGemspec:         rewriteGemspec,
+	manifest.FormatCompose:         rewriteCompose,
 
 	// These formats declare no version of their own, so Rewrite's version
 	// argument has no target and is dropped here rather than inside each one.
@@ -149,6 +150,9 @@ var rewriters = map[manifest.Format]rewriteFunc{
 	},
 	manifest.FormatGemfile: func(path, _ string, edits []Edit) (Result, error) {
 		return rewriteGemfile(path, edits)
+	},
+	manifest.FormatDockerfile: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteDockerfile(path, edits)
 	},
 }
 

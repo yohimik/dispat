@@ -36,6 +36,8 @@ const (
 	FormatPodspec         Format = "podspec"          // *.podspec
 	FormatGemfile         Format = "gemfile"          // Gemfile
 	FormatGemspec         Format = "gemspec"          // *.gemspec
+	FormatDockerfile      Format = "dockerfile"       // Dockerfile, Dockerfile.*, *.Dockerfile
+	FormatCompose         Format = "compose"          // compose.yaml, docker-compose.yml, ...
 )
 
 // Formats lists every recognised format. Both halves range over it to prove
@@ -46,7 +48,7 @@ var Formats = []Format{
 	FormatPackagesProps, FormatPackagesConfig, FormatPubspec, FormatPlist,
 	FormatAndroidManifest, FormatGradleCatalog, FormatGradleBuild,
 	FormatXcodeProject, FormatPodfile, FormatPodspec, FormatGemfile,
-	FormatGemspec,
+	FormatGemspec, FormatDockerfile, FormatCompose,
 }
 
 // byName maps an exact file name onto its format.
@@ -72,6 +74,17 @@ var byName = map[string]Format{
 	// convention, but settings.gradle may declare one anywhere, so the base
 	// name is the honest match.
 	"libs.versions.toml": FormatGradleCatalog,
+	// The Compose specification loads a base file and, beside it, an override
+	// file that layers on top. Both are manifests: the override is where a
+	// repository routinely pins the tag it actually deploys.
+	"compose.yaml":                 FormatCompose,
+	"compose.yml":                  FormatCompose,
+	"compose.override.yaml":        FormatCompose,
+	"compose.override.yml":         FormatCompose,
+	"docker-compose.yaml":          FormatCompose,
+	"docker-compose.yml":           FormatCompose,
+	"docker-compose.override.yaml": FormatCompose,
+	"docker-compose.override.yml":  FormatCompose,
 }
 
 // byExtension maps a file extension onto its format, for the families that
@@ -86,7 +99,7 @@ var byExtension = map[string]Format{
 }
 
 // FormatOf resolves a file's base name onto its format: by exact name, then by
-// extension, then by the one family whose names vary. A name that matches
+// extension, then by the two families whose names vary. A name that matches
 // nothing is not a manifest.
 func FormatOf(name string) (Format, bool) {
 	if f, ok := byName[name]; ok {
@@ -97,6 +110,9 @@ func FormatOf(name string) (Format, bool) {
 	}
 	if IsRequirementsFile(name) {
 		return FormatRequirements, true
+	}
+	if IsDockerfile(name) {
+		return FormatDockerfile, true
 	}
 	return "", false
 }
@@ -113,4 +129,45 @@ func IsRequirementsFile(name string) bool {
 	}
 	words := NameWords(strings.TrimSuffix(lower, ".txt"))
 	return len(words) > 0 && (words[0] == "requirements" || words[len(words)-1] == "requirements")
+}
+
+// dockerBuildFileNames are the two spellings of a container build file: the
+// Docker one and the Podman one, which is the same format under another name.
+var dockerBuildFileNames = []string{"dockerfile", "containerfile"}
+
+// proseExtensions are the suffixes that make a Dockerfile-prefixed name
+// documentation rather than a build file. "Dockerfile.dev" is a Dockerfile;
+// "Dockerfile.md" is an article about one.
+var proseExtensions = map[string]bool{
+	"md": true, "markdown": true, "txt": true, "rst": true, "adoc": true,
+}
+
+// IsDockerfile reports a container build file. Unlike every other format here,
+// this one has no fixed name and no extension: Docker takes the base name
+// "Dockerfile", the convention for a variant is a suffix ("Dockerfile.dev"),
+// and the convention for keeping several in one folder is a prefix
+// ("api.Dockerfile"). Podman's "Containerfile" is the same format spelled
+// differently and is accepted on the same terms.
+//
+// The comparison ignores case, because "-f dockerfile" builds exactly as
+// "-f Dockerfile" does and repositories spell it both ways.
+func IsDockerfile(name string) bool {
+	lower := strings.ToLower(name)
+	for _, base := range dockerBuildFileNames {
+		switch {
+		case lower == base:
+			return true
+		case strings.HasPrefix(lower, base+"."):
+			suffix := lower[len(base)+1:]
+			if i := strings.LastIndexByte(suffix, '.'); i >= 0 {
+				suffix = suffix[i+1:]
+			}
+			return suffix != "" && !proseExtensions[suffix]
+		case strings.HasSuffix(lower, "."+base):
+			// A leading dot would make the whole name the extension
+			// (".dockerfile" is a hidden file, not a project's build file).
+			return len(lower) > len(base)+1
+		}
+	}
+	return false
 }

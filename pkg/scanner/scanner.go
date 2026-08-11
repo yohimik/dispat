@@ -90,6 +90,7 @@ const (
 	EcosystemAndroid   = "android"   // AndroidManifest.xml
 	EcosystemGradle    = "gradle"    // libs.versions.toml, build.gradle(.kts)
 	EcosystemRubyGems  = "rubygems"  // Gemfile, *.gemspec
+	EcosystemDocker    = "docker"    // Dockerfile, compose.yaml
 )
 
 // Manifest is one parsed manifest file.
@@ -164,6 +165,8 @@ var parsers = map[manifest.Format]parseFunc{
 	manifest.FormatPodspec:         parsePodspec,
 	manifest.FormatGemfile:         parseGemfile,
 	manifest.FormatGemspec:         parseGemspec,
+	manifest.FormatDockerfile:      parseDockerfile,
+	manifest.FormatCompose:         parseCompose,
 }
 
 // parserFor resolves a file name onto its parser.

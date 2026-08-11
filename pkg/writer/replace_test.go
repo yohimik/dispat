@@ -291,6 +291,10 @@ func TestEveryFormatDeclaresReplaceSupport(t *testing.T) {
 		manifest.FormatXcodeProject: true, manifest.FormatPodfile: true,
 		manifest.FormatPodspec: true, manifest.FormatGemfile: true,
 		manifest.FormatGemspec: true,
+		// A Docker image is named, not located: a reference points at a
+		// registry, and there is no spelling for "resolve this one from a
+		// folder instead" to manage.
+		manifest.FormatDockerfile: true, manifest.FormatCompose: true,
 	}
 	for _, f := range manifest.Formats {
 		_, implemented := replacers[f]

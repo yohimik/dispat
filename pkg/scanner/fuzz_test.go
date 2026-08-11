@@ -21,6 +21,8 @@ var fuzzManifestNames = []string{
 	"Gemfile", "acme.gemspec",
 	"Acme.nuspec", "Directory.Packages.props", "packages.config",
 	"App.fsproj", "App.vbproj",
+	"Dockerfile", "Dockerfile.dev", "api.Dockerfile", "Containerfile",
+	"compose.yaml", "docker-compose.override.yml",
 }
 
 func FuzzParsers(f *testing.F) {
@@ -50,6 +52,10 @@ func FuzzParsers(f *testing.F) {
 		"<package><metadata><id>$id$</id><version>1</version><dependencies><group><dependency id=\"a\" version=\"1\"/></group></dependencies></metadata></package>",
 		"<Project><ItemGroup><PackageVersion Include=\"a\" Version=\"1\"/></ItemGroup></Project>",
 		"<packages><package id=\"a\" version=\"1\" developmentDependency=\"true\"/></packages>",
+		"FROM --platform=$BUILDPLATFORM a/b:1 AS x\nCOPY --from=x /a /b\nRUN --mount=type=bind,from=c/d:2 make\n",
+		"FROM \\\n",
+		"services:\n  api:\n    build:\n      tags:\n        - a/api:1\n    image: a/api:1\n",
+		"services:\n  api:\n    ports:\n      - \"8080:80\"\n",
 	}
 	for _, s := range seeds {
 		f.Add(s)

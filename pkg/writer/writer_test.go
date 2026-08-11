@@ -233,6 +233,9 @@ func TestEveryScannedEcosystemHasAWriter(t *testing.T) {
 		"Podfile", "Alamofire.podspec", "build.gradle", "build.gradle.kts",
 		"Gemfile", "acme.gemspec", "Acme.nuspec", "Directory.Packages.props",
 		"packages.config", "App.fsproj", "App.vbproj",
+		"Dockerfile", "Dockerfile.dev", "api.Dockerfile", "Containerfile",
+		"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml",
+		"compose.override.yaml", "docker-compose.override.yml",
 	} {
 		if !Supported(name) {
 			t.Errorf("%s is scanned but has no writer", name)
