@@ -50,6 +50,7 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | `shell`            | array of strings                           | no       | Command prefix scripts are appended to, e.g. `["bash", "-c"]` or `["cmd", "/C"]`. Default `["/bin/sh", "-c"]`.                                                         |
 | `run`              | object                                     | no       | The run-level hooks (`beforeAll` ... `afterPush`), keyed by hook name; see [Run-level hooks](#run-level-hooks).                                                        |
 | `parser`           | object                                     | no       | Commit-message parser options; see [`parser`](./parser.md#parser). Everything unset keeps the specification default.                                                   |
+| `updateCheck`      | bool                                       | no       | Whether dispat looks for a newer release of itself and mentions one on a command's way out. Default `true`; never runs under `logFormat: json`, and never delays a command. See [Updating dispat](../self-update.md#being-told-there-is-an-update).  |
 
 ## dependencies
 

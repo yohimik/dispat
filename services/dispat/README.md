@@ -48,6 +48,7 @@ $ dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle 
 $ dispat run build --since all -p core   # try the build script in packages/core with the real DISPAT_* env
 $ dispat release -g platform        # release one versioning group; -s libs releases one space
 $ dispat lint                       # run a script in every changed package that has it, in graph order
+$ dispat self-update                # replace this binary with the latest release; --rollback puts the old one back
 $ git commit -m "feat(core)%beta: try it out"
 $ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)%stable:
 ```
@@ -107,6 +108,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [The replacer](https://yohimik.github.io/dispat/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
 | [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
 | [Script environment](https://yohimik.github.io/dispat/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
+| [Updating dispat](https://yohimik.github.io/dispat/self-update)                 | `dispat self-update`: how the binary replaces itself, the backup and the rollback, the update notice. |
 | [Architecture](https://yohimik.github.io/dispat/architecture)                   | Modules, algorithms, execution model, design decisions, testing.                                    |
 | [Test coverage](https://yohimik.github.io/dispat/coverage)                      | The per-package statement coverage table and how to reproduce it.                                   |
 | [Integration tests](../../tests/integration)                                    | The black-box suite: setup, running, results; links the test plan.                                  |

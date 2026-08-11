@@ -11,9 +11,13 @@ The CLI lives in the `services/dispat` module of the repository (the binary inst
 go install github.com/yohimik/dispat/services/dispat@latest
 ```
 
-Prebuilt binaries for Linux, macOS and Windows are attached to every
+Prebuilt binaries for Linux, macOS and Windows, on Intel and on ARM, are attached to every
 [GitHub release](https://github.com/yohimik/dispat/releases); download one and put it on your `PATH` if you prefer not
 to build from source.
+
+A downloaded binary keeps itself current: `dispat self-update` replaces it with the latest release and keeps the old
+one beside it for a week in case you want it back. Every command mentions a newer release on its way out, so you find
+out without going looking. See [Updating dispat](./self-update.md).
 
 ## First configuration
 

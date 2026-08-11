@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against nineteen goals, one test file each:
+The suite was designed against twenty goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -123,6 +123,20 @@ The suite was designed against nineteen goals, one test file each:
     across the whole sweep rather than per file; that `--replace` adds and removes a redirect; that the syncLock
     scripts run exactly where a manifest changed and `--sync-lock=false` skips them; and that every refusal (a stale
     edit, a malformed spec, an unknown scope, nothing to write, a positional argument) reaches the process exit code.
+
+20. **Self-update** (`selfupdate_test.go`): dispat replacing its own binary, which is the one thing no other area can
+    witness, because it is the one command that overwrites the file it is running from. Two binaries are built at two
+    versions and a fake releases API hands one out: the old one downloads it, checks it against the published size and
+    checksum, runs it, and steps aside for it, and the same path then answers with the new version while the old one
+    waits beside it. Then the rest of the surface, all through the process boundary: `--check` changing nothing and
+    exiting 1 because there is something to install; a second run reporting it is already current and `--force`
+    installing anyway; `--release` reaching a named version including backwards and refusing one nobody published;
+    `--rollback` restoring the backup and rotating, so a second rollback returns and the directory is never left
+    holding a parked file; a checksum that does not describe what arrived refusing with the working binary untouched
+    and no backup created; a release with no binary for this platform naming the ones it has; prereleases passed over
+    until `--prerelease` asks for them and `--force` being the way back off that line; the backup surviving six days
+    and being cleared by the next command after eight; and the notice riding out on an ordinary command, staying out of
+    JSON output, and not being made at all when the configuration says no.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The

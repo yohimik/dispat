@@ -19,6 +19,7 @@ dispat [command] [flags]
 | `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `github`                  | Create the per-package GitHub release now; see [The step commands](#the-step-commands).                           |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](#the-compute-command). |
+| `self-update`             | Replace this binary with the latest release; see [Updating dispat](./self-update.md).                             |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The manifest commands](#the-manifest-commands).                     |
 | `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The manifest commands](#the-manifest-commands).                  |
 | `replacer <file>...`      | Replace literal text in any file, parsing nothing; see [The replacer](./replacer.md).                             |
@@ -42,14 +43,18 @@ dispat [command] [flags]
 | `--format`            | `json`      | `init` only: the config file format to write (`json`, `yaml` or `toml`).                                                                                                                               |
 | `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                    |
 | `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                    |
-| `--check`             |             | `compute` only: report only and exit `1` when any suggestion exists, edges and baselines alike: the CI gate for a config lagging the manifests. Overrides both apply modes.                            |
+| `--check`             |             | `compute` and `self-update`: report only, change nothing, and exit `1` when there is something to do. For `compute`, any suggestion at all, edges and baselines alike, which is the CI gate for a config lagging the manifests, and it overrides both apply modes. For `self-update`, a release it would install.  |
 | `--tag`               |             | `commit` only: also create the annotated release tag at the resulting commit; an identical existing tag is skipped.        |
 | `--push`              |             | `commit` only: push the branch, and with `--tag` the tags; tags already on the remote are skipped.                         |
 | `--name`, `--email`   | from config | `commit` only: override the `commit.name` / `commit.email` committer identity.                                             |
 | `--remote`            | from config | `commit` only: override the `commit.remote` push target.                                                                   |
 | `--message-format`    | from config | `commit` only: override the `commit.messageFormat` template.                                                               |
 | `--include`           | from config | `commit` only: override the `commit.include` extra staged paths.                                                           |
-| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `github` only: override the matching `github.*` values for every package of the invocation.  |
+| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `github`: override the matching `github.*` values for every package of the invocation. `self-update`: point it at another repository or a GitHub Enterprise endpoint instead of dispat's own releases.  |
+| `--force`             |             | `self-update` only: install the selected release even when it is not newer, which repairs a damaged binary and leaves a prerelease line.                                    |
+| `--prerelease`        |             | `self-update` only: consider prereleases too. Ordering still decides, so a released `1.2.0` still wins over `1.2.0-rc.1`.                                                   |
+| `--release`           |             | `self-update` only: install exactly this version, downgrades included. A leading `v` is fine.                                                                              |
+| `--rollback`          |             | `self-update` only: restore the binary the last update replaced, downloading nothing. Refuses beside the flags that select a release; combines with `--check`.              |
 | `--target`            |             | `github` only: create the tag at this commit or branch (`target_commitish`). Only safe once the commit is on the remote.   |
 | `--file`, `--title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation.          |
 | `--range`, `--match`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation.                             |
@@ -63,7 +68,7 @@ dispat [command] [flags]
 | `--replace`           |             | `writer` and `autoreplace`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
 | `--sub`               |             | `replacer` only: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
 | `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. `autoreplace`: an edit that matched no manifest anywhere; see [Editing across the monorepo](./autoreplace.md#applied-skipped-and-missing-across-many-packages). |
-| `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.               |
+| `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`, and a binary installed with `go install` says so in the same parenthesis, since that decides how it is [updated](./self-update.md#how-you-installed-it-matters). |
 | `--help`, `-h`        |             | Print help and exit. Without a command word, the command list and the global flags; after one, that command's synopsis and its own flags. See [Getting help](#getting-help).                            |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
@@ -367,6 +372,39 @@ that looks binary, exits `1`.
 
 The full guide, with worked examples and the format list, is [Manifest tools](./manifests.md), and the replacer has
 [a page of its own](./replacer.md).
+
+## The self-update command
+
+`dispat self-update` replaces the running binary with the latest stable release of dispat itself. It needs no config
+file and no git repository: it is about the binary, not about the repository it is standing in.
+
+The binary for the running platform is downloaded from the GitHub release, checked against the size and checksum the
+release published, run once to prove it works, and only then moved into place. The binary it replaces is kept beside it
+as `<name>.backup` and removed by a later run a week on. Nothing moves until every check has passed, so a failed update
+leaves the working binary exactly where it was.
+
+```console
+$ dispat self-update --check
+current   dispat 1.0.0 (darwin_arm64)
+available dispat 1.1.0 (services/dispat/v1.1.0)
+
+install it with: dispat self-update
+```
+
+`--check` changes nothing and exits `1` when there is something to install, which makes it a gate. `--prerelease`
+considers the release candidates too, `--release <version>` installs one named version including a downgrade, and
+`--force` installs the selection even when it is not newer. Nothing downgrades on its own: a release older than the
+running binary is reported as "already the latest" unless one of those two flags says otherwise.
+
+`--rollback` restores the kept binary and downloads nothing. It rotates rather than moves, so the binary it replaces
+becomes the new backup and a second `--rollback` returns.
+
+A binary installed with `go install` is not replaced — the next `go install` would undo it — and `--check` prints the
+`go install` command that does update it. A local build (`dev`) is refused for the same reason.
+
+Every other command reports a newer stable release on its way out, without ever waiting for the answer. Set
+[`updateCheck`](./configuration/README.md) to `false`, or `DISPAT_UPDATE_CHECK=0` in the environment, to switch that
+off. The full guide is [Updating dispat](./self-update.md).
 
 ## Exit codes
 
