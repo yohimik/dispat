@@ -349,3 +349,82 @@ func TestReplaceRulePropagatesCancellation(t *testing.T) {
 	assert.Equal(t, "1.0.0\n", fileText(t, root, "web/notes.txt"),
 		"nothing may be written after the cancellation")
 }
+
+func TestReplaceRuleStepsOverAnUnreadableFolder(t *testing.T) {
+	// A folder the walk cannot enter is reported and stepped over, the way a
+	// scan treats a sub-tree it cannot read: the files it *can* reach are
+	// still reconciled, and the release is not failed over a folder no rule
+	// was ever going to reach.
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
+	root := t.TempDir()
+	space := avReplaceSpace(model.ReplaceRule{
+		Files: []string{"*.txt"},
+		Find:  "{previous}",
+		Write: "{version}",
+	})
+	seedFile(t, root, "web/reachable.txt", "1.0.0\n")
+	seedFile(t, root, "web/locked/inner.txt", "1.0.0\n")
+	locked := filepath.Join(root, "web", "locked")
+	require.NoError(t, os.Chmod(locked, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	p := avPlan(root, space, "web")
+
+	var logBuf bytes.Buffer
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1})
+	e.Log = syncedLog(&logBuf)
+	res := e.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	assert.Equal(t, "1.0.1\n", fileText(t, root, "web/reachable.txt"))
+	assert.Contains(t, logBuf.String(), "folder skipped")
+}
+
+func TestReplaceRuleFailsOnAnUnreadablePackageFolder(t *testing.T) {
+	// The package's own folder is different: if that cannot be walked, the
+	// rules cannot be said to have run at all.
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
+	root := t.TempDir()
+	space := avReplaceSpace(model.ReplaceRule{
+		Files: []string{"*.txt"},
+		Find:  "{previous}",
+		Write: "{version}",
+	})
+	seedFile(t, root, "a/notes.txt", "1.0.0\n")
+	dir := filepath.Join(root, "a")
+	require.NoError(t, os.Chmod(dir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	res := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1}).
+		Run(context.Background(), avPlan(root, space, "a"))
+	require.Equal(t, StatusFailed, res["a"].Status)
+	assert.Equal(t, "version", res["a"].FailedStage)
+}
+
+func TestReplaceRuleWithNoProvidersSelectsNothing(t *testing.T) {
+	// A provider-scoped rule in a package with no providers expands into
+	// nothing, so its globs must select nothing either. The file it would
+	// have reached is left exactly as it was, and the sibling rule that did
+	// expand still does its job.
+	root := t.TempDir()
+	space := avReplaceSpace(
+		model.ReplaceRule{Files: []string{"deps.txt"}, Find: "{provider}@{providerPrevious}", Write: "{provider}@{providerVersion}"},
+		model.ReplaceRule{Files: []string{"own.txt"}, Find: "web@{previous}", Write: "web@{version}"},
+	)
+	seedFile(t, root, "web/deps.txt", "core@1.0.0\n")
+	seedFile(t, root, "web/own.txt", "web@1.0.0\n")
+	p := avPlan(root, space, "web") // no p.Providers entry at all
+
+	var logBuf bytes.Buffer
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1})
+	e.Log = syncedLog(&logBuf)
+	res := e.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	assert.Equal(t, "core@1.0.0\n", fileText(t, root, "web/deps.txt"),
+		"a rule that expanded into nothing must not reach its files")
+	assert.Equal(t, "web@1.0.1\n", fileText(t, root, "web/own.txt"))
+	assert.NotContains(t, logBuf.String(), plan.CodeReplaceRuleMatchedNothing,
+		"a rule with no providers to expand for is not a stale rule")
+}

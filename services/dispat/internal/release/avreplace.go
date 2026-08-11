@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
 
@@ -65,8 +67,11 @@ func (tc *taskCtx) reconcileReplace(ctx context.Context, av *model.AutoVersion) 
 
 	// One walk of the package folder, matching every rule's globs as it goes,
 	// so a package with six rules is still read once and a file matched by
-	// four of them is still written once.
-	files, err := selectFiles(ctx, tc.rel.Pkg.Dir, av.Replace)
+	// four of them is still written once. Only the rules that expanded into
+	// something are matched: a provider-scoped rule in a package with no
+	// providers selects nothing, and reading its files to substitute nothing
+	// would be pure waste.
+	files, err := selectFiles(ctx, tc.rel.Pkg.Dir, expandedRules(av, expansions), tc.log)
 	if err != nil {
 		return err
 	}
@@ -200,6 +205,16 @@ func (tc *taskCtx) reportRuleOutcomes(av *model.AutoVersion, expansions []expans
 	}
 }
 
+// expandedRules is the rules that produced at least one expansion, keeping
+// their positions so an expansion's rule index still indexes the result.
+func expandedRules(av *model.AutoVersion, expansions []expansion) []model.ReplaceRule {
+	out := make([]model.ReplaceRule, len(av.Replace))
+	for _, e := range expansions {
+		out[e.rule] = av.Replace[e.rule]
+	}
+	return out
+}
+
 // probeFor is the no-op substitution that asks whether a rule's result is
 // already in the file.
 func probeFor(sub writer.Substitution) writer.Substitution {
@@ -245,14 +260,27 @@ type selectedFile struct {
 // folders a workspace walk never enters are skipped here too: a rule must not
 // reach into node_modules or a build output tree, where the version text it
 // looks for belongs to somebody else's code.
-func selectFiles(ctx context.Context, dir string, rules []model.ReplaceRule) ([]selectedFile, error) {
+func selectFiles(ctx context.Context, dir string, rules []model.ReplaceRule, log zerolog.Logger) ([]selectedFile, error) {
 	var out []selectedFile
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if err != nil {
-			return err
+			// The package folder itself has to be readable; anything below it
+			// is reported and stepped over, matching how a scan treats a
+			// sub-tree it cannot enter. Failing the release over an
+			// unreadable folder no rule was ever going to reach would be the
+			// worse trade, and a rule that then reconciles nothing is exactly
+			// what W222 is for.
+			if path == dir {
+				return err
+			}
+			log.Warn().Err(err).Str("path", path).Msg("auto-versioning: folder skipped")
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			if path != dir && scanner.SkipDir(d.Name()) {
@@ -270,6 +298,12 @@ func selectFiles(ctx context.Context, dir string, rules []model.ReplaceRule) ([]
 		rel = filepath.ToSlash(rel)
 		var matched []int
 		for i, rule := range rules {
+			// A rule with no globs selects nothing. Saying so here matters:
+			// matchAny reads an empty list as "any", which is right for a
+			// range policy and exactly wrong for a file selector.
+			if len(rule.Files) == 0 {
+				continue
+			}
 			if matchAny(rule.Files, rel) {
 				matched = append(matched, i)
 			}
