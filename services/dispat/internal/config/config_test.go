@@ -1848,3 +1848,23 @@ func TestLoadInFolderConfigRecordLineShorthands(t *testing.T) {
 		{Line: []string{"four"}, Package: []string{"core"}},
 	}, core.Changelog.Format.Footer, "and they replace the inherited list")
 }
+
+// TestLoadRecordLineUnusableShapeIsReportedByTheDecoder: a shape the
+// shorthand does not recognise is passed through untouched, so the decoder
+// reports it against the field the user actually wrote instead of the hook
+// inventing a message for it.
+func TestLoadRecordLineUnusableShapeIsReportedByTheDecoder(t *testing.T) {
+	cases := map[string]any{
+		"a number for the whole list": 5,
+		"a number as an element":      []any{5},
+		"a nested array of numbers":   []any{[]any{1, 2}},
+	}
+	for name, header := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := writeRawRepo(t, rawRecordConfig(map[string]any{"header": header}), "pkgs/core")
+			_, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "header", "the error names the key that is wrong")
+		})
+	}
+}

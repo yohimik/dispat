@@ -29,12 +29,12 @@ baselines in `dispat compute`, the github step command, the prerelease record op
 | - `main.go`, `globx`, `model`, `cli`    | 100%                                                                                     |
 | - `filter` (the selection resolver)     | 99.4%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
-| - `plan` (planner)                      | 96.6%                                                                                    |
-| - `changelog`                           | 96.5%                                                                                    |
-| - `release` (executor)                  | 95.9%                                                                                    |
-| - `config`                              | 96.0%                                                                                    |
+| - `plan` (planner)                      | 96.7%                                                                                    |
+| - `changelog`                           | 98.1%                                                                                    |
+| - `release` (executor)                  | 95.8%                                                                                    |
+| - `config`                              | 96.2%                                                                                    |
 | - `app`                                 | 94.0%                                                                                    |
-| - `github`                              | 93.9%                                                                                    |
+| - `github`                              | 94.1%                                                                                    |
 | - `selfupdate`                          | 93.0%                                                                                    |
 | - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |
