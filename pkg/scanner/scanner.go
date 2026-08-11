@@ -203,6 +203,15 @@ var skipDirs = map[string]bool{
 	"xcuserdata":       true,
 }
 
+// SkipDir reports a folder name a workspace walk must not enter: the
+// dependency trees, virtual environments and build output listed above, plus
+// every dot-folder. It is the rule Scan itself follows, exported so a caller
+// walking a package folder for some other reason stays out of exactly the
+// same places rather than keeping a second list that drifts from this one.
+func SkipDir(name string) bool {
+	return strings.HasPrefix(name, ".") || skipDirs[name]
+}
+
 // maxManifestBytes caps a single manifest read. A manifest is a hand-written
 // file measured in kilobytes; anything near this bound is generated output or
 // garbage, and a scanner that walks arbitrary checkouts must not slurp a
@@ -252,7 +261,7 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if path != dir && (skipDirs[name] || strings.HasPrefix(name, ".")) {
+			if path != dir && SkipDir(name) {
 				return filepath.SkipDir
 			}
 			return nil

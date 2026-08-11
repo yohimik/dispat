@@ -50,13 +50,25 @@ func workspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log z
 	return names, dirs
 }
 
-// autoVersion natively rewrites the package's manifests: every declared
+// autoVersion is the version stage's native reconciliation: the parsing
+// strategy first, then the replacing one, so a package using both sees its
+// manifests reconciled before the literal substitutions run over the rest of
+// its files. Runs inside the version stage frame, after beforeVersion and
+// before any flow.version script, and its failure fails the stage. With
+// neither strategy configured it does nothing at all, which is how a space
+// asks for syncLock alone.
+func (tc *taskCtx) autoVersion(ctx context.Context, av *model.AutoVersion) error {
+	if err := tc.reconcileManifests(ctx, av); err != nil {
+		return err
+	}
+	return tc.reconcileReplace(ctx, av)
+}
+
+// reconcileManifests natively rewrites the package's manifests: every declared
 // workspace dependency passing the space's policy filters gets its range
 // reconciled to the provider's end-of-run version, and the package's own
-// version field is updated (§12.4). Runs inside the version stage frame,
-// after beforeVersion and before any flow.version script, and its failure
-// fails the stage.
-func (tc *taskCtx) autoVersion(ctx context.Context, av *model.AutoVersion) error {
+// version field is updated (§12.4).
+func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion) error {
 	if av.Manifests == model.ScopeNone {
 		return nil // the parsing strategy is off; replace rules do the work
 	}

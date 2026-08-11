@@ -175,6 +175,12 @@ const (
 	// failure, so the rewritten range is optimistic about a publish that may
 	// still fail. `dispat compute` derives the missing edge.
 	CodeUnscheduledRewriteEdge = "W221"
+	// CodeReplaceRuleMatchedNothing marks an autoVersion replace rule whose
+	// text was found in none of the files it selected. A rule that reconciles
+	// nothing is almost always a mistyped template or a stale glob, and it
+	// would otherwise fail silently for as many releases as it took someone
+	// to notice.
+	CodeReplaceRuleMatchedNothing = "W222"
 
 	// --- standalone step commands and re-runs ---
 
