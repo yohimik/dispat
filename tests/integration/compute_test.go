@@ -130,3 +130,51 @@ func TestComputeAmbiguousNameReportsW220(t *testing.T) {
 	assert.True(t, harness.HasCode(res.Events, "W220"),
 		"the ambiguity must reach the events: %s", res.Stdout)
 }
+
+// TestComputeEditsSpaceLayerDeclarations: an edge declared in a space's
+// packages entry lives in the root config, and one declared in a space
+// folder's file lives in that file. `compute --write` removes each stale
+// edge where it was written, names the source in the listing, and backs up
+// only the files it touched.
+func TestComputeEditsSpaceLayerDeclarations(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+			"web": {Dependencies: []string{"ghost"}},
+		}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "ghost")
+	r.SeedPackage("packages", "web")
+	spaceFile(t, r, "packages", models.SpaceFile{
+		Packages: map[string]models.PackageConfig{"core": {Dependencies: []string{"ghost"}}},
+	})
+	// Both consumers carry a manifest, so their declarations are judged
+	// against something: an edge no manifest declares is stale.
+	r.WriteFile("packages/web/package.json", `{"name": "@acme/web"}`)
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core"}`)
+	r.Commit("feat(core,ghost,web): bootstrap")
+
+	res := r.Command("compute")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, `spaces["libs"]: packages["web"]: dependencies[0]`,
+		"the listing names the space entry that holds the edge")
+	assert.Contains(t, res.Stdout, `packages["core"]: dependencies[0]`,
+		"and the space file that holds the other")
+
+	require.Equal(t, 0, r.Command("compute", "--write").Code)
+
+	rootAfter, err := os.ReadFile(r.Path("dispat.json"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(rootAfter), "ghost", "the space entry's edge is gone from the root config")
+	spaceAfter, err := os.ReadFile(r.Path("packages", "dispat.json"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(spaceAfter), "ghost", "and the space file's edge from the space file")
+	assert.FileExists(t, r.Path("packages", "dispat.json.backup"), "each edited file keeps its own backup")
+
+	// Both edits together still load, and the packages survive them.
+	r.StatusOK()
+}

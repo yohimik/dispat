@@ -947,3 +947,166 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 			"onFail observes the failure with the stage that carried it")
 	})
 }
+
+// TestConfigDispatignoreSelectsTheConfigFile: a folder holding two config
+// files says which one is real by naming the other in its .dispatignore, and
+// the rule holds at each of the three places a config file can sit — the
+// repository root, a space folder and a package folder. Every choice is
+// proved by a tag only that file's tagFormat could produce.
+func TestConfigDispatignoreSelectsTheConfigFile(t *testing.T) {
+	writeYAML := func(r *harness.Repo, path string, value any) {
+		t.Helper()
+		data, err := json.MarshalIndent(value, "", "  ")
+		require.NoError(t, err)
+		r.WriteFile(path, string(data)) // JSON is valid YAML
+	}
+
+	t.Run("repository root", func(t *testing.T) {
+		r := harness.New(t)
+		decoy := libsConfig(echoBuild, 1)
+		decoy.TagFormat = "json-{name}@{version}"
+		r.WriteConfigModel(decoy)
+		real := libsConfig(echoBuild, 1)
+		real.TagFormat = "yaml-{name}@{version}"
+		writeYAML(r, "dispat.yaml", real)
+		r.WriteFile(".dispatignore", "# the json file is generated\ndispat.json\n")
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): first release")
+
+		r.ReleaseOK()
+		assert.True(t, r.HasTag("yaml-core@0.1.0"), "tags: %v", r.TagList())
+	})
+
+	t.Run("space folder", func(t *testing.T) {
+		r := harness.New(t)
+		r.WriteConfigModel(libsConfig(echoBuild, 1))
+		r.SeedPackage("packages", "core")
+		spaceFile(t, r, "packages", models.SpaceFile{TagFormat: "json-{name}@{version}"})
+		writeYAML(r, "packages/dispat.yaml", models.SpaceFile{TagFormat: "yaml-{name}@{version}"})
+		r.WriteFile("packages/.dispatignore", "dispat.json\n")
+		r.Commit("feat(core): first release")
+
+		r.ReleaseOK()
+		assert.True(t, r.HasTag("yaml-core@0.1.0"), "tags: %v", r.TagList())
+	})
+
+	t.Run("package folder", func(t *testing.T) {
+		r := harness.New(t)
+		r.WriteConfigModel(libsConfig(echoBuild, 1))
+		r.SeedPackage("packages", "core")
+		packageFile(t, r, "packages/core", models.PackageConfig{TagFormat: "json-{name}@{version}"})
+		writeYAML(r, "packages/core/dispat.yaml", models.PackageConfig{TagFormat: "yaml-{name}@{version}"})
+		r.WriteFile("packages/core/.dispatignore", "dispat.json\n")
+		r.Commit("feat(core): first release")
+
+		r.ReleaseOK()
+		assert.True(t, r.HasTag("yaml-core@0.1.0"), "tags: %v", r.TagList())
+	})
+}
+
+// TestConfigResolutionAscendsPastASpaceFile: a space folder's file declares
+// packages, which is also what a monorepo of standalone packages declares.
+// Run from inside such a space — and from the space folder itself — the CLI
+// must still resolve to the root above, because that root claims the folder.
+func TestConfigResolutionAscendsPastASpaceFile(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.SeedPackage("packages", "core")
+	spaceFile(t, r, "packages", models.SpaceFile{
+		Packages: map[string]models.PackageConfig{"core": {TagFormat: "space-{name}@{version}"}},
+	})
+	r.Commit("feat(core): first release")
+
+	for _, from := range []string{"packages/core", "packages"} {
+		res := r.CommandAt(from, "status")
+		require.Equal(t, 0, res.Code,
+			"status from %s must find the root config\nstdout:\n%s\nstderr:\n%s", from, res.Stdout, res.Stderr)
+	}
+
+	res := r.CommandAt("packages/core", "release")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, r.HasTag("space-core@0.1.0"),
+		"the space file's entry applied and the tag landed in the monorepo's repository: %v", r.TagList())
+}
+
+// TestConfigSpaceLayerRejections: what the new layers may not say, each one
+// failing the load before any work rather than being half-applied.
+func TestConfigSpaceLayerRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(r *harness.Repo)
+		want  string
+	}{
+		{
+			name: "a space packages entry cannot set path",
+			setup: func(r *harness.Repo) {
+				cfg := libsConfig(echoBuild, 1)
+				cfg.Spaces = map[string]models.SpaceConfig{
+					"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+						"core": {Path: "elsewhere"},
+					}},
+				}
+				r.WriteConfigModel(cfg)
+			},
+			want: "path cannot be set",
+		},
+		{
+			name: "a space file cannot set path",
+			setup: func(r *harness.Repo) {
+				r.WriteConfigModel(libsConfig(echoBuild, 1))
+				r.WriteFile("packages/dispat.json", `{"path": "elsewhere"}`)
+			},
+			want: "path cannot be set in a space folder's config file",
+		},
+		{
+			name: "a space file cannot declare spaces",
+			setup: func(r *harness.Repo) {
+				r.WriteConfigModel(libsConfig(echoBuild, 1))
+				r.WriteFile("packages/dispat.json", `{"spaces": {"inner": {"path": "pkgs"}}}`)
+			},
+			want: "monorepo root of its own",
+		},
+		{
+			name: "a package entry cannot hold packages",
+			setup: func(r *harness.Repo) {
+				r.WriteConfigRaw(map[string]any{
+					"scripts": map[string]any{"build": echoBuild, "publish": "echo publishing"},
+					"spaces": map[string]any{"libs": map[string]any{"path": "packages",
+						"flow": map[string]any{"build": "build", "publish": "publish"}}},
+					"packages": map[string]any{
+						"core": map[string]any{"packages": map[string]any{"inner": map[string]any{}}},
+					},
+				})
+			},
+			want: "cannot be set on a package entry",
+		},
+		{
+			name: "a space packages key must match a folder of that space",
+			setup: func(r *harness.Repo) {
+				cfg := libsConfig(echoBuild, 1)
+				cfg.Spaces = map[string]models.SpaceConfig{
+					"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+						"ghost": {TagFormat: "v{version}"},
+					}},
+				}
+				r.WriteConfigModel(cfg)
+			},
+			// The error travels as a JSON log field, so the assertion stays
+			// clear of the quotes the encoder escapes.
+			want: "matches no folder of space",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := harness.New(t)
+			r.SeedPackage("packages", "core")
+			tc.setup(r)
+			r.Commit("feat(core): first release")
+
+			res := r.Status()
+			require.Equal(t, 1, res.Code,
+				"the config must be refused\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+			assert.Empty(t, r.TagList(), "nothing may be released from a refused config")
+		})
+	}
+}

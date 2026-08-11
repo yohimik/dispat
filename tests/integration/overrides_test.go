@@ -373,3 +373,164 @@ func TestOverridesScriptsAcrossTheLayers(t *testing.T) {
 	res := r.RunScript("ghost")
 	assert.NotEqual(t, 0, res.Code, "an undefined script stays a hard error")
 }
+
+// spaceFile marshals a typed space configuration and writes it as the space
+// folder's own dispat.json — the layer between the root file's space entry
+// and anything said about one package, authored the same model-first way as
+// WriteConfigModel.
+func spaceFile(t *testing.T, r *harness.Repo, spaceDir string, sf models.SpaceFile) {
+	t.Helper()
+	data, err := json.MarshalIndent(sf, "", "  ")
+	require.NoError(t, err)
+	r.WriteFile(spaceDir+"/dispat.json", string(data))
+}
+
+// TestOverridesSpacePackagesEntry: a space configures one of its own packages
+// through its `packages` map, without the root file's global one — the
+// override's tag format reaches that package alone, and its sibling keeps the
+// space's.
+func TestOverridesSpacePackagesEntry(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+			"core": {TagFormat: "space-entry-{name}@{version}"},
+		}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "extra")
+	r.Commit("feat(core,extra): bootstrap both")
+
+	r.ReleaseOK()
+
+	assert.True(t, r.HasTag("space-entry-core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("extra@0.1.0"), "the sibling keeps the repository default")
+}
+
+// TestOverridesSpaceFile: a dispat config file inside the space folder is the
+// space, said again and nearer. It replaces the stages and options it names
+// for every package of the space, inherits the rest, and leaves other spaces
+// alone.
+func TestOverridesSpaceFile(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{
+		"build":      "echo root-build >> ../../root.log",
+		"file-build": "echo file-build >> ../../file.log",
+		"publish":    "echo publishing",
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish()},
+		"svc":  {Path: "services", Flow: buildPublish()},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("services", "api")
+	spaceFile(t, r, "packages", models.SpaceFile{
+		TagFormat: "libs-{name}@{version}",
+		Flow:      &models.SpaceFlowConfig{Build: []string{"file-build"}},
+	})
+	r.Commit("feat(core,api): bootstrap both")
+
+	r.ReleaseOK()
+
+	assert.True(t, r.HasTag("libs-core@0.1.0"), "the space file's tagFormat wins: %v", r.TagList())
+	assert.True(t, r.HasTag("api@0.1.0"), "the other space is untouched")
+	assert.Equal(t, 1, countLines(r, "file.log"), "the space file's build ran for its package")
+	assert.Equal(t, 1, countLines(r, "root.log"), "and the root's build only for the other space")
+	assert.FileExists(t, r.Path("packages", "core", "CHANGELOG.md"),
+		"the publish stage the file did not name is inherited")
+}
+
+// TestOverridesLadderNearestWins: all six layers name the same package and
+// the same key, and the one nearest the package decides. The layers below it
+// still apply where they say something the nearer ones do not.
+func TestOverridesLadderNearestWins(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {
+			Path:      "packages",
+			Flow:      buildPublish(),
+			TagFormat: "s1-{name}@{version}",
+			Packages: map[string]models.PackageConfig{
+				"core": {TagFormat: "p2-{name}@{version}"},
+			},
+		},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core":  {TagFormat: "p1-{name}@{version}"},
+		"extra": {Changelog: &models.ChangelogConfig{File: "HISTORY.md"}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "extra")
+	spaceFile(t, r, "packages", models.SpaceFile{
+		TagFormat: "s2-{name}@{version}",
+		Packages: map[string]models.PackageConfig{
+			"core": {TagFormat: "p3-{name}@{version}"},
+		},
+	})
+	packageFile(t, r, "packages/core", models.PackageConfig{TagFormat: "p4-{name}@{version}"})
+	r.Commit("feat(core,extra): bootstrap both")
+
+	r.ReleaseOK()
+
+	assert.True(t, r.HasTag("p4-core@0.1.0"), "the package's own file is nearest: %v", r.TagList())
+	assert.True(t, r.HasTag("s2-extra@0.1.0"),
+		"a package no entry names still takes the space file's format")
+	assert.FileExists(t, r.Path("packages", "extra", "HISTORY.md"),
+		"the root entry's record policy still reaches the package it names")
+}
+
+// TestOverridesSpaceLayerDependencies: an edge declared in a space's packages
+// entry, and one declared in the space file, both reach the plan — the
+// consumer waits for its provider and rides its release exactly as a
+// top-level declaration would.
+func TestOverridesSpaceLayerDependencies(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	// A default propagation depth, so a provider's bump reaches its consumers
+	// with no directive in the message: what the declared edges are for here.
+	cfg.Parser = &models.ParserConfig{
+		Propagation: &models.ParserPropagationConfig{Depth: "all"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+			"mid": {Dependencies: []string{"core"}},
+		}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "mid")
+	r.SeedPackage("packages", "web")
+	spaceFile(t, r, "packages", models.SpaceFile{
+		Packages: map[string]models.PackageConfig{"web": {Dependencies: []string{"mid"}}},
+	})
+	r.Commit("feat(core,mid,web): bootstrap the chain")
+	r.ReleaseOK()
+
+	// Only the root of the chain changes: both declared edges must carry the
+	// bump forward, one layer each.
+	r.WriteFile("packages/core/f.txt", "changed\n")
+	r.Commit("fix(core): a change that must propagate")
+	r.ReleaseOK()
+
+	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("mid@0.1.1"), "the space entry's edge carried the bump to mid: %v", r.TagList())
+	assert.True(t, r.HasTag("web@0.1.1"), "the space file's edge carried it on to web: %v", r.TagList())
+}
+
+// countLines returns how many lines a log file in the monorepo root holds,
+// zero when the script that writes it never ran.
+func countLines(r *harness.Repo, name string) int {
+	data, err := os.ReadFile(r.Path(name))
+	if err != nil {
+		return 0
+	}
+	return len(strings.Fields(strings.TrimSpace(string(data))))
+}
