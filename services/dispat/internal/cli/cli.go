@@ -10,9 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"runtime/debug"
-	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
@@ -22,6 +21,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/app"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
+	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
 )
 
 // Commands accepted by Run.
@@ -49,6 +49,10 @@ const (
 	cmdScanner  = "scanner"  // read what a folder's manifests declare
 	cmdWriter   = "writer"   // edit manifests in place, format-preserving
 	cmdReplacer = "replacer" // replace literal text in any file, no parsing
+
+	// cmdSelfUpdate is about the binary rather than about any repository, so
+	// like init and the manifest commands it needs no config and no git.
+	cmdSelfUpdate = "self-update"
 )
 
 // manifestCommand reports the commands that need neither a config file nor a
@@ -79,29 +83,19 @@ func sweepCommand(cmd string) bool {
 // version stage.
 var Version = "dev"
 
-// resolvedVersion is what --version prints: the ldflags-injected value when a
-// release build set one; otherwise the module version the Go toolchain
-// stamped into the binary (`go install .../services/dispat@v1.2.3` records
-// v1.2.3 there, with no ldflags involved); otherwise the "dev" default of a
-// plain local build, whose stamp is "(devel)".
-func resolvedVersion() string {
-	if Version != "dev" {
-		return Version
-	}
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		if v := bi.Main.Version; v != "" && v != "(devel)" {
-			return strings.TrimPrefix(v, "v")
-		}
-	}
-	return Version
-}
-
-// versionLine is the whole of what --version reports: the version, and the
-// platform the binary was built for. The platform is there because "dispat
-// 1.4.0" alone does not say which of the release's three binaries is
-// running, and that is the first thing a bug report needs.
+// versionLine is what --version reports: the version, and the platform the
+// binary was built for. The platform is there because "dispat 1.4.0" alone
+// does not say which of the release's binaries is running, and that is the
+// first thing a bug report needs. A binary the Go toolchain installed says so
+// in the same parenthesis, because that is what decides how it is updated.
+//
+// The version itself is the ldflags-injected value when a release build set
+// one, otherwise the module version the toolchain stamped in (`go install
+// .../services/dispat@v1.2.3` records v1.2.3 with no ldflags involved),
+// otherwise the "dev" of a plain local build; see selfupdate.Describe.
 func versionLine() string {
-	return "dispat " + resolvedVersion() + " (" + runtime.GOOS + "_" + runtime.GOARCH + ")"
+	build := selfupdate.Describe(Version)
+	return "dispat " + build.Version + " (" + build.Platform(runtime.GOOS, runtime.GOARCH) + ")"
 }
 
 // Run is the program entry point; it returns the process exit code.
@@ -118,8 +112,26 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+
+	// Housekeeping, before anything else and on every invocation: the copy a
+	// self-update kept is deleted once it is a week old. With no backup
+	// present, which is every run outside that week, this is one stat.
+	if exe, err := selfupdate.Executable(); err == nil {
+		selfupdate.PruneBackup(exe, time.Now())
+	}
+
+	// The update check runs beside the command and is read on the way out.
+	// Deferred in this order so the notice prints before the context that
+	// carries it is cancelled.
+	checkCtx, endCheck := context.WithCancel(context.Background())
+	defer endCheck()
+	var update notice
+	defer func() { update.print(stdout) }()
+
 	if *o.showVersion {
 		// Before anything else: the version must print without a config file.
+		update = startUpdateCheck(checkCtx, o, fs, orDefault(*o.logFormat, "pretty"), true)
+		update.status = true
 		fmt.Fprintln(stdout, logo)
 		fmt.Fprintln(stdout, "\n"+versionLine())
 		return 0
@@ -160,12 +172,29 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
+	if cmd == cmdSelfUpdate && *o.suRollback {
+		// A rollback downloads nothing, so every flag that chooses something
+		// to download contradicts it.
+		for _, name := range []string{"release", "prerelease", "force"} {
+			if fs.Changed(name) {
+				bootLog.Error().Msgf("--rollback restores the kept binary and downloads nothing, so --%s means nothing beside it", name)
+				usageForCommand(cmd)
+				return 2
+			}
+		}
+	}
 	var write writeRequest
 	if cmd == cmdWriter || cmd == cmdAutoreplace {
 		var ok bool
 		if write, ok = parseWriteRequest(cmd, o, usageForCommand, bootLog); !ok {
 			return 2
 		}
+	}
+	if cmd == cmdInit || manifestCommand(cmd) {
+		// The commands that read no config file have no updateCheck option to
+		// consult, so the environment variable is the whole of their opt-out.
+		// self-update is left out on purpose: it reports the answer itself.
+		update = startUpdateCheck(checkCtx, o, fs, orDefault(*o.logFormat, "pretty"), true)
 	}
 	if cmd == cmdInit {
 		// Before config loading: init is what creates the config, so there is
@@ -176,6 +205,33 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "created %s\n", name)
+		return 0
+	}
+	if cmd == cmdSelfUpdate {
+		// Before config loading too, and for the same reason as init: this
+		// command is about the binary, not about any repository it might be
+		// standing in.
+		format := orDefault(*o.logFormat, "pretty")
+		log := newLogger(orDefault(*o.logLevel, "info"), format, stdout)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		src := updateSource(o, fs)
+		src.Prerelease = *o.suPrerelease
+		src.Log = log
+		pending, err := app.SelfUpdate(ctx, app.SelfUpdateOptions{
+			Build: selfupdate.Describe(Version), Source: src, Release: *o.suRelease,
+			Check: *o.check, Force: *o.suForce, Rollback: *o.suRollback,
+			GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
+			JSON: format == "json", Out: stdout, Log: log,
+		})
+		if err != nil {
+			return 1
+		}
+		// --check exits 1 when the same invocation without it would change
+		// the binary, which is the gate a CI job puts in front of an update.
+		if *o.check && pending {
+			return 1
+		}
 		return 0
 	}
 	if manifestCommand(cmd) {
@@ -246,6 +302,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		cfg.Parser.Quiet = *o.quietParser
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, stdout)
+	// Now that the configuration has spoken, the check can start: a run that
+	// switched it off must make no request at all, which means not making one
+	// before the option has been read.
+	update = startUpdateCheck(checkCtx, o, fs, cfg.LogFormat, cfg.UpdateCheckEnabled())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -327,7 +387,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
 			Write:       *o.computeWrite,
 			Interactive: *o.computeInteractive,
-			Check:       *o.computeCheck,
+			Check:       *o.check,
 			Filter:      sel,
 			In:          os.Stdin,
 			Out:         stdout,
@@ -335,7 +395,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return 1
 		}
-		if *o.computeCheck && open > 0 {
+		if *o.check && open > 0 {
 			return 1
 		}
 	default:
@@ -366,7 +426,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 	}
 	inv.cmd = rest[0]
 	switch inv.cmd {
-	case cmdRelease, cmdStatus, cmdInit, cmdCompute:
+	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return inv, true

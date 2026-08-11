@@ -28,7 +28,15 @@ type options struct {
 	initFormat *string
 
 	// compute
-	computeWrite, computeInteractive, computeCheck *bool
+	computeWrite, computeInteractive *bool
+
+	// self-update
+	suRelease                         *string
+	suForce, suPrerelease, suRollback *bool
+
+	// check is compute's CI gate and self-update's "would this change
+	// anything": one flag, because it answers the same question for both.
+	check *bool
 
 	// commit
 	commitTag, commitPush                                *bool
@@ -86,8 +94,16 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"apply every suggestion to the config file")
 	o.computeInteractive = fs.BoolP("interactive", "i", false,
 		"confirm each suggestion before applying it")
-	o.computeCheck = fs.Bool("check", false,
-		"report only and exit 1 when suggestions exist (CI gate)")
+	o.check = fs.Bool("check", false,
+		"report only, changing nothing, and exit 1 when there is something to do: for compute, config suggestions; for self-update, a release it would install (CI gate)")
+	o.suRelease = fs.String("release", "",
+		"self-update: install exactly this version instead of the latest one, downgrades included")
+	o.suForce = fs.Bool("force", false,
+		"self-update: install the selected release even when it is not newer, which repairs a damaged binary and leaves a prerelease line")
+	o.suPrerelease = fs.Bool("prerelease", false,
+		"self-update: consider prereleases too; ordering still decides, so a released 1.1.0 still wins over 1.1.0-rc.1")
+	o.suRollback = fs.Bool("rollback", false,
+		"self-update: put the binary the last update replaced back, without downloading anything")
 	o.commitTag = fs.Bool("tag", false,
 		"also create the annotated release tag at the resulting commit; an identical existing tag is skipped")
 	o.commitPush = fs.Bool("push", false,

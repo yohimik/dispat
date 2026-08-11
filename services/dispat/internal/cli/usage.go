@@ -199,6 +199,26 @@ suggestions to those packages.`,
 		flags: append([]string{"write", "interactive", "check"}, selectionFlags...),
 	},
 	{
+		name:  cmdSelfUpdate,
+		short: "replace this binary with the latest release",
+		long: `Replace the running dispat with the latest stable release of it: the
+binary for this platform is downloaded from the GitHub release, checked
+against the size and checksum the release published, run once to prove it
+works, and only then moved into place. The binary it replaces is kept beside
+it as <name>.backup and removed on its own after a week.
+
+--check reports what the same invocation would do and exits 1 when there is
+something to install, which is the CI gate. --prerelease considers the
+prereleases too, --release installs one named version, downgrades included,
+and --force installs the selection even when it is not newer.
+
+--rollback puts the kept binary back and downloads nothing. It rotates, so
+the binary it replaces becomes the new backup and a second --rollback
+returns. Needs no config file and no git repository.`,
+		flags: []string{"check", "force", "prerelease", "release", "rollback",
+			"owner", "repo", "api-url", "token-env"},
+	},
+	{
 		name:  cmdScanner,
 		args:  "[folder]",
 		short: "print what a folder's manifests declare",
