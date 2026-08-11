@@ -185,7 +185,5 @@ func TestNarrowIndependentPackagesFormNoGroup(t *testing.T) {
 	p := chainPlan(nil) // every space independent
 	n := p.Narrow([]string{"a"})
 	assert.Empty(t, n.Split)
-	assert.Equal(t, "", GroupOf(p.Releases["a"].Pkg))
-	assert.Equal(t, "", GroupOf(nil))
-	assert.Equal(t, "", GroupOf(&model.Package{Name: "x"}), "a package with no space belongs to no group")
+	assert.Equal(t, "", p.Releases["a"].Pkg.VersionGroupName())
 }

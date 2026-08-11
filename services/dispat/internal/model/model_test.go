@@ -112,3 +112,26 @@ func TestPackageScopeDir(t *testing.T) {
 		(&Package{Dir: filepath.Join("packages", "core"), Src: "src/main"}).ScopeDir(),
 		"a slash-separated src is a path on every platform")
 }
+
+// TestPackageVersionGroupName: a package belongs to a group only when its
+// versioning shares one, and the group is the one configuration named or the
+// space's own when it named none.
+func TestPackageVersionGroupName(t *testing.T) {
+	cases := []struct {
+		name string
+		pkg  *Package
+		want string
+	}{
+		{"nil package", nil, ""},
+		{"no space", &Package{Name: "tool"}, ""},
+		{"independent space", &Package{Space: &Space{Name: "libs"}}, ""},
+		{"the space's own group", &Package{Space: &Space{Name: "libs", Versioning: VersioningFixed}}, "libs"},
+		{"a named group", &Package{Space: &Space{Name: "libs", Versioning: VersioningFixedMajor,
+			VersionGroup: "shared"}}, "shared"},
+		{"a named group an independent space ignores",
+			&Package{Space: &Space{Name: "libs", VersionGroup: "shared"}}, ""},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, c.pkg.VersionGroupName(), c.name)
+	}
+}

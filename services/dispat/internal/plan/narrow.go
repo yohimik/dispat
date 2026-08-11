@@ -140,7 +140,7 @@ func splitGroups(p *Plan, order []string, keep map[string]bool) []SplitGroup {
 	byName := make(map[string]*SplitGroup)
 	var names []string // first-appearance order, so the report is deterministic
 	for _, pkg := range order {
-		group := GroupOf(p.Releases[pkg].Pkg)
+		group := p.Releases[pkg].Pkg.VersionGroupName()
 		if group == "" {
 			continue
 		}

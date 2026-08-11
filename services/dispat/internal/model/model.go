@@ -286,6 +286,21 @@ func (p *Package) ScopeDir() string {
 	return filepath.Join(p.Dir, filepath.FromSlash(p.Src))
 }
 
+// VersionGroupName names the versioning group the package belongs to, or ""
+// when its versioning is independent. The group is a package's third address,
+// beside its name and its folder: the planner moves a group's versions
+// together, a selection can be pointed at one, and both have to agree on which
+// packages are in it. Nil-safe.
+func (p *Package) VersionGroupName() string {
+	if p == nil || p.Space == nil || !p.Space.Versioning.Shared() {
+		return ""
+	}
+	if p.Space.VersionGroup != "" {
+		return p.Space.VersionGroup
+	}
+	return p.Space.Name // the zero value means the space's own group
+}
+
 // RecordFormat customises how a release entry renders — the resolved
 // counterpart of the config's entry-format options, shared by the changelog
 // file and the GitHub release body. Empty fields mean the renderer defaults.
