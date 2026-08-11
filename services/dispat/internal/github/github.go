@@ -119,16 +119,21 @@ type apiCall struct {
 	ContentLength int64
 	// WantStatus is the only status code accepted as success.
 	WantStatus int
-	What       string
+	// TolerateStatus is a second accepted status that is an answer rather
+	// than a failure — a 404 from the tag probe means "no such release",
+	// which is exactly what the probe asked. do reports which one arrived.
+	TolerateStatus int
+	What           string
 }
 
 // do performs one authenticated API call and enforces the expected status.
 // The response body is returned (bounded) because a created release carries
-// the asset endpoint the caller needs.
-func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, error) {
+// the asset endpoint the caller needs, and so is the status, because a call
+// naming a TolerateStatus needs to know which of the two arrived.
+func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, call.Method, call.URL, call.Body)
 	if err != nil {
-		return nil, fmt.Errorf("github: %w", err)
+		return nil, 0, fmt.Errorf("github: %w", err)
 	}
 	if call.ContentLength > 0 {
 		req.ContentLength = call.ContentLength
@@ -145,7 +150,7 @@ func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("github: %s: %w", call.What, err)
+		return nil, 0, fmt.Errorf("github: %s: %w", call.What, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
@@ -153,20 +158,20 @@ func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, error) {
 		// A truncated success body would corrupt what the caller parses out
 		// of it (a created release's upload URL), so it fails the call even
 		// when the status looked right.
-		return nil, fmt.Errorf("github: %s: reading response: %w", call.What, err)
+		return nil, resp.StatusCode, fmt.Errorf("github: %s: reading response: %w", call.What, err)
 	}
-	if resp.StatusCode != call.WantStatus {
-		return nil, fmt.Errorf("github: %s: unexpected status %s: %s",
+	if resp.StatusCode != call.WantStatus && resp.StatusCode != call.TolerateStatus {
+		return nil, resp.StatusCode, fmt.Errorf("github: %s: unexpected status %s: %s",
 			call.What, resp.Status, strings.TrimSpace(string(data)))
 	}
-	return data, nil
+	return data, resp.StatusCode, nil
 }
 
 // Verify checks that the repository is reachable with the configured token
 // (GET /repos/{owner}/{repo} must return 200). Meant to run before any
 // release work so misconfigured credentials fail fast.
 func (r *Releaser) Verify(ctx context.Context) error {
-	_, err := r.do(ctx, apiCall{
+	_, _, err := r.do(ctx, apiCall{
 		Method:     http.MethodGet,
 		URL:        r.endpoint("/repos/" + r.Owner + "/" + r.Repo),
 		WantStatus: http.StatusOK,
@@ -194,6 +199,19 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	if exported := rel.ExportedCommit(); exported != "" {
 		sha, commitish = exported, exported
 	}
+	// A release the repository already carries is a skip, not a 422: the
+	// flow may have published it from an earlier stage with `dispat github`,
+	// or this may be a re-run after a later stage failed.
+	switch exists, err := r.exists(ctx, tag); {
+	case err != nil:
+		return err
+	case exists:
+		r.Log.Info().Str("code", plan.CodeGitHubReleaseExists).
+			Str("package", rel.Pkg.Name).Str("tag", tag).
+			Msg("github release already exists, skipped")
+		return nil
+	}
+
 	body := changelog.RenderSections(rel, r.Format)
 	if sha != "" {
 		if body != "" {
@@ -212,7 +230,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		return fmt.Errorf("github: %w", err)
 	}
 
-	respBody, err := r.do(ctx, apiCall{
+	respBody, _, err := r.do(ctx, apiCall{
 		Method:      http.MethodPost,
 		URL:         r.endpoint("/repos/" + r.Owner + "/" + r.Repo + "/releases"),
 		Body:        bytes.NewReader(payload),
@@ -223,6 +241,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	if err != nil {
 		return err
 	}
+	r.Log.Info().Str("package", rel.Pkg.Name).Str("tag", tag).Msg("github release created")
 	paths := r.attachmentPaths(export, tag)
 	if len(paths) == 0 {
 		return nil
@@ -237,6 +256,25 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		}
 	}
 	return nil
+}
+
+// exists reports whether the repository already carries a release for tag
+// (GET /repos/{owner}/{repo}/releases/tags/{tag}). A 404 is the answer "no",
+// not a failure; anything else is a real error, because silently treating an
+// unreadable repository as "no release yet" would turn a permissions problem
+// into a duplicate-release attempt.
+func (r *Releaser) exists(ctx context.Context, tag string) (bool, error) {
+	_, status, err := r.do(ctx, apiCall{
+		Method:         http.MethodGet,
+		URL:            r.endpoint("/repos/" + r.Owner + "/" + r.Repo + "/releases/tags/" + neturl.PathEscape(tag)),
+		WantStatus:     http.StatusOK,
+		TolerateStatus: http.StatusNotFound,
+		What:           "looking up release " + tag,
+	})
+	if err != nil {
+		return false, err
+	}
+	return status == http.StatusOK, nil
 }
 
 // attachmentPaths resolves the plan.GitHubExport value: a whitespace-separated
@@ -298,7 +336,7 @@ func (r *Releaser) uploadAsset(ctx context.Context, uploadURL, tag, path string)
 		return fmt.Errorf("github: release %s asset: %w", tag, err)
 	}
 	name := filepath.Base(path)
-	_, err = r.do(ctx, apiCall{
+	_, _, err = r.do(ctx, apiCall{
 		Method:        http.MethodPost,
 		URL:           uploadURL + "?name=" + neturl.QueryEscape(name),
 		Body:          f,

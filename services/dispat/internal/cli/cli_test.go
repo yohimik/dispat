@@ -76,6 +76,7 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"changelog", "a"},                    // nor do the step commands
 		{"autoversion", "a"},
 		{"commit", "a"},
+		{"github", "a"},
 		{"scanner", "a", "b"},                     // scanner takes at most one folder
 		{"writer"},                                // writer needs at least one manifest
 		{"writer", "go.mod"},                      // ...and something to write
@@ -89,7 +90,7 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 }
 
 func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
-	// The selection flags parse for all six commands that take them, in both
+	// The selection flags parse for all seven commands that take them, in both
 	// spellings, and compose with the window flags they used to be rejected
 	// alongside. Exit 1 (config not found in this bare folder) rather than 2
 	// is what proves the command line itself was accepted.
@@ -103,6 +104,7 @@ func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
 		{"changelog", "--space", "libs"},
 		{"autoversion", "-p", "core"},
 		{"commit", "-s", "libs"},
+		{"github", "-p", "core"},
 		{"compute", "-p", "core"},
 	} {
 		var stdout, stderr bytes.Buffer
@@ -197,7 +199,7 @@ func TestStepCommandWordsAreNotRunScripts(t *testing.T) {
 	// stays available). The bare-word case exiting 1, not 2, is what proves
 	// the word was taken as a command.
 	root := t.TempDir()
-	for _, word := range []string{"changelog", "autoversion", "commit"} {
+	for _, word := range []string{"changelog", "autoversion", "commit", "github"} {
 		var stdout, stderr bytes.Buffer
 		code := Run([]string{word, "--root", root}, &stdout, &stderr)
 		assert.Equal(t, 1, code, "%s must parse as a command, not a run script", word)

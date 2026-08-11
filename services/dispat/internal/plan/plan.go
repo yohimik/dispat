@@ -200,6 +200,12 @@ const (
 	// (`dispat commit --tag`), and the record the tag exists to be is already
 	// durable. A tag at a different commit stays a hard error.
 	CodeTagExists = "W223"
+	// CodeGitHubReleaseExists marks a GitHub release skipped because the
+	// repository already carries one for the planned tag: a `dispat github`
+	// invocation ran earlier in the flow, or the run is a re-run after a
+	// later stage failed. Creating it again is a 422 from the API, so the
+	// skip is what makes both re-runnable.
+	CodeGitHubReleaseExists = "W224"
 
 	// --- release outcomes, repository-scoped (§16) ---
 

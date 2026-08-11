@@ -38,6 +38,7 @@ const (
 	cmdChangelog   = "changelog"   // write pending changelog entries now
 	cmdAutoversion = "autoversion" // native manifest reconciliation, plus syncLock
 	cmdCommit      = "commit"      // per-package release commit (--tag, --push)
+	cmdGithub      = "github"      // per-package GitHub release, published now
 
 	// The manifest commands, exposing the pkg/scanner and pkg/writer
 	// libraries directly. Like init, they need no config file and no git
@@ -139,6 +140,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"commit command: override the commit.messageFormat template ({tags}, {packages})")
 	commitInclude := fs.StringSlice("include", nil,
 		"commit command: override the commit.include extra staged paths")
+	ghOwner := fs.String("owner", "",
+		"github command: override the github.owner repository owner")
+	ghRepo := fs.String("repo", "",
+		"github command: override the github.repo repository name")
+	ghAPIURL := fs.String("api-url", "",
+		"github command: override the github.apiUrl API endpoint (for GitHub Enterprise)")
+	ghTokenEnv := fs.String("token-env", "",
+		"github command: override the github.tokenEnv variable the token is read from")
+	ghTarget := fs.String("target", "",
+		"github command: create the tag at this commit or branch (target_commitish); only safe once the commit is on the remote")
 	clFile := fs.String("file", "",
 		"changelog command: override the changelog.file name")
 	clTitle := fs.String("title", "",
@@ -197,6 +208,9 @@ commands:
                            auto-versioning) and run syncLock where they changed
   commit                   create the per-package release commit; --tag tags
                            it, --push pushes the branch and tags
+  github                   create the per-package GitHub release now, so a
+                           flow can publish it from its own stage;
+                           already-published releases are skipped
   compute                  scan every package's manifests (package.json, go.mod,
                            Cargo.toml, pyproject.toml, composer.json, pom.xml,
                            *.csproj, pubspec.yaml, requirements*.txt), derive
@@ -401,6 +415,11 @@ flags:
 			Remote: *commitRemote, Message: *commitMessage, Include: *commitInclude}) != nil {
 			return 1
 		}
+	case cmdGithub:
+		if a.GitHub(ctx, app.GitHubOptions{Filter: sel, Owner: *ghOwner, Repo: *ghRepo,
+			APIURL: *ghAPIURL, TokenEnv: *ghTokenEnv, Target: *ghTarget}) != nil {
+			return 1
+		}
 	case cmdCompute:
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
 			Write:       *computeWrite,
@@ -456,7 +475,7 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 			return inv, true
 		}
 		inv.script = rest[1]
-	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit:
+	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).
 				Msgf("%s takes no arguments (select packages with --package or --space)", inv.cmd)

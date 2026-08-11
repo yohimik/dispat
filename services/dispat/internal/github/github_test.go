@@ -42,15 +42,30 @@ func testRelease() *plan.Release {
 	}
 }
 
-// captureServer serves the one call these tests care about — the
-// create-release POST — by decoding its payload and replying 201. It is for
-// the tests whose only interest is what the recorder sent; servers that
-// assert on paths, headers or uploads, or inject errors, stay bespoke next
-// to their tests.
+// releaseProbe answers the lookup Record makes before it creates anything —
+// "does this tag already have a release?" — with the 404 that means no. Every
+// fake server serving a creation needs it, so it lives here instead of in
+// each handler; a server testing the skip answers 200 itself.
+func releaseProbe(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/releases/tags/") {
+		return false
+	}
+	w.WriteHeader(http.StatusNotFound)
+	return true
+}
+
+// captureServer serves the two calls these tests care about — the tag probe
+// and the create-release POST — by decoding the payload and replying 201. It
+// is for the tests whose only interest is what the recorder sent; servers
+// that assert on paths, headers or uploads, or inject errors, stay bespoke
+// next to their tests.
 func captureServer(t *testing.T) (*httptest.Server, *releaseRequest) {
 	t.Helper()
 	got := &releaseRequest{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(got))
 		w.WriteHeader(http.StatusCreated)
 	}))
@@ -95,6 +110,9 @@ func TestRecordCreatesRelease(t *testing.T) {
 	var gotPath, gotAuth, gotAccept string
 	var gotBody releaseRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		require.Equal(t, http.MethodPost, r.Method)
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
@@ -219,6 +237,9 @@ func TestVerifyFailure(t *testing.T) {
 
 func TestRecordAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(`{"message":"Validation Failed"}`))
 	}))
@@ -275,6 +296,9 @@ func TestRecordUploadsAttachments(t *testing.T) {
 	var uploads []upload
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/repos/acme/mono/releases":
 			w.WriteHeader(http.StatusCreated)
@@ -317,6 +341,9 @@ func TestRecordUploadFailureIsAnError(t *testing.T) {
 
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		if r.URL.Path == "/repos/acme/mono/releases" {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
@@ -348,6 +375,9 @@ func TestRecordInvalidAttachmentsAreSkippedWithAWarning(t *testing.T) {
 	var uploads []string
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		if r.URL.Path == "/repos/acme/mono/releases" {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
@@ -385,12 +415,58 @@ func TestRecordWithoutAttachmentsIgnoresMissingUploadURL(t *testing.T) {
 	// Servers in tests (and proxies) may return an empty creation body; with
 	// nothing to upload that must stay a success.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer srv.Close()
 
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
 	assert.NoError(t, r.Record(context.Background(), testRelease()))
+}
+
+// TestRecordSkipsAnExistingRelease: the tag already has a release, so the
+// recorder logs W224 and creates nothing. This is what makes a re-run after
+// a failed later stage — and a flow that published from `dispat github`
+// earlier — land on a no-op instead of a 422.
+func TestRecordSkipsAnExistingRelease(t *testing.T) {
+	var created int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/acme/mono/releases/tags/core@1.3.0" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id": 7}`))
+			return
+		}
+		created++
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	var logs strings.Builder
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Log: zerolog.New(&logs)}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+	assert.Zero(t, created, "an existing release is never created twice")
+	assert.Contains(t, logs.String(), plan.CodeGitHubReleaseExists)
+	assert.Contains(t, logs.String(), "already exists")
+}
+
+// TestRecordProbeFailureIsAnError: an unreadable repository must not be read
+// as "no release yet" — that would turn a permissions problem into a
+// duplicate-release attempt.
+func TestRecordProbeFailureIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible"}`))
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	err := r.Record(context.Background(), testRelease())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "looking up release core@1.3.0")
+	assert.Contains(t, err.Error(), "403")
 }
 
 func TestAssetUploadURL(t *testing.T) {
