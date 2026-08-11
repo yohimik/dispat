@@ -48,6 +48,7 @@ dispat [command] [flags]
 | `--push`              |             | `commit` only: push the branch, and with `--tag` the tags; tags already on the remote are skipped.                         |
 | `--name`, `--email`   | from config | `commit` only: override the `commit.name` / `commit.email` committer identity.                                             |
 | `--remote`            | from config | `commit` only: override the `commit.remote` push target.                                                                   |
+| `--tag-name`          | computed    | `commit` only: name the annotated tag instead of computing it; pass `$DISPAT_TAG` from a release stage. One package only.   |
 | `--message-format`    | from config | `commit` only: override the `commit.messageFormat` template.                                                               |
 | `--include`           | from config | `commit` only: override the `commit.include` extra staged paths.                                                           |
 | `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `github`: override the matching `github.*` values for every package of the invocation. `self-update`: point it at another repository or a GitHub Enterprise endpoint instead of dispat's own releases.  |

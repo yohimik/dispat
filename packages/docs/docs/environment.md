@@ -1,8 +1,14 @@
 # Script environment variables
 
-Every script receives, on top of the parent environment (the same variables also expand in
+Every script receives, on top of the parent environment, any
+[static `env` variables the configuration sets](./configuration/README.md#static-env), and then the variables below
+(the same variables also expand in
 [record text](./configuration/records.md#variables-in-record-text), so a changelog footer and a publish script name a
-release the same way):
+release the same way).
+
+The order matters when a name appears twice. The static variables are placed first, so a computed `DISPAT_*` variable
+always wins, and a static value referring to one — `custom_$DISPAT_VERSION` — is expanded against the values in this
+table before the script starts.
 
 | Variable                      | Example              | Meaning                                                                                                                                                                                 |
 |-------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

@@ -60,6 +60,13 @@ spaces:
     # the parallelism.
     scripts:
       lint: "npm run lint"
+    # Fixed environment for every script of this space's packages, its login
+    # script included, merged over the top-level `env` key by key.
+    env:
+      GOFLAGS: -mod=mod
+    # Free-form data dispat never reads, this space's own.
+    custom:
+      owner: libs-team
     # Native reconciliation at the version stage, before any flow.version
     # script. Two independent strategies: the parsing one below (declared
     # workspace ranges reconciled to end-of-run provider versions, own
@@ -189,9 +196,30 @@ versionGroups:
 # DISPAT_RESULT_* variables. The commit hooks (beforeCommit, afterCommit,
 # postCommit) and push hooks (beforePush, afterPush) bracket the finalize
 # phase when commit/push are enabled.
+#
+# allowBranch is not a hook but a guard: with it set, a release refuses to
+# start unless the checked-out branch matches one of the globs. A detached
+# HEAD matches nothing, and read-only commands are never guarded.
 run:
+  allowBranch: [main, "release/*"]
   # beforeAll: check-preconditions
   postAll: notify
+
+# Fixed environment variables added to every script. Spaces and packages
+# declare their own `env` objects and the layers merge key by key, the most
+# local winning. Keys keep their exact case, values may reference other
+# variables ($NAME / ${NAME}, resolved against the computed DISPAT_* set first
+# and the process environment second), and the DISPAT_ prefix is reserved, so
+# a static key can never shadow a computed one.
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+  CUSTOM_TAG: custom_$DISPAT_VERSION
+
+# Free-form data dispat never reads: somewhere to keep your own tooling's
+# settings without the unknown-key check rejecting them. Spaces and package
+# entries have their own; nothing merges them.
+custom:
+  team: platform
 
 # Consumer -> provider relations. Besides the full objects, an item may be a
 # shorthand keyed by consumer name whose value is a provider name or an array

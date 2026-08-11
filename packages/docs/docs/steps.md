@@ -131,6 +131,21 @@ dispat commit --tag --push   # ...and push the branch and the tags
 A package with nothing to stage is a clean no-op. A tag that already exists at the same commit is a `W223` skip; a tag
 pointing somewhere else is an error, because that is a real conflict rather than a repeat.
 
+`--tag-name` names the tag instead of letting the command compute it:
+
+```sh
+dispat commit --tag --push --tag-name "$DISPAT_TAG"
+```
+
+You need it in one situation, and it follows from the rule above that a step command plans afresh. Inside a release
+stage the command is planning a second time, and if the package belongs to a
+[fixed versioning group](./configuration/spaces.md#versioning-groups), the group's shared version has already moved by
+then, because an earlier member of the same run has tagged. The second plan would compute a different version than the
+run is reporting, and tag that. Passing the outer run's `$DISPAT_TAG` keeps the two in agreement.
+
+The name applies to the tag and to the commit message. Naming one tag while covering several packages is refused before
+any git work happens, since they cannot share it.
+
 ### `dispat github`
 
 Creates the GitHub release for each covered package: named after the tag, with the release notes as its body.

@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against twenty goals, one test file each:
+The suite was designed against twenty-one goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -138,6 +138,14 @@ The suite was designed against twenty goals, one test file each:
     and being cleared by the next command after eight; and the notice riding out on an ordinary command, staying out of
     JSON output, and not being made at all when the configuration says no.
 
+21. **The release guards** (`guard_test.go`): the two refusals that stop a release before it starts.
+    `run.allowBranch` turns a branch list into a precondition, so a run from a branch outside it exits 1 naming both the
+    branch and the patterns, with nothing built or tagged, while `dispat status` keeps working anywhere and a `*` glob
+    reaches slashed names. The push-mode behind-remote check compares the checkout against the branch it would push to
+    and refuses a stale one, because that plan was computed from tags another clone has already moved past. The pair is
+    also proven to be off unless asked for, and to sit behind `commit.verify` — the run that skips the check is carried
+    all the way to its rejected push, which is the wasted release the check exists to prevent.
+
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
 one shape the model deliberately cannot express, an unknown key, is written as `map[string]any` through
@@ -178,7 +186,11 @@ tests/integration/
                             writing, Release/ReleaseOK/Status/StatusOK/RunScript/
                             RunScriptOK/Command/CommandAt/CommandInput -> RunResult;
                             StartRelease -> Proc (Signal/Wait) for the
-                            interruption scenarios
+                            interruption scenarios. Every repository and bare
+                            remote starts on harness.DefaultBranch ("main"),
+                            pinned rather than inherited from the host's
+                            init.defaultBranch, which differs between developer
+                            machines and CI runners
     config.go               BaseFile() (concurrency + JSON logs + GitHub disabled),
                             WriteConfigModel (typed model -> dispat.json),
                             WriteConfigRaw (raw map, for shapes the model cannot express)
@@ -207,6 +219,9 @@ tests/integration/
   manifests_test.go         goal 16
   filter_test.go            goal 17
   docker_test.go            goal 18
+  autoreplace_test.go       goal 19
+  selfupdate_test.go        goal 20
+  guard_test.go             goal 21
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -284,6 +299,12 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestConfigGitRepositoryGuard`                         | A config with no git repository around it fails `status` with one clear error before any work, and `init` refuses a `--root` that is not a repository root: no raw git errors, nothing written.                                                                                                                                                                                                                               |
 | `TestConfigConcurrencyFlagOverridesFile`               | `--concurrency` beats the file value *at runtime*: measured overlap, not parsed config, is the evidence.                                                                                                                                                                                                                                                                                                                      |
 | `TestConfigCustomShellIsUsed`                          | `"shell": ["/bin/bash", "-c"]` actually switches the interpreter (a bashism invalid under `/bin/sh` succeeds).                                                                                                                                                                                                                                                                                                                |
+| `TestStaticEnvReachesScripts`                          | The `env` layers (top level, space, package) merge with the most local winning, keys keep their exact case through the binary, a value's `$DISPAT_VERSION` reference expands to the package's own version, and a run hook sees the top-level layer alone.                                    |
+| `TestStaticEnvCannotShadowComputedVariables`           | A static key under the reserved `DISPAT_` prefix is a load-time refusal, not a variable quietly ignored: that is what lets a script trust `DISPAT_VERSION`.                                                                                                                                  |
+| `TestStaticEnvRefusesUnusableKeys`                     | The two other keys that could never reach a script intact, an `=` in the name and an empty name, are each refused with the reason.                                                                                                                                                           |
+| `TestStaticEnvFromFolderConfigFiles`                   | The two in-folder layers, a space folder's config file and a package folder's, reach the scripts with their case intact and the most local winning.                                                                                                                                          |
+| `TestStaticEnvReachesTheLoginScript`                   | A space's `env` reaches its login script, which runs once per space in the space folder with no package in view.                                                                                                                                                                             |
+| `TestConfigCustomObjectIsIgnored`                      | A `custom` object at all three levels loads without tripping the unknown-key guard and changes nothing about the release.                                                                                                                                                                    |
 | `TestConfigLoginOncePerSpaceAcrossSpaces`              | Two spaces sharing one login *script text* log in once **each**; the gate is keyed by space, not by script.                                                                                                                                                                                                                                                                                                                   |
 | `TestConfigLoginFailureIsolatedToItsSpace`             | A failing login fails every publish of its space and none of another space's.                                                                                                                                                                                                                                                                                                                                                 |
 | `TestConfigOnFailAndOnSkipOutcomeScripts`              | In one failing run: `flow.onFail` fires once for the failed package with `DISPAT_FAILED_STAGE`/`DISPAT_ERROR`, `flow.onSkip` once for the blocked consumer with `DISPAT_BLOCKED_BY`, neither for the package that published; and an onFail sequence whose first command fails still runs to the end (warn-only).                                                                                                              |
@@ -491,6 +512,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestStandaloneCommitPushAndNothingToCommit`    | A clean folder commits nothing but `--tag` still tags HEAD (annotated, with the flag-supplied identity) and `--push` delivers branch and tag; a re-run converges before any git work.                                                                        |
 | `TestStandaloneCommitExportsPinWhenDispatOutputSet` | With DISPAT_OUTPUT in the environment, the commit command exports `PACKAGE_<KEY>=<sha>` for the outer run's tag and GitHub-release pin.                                                                                                                  |
 | `TestStandaloneCommitFolderNarrowing`           | Invoked inside a package folder the command narrows to that package; from the root it covers every releasing package.                                                                                                                                        |
+| `TestStandaloneCommitTagName`                   | `--tag-name` names the annotated tag and the release commit instead of computing them, which is what the nested case needs when a fixed group's shared version moves mid-run; naming one tag while covering several packages is refused before any git work; without the flag the tag is computed as before.  |
 | `TestStandaloneAutoversionReconcilesAndSyncLocks` | Ranges and own versions reconcile to the planned versions, syncLock runs once per changed package, and a second invocation rewrites nothing and regenerates nothing.                                                                                       |
 | `TestStandaloneChangelogOverrideFlags`          | `--file`, `--title` and `--date-format` override the matching `changelog.*` values for the invocation, and the default `CHANGELOG.md` is not written beside the configured file.                                                                             |
 | `TestStandaloneChangelogRespectsDisabledConfig` | `changelog.enabled=false` makes the command a clean no-op (exit 0, no file), not an error.                                                                                                                                                                   |
@@ -568,6 +590,16 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestAutoReplaceJSONEvents`                     | The machine contract: one event per manifest carrying its path and the package it belongs to, plus the run's applied/skipped/missing tally.                                                                                            |
 | `TestAutoReplaceSyncLock`                       | The syncLock scripts run exactly where a manifest changed, not where it did not, never on a converged re-run, and not at all under `--sync-lock=false`.                                                                                |
 | `TestAutoReplaceCommandWordKeepsItsScript`      | `autoreplace` is reserved like every other command word, and `dispat run autoreplace` still reaches a script of that name.                                                                                                             |
+
+### Goal 21: the release guards (`guard_test.go`)
+
+| Test                                       | Claim proven                                                                                                                                                                                                                                                     |
+|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestGuardAllowBranch`                     | With `run.allowBranch` set, a release on a listed branch proceeds; one on a foreign branch exits 1 naming the branch and the globs, with nothing tagged; a `*` glob reaches slashed branch names (`release/v1`); `dispat status` works on any branch.             |
+| `TestGuardAllowBranchRefusesDetachedHead`  | A detached HEAD has no branch name, so it matches nothing, a glob as broad as `*` included, and the run is refused before anything is tagged.                                                                                                                     |
+| `TestGuardBehindRemote`                    | In push mode a checkout whose branch is behind the remote (another clone pushed) refuses before any release work with "behind origin/main", tagging nothing; after `git pull --rebase` the same release goes through and the tag arrives on the remote.           |
+| `TestGuardBehindRemoteHonoursCommitVerify` | The behind check is another `ls-remote`, so `commit.verify: false` turns it off with the reachability check. The same run then builds, publishes and tags before git rejects the push, which is the wasted release the guard exists to prevent.                   |
+| `TestGuardsAreUnsetByDefault`              | Neither guard applies unless configured: an ordinary repository on an arbitrarily named branch, pushing to a remote, releases exactly as before.                                                                                                                  |
 
 ## Regression fences
 

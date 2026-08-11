@@ -198,7 +198,9 @@ are the one thing that legitimately persists across runs, and they are excluded 
 Optionally the run can end with a *finalize phase* (disabled by default): the `commit` option creates one release commit
 capturing all published packages' changelog and manifest changes. Tags then point at that commit, GitHub releases move
 to the end of the run, and `commit.push` pushes the commit and tags, skipping any tag already on the remote so a
-partially pushed run converges (git and GitHub access are verified up front, before any work starts). The phase is
+partially pushed run converges (git and GitHub access are verified up front, before any work starts, and a push-mode
+run additionally refuses a checkout that is behind the remote branch, since its plan was computed from stale tags and
+its push would be rejected anyway). The phase is
 bracketed by the warn-only run hooks
 `run.beforeCommit`/`run.afterCommit`, `run.postCommit` (after commit and tags) and `run.beforePush`/`run.afterPush`.
 
