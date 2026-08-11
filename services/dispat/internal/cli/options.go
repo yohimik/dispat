@@ -39,9 +39,9 @@ type options struct {
 	check *bool
 
 	// commit
-	commitTag, commitPush                                *bool
-	commitName, commitEmail, commitRemote, commitMessage *string
-	commitInclude                                        *[]string
+	commitTag, commitPush                                               *bool
+	commitName, commitEmail, commitRemote, commitMessage, commitTagName *string
+	commitInclude                                                       *[]string
 
 	// github
 	ghOwner, ghRepo, ghAPIURL, ghTokenEnv, ghTarget *string
@@ -117,6 +117,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override the commit.email committer identity")
 	o.commitRemote = fs.String("remote", "",
 		"override the commit.remote push target")
+	o.commitTagName = fs.String("tag-name", "",
+		"name the annotated tag instead of computing it (pass $DISPAT_TAG from a release stage); one package only")
 	o.commitMessage = fs.String("message-format", "",
 		"override the commit.messageFormat template ({tags}, {packages})")
 	o.commitInclude = fs.StringSlice("include", nil,

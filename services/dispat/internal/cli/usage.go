@@ -165,9 +165,11 @@ anywhere.`,
 plus the commit.include paths, the message rendered per commit.messageFormat.
 --tag also creates the annotated release tag at the resulting commit, and
 --push pushes the branch and, with --tag, the tags. A tag that already
-exists at that commit is skipped (W223).`,
-		flags: append([]string{"tag", "push", "name", "email", "remote", "message-format", "include"},
-			windowFlags...),
+exists at that commit is skipped (W223). --tag-name names the tag instead of
+computing it, which a command running inside a release stage needs when a
+shared version has moved under it; it covers one package only.`,
+		flags: append([]string{"tag", "push", "name", "email", "remote", "tag-name",
+			"message-format", "include"}, windowFlags...),
 	},
 	{
 		name:  cmdGithub,

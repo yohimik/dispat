@@ -5,6 +5,7 @@ import (
 
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -23,6 +24,13 @@ type CommitOptions struct {
 	Email   string        // overrides commit.email
 	Remote  string        // overrides commit.remote
 	Message string        // overrides commit.messageFormat
+	// TagName names the annotated tag instead of computing it. It exists for
+	// the nested case: a step command inside a release stage plans a second
+	// time, and a version shared by a fixed group moves under it once earlier
+	// members of the same run have tagged. Passing the outer run's $DISPAT_TAG
+	// keeps the two in agreement. Only valid when the invocation covers
+	// exactly one package, since one name cannot serve several.
+	TagName string
 	Include []string
 }
 
@@ -43,6 +51,15 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 	}
 	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
+		a.log.Error().Err(err).Msg("cannot commit")
+		return err
+	}
+	// Before any git work, so a refusal leaves the repository untouched: one
+	// name cannot serve several packages, and guessing which of them meant it
+	// would tag the wrong one.
+	if opts.TagName != "" && len(covered) > 1 {
+		err := fmt.Errorf("--tag-name names one tag but this invocation covers %d packages (%s); target a single package",
+			len(covered), strings.Join(covered, ", "))
 		a.log.Error().Err(err).Msg("cannot commit")
 		return err
 	}
@@ -74,7 +91,8 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		remote = "origin"
 	}
 
-	work := &commitWork{app: a, git: git, tag: opts.Tag, format: format, include: include}
+	work := &commitWork{app: a, git: git, tag: opts.Tag, tagName: opts.TagName,
+		format: format, include: include}
 	rep, err := a.sweepStep(ctx, pl, covered, work, opts.OnError, "commit")
 	if err != nil {
 		return err
@@ -102,12 +120,25 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 // HEAD, so two packages committing at once would stage each other's files.
 // That also makes tags a plain slice — only one package is ever inside Do.
 type commitWork struct {
-	app     *App
-	git     *gitx.CLI
-	tag     bool
+	app *App
+	git *gitx.CLI
+	tag bool
+	// tagName overrides the computed tag; empty means compute it. The
+	// invocation was refused above unless it covers exactly one package, so
+	// this can never name two packages' tags.
+	tagName string
 	format  string
 	include []string
 	tags    []string
+}
+
+// tagFor is the tag this run gives a release: the name the caller supplied, or
+// the computed one.
+func (w *commitWork) tagFor(rel *plan.Release) string {
+	if w.tagName != "" {
+		return w.tagName
+	}
+	return rel.TagName()
 }
 
 func (w *commitWork) stage() string { return "commit" }
@@ -122,9 +153,10 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 	// the same as the line this used to print itself.
 	return func(ctx context.Context) error {
 		name := rel.Pkg.Name
-		log := w.app.log.With().Str("package", name).Str("tag", rel.TagName()).Logger()
+		tag := w.tagFor(rel)
+		log := w.app.log.With().Str("package", name).Str("tag", tag).Logger()
 		dirs := w.app.appendIncludeDirs([]string{rel.Pkg.Dir}, w.include)
-		msg := renderCommitMessage(w.format, []string{name}, []string{rel.TagName()})
+		msg := renderCommitMessage(w.format, []string{name}, []string{tag})
 		committed, err := w.git.CommitDirs(ctx, dirs, msg)
 		if err != nil {
 			return fmt.Errorf("release commit failed: %w", err)
@@ -135,10 +167,10 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 			log.Debug().Msg("nothing to commit")
 		}
 		if w.tag {
-			if err := release.CreateReleaseTag(ctx, w.git, rel, log); err != nil {
+			if err := release.CreateReleaseTagAs(ctx, w.git, rel, w.tagName, log); err != nil {
 				return fmt.Errorf("tagging failed: %w", err)
 			}
-			w.tags = append(w.tags, rel.TagName())
+			w.tags = append(w.tags, tag)
 		}
 		if out := os.Getenv(release.OutputEnvVar); out != "" {
 			if err := exportPackageCommit(ctx, w.git, out, name); err != nil {

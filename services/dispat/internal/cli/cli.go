@@ -375,7 +375,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case cmdCommit:
 		if a.Commit(ctx, app.CommitOptions{Window: window, OnError: *o.onError,
 			Tag: *o.commitTag, Push: *o.commitPush, Name: *o.commitName, Email: *o.commitEmail,
-			Remote: *o.commitRemote, Message: *o.commitMessage, Include: *o.commitInclude}) != nil {
+			Remote: *o.commitRemote, Message: *o.commitMessage, TagName: *o.commitTagName,
+			Include: *o.commitInclude}) != nil {
 			return 1
 		}
 	case cmdGithub:
