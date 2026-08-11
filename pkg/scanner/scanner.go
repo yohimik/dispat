@@ -1,8 +1,8 @@
 // Package scanner reads dependency manifests (package.json, go.mod,
-// Cargo.toml) into one ecosystem-neutral shape: the package's declared
-// identity (name, version) and its declared dependencies with their ranges and
-// manifest fields. It only reads; rewriting manifests is the writer package's
-// job.
+// Cargo.toml, Dockerfiles and compose files among twenty-odd others) into one
+// ecosystem-neutral shape: the package's declared identity (name, version) and
+// its declared dependencies with their ranges and manifest fields. It only
+// reads; rewriting manifests is the writer package's job.
 //
 // The scanner is deliberately lightweight: a handful of file-name probes and
 // thin per-format parsers, no SBOM machinery. The recognised manifest names

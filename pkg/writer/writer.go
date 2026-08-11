@@ -9,9 +9,9 @@
 // golang.org/x/mod/modfile, format-preserving by design), Cargo.toml,
 // pyproject.toml and Gradle version catalogs (TOML span splicing), pom.xml and
 // .csproj (XML span splicing), requirements files, pubspec.yaml, Podfiles,
-// podspecs, Gemfiles and gemspecs (per-line splicing), and the platform
-// manifests Info.plist, AndroidManifest.xml, project.pbxproj and Gradle build
-// scripts.
+// podspecs, Gemfiles, gemspecs, Dockerfiles and compose files (per-line
+// splicing), and the platform manifests Info.plist, AndroidManifest.xml,
+// project.pbxproj and Gradle build scripts.
 //
 // Every writer proves its output parses before a byte lands on disk. The
 // formats with no cheap grammar to check against (the Xcode project file, the
@@ -22,9 +22,11 @@
 // A value deferring to something outside the file is left alone rather than
 // replaced with a literal, since overwriting it would sever the indirection it
 // exists for: a Maven ${property}, a Cargo workspace inheritance, an Xcode
-// $(MARKETING_VERSION), a gemspec's version constant, and a pom's parent
-// version, which selects what the module inherits from rather than what it
-// ships.
+// $(MARKETING_VERSION), a gemspec's version constant, a Docker
+// ${BASE}:${TAG}, and a pom's parent version, which selects what the module
+// inherits from rather than what it ships. A digest-pinned image reference is
+// left alone on the same reasoning: the digest is what gets pulled, so a tag
+// rewritten beside it would name a version nothing uses.
 //
 // Build numbers (CFBundleVersion, android:versionCode,
 // CURRENT_PROJECT_VERSION) are deliberately not written: they are monotonic
