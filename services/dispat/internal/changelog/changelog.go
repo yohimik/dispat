@@ -96,11 +96,13 @@ func HasEntry(content []byte, tag string) bool {
 // suitable as the body of a GitHub release.
 func RenderSections(rel *plan.Release, f Format) string {
 	f = f.withDefaults()
-	// A fixed-versioning ride has no content to group: one line states that
+	// A shared-versioning ride has no content to group: one line states that
 	// the version moved and nothing else did, in the changelog and in the
-	// GitHub release alike.
+	// GitHub release alike. It names the part of the version the group holds
+	// in common, so a reader of a fixedMajor changelog is not told that the
+	// whole version is shared when only the major is.
 	if rel.NoChanges() {
-		return "No changes — version bump to keep the versioning group on one version.\n"
+		return "No changes — version bump to keep the versioning group on " + plan.SharedPartName(rel.SharedDepth()) + ".\n"
 	}
 	var parts []string
 	// NotesUnits, not Units: a prerelease's entry contains only its own

@@ -21,13 +21,66 @@ const (
 	// previous version and is not released; changed packages release at the
 	// shared version.
 	VersioningFixedSparse Versioning = "fixedSparse"
+	// VersioningFixedMajorMinor shares the major and minor across the group:
+	// a minor or major release moves every member to the same next version,
+	// while patch releases stay each package's own.
+	VersioningFixedMajorMinor Versioning = "fixedMajorMinor"
+	// VersioningFixedMajorMinorSparse shares the major and minor exactly like
+	// VersioningFixedMajorMinor, but a package with no changes of its own
+	// keeps its previous version instead of riding along.
+	VersioningFixedMajorMinorSparse Versioning = "fixedMajorMinorSparse"
+	// VersioningFixedMajor shares the major alone: a major release moves every
+	// member to the same next version, while minor and patch releases stay
+	// each package's own.
+	VersioningFixedMajor Versioning = "fixedMajor"
+	// VersioningFixedMajorSparse shares the major exactly like
+	// VersioningFixedMajor, but a package with no changes of its own keeps its
+	// previous version instead of riding along.
+	VersioningFixedMajorSparse Versioning = "fixedMajorSparse"
 )
 
-// Shared reports whether the mode computes one version for the whole space
-// (fixed or fixedSparse).
-func (v Versioning) Shared() bool {
-	return v == VersioningFixed || v == VersioningFixedSparse
+// SharedVersioningDepth is the depth at which a group shares the whole
+// version: MAJOR, MINOR and PATCH all held in common. It is the maximum a
+// SharedDepth can reach, and the planner reads it rather than a bare 3.
+const SharedVersioningDepth = 3
+
+// SharedDepth is how many leading version components the mode keeps equal
+// across a versioning group: 3 for fixed (the whole version), 2 for
+// fixedMajorMinor, 1 for fixedMajor, 0 for independent and for any
+// unrecognised value.
+//
+// It is the one number the planner needs from a mode. Everything else about
+// partial sharing follows from it: a bump reaching the shared depth moves the
+// whole group, a smaller one is the package's own business, and a member
+// joining the group adopts the leading components and zeroes the rest.
+func (v Versioning) SharedDepth() int {
+	switch v {
+	case VersioningFixed, VersioningFixedSparse:
+		return SharedVersioningDepth
+	case VersioningFixedMajorMinor, VersioningFixedMajorMinorSparse:
+		return 2
+	case VersioningFixedMajor, VersioningFixedMajorSparse:
+		return 1
+	default:
+		return 0
+	}
 }
+
+// Sparse reports whether a member with no changes of its own stays at its
+// previous version instead of riding along when the group's shared part moves.
+func (v Versioning) Sparse() bool {
+	switch v {
+	case VersioningFixedSparse, VersioningFixedMajorMinorSparse, VersioningFixedMajorSparse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Shared reports whether the mode versions its package as part of a group,
+// which is exactly the modes that hold some leading part of the version in
+// common.
+func (v Versioning) Shared() bool { return v.SharedDepth() > 0 }
 
 // Space groups packages that share build and publish behaviour. A package
 // whose configuration overrides its space's carries its own Space value — a

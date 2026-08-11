@@ -83,8 +83,8 @@ func validateVersionGroups(c *File) error {
 		}
 		mode, ok := normalizeVersioning(g.Versioning)
 		if !ok || !model.Versioning(mode).Shared() {
-			return fmt.Errorf("versionGroups[%q]: versioning %q is invalid (a group exists to share versions; want %q or %q)",
-				name, g.Versioning, VersioningFixed, VersioningFixedSparse)
+			return fmt.Errorf("versionGroups[%q]: versioning %q is invalid (a group exists to share versions; want %s)",
+				name, g.Versioning, quotedNames(sharedVersioningNames()))
 		}
 		g.Versioning = mode
 		c.VersionGroups[name] = g

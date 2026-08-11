@@ -139,6 +139,12 @@ const (
 	// resolving to different channels; the group can only move as one, so a
 	// deterministic winner is picked.
 	CodeFixedChannelConflict = "W212"
+	// CodeFixedDepthConflict reports members of a versioning group that share
+	// different parts of the version — a `fixed` space joined by a
+	// `fixedMajor` package. The group versions on the deepest part any member
+	// asks for, which satisfies all of them, and the warning is what explains
+	// the sharing none of the shallower members declared.
+	CodeFixedDepthConflict = "W213"
 
 	// --- release outcomes (§13.7a, §13.9) ---
 
@@ -531,6 +537,17 @@ func (r *Release) NotesUnits() []*ccme.Unit {
 // "no changes" entry for it.
 func (r *Release) NoChanges() bool {
 	return r.FixedRide && len(r.Units) == 0 && len(r.DueTo) == 0
+}
+
+// SharedDepth is how many leading version components the package holds in
+// common with its versioning group: 3 for a shared whole version, 2 for a
+// shared major and minor, 1 for a shared major, 0 for an independent package.
+// Records read it to say what a ride's version bump was actually for.
+func (r *Release) SharedDepth() int {
+	if r.Pkg == nil || r.Pkg.Space == nil {
+		return 0
+	}
+	return r.Pkg.Space.Versioning.SharedDepth()
 }
 
 // Releasing reports whether the package is in this run's plan: it has a
@@ -1665,8 +1682,8 @@ func (cp *computation) sourcePackages(rec *commitRec, i int) map[string]bool {
 // ---------------------------------------------------------------------------
 
 func (cp *computation) finalise() {
-	// Members of a fixed/fixedSparse space version as one group; their
-	// per-package version computation is replaced by the group's.
+	// Members of a shared-versioning space version as one group; their
+	// per-package version computation is deferred to the group's.
 	groups := cp.fixedGroups()
 	shared := make(map[string]bool)
 	for _, members := range groups {
@@ -1727,26 +1744,6 @@ func (cp *computation) finalise() {
 	cp.reportChannelOnly()
 }
 
-// fixedGroups maps each versioning group onto its member packages, in plan
-// order: every package with shared versioning (fixed or fixedSparse) belongs
-// to its resolved VersionGroup — a space's own name unless configuration
-// joined it to a declared group, so groups may span spaces.
-func (cp *computation) fixedGroups() map[string][]string {
-	out := make(map[string][]string)
-	for _, name := range cp.order {
-		rel := cp.rel[name]
-		if rel == nil || rel.Pkg.Space == nil || !rel.Pkg.Space.Versioning.Shared() {
-			continue
-		}
-		group := rel.Pkg.Space.VersionGroup
-		if group == "" {
-			group = rel.Pkg.Space.Name // the zero value means the space's own group
-		}
-		out[group] = append(out[group], name)
-	}
-	return out
-}
-
 // newerCommit reports whether commit a is newer than commit b in the examined
 // history ("" counts as infinitely old).
 func (cp *computation) newerCommit(a, b string) bool {
@@ -1759,208 +1756,6 @@ func (cp *computation) newerCommit(a, b string) bool {
 		return oka
 	}
 	return ra.rank < rb.rank // newest first: lower rank is newer
-}
-
-// applyFixedGroup versions one versioning group as a single virtual package
-// and assigns the result to its members.
-//
-// The group aggregates what the version computation reads: the baselines of
-// every member (held ones included, so the shared version can never fall below
-// a position a member has already published), and the bumps, new work and
-// channel movements of the members that would release (a held member's
-// withheld work moves nothing, exactly as it propagates nothing). The
-// aggregate then goes through the ordinary §13.9 computation — pins, trains
-// and the E15x/E19x guards included — so a versioning group runs one
-// prerelease train and one Release-As applies to the group's single version.
-//
-// Assignment is where the two modes differ, and the mode is each member's
-// own — a group joined from two spaces may mix them: fixed releases every
-// non-held member at the group version, marking members with no cause of
-// their own as FixedRide (W210); fixedSparse assigns the group version only
-// to members with a cause of their own and leaves the rest at their previous
-// versions.
-func (cp *computation) applyFixedGroup(groupName string, members []string) {
-	if len(members) == 0 {
-		return
-	}
-	g := cp.fixedGroupAggregate(groupName, members)
-	if groupPin, ok := cp.fixedGroupPin(g, groupName, members); ok {
-		cp.applyPin(g, groupPin)
-	} else {
-		cp.computeVersion(g)
-	}
-	for _, d := range g.Diagnostics {
-		if d.Level == LevelError && IsRepositoryScoped(d.Code) {
-			return // no correct plan exists; the run aborts, leave members untouched
-		}
-	}
-
-	if !g.Changed() {
-		// Transitional states (heterogeneous member baselines) can leave a
-		// member changed while the aggregate is not — e.g. one member
-		// graduating while the max baseline is already stable. Fall back to
-		// per-member computation so such a member still releases correctly.
-		for _, name := range members {
-			cp.versionOne(name, cp.rel[name])
-		}
-		// The alignment catch-up: fixed versioning promises one version for
-		// all members, and a member left behind — its ride failed in an
-		// earlier run, or the group formed with unequal versions — has
-		// nothing pending of its own to bring it forward. Releasing it at
-		// the group's published baseline is what re-establishes the
-		// invariant, exactly as a W193 catch-up discharges an earlier run's
-		// unfinished propagation. Sparse members are exempt inside.
-		cp.alignFixedLaggards(groupName, g, members)
-		return
-	}
-
-	for _, name := range members {
-		rel := cp.rel[name]
-		if rel.Held {
-			// W154 reports the version the hold withholds; in a versioning
-			// group that is the group version the member will catch up to.
-			rel.Next = g.Next
-			continue
-		}
-		own := rel.Changed()
-		if _, ok := cp.pinned[name]; ok {
-			own = true // the member's pin has not been applied to it, only to the group
-		}
-		if rel.Pkg.Space.Versioning == model.VersioningFixedSparse && !own {
-			continue // sparse: an unchanged member keeps its previous version
-		}
-		if !own {
-			rel.FixedRide = true
-			cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
-				"released at %s with no changes of its own, to keep versioning group %q on one version",
-				g.Next.String(), groupName))
-		}
-		rel.Next = g.Next
-		rel.Bump = g.Bump
-		rel.NewWork = rel.NewWork || g.NewWork
-		rel.Channel = g.Channel
-		rel.Pinned = rel.Pinned || g.Pinned
-	}
-}
-
-// fixedGroupAggregate builds the synthetic release the group computation runs
-// on. Its Pkg exists so diagnostics raised against the group name the group
-// rather than an arbitrary member; its Space is the first member's, read
-// only for those group-level diagnostics — member tags always render
-// against each member's own space, so a group spanning tag formats is safe.
-// The aggregate collects every member's baseline (held ones included) and
-// the bumps, new work and channel movements of the members that would
-// release; members resolving to different channels are reduced to one
-// deterministic winner (W212), because the group can only move as one.
-func (cp *computation) fixedGroupAggregate(groupName string, members []string) *Release {
-	first := cp.rel[members[0]]
-	g := &Release{Pkg: &model.Package{Name: "group:" + groupName, Space: first.Pkg.Space}}
-	for _, name := range members {
-		rel := cp.rel[name]
-		if rel.HasBaseline && (!g.HasBaseline || versionLess(g.Baseline, rel.Baseline)) {
-			g.Baseline, g.HasBaseline = rel.Baseline, true
-		}
-		if versionLess(g.Current, rel.Current) {
-			g.Current = rel.Current
-		}
-	}
-	g.BaselineChannel = channelOf(g.Baseline, g.HasBaseline)
-	g.Channel = g.BaselineChannel
-	g.Next = g.Current
-	if g.HasBaseline {
-		g.Next = g.Baseline
-	}
-
-	var channelCands []string // distinct member channels departing from the group baseline
-	seenChan := make(map[string]bool)
-	for _, name := range members {
-		rel := cp.rel[name]
-		if rel.Held {
-			continue
-		}
-		g.OwnBump = ccme.MaxBump(g.OwnBump, rel.OwnBump)
-		g.PropagatedBump = ccme.MaxBump(g.PropagatedBump, rel.PropagatedBump)
-		if rel.NewWork {
-			g.NewWork = true
-		}
-		if rel.Channel != "" && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
-			seenChan[rel.Channel] = true
-			channelCands = append(channelCands, rel.Channel)
-		}
-	}
-	g.Bump = ccme.MaxBump(g.OwnBump, g.PropagatedBump)
-	if len(channelCands) > 0 {
-		if len(channelCands) > 1 {
-			cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
-				fmt.Sprintf("members of versioning group %q resolve to different channels %v; the group moves as one, using %q",
-					groupName, channelCands, channelCands[0]))
-		}
-		g.Channel = channelCands[0]
-	}
-	return g
-}
-
-// fixedGroupPin selects the pin that applies to the group, if any: the newest
-// exact pin among the members pins the group, because with one shared version
-// there is nothing narrower for it to name. Its scope breadth is deliberately
-// reset to one package — the group is one version, so E154's "an exact
-// version can name only one" is satisfied by construction here; packages
-// outside the group that the same pin scoped still go through their own
-// applyPin and its guards. Competing pins warn (W211) and the newest wins.
-func (cp *computation) fixedGroupPin(g *Release, groupName string, members []string) (pin, bool) {
-	var groupPin pin
-	pinnedVersions := make(map[string]bool)
-	hasPin := false
-	for _, name := range members {
-		p, ok := cp.pinned[name]
-		if !ok {
-			continue
-		}
-		pinnedVersions[p.version.String()] = true
-		if !hasPin || cp.newerCommit(p.commit, groupPin.commit) {
-			groupPin = p
-			hasPin = true
-		}
-	}
-	if !hasPin {
-		return pin{}, false
-	}
-	groupPin.packages = 1
-	if len(pinnedVersions) > 1 {
-		cp.warn(CodeFixedPinConflict, g.Pkg.Name, groupPin.commit,
-			fmt.Sprintf("%d exact Release-As pins compete for versioning group %q; the newest (%s) wins",
-				len(pinnedVersions), groupName, groupPin.version.String()))
-	}
-	return groupPin, true
-}
-
-// alignFixedLaggards releases every non-held, not-otherwise-releasing fixed
-// member whose baseline sits below the group's published baseline at exactly
-// that baseline version, restoring the one-version invariant after a failed
-// ride or a mid-life adoption of fixed versioning. Sparse members are
-// exempt: fixedSparse deliberately leaves an unchanged member behind.
-func (cp *computation) alignFixedLaggards(groupName string, g *Release, members []string) {
-	if !g.HasBaseline {
-		return // the group has never published: nothing to align to
-	}
-	for _, name := range members {
-		rel := cp.rel[name]
-		if rel.Pkg.Space.Versioning != model.VersioningFixed {
-			continue
-		}
-		if rel.Held || rel.Releasing() {
-			continue
-		}
-		if rel.HasBaseline && !versionLess(rel.Baseline, g.Baseline) {
-			continue // already at (or somehow past) the group version
-		}
-		rel.FixedRide = true
-		rel.Next = g.Baseline
-		rel.Channel = g.BaselineChannel
-		cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
-			"released at %s with no changes of its own, catching up to versioning group %q's published version",
-			g.Baseline.String(), groupName))
-	}
 }
 
 // versionOne applies the §13.9 computation to a single package: its pin when

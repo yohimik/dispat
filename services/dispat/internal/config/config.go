@@ -60,10 +60,54 @@ const (
 
 // Versioning values of a space; see the public package for semantics.
 const (
-	VersioningIndependent = public.VersioningIndependent
-	VersioningFixed       = public.VersioningFixed
-	VersioningFixedSparse = public.VersioningFixedSparse
+	VersioningIndependent           = public.VersioningIndependent
+	VersioningFixed                 = public.VersioningFixed
+	VersioningFixedSparse           = public.VersioningFixedSparse
+	VersioningFixedMajorMinor       = public.VersioningFixedMajorMinor
+	VersioningFixedMajorMinorSparse = public.VersioningFixedMajorMinorSparse
+	VersioningFixedMajor            = public.VersioningFixedMajor
+	VersioningFixedMajorSparse      = public.VersioningFixedMajorSparse
 )
+
+// versioningNames lists every accepted versioning value in the order error
+// messages spell them: the default first, then the shared modes from the most
+// shared to the least. It is the single list normalizeVersioning matches
+// against and every "want ..." message is rendered from, so a mode can never
+// be accepted by one and omitted by the other.
+var versioningNames = []string{
+	VersioningIndependent,
+	VersioningFixed,
+	VersioningFixedSparse,
+	VersioningFixedMajorMinor,
+	VersioningFixedMajorMinorSparse,
+	VersioningFixedMajor,
+	VersioningFixedMajorSparse,
+}
+
+// sharedVersioningNames lists the modes a versionGroups declaration accepts:
+// versioningNames without the independent default, which shares nothing.
+func sharedVersioningNames() []string {
+	out := make([]string, 0, len(versioningNames)-1)
+	for _, name := range versioningNames {
+		if model.Versioning(name).Shared() {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// quotedNames renders a list of accepted values for an error message as
+// `"a", "b" or "c"`.
+func quotedNames(names []string) string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = strconv.Quote(name)
+	}
+	if len(quoted) < 2 {
+		return strings.Join(quoted, "")
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + " or " + quoted[len(quoted)-1]
+}
 
 // DefaultNonPackageScopes returns the scopes exempt from the unknown-include
 // error by default. "release" is dispat's own release-commit scope.
@@ -619,15 +663,17 @@ func parseDepth(raw string) (ccme.Depth, error) {
 }
 
 // normalizeVersioning resolves a space's versioning value case-insensitively
-// onto the canonical constants; ok is false for an unknown value.
+// onto the canonical constants; ok is false for an unknown value. An absent
+// value is the independent default.
 func normalizeVersioning(raw string) (string, bool) {
-	switch strings.ToLower(raw) {
-	case "", strings.ToLower(VersioningIndependent):
+	if raw == "" {
 		return VersioningIndependent, true
-	case strings.ToLower(VersioningFixed):
-		return VersioningFixed, true
-	case strings.ToLower(VersioningFixedSparse):
-		return VersioningFixedSparse, true
+	}
+	low := strings.ToLower(raw)
+	for _, name := range versioningNames {
+		if low == strings.ToLower(name) {
+			return name, true
+		}
 	}
 	return "", false
 }
@@ -833,8 +879,8 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	}
 	versioning, ok := normalizeVersioning(s.Versioning)
 	if !ok {
-		return s, fmt.Errorf("%s: unknown versioning %q (want %q, %q or %q)",
-			label, s.Versioning, VersioningIndependent, VersioningFixed, VersioningFixedSparse)
+		return s, fmt.Errorf("%s: unknown versioning %q (want %s)",
+			label, s.Versioning, quotedNames(versioningNames))
 	}
 	s.Versioning = versioning
 	if err := checkScriptValues(label, s.Scripts); err != nil {

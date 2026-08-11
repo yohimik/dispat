@@ -305,6 +305,16 @@ func (c *CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
 func (c *CommitConfig) VerifyEnabled() bool { return c == nil || c.Verify == nil || *c.Verify }
 
 // Versioning values of a space (the `versioning` key).
+//
+// The shared modes differ along two axes. The first is how much of the
+// version the group holds in common: the whole of it under fixed, the major
+// and minor under fixedMajorMinor, the major alone under fixedMajor.
+// Components below that are each package's own, so under fixedMajor a fix in
+// one member moves nothing else. The second axis is what happens to a member
+// with no changes of its own when the shared part does move: the plain modes
+// release it too, at the shared version, with a single "no changes" changelog
+// entry explaining the bump; the *Sparse modes leave it at its previous
+// version until it next changes, at which point it joins the shared part.
 const (
 	// VersioningIndependent is the default: every package's version is
 	// computed from its own history alone.
@@ -320,12 +330,28 @@ const (
 	// but a package with no changes of its own keeps its previous version and
 	// is not released; changed packages release at the shared version.
 	VersioningFixedSparse = "fixedSparse"
+	// VersioningFixedMajorMinor shares the major and minor: a minor or major
+	// release moves every package of the group to the same next version, while
+	// patch releases stay each package's own.
+	VersioningFixedMajorMinor = "fixedMajorMinor"
+	// VersioningFixedMajorMinorSparse shares the major and minor exactly like
+	// fixedMajorMinor, but a package with no changes of its own keeps its
+	// previous version instead of riding along.
+	VersioningFixedMajorMinorSparse = "fixedMajorMinorSparse"
+	// VersioningFixedMajor shares the major alone: a major release moves every
+	// package of the group to the same next version, while minor and patch
+	// releases stay each package's own.
+	VersioningFixedMajor = "fixedMajor"
+	// VersioningFixedMajorSparse shares the major exactly like fixedMajor, but
+	// a package with no changes of its own keeps its previous version instead
+	// of riding along.
+	VersioningFixedMajorSparse = "fixedMajorSparse"
 )
 
 // VersionGroupConfig declares one entry of the top-level `versionGroups`
 // map: a shared-versioning group whose membership is stated by the members
 // themselves, through their versionGroup key. The declaration owns the
-// group's versioning mode — "fixed" or "fixedSparse"; "independent" is
+// group's versioning mode — any of the shared modes above; "independent" is
 // invalid, because a group exists to share — so every member moves under one
 // rule and a member cannot contradict it.
 type VersionGroupConfig struct {
@@ -342,12 +368,12 @@ type SpaceConfig struct {
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
-	// "independent" (default), "fixed" or "fixedSparse". See the Versioning*
+	// "independent" (default) or one of the shared modes. See the Versioning*
 	// constants.
 	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
 	// VersionGroup names the shared-versioning group the space's packages
 	// join: an entry of the top-level versionGroups map, or the name of
-	// another space with fixed/fixedSparse versioning. Empty means the
+	// another space whose own versioning is shared. Empty means the
 	// space's own implicit group (its name) when its versioning is shared.
 	// A declared group's versioning mode is authoritative, so a space naming
 	// one must not set versioning itself.
