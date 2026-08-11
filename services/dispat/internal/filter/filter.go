@@ -167,8 +167,9 @@ func Resolve(f Filter, ws Workspace) (Result, error) {
 				term, nameLabel("space", sortedSet(names)))
 		}
 	}
+	groups := knownGroups(ws) // one pass over the packages, however many terms
 	for _, term := range f.Groups {
-		names := sortedMatches(term, knownGroups(ws))
+		names := sortedMatches(term, groups)
 		if len(names) == 0 {
 			return Result{}, unknownGroup(term, ws)
 		}
