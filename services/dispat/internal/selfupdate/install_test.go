@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -272,6 +273,82 @@ func TestInstallerDefaultsToTheRunningBinary(t *testing.T) {
 	// the test binary and says so rather than touching anything.
 	_, _, err = Rollback(context.Background(), "")
 	assert.ErrorIs(t, err, ErrNoBackup)
+}
+
+// TestReplaceReportsAFirstRenameThatFails: before the first rename nothing
+// has moved, so the failure is simply reported. It is the case where there is
+// nothing to undo, and the message has to name what it could not move.
+func TestReplaceReportsAFirstRenameThatFails(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	incoming := filepath.Join(dir, "incoming")
+	fakeBinary(t, incoming, "1.1.0")
+
+	_, err := Replace(exe, incoming)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "moving "+exe+" aside")
+	assert.FileExists(t, incoming, "and the file that would have replaced it is still there")
+}
+
+// TestReplaceReportsAnUnremovableBackup: the previous backup is removed first
+// because Windows will not rename onto a file that exists. A path that cannot
+// be cleared stops the swap before anything moves.
+func TestReplaceReportsAnUnremovableBackup(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+	// A non-empty directory where the backup belongs: Remove refuses it.
+	require.NoError(t, os.Mkdir(BackupPath(exe), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(BackupPath(exe), "x"), nil, 0o644))
+
+	_, err := Replace(exe, filepath.Join(dir, "incoming"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "removing the previous backup")
+	assert.FileExists(t, exe, "the working binary never moved")
+}
+
+// TestRollbackRefusesWhenItCannotWrite: the rotate needs somewhere to park the
+// outgoing binary, so a directory that cannot be written to is refused before
+// anything is renamed.
+func TestRollbackRefusesWhenItCannotWrite(t *testing.T) {
+	requireExec(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.1.0")
+	fakeBinary(t, BackupPath(exe), "1.0.0")
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	_, _, err := Rollback(context.Background(), exe)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not writable")
+}
+
+// TestInstallerKeepsTheClientItWasGiven: the command hands its own client down
+// so a test, or a proxy configuration, reaches the download too.
+func TestInstallerKeepsTheClientItWasGiven(t *testing.T) {
+	client := &http.Client{Timeout: time.Second}
+	i := Installer{Client: client}
+	assert.Same(t, client, i.client())
+}
+
+// TestAtReportsAnAnswerItCannotRead: an endpoint that is reachable and
+// returns something other than a release is an error, not an absent version.
+func TestAtReportsAnAnswerItCannotRead(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "<html>this is not the api</html>")
+	}))
+	defer srv.Close()
+
+	s := &Source{APIURL: srv.URL, Owner: "o", Repo: "r"}
+	_, err := s.At(context.Background(), "1.0.0")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoRelease)
 }
 
 func read(t *testing.T, path string) []byte {
