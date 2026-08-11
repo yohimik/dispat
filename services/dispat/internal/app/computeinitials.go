@@ -180,15 +180,52 @@ func containsString(all []string, want string) bool {
 // for: the packages whose tags give no parseable stable baseline, either
 // because there is no stable tag at all or because the newest one cannot be
 // read as a version.
+func (a *App) unreleased(ctx context.Context, candidates []manifestBaseline) []initialSuggestion {
+	reasons, errs := a.baselineReasons(ctx, candidates)
+
+	var out []initialSuggestion
+	for i, c := range candidates {
+		if errs[i] != nil {
+			a.log.Warn().Err(errs[i]).Str("package", c.pkg.Name).
+				Msg("cannot read the release tags; no baseline suggested")
+			continue
+		}
+		if reasons[i] == "" {
+			continue // released and readable: the tag is the baseline
+		}
+		out = append(out, initialSuggestion{
+			pkg:     c.pkg.Name,
+			version: c.version,
+			detail:  fmt.Sprintf("%s declares %s; %s", c.manifest, c.version, reasons[i]),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].pkg < out[j].pkg })
+	return out
+}
+
+// baselineReasons says, per candidate, why the package still needs an entry
+// written down, or "" when its tags already answer.
 //
 // The tag queries are independent per-package git reads, so they run
-// concurrently and are assembled strictly in candidate order afterwards. A
-// package whose tags cannot be read loses its suggestion and nothing else:
-// the dependency half of the command has no business failing over a git
-// error.
-func (a *App) unreleased(ctx context.Context, candidates []manifestBaseline) []initialSuggestion {
+// concurrently and are read back strictly in candidate order. A package whose
+// tags cannot be read loses its suggestion and nothing else: the dependency
+// half of the command has no business failing over a git error.
+func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline) ([]string, []error) {
 	reasons := make([]string, len(candidates))
 	errs := make([]error, len(candidates))
+
+	if _, err := a.git.HeadSHA(ctx); err != nil {
+		// A repository with no commits yet, which is where adopting dispat
+		// often starts. Nothing can be reachable from a HEAD that does not
+		// exist, so every candidate is a first release and no tag query is
+		// worth making.
+		a.log.Debug().Err(err).Msg("no commit to read release tags from; every package is a first release")
+		for i := range reasons {
+			reasons[i] = "the repository has no commits yet"
+		}
+		return reasons, errs
+	}
+
 	sem := make(chan struct{}, tagConcurrency)
 	var wg sync.WaitGroup
 	for i, c := range candidates {
@@ -212,25 +249,7 @@ func (a *App) unreleased(ctx context.Context, candidates []manifestBaseline) []i
 		}(i, c)
 	}
 	wg.Wait()
-
-	var out []initialSuggestion
-	for i, c := range candidates {
-		if errs[i] != nil {
-			a.log.Warn().Err(errs[i]).Str("package", c.pkg.Name).
-				Msg("cannot read the release tags; no baseline suggested")
-			continue
-		}
-		if reasons[i] == "" {
-			continue // released and readable: the tag is the baseline
-		}
-		out = append(out, initialSuggestion{
-			pkg:     c.pkg.Name,
-			version: c.version,
-			detail:  fmt.Sprintf("%s declares %s; %s", c.manifest, c.version, reasons[i]),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].pkg < out[j].pkg })
-	return out
+	return reasons, errs
 }
 
 // collectInitialEdits adds the accepted baselines to the config's initials

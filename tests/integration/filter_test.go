@@ -310,13 +310,15 @@ func TestFilterPreviewSelects(t *testing.T) {
 
 // TestFilterComputeScopesSuggestions: compute reports only the selected
 // consumers' edges, while still detecting against every package's manifests —
-// scanning only the selection would turn a supported edge into a removal.
+// scanning only the selection would turn a supported edge into a removal. The
+// baselines are scoped the same way, by the package the entry would be about.
 func TestFilterComputeScopesSuggestions(t *testing.T) {
 	r := filterRepo(t)
 	// web declares core (already in the config) and tool (drift); site
-	// declares core (drift too, in another space).
+	// declares core (drift too, in another space). Only tool carries a
+	// version worth a baseline, and it is outside every selection below.
 	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
-	r.WriteFile("tools/tool/package.json", `{"name": "@acme/tool", "version": "0.0.0"}`)
+	r.WriteFile("tools/tool/package.json", `{"name": "@acme/tool", "version": "4.2.0"}`)
 	r.WriteFile("packages/web/package.json", `{"name": "@acme/web", "version": "0.0.0",
 		"dependencies": {"@acme/core": "workspace:*", "@acme/tool": "workspace:*"}}`)
 	r.WriteFile("apps/site/package.json", `{"name": "@acme/site", "version": "0.0.0",
@@ -327,6 +329,7 @@ func TestFilterComputeScopesSuggestions(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "web -> tool")
 	assert.NotContains(t, res.Stdout, "site -> core", "another consumer's drift is out of scope")
+	assert.NotContains(t, res.Stdout, "+ initial", "and so is another package's missing baseline")
 	assert.NotContains(t, res.Stdout, "- remove",
 		"the declared web -> core edge is supported by a manifest, and detection reads "+
 			"every package's manifests however the filter narrows the report")
@@ -345,6 +348,11 @@ func TestFilterComputeScopesSuggestions(t *testing.T) {
 	res = r.Command("compute", "--space", "apps")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "site -> core")
+
+	// Naming the package it is about brings the baseline into scope.
+	res = r.Command("compute", "--package", "tool")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "+ initial tool 4.2.0")
 }
 
 // TestFilterPositionalPackagesAreAUsageError: the selection is a flag, so a
