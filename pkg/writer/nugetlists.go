@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"sort"
 )
 
 // rewritePackagesProps edits a Directory.Packages.props: the central version
@@ -37,10 +35,11 @@ func rewritePackagesConfig(path string, edits []Edit) (Result, error) {
 // A package declared more than once (the same entry repeated under two
 // conditioned ItemGroups) is spliced in every place and reported once.
 func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr string) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
+	data := rep.bytes()
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
 		// These files have one dependency field, so a kinded edit (beyond the long
@@ -50,13 +49,8 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 		}
 	}
 
-	type patch struct {
-		span
-		text string
-	}
 	var (
 		res     Result
-		patches []patch
 		seen    = make(map[int]bool, len(edits))
 		found   = make(map[int]bool, len(edits))
 		applied = make(map[int]bool, len(edits))
@@ -92,7 +86,7 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 			continue // already the wanted text: no change, not missing
 		}
 		applied[i] = true
-		patches = append(patches, patch{s, edits[i].Range})
+		rep.replace(s, xmlEscape(edits[i].Range))
 	}
 	// Reported in edit order rather than document order, so the result does not
 	// depend on where in the file a declaration happens to sit.
@@ -107,22 +101,5 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	if len(patches) == 0 {
-		return res, nil
-	}
-
-	// Splice back to front so earlier offsets stay valid.
-	sort.Slice(patches, func(i, j int) bool { return patches[i].start > patches[j].start })
-	out := data
-	for _, p := range patches {
-		var escaped bytes.Buffer
-		if err := xml.EscapeText(&escaped, []byte(p.text)); err != nil {
-			return res, fmt.Errorf("%s: %w", path, err)
-		}
-		out = append(out[:p.start], append(escaped.Bytes(), out[p.end:]...)...)
-	}
-	if err := xmlWellFormed(out); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid XML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyXML)
 }

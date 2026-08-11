@@ -1,6 +1,11 @@
 package writer
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/pelletier/go-toml/v2"
+)
 
 // The TOML manifests are spliced line by line rather than re-encoded:
 // go-toml's Marshal drops comments and normalises layout, and its offset-aware
@@ -9,6 +14,15 @@ import "strings"
 // entries, so a per-line splice (the shape the requirements writer already
 // uses) preserves every other byte by construction. Anything that does not fit
 // on one line is declined rather than guessed at.
+
+// verifyTOML is the TOML formats' proof that a rewrite still parses.
+func verifyTOML(out []byte) error {
+	var check map[string]any
+	if err := toml.Unmarshal(out, &check); err != nil {
+		return fmt.Errorf("rewrite produced invalid TOML: %w", err)
+	}
+	return nil
+}
 
 // stripTOMLComment cuts a trailing comment, ignoring '#' inside strings. It
 // only ever truncates, so offsets into the result stay valid in the original.

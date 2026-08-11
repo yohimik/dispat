@@ -1,12 +1,14 @@
 package writer
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 
 	"golang.org/x/mod/modfile"
 )
+
+// go.mod is the one format here with no spans to speak of: x/mod's modfile
+// owns the layout and hands back the whole file, so both writers regenerate it
+// and let the replacer decide whether that changed anything.
 
 // rewriteGoMod edits a go.mod's require directives via x/mod's modfile,
 // which preserves formatting and comments by design. go.mod has one
@@ -15,11 +17,11 @@ import (
 // ignores it for go.mod). Only modules the file already requires are
 // updated: adding a require is dependency management, not version syncing.
 func rewriteGoMod(path string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	f, err := modfile.Parse(path, data, nil)
+	f, err := modfile.Parse(path, rep.bytes(), nil)
 	if err != nil {
 		return Result{}, err
 	}
@@ -50,10 +52,8 @@ func rewriteGoMod(path string, edits []Edit) (Result, error) {
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
-	if bytes.Equal(out, data) {
-		return res, nil
-	}
-	return res, atomicWrite(path, out)
+	rep.setWhole(out)
+	return res, rep.commit(nil)
 }
 
 // replaceGoMod adds, repoints and removes replace directives. x/mod's modfile
@@ -67,19 +67,19 @@ func rewriteGoMod(path string, edits []Edit) (Result, error) {
 // The other formats have no such notion, so this is the only writer that reads
 // the field.
 func replaceGoMod(path string, replacements []Replacement) (ReplaceResult, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
-	f, err := modfile.Parse(path, data, nil)
+	f, err := modfile.Parse(path, rep.bytes(), nil)
 	if err != nil {
 		return ReplaceResult{}, fmt.Errorf("%s: %w", path, err)
 	}
 	// The directives already in the file, so a redirect that is already what
 	// was asked for counts as no change rather than as work done.
 	existing := make(map[string]string, len(f.Replace))
-	for _, rep := range f.Replace {
-		existing[rep.Old.Path+"\x00"+rep.Old.Version] = rep.New.Path
+	for _, directive := range f.Replace {
+		existing[directive.Old.Path+"\x00"+directive.Old.Version] = directive.New.Path
 	}
 
 	var res ReplaceResult
@@ -112,8 +112,6 @@ func replaceGoMod(path string, replacements []Replacement) (ReplaceResult, error
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
-	if bytes.Equal(out, data) {
-		return res, nil
-	}
-	return res, atomicWrite(path, out)
+	rep.setWhole(out)
+	return res, rep.commit(nil)
 }

@@ -2,7 +2,6 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -27,18 +26,18 @@ import (
 
 // tomlReplace applies path redirects to a package-keyed table.
 func tomlReplace(path, table string, replacements []Replacement) (ReplaceResult, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
 	var doc map[string]any
-	if err := toml.Unmarshal(data, &doc); err != nil {
+	if err := toml.Unmarshal(rep.bytes(), &doc); err != nil {
 		return ReplaceResult{}, fmt.Errorf("%s: %w", path, err)
 	}
 
 	var (
 		res     ReplaceResult
-		lines   = strings.Split(string(data), "\n")
+		lines   = rep.lines()
 		changed bool
 	)
 	for _, r := range replacements {
@@ -64,15 +63,12 @@ func tomlReplace(path, table string, replacements []Replacement) (ReplaceResult,
 			changed = true
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
-	out := []byte(strings.Join(lines, "\n"))
-	if err := tomlVerifyReplacements(out, table, res.Applied); err != nil {
-		return res, fmt.Errorf("%s: internal error: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(func(out []byte) error {
+		return tomlVerifyReplacements(out, table, res.Applied)
+	})
 }
 
 // tomlPathValue renders one redirect's value.

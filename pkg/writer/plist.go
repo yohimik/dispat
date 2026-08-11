@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -35,11 +34,11 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 	if version == "" {
 		return res, nil
 	}
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	s, current, ok, err := plistVersionSpan(data)
+	s, current, ok, err := plistVersionSpan(rep.bytes())
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
@@ -51,22 +50,9 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 		return res, nil
 	}
 
-	var escaped bytes.Buffer
-	if err := xml.EscapeText(&escaped, []byte(version)); err != nil {
-		return res, fmt.Errorf("%s: %w", path, err)
-	}
-	out := make([]byte, 0, len(data)+escaped.Len())
-	out = append(out, data[:s.start]...)
-	out = append(out, escaped.Bytes()...)
-	out = append(out, data[s.end:]...)
-
-	// The splice is span-precise, but a manifest is user data: never write
-	// bytes back without proving they still parse.
-	if err := xmlWellFormed(out); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid XML: %w", path, err)
-	}
+	rep.replace(s, xmlEscape(version))
 	res.VersionWritten = true
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyXML)
 }
 
 // plistVersionSpan locates the byte span of the marketing version's <string>

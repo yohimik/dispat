@@ -3,7 +3,6 @@ package writer
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -50,12 +49,12 @@ type catalogSlot struct {
 // A catalog declares no version of its own, so Rewrite's version argument has
 // no target here.
 func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
 	var raw gradleCatalog
-	if err := toml.Unmarshal(data, &raw); err != nil {
+	if err := toml.Unmarshal(rep.bytes(), &raw); err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 	slots := catalogSlots(&raw)
@@ -95,7 +94,7 @@ func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
 		t.edits = append(t.edits, e)
 	}
 
-	lines := strings.Split(string(data), "\n")
+	lines := rep.lines()
 	index := buildTOMLIndex(lines)
 	changed := false
 	for _, id := range order {
@@ -114,18 +113,10 @@ func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
 		lines[idx] = lines[idx][:start] + t.text + lines[idx][end:]
 		changed = true
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
-	// The splice is span-precise, but a manifest is user data: never write
-	// bytes back without proving they still parse.
-	out := []byte(strings.Join(lines, "\n"))
-	var check map[string]any
-	if err := toml.Unmarshal(out, &check); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid TOML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyTOML)
 }
 
 // catalogSlots indexes every library's version location by its Maven

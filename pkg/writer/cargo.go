@@ -2,9 +2,7 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"sort"
-	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/yohimik/dispat/pkg/manifest"
@@ -48,12 +46,12 @@ var cargoTables = []struct {
 // override the workspace on purpose, which is dependency management rather
 // than version syncing.
 func rewriteCargo(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
 	var raw cargoManifest
-	if err := toml.Unmarshal(data, &raw); err != nil {
+	if err := toml.Unmarshal(rep.bytes(), &raw); err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 
@@ -88,7 +86,7 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 
 	var (
 		res     Result
-		lines   = strings.Split(string(data), "\n")
+		lines   = rep.lines()
 		index   = buildTOMLIndex(lines)
 		changed bool
 	)
@@ -129,18 +127,10 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 			}
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
-	// The splice is span-precise, but a manifest is user data: never write
-	// bytes back without proving they still parse.
-	out := []byte(strings.Join(lines, "\n"))
-	var check map[string]any
-	if err := toml.Unmarshal(out, &check); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid TOML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyTOML)
 }
 
 // cargoTableOf selects one of the decoded dependency tables by name.

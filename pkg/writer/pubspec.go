@@ -2,7 +2,6 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/manifest"
@@ -26,7 +25,7 @@ var pubspecTables = map[manifest.Kind]string{
 // to replace and is reported missing. So is a dependency in a block this
 // format has no kind for.
 func rewritePubspec(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -54,7 +53,7 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		res     Result
 		seen    = make(map[int]bool, len(edits))
 		found   = make(map[int]bool, len(edits))
-		lines   = strings.Split(string(data), "\n")
+		lines   = rep.lines()
 		changed bool
 		block   string
 		depth   = noBlock
@@ -132,10 +131,10 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-	return res, atomicWrite(path, []byte(strings.Join(lines, "\n")))
+	return res, rep.commit(nil)
 }
 
 // stripYAMLComment cuts a trailing comment, ignoring '#' inside quotes and the
@@ -238,13 +237,13 @@ const pubspecOverrides = "dependency_overrides"
 // Indentation follows the file. A pubspec written with four spaces keeps four,
 // because the block's own entries decide the width rather than a constant here.
 func replacePubspec(path string, replacements []Replacement) (ReplaceResult, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
 	var (
 		res     ReplaceResult
-		lines   = strings.Split(string(data), "\n")
+		lines   = rep.lines()
 		changed bool
 	)
 	for _, r := range replacements {
@@ -277,15 +276,12 @@ func replacePubspec(path string, replacements []Replacement) (ReplaceResult, err
 			changed = true
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
-	out := []byte(strings.Join(lines, "\n"))
-	if err := pubspecVerifyOverrides(out, res.Applied); err != nil {
-		return res, fmt.Errorf("%s: internal error: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(func(out []byte) error {
+		return pubspecVerifyOverrides(out, res.Applied)
+	})
 }
 
 // pubspecOverride is one entry of the overrides block: the line naming the

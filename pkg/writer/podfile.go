@@ -2,7 +2,6 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -25,7 +24,7 @@ func rewritePodfile(path string, edits []Edit) (Result, error) {
 // declare dependencies as `<call> 'Name', 'requirement'`, differing only in how
 // the call is spelled and whether the file also carries a version of its own.
 func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), version string) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -49,7 +48,7 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 	seen := make(map[int]bool, len(edits))
 	writable := make(map[int]bool, len(edits))
 	applied := make(map[int]bool, len(edits))
-	lines := strings.Split(string(data), "\n")
+	lines := rep.lines()
 	changed := false
 	versionDone := version == ""
 	for li, raw := range lines {
@@ -112,17 +111,14 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
 	// There is no grammar to re-parse against, so the reader is run over the
 	// result and must agree that every splice landed where it was aimed.
-	out := strings.Join(lines, "\n")
-	if err := verifyRubyPods(out, call, res.Applied, version, res.VersionWritten); err != nil {
-		return res, fmt.Errorf("%s: internal error: %w", path, err)
-	}
-	return res, atomicWrite(path, []byte(out))
+	return res, rep.commit(func(out []byte) error {
+		return verifyRubyPods(string(out), call, res.Applied, version, res.VersionWritten)
+	})
 }
 
 // verifyRubyPods re-reads a rewritten file and checks that every applied edit

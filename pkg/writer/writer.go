@@ -34,6 +34,11 @@
 // text a manifest declares, Replace manages the directive that points a
 // dependency at a local folder, the way a go.mod replace does. Four formats
 // have such a directive; SupportsReplace reports which.
+//
+// Underneath both sits one replacer. Every format writer reads its file
+// through it and writes its file through it, so the read cap, the splice, the
+// proof that the result still parses and the atomic write happen in one place
+// for all of them.
 package writer
 
 import (
@@ -178,7 +183,7 @@ func Rewrite(path, version string, edits []Edit) (Result, error) {
 		return Result{}, err
 	}
 	if info.Size() > maxManifestBytes {
-		return Result{}, fmt.Errorf("%s: %w (%d bytes)", path, ErrManifestTooLarge, info.Size())
+		return Result{}, tooLarge(path, info.Size())
 	}
 	res, err := rewrite(path, version, edits)
 	res.Path = path

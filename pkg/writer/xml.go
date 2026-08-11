@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -26,6 +27,23 @@ func xmlWellFormed(data []byte) error {
 			return err
 		}
 	}
+}
+
+// verifyXML is the XML formats' proof that a rewrite still parses.
+func verifyXML(out []byte) error {
+	if err := xmlWellFormed(out); err != nil {
+		return fmt.Errorf("rewrite produced invalid XML: %w", err)
+	}
+	return nil
+}
+
+// xmlEscape renders text as XML character data. The standard escaper writes
+// into a buffer that cannot fail, so there is no error worth returning here
+// and no caller has to carry one.
+func xmlEscape(text string) []byte {
+	var escaped bytes.Buffer
+	_ = xml.EscapeText(&escaped, []byte(text))
+	return escaped.Bytes()
 }
 
 // xmlElementTextSpan measures the content of the element the decoder has just

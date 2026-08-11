@@ -2,7 +2,6 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -33,12 +32,12 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 	if strings.ContainsAny(version, "\";{}\n\r") {
 		return res, fmt.Errorf("%s: refusing to write %q into a project file: it could not survive as one token", path, version)
 	}
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
 
-	lines := strings.Split(string(data), "\n")
+	lines := rep.lines()
 	before := 0
 	changed := false
 	for i, line := range lines {
@@ -56,13 +55,11 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 	if !changed {
 		return res, nil
 	}
-
-	out := []byte(strings.Join(lines, "\n"))
-	if err := pbxVerify(data, out, version, before); err != nil {
-		return res, fmt.Errorf("%s: internal error: %w", path, err)
-	}
+	rep.setLines(lines)
 	res.VersionWritten = true
-	return res, atomicWrite(path, out)
+	return res, rep.commit(func(out []byte) error {
+		return pbxVerify(rep.bytes(), out, version, before)
+	})
 }
 
 // pbxVerify checks the invariants that stand in for re-parsing: the structural

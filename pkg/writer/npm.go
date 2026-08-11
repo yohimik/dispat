@@ -3,14 +3,9 @@ package writer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 )
-
-// span is the byte range of one JSON scalar value inside the file.
-type span struct{ start, end int64 }
 
 // rewriteNpm edits a package.json by replacing only the bytes of the version
 // strings being changed: the file is tokenised once to find each target
@@ -27,56 +22,43 @@ func rewriteNpm(path, version string, edits []Edit) (Result, error) {
 // are called, which fieldOf resolves; everything else (the single tokenising
 // pass, the back-to-front splice, the re-validation) is identical.
 func rewriteJSON(path, version string, edits []Edit, fieldOf func(Edit) string) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	spans, versionSpan, err := npmSpans(data, edits, fieldOf)
+	spans, versionSpan, err := npmSpans(rep.bytes(), edits, fieldOf)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 
-	// Collect the replacements, newest span first so earlier offsets stay
-	// valid while splicing.
-	type patch struct {
-		span
-		text []byte
-	}
-	var (
-		res     Result
-		patches []patch
-	)
+	var res Result
 	for i, e := range edits {
 		s, ok := spans[i]
 		if !ok {
 			res.Missing = append(res.Missing, e)
 			continue
 		}
-		if string(current(data, s)) == e.Range {
+		if string(current(rep.bytes(), s)) == e.Range {
 			continue // already the wanted text: no change, not missing
 		}
 		res.Applied = append(res.Applied, e)
-		patches = append(patches, patch{s, quote(e.Range)})
+		rep.replace(s, quote(e.Range))
 	}
 	if version != "" && versionSpan != nil {
-		if string(current(data, *versionSpan)) != version {
+		if string(current(rep.bytes(), *versionSpan)) != version {
 			res.VersionWritten = true
-			patches = append(patches, patch{*versionSpan, quote(version)})
+			rep.replace(*versionSpan, quote(version))
 		}
 	}
-	if len(patches) == 0 {
-		return res, nil
+	return res, rep.commit(verifyJSON)
+}
+
+// verifyJSON is the JSON formats' proof that a rewrite still parses.
+func verifyJSON(out []byte) error {
+	if !json.Valid(out) {
+		return errors.New("rewrite produced invalid JSON")
 	}
-	sort.Slice(patches, func(i, j int) bool { return patches[i].start > patches[j].start })
-	for _, p := range patches {
-		data = append(data[:p.start], append(p.text, data[p.end:]...)...)
-	}
-	// The splice is span-precise, but a manifest is user data: never write
-	// bytes back without proving they still parse.
-	if !json.Valid(data) {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid JSON", path)
-	}
-	return res, atomicWrite(path, data)
+	return nil
 }
 
 // current is the decoded string a span holds.
@@ -214,45 +196,4 @@ func skipValue(dec *json.Decoder) error {
 			return nil
 		}
 	}
-}
-
-// atomicWrite replaces the file's contents keeping its permissions, via a
-// same-folder temp file, fsync and rename: a process crash never leaves a
-// half-written manifest (a power loss is the filesystem's problem, and the
-// fsync narrows even that window).
-func atomicWrite(path string, data []byte) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	// The temp file must live beside the target so the rename stays on one
-	// filesystem.
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".dispat-write-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Chmod(name, info.Mode()); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
-		return err
-	}
-	return nil
 }

@@ -2,7 +2,6 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -40,7 +39,7 @@ type pyLocation struct {
 // entry whose value is a table of constraints rather than a scalar, or whose
 // text the requirement reader cannot make sense of, is reported missing.
 func rewritePyproject(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -48,7 +47,7 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 	// would otherwise splice happily into a file that was already broken and
 	// then blame itself when the result failed to parse.
 	var input map[string]any
-	if err := toml.Unmarshal(data, &input); err != nil {
+	if err := toml.Unmarshal(rep.bytes(), &input); err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 	wanted := make(map[pyTarget]int, len(edits))
@@ -64,7 +63,7 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 		res            Result
 		found          = make(map[int]bool, len(edits))
 		seen           = make(map[int]bool, len(edits))
-		lines          = strings.Split(string(data), "\n")
+		lines          = rep.lines()
 		changed        bool
 		table          string
 		arrayDepth     int
@@ -171,18 +170,10 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
-	// The splice is span-precise, but a manifest is user data: never write
-	// bytes back without proving they still parse.
-	out := []byte(strings.Join(lines, "\n"))
-	var check map[string]any
-	if err := toml.Unmarshal(out, &check); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid TOML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyTOML)
 }
 
 // pyArrayKind reports the kind an array-valued key declares, for the tables
@@ -232,13 +223,15 @@ func pyPoetryValueSpan(body string, afterEq int) (start, end int, ok bool) {
 // earlier offsets stay valid.
 func pySpliceRequirements(lines []string, li int, body string, from int, kind manifest.Kind,
 	wanted map[pyTarget]int, edits []Edit, found map[int]bool) []Edit {
-	type patch struct {
+	// A within-line splice, distinct from the file-wide patches the replacer
+	// queues: these offsets are into one line's bytes.
+	type splice struct {
 		start, end int
 		text       string
 	}
 	var (
 		applied []Edit
-		patches []patch
+		patches []splice
 	)
 	for i := from; i < len(body); i++ {
 		quote := body[i]
@@ -262,7 +255,7 @@ func pySpliceRequirements(lines []string, li int, body string, from int, kind ma
 				found[idx] = true
 				if entry[nameEnd:specEnd] != edits[idx].Range {
 					applied = append(applied, edits[idx])
-					patches = append(patches, patch{i + 1 + nameEnd, i + 1 + specEnd, edits[idx].Range})
+					patches = append(patches, splice{i + 1 + nameEnd, i + 1 + specEnd, edits[idx].Range})
 				}
 			}
 		}

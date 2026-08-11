@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -55,10 +54,11 @@ func npmSpec(path string) string { return "file:" + path }
 // every offset after it and one manifest is small enough that re-reading it is
 // cheaper than tracking the shift.
 func replaceNpm(path string, replacements []Replacement) (ReplaceResult, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
+	data := rep.bytes()
 	var res ReplaceResult
 	for _, r := range replacements {
 		var doc map[string]any
@@ -78,14 +78,12 @@ func replaceNpm(path string, replacements []Replacement) (ReplaceResult, error) 
 			res.Missing = append(res.Missing, r)
 		}
 	}
-	if len(res.Applied) == 0 {
-		return res, nil
+	if len(res.Applied) > 0 {
+		rep.setWhole(data)
 	}
-
-	if err := npmVerifyReplacements(data, res.Applied); err != nil {
-		return res, fmt.Errorf("%s: internal error: %w", path, err)
-	}
-	return res, atomicWrite(path, data)
+	return res, rep.commit(func(out []byte) error {
+		return npmVerifyReplacements(out, res.Applied)
+	})
 }
 
 // npmApplyReplacement writes one redirect, reporting whether anything changed.

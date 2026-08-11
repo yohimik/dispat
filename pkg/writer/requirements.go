@@ -1,7 +1,6 @@
 package writer
 
 import (
-	"os"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/manifest"
@@ -23,7 +22,7 @@ func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(n
 // line declares are Missing. Requirements files declare no own version, so
 // the version argument has no target here.
 func rewriteRequirements(path string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -34,7 +33,7 @@ func rewriteRequirements(path string, edits []Edit) (Result, error) {
 
 	var res Result
 	found := make(map[int]bool, len(edits))
-	lines := strings.Split(string(data), "\n")
+	lines := rep.lines()
 	changed := false
 	for li, raw := range lines {
 		line := strings.TrimSuffix(raw, "\r")
@@ -64,10 +63,10 @@ func rewriteRequirements(path string, edits []Edit) (Result, error) {
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-	return res, atomicWrite(path, []byte(strings.Join(lines, "\n")))
+	return res, rep.commit(nil)
 }
 
 // requirementSpans locates, in one requirement line, the declared name and the

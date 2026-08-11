@@ -96,7 +96,7 @@ func Replace(path string, replacements []Replacement) (ReplaceResult, error) {
 		return ReplaceResult{}, err
 	}
 	if info.Size() > maxManifestBytes {
-		return ReplaceResult{}, fmt.Errorf("%s: %w (%d bytes)", path, ErrManifestTooLarge, info.Size())
+		return ReplaceResult{}, tooLarge(path, info.Size())
 	}
 
 	replace, ok := replacers[format]

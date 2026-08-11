@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"sort"
 	"strings"
 )
 
@@ -25,7 +23,7 @@ import (
 // ${property} is kept verbatim: the value lives in a <properties> block or a
 // parent POM, and overwriting the reference with a literal would sever it.
 func rewriteMaven(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -36,19 +34,12 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 		// coordinate alone identifies the declaration.
 		wanted[e.Name] = i
 	}
-	spans, declared, versionSpan, err := mavenSpans(data, wanted)
+	spans, declared, versionSpan, err := mavenSpans(rep.bytes(), wanted)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 
-	type patch struct {
-		span
-		text string
-	}
-	var (
-		res     Result
-		patches []patch
-	)
+	var res Result
 	for i, e := range edits {
 		s, ok := spans[i]
 		if !ok {
@@ -59,35 +50,19 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 			}
 			continue
 		}
-		if string(data[s.start:s.end]) == e.Range {
+		if string(rep.at(s)) == e.Range {
 			continue // already the wanted text: no change, not missing
 		}
 		res.Applied = append(res.Applied, e)
-		patches = append(patches, patch{s, e.Range})
+		rep.replace(s, xmlEscape(e.Range))
 	}
 	if version != "" && versionSpan != nil {
-		if string(data[versionSpan.start:versionSpan.end]) != version {
+		if string(rep.at(*versionSpan)) != version {
 			res.VersionWritten = true
-			patches = append(patches, patch{*versionSpan, version})
+			rep.replace(*versionSpan, xmlEscape(version))
 		}
 	}
-	if len(patches) == 0 {
-		return res, nil
-	}
-
-	sort.Slice(patches, func(i, j int) bool { return patches[i].start > patches[j].start })
-	out := data
-	for _, p := range patches {
-		var escaped bytes.Buffer
-		if err := xml.EscapeText(&escaped, []byte(p.text)); err != nil {
-			return res, fmt.Errorf("%s: %w", path, err)
-		}
-		out = append(out[:p.start], append(escaped.Bytes(), out[p.end:]...)...)
-	}
-	if err := xmlWellFormed(out); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid XML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyXML)
 }
 
 // mavenSpans locates the version span of each wanted dependency and of the

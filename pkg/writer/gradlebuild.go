@@ -2,7 +2,6 @@ package writer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -23,7 +22,7 @@ import (
 // Coordinates named through a version catalog (`implementation libs.retrofit`)
 // or built by interpolation carry no literal to replace and are missing.
 func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -50,7 +49,7 @@ func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
 		found        = make(map[int]bool, len(edits))
 		applied      = make(map[int]bool, len(edits))
 		versionFound bool
-		lines        = strings.Split(string(data), "\n")
+		lines        = rep.lines()
 		changed      bool
 	)
 	for li, raw := range lines {
@@ -99,15 +98,12 @@ func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	if !changed {
-		return res, nil
+	if changed {
+		rep.setLines(lines)
 	}
-
-	out := strings.Join(lines, "\n")
-	if err := gradleVerify(string(data), out, res.Applied, version, res.VersionWritten); err != nil {
-		return res, fmt.Errorf("%s: internal error: %w", path, err)
-	}
-	return res, atomicWrite(path, []byte(out))
+	return res, rep.commit(func(out []byte) error {
+		return gradleVerify(rep.text(), string(out), res.Applied, version, res.VersionWritten)
+	})
 }
 
 // isGradleWritable reports text that can stand inside a build script's string

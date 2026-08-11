@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"sort"
 )
 
 // rewriteCsproj edits an SDK-style .csproj: the project's own <Version>
@@ -30,7 +28,7 @@ import (
 // scanner reports, so the two halves cannot disagree about what this project's
 // version is.
 func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -40,19 +38,12 @@ func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 			wanted[e.Name] = i
 		}
 	}
-	spans, declared, versionSpan, err := csprojSpans(data, wanted)
+	spans, declared, versionSpan, err := csprojSpans(rep.bytes(), wanted)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 
-	type patch struct {
-		span
-		text string
-	}
-	var (
-		res     Result
-		patches []patch
-	)
+	var res Result
 	for i, e := range edits {
 		s, ok := spans[i]
 		if !ok {
@@ -63,36 +54,19 @@ func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 			}
 			continue
 		}
-		if string(data[s.start:s.end]) == e.Range {
+		if string(rep.at(s)) == e.Range {
 			continue // already the wanted text: no change, not missing
 		}
 		res.Applied = append(res.Applied, e)
-		patches = append(patches, patch{s, e.Range})
+		rep.replace(s, xmlEscape(e.Range))
 	}
 	if version != "" && versionSpan != nil {
-		if string(data[versionSpan.start:versionSpan.end]) != version {
+		if string(rep.at(*versionSpan)) != version {
 			res.VersionWritten = true
-			patches = append(patches, patch{*versionSpan, version})
+			rep.replace(*versionSpan, xmlEscape(version))
 		}
 	}
-	if len(patches) == 0 {
-		return res, nil
-	}
-
-	// Splice back to front so earlier offsets stay valid.
-	sort.Slice(patches, func(i, j int) bool { return patches[i].start > patches[j].start })
-	out := data
-	for _, p := range patches {
-		var escaped bytes.Buffer
-		if err := xml.EscapeText(&escaped, []byte(p.text)); err != nil {
-			return res, fmt.Errorf("%s: %w", path, err)
-		}
-		out = append(out[:p.start], append(escaped.Bytes(), out[p.end:]...)...)
-	}
-	if err := xmlWellFormed(out); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid XML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyXML)
 }
 
 // csprojSpans locates, in one pass over the token stream, the version span of

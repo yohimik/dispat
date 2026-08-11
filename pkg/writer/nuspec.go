@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"sort"
 )
 
 // rewriteNuspec edits a .nuspec, NuGet's own package manifest: the package's
@@ -20,10 +18,11 @@ import (
 // package at whatever was written, so a token value is left alone and reported
 // missing: the same rule the plist writer applies to $(MARKETING_VERSION).
 func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
-	data, err := os.ReadFile(path)
+	rep, err := openReplacer(path)
 	if err != nil {
 		return Result{}, err
 	}
+	data := rep.bytes()
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
 		// A nuspec has one dependency field; a group is a target framework,
@@ -33,13 +32,8 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 		}
 	}
 
-	type patch struct {
-		span
-		text string
-	}
 	var (
 		res         Result
-		patches     []patch
 		seen        = make(map[int]bool, len(edits))
 		found       = make(map[int]bool, len(edits))
 		applied     = make(map[int]bool, len(edits))
@@ -87,7 +81,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 					break // already the wanted text: no change, not missing
 				}
 				applied[i] = true
-				patches = append(patches, patch{s, edits[i].Range})
+				rep.replace(s, xmlEscape(edits[i].Range))
 
 			// The package's own version is a direct child of <metadata>, which
 			// keeps a <dependency> element's version out of the running.
@@ -119,24 +113,8 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 	if version != "" && versionSpan != nil {
 		if string(data[versionSpan.start:versionSpan.end]) != version {
 			res.VersionWritten = true
-			patches = append(patches, patch{*versionSpan, version})
+			rep.replace(*versionSpan, xmlEscape(version))
 		}
 	}
-	if len(patches) == 0 {
-		return res, nil
-	}
-
-	sort.Slice(patches, func(i, j int) bool { return patches[i].start > patches[j].start })
-	out := data
-	for _, p := range patches {
-		var escaped bytes.Buffer
-		if err := xml.EscapeText(&escaped, []byte(p.text)); err != nil {
-			return res, fmt.Errorf("%s: %w", path, err)
-		}
-		out = append(out[:p.start], append(escaped.Bytes(), out[p.end:]...)...)
-	}
-	if err := xmlWellFormed(out); err != nil {
-		return res, fmt.Errorf("%s: internal error: rewrite produced invalid XML: %w", path, err)
-	}
-	return res, atomicWrite(path, out)
+	return res, rep.commit(verifyXML)
 }
