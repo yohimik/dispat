@@ -8,7 +8,7 @@ dispat [command] [flags]
 
 | Command                   | Effect                                                                                                            |
 |---------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag. `--package` / `--space` release part of the graph; see [Releasing part of the graph](#releasing-part-of-the-graph). |
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag. `--package` / `--space` / `--group` release part of the graph; see [Releasing part of the graph](#releasing-part-of-the-graph). |
 | `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written. Takes the release's own selection flags.          |
 | `run <script>`            | Run a script in every changed package that has it, graph-ordered; see [The run command](#the-run-command).        |
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
@@ -32,6 +32,7 @@ dispat [command] [flags]
 | `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
 | `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
 | `--space`, `-s`       |             | The same nine commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
+| `--group`, `-g`       |             | The same nine commands: narrow to every package of the named [versioning groups](./versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
 | `--since`             |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
 | `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
 | `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
@@ -82,7 +83,7 @@ command name is the [run shorthand](#the-run-command), so `dispat lint --help` p
 ## Releasing part of the graph
 
 `dispat release` and `dispat status` read the same [selection](#choosing-the-packages) every other command does:
-`--package`, `--space`, or the package or space folder the command was invoked from. The plan is computed for the
+`--package`, `--space`, `--group`, or the package or space folder the command was invoked from. The plan is computed for the
 whole repository and narrowed afterwards, so a selection decides *what* is released and never *at which version* —
 `dispat release -p core` releases core at exactly the version a full release would have given it.
 
@@ -94,7 +95,8 @@ held is nothing to wait for.
 
 A [versioning group](./versioning.md) is the softer case: a selection that takes only part of one releases and warns
 (`W231`). Nothing goes out of order, and the members left behind are ridden up to the group's version by the next run
-(`W210`), so the split is temporary and needs no operator.
+(`W210`), so the split is temporary and needs no operator. Naming the group itself, `dispat release -g platform`,
+takes every member at once and so can never split it.
 
 `--strict` refuses both, before anything is built, published or tagged: either the selection goes out as written or
 nothing does. On `status` it exits `1` for the same selections, which makes it a gate to put in front of a release
@@ -122,7 +124,7 @@ Selection happens in three steps, in this order:
    the reserved `all` for every package, changed or not. Selection follows the planner's
    [scope semantics](./commits.md#scope-sets): a commit's written scopes are authoritative, and only scopeless units
    fall back to the files they changed.
-2. **The filter** picks from that window: `--package` / `--space`, or the folder you are standing in, as described in
+2. **The filter** picks from that window: `--package` / `--space` / `--group`, or the folder you are standing in, as described in
    [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core when
    core changed and nothing at all when it did not. `--since all -p core` is how you run a script in a package
    regardless — the way to try one script under the exact input its stage would give it, without releasing anything.
@@ -138,21 +140,31 @@ narrow to the same folders.
 
 ### Choosing the packages
 
-`--package` (`-p`) names packages and `--space` (`-s`) names spaces; every package of a named space is selected. Both
-are repeatable and comma-separated (`-p core,web`, `-p core -p web`), matched case-insensitively, and both accept `*`
-globs — `-p '@acme/*'` for a prefix, `-p '*'` for every package, `-s '*'` for every space. Quote a glob, or the shell
-expands it first. No word is reserved: a package named `all` is selected by `all` and by nothing else.
+Three flags name the same thing three ways. `--package` (`-p`) names packages. `--space` (`-s`) names spaces, and
+selects every package of one. `--group` (`-g`) names [versioning groups](./versioning.md), and selects every package
+that versions with the rest of the group. All three are repeatable and comma-separated (`-p core,web`,
+`-p core -p web`), matched case-insensitively, and all three accept `*` globs: `-p '@acme/*'` for a prefix, `-p '*'`
+for every package, `-s '*'` for every space, `-g '*'` for every group. Quote a glob, or the shell expands it first. No
+word is reserved: a package named `all` is selected by `all` and by nothing else. Terms combine by union, so a package
+named twice over is still selected once.
+
+A space is a folder and a group is a versioning relationship, which is why they are separate flags. A group may hold
+packages from several spaces, or a single package out of one, and a
+[standalone package](./configuration/packages.md#standalone-packages-path) that joined a group is reachable by
+`--group` although it belongs to no space at all. A package that versions on its own belongs to no group, so `-g '*'`
+never reaches it.
 
 A term that matches nothing is an error, never an empty selection, because a command that quietly acts on nothing is
-how a typo hides. The error names what was discovered, and looks across the other flag: naming a space in `--package`,
-or a package in `--space`, says so and points at the flag that reaches it. A
-[standalone package](./configuration/packages.md#standalone-packages-path) belongs to no space, so `--package` (or
-`-p '*'`) is the only way to name one; `-s '*'` means every configured space and leaves it out.
+how a typo hides. The error names what was discovered, and looks across the other two flags: naming a space in
+`--package`, a group in `--space`, or a package in `--group` says so and points at the flag that reaches it. A
+standalone package belongs to no space, so `--package` (or `-p '*'`) is the only way to name one unless it joined a
+group; `-s '*'` means every configured space and leaves it out.
 
 With no terms at all, the folder the command was invoked from is the selection: inside a package folder (or any
 subdirectory of it) that package, inside a space folder that space, anywhere else — the monorepo root included —
 nothing, so the command covers its usual set. The deepest match wins, so a standalone package nested inside another
-package's folder still selects itself. A term on the command line always beats the folder it was typed in.
+package's folder still selects itself. A term on the command line always beats the folder it was typed in. A group is
+never inferred this way, because no folder is a group; `--group` is the only way to name one.
 
 Nine commands read the same selection: `release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`,
 `github` and `compute`. What each of them *does* with it differs — a release additionally has to respect publish
@@ -171,7 +183,7 @@ config file.
 `dispat preview` plans, then prints the pending release notes: the breaking-changes/features/fixes sections plus
 provider updates that the next release's changelog entry and GitHub release body would carry. It covers every package
 that has something pending, in publish order, narrowed by
-[`--package` / `--space` or the invocation folder](#choosing-the-packages). It follows the
+[`--package` / `--space` / `--group` or the invocation folder](#choosing-the-packages). It follows the
 [release-notes windowing](./configuration/records.md#changelog), so a pending prerelease previews only its own
 changeset. Prints `no pending changes` when nothing is — naming the selection when there was one.
 
@@ -180,7 +192,7 @@ changeset. Prints `no pending changes` when nothing is — naming the selection 
 `dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
 steps to custom flows: a stage script can run a step at the moment the flow needs it, and the release stage later
 finds the work done and skips it. All four share the run command's [selection](#choosing-the-packages): with no terms they cover every
-releasing package in dependency order, and `--package`, `--space` or the invocation folder narrows that. A term
+releasing package in dependency order, and `--package`, `--space`, `--group` or the invocation folder narrows that. A term
 matching no package is an error; a *selected* package that is not releasing is a logged no-op, so a flow never fails
 over a converged or held package. The four command words are reserved: like every command name, each wins
 the `dispat <script>` shorthand over a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name, so
@@ -234,7 +246,7 @@ dependency graph nor the starting versions have to be transcribed by hand. It de
 By default the suggestions are only printed; `--write` applies them, `--interactive` confirms each, `--check` gates CI.
 The edges need no git history. The baselines read each package's release tags, and only those.
 
-[`--package` / `--space`](#choosing-the-packages) scope the report to the selected packages' own declarations.
+[`--package` / `--space` / `--group`](#choosing-the-packages) scope the report to the selected packages' own declarations.
 Detection still reads every package's manifests whichever way you narrow: the workspace name index is what resolves a
 declared dependency onto a provider, so an edge onto a package outside the selection stays recognised rather than
 being proposed for removal.

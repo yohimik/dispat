@@ -17,7 +17,7 @@ callable without a command line.
    graph (build concurrency budget; `--on-error` decides whether a failure skips the failed package's dependents) and
    stops. Which packages that covers is decided in three steps by the shared `internal/filter` resolver: a window
    (the release window, what `--since <rev>` addresses — scopes first, changed files for scopeless units, §6.2 — or
-   every package for `--since all`), then the `--package` / `--space` terms narrowing it (the invocation folder
+   every package for `--since all`), then the `--package` / `--space` / `--group` terms narrowing it (the invocation folder
    standing in for the terms nobody typed), then `--consumers` expanding the result downstream. Nothing below step 6
    applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (every
    pending package's in publish order, under the same filter), and stops. `scanner` and `writer` also
@@ -42,7 +42,7 @@ callable without a command line.
    compute direct bumps, run the three propagation phases, then versions, with every versioning group (a space with
    its own shared mode, or a declared `versionGroups` entry its members joined) versioned as one (see "Versioning
    groups" below).
-6. Print the diagnostics; narrow the plan to the invocation's `--package` / `--space` selection (`plan.Narrow`: every
+6. Print the diagnostics; narrow the plan to the invocation's `--package` / `--space` / `--group` selection (`plan.Narrow`: every
    unselected releasing package is deselected, a selected one whose provider is releasing and unselected is withheld
    for the next run as `W230`, and a versioning group the selection splits is reported as `W231`); then print the full
    graph with `old -> new` versions and channel transitions, in publish order, the deselected packages marked as such.
@@ -176,7 +176,7 @@ sections below.
 | `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
 | `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits.                                                                                                                               |
 | `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
-| `internal/filter`    | The one package/space selection resolver every package-selecting command shares, `release` and `status` included: `--package` / `--space` terms, their globs, and the invocation folder that stands in for them.                              |
+| `internal/filter`    | The one selection resolver every package-selecting command shares, `release` and `status` included: `--package` / `--space` / `--group` terms, their globs, and the invocation folder that stands in for the first two.                              |
 | `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatignore` and the selection terms share.                                                                                                        |
 
 ## Graph algorithms

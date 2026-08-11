@@ -208,7 +208,7 @@ just executes no shell command.
 
 Outside the release pipeline, `dispat run <name>` (or just `dispat <name>`) runs the
 [script](./configuration/spaces.md#scripts-and-dispat-run) of that name inside each changed package that has one — or
-inside the packages [`--package` / `--space`](./configuration/spaces.md#choosing-the-packages) select, the folder you
+inside the packages [`--package` / `--space` / `--group`](./configuration/spaces.md#choosing-the-packages) select, the folder you
 stand in included — honouring the dependency graph within the build concurrency budget (the configured value, or `--concurrency`'s first
 value when given; `--on-error` decides whether a failure skips the dependents), with the same `DISPAT_*` environment
 and nothing released or tagged. It uses the same three-level `scripts` lookup the stages use, so where you define a

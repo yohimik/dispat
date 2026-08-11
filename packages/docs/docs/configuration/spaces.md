@@ -371,7 +371,7 @@ it: the `flow` stages and hooks, `autoVersion.syncLock`, and `dispat run`.
 means the packages a release would process. The dependency graph is respected: a package's script starts only after
 every changed provider's script has finished, and independent packages run side by side within the build concurrency
 budget (the first value of `--concurrency`). `dispat <name>` is a shorthand for the same thing whenever `<name>` is not
-a command name. [`--package` / `--space`](#choosing-the-packages), or the folder you invoke it from, narrow that to
+a command name. [`--package` / `--space` / `--group`](#choosing-the-packages), or the folder you invoke it from, narrow that to
 part of the monorepo.
 
 Because the lookup is per package, the level you define a name at is what decides how far the run reaches:
@@ -403,23 +403,26 @@ naming: dispat's own command words (`status`, `commit`, `changelog` and the rest
 
 ### Choosing the packages
 
-Two flags narrow a run to part of the monorepo: `--package` (`-p`) names packages, `--space` (`-s`) names spaces and
-selects every package they hold. Both are repeatable and comma-separated, matched case-insensitively, and both accept
-`*` globs:
+Three flags narrow a run to part of the monorepo: `--package` (`-p`) names packages, `--space` (`-s`) names spaces and
+selects every package they hold, `--group` (`-g`) names [versioning groups](#versioning-groups) and selects every
+package that versions with the group. All three are repeatable and comma-separated, matched case-insensitively, and
+all three accept `*` globs:
 
 ```sh
 dispat run lint -p core             # one package
 dispat run lint -p core,web         # several
 dispat run lint -s libs             # every package of a space
+dispat run lint -g platform         # every package of a versioning group
 dispat run lint -p '@acme/*'        # a glob (quoted: the shell must not expand it)
 dispat run lint -p '*'              # every package
 ```
 
 No word is reserved, so a package named `all` is selected by `all` and by nothing else. A term matching nothing is an
 error listing what was discovered — the same reason an unknown script name is one — and the error looks across the
-other flag: a space named in `--package`, or a package named in `--space`, says so and points at the flag that reaches
-it. A [standalone package](./packages.md#standalone-packages-path) belongs to no space, so `-p <name>` or `-p '*'` is
-the only way to name one; `-s '*'` means every configured space and leaves it out.
+other flags: a space named in `--package`, a group named in `--space`, or a package named in `--group`, says so and
+points at the flag that reaches it. A [standalone package](./packages.md#standalone-packages-path) belongs to no
+space, so `-p <name>` or `-p '*'` is the only way to name one unless it joined a group; `-s '*'` means every
+configured space and leaves it out.
 
 With no terms, the folder you are standing in is the selection. dispat finds the monorepo root by walking up to the
 config file, so `cd packages/core && dispat lint` lints `core` and nothing else, and so does any folder below it.
@@ -427,8 +430,11 @@ Standing in a space folder — `cd packages && dispat lint` — covers that spac
 or anywhere outside every space, covers the usual set. The deepest match wins, so a standalone package nested inside
 another package's folder still selects itself, and a flag on the command line always beats the folder it was typed in.
 
-Every command that acts on a subset of packages reads the same two flags and the same folder rule: `dispat run`,
-`preview`, `changelog`, `autoversion`, `commit` and `compute`.
+A group is never inferred from a folder, because it is a versioning relationship rather than a place; `--group` is
+the only way to name one.
+
+Every command that acts on a subset of packages reads the same three flags and the same folder rule: `dispat release`,
+`status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github` and `compute`.
 
 ### Windows: `--since` and `--consumers`
 

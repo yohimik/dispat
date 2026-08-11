@@ -133,8 +133,9 @@ dispat run lint             # run the "lint" script in every changed package tha
 dispat lint                 # the same: an unknown command word means "run <word>"
 dispat run lint --on-error continue   # keep running dependents of a failed package
 dispat run lint -p core,web # narrow to named packages; -s libs narrows to a space's,
-                            # -p '*' covers every one. Standing in packages/core, plain
-                            # "dispat lint" narrows to core the same way
+                            # -g platform to a version group's, -p '*' covers every one.
+                            # Standing in packages/core, plain "dispat lint" narrows to
+                            # core the same way
 dispat run build --since all -p core  # run "build" inside packages/core with core's full
                             # DISPAT_* environment whether or not it changed; releases
                             # nothing. A filter narrows the window, --since all opens it

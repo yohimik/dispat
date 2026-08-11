@@ -50,6 +50,7 @@ flags every other dispat command uses:
 dispat changelog                    # every releasing package
 dispat changelog --package core     # just core
 dispat changelog --space libs       # every package of the libs space
+dispat changelog --group platform   # every package of the platform version group
 ```
 
 If you run the command from inside a package folder and pass no flags, it narrows to that package. That is the same

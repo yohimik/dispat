@@ -91,18 +91,20 @@ The suite was designed against eighteen goals, one test file each:
     on disk; that the replacer replaces every occurrence and chains its substitutions in the order they were given;
     that the scanner reads back what the writer just wrote; and that the three command words did not cost the run
     shorthand a script of the same name.
-17. **The `--package` / `--space` selection** (`filter_test.go`): the one selection every package command shares,
-    through the binary: name, comma-separated, repeated, glob and case-insensitive terms; a space term staying inside
-    its space; a standalone package belonging to no space and reachable only through `--package`; an unmatched term
-    failing with the mirror hint that names the other flag; the invocation folder standing in for the terms nobody
+17. **The `--package` / `--space` / `--group` selection** (`filter_test.go`): the one selection every package command
+    shares, through the binary: name, comma-separated, repeated, glob and case-insensitive terms; a space term staying
+    inside its space; a group term crossing spaces and reaching a standalone package that joined it, while reaching no
+    package that versions on its own; a standalone package belonging to no space and reachable only through
+    `--package` or its group; an unmatched term failing with the mirror hint that names the flag that would reach it; the invocation folder standing in for the terms nobody
     typed (a package folder, a nested subfolder, a space folder, the root, outside everything, and the deepest match
     winning over an enclosing one) while an explicit term always beats it; the filter narrowing a window and never
     widening it (`--since all` being what reaches an unchanged package) and composing with `--consumers`; the same
     terms and folder inference on `preview`, the step commands and `compute`, whose suggestions are scoped to the
     selected consumers while detection still reads every package's manifests; the same selection on `release` and
     `status`, where publish order additionally withholds a consumer whose provider was left out (`W230`), a split
-    versioning group is warned about and released (`W231`), and `--strict` refuses either before anything is built;
-    and a positional package name now being a usage error.
+    versioning group is warned about and released (`W231`), naming the group instead of its members releases it whole
+    and cannot split it, and `--strict` refuses either before anything is built; and a positional package name now
+    being a usage error.
 18. **Docker through the binary** (`docker_test.go`): the ecosystem dispat was built around and the last one it could
     read. What only a real run can show: that `compute` derives an image-to-image edge from a `FROM` line nobody wrote
     into the config; that a release reconciles the consumer's `FROM` and `COPY --from` tags and a compose file's
@@ -483,7 +485,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestManifestsReplacerJSONEvents`                | `--log-format json` carries one event per file with its path and occurrence count, plus the summary splitting applied, missing and skipped.                                                                                            |
 | `TestManifestsReplacerWordKeepsItsScript`        | `replacer` is reserved like the other command words, and `dispat run replacer` still reaches a script of that name.                                                                                                                   |
 
-### Goal 17: the `--package` / `--space` selection (`filter_test.go`)
+### Goal 17: the `--package` / `--space` / `--group` selection (`filter_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                                     |
 |-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -505,6 +507,10 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestFilterReleaseInfersFromTheInvocationFolder`| A release run from inside a package folder is that package's release; from the root it is still the whole monorepo.                                                                                                                              |
 | `TestFilterReleaseRecordsOnlyWhatReleased`      | The durable records follow the narrowed run: the release commit names only the created tag, only the released package's changelog is written, and no tag exists for a package left out.                                                          |
 | `TestFilterStatusSelects`                       | `status` narrows the same plan while still printing every package (`⊝ not selected`, `⊘ withheld until its providers release`), reports `W230` and exits 0, exits 1 under `--strict`, is clean when a space term brings the provider along, and fails on an unmatched term. |
+| `TestFilterSelectsAVersioningGroup`             | Every `--group` spelling selects the group's packages wherever they live: a group joined by a space and by a standalone package, a space that versions as its own group, comma-separated and repeated terms, a glob, `'*'`, and a union with the other two flags that selects a package named twice over once; `-g '*'` reaches no independently versioned package. |
+| `TestFilterUnknownGroupTermsAreErrors`          | A `--group` term naming nothing exits 1 listing the groups there are, and the three flags name each other: a space in `--group`, a package in `--group`, a group in `--space` and in `--package`; a repository with no groups at all says so.     |
+| `TestFilterGroupSelectsForEveryCommand`         | The group term narrows `preview`, `status`, `changelog`, `commit` and `compute` exactly as the other terms do, leaving the other group untouched.                                                                                                 |
+| `TestFilterReleaseByGroupNeverSplitsIt`         | Naming a member of a group under `--strict` is refused (`W231`) while naming the group releases every member at once, clean under `--strict`, across a space and a standalone package alike; a later unfiltered run finishes the rest.            |
 | `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
 
 ### Goal 18: Docker through the binary (`docker_test.go`)

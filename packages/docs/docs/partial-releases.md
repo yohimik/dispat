@@ -5,19 +5,21 @@ Sometimes it is not. You may want to ship a hotfix in one library today and leav
 weekly release. You may have one package whose publish target is down. You may simply want to try the pipeline on a
 single package first.
 
-For those cases, `dispat release` and `dispat status` take the same two selection flags every other dispat command
+For those cases, `dispat release` and `dispat status` take the same three selection flags every other dispat command
 takes:
 
 ```sh
 dispat release --package core        # release core and nothing else
 dispat release -p core,web           # release both
 dispat release --space libs          # release every package of the libs space
+dispat release --group platform      # release every package of the platform version group
 dispat status -p core                # see what that release would do, without doing it
 ```
 
-`--package` (short `-p`) names packages, `--space` (short `-s`) names spaces. Both are repeatable, both accept
-comma separated lists, both match without caring about upper or lower case, and both accept `*` as a wildcard
-(`-p '@acme/*'`). Quote the wildcard, or your shell will try to expand it first. The full rules are in
+`--package` (short `-p`) names packages, `--space` (short `-s`) names spaces, and `--group` (short `-g`) names
+[version groups](./versioning.md). All three are repeatable, all three accept comma separated lists, all three match
+without caring about upper or lower case, and all three accept `*` as a wildcard (`-p '@acme/*'`). Quote the wildcard,
+or your shell will try to expand it first. The full rules are in
 [Choosing the packages](./cli.md#choosing-the-packages), and they are the same rules `dispat run` uses.
 
 If you pass no flags at all, the folder you are standing in is the selection. Run `dispat release` inside
@@ -79,7 +81,9 @@ briefly untrue: `one` is at 0.2.0 and `two` is still at 0.1.0. The next full rel
 because a member that has fallen behind its group is released to catch up (that is the `W210` ride you may already
 have seen). You do not have to do anything.
 
-If your repository would rather never be in that state, use `--strict`.
+If your repository would rather never be in that state, you have two options. Name the group instead of its members,
+`dispat release -g libs`, which releases every member at once and so cannot split anything. Or use `--strict`, which
+refuses the split outright.
 
 ## `--strict`: all or nothing
 
@@ -171,6 +175,7 @@ steps.
 | Release one package                          | `dispat release -p core`                  |
 | Release a package and its provider           | `dispat release -p core,web`              |
 | Release one space                            | `dispat release -s libs`                  |
+| Release a whole version group                | `dispat release -g platform`              |
 | Release the package folder you are in        | `dispat release` (from inside the folder) |
 | See it first                                 | `dispat status -p core`                   |
 | Fail instead of releasing part of it         | add `--strict`                            |

@@ -167,6 +167,32 @@ Three things are worth knowing about joining:
 The full reference for all of this is under
 [versioning groups](./configuration/spaces.md#versioning-groups).
 
+## Acting on a group
+
+A group is a name you can point a command at, the same way you point one at a package or a space. That is `--group`,
+short `-g`:
+
+```sh
+dispat status -g platform         # what a release of the group would do
+dispat release -g platform        # release the group, and nothing else
+dispat run test -g platform       # run one script across the group
+dispat preview -g platform        # the pending notes of its members
+```
+
+It takes the same spellings as the other two selection flags: repeatable, comma separated, case insensitive, and `*`
+globs over group names. `-g '*'` is every package that versions in a group, which leaves out every package that
+versions on its own.
+
+Naming the group is the difference between a clean partial release and a noisy one. A group moves as a unit, so
+selecting one member of it releases a shared version that is briefly untrue for the others and dispat warns about it
+(`W231`). Selecting the group takes every member at once, so there is nothing to warn about, and it passes `--strict`
+where the single package would not. [Partial releases](./partial-releases.md) has the worked output.
+
+Two details worth remembering. A space that versions as a group is a group name too, so `-g libs` works with no
+`versionGroups` entry anywhere. And a group is a versioning relationship rather than a folder, so it can hold packages
+from several spaces, or a standalone package that belongs to no space at all, and standing in a folder never selects a
+group for you.
+
 ## Prereleases and pinned versions
 
 Both follow the same rule as everything else: they move the group when they reach the shared part, and stay local when

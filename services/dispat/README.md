@@ -45,6 +45,7 @@ $ dispat scanner packages/core      # what that folder's manifests declare; no c
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
 $ dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle   # literal text, no parsing
 $ dispat run build --since all -p core   # try the build script in packages/core with the real DISPAT_* env
+$ dispat release -g platform        # release one versioning group; -s libs releases one space
 $ dispat lint                       # run a script in every changed package that has it, in graph order
 $ git commit -m "feat(core)%beta: try it out"
 $ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)%stable:
@@ -74,8 +75,9 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
   verified before any work, and nothing is ever published against an unpublished dependency.
-- **Release part of the monorepo when you need to.** `dispat release --package core` (or `--space libs`, or just the
-  folder you are standing in) releases a subset at exactly the versions a full release would have given it. Publish
+- **Release part of the monorepo when you need to.** `dispat release --package core` (or `--space libs`, or
+  `--group platform` for a whole version group, or just the folder you are standing in) releases a subset at exactly
+  the versions a full release would have given it. Publish
   order still rules: a package whose provider is releasing and unselected waits for the next run instead of shipping
   ahead of it, and `--strict` refuses a selection that cannot go out cleanly before anything is built.
   [Details](https://yohimik.github.io/dispat/partial-releases).
