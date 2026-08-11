@@ -562,7 +562,7 @@ func TestUnwrapJoined(t *testing.T) {
 
 func TestSubstituteFilesReplacesLiteralTextAnywhere(t *testing.T) {
 	// The replacer parses nothing, so it reaches the files no manifest writer
-	// covers: a build script, a Dockerfile, a README.
+	// covers: a build script, a Helm chart, a README.
 	root := manifestRepo(t, map[string]string{
 		"build.gradle": "implementation 'com.acme:core:1.2.0'\ntestImplementation 'com.acme:core:1.2.0'\n",
 		"README.md":    "Use com.acme:core:1.2.0 in your build.\n",

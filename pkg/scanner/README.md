@@ -37,6 +37,24 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | `pubspec.yaml`      | pub       | name, version, dependencies, `dependency_overrides` folded onto their declarations                |
 | `Gemfile`           | rubygems  | `gem` declarations, `:path` local gems, development and test groups onto devDependencies          |
 | `*.gemspec`         | rubygems  | name, version, `add_dependency`/`add_runtime_dependency`/`add_development_dependency`             |
+| `Dockerfile`        | docker    | every `FROM`, `COPY --from` and `RUN --mount=…,from=` image; stage aliases and `scratch` excluded  |
+| `compose.yaml`      | docker    | the image the file builds as its identity, every other service's image as a dependency            |
+
+A Dockerfile is matched by name rather than by extension, so `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile` and
+Podman's `Containerfile` all count. A compose file is matched by name too: `compose.yaml`, `compose.yml`,
+`docker-compose.yaml`, `docker-compose.yml` and the `.override.` variant of each, which is the set the Compose
+specification itself loads.
+
+Docker has no version field, so the reader takes the identity from the images the file names. The rule, in order: the
+service that declares both a `build` section and a tagged `image` is producing that image here, which is as close to
+"this is my package" as compose gets; failing that, the tagged repository the most services name. Ties go to the lowest
+service name, because a YAML mapping decodes in no order worth trusting and the answer has to come from the data. A
+compose file that only wires third-party services together declares no identity at all, which is the honest answer
+rather than a guess. A Dockerfile never declares one: what it builds is named on the command line, not in the file.
+
+The name a Docker manifest declares is an image repository — `ghcr.io/acme/api`, not `api` — so a package usually
+either states `manifestNames` or leans on the substring name matching, whose last-segment rule maps the two onto each
+other.
 
 The mobile platforms are covered too. Four of these declare an identity and a version but no dependencies at all, so
 they feed auto-versioning rather than the dependency graph. Every Java-world coordinate is spelled `group:artifact`,

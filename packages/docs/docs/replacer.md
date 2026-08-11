@@ -2,8 +2,8 @@
 
 Some versions do not live in a manifest.
 
-A Gradle build script assembles a coordinate out of strings. A Dockerfile pins a base image tag. A README shows the
-install line people copy. A CI workflow names a container. None of these is a file any parser can read as a package
+A Gradle build script assembles a coordinate out of strings. A README shows the install line people copy. A CI
+workflow names a container. A Helm chart pins an image. None of these is a file any parser can read as a package
 manifest, and yet every one of them has to move when you release.
 
 The replacer is dispat's answer to that. It finds literal text and writes different literal text in its place. It
@@ -197,7 +197,7 @@ whether the file already reads the way the rule wants before deciding the rule i
 | You have                                                                    | Use                                                     |
 |-----------------------------------------------------------------------------|---------------------------------------------------------|
 | A `package.json`, `go.mod`, `Cargo.toml` or another supported manifest       | The parsing strategy: leave `manifests` at its default. |
-| A Gradle script, a Dockerfile, a README, a CI workflow                       | `replace` rules.                                        |
+| A Gradle script, a README, a CI workflow, a Helm chart                       | `replace` rules.                                        |
 | Both, in one package                                                         | Both. Manifests are reconciled first.                   |
 | Neither, but a lock file to regenerate                                       | `manifests: none`, no `replace`, and a `syncLock` list.  |
 

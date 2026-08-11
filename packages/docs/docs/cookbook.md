@@ -252,16 +252,48 @@ $ dispat
 Read the order: `app`'s build starts only after `docker push` of `base` finished, because the flag told the scheduler
 that this space's consumers need their providers *published*, not merely built. Without the flag,
 `app`'s build would have run in parallel with `base`'s push (that is the right setting for npm, where a consumer builds
-against the local workspace). In a Dockerfile, pin the base by the version dispat provides:
+against the local workspace).
+
+That leaves the base image's version in `app`'s Dockerfile. There are two ways to keep it current, and the first is
+usually the one you want.
+
+**Let dispat write the tag.** dispat reads Dockerfiles, so the `FROM` line is a declared dependency like any other and
+an `autoVersion` block reconciles it at the version stage:
+
+```json
+{
+  "spaces": {
+    "images": {
+      "path": "images",
+      "isBuildWaitingPublish": true,
+      "autoVersion": {},
+      "flow": { "build": "build", "publish": "publish" }
+    }
+  }
+}
+```
+
+```dockerfile
+FROM registry.example.com/base:0.1.0
+```
+
+After the run above, that line reads `registry.example.com/base:0.2.0` and every other byte of the file is untouched.
+The base's package must answer to the repository name for the two to connect — `"packages": {"base": {"manifestNames":
+["registry.example.com/base"]}}` — because an image is called `registry.example.com/base` while the folder is called
+`base`. With that in place `dispat compute` will even propose the `app -> base` edge for you, straight off the `FROM`
+line, so the `dependencies` block above need not be written by hand. The details are in
+[manifests](manifests.md#docker).
+
+**Or pass it as a build argument.** When you would rather the Dockerfile stay version-free:
 
 ```dockerfile
 ARG BASE_VERSION
 FROM registry.example.com/base:${BASE_VERSION}
 ```
 
-and pass it in the build script with `--build-arg BASE_VERSION=$DISPAT_UPDATED_BASE_NEW_VERSION` (falling back to
-`$DISPAT_WORKSPACE_BASE_VERSION` when base is not part of this run; see
-[the script environment](environment.md)).
+dispat never rewrites an interpolated reference, so this one is left alone by design. Pass it in the build script with
+`--build-arg BASE_VERSION=$DISPAT_UPDATED_BASE_NEW_VERSION` (falling back to `$DISPAT_WORKSPACE_BASE_VERSION` when base
+is not part of this run; see [the script environment](environment.md)).
 
 ## An Android app
 

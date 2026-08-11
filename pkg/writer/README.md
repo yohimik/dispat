@@ -26,29 +26,41 @@ holds the ones the manifest does not declare at all, which usually means the cal
 
 ## Supported manifests
 
-| File                           | Rewrites dependency ranges                         | Rewrites the own `version` field       |
-|--------------------------------|----------------------------------------------------|----------------------------------------|
-| `package.json`                 | yes (byte-precise scalar splice)                   | yes                                    |
-| `go.mod`                       | yes (`golang.org/x/mod/modfile`)                   | no such field                          |
-| `requirements*.txt`            | yes (per-line splice, comments and CRLF preserved) | no such field                          |
-| `Info.plist`                   | none to write                                      | yes (`CFBundleShortVersionString`)     |
-| `AndroidManifest.xml`          | none to write                                      | yes (`android:versionName`)            |
-| `project.pbxproj`              | none to write                                      | yes (`MARKETING_VERSION`, all configs) |
-| `libs.versions.toml`           | yes (through `version.ref` into `[versions]`)      | no such field                          |
-| `Podfile`                      | yes (per-line splice, quote style preserved)       | no such field                          |
-| `*.podspec`                    | yes (per-line splice)                              | yes (`s.version`)                      |
-| `build.gradle`(`.kts`)         | yes (the version segment of a literal coordinate)  | yes (`versionName`)                    |
-| `Cargo.toml`                   | yes (plain values and inline-table `version` keys) | yes (`[package] version`)              |
-| `pyproject.toml`               | yes (PEP 508 array entries and Poetry tables)      | yes (`[project]`, else Poetry's)       |
-| `composer.json`                | yes (`require`, `require-dev`)                     | yes, where one is declared             |
-| `pom.xml`                      | yes (each `<dependency>`'s `<version>`)            | yes (the project's own, not parent's)  |
-| `*.csproj`/`.fsproj`/`.vbproj` | yes (`Version` attribute and child element)        | yes (first `PropertyGroup`)            |
-| `*.nuspec`                     | yes (each `<dependency>`'s version attribute)      | yes (`<metadata><version>`)            |
-| `Directory.Packages.props`     | yes (each `PackageVersion`)                        | no such field                          |
-| `packages.config`              | yes (each `<package>`'s lower-case `version`)      | no such field                          |
-| `pubspec.yaml`                 | yes (per-line scalar splice)                       | yes                                    |
-| `Gemfile`                      | yes (per-line splice, quote style preserved)       | no such field                          |
-| `*.gemspec`                    | yes (per-line splice)                              | yes (`spec.version`)                   |
+| File                           | Rewrites dependency ranges                         | Rewrites the own `version` field       | Manages a local redirect |
+|--------------------------------|----------------------------------------------------|----------------------------------------|--------------------------|
+| `package.json`                 | yes (byte-precise scalar splice)                   | yes                                    | yes (`file:` ranges)     |
+| `go.mod`                       | yes (`golang.org/x/mod/modfile`)                   | no such field                          | yes (`replace`)          |
+| `requirements*.txt`            | yes (per-line splice, comments and CRLF preserved) | no such field                          | no such directive        |
+| `Dockerfile`                   | yes (the tag of a `FROM` or `COPY --from` image)   | no such field                          | no such directive        |
+| `compose.yaml`                 | yes (the tag of a service's `image`)               | yes (the image the file builds)        | no such directive        |
+| `Info.plist`                   | none to write                                      | yes (`CFBundleShortVersionString`)     | no such directive        |
+| `AndroidManifest.xml`          | none to write                                      | yes (`android:versionName`)            | no such directive        |
+| `project.pbxproj`              | none to write                                      | yes (`MARKETING_VERSION`, all configs) | no such directive        |
+| `libs.versions.toml`           | yes (through `version.ref` into `[versions]`)      | no such field                          | no such directive        |
+| `Podfile`                      | yes (per-line splice, quote style preserved)       | no such field                          | no such directive        |
+| `*.podspec`                    | yes (per-line splice)                              | yes (`s.version`)                      | no such directive        |
+| `build.gradle`(`.kts`)         | yes (the version segment of a literal coordinate)  | yes (`versionName`)                    | no such directive        |
+| `Cargo.toml`                   | yes (plain values and inline-table `version` keys) | yes (`[package] version`)              | yes (`path` keys)        |
+| `pyproject.toml`               | yes (PEP 508 array entries and Poetry tables)      | yes (`[project]`, else Poetry's)       | yes (Poetry `path`)      |
+| `composer.json`                | yes (`require`, `require-dev`)                     | yes, where one is declared             | no such directive        |
+| `pom.xml`                      | yes (each `<dependency>`'s `<version>`)            | yes (the project's own, not parent's)  | no such directive        |
+| `*.csproj`/`.fsproj`/`.vbproj` | yes (`Version` attribute and child element)        | yes (first `PropertyGroup`)            | no such directive        |
+| `*.nuspec`                     | yes (each `<dependency>`'s version attribute)      | yes (`<metadata><version>`)            | no such directive        |
+| `Directory.Packages.props`     | yes (each `PackageVersion`)                        | no such field                          | no such directive        |
+| `packages.config`              | yes (each `<package>`'s lower-case `version`)      | no such field                          | no such directive        |
+| `pubspec.yaml`                 | yes (per-line scalar splice)                       | yes                                    | yes (`dependency_overrides`) |
+| `Gemfile`                      | yes (per-line splice, quote style preserved)       | no such field                          | no such directive        |
+| `*.gemspec`                    | yes (per-line splice)                              | yes (`spec.version`)                   | no such directive        |
+
+The last column is `Replace`, the other half of this package. Where `Rewrite` changes the version text a manifest
+declares, `Replace` manages the directive that points a dependency at a folder in the same repository instead of at a
+registry. Only five formats have such a directive to manage, which is why the rest of the column reads the way it does:
+a NuGet package reference or a Maven coordinate names a package and nothing else, and there is no spelling for
+"resolve this one locally" for `Replace` to add or remove. `SupportsReplace` reports the same five at runtime.
+
+A Docker image is named rather than located too. A reference points at a registry, so there is no redirect to manage —
+building the image from a folder in this repository is what a compose file's `build:` says, and that is the author's
+structure rather than a version dispat reconciles.
 
 **Every ecosystem the scanner reads now has a writer.** `TestEveryScannedEcosystemHasAWriter` is the list that says so,
 and a format the scanner learns to read should fail it until it can be written too.
@@ -60,6 +72,22 @@ re-parse for the XML formats, `toml.Unmarshal` for the TOML ones.
 guards stand in for one. A replacement carrying any byte that could end a literal or open a block is refused outright.
 The file's brace balance must come out unchanged. And the reader is run over the result, where it has to agree that
 every splice landed where it was aimed.
+
+The two Docker formats have no grammar to re-parse either, and they answer it with two guards. Nothing is written that
+a registry would not accept as a tag, so the replacement can never carry a character that ends the value it sits in.
+And the reader is run over the result, where every reference must read back as the tag it was aimed at.
+
+The Docker formats decline three shapes of reference outright, and each comes back as `Skipped` rather than as an
+error, because each is how a careful file is written:
+
+| Reference                       | Why it is left alone                                                                     |
+|---------------------------------|------------------------------------------------------------------------------------------|
+| `FROM redis`                    | there is no tag to replace, and inventing one overrides the default the author chose      |
+| `FROM redis@sha256:...`         | the digest is what gets pulled, so a new tag beside it would name a version nothing uses  |
+| `FROM ${REGISTRY}/base:${TAG}`  | the value is resolved outside the file, and a literal would sever the indirection         |
+
+A tag is also not a range. `^1.2.3` is not something a registry can resolve, so a caret policy writes the bare version
+into a Docker manifest; a `{version}` template still passes through, which is how `{version}-alpine` is spelled.
 
 ## From the command line
 

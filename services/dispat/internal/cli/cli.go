@@ -216,7 +216,7 @@ commands:
   replacer <file>...       replace literal text in any file, parsing nothing:
                            --sub 'find=>write', repeatable and applied in
                            order, for the versions no manifest writer reaches
-                           (a Gradle coordinate, a Dockerfile, a README).
+                           (a Gradle coordinate, a Helm chart, a README).
                            Needs no config file and no git repository
 
 flags:

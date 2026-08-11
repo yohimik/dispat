@@ -234,7 +234,7 @@ dependency against the workspace (by manifest name, by a name the configuration 
 provider is releasing and has not failed, and its baseline otherwise. `manifests: none` turns it off.
 
 The **replacing** strategy is the `replace` list: literal find-and-write over whatever files its globs select, parsing
-nothing, for the versions no manifest holds (a Gradle coordinate, a Dockerfile tag, a README example). It has
+nothing, for the versions no manifest holds (a Gradle coordinate, a README example, a CI workflow). It has
 [a page of its own](../replacer.md).
 
 A package may use both, in which case its manifests are reconciled first. A block using neither still schedules a

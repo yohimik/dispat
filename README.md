@@ -44,10 +44,10 @@ $ dispat
   consumers are never lost. The next run catches them up automatically, at the exact version they were originally owed,
   with no state file and no double release. Recovery is just re-running.
 - **The graph can come from the manifests themselves.** `dispat compute` reads the packages' project files
-  (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements files)
-  and derives the consumer/provider graph from them. Suggestions are previewable, confirmable one by one or applied
-  wholesale; `--check` gates CI on a drifted graph, and `keep: true` marks deliberate relations no manifest declares,
-  such as a Docker chain. A space with an `autoVersion` block goes further: dispat rewrites its manifests at the version
+  (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements files,
+  Dockerfiles and compose files) and derives the consumer/provider graph from them — including an image chain, read
+  straight off the `FROM` lines. Suggestions are previewable, confirmable one by one or applied wholesale; `--check`
+  gates CI on a drifted graph, and `keep: true` marks deliberate relations no manifest declares. A space with an `autoVersion` block goes further: dispat rewrites its manifests at the version
   stage, reconciling declared ranges to end-of-run versions format-preservingly, with `syncLock` scripts (`npm install`)
   regenerating lock files between version and build. The same two libraries are also commands of their own: `dispat
   scanner` prints what a folder's manifests declare and `dispat writer` edits one in place, neither needing a config
@@ -91,9 +91,9 @@ dispat stands on the shoulders of two things:
   normalisation) that keeps the scanner and writer halves in perfect agreement.
 - **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library: package.json, go.mod, Cargo.toml,
   pyproject.toml, composer.json, pom.xml, the .NET project/nuspec/packages family, pubspec.yaml, Gemfile, .gemspec and
-  requirements files parsed into one ecosystem-neutral shape, plus the mobile platforms — Info.plist, project.pbxproj,
-  Podfile and .podspec on iOS, AndroidManifest.xml, Gradle version catalogs and build scripts on Android; the library
-  behind `dispat compute`, auto-versioning and the `dispat scanner` command.
+  requirements files parsed into one ecosystem-neutral shape, plus Dockerfiles and compose files, and the mobile
+  platforms — Info.plist, project.pbxproj, Podfile and .podspec on iOS, AndroidManifest.xml, Gradle version catalogs
+  and build scripts on Android; the library behind `dispat compute`, auto-versioning and the `dispat scanner` command.
 - **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for **every** manifest
   the scanner reads, with atomic writes and validated output; the library behind auto-versioning and the `dispat
   writer` command.

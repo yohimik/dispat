@@ -178,12 +178,12 @@ declared dependency onto a provider, so an edge onto a package outside the selec
 being proposed for removal.
 
 **What it reads.** Every package folder is scanned for manifests: `package.json`, `go.mod`, `Cargo.toml`,
-`pyproject.toml` (PEP 621 and Poetry), `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml` and
-`requirements*.txt`.
+`pyproject.toml` (PEP 621 and Poetry), `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `requirements*.txt`,
+`Dockerfile` and `compose.yaml`.
 
 **How a dependency becomes an edge.** A declaration matches a workspace package by manifest name first (Python names are
-PEP 503-normalised, Maven names are `groupId:artifactId`), then by a declared local path (`file:`, a relative
-`replace`, `path =`, a `ProjectReference`). Two packages declaring the same manifest name is ambiguous: reported as
+PEP 503-normalised, Maven names are `groupId:artifactId`, Docker names are image repositories such as
+`ghcr.io/acme/api`), then by a declared local path (`file:`, a relative `replace`, `path =`, a `ProjectReference`). Two packages declaring the same manifest name is ambiguous: reported as
 `W220`, and no edges are derived from that name.
 
 **What it suggests.** Three kinds of change, each printed with the manifest line that motivates it:
@@ -227,7 +227,7 @@ or missing (a dependency the manifest does not declare, which fails only under `
 always exits `1`.
 
 `dispat replacer <file>...` applies each `--sub 'find=>write'` to each named file, in the order given and to every
-occurrence, parsing nothing. It is the tool for the versions no manifest holds: a Gradle coordinate, a Dockerfile tag,
+occurrence, parsing nothing. It is the tool for the versions no manifest holds: a Gradle coordinate, a Helm chart,
 a README example. A pattern that matched nothing anywhere fails only under `--strict`; a file that cannot be read, or
 that looks binary, exits `1`.
 

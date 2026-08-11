@@ -19,7 +19,7 @@ import (
 // The replacing strategy: literal text substitution over whatever files a rule
 // points at, parsing nothing (§9.4). It reaches the versions the manifest
 // writers cannot — a coordinate a Gradle script builds by hand, a base image
-// in a Dockerfile, an example in a README — at the cost of doing exactly what
+// in a Helm chart, an example in a README — at the cost of doing exactly what
 // it is told, which is why a rule states the text it looks for rather than
 // deriving it.
 //

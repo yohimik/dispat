@@ -14,7 +14,7 @@ new version. Two commands expose that machinery on its own:
 Neither one needs a config file, a git repository or a release plan. They read the files you point them at and nothing
 else, so they work on any checkout, including one that has never heard of dispat.
 
-For the versions that do not live in a manifest at all, a Gradle coordinate or a Dockerfile tag or a README example,
+For the versions that do not live in a manifest at all, a Gradle coordinate or a Helm chart or a README example,
 there is a third command that parses nothing and replaces literal text: see [the replacer](./replacer.md).
 
 ## Reading a folder
@@ -193,11 +193,86 @@ npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.to
 (`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj`, `*.fsproj`, `*.vbproj`, `*.nuspec`,
 `Directory.Packages.props`, `packages.config`), Dart and Flutter (`pubspec.yaml`), Ruby (`Gemfile`, `*.gemspec`),
 CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple bundles (`Info.plist`), Android
-(`AndroidManifest.xml`) and Gradle (`libs.versions.toml`, `build.gradle`, `build.gradle.kts`).
+(`AndroidManifest.xml`), Gradle (`libs.versions.toml`, `build.gradle`, `build.gradle.kts`) and Docker (`Dockerfile`,
+`compose.yaml`).
 
 The per-format detail, including which fields each one reads and which of them can be written back, is in the
 [scanner](https://github.com/yohimik/dispat/tree/main/pkg/scanner) and
 [writer](https://github.com/yohimik/dispat/tree/main/pkg/writer) module documentation.
+
+## Docker
+
+Docker fits the same two commands as everything else, but it spells "version" differently enough to be worth its own
+section.
+
+A Dockerfile's dependencies are the images it names. Every `FROM`, every `COPY --from` and every
+`RUN --mount=...,from=` counts, because each one pulls a real image:
+
+```dockerfile
+FROM --platform=$BUILDPLATFORM ghcr.io/acme/toolchain:2.1.0 AS builder
+FROM ghcr.io/acme/base:1.2.3
+COPY --from=builder /app /usr/local/bin/app
+COPY --from=ghcr.io/acme/certs:3.0.0 /certs /etc/ssl/certs
+```
+
+Three of those four are dependencies. `COPY --from=builder` is not: it names a stage defined earlier in this same
+file, which is part of the build rather than something outside it. `scratch` is skipped for the same reason, and so is
+a stage named by its position (`--from=0`). An alias only shadows an image from the line that defines it onwards, so a
+real image called `tools:1.0` on line one and a stage called `tools` on line two are told apart the way the builder
+tells them apart.
+
+The version of a dependency is its tag, and a tag is not a range. There is no such thing as `^1.2.3` in a registry, so
+a caret policy writes the plain version. A `{version}` template still passes through, which is how you get
+`{version}-alpine`.
+
+### Which service names a compose file
+
+A Dockerfile has no identity of its own — what it builds is named on the `docker build` command line, not in the file.
+A compose file usually does have one, and dispat reads it off the services:
+
+```yaml
+services:
+  api:
+    build:
+      context: .
+      tags:
+        - ghcr.io/acme/api:1.4.2
+    image: ghcr.io/acme/api:1.4.2
+  cache:
+    image: redis:7.2
+```
+
+The service that both declares a `build` section and carries a tagged `image` is the one producing an image here, so
+`ghcr.io/acme/api` at `1.4.2` is what this file is called and what version it is at. Every other service's image —
+`redis:7.2` — is a dependency. When nothing builds, the tagged image the most services share wins instead, since a
+scaled service appears several times under one image while the third-party ones beside it appear once each. Ties go to
+the lowest service name, so the answer never depends on the order the file happened to be written in. A compose file
+that only wires third-party services together has no identity, and that is reported as no identity rather than as a
+guess.
+
+Writing the version back goes to the same places: the `image:` of that service and every entry of its `build.tags:`,
+because those are all names for the one image the build produces. Nothing else in the file is looked at, so a
+`ports: ["8080:80"]` or a `DATABASE_URL: "postgres:5432"` is never mistaken for a reference.
+
+### What is left alone
+
+Three kinds of reference are reported as skipped and never rewritten:
+
+| Reference                      | Why                                                                            |
+|--------------------------------|--------------------------------------------------------------------------------|
+| `FROM redis`                   | there is no tag, and adding one would override the default you chose            |
+| `FROM redis@sha256:...`        | the digest is what gets pulled, so a new tag beside it would name nothing real  |
+| `FROM ${REGISTRY}/base:${TAG}` | the value comes from a build argument, and a literal would break that link      |
+
+None of these is an error. They are how a careful Dockerfile is written, and a run that meets them still succeeds.
+
+### Naming a Docker package
+
+The name a Docker manifest declares is an image repository — `ghcr.io/acme/api` — and your package is almost certainly
+a folder called `api`. Two ways to connect them: state the repository under
+[`manifestNames`](./configuration/packages.md), or set `autoVersion.nameMatch` to `substring`, whose last-segment rule
+maps `ghcr.io/acme/api` onto `api` on its own. The first is explicit and worth preferring when the repository name and
+the folder name really do differ.
 
 ## Exit codes
 

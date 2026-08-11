@@ -80,8 +80,8 @@ spaces:
                                  # parsing strategy off entirely
       # writeVersion: true       # also write the package's own version field
       # Literal find-and-write over the files these globs select, parsing
-      # nothing: the strategy for a Gradle coordinate, a Dockerfile tag or a
-      # README example. {name}/{version}/{previous} stand for this package;
+      # nothing: the strategy for a Gradle coordinate, a README example or a
+      # CI workflow. {name}/{version}/{previous} stand for this package;
       # {provider}/{providerVersion}/{providerPrevious} for each of its
       # configured providers, and a rule naming one is applied once per
       # provider.
