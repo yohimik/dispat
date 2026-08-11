@@ -14,6 +14,9 @@ new version. Two commands expose that machinery on its own:
 Neither one needs a config file, a git repository or a release plan. They read the files you point them at and nothing
 else, so they work on any checkout, including one that has never heard of dispat.
 
+For the versions that do not live in a manifest at all, a Gradle coordinate or a Dockerfile tag or a README example,
+there is a third command that parses nothing and replaces literal text: see [the replacer](./replacer.md).
+
 ## Reading a folder
 
 Point the scanner at a folder and it prints every manifest it finds under it:
@@ -174,6 +177,8 @@ command are still written, and the command exits `1` at the end.
 - Reconciling manifests to the versions a release just computed is
   [auto-versioning](./configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
   underneath and knows what the new versions are; the writer alone only writes what you tell it.
+- Replacing a version in a file no parser understands is [the replacer](./replacer.md), which does exactly what it is
+  told and nothing more.
 - Looking at what is declared, or making one specific change, is what these two commands are for.
 
 Both are also available as Go libraries, [`pkg/scanner`](https://github.com/yohimik/dispat/tree/main/pkg/scanner) and

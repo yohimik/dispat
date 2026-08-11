@@ -25,6 +25,13 @@
         "match": ["workspace:*"],
         "range": "caret",
         "kinds": ["dependencies", "devDependencies", "peerDependencies"],
+        "replace": [
+          {
+            "files": ["*.gradle"],
+            "find": "com.acme:{provider}:{providerPrevious}",
+            "write": "com.acme:{provider}:{providerVersion}"
+          }
+        ],
         "syncLock": ["npm-install"],
         "syncLockConcurrency": 1
       },
@@ -55,7 +62,8 @@
       "versionGroup": "platform",
       "concurrency": [2, 1],
       "changelog": { "file": "HISTORY.md" },
-      "github": { "enabled": false }
+      "github": { "enabled": false },
+      "manifestNames": ["com.acme:core"]
     },
     "cli": {
       "path": "tools/cli",

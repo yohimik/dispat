@@ -51,10 +51,11 @@ spaces:
     # the parallelism.
     scripts:
       lint: "npm run lint"
-    # Native manifest rewriting at the version stage (package.json, go.mod):
-    # declared workspace ranges are reconciled to end-of-run provider
-    # versions and the package's own version field is updated, before any
-    # flow.version script. All keys optional; the block's presence enables it.
+    # Native reconciliation at the version stage, before any flow.version
+    # script. Two independent strategies: the parsing one below (declared
+    # workspace ranges reconciled to end-of-run provider versions, own
+    # version field updated), and `replace` for the versions no manifest
+    # holds. All keys optional; the block's presence enables it.
     autoVersion:
       match: ["workspace:*"]     # only rewrite ranges matching these globs
                                  # (hand-pinned versions survive); empty = any
@@ -66,9 +67,22 @@ spaces:
       # nameMatch: substring     # also match a declared name's last segment
                                  # onto a folder name (@core/app -> app), for
                                  # packages whose manifests declare no name
-      # manifests: root          # root (default) or all manifests in the package
+      # manifests: root          # root (default), all, or none to turn the
+                                 # parsing strategy off entirely
       # writeVersion: true       # also write the package's own version field
+      # Literal find-and-write over the files these globs select, parsing
+      # nothing: the strategy for a Gradle coordinate, a Dockerfile tag or a
+      # README example. {name}/{version}/{previous} stand for this package;
+      # {provider}/{providerVersion}/{providerPrevious} for each of its
+      # configured providers, and a rule naming one is applied once per
+      # provider.
+      # replace:
+      #   - files: ["*.gradle"]
+      #     find:  "com.acme:{provider}:{providerPrevious}"
+      #     write: "com.acme:{provider}:{providerVersion}"
       syncLock: [npm-install]    # scripts run after the rewrite, before build
+                                 # (with neither strategy configured there is
+                                 # no change to key off, so they run always)
       syncLockConcurrency: 1     # run-wide cap; 1 keeps shared lock files safe
     flow:
       build: [install, build]
@@ -130,6 +144,13 @@ packages:
       file: HISTORY.md                # unset fields keep the global ones
     github:
       enabled: false                  # no GitHub releases for this one
+    # The manifest names this package answers to, stated rather than read
+    # from its files. For a package whose manifests declare no name dispat
+    # can learn (a Gradle module, a Makefile project): `dispat compute`
+    # derives the edges pointing at it and auto-versioning reconciles the
+    # declarations naming it. A stated name beats a declared one, and no two
+    # packages may state the same name.
+    # manifestNames: ["com.acme:core"]
   cli:
     path: tools/cli                   # standalone: lives outside the spaces
     flow:

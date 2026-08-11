@@ -57,8 +57,14 @@ package.
 (`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`). It is not a semantic version, and no writer
 rewrites it.
 
-Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, root manifests first, ambiguous
-names reported instead of guessed) and `ResolveLocalDir` (declared local path → owning package folder).
+Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, stated names first, then root
+manifests, then nested ones, with a same-rank collision reported instead of guessed), `ResolveLocalDir` (declared local
+path → owning package folder) and `SkipDir` (the folder names a workspace walk never enters, exported so a caller
+walking a package for other reasons stays out of the same places).
+
+`Owner.Names` is how a package with no readable identity joins the index: a Gradle module or a Makefile project
+declares nothing a parser here can read, so the caller states the names it answers to and they outrank anything a file
+declares.
 
 ## From the command line
 

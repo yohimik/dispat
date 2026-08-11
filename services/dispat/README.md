@@ -43,6 +43,7 @@ $ dispat compute                    # derive the dependency graph from the manif
 $ dispat preview                    # pending release notes, all packages (-p core: just one)
 $ dispat scanner packages/core      # what that folder's manifests declare; no config or git needed
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
+$ dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle   # literal text, no parsing
 $ dispat run build --since all -p core   # try the build script in packages/core with the real DISPAT_* env
 $ dispat lint                       # run a script in every changed package that has it, in graph order
 $ git commit -m "feat(core)%beta: try it out"
@@ -89,6 +90,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, the release commit.                                                    |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object.                                            |
 | [Manifest tools](https://yohimik.github.io/dispat/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
+| [The replacer](https://yohimik.github.io/dispat/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
 | [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
 | [Script environment](https://yohimik.github.io/dispat/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
 | [Architecture](https://yohimik.github.io/dispat/architecture)                   | Modules, algorithms, execution model, design decisions, testing.                                    |

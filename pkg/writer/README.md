@@ -6,6 +6,10 @@ counterpart of [`pkg/scanner`](../scanner), sharing its vocabulary through
 [`pkg/manifest`](../manifest), and the library behind dispat's native auto-versioning. The goal is to support **all
 package managers**; each ecosystem gains a writer once its rewrite can be made byte-precise.
 
+Every format writer reads and writes through one internal replacer, so the read cap, the splice, the proof that the
+result still parses and the atomic write happen in one place for all of them. `Substitute` is that same machinery with
+the format knowledge taken away, for the versions no manifest holds.
+
 ```go
 res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
 {Name: "@acme/core", Kind: "dependencies", Range: "^1.3.0"},
@@ -73,7 +77,35 @@ dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a mi
 for the four dependency fields, so a Maven `group:artifact` coordinate keeps its colon. The full guide is
 [Manifest tools](https://yohimik.github.io/dispat/manifests).
 
-## Replacing a dependency with a local folder
+`dispat replacer <file>...` is `Substitute` with the same report attached:
+
+```sh
+dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle README.md
+dispat replacer --strict --sub 'stale-pattern=>x' Dockerfile   # exit 1 when it matched nothing
+```
+
+## Replacing literal text: `Substitute`
+
+Some versions do not live in a manifest: a coordinate a Gradle script assembles by hand, a base image in a Dockerfile,
+the install line in a README. `Substitute` is the replacer with the format knowledge taken away.
+
+```go
+res, err := writer.Substitute("build.gradle", []writer.Substitution{
+{Find: "com.acme:core:1.2.0", Write: "com.acme:core:1.3.0"},
+})
+// res.Applied, res.Skipped, res.Missing, res.Count, res.Path
+```
+
+It runs over any file at all, replaces every occurrence rather than the first, and applies its substitutions in order,
+each over what the one before it left. It shares the read cap and the atomic write with the rest of the package, and it
+refuses a file that looks binary (`ErrBinaryFile`, decided by a NUL byte in the first 8 KiB) so a replacement never
+lands in a PNG that happens to contain the version text. `SubstituteBytes` is the same work in memory, without touching
+the caller's input.
+
+Because it parses nothing it also cannot tell an intended match from an accidental one, so a substitution should carry
+enough context to be unambiguous: `com.acme:core:1.2.0`, not `1.2.0`.
+
+## Redirecting a dependency to a local folder
 
 `go.mod` can point a dependency somewhere else, and a few other formats can too:
 

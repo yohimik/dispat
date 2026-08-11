@@ -56,6 +56,7 @@ keys:
 | `concurrency`  | int or `[b, p]` | The package's *weight*: how many slots of the stage [concurrency budgets](./README.md#top-level-options) its tasks occupy. See [package weights](#package-weights-concurrency) below.                                                                                                                 |
 | `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                        |
 | `dependencies` | string or array | Provider names this package [depends on](#package-dependencies); the consumer is the package itself.                                                                                                                                                                                                  |
+| `manifestNames` | array of strings | The manifest names this package answers to, stated rather than read from its files. See [`manifestNames`](#manifestnames) below.                                                                                                                                                                     |
 
 For an entry overriding a space package, a field left unset **inherits** from the space; a field set overrides it. The
 per-field rules follow from what each object means:
@@ -77,7 +78,39 @@ per-field rules follow from what each object means:
 - `autoVersion` replaces **wholesale**: its empty fields already carry meaning relative to their siblings (no `kinds`
   means all four), so a field-level overlay could never express them against a non-empty base. An override of
   `{"enabled": false}` switches the space's block off for the package.
+- `manifestNames` replaces **wholesale**, like every other list: the layer nearest the package states what the package
+  is called, and adding to an inherited list could never take a name away again.
 - `tagFormat` overrides like everywhere else: package over space over repository.
+
+## `manifestNames`
+
+dispat works out which package a dependency refers to by reading the name each package's manifests declare. A
+`package.json` says `"name": "@acme/core"`, so a sibling depending on `@acme/core` is depending on that folder. That
+covers most repositories without any configuration at all.
+
+Some packages declare no name anything here can read. A Gradle module keeps its coordinate in a build script that is a
+program rather than a manifest. A folder built by a Makefile declares nothing. A project in an ecosystem dispat has no
+parser for is opaque by definition. Nothing points at these packages, so `dispat compute` derives no edges into them
+and auto-versioning never reconciles the declarations that name them.
+
+`manifestNames` is how you say what such a package is called:
+
+```yaml
+packages:
+  core:
+    manifestNames: [ "com.acme:core" ]
+```
+
+From then on a dependency spelled `com.acme:core` anywhere in the workspace resolves to the `core` package, for
+`dispat compute` and for [auto-versioning](./spaces.md#autoversion) alike. The two share one index, so they cannot
+disagree about what a name means.
+
+Two rules keep it honest. A stated name **outranks** one a manifest declares, because it is you saying so rather than
+a file happening to say it. And no two packages may state the same name: a manifest name identifies one package, and a
+collision here is a typo in your configuration rather than a fact about the repository, so it fails to load.
+
+The key belongs to a package, not to a space, so it lives in a `packages` entry or in the package's own
+[in-folder file](#in-folder-configuration-files).
 
 ## Package weights: `concurrency`
 
