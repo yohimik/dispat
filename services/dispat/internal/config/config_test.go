@@ -1690,3 +1690,161 @@ func TestDiscoverPackagesIsRepeatable(t *testing.T) {
 		assert.Equal(t, first[i].Space.TagFormat, second[i].Space.TagFormat, first[i].Name)
 	}
 }
+
+// rawRecordConfig is the minimal valid config with a raw changelog object, so
+// the record-line shorthands — shapes the typed model cannot express — can be
+// written the way a user writes them.
+func rawRecordConfig(changelog map[string]any) map[string]any {
+	return map[string]any{
+		"scripts":   map[string]any{"b": "echo b"},
+		"spaces":    map[string]any{"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "b"}}},
+		"changelog": changelog,
+	}
+}
+
+// TestLoadRecordLineShorthands: an element of a line list is an object, a
+// bare string, or a bare array of strings, and a whole list may be one bare
+// string. All four decode into the same shape.
+func TestLoadRecordLineShorthands(t *testing.T) {
+	root := writeRawRepo(t, rawRecordConfig(map[string]any{
+		"fileTitle": "# Changelog",
+		"header":    []any{"one", []any{"two", "three"}, map[string]any{"line": "four", "space": "libs"}},
+		"footer":    []any{map[string]any{"line": []any{"five", "six"}, "package": []any{"a", "b"}}},
+	}), "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, titleLine("# Changelog"), cfg.Changelog.FileTitle,
+		"a bare string is the whole list, one line, unfiltered")
+	assert.Equal(t, []EntryLine{
+		{Line: []string{"one"}},
+		{Line: []string{"two", "three"}},
+		{Line: []string{"four"}, Space: []string{"libs"}},
+	}, cfg.Changelog.Header)
+	assert.Equal(t, []EntryLine{
+		{Line: []string{"five", "six"}, Package: []string{"a", "b"}},
+	}, cfg.Changelog.Footer)
+}
+
+// TestLoadRecordLineScalarFilters: a filter is one name or an array of names,
+// the weak typing every other list-shaped key gets.
+func TestLoadRecordLineScalarFilters(t *testing.T) {
+	root := writeRawRepo(t, rawRecordConfig(map[string]any{
+		"footer": []any{map[string]any{"line": "x", "package": "core", "space": "libs", "group": "libs"}},
+	}), "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []EntryLine{{
+		Line: []string{"x"}, Package: []string{"core"}, Space: []string{"libs"}, Group: []string{"libs"},
+	}}, cfg.Changelog.Footer)
+}
+
+// TestLoadRecordLineWithoutLineIsRefused: a line that selects packages and
+// then writes nothing to them is a mistake, named by its index.
+func TestLoadRecordLineWithoutLineIsRefused(t *testing.T) {
+	cases := []struct {
+		name, want string
+		changelog  map[string]any
+	}{
+		{"header", "changelog: header[1]", map[string]any{
+			"header": []any{"fine", map[string]any{"package": "core"}}}},
+		{"footer", "changelog: footer[0]", map[string]any{
+			"footer": []any{map[string]any{"space": "libs"}}}},
+		{"fileTitle", "changelog: fileTitle[0]", map[string]any{
+			"fileTitle": []any{map[string]any{"package": "core"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeRawRepo(t, rawRecordConfig(tc.changelog), "pkgs/core")
+			_, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, err.Error(), "line is required")
+		})
+	}
+}
+
+// TestLoadRecordLineUnknownKeyIsRefused: a typo inside a line object is an
+// unknown key like any other.
+func TestLoadRecordLineUnknownKeyIsRefused(t *testing.T) {
+	root := writeRawRepo(t, rawRecordConfig(map[string]any{
+		"footer": []any{map[string]any{"line": "x", "packages": "core"}},
+	}), "pkgs/core")
+	_, err := Load(filepath.Join(root, "dispat.json"), nil)
+	assert.ErrorContains(t, err, "packages")
+}
+
+// TestLoadPackageOverrideRecordLines: a package override carries the same
+// shorthands, and its own lines replace the inherited list rather than
+// extending it.
+func TestLoadPackageOverrideRecordLines(t *testing.T) {
+	raw := rawRecordConfig(map[string]any{"footer": []any{"global"}})
+	raw["packages"] = map[string]any{
+		"core": map[string]any{"changelog": map[string]any{"footer": []any{"local"}}},
+	}
+	root := writeRawRepo(t, raw, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+	assert.Equal(t, []model.EntryLine{{Line: []string{"local"}}}, core.Changelog.Format.Footer,
+		"the nearest layer states the whole list")
+}
+
+// TestLoadPackageOverrideRecordLinesValidated: a broken line in a package
+// override is refused too, named by where it sits.
+func TestLoadPackageOverrideRecordLinesValidated(t *testing.T) {
+	raw := rawRecordConfig(nil)
+	raw["packages"] = map[string]any{
+		"core": map[string]any{"github": map[string]any{"header": []any{map[string]any{"space": "libs"}}}},
+	}
+	root := writeRawRepo(t, raw, "pkgs/core")
+	_, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `packages["core"]: github: header[0]`)
+}
+
+// TestLoadReleaseNameReachesBothSpecs: releaseName is one of the shared entry
+// format options, so it lands on the changelog and the github policy alike.
+func TestLoadReleaseNameReachesBothSpecs(t *testing.T) {
+	raw := rawRecordConfig(map[string]any{"releaseName": "${DISPAT_PACKAGE} out"})
+	raw["github"] = map[string]any{"releaseName": "v${DISPAT_VERSION}"}
+	root := writeRawRepo(t, raw, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+	assert.Equal(t, "${DISPAT_PACKAGE} out", core.Changelog.Format.ReleaseName)
+	assert.Equal(t, "v${DISPAT_VERSION}", core.GitHub.Format.ReleaseName)
+}
+
+// TestLoadInFolderConfigRecordLineShorthands: an in-folder package config
+// accepts every shape the root config does. The two share one decoding
+// stance, so a shorthand cannot be valid at the root and a syntax error one
+// folder down.
+func TestLoadInFolderConfigRecordLineShorthands(t *testing.T) {
+	root := writeRawRepo(t, rawRecordConfig(map[string]any{"footer": []any{"global"}}), "pkgs/core")
+	writePackageRaw(t, root, "pkgs/core", map[string]any{
+		"changelog": map[string]any{
+			"fileTitle": "# Core",
+			"footer":    []any{"one", []any{"two", "three"}, map[string]any{"line": "four", "package": "core"}},
+		},
+	})
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+
+	core := packagesByName(pkgs)["core"]
+	assert.Equal(t, []model.EntryLine{{Line: []string{"# Core"}}}, core.Changelog.FileTitle)
+	assert.Equal(t, []model.EntryLine{
+		{Line: []string{"one"}},
+		{Line: []string{"two", "three"}},
+		{Line: []string{"four"}, Package: []string{"core"}},
+	}, core.Changelog.Format.Footer, "and they replace the inherited list")
+}

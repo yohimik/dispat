@@ -74,7 +74,7 @@ func (a *App) previewOne(rel *plan.Release) string {
 	// no date yet, so it shows the channel movement instead: the transition
 	// (§13.10) is the context a reader needs to judge the sections below.
 	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), rel.ChannelTransition())
-	body := changelog.RenderBody(rel, format, nil)
+	body := changelog.RenderEntryBody(rel, format, nil)
 	if body == "" {
 		return header
 	}

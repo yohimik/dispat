@@ -167,10 +167,13 @@ func RenderSections(rel *plan.Release, f Format) string {
 	return strings.Join(parts, "\n")
 }
 
-// RenderBody assembles the body of one entry: the release-name sub-header,
-// the configured header lines, the grouped sections, any extra sections the
-// caller appends, and the configured footer lines. A nil look means the
-// release's own ReleaseLookup.
+// RenderBody assembles the body of one entry: the configured header lines,
+// the grouped sections, any extra sections the caller appends, and the
+// configured footer lines. A nil look means the release's own ReleaseLookup.
+//
+// The release name is not here. A GitHub release carries it as the release's
+// own name, so writing it into the body too would say it twice; the changelog
+// entry, which has no such field, adds it through RenderEntryBody.
 //
 // Blocks are separated by exactly one blank line and empty ones are dropped,
 // so an entry reads the same whether none of the optional blocks are
@@ -181,10 +184,7 @@ func RenderBody(rel *plan.Release, f Format, look Lookup, extra ...string) strin
 	if look == nil {
 		look = ReleaseLookup(rel)
 	}
-	blocks := make([]string, 0, len(extra)+4)
-	if name := Expand(f.ReleaseName, look); name != "" {
-		blocks = append(blocks, "### "+name+"\n")
-	}
+	blocks := make([]string, 0, len(extra)+3)
 	blocks = appendBlock(blocks, RenderLines(f.Header, rel, look))
 	blocks = appendBlock(blocks, RenderSections(rel, f))
 	for _, e := range extra {
@@ -224,12 +224,27 @@ func joinBlocks(blocks []string) string {
 	return b.String()
 }
 
+// RenderEntryBody is what goes under a changelog entry's header line: the
+// release-name sub-header, when one is configured, followed by the shared
+// body. The entry header is "## ", so its sub-header is "### ".
+func RenderEntryBody(rel *plan.Release, f Format, look Lookup) string {
+	if look == nil {
+		look = ReleaseLookup(rel)
+	}
+	body := RenderBody(rel, f, look)
+	name := Expand(f.ReleaseName, look)
+	if name == "" {
+		return body
+	}
+	return joinBlocks(appendBlock([]string{"### " + name + "\n"}, body))
+}
+
 // RenderEntry renders one dated changelog entry: a "## pkg@version (date)"
 // header followed by the body.
 func RenderEntry(rel *plan.Release, date time.Time, f Format) string {
 	f = f.withDefaults()
 	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), date.Format(f.DateFormat))
-	body := RenderBody(rel, f, nil)
+	body := RenderEntryBody(rel, f, nil)
 	if body == "" {
 		return header
 	}

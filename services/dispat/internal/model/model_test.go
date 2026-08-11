@@ -135,3 +135,51 @@ func TestPackageVersionGroupName(t *testing.T) {
 		assert.Equal(t, c.want, c.pkg.VersionGroupName(), c.name)
 	}
 }
+
+// TestGitHubSpecKeyDistinguishesPolicies: the key is what decides whether two
+// packages share a releaser, so every field a releaser is built from has to
+// change it — the entry format included, since it shapes every body sent.
+func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
+	base := GitHubSpec{
+		Enabled: true, Prerelease: true, Owner: "acme", Repo: "mono",
+		APIURL: "https://api.github.com", TokenEnv: "GITHUB_TOKEN",
+		Format: RecordFormat{
+			FeaturesTitle: "Features",
+			Header:        []EntryLine{{Line: []string{"a"}, Package: []string{"core"}}},
+		},
+	}
+	assert.Equal(t, base.Key(), base.Key(), "the same policy keys the same twice")
+
+	cases := map[string]func(s *GitHubSpec){
+		"enabled":     func(s *GitHubSpec) { s.Enabled = false },
+		"prerelease":  func(s *GitHubSpec) { s.Prerelease = false },
+		"allPackages": func(s *GitHubSpec) { s.AllPackages = true },
+		"owner":       func(s *GitHubSpec) { s.Owner = "other" },
+		"repo":        func(s *GitHubSpec) { s.Repo = "other" },
+		"apiUrl":      func(s *GitHubSpec) { s.APIURL = "https://ghe" },
+		"tokenEnv":    func(s *GitHubSpec) { s.TokenEnv = "OTHER" },
+		"dateFormat":  func(s *GitHubSpec) { s.Format.DateFormat = "2006" },
+		"titles":      func(s *GitHubSpec) { s.Format.FeaturesTitle = "Added" },
+		"releaseName": func(s *GitHubSpec) { s.Format.ReleaseName = "v1" },
+		"header text": func(s *GitHubSpec) { s.Format.Header = []EntryLine{{Line: []string{"b"}}} },
+		"header filter": func(s *GitHubSpec) {
+			s.Format.Header = []EntryLine{{Line: []string{"a"}, Package: []string{"other"}}}
+		},
+		"header length": func(s *GitHubSpec) { s.Format.Header = nil },
+		"footer":        func(s *GitHubSpec) { s.Format.Footer = []EntryLine{{Line: []string{"a"}}} },
+	}
+	for name, change := range cases {
+		other := base
+		other.Format.Header = append([]EntryLine(nil), base.Format.Header...)
+		change(&other)
+		assert.NotEqual(t, base.Key(), other.Key(), "a different %s must key differently", name)
+	}
+}
+
+// TestGitHubSpecKeySeparatesFields: values are quoted and separated, so text
+// cannot be shuffled between neighbouring fields to collide.
+func TestGitHubSpecKeySeparatesFields(t *testing.T) {
+	a := GitHubSpec{Owner: "ac", Repo: "me"}
+	b := GitHubSpec{Owner: "a", Repo: "cme"}
+	assert.NotEqual(t, a.Key(), b.Key())
+}

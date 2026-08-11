@@ -161,35 +161,45 @@ func TestReleaseLookupWithoutAPackage(t *testing.T) {
 	assert.Equal(t, "env-value", v)
 }
 
-// TestRenderBodyPlacement pins where each optional block lands: the release
-// name first, then the header, the sections, the caller's extra section, and
-// the footer last.
-func TestRenderBodyPlacement(t *testing.T) {
-	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
-	f := Format{
-		ReleaseName: "Winter release",
-		Header:      titleLines("header line"),
-		Footer:      titleLines("footer line"),
-	}
-	out := RenderBody(rel, f, nil, "### Release\n\n- commit: abc\n")
-
-	order := []string{
-		"### Winter release",
-		"header line",
-		"### Breaking Changes",
-		"### Features",
-		"### Fixes",
-		"### Dependencies",
-		"### Release",
-		"footer line",
-	}
+// assertOrder fails unless every marker appears in out, in the order given.
+func assertOrder(t *testing.T, out string, markers ...string) {
+	t.Helper()
 	at := -1
-	for _, marker := range order {
+	for _, marker := range markers {
 		i := strings.Index(out, marker)
 		require.NotEqual(t, -1, i, "missing %q in:\n%s", marker, out)
 		assert.Greater(t, i, at, "%q is out of order in:\n%s", marker, out)
 		at = i
 	}
+}
+
+var placementFormat = Format{
+	ReleaseName: "Winter release",
+	Header:      titleLines("header line"),
+	Footer:      titleLines("footer line"),
+}
+
+// TestRenderEntryBodyPlacement: in a changelog entry the release name opens
+// the body as a sub-header, then the header lines, the sections, the footer.
+func TestRenderEntryBodyPlacement(t *testing.T) {
+	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
+	assertOrder(t, RenderEntryBody(rel, placementFormat, nil),
+		"### Winter release", "header line",
+		"### Breaking Changes", "### Features", "### Fixes", "### Dependencies",
+		"footer line")
+}
+
+// TestRenderBodyPlacement: the shared body carries no release name — GitHub
+// puts it in the release's own name field — and the caller's extra section
+// sits between the sections and the footer.
+func TestRenderBodyPlacement(t *testing.T) {
+	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
+	out := RenderBody(rel, placementFormat, nil, "### Release\n\n- commit: abc\n")
+
+	assert.NotContains(t, out, "Winter release", "the name belongs to the destination, not the body")
+	assertOrder(t, out, "header line",
+		"### Breaking Changes", "### Features", "### Fixes", "### Dependencies",
+		"### Release", "footer line")
 }
 
 // TestRenderBodyBlockSpacing: whatever combination of blocks is configured,
@@ -200,7 +210,7 @@ func TestRenderBodyBlockSpacing(t *testing.T) {
 	rel.Units = []*ccme.Unit{testUnit("feat", ccme.BumpMinor, "add streaming")}
 	rel.DueTo, rel.Updates = nil, nil
 
-	out := RenderBody(rel, Format{
+	out := RenderEntryBody(rel, Format{
 		ReleaseName: "Name",
 		Header:      titleLines("header"),
 		Footer:      titleLines("footer"),
@@ -246,7 +256,7 @@ func TestRenderBodyAroundASharedVersioningRide(t *testing.T) {
 // all interpolate against the same release.
 func TestRenderBodyExpandsEveryBlock(t *testing.T) {
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
-	out := RenderBody(rel, Format{
+	out := RenderEntryBody(rel, Format{
 		ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
 		Header:      titleLines("space: ${DISPAT_SPACE}"),
 		Footer:      titleLines("tag: ${DISPAT_TAG}"),

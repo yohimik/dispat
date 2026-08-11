@@ -308,3 +308,91 @@ func TestHasEntryIsLineAnchored(t *testing.T) {
 	assert.False(t, HasEntry(body, "core@2.0.0"), "indented text does not count")
 	assert.False(t, HasEntry(nil, "core@1.0.0"), "an absent file has no entries")
 }
+
+// TestRecordMultiLineFileTitle: a file title may be several lines, written
+// once at the top and not repeated by the next release.
+func TestRecordMultiLineFileTitle(t *testing.T) {
+	dir := t.TempDir()
+	w := &FileWriter{
+		FileTitle: titleLines("# Changelog", "", "All notable changes to core."),
+		Now:       func() time.Time { return testDate },
+	}
+	ctx := context.Background()
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2, Minor: 1})))
+
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.True(t, strings.HasPrefix(content, "# Changelog\n\nAll notable changes to core.\n"), content)
+	assert.Equal(t, 1, strings.Count(content, "All notable changes to core."),
+		"the title heads the file once, however many entries it holds")
+}
+
+// TestRecordFileTitleIsFiltered: a file title can differ per package, like
+// any other record line.
+func TestRecordFileTitleIsFiltered(t *testing.T) {
+	dir := t.TempDir()
+	w := &FileWriter{
+		FileTitle: []model.EntryLine{
+			{Line: []string{"# Core"}, Package: []string{"core"}},
+			{Line: []string{"# Everything else"}, Package: []string{"other"}},
+		},
+		Now: func() time.Time { return testDate },
+	}
+	require.NoError(t, w.Record(context.Background(), testRelease(dir, ccme.Version{Major: 2})))
+
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(data), "# Core\n"), string(data))
+	assert.NotContains(t, string(data), "Everything else")
+}
+
+// TestRecordEveryEntryCarriesItsOwnBlocks: the header and footer belong to
+// the entry, so a second release writes its own copy above the first and
+// leaves the first untouched.
+func TestRecordEveryEntryCarriesItsOwnBlocks(t *testing.T) {
+	dir := t.TempDir()
+	w := &FileWriter{
+		Format: Format{
+			ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
+			Header:      titleLines("Built by CI."),
+			Footer:      titleLines("---"),
+		},
+		Now: func() time.Time { return testDate },
+	}
+	ctx := context.Background()
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2, Minor: 1})))
+
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Equal(t, 2, strings.Count(content, "Built by CI."), "one header per entry")
+	assert.Equal(t, 2, strings.Count(content, "\n---\n"), "one footer per entry")
+	assert.Contains(t, content, "### core 2.1.0", "each entry names its own release")
+	assert.Contains(t, content, "### core 2.0.0")
+	assert.True(t, HasEntry([]byte(content), "core@2.1.0"), "the entry stays findable under its sub-header")
+}
+
+// TestRecordChangedFileTitleIsNotStripped documents the one sharp edge of a
+// file title: the writer strips the title it renders now, so a title that
+// changed since the last release is not recognised and the old one stays in
+// the file. A title must not carry anything that varies per release.
+func TestRecordChangedFileTitleIsNotStripped(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	first := &FileWriter{FileTitle: titleLines("# Changelog"), Now: func() time.Time { return testDate }}
+	require.NoError(t, first.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+
+	second := &FileWriter{FileTitle: titleLines("# History"), Now: func() time.Time { return testDate }}
+	require.NoError(t, second.Record(ctx, testRelease(dir, ccme.Version{Major: 2, Minor: 1})))
+
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	content := string(data)
+	assert.True(t, strings.HasPrefix(content, "# History\n"), "the new title heads the file")
+	assert.Contains(t, content, "# Changelog", "and the old one survives below, unrecognised")
+}

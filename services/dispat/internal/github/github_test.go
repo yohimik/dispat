@@ -492,3 +492,89 @@ func TestVerifyConnectionError(t *testing.T) {
 	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn"}
 	assert.Error(t, rel.Verify(context.Background()))
 }
+
+// TestRecordNamesTheReleaseAfterTheTag: with no releaseName configured the
+// release is named after its tag, as it always was.
+func TestRecordNamesTheReleaseAfterTheTag(t *testing.T) {
+	srv, gotBody := captureServer(t)
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+
+	assert.Equal(t, "core@1.3.0", gotBody.Name)
+	assert.Equal(t, "core@1.3.0", gotBody.TagName)
+}
+
+// TestRecordReleaseNameOverridesTheName: releaseName renames the release and
+// nothing else — the tag it hangs off is untouched.
+func TestRecordReleaseNameOverridesTheName(t *testing.T) {
+	srv, gotBody := captureServer(t)
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Format: changelog.Format{ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION} is out"}}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+
+	assert.Equal(t, "core 1.3.0 is out", gotBody.Name, "the name is interpolated")
+	assert.Equal(t, "core@1.3.0", gotBody.TagName, "the tag is never renamed")
+	assert.NotContains(t, gotBody.Body, "core 1.3.0 is out",
+		"on GitHub the name is the release's title, not a sub-header in its body")
+}
+
+// TestRecordBodyOrder: the header opens the body, the footer closes it, and
+// the release section documenting the commit sits between the sections and
+// the footer.
+func TestRecordBodyOrder(t *testing.T) {
+	srv, gotBody := captureServer(t)
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		CommitSHA: "abc123",
+		Format: changelog.Format{
+			Header: []model.EntryLine{{Line: []string{"Built by CI."}}},
+			Footer: []model.EntryLine{{Line: []string{"", "Changelog: /blob/${DISPAT_TAG}/CHANGELOG.md"}}},
+		}}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+
+	body := gotBody.Body
+	order := []string{"Built by CI.", "### Features", "### Dependencies", "### Release",
+		"Changelog: /blob/core@1.3.0/CHANGELOG.md"}
+	at := -1
+	for _, marker := range order {
+		i := strings.Index(body, marker)
+		require.NotEqual(t, -1, i, "missing %q in:\n%s", marker, body)
+		assert.Greater(t, i, at, "%q is out of order in:\n%s", marker, body)
+		at = i
+	}
+}
+
+// TestRecordSkipsLinesForOtherPackages: a line filtered to another package
+// leaves the body exactly as an unconfigured format would have rendered it.
+func TestRecordSkipsLinesForOtherPackages(t *testing.T) {
+	plainSrv, plainBody := captureServer(t)
+	plain := &Releaser{APIURL: plainSrv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: plainSrv.Client()}
+	require.NoError(t, plain.Record(context.Background(), testRelease()))
+
+	srv, gotBody := captureServer(t)
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Format: changelog.Format{
+			Header: []model.EntryLine{{Line: []string{"apps only"}, Space: []string{"apps"}}},
+			Footer: []model.EntryLine{{Line: []string{"other only"}, Package: []string{"other"}}},
+		}}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+
+	assert.Equal(t, plainBody.Body, gotBody.Body)
+}
+
+// TestRecordExpandsAScriptOutput: a value a build script exported reaches the
+// release body, which is how a footer links an artefact the run produced.
+func TestRecordExpandsAScriptOutput(t *testing.T) {
+	srv, gotBody := captureServer(t)
+
+	rel := testRelease()
+	rel.Outputs = append(rel.Outputs, plan.Output{Name: "IMAGE", Value: "acme/core:1.3.0", Source: "core:build"})
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Format: changelog.Format{Footer: []model.EntryLine{{Line: []string{"image: ${DISPAT_OUTPUT_IMAGE}"}}}}}
+	require.NoError(t, r.Record(context.Background(), rel))
+
+	assert.Contains(t, gotBody.Body, "image: acme/core:1.3.0")
+}
