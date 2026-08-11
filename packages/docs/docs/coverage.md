@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 90.0%; the integration
-layer's instrumented binary: 84.4%).
+The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 90.1%; the integration
+layer's instrumented binary: 84.6%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
