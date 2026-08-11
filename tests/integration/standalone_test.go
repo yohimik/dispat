@@ -566,3 +566,52 @@ func TestStandaloneStepsTakeTheWindowFlags(t *testing.T) {
 	assert.NotContains(t, res.Stdout, "outside the window",
 		"--since all puts the released package back on the table")
 }
+
+// TestStandaloneCommitTagName: `--tag-name` names the annotated tag instead of
+// computing it, which is what a step command running inside a release stage
+// needs. It plans a second time, and a version shared by a fixed versioning
+// group moves under it as soon as an earlier member of the same run tags;
+// passing the outer run's $DISPAT_TAG keeps the two in agreement.
+func TestStandaloneCommitTagName(t *testing.T) {
+	repo := func(t *testing.T) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("packages", "app")
+		r.Commit("feat(core,app): both change")
+		return r
+	}
+
+	t.Run("names the tag and the commit", func(t *testing.T) {
+		r := repo(t)
+		// Something to stage, so the release commit is real and its message
+		// can be read back.
+		r.WriteFile("packages/core/CHANGELOG.md", "# Changelog\n")
+
+		res := r.Command("commit", "--package", "core", "--tag", "--tag-name", "core@0.5.0")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.True(t, r.HasTag("core@0.5.0"), "the named tag is created; tags: %v", r.TagList())
+		assert.False(t, r.HasTag("core@0.1.0"), "the computed tag is not")
+		assert.Contains(t, r.Git("log", "-1", "--format=%s"), "core@0.5.0",
+			"the release commit message carries the named tag too")
+	})
+
+	t.Run("refuses to name one tag for several packages", func(t *testing.T) {
+		r := repo(t)
+		res := r.Command("commit", "--tag", "--tag-name", "whatever@1.0.0")
+		require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout, "--tag-name names one tag")
+		assert.False(t, r.HasTag("whatever@1.0.0"), "nothing is written on refusal")
+		assert.Equal(t, 0, r.TagCount("core@"), "the refusal comes before any git work")
+	})
+
+	t.Run("without it the tag is computed as before", func(t *testing.T) {
+		r := repo(t)
+		res := r.Command("commit", "--package", "core", "--tag")
+		require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	})
+}
