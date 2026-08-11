@@ -186,8 +186,8 @@ already on, so it pins that one package and leaves the rest untouched.
 | Code   | Meaning                                                                                                        |
 |--------|----------------------------------------------------------------------------------------------------------------|
 | `W210` | A package was released with nothing of its own, to keep the group together. Also raised when a package that fell behind is caught up to the shared part. |
-| `W211` | Two exact `Release-As` pins competed for one group's version. The newest wins.                                  |
-| `W212` | Members resolved to different prerelease channels. The group can only move as one, so a single winner is picked. |
+| `W211` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
+| `W212` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
 | `W213` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
 
 `W210` cannot be suppressed. Nothing in the commit log explains why that package is in the plan, so the warning is the

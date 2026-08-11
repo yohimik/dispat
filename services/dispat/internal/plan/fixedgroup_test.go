@@ -345,6 +345,77 @@ func TestFixedMajorPinBelowTheMajorMovesOnlyItsPackage(t *testing.T) {
 	assert.False(t, p.Releases["b"].Releasing())
 }
 
+func TestFixedMajorLocalPinsDoNotCompete(t *testing.T) {
+	// Two pins, both inside the group's major. Neither asks for anything of
+	// the group's, so both apply to their own package and there is no
+	// conflict to report: a W211 here would tell the operator that half their
+	// intent was overridden when nothing was.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(a): a's own\n\nRelease-As: 1.5.0\n"},
+		commit{sha: "c2", message: "release(b): b's own\n\nRelease-As: 1.7.0\n"},
+	).tag("a", "1.2.3", "").tag("b", "1.4.0", "")
+	p := computeFixed(t, model.VersioningFixedMajor, git)
+
+	assertVersion(t, v(1, 5, 0), p.Releases["a"].Next)
+	assertVersion(t, v(1, 7, 0), p.Releases["b"].Next, "each pin applies to its own package")
+	for _, d := range p.Diagnostics {
+		assert.NotEqual(t, CodeFixedPinConflict, d.Code, "local pins do not compete: %v", d)
+	}
+}
+
+func TestFixedMajorGroupPinWinsOverALocalOne(t *testing.T) {
+	// The newest pin here is local, and an older one crosses the major. The
+	// group pin must be the one that actually names the shared part, or the
+	// crossing member would leave its group behind for a whole run.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(a): to the next major\n\nRelease-As: 2.0.0\n"},
+		commit{sha: "c2", message: "release(b): b's own line\n\nRelease-As: 1.7.0\n"},
+	).tag("a", "1.2.3", "").tag("b", "1.4.0", "")
+	p := computeFixed(t, model.VersioningFixedMajor, git)
+
+	assertVersion(t, v(2, 0, 0), p.Releases["a"].Next)
+	assertVersion(t, v(2, 0, 0), p.Releases["b"].Next,
+		"the pin naming the shared major moves the group, whatever else was pinned")
+}
+
+func TestFixedMajorLocalChannelsDoNotConflict(t *testing.T) {
+	// Two prerelease trains below the shared major belong to their own
+	// packages. The group is not moving, so nobody's channel was overridden
+	// and W212 must stay silent.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(a)%beta: a wants beta\n---\nfix(b)%rc: b wants rc"},
+	).tag("a", "1.2.3", "").tag("b", "1.4.0", "")
+	p := computeFixed(t, model.VersioningFixedMajor, git)
+
+	assert.Equal(t, "1.2.4-beta.0", p.Releases["a"].Next.String())
+	assert.Equal(t, "1.4.1-rc.0", p.Releases["b"].Next.String(), "each member keeps the channel it asked for")
+	for _, d := range p.Diagnostics {
+		assert.NotEqual(t, CodeFixedChannelConflict, d.Code, "local trains do not conflict: %v", d)
+	}
+}
+
+func TestFixedMajorDivergentChannelsConflictWhenTheGroupMoves(t *testing.T) {
+	// The same two channels, now carried by a bump that reaches the shared
+	// major: the group takes everyone onto one channel, so one member was
+	// overridden and W212 is exactly right.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a)%beta!: a wants beta\n---\nfeat(b)%rc!: b wants rc"},
+	).tag("a", "1.2.3", "").tag("b", "1.4.0", "")
+	p := computeFixed(t, model.VersioningFixedMajor, git)
+
+	found := false
+	for _, d := range p.Diagnostics {
+		if d.Code == CodeFixedChannelConflict {
+			found = true
+			assert.Equal(t, "group:shared", d.Pkg)
+			assert.Contains(t, d.Message, p.Releases["a"].Channel, "the message names the winner")
+		}
+	}
+	assert.True(t, found, "an overridden channel must be reported: %v", p.Diagnostics)
+	assert.Equal(t, p.Releases["a"].Next.String(), p.Releases["b"].Next.String(),
+		"the group moves as one")
+}
+
 // ---------------------------------------------------------------------------
 // Groups whose members declare different depths
 // ---------------------------------------------------------------------------

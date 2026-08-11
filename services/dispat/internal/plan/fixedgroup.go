@@ -166,17 +166,10 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	if len(members) == 0 {
 		return
 	}
-	g := cp.fixedGroupAggregate(groupName, members)
+	g, channelCands := cp.fixedGroupAggregate(groupName, members)
 	depth := cp.groupDepth(g, groupName, members)
 
-	groupPin, hasPin := cp.fixedGroupPin(g, groupName, members)
-	if hasPin && depth < model.SharedVersioningDepth && samePrefix(groupPin.version, g.Baseline, depth) {
-		// A pin that names the prefix the group is already on asks for nothing
-		// of the group's; it is the member's own business, and evaluating it
-		// against the aggregate would answer its guards (E153, E154, E157) for
-		// the wrong package.
-		hasPin = false
-	}
+	groupPin, hasPin := cp.fixedGroupPin(g, groupName, members, depth)
 	if hasPin {
 		cp.applyPin(g, groupPin)
 	} else {
@@ -198,6 +191,17 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 		}
 		cp.alignFixedGroup(groupName, g, members, depth)
 		return
+	}
+
+	// Only now is a divergent channel a conflict. The group is about to take
+	// every member onto one channel, so the members that asked for another one
+	// have been overridden, which is what W212 reports. Had the group stayed
+	// put, each member would have kept the channel it asked for and there
+	// would have been nothing to report.
+	if len(channelCands) > 1 {
+		cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
+			fmt.Sprintf("members of versioning group %q resolve to different channels %v; the group moves as one, using %q",
+				groupName, channelCands, g.Channel))
 	}
 
 	for _, name := range members {
@@ -237,8 +241,11 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 // The aggregate collects every member's baseline (held ones included) and
 // the bumps, new work and channel movements of the members that would
 // release; members resolving to different channels are reduced to one
-// deterministic winner (W212), because the group can only move as one.
-func (cp *computation) fixedGroupAggregate(groupName string, members []string) *Release {
+// deterministic winner, because the group can only move as one. The distinct
+// channels are returned rather than reported here: whether the reduction
+// overrode anybody depends on the group actually moving, which only the
+// caller knows.
+func (cp *computation) fixedGroupAggregate(groupName string, members []string) (*Release, []string) {
 	first := cp.rel[members[0]]
 	g := &Release{Pkg: &model.Package{Name: "group:" + groupName, Space: first.Pkg.Space}}
 	for _, name := range members {
@@ -276,24 +283,26 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) *
 	}
 	g.Bump = ccme.MaxBump(g.OwnBump, g.PropagatedBump)
 	if len(channelCands) > 0 {
-		if len(channelCands) > 1 {
-			cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
-				fmt.Sprintf("members of versioning group %q resolve to different channels %v; the group moves as one, using %q",
-					groupName, channelCands, channelCands[0]))
-		}
 		g.Channel = channelCands[0]
 	}
-	return g
+	return g, channelCands
 }
 
 // fixedGroupPin selects the pin that applies to the group, if any: the newest
-// exact pin among the members pins the group, because with one shared version
-// there is nothing narrower for it to name. Its scope breadth is deliberately
-// reset to one package — the group is one version, so E154's "an exact
-// version can name only one" is satisfied by construction here; packages
-// outside the group that the same pin scoped still go through their own
-// applyPin and its guards. Competing pins warn (W211) and the newest wins.
-func (cp *computation) fixedGroupPin(g *Release, groupName string, members []string) (pin, bool) {
+// exact pin naming a shared part the group is not already on. With the whole
+// version shared that is every pin, because there is nothing narrower for one
+// to name. Under a partial mode a pin that stays inside the group's prefix
+// asks for nothing of the group's, so it is not a candidate at all: it goes
+// through its own package's applyPin, with its own guards (E153, E154, E157)
+// measured against that package rather than against the aggregate, and it
+// competes with nobody.
+//
+// The winner's scope breadth is deliberately reset to one package — the group
+// holds one shared prefix, so E154's "an exact version can name only one" is
+// satisfied by construction here; packages outside the group that the same pin
+// scoped still go through their own applyPin and its guards. Competing group
+// pins warn (W211) and the newest wins.
+func (cp *computation) fixedGroupPin(g *Release, groupName string, members []string, depth int) (pin, bool) {
 	var groupPin pin
 	pinnedVersions := make(map[string]bool)
 	hasPin := false
@@ -301,6 +310,9 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 		p, ok := cp.pinned[name]
 		if !ok {
 			continue
+		}
+		if depth < model.SharedVersioningDepth && samePrefix(p.version, g.Baseline, depth) {
+			continue // the member's own business, not the group's
 		}
 		pinnedVersions[p.version.String()] = true
 		if !hasPin || cp.newerCommit(p.commit, groupPin.commit) {
