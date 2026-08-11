@@ -17,6 +17,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
+	"github.com/yohimik/dispat/pkg/writer"
+
 	"github.com/yohimik/dispat/services/dispat/internal/app"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
@@ -149,6 +151,22 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			app.OnErrorSkip, app.OnErrorContinue)
 		return 2
 	}
+	// The rest of what the flags alone decide, also before any config is
+	// loaded: a usage mistake should not first cost the user a config error.
+	if cmd == cmdAutoversion || cmd == cmdAutoreplace {
+		if !validManifestScope(*o.avManifests, cmd == cmdAutoversion) {
+			bootLog.Error().Str("manifests", *o.avManifests).
+				Msg(manifestScopeHint(cmd == cmdAutoversion))
+			return 2
+		}
+	}
+	var write writeRequest
+	if cmd == cmdWriter || cmd == cmdAutoreplace {
+		var ok bool
+		if write, ok = parseWriteRequest(cmd, o, usageForCommand, bootLog); !ok {
+			return 2
+		}
+	}
 	if cmd == cmdInit {
 		// Before config loading: init is what creates the config, so there is
 		// nothing to load yet (and no git repository is needed either).
@@ -196,19 +214,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
-		edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrReplace)
-		if err != nil {
-			bootLog.Error().Err(err).Msg("invalid edit")
-			return 2
-		}
-		if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
-			bootLog.Error().Msg("writer needs something to write: --set-version, --set or --replace")
-			usageForCommand(cmd)
-			return 2
-		}
 		if app.WriteManifests(ctx, app.WriteOptions{
-			Root: *o.root, Paths: inv.paths, Version: *o.wrSetVersion,
-			Edits: edits, Replacements: repls, Strict: *o.strict,
+			Root: *o.root, Paths: inv.paths, Version: write.version,
+			Edits: write.edits, Replacements: write.replacements, Strict: *o.strict,
 			JSON: *o.logFormat == "json", Out: stdout, Log: log,
 		}) != nil {
 			return 1
@@ -285,11 +293,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case cmdAutoversion:
-		if !validManifestScope(*o.avManifests, true) {
-			bootLog.Error().Str("manifests", *o.avManifests).
-				Msg("unknown --manifests value (want root, all or none)")
-			return 2
-		}
 		opts := app.AutoVersionOptions{Window: window, OnError: *o.onError,
 			Range: *o.avRange, Match: *o.avMatch, Manifests: *o.avManifests,
 			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, NoReplace: *o.avNoReplace}
@@ -300,24 +303,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case cmdAutoreplace:
-		if !validManifestScope(*o.avManifests, false) {
-			bootLog.Error().Str("manifests", *o.avManifests).
-				Msg("unknown --manifests value (want root or all)")
-			return 2
-		}
-		edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrReplace)
-		if err != nil {
-			bootLog.Error().Err(err).Msg("invalid edit")
-			return 2
-		}
-		if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
-			bootLog.Error().Msg("autoreplace needs something to write: --set-version, --set or --replace")
-			usageForCommand(cmd)
-			return 2
-		}
 		if a.AutoReplace(ctx, app.AutoReplaceOptions{
-			Window: window, OnError: *o.onError, Version: *o.wrSetVersion,
-			Edits: edits, Replacements: repls, Manifests: *o.avManifests,
+			Window: window, OnError: *o.onError, Version: write.version,
+			Edits: write.edits, Replacements: write.replacements, Manifests: *o.avManifests,
 			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, Strict: *o.strict,
 			JSON: cfg.LogFormat == "json", Out: stdout,
 		}) != nil {
@@ -461,6 +449,40 @@ func validManifestScope(value string, allowNone bool) bool {
 		return allowNone
 	}
 	return false
+}
+
+// manifestScopeHint is the refusal, spelling out the scopes that command has.
+func manifestScopeHint(allowNone bool) string {
+	if allowNone {
+		return "unknown --manifests value (want root, all or none)"
+	}
+	return "unknown --manifests value (want root or all)"
+}
+
+// writeRequest is the parsed --set-version/--set/--replace trio, which
+// `dispat writer` and `dispat autoreplace` spell the same way and differ over
+// only in which files they apply it to.
+type writeRequest struct {
+	version      string
+	edits        []writer.Edit
+	replacements []writer.Replacement
+}
+
+// parseWriteRequest reads the three flags into one request. A malformed spec
+// and a request with nothing in it are both usage mistakes, reported here and
+// answered with false.
+func parseWriteRequest(cmd string, o *options, usage func(string), log zerolog.Logger) (writeRequest, bool) {
+	edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrReplace)
+	if err != nil {
+		log.Error().Err(err).Msg("invalid edit")
+		return writeRequest{}, false
+	}
+	if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
+		log.Error().Msgf("%s needs something to write: --set-version, --set or --replace", cmd)
+		usage(cmd)
+		return writeRequest{}, false
+	}
+	return writeRequest{version: *o.wrSetVersion, edits: edits, replacements: repls}, true
 }
 
 // orDefault answers with fallback when the flag was left at its empty

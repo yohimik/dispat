@@ -385,7 +385,7 @@ func (w *replaceWork) write(ctx context.Context, rel *plan.Release, mans []scann
 			errs = append(errs, err)
 			continue
 		}
-		w.record(rel.Pkg.Name, res, replRes)
+		w.record(rel.Pkg.Name, one, res, replRes)
 		shown := w.relative(path)
 		if w.json {
 			logWrite(w.app.log.With().Str("package", rel.Pkg.Name).Logger(), shown, res, replRes)
@@ -409,7 +409,13 @@ func (w *replaceWork) relative(path string) string {
 }
 
 // record folds one manifest's outcomes into the run-wide tally.
-func (w *replaceWork) record(pkg string, res writer.Result, replRes writer.ReplaceResult) {
+//
+// "Landed" is answered by elimination rather than by the applied list, because
+// the writer reports nothing at all for an edit the manifest already spells
+// exactly as asked — and a second, converged run must not then call that edit
+// stale. So every edit this manifest was asked for landed here unless the
+// manifest came back saying it declares no such thing.
+func (w *replaceWork) record(pkg string, tried manifestEdit, res writer.Result, replRes writer.ReplaceResult) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.counts.applied += len(res.Applied) + len(replRes.Applied)
@@ -418,17 +424,22 @@ func (w *replaceWork) record(pkg string, res writer.Result, replRes writer.Repla
 	if res.VersionWritten || len(res.Applied) > 0 || len(replRes.Applied) > 0 {
 		w.changed[pkg] = true
 	}
-	// "Landed" is deliberately generous: an edit the manifest declares but
-	// cannot express, or already spells as asked, has found its target. Only an
-	// edit no manifest anywhere declares is the stale one worth catching.
-	for _, group := range [][]writer.Edit{res.Applied, res.Skipped} {
-		for _, e := range group {
-			w.landed[editKey(e)] = true
+
+	missing := make(map[string]bool, len(res.Missing)+len(replRes.Missing))
+	for _, e := range res.Missing {
+		missing[editKey(e)] = true
+	}
+	for _, r := range replRes.Missing {
+		missing[replaceKey(r)] = true
+	}
+	for _, e := range tried.Edits {
+		if key := editKey(e); !missing[key] {
+			w.landed[key] = true
 		}
 	}
-	for _, group := range [][]writer.Replacement{replRes.Applied, replRes.Skipped} {
-		for _, r := range group {
-			w.landed[replaceKey(r)] = true
+	for _, r := range tried.Replacements {
+		if key := replaceKey(r); !missing[key] {
+			w.landed[key] = true
 		}
 	}
 }

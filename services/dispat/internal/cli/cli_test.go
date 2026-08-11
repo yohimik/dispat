@@ -182,8 +182,15 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"run", "x", "--on-error", "explode"}, // unknown --on-error value
 		{"changelog", "a"},                    // nor do the step commands
 		{"autoversion", "a"},
+		{"autoreplace", "a"},
 		{"commit", "a"},
 		{"github", "a"},
+		{"autoreplace"},                  // autoreplace needs something to write
+		{"autoreplace", "--set", "nope"}, // a malformed edit spec
+		{"autoreplace", "--set-version", "1.0.0", "--manifests", "sideways"},
+		{"autoreplace", "--set-version", "1.0.0", "--manifests", "none"}, // not a scope it has
+		{"autoversion", "--manifests", "sideways"},
+		{"changelog", "--on-error", "explode"},    // every sweeping command validates it
 		{"scanner", "a", "b"},                     // scanner takes at most one folder
 		{"writer"},                                // writer needs at least one manifest
 		{"writer", "go.mod"},                      // ...and something to write
@@ -226,6 +233,13 @@ func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
 		{"commit", "-g", "libs"},
 		{"github", "-g", "libs"},
 		{"compute", "-g", "libs"},
+		{"autoreplace", "--set", "core=1.0.0", "-p", "core"},
+		{"autoreplace", "--set-version", "{version}", "-g", "libs", "--since", "all"},
+		{"autoreplace", "--replace", "core=../core", "-s", "libs", "--consumers"},
+		{"autoreplace", "--set", "core=1.0.0", "--manifests", "all", "--only-updated"},
+		{"changelog", "--since", "HEAD~1", "--consumers"},
+		{"commit", "--on-error", "continue"},
+		{"autoversion", "--only-updated", "--since", "all"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)

@@ -659,3 +659,42 @@ func autoVersionPackagesCtx(ctx context.Context, p *plan.Plan, pkgs []string, po
 	}
 	return changed, nil
 }
+
+// TestAutoVersionOnlyUpdatedLeavesTheCatchUpAlone: the policy's OnlyUpdated
+// restricts the reconciliation to the run's own updates, so a range that had
+// fallen behind a provider released earlier stays as it is — and the W197 that
+// would have explained the catch-up is never emitted, because nothing caught
+// up.
+func TestAutoVersionOnlyUpdatedLeavesTheCatchUpAlone(t *testing.T) {
+	root := t.TempDir()
+	seedFile(t, root, "core/package.json", `{"name": "@acme/core", "version": "1.0.0"}`)
+	seedFile(t, root, "web/package.json",
+		`{"name": "@acme/web", "version": "1.0.0", "dependencies": {"@acme/core": "^0.9.0"}}`)
+	p := avPlan(root, avSpace(nil), "core", "web")
+	p.Providers["web"] = []string{"core"}
+	// core is not releasing this run: its baseline comes from an earlier one.
+	core := p.Releases["core"]
+	core.OwnBump, core.Bump, core.NewWork, core.Units = ccme.BumpNone, ccme.BumpNone, false, nil
+	core.Next = core.Current
+
+	var logBuf bytes.Buffer
+	policy := func(*plan.Release) *model.AutoVersion {
+		return &model.AutoVersion{Kinds: allKinds(), WriteVersion: true, OnlyUpdated: true}
+	}
+	changed, err := autoVersionPackagesCtx(context.Background(), p, []string{"core", "web"}, policy, syncedLog(&logBuf))
+	require.NoError(t, err)
+
+	web := fileText(t, root, "web/package.json")
+	assert.Contains(t, web, `"@acme/core": "^0.9.0"`, "the stale range is left alone")
+	assert.NotContains(t, logBuf.String(), plan.CodeRangeCatchUp, "nothing caught up, so nothing to warn about")
+	assert.True(t, changed["web"], "web's own version is still written")
+
+	// Without the flag the same run does catch the range up, which is what
+	// makes the flag's effect the flag's own.
+	plain := func(*plan.Release) *model.AutoVersion {
+		return &model.AutoVersion{Kinds: allKinds(), WriteVersion: true}
+	}
+	_, err = autoVersionPackagesCtx(context.Background(), p, []string{"core", "web"}, plain, syncedLog(&logBuf))
+	require.NoError(t, err)
+	assert.Contains(t, fileText(t, root, "web/package.json"), `"@acme/core": "^1.0.0"`)
+}
