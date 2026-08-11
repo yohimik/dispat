@@ -28,20 +28,6 @@ import (
 // is reserved and rejected, so a typo cannot shadow the DISPAT_* environment.
 const OutputEnvVar = "DISPAT_OUTPUT"
 
-// outputEnvPrefix is what an exported name is published under; scripts may
-// also spell the name with this prefix already attached in their export line.
-const outputEnvPrefix = "DISPAT_OUTPUT_"
-
-// sourceEnvPrefix is where an export's provenance is published:
-// DISPAT_OUTPUT_SOURCE_<NAME>=<package>:<stage>.
-const sourceEnvPrefix = "DISPAT_OUTPUT_SOURCE_"
-
-// reservedPrefix guards the rest of the script environment: an export whose
-// name starts with DISPAT_ but is neither a DISPAT_OUTPUT_-spelled output nor
-// plan.GitHubExport is rejected rather than passed through, because it would
-// otherwise override a real DISPAT_* variable in every later script.
-const reservedPrefix = "DISPAT_"
-
 // parseOutputs reads one sequence's output file. A line is NAME=value with
 // NAME a valid environment variable name, optionally spelled with the
 // DISPAT_OUTPUT_ prefix (stripped, so both spellings address one output);
@@ -65,7 +51,7 @@ func parseOutputs(path, source string) ([]plan.Output, error) {
 		}
 		if !ok {
 			return nil, fmt.Errorf("%s line %d: want [%s]NAME=value or %s=value, got %q",
-				OutputEnvVar, i+1, outputEnvPrefix, plan.GitHubExport, line)
+				OutputEnvVar, i+1, plan.OutputEnvPrefix, plan.GitHubExport, line)
 		}
 		if at, dup := index[name]; dup {
 			out[at].Value, out[at].Source = value, source
@@ -86,9 +72,9 @@ func normalizeOutputName(name string) (string, bool) {
 	switch {
 	case name == plan.GitHubExport:
 		return name, true
-	case strings.HasPrefix(name, outputEnvPrefix):
-		name = strings.TrimPrefix(name, outputEnvPrefix)
-	case strings.HasPrefix(name, reservedPrefix):
+	case strings.HasPrefix(name, plan.OutputEnvPrefix):
+		name = strings.TrimPrefix(name, plan.OutputEnvPrefix)
+	case strings.HasPrefix(name, plan.ReservedEnvPrefix):
 		return "", false
 	}
 	return name, validEnvName(name)
@@ -115,29 +101,6 @@ func MergeOutputs(rel *plan.Release, outs []plan.Output) {
 			rel.Outputs = append(rel.Outputs, o)
 		}
 	}
-}
-
-// outputsEnv renders the accumulated outputs: one DISPAT_OUTPUT_<NAME> per
-// export with its DISPAT_OUTPUT_SOURCE_<NAME> provenance, plus the
-// DISPAT_OUTPUTS listing, set even when empty so a shell loop iterates zero
-// times instead of reading an unset variable. plan.GitHubExport travels under
-// its full name (no re-prefixing, no listing entry): it is a directive to the
-// GitHub recorder, not an ordinary output.
-func outputsEnv(rel *plan.Release) []string {
-	names := make([]string, 0, len(rel.Outputs))
-	env := make([]string, 0, len(rel.Outputs)*2+1)
-	for _, o := range rel.Outputs {
-		if strings.HasPrefix(o.Name, reservedPrefix) { // plan.GitHubExport
-			env = append(env, o.Name+"="+o.Value)
-			continue
-		}
-		names = append(names, o.Name)
-		env = append(env, outputEnvPrefix+o.Name+"="+o.Value)
-		if o.Source != "" {
-			env = append(env, sourceEnvPrefix+o.Name+"="+o.Source)
-		}
-	}
-	return append(env, "DISPAT_OUTPUTS="+strings.Join(names, " "))
 }
 
 // validEnvName reports whether s is a portable environment variable name:

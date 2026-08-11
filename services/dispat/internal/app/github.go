@@ -8,7 +8,6 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
-	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // GitHubOptions selects what GitHub covers and where it publishes. The
@@ -152,7 +151,7 @@ func (e stepExport) covers(name string) bool {
 // dropped rather than applied to the wrong release.
 func (a *App) readExport(targets []string) stepExport {
 	value, present := os.LookupEnv(plan.GitHubExport)
-	e := stepExport{value: value, present: present, pkg: os.Getenv(release.PackageEnvVar)}
+	e := stepExport{value: value, present: present, pkg: os.Getenv(plan.PackageEnvVar)}
 	if !present || e.pkg == "" {
 		return e
 	}

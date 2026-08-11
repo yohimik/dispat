@@ -237,70 +237,17 @@ func CommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
 	return packageEnv(p, pkg, wsVars, liveProviderUpdates(pkg, p, nil), stage)
 }
 
-// PackageEnvVar names the package a per-package script or hook is running
-// for. A nested dispat command reads it to know whose environment it was
-// handed, which is how the standalone github step attributes the
-// plan.GitHubExport opt-in it finds there.
-const PackageEnvVar = "DISPAT_PACKAGE"
-
 // packageEnv builds the DISPAT_* environment of one package's script or hook.
 // stage is what DISPAT_STAGE carries: the stage name for a stage script, the
 // hook name ("beforeBuild", "postPublish", ...) for a hook — every hook gets
 // the same full environment as the stage scripts, distinguished only there.
+//
+// What the release says about itself comes from plan.Release.Vars, which the
+// record text interpolates as well; everything below it is what a release
+// alone cannot answer — the stage, the workspace, the live provider updates.
 func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
 	rel := p.Releases[pkg]
-	env := []string{
-		PackageEnvVar + "=" + pkg,
-		"DISPAT_SPACE=" + rel.Pkg.Space.Name,
-		"DISPAT_OLD_VERSION=" + rel.Previous().String(),
-		"DISPAT_STABLE_BASELINE=" + rel.Current.String(),
-		"DISPAT_NEW_VERSION=" + rel.Next.String(),
-		"DISPAT_BUMP=" + rel.Bump.String(),
-		"DISPAT_TAG=" + rel.TagName(),
-		"DISPAT_STAGE=" + stage,
-		// Channel state (§11.1). A publish script needs the channel to choose
-		// a dist-tag; the old value is there so that a graduation is
-		// distinguishable from an ordinary release.
-		"DISPAT_CHANNEL=" + rel.Channel,
-		"DISPAT_OLD_CHANNEL=" + rel.BaselineChannel,
-		"DISPAT_IS_PRERELEASE=" + boolEnv(rel.IsPrerelease()),
-		// The same release named under the normative "{name}@{version}"
-		// format. DISPAT_TAG follows the space's tagFormat, so a script
-		// written against the SemVer spelling keeps a stable input whatever
-		// local convention that format encodes.
-		"DISPAT_SEMVER_TAG=" + rel.SemverTagName(),
-		// The version decomposed, so a script never re-parses a tag:
-		//
-		//	DISPAT_VERSION      the core alone: 1.0.1
-		//	DISPAT_CHANNEL      the channel alone (above)
-		//	DISPAT_COUNTER      the counter alone (below; unset when stable)
-		//	DISPAT_NEW_VERSION  version+channel+counter, SemVer: 1.0.1-beta.4
-		//	DISPAT_TAG_VERSION  version+channel+counter as the space's
-		//	                    tagFormat spells it — 1.0.1-beta4 under
-		//	                    "{name}@v{version}-{channel}{counter}" — the
-		//	                    version section of DISPAT_TAG without the name
-		//	                    and its decoration
-		"DISPAT_VERSION=" + rel.Next.Core().String(),
-		"DISPAT_TAG_VERSION=" + rel.TagFormat().RenderVersion(rel.Next),
-	}
-	// The baseline — the newest tag of any kind, prereleases included — is
-	// the counterpart of DISPAT_STABLE_BASELINE: what the computed version
-	// must exceed and where the channel is read from. It is left unset when
-	// the package has never released, so ${DISPAT_BASELINE+x} detects a first
-	// release — DISPAT_OLD_VERSION cannot, because it falls back to the
-	// stable baseline (initials or 0.0.0) there. When set, the two are equal.
-	if rel.HasBaseline {
-		env = append(env, "DISPAT_BASELINE="+rel.Baseline.String())
-	}
-	// The counters are left unset — not empty — when the version has none, so
-	// a shell's ${DISPAT_COUNTER+x} distinguishes "a stable release" from "a
-	// prerelease whose counter is empty text", which "" cannot.
-	if c := rel.Counter(); c != "" {
-		env = append(env, "DISPAT_COUNTER="+c)
-	}
-	if c := rel.PreviousCounter(); c != "" {
-		env = append(env, "DISPAT_OLD_COUNTER="+c)
-	}
+	env := append(rel.Vars(), "DISPAT_STAGE="+stage)
 	// The release notes, grouped exactly as the changelog and the GitHub
 	// release group their sections: units bumping major are breaking changes,
 	// minor are features, patch are fixes. One headline per line — bodies are
@@ -326,7 +273,7 @@ func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpd
 	// The accumulated script outputs: everything earlier scripts of the
 	// package exported through their DISPAT_OUTPUT files, as
 	// DISPAT_OUTPUT_<NAME> variables plus the DISPAT_OUTPUTS listing.
-	env = append(env, outputsEnv(rel)...)
+	env = append(env, rel.OutputVars()...)
 	return env
 }
 
