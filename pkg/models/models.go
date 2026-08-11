@@ -410,6 +410,16 @@ type PackageConfig struct {
 	// other package with it.
 	Scripts     map[string]string  `mapstructure:"scripts" json:"scripts,omitempty"`
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	// ManifestNames are the manifest names this package is known by, stated
+	// here rather than read from its files. They exist for the packages whose
+	// manifests declare no name the workspace can learn — a Gradle module, a
+	// bare Makefile project, a folder in an ecosystem dispat cannot parse —
+	// so `dispat compute` still derives the edges pointing at it and
+	// auto-versioning still reconciles the declarations naming it.
+	//
+	// A stated name outranks one a manifest declares, and no two packages may
+	// state the same name.
+	ManifestNames []string `mapstructure:"manifestNames" json:"manifestNames,omitempty"`
 	// Changelog and GitHub overlay the top-level objects field by field for
 	// this package's release records — flip enabled, rename the file, target
 	// another repository — leaving unset fields at the global values.

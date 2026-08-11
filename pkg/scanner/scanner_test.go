@@ -289,6 +289,44 @@ func TestNameIndex(t *testing.T) {
 	}
 }
 
+func TestNameIndexStatedNamesOutrankDeclaredOnes(t *testing.T) {
+	owners := []Owner{
+		// A package whose manifests declare nothing a workspace can learn:
+		// stating the name is the only way it becomes visible.
+		{Package: "gradle-lib", Names: []string{"com.acme:core"}},
+		// A stated name beats another package's root manifest, since it is
+		// the operator saying so rather than a file happening to say it.
+		{Package: "renamed", Names: []string{"@acme/web"}},
+		{Package: "web", Manifests: []Manifest{{Name: "@acme/web", Root: true}}},
+	}
+	names, ambiguous := NameIndex(owners)
+	if got := names["com.acme:core"]; got != "gradle-lib" {
+		t.Errorf("com.acme:core -> %q, want gradle-lib", got)
+	}
+	if got := names["@acme/web"]; got != "renamed" {
+		t.Errorf("@acme/web -> %q, want renamed (a stated name outranks a declared one)", got)
+	}
+	if len(ambiguous) != 0 {
+		t.Errorf("ambiguous = %v, want none: the ranks separate the two claims", ambiguous)
+	}
+}
+
+func TestNameIndexTwoStatedNamesCollide(t *testing.T) {
+	// Nothing separates two claims of equal rank, so the name maps to
+	// neither, exactly as two root manifests would.
+	names, ambiguous := NameIndex([]Owner{
+		{Package: "a", Names: []string{"shared"}},
+		{Package: "b", Names: []string{"shared"}},
+		{Package: "c", Names: []string{"shared"}},
+	})
+	if _, ok := names["shared"]; ok {
+		t.Error("a name two packages state must not be mapped")
+	}
+	if !reflect.DeepEqual(ambiguous, []string{"shared"}) {
+		t.Errorf("ambiguous = %v, want [shared] once", ambiguous)
+	}
+}
+
 func TestResolveLocalDir(t *testing.T) {
 	root := filepath.FromSlash("/repo")
 	dirs := map[string]string{

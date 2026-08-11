@@ -1036,6 +1036,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 					onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 				}
 				pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
+				pkg.ManifestNames = ex.manifestNames
 				if ex.changelog != nil {
 					pkg.Changelog = changelogSpec(ex.changelog)
 				}
@@ -1167,6 +1168,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 		}
 		pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
+		pkg.ManifestNames = ex.manifestNames
 		if ex.changelog != nil {
 			pkg.Changelog = changelogSpec(ex.changelog)
 		}
@@ -1212,7 +1214,37 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			}
 		}
 	}
+	if err := checkManifestNames(pkgs); err != nil {
+		return nil, nil, err
+	}
 	return pkgs, declared, nil
+}
+
+// checkManifestNames proves no two packages state the same manifest name. A
+// name a manifest merely declares twice is a warning at scan time (W220,
+// nothing is derived from it), but a name two packages were *told* to answer
+// to is a typo in the configuration, and letting it resolve to neither would
+// silently turn the feature off for both.
+func checkManifestNames(pkgs []*model.Package) error {
+	stated := make(map[string]string)
+	for _, p := range pkgs {
+		for _, name := range p.ManifestNames {
+			if name == "" {
+				return fmt.Errorf("config: package %q: manifestNames: empty name", p.Name)
+			}
+			if prev, taken := stated[name]; taken {
+				first, second := prev, p.Name
+				if second < first {
+					first, second = second, first
+				}
+				return fmt.Errorf(
+					"config: manifestNames: %q is stated by both package %q and package %q; a manifest name identifies one package",
+					name, first, second)
+			}
+			stated[name] = p.Name
+		}
+	}
+	return nil
 }
 
 // buildSpace resolves one validated space-shaped configuration onto the

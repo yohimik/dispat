@@ -468,3 +468,56 @@ dependencies = ["core"]
 	require.NoError(t, readErr)
 	assert.Equal(t, body, string(data), "a refused edit leaves the config untouched")
 }
+
+func TestComputeStatedManifestNamesDeriveEdges(t *testing.T) {
+	// A Gradle module declares no name any parser here can read, so nothing
+	// points at it until the configuration says what it is called. With the
+	// name stated, the coordinate in a consumer's manifest resolves like any
+	// other.
+	cfg := libsConfig()
+	cfg.Packages = map[string]config.PackageConfig{
+		"gradlelib": {ManifestNames: []string{"com.acme:core"}},
+	}
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages/gradlelib"), 0o755))
+	seedManifest(t, root, "packages/web/pom.xml", `<project>
+  <groupId>com.acme</groupId>
+  <artifactId>web</artifactId>
+  <version>1.0.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>com.acme</groupId>
+      <artifactId>core</artifactId>
+      <version>1.0.0</version>
+    </dependency>
+  </dependencies>
+</project>`)
+
+	var out bytes.Buffer
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
+	require.NoError(t, err)
+	assert.Equal(t, 1, open)
+	assert.Contains(t, out.String(), "+ add    web -> gradlelib (dependencies)")
+}
+
+func TestComputeStatedNameOutranksADeclaredOne(t *testing.T) {
+	// The operator's statement wins over a file that happens to say the same
+	// thing, and nothing is reported ambiguous: the ranks separate the claims.
+	cfg := libsConfig()
+	cfg.Packages = map[string]config.PackageConfig{
+		"renamed": {ManifestNames: []string{"@acme/core"}},
+	}
+	var logBuf bytes.Buffer
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.New(&logBuf))
+	seedManifest(t, root, "packages/renamed/package.json", `{"name": "@acme/renamed"}`)
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "^1"}}`)
+
+	var out bytes.Buffer
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
+	require.NoError(t, err)
+	assert.Equal(t, 1, open)
+	assert.Contains(t, out.String(), "+ add    web -> renamed (dependencies)")
+	assert.NotContains(t, logBuf.String(), plan.CodeAmbiguousManifestName)
+}

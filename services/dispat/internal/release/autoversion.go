@@ -40,7 +40,7 @@ func workspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log z
 		if err != nil {
 			log.Debug().Err(err).Str("package", name).Msg("auto-versioning: root manifest failed to parse")
 		}
-		owners = append(owners, scanner.Owner{Package: name, Manifests: mans})
+		owners = append(owners, scanner.Owner{Package: name, Names: rel.Pkg.ManifestNames, Manifests: mans})
 	}
 	names, ambiguous := scanner.NameIndex(owners)
 	for _, name := range ambiguous {

@@ -175,6 +175,11 @@ type Package struct {
 	// recorders read the package alone.
 	Changelog ChangelogSpec
 	GitHub    GitHubSpec
+	// ManifestNames are the manifest names the configuration states this
+	// package is known by, for the packages whose files declare none the
+	// workspace can learn. They outrank a declared name and feed the one
+	// index `dispat compute` and auto-versioning share.
+	ManifestNames []string
 }
 
 // RecordFormat customises how a release entry renders — the resolved

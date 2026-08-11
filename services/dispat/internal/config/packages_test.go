@@ -1075,3 +1075,69 @@ func TestDependencyShorthandInvalidValue(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "provider name or an array of names")
 }
+
+// TestPackageManifestNames: a package can be told what its manifests are
+// called, through the entry or through its own in-folder file, with the more
+// local layer replacing rather than extending the list.
+func TestPackageManifestNames(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"core": {ManifestNames: []string{"com.acme:core", "acme-core"}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	assert.Equal(t, []string{"com.acme:core", "acme-core"}, byName["core"].ManifestNames)
+	assert.Nil(t, byName["utils"].ManifestNames, "the key is the package's own, not the space's")
+
+	// The in-folder file is the most local layer, and a list replaces: adding
+	// to an inherited one could never take a name away again.
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{ManifestNames: []string{"only-this"}})
+	pkgs, err = discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"only-this"}, packagesByName(pkgs)["core"].ManifestNames)
+}
+
+// TestPackageManifestNamesMustBeUnique: a name two packages were told to
+// answer to identifies neither, and unlike a name two manifests happen to
+// declare (W220) it is a typo in the configuration rather than a fact about
+// the repository, so it fails to load.
+func TestPackageManifestNamesMustBeUnique(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"core":  {ManifestNames: []string{"shared"}},
+		"utils": {ManifestNames: []string{"shared"}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "manifestNames")
+	assert.Contains(t, err.Error(), `"shared"`)
+	assert.Contains(t, err.Error(), `package "core"`)
+	assert.Contains(t, err.Error(), `package "utils"`)
+}
+
+// TestPackageManifestNamesRejectsAnEmptyName: an empty entry names nothing
+// and would bind every unnamed manifest to the package.
+func TestPackageManifestNamesRejectsAnEmptyName(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {ManifestNames: []string{""}}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "manifestNames: empty name")
+}
+
+// TestStandaloneManifestNames: a standalone package's entry is its whole
+// configuration, so the key works there too.
+func TestStandaloneManifestNames(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"tools": {Path: "tools", ManifestNames: []string{"com.acme:tools"}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"com.acme:tools"}, packagesByName(pkgs)["tools"].ManifestNames)
+}

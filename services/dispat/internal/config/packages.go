@@ -228,9 +228,10 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 // packageExtras carries the package-only override knobs — the keys that are
 // not space-shaped — across the layers.
 type packageExtras struct {
-	changelog   *ChangelogConfig
-	github      *GitHubConfig
-	concurrency []int
+	changelog     *ChangelogConfig
+	github        *GitHubConfig
+	concurrency   []int
+	manifestNames []string
 }
 
 // apply folds one layer's package-only keys in. Changelog and github overlay
@@ -260,6 +261,12 @@ func (ex *packageExtras) apply(c *File, po PackageConfig) {
 	}
 	if po.Concurrency != nil {
 		ex.concurrency = po.Concurrency
+	}
+	if len(po.ManifestNames) > 0 {
+		// A list replaces rather than appends: the layer nearest the package
+		// states what the package is called, and adding to an inherited list
+		// could never take a name away again.
+		ex.manifestNames = po.ManifestNames
 	}
 }
 

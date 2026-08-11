@@ -332,34 +332,51 @@ func ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 	return New().ScanRoot(ctx, dir)
 }
 
-// Owner is one package's parsed manifests: the input NameIndex maps over.
+// Owner is one package's identity as NameIndex sees it: the names its
+// configuration states outright, and the names its manifests declare.
 type Owner struct {
-	Package   string
+	Package string
+	// Names are the manifest names the package is known by regardless of what
+	// its files say. They exist for the packages whose manifests declare no
+	// name a workspace can learn: a Gradle module, a bare Makefile project, a
+	// folder whose manifest this package cannot parse. A stated name outranks
+	// a declared one, since it is the operator saying so.
+	Names []string
+	// Manifests are the package's parsed manifests.
 	Manifests []Manifest
 }
 
-// NameIndex maps every declared manifest name onto the package declaring it,
-// under one rule shared by every consumer of the mapping: root manifests bind
-// before nested ones (a package's own identity beats a vendored or example
-// manifest deeper inside another package), and a name two packages declare at
-// root priority is ambiguous, returned in ambiguous (sorted) instead of
-// mapped, because deriving relations from it would be guessing.
+// Where a name came from, in the order the claims bind.
+const (
+	statedName = iota // Owner.Names: the configuration said so
+	rootName          // a manifest sitting directly in the package folder
+	nestedName        // a manifest somewhere below it
+)
+
+// NameIndex maps every manifest name onto the package it belongs to, under one
+// rule shared by every consumer of the mapping: a stated name binds before a
+// declared one, and a root manifest before a nested one (a package's own
+// identity beats a vendored or example manifest deeper inside another
+// package). A name two packages claim at the same rank is ambiguous, returned
+// in ambiguous (sorted) instead of mapped, because deriving relations from it
+// would be guessing.
 func NameIndex(owners []Owner) (names map[string]string, ambiguous []string) {
 	names = make(map[string]string)
+	boundAt := make(map[string]int)
 	dropped := make(map[string]bool)
-	for _, root := range []bool{true, false} {
+	for rank := statedName; rank <= nestedName; rank++ {
 		for _, o := range owners {
-			for _, m := range o.Manifests {
-				if m.Root != root || m.Name == "" {
-					continue
-				}
-				owner, taken := names[m.Name]
+			for _, name := range ownerNames(o, rank) {
+				owner, taken := names[name]
 				switch {
 				case !taken:
-					names[m.Name] = o.Package
-				case owner != o.Package && root && !dropped[m.Name]:
-					dropped[m.Name] = true
-					ambiguous = append(ambiguous, m.Name)
+					names[name] = o.Package
+					boundAt[name] = rank
+				case owner != o.Package && boundAt[name] == rank && !dropped[name]:
+					// A lower-ranked claim loses quietly; two claims of equal
+					// rank have nothing to separate them.
+					dropped[name] = true
+					ambiguous = append(ambiguous, name)
 				}
 			}
 		}
@@ -369,6 +386,21 @@ func NameIndex(owners []Owner) (names map[string]string, ambiguous []string) {
 		delete(names, name)
 	}
 	return names, ambiguous
+}
+
+// ownerNames is the names one owner claims at one rank.
+func ownerNames(o Owner, rank int) []string {
+	if rank == statedName {
+		return o.Names
+	}
+	claimed := make([]string, 0, len(o.Manifests))
+	for _, m := range o.Manifests {
+		if m.Name == "" || m.Root != (rank == rootName) {
+			continue
+		}
+		claimed = append(claimed, m.Name)
+	}
+	return claimed
 }
 
 // ResolveLocalDir maps a declared local path (an npm "file:" range, a go.mod

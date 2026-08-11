@@ -163,13 +163,18 @@ func (a *App) detectEdges(ctx context.Context, pkgs []*model.Package) ([]detecte
 	}
 	var all []parsed
 	hasManifest := make(map[string]bool)
-	byDir := make(map[string]string, len(pkgs)) // cleaned package dir -> name
+	byDir := make(map[string]string, len(pkgs))   // cleaned package dir -> name
+	owners := make([]scanner.Owner, 0, len(pkgs)) // every package, named or not
 	for _, p := range pkgs {
 		byDir[filepath.Clean(p.Dir)] = p.Name
 		mans, err := a.scan.Scan(ctx, p.Dir)
 		if err != nil {
 			a.log.Warn().Err(err).Str("package", p.Name).Msg("some manifests failed to parse")
 		}
+		// Every package is an owner, because one whose manifests declare no
+		// name may still have been told what it is called. It only joins the
+		// scan of declarations when it has manifests to declare with.
+		owners = append(owners, scanner.Owner{Package: p.Name, Names: p.ManifestNames, Manifests: mans})
 		if len(mans) > 0 {
 			hasManifest[p.Name] = true
 			all = append(all, parsed{p, mans})
@@ -177,12 +182,9 @@ func (a *App) detectEdges(ctx context.Context, pkgs []*model.Package) ([]detecte
 	}
 
 	// The name map: scanner.NameIndex's rule, shared with the executor's
-	// auto-versioning — root manifests bind before nested ones, and a
-	// same-priority collision is ambiguous: W220, no edges by that name.
-	owners := make([]scanner.Owner, 0, len(all))
-	for _, pa := range all {
-		owners = append(owners, scanner.Owner{Package: pa.pkg.Name, Manifests: pa.mans})
-	}
+	// auto-versioning — a stated name binds before a declared one and a root
+	// manifest before a nested one, and a same-rank collision is ambiguous:
+	// W220, no edges by that name.
 	byName, ambiguous := scanner.NameIndex(owners)
 	for _, name := range ambiguous {
 		a.log.Warn().Str("code", plan.CodeAmbiguousManifestName).
