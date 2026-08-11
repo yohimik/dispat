@@ -450,10 +450,16 @@ type AutoVersionConfig struct {
 	// absent (the config loader's flattening prunes empty objects), so the
 	// minimal opt-in is {"enabled": true}.
 	Enabled *bool `mapstructure:"enabled" json:"enabled,omitempty"`
-	// Manifests selects which manifests of a package are rewritten: "root"
-	// (default) — only manifests directly in the package folder — or "all",
-	// every manifest found under it.
+	// Manifests selects which manifests of a package are parsed and
+	// rewritten: "root" (default) — only manifests directly in the package
+	// folder — "all", every manifest found under it, or "none", which turns
+	// the parsing strategy off entirely and leaves the work to `replace` and
+	// `syncLock`.
 	Manifests string `mapstructure:"manifests" json:"manifests,omitempty"`
+	// Replace are the literal text substitutions applied to the package's
+	// files after (or instead of) the manifest rewriting: the strategy for
+	// the versions no manifest writer can reach. Empty means off.
+	Replace []AutoVersionReplaceConfig `mapstructure:"replace" json:"replace,omitempty"`
 	// Kinds restricts rewriting to the named manifest fields
 	// ("dependencies", "devDependencies", "peerDependencies",
 	// "optionalDependencies"). Empty means all four.
@@ -502,6 +508,33 @@ type AutoVersionConfig struct {
 	// parallel writers, so the default is 1. When spaces disagree, the
 	// smallest configured value wins.
 	SyncLockConcurrency int `mapstructure:"syncLockConcurrency" json:"syncLockConcurrency,omitempty"`
+}
+
+// AutoVersionReplaceConfig is one entry of an `autoVersion.replace` list: a
+// literal find/write pair applied to the files matching a set of globs.
+//
+// Both texts are templates over the release being made. {name}, {version} and
+// {previous} stand for the package itself; {provider}, {providerVersion} and
+// {providerPrevious} stand for one of its configured providers, and a rule
+// mentioning any of the three is expanded once per provider.
+//
+// Nothing is parsed, so the rule reaches any file at all. That also means it
+// does exactly what it says: a find that matches somewhere unintended is
+// replaced there too, which is why a rule should carry enough context to be
+// unambiguous.
+type AutoVersionReplaceConfig struct {
+	// Files are globs, relative to the package folder, selecting what the
+	// rule applies to. "*" matches any run of characters, separators
+	// included, so "*.gradle" reaches nested build scripts. Dependency,
+	// virtual-environment and build-output folders are never entered.
+	// Required.
+	Files []string `mapstructure:"files" json:"files,omitempty"`
+	// Find is the literal text to look for, after the placeholders in it are
+	// filled in. Required.
+	Find string `mapstructure:"find" json:"find,omitempty"`
+	// Write is the literal text to put in its place, after the placeholders
+	// in it are filled in. Required.
+	Write string `mapstructure:"write" json:"write,omitempty"`
 }
 
 // IsEnabled reports whether the autoVersion block is active (default true

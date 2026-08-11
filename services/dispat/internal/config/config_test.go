@@ -514,6 +514,31 @@ func TestLoadErrors(t *testing.T) {
 		{"autoVersion negative syncLockConcurrency", func(c *File) {
 			withLibs(c, func(s *SpaceConfig) { s.AutoVersion = &AutoVersionConfig{SyncLockConcurrency: -1} })
 		}, "syncLockConcurrency"},
+		{"autoVersion replace without files", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) {
+				s.AutoVersion = &AutoVersionConfig{Replace: []AutoVersionReplaceConfig{{Find: "a", Write: "b"}}}
+			})
+		}, "replace[0]: files is required"},
+		{"autoVersion replace with an empty glob", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) {
+				s.AutoVersion = &AutoVersionConfig{Replace: []AutoVersionReplaceConfig{{Files: []string{""}, Find: "a", Write: "b"}}}
+			})
+		}, "replace[0]: files: empty glob"},
+		{"autoVersion replace with a bad glob", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) {
+				s.AutoVersion = &AutoVersionConfig{Replace: []AutoVersionReplaceConfig{{Files: []string{"[oops"}, Find: "a", Write: "b"}}}
+			})
+		}, "replace[0]: files: invalid pattern"},
+		{"autoVersion replace without find", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) {
+				s.AutoVersion = &AutoVersionConfig{Replace: []AutoVersionReplaceConfig{{Files: []string{"*.md"}, Write: "b"}}}
+			})
+		}, "replace[0]: find is required"},
+		{"autoVersion replace without write", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) {
+				s.AutoVersion = &AutoVersionConfig{Replace: []AutoVersionReplaceConfig{{Files: []string{"*.md"}, Find: "a"}}}
+			})
+		}, "replace[0]: write is required"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1225,7 +1250,9 @@ func TestAutoVersionResolution(t *testing.T) {
 		require.NoError(t, err)
 		av := pkgs[0].Space.AutoVersion
 		require.NotNil(t, av)
-		assert.False(t, av.AllManifests)
+		assert.Equal(t, model.ScopeRoot, av.Manifests, "manifests defaults to root")
+		assert.Empty(t, av.Replace, "no replace rules means the replacing strategy is off")
+		assert.True(t, av.Reconciles())
 		assert.False(t, av.NameSubstring)
 		assert.True(t, av.WriteVersion, "writeVersion defaults on")
 		assert.Empty(t, av.SyncLock)
@@ -1260,7 +1287,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		require.NoError(t, err)
 		av := pkgs[0].Space.AutoVersion
 		require.NotNil(t, av)
-		assert.True(t, av.AllManifests)
+		assert.Equal(t, model.ScopeAll, av.Manifests)
 		assert.True(t, av.NameSubstring)
 		assert.False(t, av.WriteVersion)
 		assert.Equal(t, []string{"workspace:*"}, av.Match)
@@ -1331,4 +1358,61 @@ func TestStringKeyMap(t *testing.T) {
 
 	_, ok = stringKeyMap([]any{"not", "a", "map"})
 	assert.False(t, ok)
+}
+
+// TestAutoVersionStrategies: the two strategies resolve independently, and a
+// block with neither still resolves — that is how a space asks for syncLock
+// and nothing else.
+func TestAutoVersionStrategies(t *testing.T) {
+	resolve := func(t *testing.T, av *AutoVersionConfig) *model.AutoVersion {
+		t.Helper()
+		cfg := minimalConfig()
+		cfg.Scripts["lock"] = "go mod tidy"
+		libs := cfg.Spaces["libs"]
+		libs.AutoVersion = av
+		cfg.Spaces["libs"] = libs
+		root := writeModelRepo(t, cfg, "pkgs/core")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		pkgs, _, err := Discover(loaded, root)
+		require.NoError(t, err)
+		return pkgs[0].Space.AutoVersion
+	}
+
+	t.Run("replace only", func(t *testing.T) {
+		av := resolve(t, &AutoVersionConfig{
+			Manifests: "none",
+			Replace: []AutoVersionReplaceConfig{
+				{Files: []string{"*.gradle"}, Find: "{provider}:{providerPrevious}", Write: "{provider}:{providerVersion}"},
+			},
+		})
+		require.NotNil(t, av)
+		assert.Equal(t, model.ScopeNone, av.Manifests)
+		require.Len(t, av.Replace, 1)
+		assert.Equal(t, []string{"*.gradle"}, av.Replace[0].Files)
+		assert.Equal(t, "{provider}:{providerPrevious}", av.Replace[0].Find)
+		assert.Equal(t, "{provider}:{providerVersion}", av.Replace[0].Write)
+		assert.True(t, av.Reconciles(), "replace rules are work to do")
+	})
+
+	t.Run("syncLock only", func(t *testing.T) {
+		av := resolve(t, &AutoVersionConfig{Manifests: "none", SyncLock: []string{"lock"}})
+		require.NotNil(t, av, "a block with neither strategy still resolves")
+		assert.False(t, av.Reconciles())
+		assert.Equal(t, []string{"go mod tidy"}, av.SyncLock)
+	})
+
+	t.Run("both", func(t *testing.T) {
+		av := resolve(t, &AutoVersionConfig{
+			Manifests: "all",
+			Replace:   []AutoVersionReplaceConfig{{Files: []string{"README.md"}, Find: "{previous}", Write: "{version}"}},
+		})
+		assert.Equal(t, model.ScopeAll, av.Manifests)
+		assert.Len(t, av.Replace, 1)
+		assert.True(t, av.Reconciles())
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		assert.Nil(t, resolve(t, &AutoVersionConfig{Enabled: models.Bool(false), Manifests: "none"}))
+	})
 }

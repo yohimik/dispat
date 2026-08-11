@@ -33,21 +33,22 @@ import (
 // The configuration model, aliased from the public package so the rest of the
 // CLI keeps importing internal/config alone.
 type (
-	File                    = public.File
-	RunConfig               = public.RunConfig
-	EntryFormatConfig       = public.EntryFormatConfig
-	ChangelogConfig         = public.ChangelogConfig
-	GitHubConfig            = public.GitHubConfig
-	CommitConfig            = public.CommitConfig
-	SpaceConfig             = public.SpaceConfig
-	SpaceFlowConfig         = public.SpaceFlowConfig
-	PackageConfig           = public.PackageConfig
-	VersionGroupConfig      = public.VersionGroupConfig
-	AutoVersionConfig       = public.AutoVersionConfig
-	DependencyConfig        = public.DependencyConfig
-	ParserConfig            = public.ParserConfig
-	ParserPropagationConfig = public.ParserPropagationConfig
-	ParserLimitsConfig      = public.ParserLimitsConfig
+	File                     = public.File
+	RunConfig                = public.RunConfig
+	EntryFormatConfig        = public.EntryFormatConfig
+	ChangelogConfig          = public.ChangelogConfig
+	GitHubConfig             = public.GitHubConfig
+	CommitConfig             = public.CommitConfig
+	SpaceConfig              = public.SpaceConfig
+	SpaceFlowConfig          = public.SpaceFlowConfig
+	PackageConfig            = public.PackageConfig
+	VersionGroupConfig       = public.VersionGroupConfig
+	AutoVersionConfig        = public.AutoVersionConfig
+	AutoVersionReplaceConfig = public.AutoVersionReplaceConfig
+	DependencyConfig         = public.DependencyConfig
+	ParserConfig             = public.ParserConfig
+	ParserPropagationConfig  = public.ParserPropagationConfig
+	ParserLimitsConfig       = public.ParserLimitsConfig
 )
 
 // Values of the commitErrors key; see the public package for semantics.
@@ -745,9 +746,29 @@ func validateAutoVersion(label string, av *public.AutoVersionConfig) error {
 	}
 	prefix := label + ": autoVersion: "
 	switch av.Manifests {
-	case "", "root", "all":
+	case "", "root", "all", "none":
 	default:
-		return fmt.Errorf(`%smanifests: unknown value %q (want "root" or "all")`, prefix, av.Manifests)
+		return fmt.Errorf(`%smanifests: unknown value %q (want "root", "all" or "none")`, prefix, av.Manifests)
+	}
+	for i, r := range av.Replace {
+		at := fmt.Sprintf("%sreplace[%d]: ", prefix, i)
+		if len(r.Files) == 0 {
+			return fmt.Errorf("%sfiles is required: a rule with nothing to apply to writes nothing", at)
+		}
+		for _, g := range r.Files {
+			if g == "" {
+				return fmt.Errorf("%sfiles: empty glob", at)
+			}
+			if _, err := filepath.Match(g, ""); err != nil {
+				return fmt.Errorf("%sfiles: invalid pattern %q: %w", at, g, err)
+			}
+		}
+		if r.Find == "" {
+			return fmt.Errorf("%sfind is required: an empty pattern matches everywhere", at)
+		}
+		if r.Write == "" {
+			return fmt.Errorf("%swrite is required: use find alone only when there is something to write", at)
+		}
 	}
 	for _, k := range av.Kinds {
 		if _, err := DepKind(k); err != nil {
@@ -796,8 +817,17 @@ func resolveAutoVersion(scope scriptScope, av *public.AutoVersionConfig) *model.
 			only[name] = true
 		}
 	}
+	manifests := model.ScopeRoot
+	if av.Manifests != "" {
+		manifests = model.ManifestScope(av.Manifests) // validated
+	}
+	var replace []model.ReplaceRule
+	for _, r := range av.Replace {
+		replace = append(replace, model.ReplaceRule{Files: r.Files, Find: r.Find, Write: r.Write})
+	}
 	return &model.AutoVersion{
-		AllManifests:        av.Manifests == "all",
+		Manifests:           manifests,
+		Replace:             replace,
 		Kinds:               kinds,
 		Only:                only,
 		NameSubstring:       av.NameMatch == "substring",

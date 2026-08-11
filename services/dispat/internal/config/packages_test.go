@@ -188,7 +188,7 @@ func TestPackageOverrideAutoVersionWholeObject(t *testing.T) {
 	byName := packagesByName(pkgs)
 	assert.Nil(t, byName["core"].Space.AutoVersion, "the disabled override replaces the space block")
 	require.NotNil(t, byName["utils"].Space.AutoVersion)
-	assert.True(t, byName["utils"].Space.AutoVersion.AllManifests, "siblings keep the space block")
+	assert.Equal(t, model.ScopeAll, byName["utils"].Space.AutoVersion.Manifests, "siblings keep the space block")
 
 	cfg.Packages["core"] = PackageConfig{AutoVersion: &AutoVersionConfig{SyncLock: []string{"ghost"}}}
 	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")

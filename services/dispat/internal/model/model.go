@@ -127,12 +127,32 @@ type Space struct {
 	AutoVersion *AutoVersion
 }
 
+// ManifestScope is how much of a package the parsing strategy covers.
+type ManifestScope string
+
+// The three manifest scopes. ScopeNone turns the parsing strategy off, which
+// leaves the replace rules and syncLock as the whole of the version stage.
+const (
+	ScopeRoot ManifestScope = "root"
+	ScopeAll  ManifestScope = "all"
+	ScopeNone ManifestScope = "none"
+)
+
 // AutoVersion is a space's resolved autoVersion policy: which declarations
 // the version stage rewrites natively (§9.4) and what it writes.
+//
+// Two strategies live here and either may be off. The parsing one reads the
+// package's manifests and rewrites the declarations naming a workspace
+// provider; the replacing one substitutes literal text in whatever files the
+// rules point at, parsing nothing. With both off the block still schedules a
+// version task, which is how a space asks for syncLock and nothing else.
 type AutoVersion struct {
-	// AllManifests rewrites every manifest under the package folder instead
-	// of only the root ones.
-	AllManifests bool
+	// Manifests is the parsing strategy's scope: the package's root
+	// manifests, every manifest under it, or none at all.
+	Manifests ManifestScope
+	// Replace are the resolved literal substitution rules; empty means the
+	// replacing strategy is off.
+	Replace []ReplaceRule
 	// Kinds are the manifest fields eligible for rewriting; always fully
 	// populated (all four kinds when the config named none).
 	Kinds map[DepKind]bool
@@ -158,6 +178,21 @@ type AutoVersion struct {
 	// SyncLockConcurrency is the space's vote for the run-wide syncLock
 	// budget; 0 means the default of 1.
 	SyncLockConcurrency int
+}
+
+// ReplaceRule is one resolved literal substitution: which files it applies to
+// and the templated text it looks for and writes.
+type ReplaceRule struct {
+	Files       []string
+	Find, Write string
+}
+
+// Reconciles reports whether either strategy has work to do. When it does
+// not, the version stage still runs and syncLock still runs with it: a space
+// asking only for a lock-file refresh has no manifest change to key off, so
+// gating on one would mean it never fired. Nil-safe.
+func (a *AutoVersion) Reconciles() bool {
+	return a != nil && (a.Manifests != ScopeNone || len(a.Replace) > 0)
 }
 
 // Package is a single releasable folder inside a space.

@@ -57,11 +57,14 @@ func workspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log z
 // after beforeVersion and before any flow.version script, and its failure
 // fails the stage.
 func (tc *taskCtx) autoVersion(ctx context.Context, av *model.AutoVersion) error {
+	if av.Manifests == model.ScopeNone {
+		return nil // the parsing strategy is off; replace rules do the work
+	}
 	var (
 		mans []scanner.Manifest
 		err  error
 	)
-	if av.AllManifests {
+	if av.Manifests == model.ScopeAll {
 		mans, err = tc.scan.Scan(ctx, tc.rel.Pkg.Dir)
 	} else {
 		mans, err = tc.scan.ScanRoot(ctx, tc.rel.Pkg.Dir)

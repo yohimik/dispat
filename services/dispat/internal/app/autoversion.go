@@ -21,15 +21,16 @@ type AutoVersionOptions struct {
 	Filter       filter.Filter // which packages the command covers
 	Range        string        // overrides autoVersion.range
 	Match        []string      // overrides autoVersion.match
-	AllManifests *bool         // overrides autoVersion.manifests (true = all)
+	Manifests    string        // overrides autoVersion.manifests (root, all or none)
 	WriteVersion *bool         // overrides autoVersion.writeVersion
+	NoReplace    bool          // skip the autoVersion.replace rules for this invocation
 	SyncLock     bool          // run the space's syncLock scripts for changed packages
 }
 
 // hasPolicy reports whether any policy override was set, which is what makes
 // the command act on a space without an autoVersion block.
 func (o AutoVersionOptions) hasPolicy() bool {
-	return o.Range != "" || len(o.Match) > 0 || o.AllManifests != nil || o.WriteVersion != nil
+	return o.Range != "" || len(o.Match) > 0 || o.Manifests != "" || o.WriteVersion != nil || o.NoReplace
 }
 
 // AutoVersion runs the native manifest reconciliation for the covered
@@ -57,11 +58,14 @@ func (a *App) AutoVersion(ctx context.Context, opts AutoVersionOptions) error {
 			if len(opts.Match) > 0 {
 				av.Match = opts.Match
 			}
-			if opts.AllManifests != nil {
-				av.AllManifests = *opts.AllManifests
+			if opts.Manifests != "" {
+				av.Manifests = model.ManifestScope(opts.Manifests)
 			}
 			if opts.WriteVersion != nil {
 				av.WriteVersion = *opts.WriteVersion
+			}
+			if opts.NoReplace {
+				av.Replace = nil
 			}
 			return av
 		}
@@ -109,6 +113,7 @@ func (a *App) AutoVersion(ctx context.Context, opts AutoVersionOptions) error {
 func effectivePolicy(av *model.AutoVersion) *model.AutoVersion {
 	if av == nil {
 		return &model.AutoVersion{
+			Manifests: model.ScopeRoot,
 			Kinds: map[model.DepKind]bool{
 				model.KindDependencies: true, model.KindDevDependencies: true,
 				model.KindPeerDependencies: true, model.KindOptionalDependencies: true,

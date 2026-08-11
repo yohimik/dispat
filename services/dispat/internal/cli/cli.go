@@ -150,7 +150,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	avMatch := fs.StringSlice("match", nil,
 		"autoversion command: override the autoVersion.match range globs")
 	avManifests := fs.String("manifests", "",
-		"autoversion command: override autoVersion.manifests (root or all)")
+		"autoversion command: override autoVersion.manifests (root, all or none)")
+	avNoReplace := fs.Bool("no-replace", false,
+		"autoversion command: skip the autoVersion.replace rules for this invocation")
 	avWriteVersion := fs.Bool("write-version", true,
 		"autoversion command: override autoVersion.writeVersion")
 	avSyncLock := fs.Bool("sync-lock", true,
@@ -378,17 +380,13 @@ flags:
 		}
 	case cmdAutoversion:
 		opts := app.AutoVersionOptions{Filter: sel,
-			Range: *avRange, Match: *avMatch, SyncLock: *avSyncLock}
+			Range: *avRange, Match: *avMatch, SyncLock: *avSyncLock, NoReplace: *avNoReplace}
 		switch *avManifests {
-		case "":
-		case "all":
-			v := true
-			opts.AllManifests = &v
-		case "root":
-			v := false
-			opts.AllManifests = &v
+		case "", "root", "all", "none":
+			opts.Manifests = *avManifests
 		default:
-			bootLog.Error().Str("manifests", *avManifests).Msg("unknown --manifests value (want root or all)")
+			bootLog.Error().Str("manifests", *avManifests).
+				Msg("unknown --manifests value (want root, all or none)")
 			return 2
 		}
 		if fs.Changed("write-version") {
