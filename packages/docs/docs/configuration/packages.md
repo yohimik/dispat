@@ -59,6 +59,7 @@ keys:
 | `changelog`    | object          | Overlays the top-level [`changelog`](./records.md#changelog) **field by field** for this package's release records: flip `enabled`, rename the file, retitle a section; unset fields keep the global values.                                                                                          |
 | `github`       | object          | Overlays the top-level [`github`](./records.md#github) the same way: a package can disable its GitHub releases or target another repository while keeping the global `tokenEnv`. Distinct effective targets each get their own up-front verification.                                                 |
 | `concurrency`  | int or `[b, p]` | The package's *weight*: how many slots of the stage [concurrency budgets](./README.md#top-level-options) its tasks occupy. See [package weights](#package-weights-concurrency) below.                                                                                                                 |
+| `versioning`   | string          | How much of the version this one package holds in common with its group; see [`versioning`](./spaces.md#versioning). Most usefully `independent`, opting one package out of a shared space, but any mode is settable and the package stays in its space's group under it.                             |
 | `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                        |
 | `dependencies` | string or array | Provider names this package [depends on](#package-dependencies); the consumer is the package itself.                                                                                                                                                                                                  |
 | `manifestNames` | array of strings | The manifest names this package answers to, stated rather than read from its files. See [`manifestNames`](#manifestnames) below.                                                                                                                                                                     |
@@ -79,7 +80,9 @@ per-field rules follow from what each object means:
   package with it. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run).
 - `versioning`/`versionGroup` are one axis: a layer setting either supersedes both inherited values (so a package sets
   `versioning: independent` to opt out of its space's group, or `versionGroup: <name>` to join another). Setting both in
-  one layer is a contradiction and is rejected.
+  one layer is a contradiction and is rejected. Note that setting `versioning` to another *shared* mode does not leave
+  the space's group: the package keeps its membership and asks to share a different amount, which the group resolves to
+  the deepest any member asked for (`W213`).
 - `autoVersion` replaces **wholesale**: its empty fields already carry meaning relative to their siblings (no `kinds`
   means all four), so a field-level overlay could never express them against a non-empty base. An override of
   `{"enabled": false}` switches the space's block off for the package.

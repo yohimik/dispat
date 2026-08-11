@@ -15,8 +15,8 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage, or is skipped after its version stage already modified files.                                                                                                                                                   |
 | `flow`                  | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
-| `versioning`            | string                   | no         | How versions relate across the space's packages: `independent` (default), `fixed` or `fixedSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                                                                                                            |
-| `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space with `fixed`/`fixedSparse` versioning. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                 |
+| `versioning`            | string                   | no         | How much of the version the space's packages hold in common: `independent` (default), `fixed`, `fixedSparse`, `fixedMajorMinor`, `fixedMajorMinorSparse`, `fixedMajor` or `fixedMajorSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                  |
+| `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space whose own versioning is shared. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                        |
 | `scripts`               | map name → shell command | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 
@@ -110,38 +110,55 @@ Neither runs for a package that published (that is `flow.postPublish` and the an
 
 ## `versioning`
 
-How the versions of a space's packages relate to each other.
+How the versions of a space's packages relate to each other. Two axes decide it: how much of the version the group
+holds in common, and what happens to a member that has nothing of its own to release when the shared part moves. The
+walkthrough with worked examples is [Shared versions](../versioning.md); this is the reference.
 
-| Value                     | Effect                                                                                                                                                                                                                             |
-|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `independent` *(default)* | Every package's version is computed from its own history alone: the behaviour described everywhere else in this documentation.                                                                                                     |
-| `fixed`                   | One shared version for the whole space: a change to any member (by commit scope or changed files) releases every member at the same next version.                                                                                  |
-| `fixedSparse`             | The shared version is computed exactly like `fixed`, but a member with no changes of its own keeps its previous version and is not released; changed members release at the shared version, aligning to it the moment they change. |
+| Value                     | Shares          | Effect                                                                                                                                                                                                                             |
+|---------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `independent` *(default)* | nothing         | Every package's version is computed from its own history alone: the behaviour described everywhere else in this documentation.                                                                                                     |
+| `fixed`                   | the whole version | One shared version for the whole space: a change to any member (by commit scope or changed files) releases every member at the same next version.                                                                                  |
+| `fixedSparse`             | the whole version | The shared version is computed exactly like `fixed`, but a member with no changes of its own keeps its previous version and is not released; changed members release at the shared version, aligning to it the moment they change. |
+| `fixedMajorMinor`         | `MAJOR.MINOR`   | Patch releases stay each package's own and move nobody else; a minor or major release moves the whole group to one shared next version, riding unchanged members as `fixed` does.                                                  |
+| `fixedMajorMinorSparse`   | `MAJOR.MINOR`   | The same, with `fixedSparse` assignment: an unchanged member keeps its previous version and adopts the shared major and minor on its own next release.                                                                             |
+| `fixedMajor`              | `MAJOR`         | Minor and patch releases stay each package's own; only a major release moves the whole group, riding unchanged members as `fixed` does.                                                                                            |
+| `fixedMajorSparse`        | `MAJOR`         | The same, with `fixedSparse` assignment: an unchanged member keeps its previous version and adopts the shared major on its own next release.                                                                                       |
 
 A space with shared versioning is a versioning group whose name is the space's own. The general mechanism, groups that
 cut across the filesystem included, is described under [Versioning groups](#versioning-groups). Everything below holds
 for any group, whichever way its members joined.
 
-Under `fixed` and `fixedSparse` the group versions **as if it were one package**: the shared next version is computed
-over the group's highest baseline with the max bump across all members, the group runs a single prerelease train (a
-channel directive on one member moves the whole group; a graduation ends the train for all of it), and an exact
-`Release-As` naming one member pins the group's single version, with the usual pin guards applied to it. A
-`Release-As: none` hold still applies to the member it names: the held member stays behind and catches up when resumed.
+**When the group moves.** A release moves the whole group when it reaches the part the group shares, and belongs to
+one package alone when it stays below it. Under `fixed` every release reaches the shared part, since the whole version
+is shared; under `fixedMajorMinor` a patch does not; under `fixedMajor` neither a patch nor a minor does. A member
+releasing on its own always keeps the shared part it already carries, and a member joining a moved group starts the
+components below the shared part at zero, so a `fixedMajor` group reaching major 2 lands every member on `2.0.0`.
+
+**How the group version is computed.** When the shared part moves, the group versions **as if it were one package**:
+over the group's highest baseline, with the max bump across all members. It runs a single prerelease train (a channel
+directive on one member moves the whole group; a graduation ends the train for all of it), and an exact `Release-As`
+naming one member pins the group's version, with the usual pin guards applied to it. Under a partial mode both of those
+are scoped by the same rule as everything else: a train started by a bump that reaches the shared part is the group's,
+a train below it is one package's, and a pin naming a different shared part moves the group while a pin inside the
+current one applies to the package that wrote it, with its own guards rather than the group's. A `Release-As: none`
+hold always applies to the member it names: the held member stays behind and catches up when resumed.
 
 Scopes (commit scope-sets and changed files) keep exactly one job in a versioning group: deciding which changelog
 entries a package receives (and what its GitHub release announces). A member released only because of the shared version
-gets a single "no changes" entry instead of borrowing its neighbour's notes, and its presence in the plan is reported as
-`W210` (non-suppressible, like the catch-up codes: nothing in the commit log alone explains it). Such a ride is a full
-release at the execution level: its version/build/publish scripts, hooks, tag and records all run.
+gets a single "no changes" entry instead of borrowing its neighbour's notes, and that entry names what the group holds
+in common ("on one major version" under `fixedMajor`, "on one version" under `fixed`). Its presence in the plan is
+reported as `W210` (non-suppressible, like the catch-up codes: nothing in the commit log alone explains it). Such a ride
+is a full release at the execution level: its version/build/publish scripts, hooks, tag and records all run.
 
-Two convergence properties are worth knowing. A group whose members all carry the shared version releases nothing on a
-quiet run, exactly like independent packages. And a `fixed` member left *behind* the group's published baseline (its
-ride failed in an earlier run, or the group formed with unequal versions) is caught up at exactly that baseline on the
-next run (also `W210`), restoring the one-version invariant. `fixedSparse` deliberately never does this, since staying
-behind is its point.
+Two convergence properties are worth knowing. A group whose members all agree on the shared part releases nothing on a
+quiet run, exactly like independent packages. And a non-sparse member left *behind* the group's shared part (its ride
+failed in an earlier run, or the group formed with unequal versions) is caught up on the next run (also `W210`),
+restoring the invariant: at exactly the group's published version under `fixed`, at the start of its own line under a
+partial mode. The sparse modes deliberately never do this, since staying behind is their point.
 
-Dependency edges stay package-scoped either way: a provider propagating into one member bumps that member (which then
-carries its group along under `fixed`), and only the member with provider updates runs a version task.
+Dependency edges stay package-scoped whichever mode is in force: a provider propagating into one member bumps that
+member (which then carries its group along, if the bump reaches the shared part), and only the member with provider
+updates runs a version task.
 
 ## Versioning groups
 
@@ -177,7 +194,7 @@ different spaces) may still want one version, and one space may hold packages of
 Here every package of `libs` plus the single `shell` package version together as group `platform`, while the rest of
 `apps` stays independent.
 
-A declaration carries one key: `versioning`, `fixed` or `fixedSparse`. `independent` is invalid there, because a group
+A declaration carries one key: `versioning`, any of the shared modes. `independent` is invalid there, because a group
 exists to share versions. The declaration's mode is authoritative for everyone who joins, which is why `versionGroup`
 and
 `versioning` are mutually exclusive on the same space or package: a member cannot contradict its group. A declared group
@@ -189,15 +206,19 @@ The joining rules:
   [`packages` entry](./packages.md) or an
   [in-folder config file](./packages.md#in-folder-configuration-files)); the
   [most local layer wins](./packages.md#package-options).
-- The reference may also name another space whose own `versioning` is `fixed`/`fixedSparse`, joining that space's
-  implicit group. A space that itself joined a declared group has no group of its own to reference; name the declared
-  group directly. Group and space names share one namespace (a declaration shadowing a space name is rejected), and an
-  unknown reference is an error, the same typo protection as an unknown dependency endpoint.
+- The reference may also name another space whose own `versioning` is shared, joining that space's implicit group. A
+  space that itself joined a declared group has no group of its own to reference; name the declared group directly.
+  Group and space names share one namespace (a declaration shadowing a space name is rejected), and an unknown
+  reference is an error, the same typo protection as an unknown dependency endpoint.
 - A member's assignment mode is its own: a `fixed` space and a `fixedSparse` package can join the same group. The shared
   version is computed once, then each member follows its own mode (ride along, or stay behind when unchanged).
+- The *depth* is the group's, not the member's, because there is one shared version to compute. Members asking for
+  different depths (a `fixedMajor` package inside a `fixedMajorMinor` group, reachable by overriding one package's
+  `versioning` without changing its group) resolve to the deepest any of them asked for, since sharing the major and
+  minor also shares the major. The resolution is reported as `W213`.
 
-Group diagnostics (`W210` rides, `W211` competing pins, `W212` channel conflicts) name the group; the synthetic package
-they are raised against is `group:<name>`.
+Group diagnostics (`W210` rides, `W211` competing pins, `W212` channel conflicts, `W213` mixed depths) name the group;
+the synthetic package they are raised against is `group:<name>`.
 
 ## `autoVersion`
 

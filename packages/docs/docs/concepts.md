@@ -82,24 +82,35 @@ is always computed over the whole train.
 
 ### Space versioning modes
 
-A space may declare how its packages' versions relate:
-[`versioning`](./configuration/spaces.md#versioning) is `independent` (the default, and everything described above),
-`fixed` or `fixedSparse`. Under `fixed` the space versions as one package: a change to any member releases every member
-at one shared next version (computed over the space's highest baseline with the max bump), the space runs a single
-prerelease train, an exact `Release-As` on one member pins the space, and a member released with nothing of its own gets
-one "no changes" changelog entry, labelled `W210` in the plan. A member left behind (a failed ride) is re-aligned to the
-space's published version on the next run. `fixedSparse` computes the same shared version but releases only changed
-members; the rest keep their previous versions until they change, at which point they jump to the shared version. Commit
-and file scopes keep exactly one job in these modes: deciding which changelog entries (and GitHub release notes) each
-package receives.
+A space may declare how much of its packages' versions is held in common:
+[`versioning`](./configuration/spaces.md#versioning) is `independent` (the default, and everything described above), or
+one of six shared modes. Two axes decide them. **How much is shared:** the whole version (`fixed`), the major and minor
+(`fixedMajorMinor`), or the major alone (`fixedMajor`). **What an unchanged member does when the shared part moves:**
+release along with it (the plain modes), or stay put until it next has something of its own (the `Sparse` variants).
 
-The same commit under each mode, for a space of `a` (changed by `feat(a)`) and `b` (unchanged, at `1.0.0`):
+A release moves the whole group when it reaches the shared part, and belongs to one package alone when it stays below
+it. So under `fixed` the space versions as one package: any change releases every member at one shared next version
+(computed over the space's highest baseline with the max bump), the space runs a single prerelease train, and an exact
+`Release-As` on one member pins the space. Under `fixedMajor` the same is true of a breaking change, while a fix or a
+feature moves only its own package, along with its own train and its own pins. A member released with nothing of its own
+gets one "no changes" changelog entry naming what is shared, labelled `W210` in the plan; under a plain mode a member
+left behind (a failed ride) is re-aligned on the next run. Commit and file scopes keep exactly one job in every shared
+mode: deciding which changelog entries (and GitHub release notes) each package receives.
 
-| Mode          | `a`              | `b`                                             |
-|---------------|------------------|-------------------------------------------------|
-| `independent` | `1.1.0`          | stays `1.0.0`, not released                     |
-| `fixed`       | `1.1.0`          | `1.1.0`, released with a "no changes" entry (W210) |
-| `fixedSparse` | `1.1.0`          | stays `1.0.0` until its own next change         |
+Two commits under each mode, for a space of `a` and `b`, both at `1.0.0`, where only `a` ever changes:
+
+| Mode                    | `feat(a)` gives `b`                         | `feat(a)!` gives `b`                        |
+|-------------------------|---------------------------------------------|---------------------------------------------|
+| `independent`           | stays `1.0.0`, not released                 | stays `1.0.0`, not released                 |
+| `fixed`                 | `1.1.0`, a "no changes" release (W210)      | `2.0.0`, a "no changes" release (W210)      |
+| `fixedSparse`           | stays `1.0.0` until its own next change     | stays `1.0.0` until its own next change     |
+| `fixedMajorMinor`       | `1.1.0`, a "no changes" release (W210)      | `2.0.0`, a "no changes" release (W210)      |
+| `fixedMajorMinorSparse` | stays `1.0.0` until its own next change     | stays `1.0.0` until its own next change     |
+| `fixedMajor`            | stays `1.0.0`: a minor is not shared        | `2.0.0`, a "no changes" release (W210)      |
+| `fixedMajorSparse`      | stays `1.0.0`: a minor is not shared        | stays `1.0.0` until its own next change     |
+
+`a` releases `1.1.0` and `2.0.0` in every row. The walkthrough, with worked examples and the rules for groups that span
+spaces, is [Shared versions](./versioning.md).
 
 ### Release control
 

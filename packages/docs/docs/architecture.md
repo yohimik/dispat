@@ -39,9 +39,9 @@ callable without a command line.
    every source (the root list, the entries, the in-folder files) into one merged list.
 4. Build the dependency graph from the merged relations; topologically sort it (cycles abort with the members named).
 5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
-   compute direct bumps, run the three propagation phases, then versions, with every versioning group (a
-   `fixed`/`fixedSparse` space, or a declared `versionGroups` entry its members joined) versioned as one (see "Fixed
-   versioning groups" below).
+   compute direct bumps, run the three propagation phases, then versions, with every versioning group (a space with
+   its own shared mode, or a declared `versionGroups` entry its members joined) versioned as one (see "Versioning
+   groups" below).
 6. Print the diagnostics, then the full graph with `old -> new` versions and channel transitions, in publish order.
    `status` stops here.
 7. Refuse to release when the plan has a repository-scoped error, or any error at all under `commitErrors: "error"`.
@@ -117,20 +117,37 @@ The traversal is shared by both axes: breadth-first from the unit's source packa
 measured from the originating source set and never re-based on an intermediate. A package republishing as a catch-up
 does not propagate onward, so a failed publish can never enlarge what a commit releases.
 
-**Fixed versioning groups.** Packages with shared versioning are grouped by their resolved group key: the space's own
-name for a `fixed`/`fixedSparse` space, or the declared `versionGroups` entry the space or package joined, so a group
-may span spaces. Each group is versioned as one virtual package, after the per-package pipeline has produced bumps,
-channels and pins. The group aggregates what the version computation reads: the baselines of *every* member (held ones
-included, so the shared version can never fall below a position a member already published) and the bumps, new work and
-channel movements of the members that would release. It runs that through the ordinary §13.9 computation, pins, trains
-and guards included: one shared next version, one prerelease train, one pin per group (the newest member pin wins; its
-scope breadth is one by construction, since the group is one version). Assignment is where the modes differ, and the
-mode is each member's own (a joined group can mix them): `fixed` releases every non-held member at the group version,
-marking members with no cause of their own as rides (`W210`, non-suppressible, with a "no changes"
-changelog entry); `fixedSparse` assigns the group version only to members with a cause of their own. Scope resolution is
-untouched: each member keeps its *own* units for changelog and release notes. Two convergence properties are preserved:
-an aligned quiet group releases nothing, and a `fixed` member left behind the group's published baseline (a failed ride,
-a mid-life adoption) is re-released at exactly that baseline on the next run.
+**Versioning groups.** Packages with shared versioning are grouped by their resolved group key: the space's own name
+for a space with its own mode, or the declared `versionGroups` entry the space or package joined, so a group may span
+spaces. A mode carries one number, its *shared depth*: how many leading version components the group holds equal, 3 for
+`fixed`, 2 for `fixedMajorMinor`, 1 for `fixedMajor`, 0 for `independent`. The group's depth is the deepest any member
+declares, since sharing more implies sharing the prefix, and a disagreement is reported as `W213`.
+
+Each group is versioned as one virtual package, after the per-package pipeline has produced bumps, channels and pins.
+The group aggregates what the version computation reads: the baselines of *every* member (held ones included, so the
+shared version can never fall below a position a member already published) and the bumps, new work and channel
+movements of the members that would release. It runs that through the ordinary §13.9 computation, pins, trains and
+guards included: one shared next version, one prerelease train, one pin per group (the newest member pin wins; its
+scope breadth is one by construction, since the group holds one shared prefix).
+
+**The engagement rule** is what makes a partial depth work, and it is a single predicate evaluated after that
+computation: the group takes its members over only when the computed version leaves the group's prefix behind, or the
+group already sits on a prerelease train whose prefix left the stable line (that train's later prereleases and its
+graduation belong to the whole group even though neither moves the prefix again). At the full depth the predicate is
+constantly true, so `fixed` and `fixedSparse` run the path they always did. A pin is admitted to the group computation
+under the same rule: one naming the prefix the group already carries is left to its own package's `applyPin`, so a
+member's local `Release-As` is never measured against the group's aggregate. When the group does not engage, every
+member goes through the ordinary per-member `versionOne`, and an alignment pass then keeps the invariant: a member
+releasing below the group's prefix adopts it (which is how a sparse member's first change lands it on the shared part),
+and a non-sparse member with nothing pending whose baseline lags is released at the prefix with `W210`.
+
+Assignment is where sparseness shows, and the mode is each member's own (a joined group can mix them): a plain mode
+releases every non-held member at the group version, marking members with no cause of their own as rides (`W210`,
+non-suppressible, with a "no changes" changelog entry naming the shared part); a sparse mode assigns the group version
+only to members with a cause of their own. Scope resolution is untouched: each member keeps its *own* units for
+changelog and release notes. Two convergence properties are preserved: a quiet group whose members agree on the prefix
+releases nothing, and a non-sparse member left behind (a failed ride, a mid-life adoption) is re-released on the next
+run, at exactly the group's published version under `fixed` and at the start of its own line under a partial mode.
 
 ## Module map
 
@@ -147,7 +164,7 @@ sections below.
 | `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
 | `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the finalize phase and run-level hooks; wires every other package together.  |
 | `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write`. |
-| `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, fixed groups; a pure function of history, graph and configuration.                                                                          |
+| `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration.                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
 | `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs.                                                                    |
 | `internal/changelog` | Changelog rendering and the per-package record dispatcher.                                                                                                                                                   |

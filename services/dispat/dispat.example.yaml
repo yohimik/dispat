@@ -33,12 +33,21 @@ spaces:
     # from this space fails during version, build or publish.
     revertOnFail: true
     # How versions relate across the space's packages:
-    #   independent (default)  every package versions from its own history
-    #   fixed                  one shared version: any change releases every
-    #                          member; single prerelease train; riders get a
-    #                          "no changes" changelog entry (W210)
-    #   fixedSparse            the shared version, but unchanged members keep
-    #                          their previous versions until they change
+    # How much of the version the space's packages hold in common. Whatever
+    # is shared is always equal across the group; whatever is not is each
+    # package's own, and a release moves the whole group only when it reaches
+    # the shared part. The Sparse variants compute the same shared version but
+    # leave an unchanged member at its previous one until it next releases,
+    # instead of riding it along with a "no changes" entry (W210).
+    #   independent (default)   every package versions from its own history
+    #   fixed                   the whole version: any change releases every
+    #                           member; single prerelease train
+    #   fixedSparse             the same, unchanged members staying behind
+    #   fixedMajorMinor         MAJOR.MINOR: patches stay with their package,
+    #                           minors and majors move the whole group
+    #   fixedMajorMinorSparse   the same, unchanged members staying behind
+    #   fixedMajor              MAJOR: only a breaking change moves the group
+    #   fixedMajorSparse        the same, unchanged members staying behind
     versioning: independent
     # The space's own scripts: the same shape as the top-level `scripts`,
     # layered over them for this space's packages. `flow` entries name them,
@@ -164,10 +173,10 @@ packages:
 
 # Shared-versioning groups that cut across spaces, joined by name through a
 # space's or package's versionGroup key. The declaration owns the group's
-# mode (fixed or fixedSparse; independent would defeat the point), so a
-# member never sets versioning alongside versionGroup. A space with
-# versioning: fixed/fixedSparse is implicitly a group named after itself,
-# and versionGroup may reference such a space too.
+# mode (any of the shared modes above; independent would defeat the point),
+# so a member never sets versioning alongside versionGroup. A space with a
+# shared versioning is implicitly a group named after itself, and
+# versionGroup may reference such a space too.
 versionGroups:
   platform:
     versioning: fixed

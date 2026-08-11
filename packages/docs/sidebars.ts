@@ -11,6 +11,7 @@ const sidebars: SidebarsConfig = {
     'getting-started',
     'cookbook',
     'concepts',
+    {type: 'doc', id: 'versioning', label: 'Shared versions'},
     {type: 'doc', id: 'cli', label: 'CLI'},
     {
       type: 'category',

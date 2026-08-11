@@ -82,6 +82,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Getting started](https://yohimik.github.io/dispat/getting-started)             | Install, first config, commit convention, commands, CI setup.                                       |
 | [Cookbook](https://yohimik.github.io/dispat/cookbook)                           | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels. |
 | [Concepts](https://yohimik.github.io/dispat/concepts)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
+| [Shared versions](https://yohimik.github.io/dispat/versioning)                  | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups. |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
 | [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |

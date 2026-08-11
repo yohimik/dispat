@@ -58,7 +58,8 @@ between packages under `dependencies` so bumps propagate and ordering is enforce
 That is a complete, working configuration. Everything else is optional and layered on top:
 
 - concurrency budgets, tag formats, log settings: the [top-level options](configuration/README.md);
-- build/publish ordering, hooks, login, versioning modes, `scripts` and `dispat run`: [spaces](configuration/spaces.md);
+- build/publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](configuration/spaces.md);
+- packages that must share a version, or a major: [shared versions](versioning.md);
 - changelogs, GitHub releases, the release commit: [release records](configuration/records.md);
 - commit-message policies and parser tweaks: [parsing options](configuration/parser.md).
 
