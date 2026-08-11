@@ -175,6 +175,8 @@ command are still written, and the command exits `1` at the end.
 - Deriving a monorepo's dependency graph, and the baselines its packages start from, into the config file is
   [`dispat compute`](./cli.md#the-compute-command). It uses the scanner underneath and understands your packages; the
   scanner alone only reports files.
+- Making the same change in every package the plan picks, instead of in the files you name, is
+  [`dispat autoreplace`](./autoreplace.md). Same three flags, same outcomes; it finds the manifests itself.
 - Reconciling manifests to the versions a release just computed is
   [auto-versioning](./configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
   underneath and knows what the new versions are; the writer alone only writes what you tell it.

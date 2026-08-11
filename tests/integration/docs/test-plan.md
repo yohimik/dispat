@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against eighteen goals, one test file each:
+The suite was designed against nineteen goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -112,6 +112,17 @@ The suite was designed against eighteen goals, one test file each:
     and its provider's in the service it pulls; that a build stage and a port mapping are left alone; and that the
     repository a Docker manifest declares — never a folder name — reaches the workspace index the planner and the
     writer share.
+19. **The `autoreplace` command** (`autoreplace_test.go`): `dispat writer`'s edits applied to the packages the plan
+    selects. What only the binary can witness: that the manifests it writes are the ones it found by scanning each
+    covered package rather than any it was told about; that the edits land byte for byte, leaving every other byte of
+    the fixture alone, and converge on a second pass; that `{version}` resolves against the plan the binary has just
+    computed, for the package an edit names and for the covered package's own version field, and that a placeholder
+    naming no package of the workspace is refused before a file is opened; that `--manifests root` stops at the package
+    folder while `all` descends without stamping a nested manifest's own version; that `--only-updated` follows the
+    plan, so the same command is a clean no-op once everything it named has been released; that `--strict` is asked
+    across the whole sweep rather than per file; that `--replace` adds and removes a redirect; that the syncLock
+    scripts run exactly where a manifest changed and `--sync-lock=false` skips them; and that every refusal (a stale
+    edit, a malformed spec, an unknown scope, nothing to write, a positional argument) reaches the process exit code.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -468,6 +479,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestStandaloneGithubSelection`                 | The github command selects like every other step command: no opt-in publishes nothing (exit 0), the exported opt-in publishes, a non-releasing package is a logged no-op, an unknown term exits 1 and a positional argument exits 2. |
 | `TestStandaloneGithubFailures`                  | The error paths: a prerelease held back by `github.prerelease` publishes nothing and states why; an unresolvable token and a refused verification both exit 1 before any release is created; an API that rejects the creation exits 1. |
 | `TestStandaloneCommitPushWithoutRemoteFails`    | `--push` without a remote exits 1, while the local commit and tag it had already made survive.                                                                                                                                                               |
+| `TestStandaloneStepsTakeTheWindowFlags`         | The steps take `dispat run`'s window: `--since` picks what a revision addressed, `--consumers` pulls the dependents in, `--on-error` is validated on every sweeping command, and a package tagged by `dispat commit --tag` falls off the recomputed window until `--since all` puts it back. |
 
 ### Goal 16: the manifest commands (`manifests_test.go`)
 
@@ -497,7 +509,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestFilterInfersFromTheInvocationFolder`       | With no terms the folder is the selection: a package folder or any subfolder of it, a space folder, the root and a folder outside every space each select what they should, and the deepest match wins over an enclosing one.                     |
 | `TestFilterExplicitTermsBeatTheFolder`          | A term typed on the command line is the whole answer, whichever folder it was typed in — for both flags.                                                                                                                                          |
 | `TestFilterRefusesASelectionWithoutTheScript`   | A filter reaching only packages that resolve no command for the name exits 1, the same guard a whole-monorepo run applies.                                                                                                                        |
-| `TestFilterStepCommandsSelect`                  | The step commands take the same terms and the same folder inference; a selected package the plan is not releasing is a logged no-op, not a failure; an unmatched term exits 1.                                                                    |
+| `TestFilterStepCommandsSelect`                  | The step commands take the same terms and the same folder inference; a selected package the recomputed plan is no longer releasing is a logged no-op, not a failure; an unmatched term exits 1.                                                   |
 | `TestFilterPreviewSelects`                      | Preview takes the same terms and folder inference, and names the selection it found nothing pending for.                                                                                                                                          |
 | `TestFilterComputeScopesSuggestions`            | Compute reports and writes only the selected consumers' edges while still detecting against every package's manifests, so a declared edge onto an unselected provider is never proposed for removal; the in-sync line names the scope.            |
 | `TestFilterReleaseSelectsPartOfTheGraph`        | A release takes the same terms: `-p core` tags and publishes core alone, `-s apps` that space's package, the graph marks what was left out, and a later unfiltered run releases the rest without re-releasing what is already out.                |
@@ -520,6 +532,20 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestDockerComputeDerivesTheImageChain`         | `compute` reads an image-to-image edge off a `FROM` line that no config declares, names the file it came from, ignores a base that is not a workspace package, writes the edge under `--write` and greens the `--check` gate; the stated `manifestNames` repository is what lets the chain resolve, since an image's identity is never its folder name. |
 | `TestDockerReleaseReconcilesTagsAndCompose`     | A release reconciles both Docker formats at the version stage: the consumer's `FROM` tag and its `COPY --from` image follow the provider's new version, a `COPY --from` naming a build stage is left alone, and the compose file gets the package's own version in the service it builds and every `build.tags` entry, the provider's in the service it pulls, and nothing at all in a port mapping. |
 | `TestDockerManifestCommands`                    | The config-free commands over both formats: `scanner` reports a compose file's identity and a Dockerfile's bases with no config, commit or plan; `writer` rewrites a compose tag and own version proved byte-for-byte on disk; a digest-pinned base is skipped rather than failed, and a missing edit still gates under `--strict`. |
+
+### Goal 19: the `autoreplace` command (`autoreplace_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                                          |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestAutoReplaceEditsEveryCoveredPackage`       | One invocation reaches every package the window covers, writing the fixture back with exactly the edited bytes changed; `{version}` resolves against the plan the binary just computed, in a range and in the own-version field alike; a second pass leaves the working tree untouched. |
+| `TestAutoReplaceSelectsLikeEveryOtherCommand`   | The selection is the shared one: a `--package` term, the invocation folder standing in for it, `--consumers` reaching a package that declares nothing itself, and an unmatched term exiting 1.                                          |
+| `TestAutoReplaceOnlyUpdatedFollowsThePlan`      | `--only-updated` keeps an edit while the package it names is releasing and drops one naming no package of the workspace; once everything is released the same command writes nothing and says so, exiting 0.                            |
+| `TestAutoReplaceManifestScope`                  | `--manifests root` stops at the package folder while `all` reaches a nested manifest, and the own-version write stays on the root manifests under either scope.                                                                        |
+| `TestAutoReplaceRedirects`                      | `--replace` adds the local-folder directive across the selection and an empty path restores the declared range.                                                                                                                       |
+| `TestAutoReplaceOutcomesReachTheExitCode`       | `--strict` is asked across the sweep (an edit landing in one package of two is clean, one landing nowhere exits 1, and without the flag the same run exits 0); nothing to write, a malformed spec, an unknown `--manifests` value and a positional argument are usage errors (2); an unresolvable `{version}` exits 1 with nothing written. |
+| `TestAutoReplaceJSONEvents`                     | The machine contract: one event per manifest carrying its path and the package it belongs to, plus the run's applied/skipped/missing tally.                                                                                            |
+| `TestAutoReplaceSyncLock`                       | The syncLock scripts run exactly where a manifest changed, not where it did not, never on a converged re-run, and not at all under `--sync-lock=false`.                                                                                |
+| `TestAutoReplaceCommandWordKeepsItsScript`      | `autoreplace` is reserved like every other command word, and `dispat run autoreplace` still reaches a script of that name.                                                                                                             |
 
 ## Regression fences
 

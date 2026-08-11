@@ -15,6 +15,7 @@ dispat [command] [flags]
 | `preview`                 | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
 | `changelog`               | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
 | `autoversion`             | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
+| `autoreplace`             | Apply one set of manifest edits to every covered package; see [The autoreplace command](#the-autoreplace-command). |
 | `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `github`                  | Create the per-package GitHub release now; see [The step commands](#the-step-commands).                           |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](#the-compute-command). |
@@ -29,12 +30,12 @@ dispat [command] [flags]
 | `--root`              | `.`         | Where to start config resolution, usually where you stand. The *effective* monorepo root is the directory the config file is found in (see `--config`), so the CLI works from inside a package folder. |
 | `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.  |
 | `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
-| `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
+| `--on-error`          | `skip`      | Every sweeping command (`run`, `autoreplace`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
 | `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
 | `--space`, `-s`       |             | The same nine commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
 | `--group`, `-g`       |             | The same nine commands: narrow to every package of the named [versioning groups](./versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
-| `--since`             |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
-| `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
+| `--since`             |             | The same six commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](#the-run-command).                |
+| `--consumers`         |             | The same six commands: additionally cover every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                          |
 | `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
 | `--log-format`        | from config | Override: `pretty` or `json`.                                                                                                                                                                          |
 | `--quiet-parser`      | from config | Override `parser.quiet`: hide the commit-message parser's own diagnostics. `--quiet-parser=false` shows them again when the config sets `quiet: true`; see [the parser options](./configuration/parser.md#quiet). |
@@ -51,15 +52,17 @@ dispat [command] [flags]
 | `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `github` only: override the matching `github.*` values for every package of the invocation.  |
 | `--target`            |             | `github` only: create the tag at this commit or branch (`target_commitish`). Only safe once the commit is on the remote.   |
 | `--file`, `--title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation.          |
-| `--range`, `--match`, `--manifests`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation. `--manifests` takes `root`, `all` or `none`, where `none` turns the parsing strategy off. |
+| `--range`, `--match`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation.                             |
+| `--manifests`         | from config | `autoversion` and `autoreplace`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
+| `--only-updated`      |             | `autoversion` and `autoreplace`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
 | `--no-replace`        |             | `autoversion` only: skip the `autoVersion.replace` rules for this invocation.                                     |
-| `--sync-lock`         | `true`      | `autoversion` only: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them.         |
+| `--sync-lock`         | `true`      | `autoversion` and `autoreplace`: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them. |
 | `--root-only`         |             | `scanner` only: read the folder's own manifests without descending into sub-folders.                                       |
-| `--set-version`       |             | `writer` only: rewrite each named manifest's own version field.                                                            |
-| `--set`               |             | `writer` only: set one dependency's declared range, `[kind:]name=range`; repeatable.                                       |
-| `--replace`           |             | `writer` only: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable.          |
+| `--set-version`       |             | `writer` and `autoreplace`: rewrite the manifest's own version field. For `autoreplace`, `{version}` writes the covered package's planned version, and only its root manifests are touched. |
+| `--set`               |             | `writer` and `autoreplace`: set one dependency's declared range, `[kind:]name=range`; repeatable. For `autoreplace`, `{version}` in the range is the planned version of the package the edit names. |
+| `--replace`           |             | `writer` and `autoreplace`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
 | `--sub`               |             | `replacer` only: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
-| `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. |
+| `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. `autoreplace`: an edit that matched no manifest anywhere; see [Editing across the monorepo](./autoreplace.md#applied-skipped-and-missing-across-many-packages). |
 | `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.               |
 | `--help`, `-h`        |             | Print help and exit. Without a command word, the command list and the global flags; after one, that command's synopsis and its own flags. See [Getting help](#getting-help).                            |
 
@@ -191,12 +194,19 @@ changeset. Prints `no pending changes` when nothing is — naming the selection 
 
 `dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
 steps to custom flows: a stage script can run a step at the moment the flow needs it, and the release stage later
-finds the work done and skips it. All four share the run command's [selection](#choosing-the-packages): with no terms they cover every
-releasing package in dependency order, and `--package`, `--space`, `--group` or the invocation folder narrows that. A term
-matching no package is an error; a *selected* package that is not releasing is a logged no-op, so a flow never fails
-over a converged or held package. The four command words are reserved: like every command name, each wins
+finds the work done and skips it. All four share the run command's [selection](#choosing-the-packages) *and* its
+window: with no terms they cover every releasing package in dependency order, `--package`, `--space`, `--group` or the
+invocation folder narrows that, `--since` replaces the window, `--consumers` expands it downstream, and `--on-error`
+decides what a failed package does to its dependents. A term matching no package is an error; a *selected* package
+that is not releasing is a logged no-op, so a flow never fails over a converged or held package — which also means a
+step run after `dispat commit --tag` covers nothing until `--since all` puts the tagged package back on the table.
+The four command words are reserved: like every command name, each wins
 the `dispat <script>` shorthand over a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name, so
 `dispat commit` is always the command. Spelling it out as `dispat run commit` still reaches the script.
+
+`dispat commit` and `dispat github` cover their packages one at a time — a repository has one index and one HEAD, and
+a release order is worth reading — while `dispat changelog` and `dispat autoversion` write inside each package's own
+folder and ride the build concurrency budget.
 
 Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
 [flags table](#flags).
@@ -210,7 +220,8 @@ in a `beforePublish` script, before `dispat commit`, lands inside the tagged com
 ranges rewritten to the planned versions, own versions updated, and the space's `syncLock` scripts run for each
 package whose manifests actually changed. Rewriting already-reconciled manifests changes nothing, so re-running is
 safe. A space without an `autoVersion` block is skipped unless a policy flag forces one, which then starts from the
-defaults.
+defaults. `--only-updated` narrows the rewrites to declarations naming a package this run releases, so a range that
+had fallen behind a provider released earlier is left as it is instead of caught up (`W197`).
 
 **`dispat commit`** creates each covered package's release commit: the package folder staged together with
 the `commit.include` paths, the message rendered from `commit.messageFormat` with that one package's name and tag.
@@ -231,6 +242,24 @@ The opt-in is the one the recorder uses: a package is released when its scripts 
 export out of its own environment — the stage handed it over, along with `DISPAT_PACKAGE` naming whose it is — and
 attaches the files it lists. Run by hand with the variable exported, it covers every package the invocation selects.
 Without either opt-in the command publishes nothing, and says so with exit `0`.
+
+## The autoreplace command
+
+`dispat autoreplace` is `dispat writer` pointed at a selection instead of a list of files: `--set-version`, `--set` and
+`--replace` mean exactly what they mean there, but the manifests are found by scanning each covered package and the
+packages are the ones the plan and the window pick. It takes the same selection and window flags as the step commands,
+so `--package`, `--space`, `--group`, `--since` and `--consumers` all read the same.
+
+`--manifests root` (the default) edits the manifests sitting in each package folder, `--manifests all` every manifest
+under it, leaving any that belongs to another package to that package. A range may be written as `{version}`, which
+resolves to the planned version of the package the edit names, and `--set-version {version}` to the covered package's
+own — written to its root manifests alone. `--only-updated` drops every edit naming a package this run does not
+update, and `--strict` fails on an edit that matched no manifest anywhere, which is the cross-package reading of
+missing: an edit absent from one manifest of twenty is the ordinary case.
+
+A covered package with no manifest anything can write is a no-op; a selection in which none of them has one is an
+error. The whole command, with worked examples, is in
+[Editing across the monorepo](./autoreplace.md).
 
 ## The compute command
 

@@ -18,6 +18,10 @@ There are four:
 | `dispat commit`     | Makes each package's release commit, and can tag and push it        |
 | `dispat github`     | Creates each package's GitHub release                               |
 
+[`dispat autoreplace`](./autoreplace.md) is not one of them — it does something a release never does on its own — but
+it covers packages by the same rules, so everything on this page about choosing what a command covers applies to it
+too.
+
 Every one of them plans first, exactly like a release would, so they always agree with each other about what the new
 versions are. None of them needs the release to be running.
 
@@ -26,7 +30,8 @@ versions are. None of them needs the release to be running.
 **They only touch packages that are actually releasing.** A step command computes the release plan, then works on the
 packages that plan is releasing. If you point one at a package with no pending changes, it says so and does nothing.
 That is a success, not an error, so a script in your flow never breaks because a package happened to have nothing to
-release this time.
+release this time. It also has a consequence worth knowing in advance: see
+[the pitfall](#the-pitfall-a-tagged-package-drops-off-the-window) below.
 
 **Running one twice changes nothing the second time.** Each step checks whether its work is already done before doing
 it:
@@ -58,6 +63,40 @@ rule [`dispat run`](./cli.md#choosing-the-packages) follows.
 
 A name that matches no package at all is an error, because a typo that quietly does nothing is worse than one that
 stops you.
+
+The step commands take `dispat run`'s window flags as well, and they mean the same thing:
+
+```sh
+dispat changelog --since HEAD~1     # the packages the last commit addressed
+dispat changelog --since all        # every package, releasing or not
+dispat changelog -p core --consumers  # core, plus everything that depends on it
+dispat commit --on-error continue   # a failed package does not skip its dependents
+```
+
+`dispat commit` and `dispat github` work through their packages one at a time, since a repository has one index and
+one HEAD. `dispat changelog` and `dispat autoversion` write inside each package's own folder, so they run several at
+once under the build concurrency budget, in dependency order.
+
+## The pitfall: a tagged package drops off the window
+
+Every step command plans afresh, and the plan is computed from the tags. So the moment `dispat commit --tag` has
+tagged a package, the *next* command sees a package with nothing pending and covers nothing at all:
+
+```console
+$ dispat commit --package core --tag
+$ dispat autoversion --package core
+INF package is outside the window, nothing to do  package=core
+```
+
+Nothing is wrong there, and the exit code is `0`. It is the same rule that keeps a flow from breaking on a quiet day.
+But if you meant to reach the package anyway, say so with the window:
+
+```sh
+dispat autoversion --package core --since all
+```
+
+The usual shape of this is a flow that tags early and then wants to do more work on the same package. Either do the
+rest before the tag, or reach for `--since all` afterwards.
 
 ## The commands, one at a time
 

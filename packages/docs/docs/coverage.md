@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 89.9%; the integration
-layer's instrumented binary: 85.0%).
+The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 89.8%; the integration
+layer's instrumented binary: 85.2%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -12,10 +12,10 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-11** (after the `--group` selection joined `--package` and `--space` on every package command, on top of the
-narrowed `release` and `status`, the manifest-derived baselines in `dispat compute`, the github step command, the
-prerelease record opt-out, per-command help, `parser.quiet` and the package `src` path) with Go 1.26 using the steps
-under [Reproducing](#reproducing), and drifts until someone regenerates it.
+**2026-08-11** (after `dispat autoreplace` and the package sweep every covering command now shares, on top of the
+`--group` selection, the narrowed `release` and `status`, the manifest-derived baselines in `dispat compute`, the
+github step command, the prerelease record opt-out, per-command help, `parser.quiet` and the package `src` path) with
+Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
 | Module / package                        | Statement coverage                                                                       |
 |-----------------------------------------|------------------------------------------------------------------------------------------|
@@ -25,16 +25,16 @@ under [Reproducing](#reproducing), and drifts until someone regenerates it.
 | `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
 | `pkg/scanner` (manifest reader)         | **96.3%**, plus two fuzz targets over every registered parser                            |
 | `pkg/writer` (manifest writer)          | **93.7%**, plus fuzz targets proving rewrites never corrupt valid JSON and that the replacer's arithmetic holds |
-| `services/dispat` (all packages)        | **95.8%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| `services/dispat` (all packages)        | **95.7%** aggregate, `main.go` included (the integration suite runs the real binary)     |
 | - `main.go`, `globx`, `model`           | 100%                                                                                     |
 | - `filter` (the selection resolver)     | 99.4%                                                                                    |
 | - `cli` (controller)                    | 99.7%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
 | - `plan` (planner)                      | 96.6%                                                                                    |
 | - `changelog`                           | 96.5%                                                                                    |
-| - `release` (executor)                  | 96.0%                                                                                    |
+| - `release` (executor)                  | 95.9%                                                                                    |
 | - `config`                              | 96.0%                                                                                    |
-| - `app`                                 | 94.5%                                                                                    |
+| - `app`                                 | 94.3%                                                                                    |
 | - `github`                              | 93.9%                                                                                    |
 | - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |

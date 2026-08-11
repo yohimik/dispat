@@ -166,7 +166,7 @@ sections below.
 | `pkg/scanner`        | Deliberately lightweight manifest reader (own module): npm, Go, Cargo, Python, Composer, Maven, .NET, pub, RubyGems and the mobile formats parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors. No lockfile resolution, no network. Exposed on its own as `dispat scanner`. |
 | `pkg/writer`         | Format-preserving manifest writer (own module): byte-precise range and version rewrites for **every** manifest the scanner reads, atomic writes, and a result separating applied edits from ones deliberately left alone (a Maven property, a workspace inheritance). Exposed on its own as `dispat writer`. |
 | `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
-| `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the finalize phase and run-level hooks; wires every other package together.  |
+| `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `AutoReplace`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the step commands, the finalize phase and run-level hooks; wires every other package together. Its package *sweep* is the shared half of every command that covers a set of packages: the selection, the task graph, the concurrency budget and the skip cascade live there once, and each command supplies only what one package's work means. |
 | `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write` (every key one run touches in a file written in a single pass, so one backup holds the file as it was). |
 | `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration. Plus `Narrow`, which restricts a computed plan to part of the graph for a filtered release (publish order withholds, versioning-group splits reported).                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
@@ -255,6 +255,14 @@ skip read. Every task finishes exactly once, including no-op completions for pac
 is what lets the counting terminate without special cases. A cancelled context stops new launches (in-flight nodes are
 awaited, the rest are reported cancelled), and a frontier that empties with nodes remaining is diagnosed as a cycle
 instead of deadlocking.
+
+Two things drain: the release executor, over `(package, stage)` nodes and the budgets above, and the *package sweep* in
+`internal/app`, over package names and one budget. The sweep is what every command covering a set of packages runs on
+— `run`, `autoreplace`, and the four step commands — and it decides who runs, in what order, under which budget and
+what a failure does to the dependents. A command supplies only a `packageWork`: given one package's release, hand back
+the work to do, or nothing when there is none. `commit` and `github` declare themselves serial, since a repository has
+one index and one HEAD; the rest ride the build budget. Adding a command that covers packages is therefore one small
+file, not a copy of the scheduling.
 
 ### Propagation: bounded BFS, three phases
 
