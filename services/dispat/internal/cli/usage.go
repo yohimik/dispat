@@ -59,7 +59,14 @@ var commands = []command{
 stages of every changed package, in dependency order, then the release
 commit, the tags and the GitHub releases the configuration asks for.
 
+--package and --space release part of the graph instead of all of it, as
+does the package or space folder the command is invoked from. A selected
+package whose provider is releasing and unselected stays behind for the
+next run (W230), and a selection that releases part of a versioning group
+says so (W231); --strict refuses either before anything is published.
+
 This is what a bare "dispat" does.`,
+		flags: append([]string{"strict"}, selectionFlags...),
 	},
 	{
 		name:  cmdStatus,
@@ -68,8 +75,14 @@ This is what a bare "dispat" does.`,
 new version, its channel transition and why it is releasing — without
 building, tagging or writing anything.
 
+It takes the release's own selection flags and narrows the plan exactly as
+a release would, so the graph shows what "dispat release" with the same
+flags is about to do.
+
 Exits 0 even when a release would refuse, because showing the plan is the
-job; only a repository that cannot produce a correct plan at all exits 1.`,
+job; only a repository that cannot produce a correct plan at all — or a
+--strict selection the plan cannot release — exits 1.`,
+		flags: append([]string{"strict"}, selectionFlags...),
 	},
 	{
 		name:  cmdRun,

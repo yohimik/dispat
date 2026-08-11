@@ -75,7 +75,7 @@ func shortCommit(c string) string {
 // actually be published in is visible before the run rather than inferred
 // afterwards.
 func (a *App) printGraph(pl *plan.Plan) {
-	releasing, held := 0, 0
+	releasing, held, deselected := 0, 0, 0
 	for _, name := range pl.Order {
 		rel := pl.Releases[name]
 		ev := a.log.Info().
@@ -108,6 +108,14 @@ func (a *App) printGraph(pl *plan.Plan) {
 		case rel.Held:
 			held++
 			ev.Msg("‖ held (Release-As: none)")
+		case len(rel.WaitingFor) > 0:
+			// Selected and not going: the graph is the place that has to say
+			// so, because the version beside it is one this run will not write.
+			deselected++
+			ev.Strs("waitingFor", rel.WaitingFor).Msg("⊘ withheld until its providers release")
+		case rel.Deselected:
+			deselected++
+			ev.Msg("⊝ not selected")
 		case rel.CatchUp:
 			releasing++
 			ev.Msg("↻ catch-up")
@@ -119,11 +127,16 @@ func (a *App) printGraph(pl *plan.Plan) {
 			ev.Msg("● changed")
 		}
 	}
-	a.log.Info().
+	ev := a.log.Info().
 		Int("packages", len(pl.Order)).
 		Int("releasing", releasing).
-		Int("held", held).
-		Msg("release plan ready")
+		Int("held", held)
+	if deselected > 0 {
+		// Only when a selection was in force, so an unfiltered run's summary
+		// line reads exactly as it always has.
+		ev = ev.Int("deselected", deselected)
+	}
+	ev.Msg("release plan ready")
 }
 
 // summarize prints one line per processed package plus totals, and returns
@@ -162,13 +175,21 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 			Dur("took", res.Duration).
 			Msg("summary")
 	}
-	a.log.Info().
+	// A deselected package is not unchanged — it has a version waiting for the
+	// next run — so it is counted on its own and taken out of that total.
+	// Narrow only ever touches releasing packages, so it can never overlap the
+	// held ones.
+	left := pl.Deselected()
+	ev := a.log.Info().
 		Int("published", published).
 		Int("failed", failed).
 		Int("skipped", skipped).
 		Int("cancelled", cancelled).
-		Int("held", len(pl.Held())).
-		Int("unchanged", len(pl.Order)-len(results)-len(pl.Held())).
+		Int("held", len(pl.Held()))
+	if len(left) > 0 {
+		ev = ev.Int("deselected", len(left))
+	}
+	ev.Int("unchanged", len(pl.Order)-len(results)-len(pl.Held())-len(left)).
 		Dur("took", took).
 		Msg("done")
 	return failed

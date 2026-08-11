@@ -11,12 +11,31 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
+
+// ReleaseOptions narrows a release — and the release `status` reports on — to
+// part of the monorepo. The zero value is the whole of it, which is what a bare
+// `dispat release` at the repository root asks for.
+type ReleaseOptions struct {
+	// Filter selects the packages to release: --package, --space, or the
+	// package or space folder the command was invoked from. It only ever
+	// narrows the plan, never widens it, and it cannot reorder it: a selected
+	// package whose provider is releasing and unselected stays behind (see
+	// plan.Narrow).
+	Filter filter.Filter
+	// Strict refuses the run when the selection is not one the plan can
+	// release cleanly — a package the order held back, a versioning group
+	// split in two. Without it both are warnings and the reachable part of the
+	// selection releases; with it nothing is released at all, which is what
+	// makes a filtered release safe to run unattended.
+	Strict bool
+}
 
 // Release computes the plan and executes it end to end: verification, the
 // gating beforeAll hook, the task graph, the run-level hooks, the finalize
@@ -29,8 +48,8 @@ import (
 // the values rather than from the log stream; it is nil when the run never
 // reached execution (a blocked plan, failed verification, a failed gating
 // hook).
-func (a *App) Release(ctx context.Context) (map[string]*release.Result, error) {
-	pl, err := a.computePlan(ctx)
+func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*release.Result, error) {
+	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return nil, err
 	}

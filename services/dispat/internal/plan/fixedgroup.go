@@ -82,16 +82,28 @@ func (cp *computation) fixedGroups() map[string][]string {
 	out := make(map[string][]string)
 	for _, name := range cp.order {
 		rel := cp.rel[name]
-		if rel == nil || rel.Pkg.Space == nil || !rel.Pkg.Space.Versioning.Shared() {
+		if rel == nil {
 			continue
 		}
-		group := rel.Pkg.Space.VersionGroup
-		if group == "" {
-			group = rel.Pkg.Space.Name // the zero value means the space's own group
+		if group := GroupOf(rel.Pkg); group != "" {
+			out[group] = append(out[group], name)
 		}
-		out[group] = append(out[group], name)
 	}
 	return out
+}
+
+// GroupOf names the versioning group a package belongs to, or "" when its
+// versioning is independent. It is exported because the group is not only the
+// planner's business: a selection that releases part of a group breaks the
+// shared version it exists to keep true, and Narrow says so.
+func GroupOf(pkg *model.Package) string {
+	if pkg == nil || pkg.Space == nil || !pkg.Space.Versioning.Shared() {
+		return ""
+	}
+	if pkg.Space.VersionGroup != "" {
+		return pkg.Space.VersionGroup
+	}
+	return pkg.Space.Name // the zero value means the space's own group
 }
 
 // groupDepth is the shared depth the whole group versions at: the deepest any

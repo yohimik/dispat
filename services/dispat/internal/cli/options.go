@@ -138,7 +138,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.rpSub = fs.StringArray("sub", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")
 	o.strict = fs.Bool("strict", false,
-		"exit 1 on a manifest that failed to parse, an edit the manifest does not declare, or a --sub that matched nothing")
+		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, writer and replacer, a manifest that failed to parse, an edit the manifest does not declare, or a --sub that matched nothing")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has

@@ -239,9 +239,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.
 	a := app.New(resolvedRoot, cfg, log)
+	// The release's own options, shared by the command that performs it and
+	// the command that shows it in advance.
+	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict}
 	switch cmd {
 	case cmdStatus:
-		if a.Status(ctx) != nil {
+		if a.Status(ctx, relOpts) != nil {
 			return 1
 		}
 	case cmdRun:
@@ -311,7 +314,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	default:
-		if _, err := a.Release(ctx); err != nil {
+		if _, err := a.Release(ctx, relOpts); err != nil {
 			return 1
 		}
 	}

@@ -41,6 +41,38 @@ func (a *App) spacePaths() map[string]string {
 	return paths
 }
 
+// narrow applies one release's selection to the computed plan and reports what
+// that cost. An inactive filter — no terms, and an invocation folder that
+// stands for none — returns immediately, so a whole-monorepo release pays
+// nothing for the feature and its output is unchanged.
+//
+// The findings are logged here and the decision left to the caller: both are
+// warnings, and --strict is what turns them into a refusal.
+func (a *App) narrow(pl *plan.Plan, f filter.Filter) (plan.Narrowing, error) {
+	sel, err := a.selectPackages(a.planWorkspace(pl), f)
+	if err != nil {
+		a.log.Error().Err(err).Msg("cannot narrow the release")
+		return plan.Narrowing{}, err
+	}
+	if !sel.Active() {
+		return plan.Narrowing{}, nil
+	}
+	n := pl.Narrow(sel.Names)
+	a.log.Info().Str("selection", sel.Description).Strs("releasing", n.Release).
+		Msg("release narrowed to the selection")
+	for _, w := range n.Withheld {
+		a.log.Warn().Str("code", plan.CodeSelectionWithheld).Str("package", w.Pkg).
+			Strs("waitingFor", w.Waiting).
+			Msg("selected package cannot be released before its providers, leaving it for the next run")
+	}
+	for _, g := range n.Split {
+		a.log.Warn().Str("code", plan.CodeSelectionSplit).Str("group", g.Name).
+			Strs("releasing", g.Releasing).Strs("leftBehind", g.LeftBehind).
+			Msg("selection releases part of a versioning group; the rest catches up on the next run")
+	}
+	return n, nil
+}
+
 // selectPackages resolves one command's filter against the workspace. The
 // error is returned rather than logged: each command has its own headline for
 // "cannot do the thing".

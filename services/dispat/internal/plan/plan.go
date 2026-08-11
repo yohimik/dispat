@@ -155,7 +155,6 @@ const (
 	// CodeBlocked marks a package that was planned but not attempted because a
 	// dependency failed to publish (§19.3). Non-suppressible.
 	CodeBlocked = "W194"
-
 	// --- manifests (§9.4, §12.4; emitted by the executor and by compute) ---
 
 	// CodeManifestVersionDrift marks a manifest whose declared own version
@@ -211,6 +210,25 @@ const (
 	// later stage failed. Creating it again is a 422 from the API, so the
 	// skip is what makes both re-runnable.
 	CodeGitHubReleaseExists = "W224"
+
+	// --- releasing part of the graph (see narrow.go) ---
+	//
+	// W23x, not the W19x the release outcomes above live in: §16's registry
+	// reserves W195 and W196 for a staleness audit and an adopted tag, and a
+	// selection is dispat's own idea rather than the specification's.
+
+	// CodeSelectionWithheld marks a selected package the release order cannot
+	// reach in this run: a provider it depends on is releasing in the same plan
+	// and the selection leaves that provider out. Releasing the consumer first
+	// is the one staleness case publish order exists to prevent (§19.2,
+	// §13.7b), so it stays behind and the next run releases it.
+	// Non-suppressible: the selection asked for the package and did not get it.
+	CodeSelectionWithheld = "W230"
+	// CodeSelectionSplit marks a selection that releases part of a versioning
+	// group. The members left behind keep their old version until the next run
+	// rides them up to the group's (W210), so the group's shared version is
+	// briefly untrue — deliberate, and worth saying out loud.
+	CodeSelectionSplit = "W231"
 
 	// --- release outcomes, repository-scoped (§16) ---
 
@@ -405,6 +423,19 @@ type Release struct {
 	// single "no changes" entry.
 	FixedRide bool
 
+	// Deselected is set by Narrow when the invocation's selection leaves the
+	// package out of this run. It is Held's twin: the package keeps its
+	// computed bump and version — both are reported — and is neither built,
+	// published nor tagged. Nothing in Compute sets it; a plan is narrowed
+	// after it is computed, so the versions a filtered run releases are the
+	// versions the whole-monorepo run would have released.
+	Deselected bool
+	// WaitingFor names the releasing providers a *selected* package must
+	// follow and this run is not releasing, which is why Narrow deselected it
+	// anyway. Empty on a package the selection simply did not name: that one
+	// is nobody's surprise, while this one was asked for and could not go.
+	WaitingFor []string
+
 	// Outputs are the values the package's scripts exported through their
 	// DISPAT_OUTPUT files, in first-export order with later re-exports
 	// overriding earlier values. They are produced at run time (by the
@@ -562,10 +593,16 @@ func (r *Release) SharedDepth() int {
 }
 
 // Releasing reports whether the package is in this run's plan: it has a
-// reason, and it is not held. Every released package is versioned and tagged
-// whatever its publish target — an exception there costs convergence (§13.7c).
+// reason, it is not held, and this invocation's selection did not leave it out.
+// Every released package is versioned and tagged whatever its publish target —
+// an exception there costs convergence (§13.7c).
+//
+// This is the one gate the whole run reads: the executor's task graph, the
+// workspace environment, auto-versioning's provider ranges, the finalize phase
+// and the summary all ask it, which is what makes narrowing a plan a single
+// decision rather than a condition repeated in five places.
 func (r *Release) Releasing() bool {
-	return r.Changed() && !r.Held
+	return r.Changed() && !r.Held && !r.Deselected
 }
 
 // TagFormat is the release tag template of the package's space, or the
@@ -711,6 +748,19 @@ func (p *Plan) Held() []string {
 	var out []string
 	for _, name := range p.Order {
 		if r := p.Releases[name]; r != nil && r.Held {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// Deselected lists the packages Narrow left out of this run, in dependency
+// order: they would have released, and this invocation's selection is why they
+// are not. Empty on every plan nothing narrowed.
+func (p *Plan) Deselected() []string {
+	var out []string
+	for _, name := range p.Order {
+		if r := p.Releases[name]; r != nil && r.Deselected {
 			out = append(out, name)
 		}
 	}

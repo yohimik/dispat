@@ -48,14 +48,16 @@ func New(root string, cfg *config.File, log zerolog.Logger) *App {
 
 // Status computes the plan and reports it — diagnostics, then the full graph
 // with versions and channel transitions — without executing, tagging or
-// writing anything.
+// writing anything. It takes the release's own options because it is that
+// release seen in advance: the same selection, narrowed the same way, so what
+// the graph shows is what `dispat release` with those flags would do.
 //
 // It returns an error only when no correct plan exists (a repository-scoped
-// failure). A unit-scoped finding is reported and tolerated: seeing the plan
-// is the point of the operation, and the plan it printed is the one a release
-// would use.
-func (a *App) Status(ctx context.Context) error {
-	pl, err := a.computePlan(ctx)
+// failure) or when --strict refuses the selection. A unit-scoped finding is
+// reported and tolerated: seeing the plan is the point of the operation, and
+// the plan it printed is the one a release would use.
+func (a *App) Status(ctx context.Context, opts ReleaseOptions) error {
+	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -74,7 +76,10 @@ func (a *App) Status(ctx context.Context) error {
 }
 
 // computePlan discovers the workspace, computes the release plan and reports
-// it (diagnostics, then the graph).
+// it (diagnostics, then the graph). It is the whole plan, unnarrowed: `dispat
+// run` selects its own packages afterwards and never releases any of them, so
+// the graph it prints is the repository's. The commands that do release one
+// take selectedPlan below.
 func (a *App) computePlan(ctx context.Context) (*plan.Plan, error) {
 	pl, err := a.plan(ctx)
 	if err != nil {
@@ -82,6 +87,33 @@ func (a *App) computePlan(ctx context.Context) (*plan.Plan, error) {
 	}
 	a.printDiagnostics(pl)
 	a.printGraph(pl)
+	return pl, nil
+}
+
+// selectedPlan is computePlan for the two commands that release the plan
+// rather than read it: the plan is narrowed to the invocation's selection
+// between the diagnostics and the graph, so the graph printed is the run the
+// operator is about to get.
+//
+// The order matters at the end too. A --strict refusal comes after the graph,
+// never instead of it: "this selection cannot be released cleanly" is only
+// actionable next to the plan that says why.
+func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan, error) {
+	pl, err := a.plan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	a.printDiagnostics(pl)
+	narrowing, err := a.narrow(pl, opts.Filter)
+	if err != nil {
+		return nil, err
+	}
+	a.printGraph(pl)
+	if opts.Strict && !narrowing.Clean() {
+		err := errors.New("the selection cannot be released as it stands and --strict is set")
+		a.log.Error().Err(err).Msg("refusing to release")
+		return nil, err
+	}
 	return pl, nil
 }
 
