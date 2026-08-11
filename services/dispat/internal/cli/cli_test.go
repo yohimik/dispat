@@ -116,6 +116,16 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 	}
 }
 
+func TestCommandUsageFallsBackToTheProgramHelp(t *testing.T) {
+	// A word the table does not know has no help of its own; printing
+	// nothing would be worse than printing the command list.
+	var buf bytes.Buffer
+	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	declareFlags(fs)
+	printCommandUsage(&buf, fs, "nonsense")
+	assert.Contains(t, buf.String(), "usage: dispat [command] [flags]")
+}
+
 func TestEveryFlagIsClaimedByACommand(t *testing.T) {
 	// The drift guard: a flag added to the set but to no command's entry
 	// would be invisible in every help rendering, and the command table is

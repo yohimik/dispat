@@ -412,3 +412,105 @@ func TestStandaloneGithubSelection(t *testing.T) {
 	assert.Equal(t, 1, r.Command("github", "--package", "ghost").Code)
 	assert.Equal(t, 2, r.Command("github", "core").Code)
 }
+
+// TestStandaloneGithubFailures: the github step's error paths. A prerelease
+// held back by github.prerelease publishes nothing and says so; a package
+// whose token cannot be resolved fails the command outright rather than
+// silently publishing nothing, because a step the flow asked for must not
+// pass quietly when it could not run; and an API that rejects the up-front
+// verification fails before any release is created.
+func TestStandaloneGithubFailures(t *testing.T) {
+	t.Run("a prerelease held back", func(t *testing.T) {
+		srv, bodies := githubFake(t)
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.GitHub = &models.GitHubConfig{
+			Enabled: models.Bool(true), AllPackages: models.Bool(true), Prerelease: models.Bool(false),
+			Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		}
+		r.WriteConfigModel(cfg)
+		t.Setenv("DISPAT_IT_TOKEN", "tkn")
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core)%beta: a beta")
+
+		res := r.Command("github", "--package", "core")
+		assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+		assert.Empty(t, bodies(), "github.prerelease false holds the beta back here too")
+		assert.Contains(t, res.Stdout, "github.prerelease is false", "the skip states its reason")
+	})
+
+	t.Run("no token", func(t *testing.T) {
+		srv, bodies := githubFake(t)
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.GitHub = &models.GitHubConfig{
+			Enabled: models.Bool(true), AllPackages: models.Bool(true),
+			Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_MISSING_TOKEN",
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): first release")
+
+		res := r.Command("github", "--package", "core")
+		assert.Equal(t, 1, res.Code, "an unresolvable target fails the step it was asked for")
+		assert.Contains(t, res.Stdout+res.Stderr, "DISPAT_IT_MISSING_TOKEN")
+		assert.Empty(t, bodies())
+	})
+
+	t.Run("verification refused", func(t *testing.T) {
+		var created int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == http.MethodPost {
+				created++
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+		}))
+		defer srv.Close()
+
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.GitHub = &models.GitHubConfig{
+			Enabled: models.Bool(true), AllPackages: models.Bool(true),
+			Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		}
+		r.WriteConfigModel(cfg)
+		t.Setenv("DISPAT_IT_TOKEN", "wrong")
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): first release")
+
+		res := r.Command("github", "--package", "core")
+		assert.Equal(t, 1, res.Code)
+		assert.Contains(t, res.Stdout+res.Stderr, "github verification failed")
+		assert.Zero(t, created, "verification fails before any release is created")
+	})
+
+	t.Run("the api rejects the creation", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			switch {
+			case githubTagProbe(w, req, nil):
+			case req.Method == http.MethodGet:
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"Validation Failed"}`))
+			}
+		}))
+		defer srv.Close()
+
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.GitHub = &models.GitHubConfig{
+			Enabled: models.Bool(true), AllPackages: models.Bool(true),
+			Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		}
+		r.WriteConfigModel(cfg)
+		t.Setenv("DISPAT_IT_TOKEN", "tkn")
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): first release")
+
+		res := r.Command("github", "--package", "core")
+		assert.Equal(t, 1, res.Code)
+		assert.Contains(t, res.Stdout+res.Stderr, "github release failed")
+	})
+}
