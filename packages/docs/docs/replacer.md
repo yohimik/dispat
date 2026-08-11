@@ -180,9 +180,12 @@ legal and worth a glance.
 
 ### When a rule matches nothing
 
-`W222` says a rule found its text in none of the files it selected. That almost always means a mistyped template or a
-glob that has gone stale, and without the warning it would fail silently for as many releases as it took someone to
+`W222` says a rule reached files and found its text in none of them. That almost always means a mistyped template or a
+pattern that has gone stale, and without the warning it would fail silently for as many releases as it took someone to
 notice.
+
+A rule whose globs reach no file at all says nothing. One space-wide rule over `README.md` is the ordinary way to keep
+every README that exists in step, and a package without one has nothing for the rule to report.
 
 Re-running a release does not trigger it. After the first pass the text the rule looked for is gone, and dispat checks
 whether the file already reads the way the rule wants before deciding the rule is stale.
