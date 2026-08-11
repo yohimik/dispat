@@ -99,8 +99,10 @@ The suite was designed against eighteen goals, one test file each:
     winning over an enclosing one) while an explicit term always beats it; the filter narrowing a window and never
     widening it (`--since all` being what reaches an unchanged package) and composing with `--consumers`; the same
     terms and folder inference on `preview`, the step commands and `compute`, whose suggestions are scoped to the
-    selected consumers while detection still reads every package's manifests; and a positional package name now being
-    a usage error.
+    selected consumers while detection still reads every package's manifests; the same selection on `release` and
+    `status`, where publish order additionally withholds a consumer whose provider was left out (`W230`), a split
+    versioning group is warned about and released (`W231`), and `--strict` refuses either before anything is built;
+    and a positional package name now being a usage error.
 18. **Docker through the binary** (`docker_test.go`): the ecosystem dispat was built around and the last one it could
     read. What only a real run can show: that `compute` derives an image-to-image edge from a `FROM` line nobody wrote
     into the config; that a release reconciles the consumer's `FROM` and `COPY --from` tags and a compose file's
@@ -496,6 +498,13 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestFilterStepCommandsSelect`                  | The step commands take the same terms and the same folder inference; a selected package the plan is not releasing is a logged no-op, not a failure; an unmatched term exits 1.                                                                    |
 | `TestFilterPreviewSelects`                      | Preview takes the same terms and folder inference, and names the selection it found nothing pending for.                                                                                                                                          |
 | `TestFilterComputeScopesSuggestions`            | Compute reports and writes only the selected consumers' edges while still detecting against every package's manifests, so a declared edge onto an unselected provider is never proposed for removal; the in-sync line names the scope.            |
+| `TestFilterReleaseSelectsPartOfTheGraph`        | A release takes the same terms: `-p core` tags and publishes core alone, `-s apps` that space's package, the graph marks what was left out, and a later unfiltered run releases the rest without re-releasing what is already out.                |
+| `TestFilterReleaseWithholdsWhatTheOrderCannotReach` | A selected consumer whose provider is releasing and unselected is withheld (`W230`, naming the provider) and nothing is released; naming the provider too releases both; once the provider is out, the consumer alone is a fine selection.    |
+| `TestFilterReleaseStrictRefusesBeforeAnythingRuns` | `--strict` turns the withholding into exit 1 with no tags, no stage scripts and the releasable half of the same selection untouched; without it that half releases; a clean selection is unaffected by the flag.                             |
+| `TestFilterReleaseSplitsAVersioningGroup`       | Taking part of a `fixed` group releases it and warns (`W231`) rather than refusing; `--strict` refuses the same selection with nothing released; the next run rides the member left behind up to the group's version (`W210`).                   |
+| `TestFilterReleaseInfersFromTheInvocationFolder`| A release run from inside a package folder is that package's release; from the root it is still the whole monorepo.                                                                                                                              |
+| `TestFilterReleaseRecordsOnlyWhatReleased`      | The durable records follow the narrowed run: the release commit names only the created tag, only the released package's changelog is written, and no tag exists for a package left out.                                                          |
+| `TestFilterStatusSelects`                       | `status` narrows the same plan while still printing every package (`⊝ not selected`, `⊘ withheld until its providers release`), reports `W230` and exits 0, exits 1 under `--strict`, is clean when a space term brings the provider along, and fails on an unmatched term. |
 | `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
 
 ### Goal 18: Docker through the binary (`docker_test.go`)

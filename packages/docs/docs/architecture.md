@@ -42,8 +42,12 @@ callable without a command line.
    compute direct bumps, run the three propagation phases, then versions, with every versioning group (a space with
    its own shared mode, or a declared `versionGroups` entry its members joined) versioned as one (see "Versioning
    groups" below).
-6. Print the diagnostics, then the full graph with `old -> new` versions and channel transitions, in publish order.
-   `status` stops here.
+6. Print the diagnostics; narrow the plan to the invocation's `--package` / `--space` selection (`plan.Narrow`: every
+   unselected releasing package is deselected, a selected one whose provider is releasing and unselected is withheld
+   for the next run as `W230`, and a versioning group the selection splits is reported as `W231`); then print the full
+   graph with `old -> new` versions and channel transitions, in publish order, the deselected packages marked as such.
+   `--strict` refuses a selection carrying either finding, after the graph and before any release work. `status` stops
+   here.
 7. Refuse to release when the plan has a repository-scoped error, or any error at all under `commitErrors: "error"`.
 8. When `commit.push` or GitHub releases are enabled: verify remote/API access up front (`git ls-remote`,
    `GET /repos/{owner}/{repo}`) and fail fast before any release work. `commit.verify: false` skips the git check.
@@ -164,7 +168,7 @@ sections below.
 | `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
 | `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the finalize phase and run-level hooks; wires every other package together.  |
 | `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write` (every key one run touches in a file written in a single pass, so one backup holds the file as it was). |
-| `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration.                                                                     |
+| `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration. Plus `Narrow`, which restricts a computed plan to part of the graph for a filtered release (publish order withholds, versioning-group splits reported).                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
 | `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs.                                                                    |
 | `internal/changelog` | Changelog rendering and the per-package record dispatcher.                                                                                                                                                   |
@@ -172,7 +176,7 @@ sections below.
 | `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
 | `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits.                                                                                                                               |
 | `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
-| `internal/filter`    | The one package/space selection resolver every package-selecting command shares: `--package` / `--space` terms, their globs, and the invocation folder that stands in for them.                              |
+| `internal/filter`    | The one package/space selection resolver every package-selecting command shares, `release` and `status` included: `--package` / `--space` terms, their globs, and the invocation folder that stands in for them.                              |
 | `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatignore` and the selection terms share.                                                                                                        |
 
 ## Graph algorithms
@@ -379,9 +383,12 @@ audit) and `W196` (published version adopted from the registry) belong to the sa
 registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`), is implemented and
 emitted.
 
-In the other direction, three codes are dispat's own, outside the specification's registry, attached to the
-manifest-derived features the specification predates: `W220` (ambiguous manifest name), `W221` (rewritten dependency
-with no configured `dependencies` edge) and `W225` (one package's manifests declaring different versions for it). They
+In the other direction, five codes are dispat's own, outside the specification's registry, attached to features the
+specification predates or does not have. Three are manifest-derived: `W220` (ambiguous manifest name), `W221`
+(rewritten dependency with no configured `dependencies` edge) and `W225` (one package's manifests declaring different
+versions for it). Two belong to [releasing part of the graph](./partial-releases.md): `W230` (a selected package the
+publish order cannot reach yet) and `W231` (a selection releasing part of a versioning group). They are numbered
+clear of `W195`/`W196` on purpose, since the specification reserves those for the audit features above. All five
 follow the registry's numbering conventions and blast-radius rules, and are documented where their features are
 ([`compute`](./cli.md), [`autoVersion`](./configuration/spaces.md#autoversion)). `W192`, `W197` and `W203`, the auto-versioning narrations, are
 the specification's own §9.4/§12.4 codes.

@@ -74,6 +74,11 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
   verified before any work, and nothing is ever published against an unpublished dependency.
+- **Release part of the monorepo when you need to.** `dispat release --package core` (or `--space libs`, or just the
+  folder you are standing in) releases a subset at exactly the versions a full release would have given it. Publish
+  order still rules: a package whose provider is releasing and unselected waits for the next run instead of shipping
+  ahead of it, and `--strict` refuses a selection that cannot go out cleanly before anything is built.
+  [Details](https://yohimik.github.io/dispat/partial-releases).
 
 ## Documentation
 
@@ -87,6 +92,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Shared versions](https://yohimik.github.io/dispat/versioning)                  | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups. |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
 | [Release steps](https://yohimik.github.io/dispat/steps)                         | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.  |
+| [Partial releases](https://yohimik.github.io/dispat/partial-releases)           | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`. |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
 | [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
 | [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, `src`, standalone packages, package dependencies, in-folder config files. |
@@ -111,5 +117,5 @@ functions plus fuzzing, run by [CI](../../.github/workflows/tests.yml) on every 
 fakes, and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
 disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
-Together they hold **94.7%** workspace statement coverage
+Together they hold **95.6%** workspace statement coverage
 ([per-package table](https://yohimik.github.io/dispat/coverage), [test inventory](https://yohimik.github.io/dispat/architecture#testing)).

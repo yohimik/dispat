@@ -8,8 +8,8 @@ dispat [command] [flags]
 
 | Command                   | Effect                                                                                                            |
 |---------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag.            |
-| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written.          |
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag. `--package` / `--space` release part of the graph; see [Releasing part of the graph](#releasing-part-of-the-graph). |
+| `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written. Takes the release's own selection flags.          |
 | `run <script>`            | Run a script in every changed package that has it, graph-ordered; see [The run command](#the-run-command).        |
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
 | `preview`                 | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
@@ -30,8 +30,8 @@ dispat [command] [flags]
 | `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.  |
 | `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
 | `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
-| `--package`, `-p`     |             | `run`, `preview`, `changelog`, `autoversion`, `commit`, `github` and `compute`: narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same seven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
+| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
+| `--space`, `-s`       |             | The same nine commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
 | `--since`             |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
 | `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
 | `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
@@ -58,7 +58,7 @@ dispat [command] [flags]
 | `--set`               |             | `writer` only: set one dependency's declared range, `[kind:]name=range`; repeatable.                                       |
 | `--replace`           |             | `writer` only: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable.          |
 | `--sub`               |             | `replacer` only: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
-| `--strict`            |             | `scanner`, `writer` and `replacer` only: exit `1` on a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. |
+| `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. |
 | `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.               |
 | `--help`, `-h`        |             | Print help and exit. Without a command word, the command list and the global flags; after one, that command's synopsis and its own flags. See [Getting help](#getting-help).                            |
 
@@ -78,6 +78,29 @@ dispat github --help       # the github step's, and so on
 
 Help needs no config file and no git repository, and exits `0`: asking for help is not an error. A word that is not a
 command name is the [run shorthand](#the-run-command), so `dispat lint --help` prints run's help.
+
+## Releasing part of the graph
+
+`dispat release` and `dispat status` read the same [selection](#choosing-the-packages) every other command does:
+`--package`, `--space`, or the package or space folder the command was invoked from. The plan is computed for the
+whole repository and narrowed afterwards, so a selection decides *what* is released and never *at which version* —
+`dispat release -p core` releases core at exactly the version a full release would have given it.
+
+One rule is the selection's own, and it comes from publish order. A selected package whose provider is releasing in
+the same plan and is *not* selected is **withheld**: releasing it first would ship release notes crediting a provider
+version that does not exist yet (§19.2). It is reported as `W230` with the providers it waits for, the rest of the
+selection still releases, and the next run releases it. The rule is transitive, and a provider that is unchanged or
+held is nothing to wait for.
+
+A [versioning group](./versioning.md) is the softer case: a selection that takes only part of one releases and warns
+(`W231`). Nothing goes out of order, and the members left behind are ridden up to the group's version by the next run
+(`W210`), so the split is temporary and needs no operator.
+
+`--strict` refuses both, before anything is built, published or tagged: either the selection goes out as written or
+nothing does. On `status` it exits `1` for the same selections, which makes it a gate to put in front of a release
+job. The graph is printed either way, so a refusal always comes with the plan that explains it.
+
+The full guide, with worked output, is [Partial releases](./partial-releases.md).
 
 ## The run command
 
@@ -131,7 +154,10 @@ subdirectory of it) that package, inside a space folder that space, anywhere els
 nothing, so the command covers its usual set. The deepest match wins, so a standalone package nested inside another
 package's folder still selects itself. A term on the command line always beats the folder it was typed in.
 
-The same six commands read the same selection: `run`, `preview`, `changelog`, `autoversion`, `commit` and `compute`.
+Nine commands read the same selection: `release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`,
+`github` and `compute`. What each of them *does* with it differs — a release additionally has to respect publish
+order, described in [Releasing part of the graph](#releasing-part-of-the-graph) — but which packages a term picks out
+never does.
 
 ## The init command
 
@@ -307,10 +333,12 @@ Exit codes: `0` success (including "nothing changed"), `1` configuration/plannin
 [`commitErrors`](./configuration/parser.md#commiterrors)), at least one package failed, or an interrupted run, `2` bad
 command line.
 
-Both `release` and `status` print the plan's diagnostics before the graph. `status` exits `1` only for a
-repository-scoped failure (an unreadable tag, a version that would go backwards, a dependency cycle, a shallow clone),
-because for anything else the plan it just printed is the plan a release would use; when a release *would* refuse (for
-example under `commitErrors: error`) it says so in a warning and still exits `0`.
+Both `release` and `status` print the plan's diagnostics before the graph, and both narrow it to their
+[selection](#releasing-part-of-the-graph) between the two. `status` exits `1` only for a repository-scoped failure (an
+unreadable tag, a version that would go backwards, a dependency cycle, a shallow clone) or for a `--strict` selection
+the plan cannot release, because for anything else the plan it just printed is the plan a release would use; when a
+release *would* refuse (for example under `commitErrors: error`) it says so in a warning and still exits `0`. A
+withheld package or a split versioning group is a warning on both commands and exits `0` without `--strict`.
 
 ## Interruption
 

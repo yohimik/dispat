@@ -97,8 +97,9 @@ INF plan diagnostics warnings=12 errors=1 hidden=13
 ```
 
 Findings about the workspace rather than the message — an unknown scope (`E130`), a catch-up (`W193`), a blocked
-package (`W194`) — are never hidden. They explain a release outcome that a reader of the commit log alone cannot
-account for, which is the whole reason they exist.
+package (`W194`), a package a [selection](../partial-releases.md) could not release yet (`W230`) — are never hidden.
+They explain a release outcome that a reader of the commit log alone cannot account for, which is the whole reason
+they exist.
 
 The [`--quiet-parser` flag](../cli.md#flags) overrides the config in both directions:
 
