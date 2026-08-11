@@ -84,12 +84,13 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Concepts](https://yohimik.github.io/dispat/concepts)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
 | [Shared versions](https://yohimik.github.io/dispat/versioning)                  | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups. |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
+| [Release steps](https://yohimik.github.io/dispat/steps)                         | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.  |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
 | [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
-| [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, standalone packages, package dependencies, in-folder config files. |
+| [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, `src`, standalone packages, package dependencies, in-folder config files. |
 | [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
-| [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, the release commit.                                                    |
-| [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object.                                            |
+| [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, holding prereleases back, the release commit.                          |
+| [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object, quieting the parser's diagnostics.         |
 | [Manifest tools](https://yohimik.github.io/dispat/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
 | [The replacer](https://yohimik.github.io/dispat/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
 | [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |

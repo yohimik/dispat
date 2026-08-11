@@ -16,6 +16,7 @@ dispat [command] [flags]
 | `changelog`               | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
 | `autoversion`             | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
 | `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
+| `github`                  | Create the per-package GitHub release now; see [The step commands](#the-step-commands).                           |
 | `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).        |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The manifest commands](#the-manifest-commands).                     |
 | `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The manifest commands](#the-manifest-commands).                  |
@@ -29,12 +30,13 @@ dispat [command] [flags]
 | `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.  |
 | `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
 | `--on-error`          | `skip`      | `run` only: what a failing script does to the failed package's dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
-| `--package`, `-p`     |             | `run`, `preview`, `changelog`, `autoversion`, `commit` and `compute`: narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same six commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
+| `--package`, `-p`     |             | `run`, `preview`, `changelog`, `autoversion`, `commit`, `github` and `compute`: narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
+| `--space`, `-s`       |             | The same seven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
 | `--since`             |             | `run` only: select the packages the commits since a git revision address, instead of the release window; see [the run command](#the-run-command).                                                      |
 | `--consumers`         |             | `run` only: additionally run every package that transitively depends on a selected one; see [the run command](#the-run-command).                                                                       |
 | `--log-level`         | from config | Override: `trace`, `debug`, `info`, `warn`, `error`.                                                                                                                                                   |
 | `--log-format`        | from config | Override: `pretty` or `json`.                                                                                                                                                                          |
+| `--quiet-parser`      | from config | Override `parser.quiet`: hide the commit-message parser's own diagnostics. `--quiet-parser=false` shows them again when the config sets `quiet: true`; see [the parser options](./configuration/parser.md#quiet). |
 | `--format`            | `json`      | `init` only: the config file format to write (`json`, `yaml` or `toml`).                                                                                                                               |
 | `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                    |
 | `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                    |
@@ -45,6 +47,8 @@ dispat [command] [flags]
 | `--remote`            | from config | `commit` only: override the `commit.remote` push target.                                                                   |
 | `--message-format`    | from config | `commit` only: override the `commit.messageFormat` template.                                                               |
 | `--include`           | from config | `commit` only: override the `commit.include` extra staged paths.                                                           |
+| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `github` only: override the matching `github.*` values for every package of the invocation.  |
+| `--target`            |             | `github` only: create the tag at this commit or branch (`target_commitish`). Only safe once the commit is on the remote.   |
 | `--file`, `--title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation.          |
 | `--range`, `--match`, `--manifests`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation. `--manifests` takes `root`, `all` or `none`, where `none` turns the parsing strategy off. |
 | `--no-replace`        |             | `autoversion` only: skip the `autoVersion.replace` rules for this invocation.                                     |
@@ -55,10 +59,25 @@ dispat [command] [flags]
 | `--replace`           |             | `writer` only: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable.          |
 | `--sub`               |             | `replacer` only: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
 | `--strict`            |             | `scanner`, `writer` and `replacer` only: exit `1` on a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. |
-| `--version`           |             | Print the dispat logo and version (`dispat 1.2.3`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.                                        |
-| `--help`              |             | Print the logo and usage.                                                                                                                                                                              |
+| `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`.               |
+| `--help`, `-h`        |             | Print help and exit. Without a command word, the command list and the global flags; after one, that command's synopsis and its own flags. See [Getting help](#getting-help).                            |
 
 Flag precedence (via viper): explicitly set flag > config file > flag default > built-in default.
+
+## Getting help
+
+`dispat --help` lists every command with a one-line summary, plus the flags that apply everywhere. A command's own
+flags are one step away: `dispat <command> --help` prints that command's synopsis, what it does, and the flags it
+reads — and nothing else, so the page stays readable however many commands dispat grows.
+
+```sh
+dispat --help              # the command list and the global flags
+dispat run --help          # run's synopsis and its own flags
+dispat github --help       # the github step's, and so on
+```
+
+Help needs no config file and no git repository, and exits `0`: asking for help is not an error. A word that is not a
+command name is the [run shorthand](#the-run-command), so `dispat lint --help` prints run's help.
 
 ## The run command
 
@@ -132,12 +151,12 @@ changeset. Prints `no pending changes` when nothing is — naming the selection 
 
 ## The step commands
 
-`dispat changelog`, `dispat autoversion` and `dispat commit` expose the release pipeline's native steps to custom
-flows: a stage script can run a step at the moment the flow needs it, and the release stage later finds the work done
-and skips it. All three share the run command's [selection](#choosing-the-packages): with no terms they cover every
+`dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
+steps to custom flows: a stage script can run a step at the moment the flow needs it, and the release stage later
+finds the work done and skips it. All four share the run command's [selection](#choosing-the-packages): with no terms they cover every
 releasing package in dependency order, and `--package`, `--space` or the invocation folder narrows that. A term
 matching no package is an error; a *selected* package that is not releasing is a logged no-op, so a flow never fails
-over a converged or held package. The three command words are reserved: like every command name, each wins
+over a converged or held package. The four command words are reserved: like every command name, each wins
 the `dispat <script>` shorthand over a [script](./configuration/spaces.md#scripts-and-dispat-run) of the same name, so
 `dispat commit` is always the command. Spelling it out as `dispat run commit` still reaches the script.
 
@@ -162,6 +181,18 @@ commit; a tag that already exists there is a skip (`W223`), while a tag at any o
 `--push`, the branch is pushed once after all packages, and with `--tag` the tags too, skipping any already on the
 remote. When the command runs inside a release stage script (the environment carries `DISPAT_OUTPUT`), each package's
 commit is exported as `PACKAGE_<KEY>`, pinning the outer run's tag and GitHub release to it.
+
+**`dispat github`** creates each covered package's GitHub release, exactly what the release pipeline's own recorder
+would create: the release named after the package tag, its body the rendered changelog sections. A release the
+repository already carries is a skip (`W224`), so a repeated invocation — and the release that follows one — converge
+instead of failing on the API's duplicate-tag rejection.
+
+The opt-in is the one the recorder uses: a package is released when its scripts exported
+[`DISPAT_EXPORT_GITHUB`](./environment.md#script-outputs), or when
+[`github.allPackages`](./configuration/records.md#github) covers it. Run inside a stage script, the command reads that
+export out of its own environment — the stage handed it over, along with `DISPAT_PACKAGE` naming whose it is — and
+attaches the files it lists. Run by hand with the variable exported, it covers every package the invocation selects.
+Without either opt-in the command publishes nothing, and says so with exit `0`.
 
 ## The compute command
 

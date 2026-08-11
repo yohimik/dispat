@@ -32,7 +32,9 @@ The type decides the bump (overridable via [`parser.types`](./configuration/pars
 | `-app`    | removes `app` from the set; exclusions always win | warning                       |
 
 With no parentheses at all the set is file-derived, by longest matching path prefix: a file under a package nested
-inside another belongs to the inner one only. A unit resolving to no package is inert and reported as such.
+inside another belongs to the inner one only. A package that declares a [`src`](./configuration/packages.md#src) owns
+only what sits under that sub-folder, so a change elsewhere in its folder does not address it. A unit resolving to no
+package is inert and reported as such.
 
 ## Inline directives
 

@@ -133,12 +133,18 @@ dispat changelog            # write pending changelog entries now (custom flows;
                             # the release skips entries already written)
 dispat autoversion          # reconcile manifests to the planned versions
 dispat commit --tag --push  # per-package release commit, tag and push
+dispat github               # create the pending GitHub releases now (for a flow that
+                            # publishes from its own stage; already-published ones skip)
+dispat --help               # the command list; "dispat <command> --help" for one
+                            # command's own flags
 dispat --concurrency 4,2    # override build/publish parallelism
 dispat run lint --concurrency 8       # dispat run uses the build (first) value as its budget
 dispat --log-format json    # machine-readable logs for CI
 dispat --log-level debug    # more verbose output
-dispat --version            # print the dispat version (release binaries carry
-                            # the release tag's version; local builds say dev)
+dispat --quiet-parser       # hide the commit-message parser's diagnostics for this run
+dispat --version            # print the version and platform, e.g. 1.4.0 (linux_amd64)
+                            # (release binaries carry the release tag's version;
+                            # local builds say dev)
 ```
 
 ## Reviewing a plan

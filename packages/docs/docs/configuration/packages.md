@@ -63,6 +63,7 @@ keys:
 | `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                        |
 | `dependencies` | string or array | Provider names this package [depends on](#package-dependencies); the consumer is the package itself.                                                                                                                                                                                                  |
 | `manifestNames` | array of strings | The manifest names this package answers to, stated rather than read from its files. See [`manifestNames`](#manifestnames) below.                                                                                                                                                                     |
+| `src`          | string          | A folder-relative path narrowing which of the package's files count as changes to it. See [`src`](#src) below.                                                                                                                                                                                        |
 
 For an entry overriding a space package, a field left unset **inherits** from the space; a field set overrides it. The
 per-field rules follow from what each object means:
@@ -166,6 +167,41 @@ collision here is a typo in your configuration rather than a fact about the repo
 
 The key belongs to a package, not to a space, so it lives in a `packages` entry or in the package's own
 [in-folder file](#in-folder-configuration-files).
+
+## `src`
+
+A commit that names no scope is attributed by the files it touched: whichever package owns a changed path is the
+package the commit addresses. Ownership is the package folder, so *everything* in the folder counts, which is usually
+right and occasionally not. A package whose folder also holds a docs site, a fixtures tree or a scratch directory
+releases on a typo fix in prose.
+
+`src` narrows that to one sub-folder:
+
+```yaml
+packages:
+  core:
+    src: lib
+```
+
+A changed file now has to sit under `packages/core/lib` to make a scopeless commit address `core`. Anything else in
+the folder belongs to whichever package encloses it, or to no package at all.
+
+What `src` does *not* change is worth stating, because it is most of the package:
+
+- **The package folder is still the package.** Scripts run there, the changelog is written there, and the release
+  commit stages all of it, `src` or not.
+- **Manifests are still found in the whole folder.** A `package.json` or `go.mod` usually sits at the package root,
+  outside `src`, and [auto-versioning](./spaces.md#autoversion) and `dispat compute` must still reach it.
+- **A scope always wins.** `fix(core): ...` addresses `core` wherever the commit's files are. `src` narrows the
+  file-derived fallback, which is what runs when a commit names no scope at all. See
+  [scope sets](../commits.md#scope-sets).
+
+A `src` that could never match is refused at load: a folder that is not there, a path leaving the package, or the
+package folder itself. Each of those would narrow the package to nothing, and a package that quietly stops releasing
+is the failure this check exists to prevent.
+
+Like `manifestNames`, the key belongs to a package rather than a space, so it lives in a `packages` entry or in the
+package's own [in-folder file](#in-folder-configuration-files).
 
 ## Package weights: `concurrency`
 

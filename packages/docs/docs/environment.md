@@ -161,7 +161,9 @@ empty value creates the release with no assets. An invalid entry (a relative pat
 skipped with a warning while the release and the sound entries go through. Unlike ordinary outputs the export travels to
 later scripts under its full name, so appending is
 `echo "DISPAT_EXPORT_GITHUB=$DISPAT_EXPORT_GITHUB $PWD/more.tgz" >> "$DISPAT_OUTPUT"`, and it does not appear in
-`DISPAT_OUTPUTS`.
+`DISPAT_OUTPUTS`. Because it reaches later scripts as a plain environment variable, the
+[`dispat github`](./cli.md#the-step-commands) step command run from one of them reads the same opt-in and the same
+asset list out of its own environment.
 
 The other export with a consumer inside dispat is **`PACKAGE_<KEY>`**, where `<KEY>` is the exporting package's own key
 under the [scheme above](#workspace-data). A release script that exports `PACKAGE_<KEY>=<commitHash>` pins the package's

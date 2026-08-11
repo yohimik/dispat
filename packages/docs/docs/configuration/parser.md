@@ -22,7 +22,8 @@ would not exceed the baseline, a graduation that would go backwards, a dependenc
 exists, so the run always aborts before releasing anything. They are fixed by correcting the repository (usually a tag)
 and re-running, not by editing a commit.
 
-Diagnostics are printed either way, with their code (`E130`, `W193`, ...), the package and the commit.
+Diagnostics are printed either way, with their code (`E130`, `W193`, ...), the package and the commit — unless
+[`parser.quiet`](#quiet) hides the parser's own, which changes what you read and nothing about what the run does.
 
 ## `nonPackageScopes`
 
@@ -51,6 +52,7 @@ propagation usually want `1` here; teams that want blast radius readable from ea
 |----------------------------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `separator`                | `---`                              | The unit separator line. At least three ASCII-printable characters, no whitespace, must not begin like a type. Repositories exchanging patches by mail often use `%%%`.                                                                                              |
 | `types`                    | the standard table                 | Map of commit type → bump (`none`, `patch`, `minor`, `major`). A non-empty map **replaces** the standard table (`feat`=minor, `fix`/`perf`/`revert`=patch, the rest none) wholesale, so list every type you keep. Names are a-z only (viper lowercases keys anyway). |
+| `quiet`                    | `false`                            | Hide the parser's own diagnostics from the log; see [Quiet](#quiet).                                                                                                                                                                                                 |
 | `strictTypes`              | `false`                            | Turn an unknown commit type into an error (E140) instead of a warning; the [`commitErrors`](#commiterrors) policy decides whether that stops the run.                                                                                                                |
 | `lenient`                  | `false`                            | Downgrade selected authoring errors to warnings: an uppercase type is lowercased, a missing space after `:` is accepted, a footer contradicting an inline directive wins.                                                                                            |
 | `maxDescriptionLength`     | `100`                              | The long-description warning threshold, in Unicode scalar values; negative disables it.                                                                                                                                                                              |
@@ -72,4 +74,35 @@ parser:
   strictTypes: true
   propagation:
     depth: 1        # bundled dependencies: a bump reaches direct consumers by default
+```
+
+### Quiet
+
+A repository whose history predates the convention earns a diagnostic on nearly every old commit, and the noise buries
+the findings that matter. `parser.quiet: true` hides the parser's own findings — the ones about the text of a commit
+message, codes `E0xx`/`E1xx` and `W0xx`/`W1xx` — from the log.
+
+```yaml
+parser:
+  quiet: true
+```
+
+It is a display decision and only that. Every diagnostic is still raised, still counted, and still does whatever it did
+before: under `commitErrors: "error"` a hidden error still refuses the release, and a
+[repository-scoped](#commiterrors) failure still aborts the run. The plan-diagnostics summary line reports how many
+lines went unprinted, so "nothing is wrong" and "you asked not to see it" never look the same:
+
+```console
+INF plan diagnostics warnings=12 errors=1 hidden=13
+```
+
+Findings about the workspace rather than the message — an unknown scope (`E130`), a catch-up (`W193`), a blocked
+package (`W194`) — are never hidden. They explain a release outcome that a reader of the commit log alone cannot
+account for, which is the whole reason they exist.
+
+The [`--quiet-parser` flag](../cli.md#flags) overrides the config in both directions:
+
+```sh
+dispat status --quiet-parser         # hide them for this invocation
+dispat status --quiet-parser=false   # show them again, whatever the config says
 ```

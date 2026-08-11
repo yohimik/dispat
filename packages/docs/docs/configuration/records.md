@@ -19,10 +19,11 @@ repository.
 
 | Key       | Default        | Description                                   |
 |-----------|----------------|-----------------------------------------------|
-| `enabled` | `true`         | Write a changelog file per published package. |
-| `file`    | `CHANGELOG.md` | File name inside the package folder.          |
-| `title`   | `# Changelog`  | First line of the file.                       |
-| *format*  |                | All entry format options above.               |
+| `enabled`    | `true`         | Write a changelog file per published package.                                          |
+| `prerelease` | `true`         | Write an entry for a prerelease version too; see [Holding prereleases back](#holding-prereleases-back). |
+| `file`       | `CHANGELOG.md` | File name inside the package folder.                                                   |
+| `title`      | `# Changelog`  | First line of the file.                                                                |
+| *format*     |                | All entry format options above.                                                        |
 
 New entries are prepended below the title, newest first.
 
@@ -48,6 +49,7 @@ lands inside the release commit, and the release stage's own recorder finds it a
 |------------|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](../environment.md#script-outputs).                                                                                                                                                |
 | `allPackages`  | `false`                  | Create a release for every published package, even when no script exported `DISPAT_EXPORT_GITHUB`; the export then only adds assets. Default: the export is the per-package opt-in. |
+| `prerelease` | `true`                    | Create a release for a prerelease version too (flagged as a prerelease on GitHub); see [Holding prereleases back](#holding-prereleases-back).                                                                                        |
 | `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                      |
 | `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                       |
 | `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                                                                                                                                                                                                                              |
@@ -85,6 +87,29 @@ uploaded (named after the file, `application/octet-stream`) right after the rele
 mode too, where the release itself moves to the finalize phase. An invalid entry (a relative path, a missing file, a
 directory) is skipped with a warning while the release and the remaining files go through; a failed upload of a valid
 file still fails the package like any other recording failure.
+
+**Creating a release twice.** A release the repository already carries for the planned tag is a skip (`W224`), not the
+API's duplicate-tag rejection, so a run repeated after a later stage failed — and the
+[`dispat github`](../cli.md#the-step-commands) step command run twice — converge instead of failing.
+
+## Holding prereleases back
+
+Both records write on every channel by default: a `1.3.0-beta.0` earns a changelog entry and a GitHub release just
+like a stable version does. `prerelease: false` on either object stops that for the version it applies to, and it is
+one of the fields a package may [override](./packages.md), so the choice can be per package.
+
+```json title="dispat.json"
+{
+  "changelog": { "prerelease": false },
+  "github": { "prerelease": false }
+}
+```
+
+Nothing else about the prerelease changes. It is still planned, still built, still published and still tagged; the
+flow does not notice. Only the records are held: the betas of a version leave nothing behind, and the
+**graduation** to stable writes the one entry and creates the one release covering the whole train, under the
+[release-notes windowing](#changelog) that already collects it. A repository whose changelog is meant to read as the
+history of its stable releases, with the beta traffic staying in the tags, wants exactly this.
 
 ## `commit`
 

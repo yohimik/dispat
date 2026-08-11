@@ -13,6 +13,7 @@ const sidebars: SidebarsConfig = {
     'concepts',
     {type: 'doc', id: 'versioning', label: 'Shared versions'},
     {type: 'doc', id: 'cli', label: 'CLI'},
+    {type: 'doc', id: 'steps', label: 'Release steps'},
     {
       type: 'category',
       label: 'Configuration',
