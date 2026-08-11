@@ -8,6 +8,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // GitHubOptions selects what GitHub covers and where it publishes. The
@@ -68,9 +69,9 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 				a.log.Error().Err(err).Msg("github verification failed")
 				return err
 			}
+			gh.TargetCommitish = opts.Target
 			releasers[spec] = gh
 		}
-		gh.TargetCommitish = opts.Target
 		if export.covers(name) {
 			// A step invocation has no run behind it, so the release carries
 			// no outputs of its own; the stage's own environment supplies the
@@ -129,7 +130,7 @@ func (e stepExport) covers(name string) bool {
 // dropped rather than applied to the wrong release.
 func (a *App) readExport(targets []string) stepExport {
 	value, present := os.LookupEnv(plan.GitHubExport)
-	e := stepExport{value: value, present: present, pkg: os.Getenv("DISPAT_PACKAGE")}
+	e := stepExport{value: value, present: present, pkg: os.Getenv(release.PackageEnvVar)}
 	if !present || e.pkg == "" {
 		return e
 	}

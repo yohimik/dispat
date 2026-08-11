@@ -14,6 +14,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // stepApp builds the plan the step commands select over — packages a, b, c,
@@ -131,7 +132,7 @@ func TestReadExportReadsTheStageEnvironment(t *testing.T) {
 			} else {
 				t.Setenv(plan.GitHubExport, tc.export)
 			}
-			t.Setenv("DISPAT_PACKAGE", tc.pkg)
+			t.Setenv(release.PackageEnvVar, tc.pkg)
 
 			got := a.readExport(targets)
 			assert.Equal(t, tc.want, got)

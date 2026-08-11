@@ -237,6 +237,12 @@ func CommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
 	return packageEnv(p, pkg, wsVars, liveProviderUpdates(pkg, p, nil), stage)
 }
 
+// PackageEnvVar names the package a per-package script or hook is running
+// for. A nested dispat command reads it to know whose environment it was
+// handed, which is how the standalone github step attributes the
+// plan.GitHubExport opt-in it finds there.
+const PackageEnvVar = "DISPAT_PACKAGE"
+
 // packageEnv builds the DISPAT_* environment of one package's script or hook.
 // stage is what DISPAT_STAGE carries: the stage name for a stage script, the
 // hook name ("beforeBuild", "postPublish", ...) for a hook — every hook gets
@@ -244,7 +250,7 @@ func CommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
 func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
 	rel := p.Releases[pkg]
 	env := []string{
-		"DISPAT_PACKAGE=" + pkg,
+		PackageEnvVar + "=" + pkg,
 		"DISPAT_SPACE=" + rel.Pkg.Space.Name,
 		"DISPAT_OLD_VERSION=" + rel.Previous().String(),
 		"DISPAT_STABLE_BASELINE=" + rel.Current.String(),

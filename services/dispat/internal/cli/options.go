@@ -140,6 +140,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.strict = fs.Bool("strict", false,
 		"exit 1 on a manifest that failed to parse, an edit the manifest does not declare, or a --sub that matched nothing")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
+	// Declaring help is what makes it a flag rather than pflag's own
+	// interception, which fires during Parse — before the command word has
+	// been read — and is why help used to be the whole program's, whatever
+	// command was asked for.
 	o.showHelp = fs.BoolP("help", "h", false,
 		"print help for the command and exit")
 	return o

@@ -5,7 +5,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -96,16 +95,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	o := declareFlags(fs)
-	// Declaring --help is what makes it a flag rather than pflag's own
-	// interception, which fires during Parse — before the command word is
-	// read — and is why help used to be the whole program's, whatever
-	// command was asked for.
 	fs.Usage = func() { printUsage(stderr, fs) }
 	usageForCommand := func(cmd string) { printCommandUsage(stderr, fs, cmd) }
 	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, pflag.ErrHelp) {
-			return 0
-		}
 		// pflag's ContinueOnError mode returns the error without printing it,
 		// so an unrecognized flag would otherwise exit 2 in total silence.
 		fmt.Fprintf(stderr, "dispat: %v\n\n", err)
@@ -181,7 +173,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			}
 			if len(subs) == 0 {
 				bootLog.Error().Msg("replacer needs something to write: --sub 'find=>write'")
-				fs.Usage()
+				usageForCommand(cmd)
 				return 2
 			}
 			if app.SubstituteFiles(ctx, app.SubstituteOptions{
@@ -199,7 +191,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
 			bootLog.Error().Msg("writer needs something to write: --set-version, --set or --replace")
-			fs.Usage()
+			usageForCommand(cmd)
 			return 2
 		}
 		if app.WriteManifests(ctx, app.WriteOptions{
