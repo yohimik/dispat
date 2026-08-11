@@ -301,7 +301,7 @@ func TestInFolderNestedRoot(t *testing.T) {
 	})
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nested monorepo root")
+	assert.Contains(t, err.Error(), "monorepo root of its own")
 	assert.Contains(t, err.Error(), DispatignoreName)
 }
 

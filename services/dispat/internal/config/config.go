@@ -40,6 +40,7 @@ type (
 	GitHubConfig             = public.GitHubConfig
 	CommitConfig             = public.CommitConfig
 	SpaceConfig              = public.SpaceConfig
+	SpaceFile                = public.SpaceFile
 	SpaceFlowConfig          = public.SpaceFlowConfig
 	PackageConfig            = public.PackageConfig
 	VersionGroupConfig       = public.VersionGroupConfig
@@ -227,50 +228,83 @@ var defaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dis
 // from inside a package folder, with the config's own directory becoming the
 // effective monorepo root.
 //
-// A package folder may carry a dispat config file of its own — its override
-// layer — so a found file only ends the ascent when it declares spaces or
-// packages (or cannot be read at all, because a broken root config must fail
-// in Load, not be silently skipped). When no file on the way up declares
-// either, the first file found is returned anyway: the "at least one space
-// or package" error it produces names the real mistake. When nothing is
-// found, the error says so and names every candidate tried.
+// A space folder and a package folder may both carry a dispat config file of
+// their own — their override layers — so what a found file declares decides
+// whether the ascent ends there:
+//
+//	declares spaces      a monorepo root; the ascent stops
+//	cannot be read       likewise, because a broken root config must fail in
+//	                     Load rather than be silently skipped
+//	declares packages    a root candidate, remembered, and the ascent goes on:
+//	                     a space folder's file declares packages too
+//	neither              a package folder's file; remembered as the weakest
+//	                     fallback, and the ascent goes on
+//
+// A remembered candidate is only displaced by a spaces-declaring ancestor
+// that owns it: the ancestor's space paths decide, so a space folder's file
+// yields to the root above it while a repository whose only config declares
+// packages stays its own root. When no file on the way up declares either
+// key, the nearest file found is returned anyway: the "at least one space or
+// package" error it produces names the real mistake. When nothing is found,
+// the error says so and names every candidate tried.
 func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
 	if explicit {
 		return filepath.Join(root, name), root, nil
 	}
-	var fallback, fallbackRoot string
-	// A directory contributes its first existing candidate name alone — the
-	// name-order precedence within one folder predates the ascent and stays.
-	try := func(dir string) (string, bool) {
-		for _, cand := range defaultFileNames {
-			p := filepath.Join(dir, cand)
-			if _, err := os.Stat(p); err != nil {
-				continue
+	var candidate, candidateRoot string // declares packages, not spaces
+	var fallback, fallbackRoot string   // declares neither
+	// A directory contributes its first candidate name alone — the name-order
+	// precedence within one folder predates the ascent and stays.
+	try := func(dir string) (string, string, error) {
+		names, err := configCandidates(dir)
+		if err != nil {
+			return "", "", fmt.Errorf("config: %s: %s: %w", dir, DispatignoreName, err)
+		}
+		if len(names) == 0 {
+			return "", "", nil
+		}
+		p := filepath.Join(dir, names[0])
+		switch classifyConfig(p) {
+		case configRoot:
+			if candidate != "" && ownsSpaceFolder(p, dir, candidateRoot) {
+				return candidate, candidateRoot, nil
 			}
-			if isRootConfig(p) {
-				return p, true
+			return p, dir, nil
+		case configBroken:
+			return p, dir, nil
+		case configPackages:
+			if candidate == "" {
+				candidate, candidateRoot = p, dir
 			}
+		default:
 			if fallback == "" {
 				fallback, fallbackRoot = p, dir
 			}
-			break
 		}
-		return "", false
+		return "", "", nil
 	}
-	if p, ok := try(root); ok {
-		return p, root, nil
-	}
-	// Not in root itself: ascend. Absolute paths make the parent walk
+	dirs := []string{root}
+	// Beyond root itself the walk ascends; absolute paths make it
 	// well-defined wherever the relative root pointed.
 	if abs, absErr := filepath.Abs(root); absErr == nil {
 		for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
-			if p, ok := try(dir); ok {
-				return p, dir, nil
-			}
+			dirs = append(dirs, dir)
 			if dir == filepath.Dir(dir) { // filesystem root
 				break
 			}
 		}
+	}
+	for _, dir := range dirs {
+		p, r, err := try(dir)
+		if err != nil {
+			return "", "", err
+		}
+		if p != "" {
+			return p, r, nil
+		}
+	}
+	if candidate != "" {
+		return candidate, candidateRoot, nil
 	}
 	if fallback != "" {
 		return fallback, fallbackRoot, nil
@@ -280,18 +314,76 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 		root, strings.Join(defaultFileNames, ", "))
 }
 
-// isRootConfig reports whether the file is a monorepo root configuration —
-// it declares spaces or packages — rather than a package's in-folder
-// override file. A file viper cannot read counts as a root config: Load is
-// where a broken config fails loudly, and skipping it to use a parent's file
-// would hide the breakage.
-func isRootConfig(path string) bool {
+// configClass is what a file found during the ascent turns out to be.
+type configClass int
+
+const (
+	// configLoose declares neither spaces nor packages: a package folder's
+	// override file, or a root config missing both.
+	configLoose configClass = iota
+	// configPackages declares packages but no spaces: either a monorepo of
+	// standalone packages, or a space folder's own file.
+	configPackages
+	// configRoot declares spaces, so it is a monorepo root.
+	configRoot
+	// configBroken cannot be read at all.
+	configBroken
+)
+
+// classifyConfig reads just enough of a file to place it. A file viper cannot
+// read is broken rather than skippable: Load is where a broken config fails
+// loudly, and stepping over it to use a parent's file would hide the
+// breakage.
+func classifyConfig(path string) configClass {
 	v := viper.New()
 	v.SetConfigFile(path)
 	if err := v.ReadInConfig(); err != nil {
-		return true
+		return configBroken
 	}
-	return v.IsSet("spaces") || v.IsSet("packages")
+	switch {
+	case v.IsSet("spaces"):
+		return configRoot
+	case v.IsSet("packages"):
+		return configPackages
+	default:
+		return configLoose
+	}
+}
+
+// ownsSpaceFolder reports whether the root config at path, loaded with rootDir
+// as the monorepo root, declares a space whose folder is dir — which is what
+// tells a space folder's config file apart from a monorepo of standalone
+// packages. Folders are compared by identity, so a symlinked or
+// case-insensitive path still matches itself.
+func ownsSpaceFolder(path, rootDir, dir string) bool {
+	target, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	v := viper.New()
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		return false
+	}
+	spaces, ok := v.Get("spaces").(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, raw := range spaces {
+		fields, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		p, ok := fields["path"].(string)
+		if !ok || p == "" {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(rootDir, filepath.FromSlash(p)))
+		if err == nil && os.SameFile(info, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {

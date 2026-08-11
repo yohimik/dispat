@@ -23,11 +23,49 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
-// DispatignoreName is the per-space ignore file: one pattern per line,
-// matched against the space folder's direct sub-folder names, marking
-// folders that are not packages. Blank lines and #-comments are skipped;
-// "*" in a pattern matches any run of characters.
+// DispatignoreName is the per-folder ignore file: one pattern per line,
+// matched against the names in the folder it sits in. In a space folder the
+// patterns mark direct sub-folders that are not packages; in any folder they
+// also mark config file names dispat must not pick up, which is how a folder
+// holding both dispat.json and dispat.yaml says which one is real. Blank
+// lines and #-comments are skipped; "*" in a pattern matches any run of
+// characters.
 const DispatignoreName = ".dispatignore"
+
+// configCandidates returns the config files present in dir, in the
+// defaultFileNames precedence order, minus the names the folder's own
+// .dispatignore excludes. It is the single probe ResolveFile, loadSpaceFile
+// and loadPackageFile share, so the three can never disagree about which file
+// a folder offers.
+//
+// The ignore file is only read when the folder actually holds a config file:
+// a folder with nothing to pick has nothing to exclude, and the ascent walks
+// folders that are none of dispat's business.
+func configCandidates(dir string) ([]string, error) {
+	var present []string
+	for _, cand := range defaultFileNames {
+		if _, err := os.Stat(filepath.Join(dir, cand)); err == nil {
+			present = append(present, cand)
+		}
+	}
+	if len(present) == 0 {
+		return nil, nil
+	}
+	patterns, err := loadIgnore(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(patterns) == 0 {
+		return present, nil
+	}
+	kept := present[:0:0]
+	for _, cand := range present {
+		if !ignoredName(patterns, cand) {
+			kept = append(kept, cand)
+		}
+	}
+	return kept, nil
+}
 
 // validateVersionGroups normalizes the declared groups in place and rejects
 // the two declaration mistakes: a versioning mode that does not share (a
@@ -386,44 +424,101 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 	}
 }
 
+// openFolderConfig probes a folder for its in-folder dispat config file — the
+// same names and formats the root config resolves through, minus what the
+// folder's .dispatignore excludes — and returns the reader positioned on it.
+// An absent file yields an empty path and a nil reader, which every caller
+// reads as "this folder says nothing".
+func openFolderConfig(dir string) (*viper.Viper, string, error) {
+	names, err := configCandidates(dir)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %w", DispatignoreName, err)
+	}
+	if len(names) == 0 {
+		return nil, "", nil
+	}
+	p := filepath.Join(dir, names[0])
+	v := viper.New()
+	v.SetConfigFile(p)
+	if err := v.ReadInConfig(); err != nil {
+		return nil, p, fmt.Errorf("cannot read %s: %w", p, err)
+	}
+	return v, p, nil
+}
+
+// weakDecode is the decoding stance every in-folder file shares with the root
+// config: unknown keys are rejected, and weak typing lifts a scalar flow
+// entry into its slice.
+func weakDecode(dc *mapstructure.DecoderConfig) { dc.WeaklyTypedInput = true }
+
+// refuseNestedRoot rejects a folder file declaring one of the keys only a
+// monorepo root may declare. The folder holds a repository of its own, and a
+// nested root must be ignored rather than half-merged; role and remedy name
+// what the folder was being read as and how to take it out of the walk.
+func refuseNestedRoot(v *viper.Viper, path, role, remedy string, keys ...string) error {
+	for _, key := range keys {
+		if v.IsSet(key) {
+			return fmt.Errorf(
+				"%s declares %s, so the folder looks like a monorepo root of its own rather than a %s; %s, or remove the file",
+				path, key, role, remedy)
+		}
+	}
+	return nil
+}
+
 // loadPackageFile probes a package folder for its in-folder dispat config
-// file — the same names and formats the root config resolves through — and
-// decodes it as a PackageConfig, the file's top-level object. A file that
-// declares spaces or packages is refused with guidance: the folder holds a
-// monorepo of its own, and a nested root must be ignored, not merged.
+// file and decodes it as a PackageConfig, the file's top-level object.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
 	var pc PackageConfig
-	for _, cand := range defaultFileNames {
-		p := filepath.Join(dir, cand)
-		if _, err := os.Stat(p); err != nil {
-			continue
-		}
-		v := viper.New()
-		v.SetConfigFile(p)
-		if err := v.ReadInConfig(); err != nil {
-			return pc, p, fmt.Errorf("cannot read %s: %w", p, err)
-		}
-		for _, rootKey := range []string{"spaces", "packages"} {
-			if v.IsSet(rootKey) {
-				return pc, p, fmt.Errorf(
-					"%s declares %s, so the folder looks like a nested monorepo root rather than a package; ignore the folder (%s) or remove the file",
-					p, rootKey, DispatignoreName)
-			}
-		}
-		// The same decoding stance as the root config: unknown keys are
-		// rejected, weak typing lifts scalar flow entries into slices.
-		weak := func(dc *mapstructure.DecoderConfig) { dc.WeaklyTypedInput = true }
-		if err := v.UnmarshalExact(&pc, weak); err != nil {
-			return pc, p, fmt.Errorf("invalid format in %s: %w", p, err)
-		}
-		if pc.Path != "" {
-			return pc, p, fmt.Errorf(
-				"%s: path cannot be set in a package folder's config file — the package's location is the folder itself (or its packages entry's path)",
-				p)
-		}
-		return pc, p, nil
+	v, p, err := openFolderConfig(dir)
+	if err != nil || v == nil {
+		return pc, p, err
 	}
-	return pc, "", nil
+	if err := refuseNestedRoot(v, p, "package",
+		"exclude the folder with "+DispatignoreName, "spaces", "packages"); err != nil {
+		return pc, p, err
+	}
+	if err := v.UnmarshalExact(&pc, weakDecode); err != nil {
+		return pc, p, fmt.Errorf("invalid format in %s: %w", p, err)
+	}
+	if pc.Path != "" {
+		return pc, p, fmt.Errorf(
+			"%s: %s", p, pathRefused("a package folder's config file"))
+	}
+	return pc, p, nil
+}
+
+// loadSpaceFile probes a space folder for its in-folder dispat config file
+// and decodes it as a SpaceFile, the space's own configuration overriding
+// what the root file says about it. `path` has no field to land in — the
+// folder the file sits in already is the space's path — so it is reported by
+// name rather than as a bare unknown key.
+func loadSpaceFile(dir string) (SpaceFile, string, error) {
+	var sf SpaceFile
+	v, p, err := openFolderConfig(dir)
+	if err != nil || v == nil {
+		return sf, p, err
+	}
+	if err := refuseNestedRoot(v, p, "space folder",
+		"drop the space from the root config", "spaces"); err != nil {
+		return sf, p, err
+	}
+	if v.IsSet("path") {
+		return sf, p, fmt.Errorf("%s: %s", p, pathRefused("a space folder's config file"))
+	}
+	if err := v.UnmarshalExact(&sf, weakDecode); err != nil {
+		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
+	}
+	return sf, p, nil
+}
+
+// pathRefused is the one sentence every layer that may not set `path` gives,
+// so a space entry, a space file and a package file all explain the rule the
+// same way.
+func pathRefused(where string) string {
+	return fmt.Sprintf(
+		"path cannot be set in %s: a folder's location is the folder itself, and only a top-level packages entry declares a package elsewhere",
+		where)
 }
 
 // loadIgnore reads a space folder's .dispatignore patterns; an absent file

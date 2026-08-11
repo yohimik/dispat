@@ -365,19 +365,71 @@ type SpaceConfig struct {
 	// before any flow.version script runs. nil means off. See
 	// AutoVersionConfig.
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	// Packages holds per-package configuration for this space's packages
+	// alone, keyed by folder name — the same entry shape as the file's own
+	// `packages` map, scoped to the space that owns the folders. Every key
+	// must match exactly one folder of this space, and no entry may carry a
+	// `path`: a space package's location is its folder, and a package living
+	// outside every space is declared in the top-level map instead. An entry
+	// here outranks the top-level entry for the same package, being the
+	// nearer statement about it.
+	Packages map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
 }
 
-// PackageConfig is one entry of the top-level `packages` map. Without `path`
-// it overrides the enclosing space's configuration for the package whose
-// folder name matches the entry key; with `path` it declares a standalone
-// package outside every space, whose configuration the entry itself is. It
-// mirrors SpaceConfig's keys plus the package-only keys: `changelog`,
-// `github`, `concurrency` and `dependencies`. The same shape (minus `path` —
-// a package's location is its entry or its folder, never the file inside it)
-// is the top-level object of a dispat config file placed inside a package
-// folder, which is the most local override layer: space config (or the
-// standalone entry's synthetic base), then the `packages` entry, then the
-// in-folder file, field by field.
+// SpaceFile is the top-level object of a dispat config file placed inside a
+// space folder: the space's own configuration, overriding what the root
+// file's `spaces` entry says about it field by field, plus the `packages`
+// entries for the folders next to the file.
+//
+// It mirrors SpaceConfig minus `path` — the file sits in the space folder, so
+// the folder it lives in already *is* the path, and a file able to redefine
+// it could point a space at a folder it is not in. `spaces` is refused for
+// the same reason a package folder's file refuses it: a file declaring spaces
+// is a monorepo root of its own, and a nested root must be ignored rather
+// than half-merged.
+//
+// A field left unset inherits from the root file's space entry, which is why
+// the scalar booleans are pointers here where SpaceConfig's are plain: an
+// override must be able to say nothing.
+type SpaceFile struct {
+	IsBuildWaitingPublish *bool                    `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool                    `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig         `mapstructure:"flow" json:"flow,omitempty"`
+	TagFormat             string                   `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	Versioning            string                   `mapstructure:"versioning" json:"versioning,omitempty"`
+	VersionGroup          string                   `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
+	Scripts               map[string]string        `mapstructure:"scripts" json:"scripts,omitempty"`
+	AutoVersion           *AutoVersionConfig       `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	Packages              map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
+}
+
+// PackageConfig is one entry of a `packages` map. Without `path` it overrides
+// the enclosing space's configuration for the package whose folder name
+// matches the entry key; with `path` — only ever in the file's top-level map —
+// it declares a standalone package outside every space, whose configuration
+// the entry itself is. It mirrors SpaceConfig's keys plus the package-only
+// keys: `changelog`, `github`, `concurrency` and `dependencies`. The same
+// shape is the top-level object of a dispat config file placed inside a
+// package folder.
+//
+// One entry shape therefore serves four override layers, applied in this
+// order, each overlaying the previous field by field and the one nearest the
+// package winning:
+//
+//	1. the file's top-level `packages` entry
+//	2. the space's `packages` entry (SpaceConfig.Packages)
+//	3. the space folder file's `packages` entry (SpaceFile.Packages)
+//	4. the package folder's own config file
+//
+// under the space's configuration, itself the root file's `spaces` entry
+// overlaid with the space folder file. A standalone package has no space, so
+// only layers 1 and 4 apply, over a synthetic single-package base.
+//
+// The entry has no `packages` and no `spaces` field, and that is deliberate:
+// a package configures one package, so a package holding spaces or packages
+// of its own is refused wherever it is written. `path` is refused everywhere
+// but layer 1 — a package inside a space lives in its folder, and neither the
+// space nor the file inside the folder may move it.
 //
 // A field left unset inherits from the layer below, which is why the scalar
 // booleans are pointers here where SpaceConfig's are plain: an override must
@@ -387,10 +439,10 @@ type SpaceConfig struct {
 // would contradict all three.
 type PackageConfig struct {
 	// Path declares a standalone package at this root-relative folder,
-	// outside every space. Only valid on a top-level `packages` entry whose
-	// key matches no space folder: a space package's location is its folder
-	// and cannot be redefined, and an in-folder config file cannot move the
-	// folder it lives in.
+	// outside every space. Only valid on the file's top-level `packages`
+	// entry whose key matches no space folder: a space package's location is
+	// its folder and cannot be redefined, so neither a space's own `packages`
+	// entry nor a config file inside a folder may set it.
 	Path                  string           `mapstructure:"path" json:"path,omitempty"`
 	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
@@ -645,6 +697,15 @@ func (s SpaceConfig) Script(name string) (string, bool) {
 // for the same viper reason as Script.
 func (c *File) Package(name string) (PackageConfig, bool) {
 	pc, ok := c.Packages[strings.ToLower(name)]
+	return pc, ok
+}
+
+// Package resolves one of the space's own `packages` entries by package name,
+// case-insensitively for the same viper reason as File.Package. It looks no
+// further than this level: the file's entry is a separate layer, applied
+// before this one.
+func (s SpaceConfig) Package(name string) (PackageConfig, bool) {
+	pc, ok := s.Packages[strings.ToLower(name)]
 	return pc, ok
 }
 
