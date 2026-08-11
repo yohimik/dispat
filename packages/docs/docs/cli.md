@@ -56,7 +56,8 @@ dispat [command] [flags]
 | `--release`           |             | `self-update` only: install exactly this version, downgrades included. A leading `v` is fine.                                                                              |
 | `--rollback`          |             | `self-update` only: restore the binary the last update replaced, downloading nothing. Refuses beside the flags that select a release; combines with `--check`.              |
 | `--target`            |             | `github` only: create the tag at this commit or branch (`target_commitish`). Only safe once the commit is on the remote.   |
-| `--file`, `--title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation.          |
+| `--file`, `--file-title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation. `--file-title` states the whole title as one line. |
+| `--release-name`      | from config | `changelog` and `github`: override [`releaseName`](./configuration/records.md#your-own-words-around-an-entry) for the invocation. `$VAR` and `${VAR}` expand as they do in the config. |
 | `--range`, `--match`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation.                             |
 | `--manifests`         | from config | `autoversion` and `autoreplace`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
 | `--only-updated`      |             | `autoversion` and `autoreplace`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
@@ -237,7 +238,9 @@ remote. When the command runs inside a release stage script (the environment car
 commit is exported as `PACKAGE_<KEY>`, pinning the outer run's tag and GitHub release to it.
 
 **`dispat github`** creates each covered package's GitHub release, exactly what the release pipeline's own recorder
-would create: the release named after the package tag, its body the rendered changelog sections. A release the
+would create: the release named after the package tag (or after
+[`releaseName`](./configuration/records.md#your-own-words-around-an-entry)), its body the rendered changelog
+sections. A release the
 repository already carries is a skip (`W224`), so a repeated invocation — and the release that follows one — converge
 instead of failing on the API's duplicate-tag rejection.
 

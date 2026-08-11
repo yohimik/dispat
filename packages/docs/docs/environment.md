@@ -1,6 +1,8 @@
 # Script environment variables
 
-Every script receives, on top of the parent environment:
+Every script receives, on top of the parent environment (the same variables also expand in
+[record text](./configuration/records.md#variables-in-record-text), so a changelog footer and a publish script name a
+release the same way):
 
 | Variable                      | Example              | Meaning                                                                                                                                                                                 |
 |-------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

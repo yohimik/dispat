@@ -7,13 +7,19 @@ repository.
 
 ## Entry format options (shared by `changelog` and `github`)
 
-| Key                 | Default            | Description                         |
-|---------------------|--------------------|-------------------------------------|
-| `dateFormat`        | `2006-01-02`       | Go time layout for the entry date.  |
-| `breakingTitle`     | `Breaking Changes` | Section title for breaking changes. |
-| `featuresTitle`     | `Features`         | Section title for features.         |
-| `fixesTitle`        | `Fixes`            | Section title for fixes.            |
-| `dependenciesTitle` | `Dependencies`     | Section title for provider updates. |
+| Key                 | Default            | Description                                                                                                                                    |
+|---------------------|--------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dateFormat`        | `2006-01-02`       | Go time layout for the entry date.                                                                                                             |
+| `breakingTitle`     | `Breaking Changes` | Section title for breaking changes.                                                                                                            |
+| `featuresTitle`     | `Features`         | Section title for features.                                                                                                                    |
+| `fixesTitle`        | `Fixes`            | Section title for fixes.                                                                                                                       |
+| `dependenciesTitle` | `Dependencies`     | Section title for provider updates.                                                                                                            |
+| `releaseName`       | none               | What the release is called. On GitHub it replaces the release name (the tag by default); in a changelog it writes a sub-header under the entry's date line. See [Your own words around an entry](#your-own-words-around-an-entry). |
+| `header`            | none               | Lines written inside every entry, above the sections.                                                                                          |
+| `footer`            | none               | Lines written inside every entry, after the sections.                                                                                          |
+
+`releaseName`, `header` and `footer` are interpolated: see
+[Variables in record text](#variables-in-record-text).
 
 ## `changelog`
 
@@ -22,7 +28,7 @@ repository.
 | `enabled`    | `true`         | Write a changelog file per published package.                                          |
 | `prerelease` | `true`         | Write an entry for a prerelease version too; see [Holding prereleases back](#holding-prereleases-back). |
 | `file`       | `CHANGELOG.md` | File name inside the package folder.                                                   |
-| `title`      | `# Changelog`  | First line of the file.                                                                |
+| `fileTitle`  | `# Changelog`  | Heads the file, above every entry. Takes the [line shapes](#your-own-words-around-an-entry) `header` and `footer` take, so it can be several lines and can differ per package. |
 | *format*     |                | All entry format options above.                                                        |
 
 New entries are prepended below the title, newest first.
@@ -54,7 +60,7 @@ lands inside the release commit, and the release stage's own recorder finds it a
 | `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                       |
 | `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                                                                                                                                                                                                                              |
 | `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                                                                                                                                                                                                                |
-| *format*   |                           | All entry format options above. The release body contains only the sections; the `## pkg@version (date)` header line used in changelog files is omitted, since the release title is already the tag and GitHub shows its own date, so `dateFormat` has no effect here. |
+| *format*   |                           | All entry format options above. The release body contains the sections, with `header` and `footer` around them; the `## pkg@version (date)` header line used in changelog files is omitted, since GitHub shows the release's name and its own date, so `dateFormat` has no effect here. `releaseName` sets the release's name, which otherwise is the tag. |
 
 The release is **opt-in per package and per run**: it is created exactly when one of the package's scripts exported
 [`DISPAT_EXPORT_GITHUB`](../environment.md#script-outputs); a published package without the export is skipped (with an
@@ -91,6 +97,145 @@ file still fails the package like any other recording failure.
 **Creating a release twice.** A release the repository already carries for the planned tag is a skip (`W224`), not the
 API's duplicate-tag rejection, so a run repeated after a later stage failed — and the
 [`dispat github`](../cli.md#the-step-commands) step command run twice — converge instead of failing.
+
+## Your own words around an entry
+
+Everything dispat writes about a release is the notes it read out of your commits. `header`, `footer`, `releaseName`
+and `fileTitle` are where you add your own text: an install line, a link back to the package, a horizontal rule between
+entries, a name for the release that reads better than a tag.
+
+Here is where each one lands in a changelog file:
+
+```markdown
+# Changelog                      <- fileTitle, once at the top of the file
+
+## core@1.2.0 (2026-08-11)       <- the entry, one per release
+
+### Winter release              <- releaseName, when you set one
+
+Built from the acme monorepo.   <- header
+
+### Features
+
+- add streaming
+
+[Full changelog](...)           <- footer
+
+## core@1.1.0 (2026-07-02)      <- the previous entry, with its own header and footer
+```
+
+A GitHub release has no file to head, so `fileTitle` does not apply there, and `releaseName` becomes the release's own
+name rather than a line in its body. The body reads: `header`, the sections, the `### Release` block when
+[commit mode](#commit) is on, then `footer`.
+
+`header` and `footer` are written **inside every entry**, not once per file. Each entry keeps the text it was written
+with, so changing a footer today does not rewrite what last month's release said.
+
+### Writing the lines
+
+A list holds three kinds of element, and you can mix them freely:
+
+```json title="dispat.json"
+{
+  "changelog": {
+    "footer": [
+      "",
+      ["Questions? Open an issue.", "Thanks for reading."],
+      { "line": "Published from the acme monorepo.", "space": "libs" }
+    ]
+  }
+}
+```
+
+* A **string** is one line. An empty string is a blank line, which is how you space a block out.
+* An **array of strings** is several lines, written one after another.
+* An **object** is one or more lines plus the filters that decide which packages get them. `line` holds the text, as a
+  string or an array of strings.
+
+### Choosing which packages a line reaches
+
+Three optional filters narrow an object to part of the workspace:
+
+| Filter    | Matches against                                                                                          |
+|-----------|----------------------------------------------------------------------------------------------------------|
+| `package` | The package name.                                                                                        |
+| `space`   | The name of the [space](./spaces.md) the package belongs to.                                              |
+| `group`   | The package's [versioning group](./spaces.md#versioning-groups). A package that shares its version with nothing belongs to no group, so a `group` filter never selects it. |
+
+Each takes one name or an array of names, and matches the same way the `--package`, `--space` and `--group` flags do:
+case-insensitively, with `*` standing for any run of characters.
+
+```json title="dispat.json"
+{
+  "changelog": {
+    "footer": [
+      { "line": "Internal package, no support promised.", "package": ["@acme/internal-*", "scratch"] },
+      { "line": "Released together.", "group": "core-libs" }
+    ]
+  }
+}
+```
+
+Several values under one filter mean *any of them*. Several filters together mean *all of them*: a line with both
+`space` and `group` reaches only packages that match each. A line with no filters at all reaches every package, which
+is what a bare string is.
+
+### Overriding a list
+
+A [package override](./packages.md) that sets a list states that package's whole list; it does not add to the one it
+inherited. The filters are how a workspace-wide list reaches some packages and not others, so there is one place to
+look for what a package writes.
+
+```json title="dispat.json"
+{
+  "changelog": { "footer": ["shared"] },
+  "packages": {
+    "core": { "changelog": { "footer": ["core only"] } }
+  }
+}
+```
+
+Core writes `core only`. Every other package writes `shared`.
+
+There are no command-line flags for `header` and `footer`, because a filtered list of lines is not a flag-shaped thing.
+`releaseName` and `fileTitle` do have flags on the step commands, `--release-name` and `--file-title`, each replacing
+the configured value for that one invocation.
+
+## Variables in record text
+
+`releaseName`, `header`, `footer` and `fileTitle` expand `$VAR` and `${VAR}`, so one configured line can name the
+package and the version it belongs to:
+
+```json title="dispat.json"
+{
+  "github": {
+    "releaseName": "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
+    "footer": [
+      "",
+      "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/packages/${DISPAT_PACKAGE}/CHANGELOG.md"
+    ]
+  }
+}
+```
+
+Three sources answer, in this order:
+
+1. The releasing package's own [`DISPAT_*` variables](../environment.md): its name, version, channel, tag and the rest.
+   These are the same variables your scripts receive, so a footer and a publish script name the release the same way.
+2. Anything the package's scripts [exported](../environment.md#script-outputs), as `DISPAT_OUTPUT_<NAME>`. This is how
+   a footer links an artifact the run itself produced.
+3. The process environment.
+
+A name that none of the three defines expands to nothing, the way a shell expands an unset variable. Half-written
+`${...}` in a published release reads worse than the gap it would have filled.
+
+Two things worth knowing:
+
+* **Everything in the environment expands, secrets included.** `${GITHUB_TOKEN}` in a footer would publish your token.
+  Only name variables you mean to show.
+* **A `fileTitle` must not contain anything that changes between releases.** The title is written once and matched
+  against on the next release so it is not duplicated. A title holding `${DISPAT_TAG}` looks different every time, the
+  match fails, and the old title stays behind in the file. Package and space names are safe; versions and tags are not.
 
 ## Holding prereleases back
 

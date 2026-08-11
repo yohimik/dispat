@@ -101,7 +101,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
 | [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, `src`, standalone packages, package dependencies, in-folder config files. |
 | [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
-| [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, holding prereleases back, the release commit.                          |
+| [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, your own header and footer lines, holding prereleases back, the release commit. |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object, quieting the parser's diagnostics.         |
 | [Manifest tools](https://yohimik.github.io/dispat/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
 | [Editing across the monorepo](https://yohimik.github.io/dispat/autoreplace)      | `dispat autoreplace`: one manifest edit applied to every package the plan selects.                  |
