@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -83,36 +84,63 @@ func TestStepTargetsRejectsAnUnmatchedTerm(t *testing.T) {
 	assert.Contains(t, err.Error(), "a is a package — select it with --package")
 }
 
-// TestStepExportReadsTheStageEnvironment: a step invocation has no run
+// TestReadExportReadsTheStageEnvironment: a step invocation has no run
 // behind it, so the GitHub opt-in comes from the process environment the
-// stage script handed it, attributed to the package DISPAT_PACKAGE names.
-func TestStepExportReadsTheStageEnvironment(t *testing.T) {
+// stage script handed it. Presence is the opt-in and the value is the
+// attachment list, so an export set to nothing still releases the package.
+func TestReadExportReadsTheStageEnvironment(t *testing.T) {
 	targets := []string{"a", "c"}
 	for name, tc := range map[string]struct {
-		export, pkg    string
-		wantExport     string
-		wantForPackage string
+		export, pkg string
+		unset       bool
+		want        stepExport
+		covers      map[string]bool
 	}{
 		"a stage script exports for its own package": {
-			"/dist/app.tgz", "c", "/dist/app.tgz", "c"},
-		"no DISPAT_PACKAGE means the whole invocation": {
-			"/dist/app.tgz", "", "/dist/app.tgz", ""},
-		"an export for an uncovered package is ignored": {
-			"/dist/app.tgz", "b", "", "b"},
+			export: "/dist/app.tgz", pkg: "c",
+			want:   stepExport{value: "/dist/app.tgz", present: true, pkg: "c"},
+			covers: map[string]bool{"a": false, "c": true},
+		},
+		"no DISPAT_PACKAGE means every covered package": {
+			export: "/dist/app.tgz",
+			want:   stepExport{value: "/dist/app.tgz", present: true},
+			covers: map[string]bool{"a": true, "c": true},
+		},
+		"an empty export is still an opt-in": {
+			export: "", pkg: "c",
+			want:   stepExport{present: true, pkg: "c"},
+			covers: map[string]bool{"c": true},
+		},
+		"an export for an uncovered package is dropped": {
+			export: "/dist/app.tgz", pkg: "b",
+			want:   stepExport{pkg: "b"},
+			covers: map[string]bool{"a": false, "c": false},
+		},
 		"no export at all": {
-			"", "c", "", "c"},
+			unset:  true,
+			pkg:    "c",
+			want:   stepExport{pkg: "c"},
+			covers: map[string]bool{"a": false, "c": false},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, _, buf := stepApp(t)
-			t.Setenv(plan.GitHubExport, tc.export)
+			if tc.unset {
+				t.Setenv(plan.GitHubExport, "x")
+				require.NoError(t, os.Unsetenv(plan.GitHubExport))
+			} else {
+				t.Setenv(plan.GitHubExport, tc.export)
+			}
 			t.Setenv("DISPAT_PACKAGE", tc.pkg)
 
-			export, forPackage := a.stepExport(targets)
-			assert.Equal(t, tc.wantExport, export)
-			assert.Equal(t, tc.wantForPackage, forPackage)
-			if tc.export != "" && tc.wantExport == "" {
+			got := a.readExport(targets)
+			assert.Equal(t, tc.want, got)
+			for pkg, want := range tc.covers {
+				assert.Equal(t, want, got.covers(pkg), "covers(%q)", pkg)
+			}
+			if !tc.unset && tc.pkg == "b" {
 				assert.Contains(t, buf.String(), "does not cover",
-					"an ignored export says so rather than going missing")
+					"a dropped export says so rather than going missing")
 			}
 		})
 	}

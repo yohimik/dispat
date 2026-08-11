@@ -8,6 +8,7 @@ package integration
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -138,4 +139,68 @@ func TestCommandsPreviewAllPackages(t *testing.T) {
 
 	// A positional package is a usage error: the selection is a flag.
 	assert.Equal(t, 2, r.Command("preview", "core").Code)
+}
+
+// TestCommandsHelpIsScopedToTheCommand: `dispat <command> --help` prints
+// that command's synopsis and its own flags, not the whole program's. The
+// program help without a command word lists every command and the global
+// flags alone, so it stays readable however the flag set grows. Both exit 0
+// and need no config file or repository.
+func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
+	r := harness.New(t)
+
+	program := r.Command("--help")
+	require.Equal(t, 0, program.Code, "stderr:\n%s", program.Stderr)
+	assert.Contains(t, program.Stderr, "usage: dispat [command] [flags]")
+	for _, word := range []string{"release", "status", "run", "init", "preview", "changelog",
+		"autoversion", "commit", "github", "compute", "scanner", "writer", "replacer"} {
+		assert.Contains(t, program.Stderr, word, "the command list names every command")
+	}
+	assert.Contains(t, program.Stderr, "global flags:")
+	assert.NotContains(t, program.Stderr, "--set-version",
+		"a command's own flags stay out of the program help")
+
+	for name, tc := range map[string]struct {
+		args        []string
+		usage       string
+		has, hasNot []string
+	}{
+		"run": {
+			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [flags]",
+			has:    []string{"--on-error", "--since", "--consumers"},
+			hasNot: []string{"--set-version", "--tag", "--owner"},
+		},
+		"github": {
+			args: []string{"github", "--help"}, usage: "usage: dispat github [flags]",
+			has:    []string{"--owner", "--repo", "--token-env", "--target"},
+			hasNot: []string{"--on-error", "--set-version"},
+		},
+		"writer": {
+			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",
+			has:    []string{"--set-version", "--set", "--replace"},
+			hasNot: []string{"--on-error", "--tag"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := r.Command(tc.args...)
+			assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+			assert.Contains(t, res.Stderr, tc.usage)
+			for _, want := range tc.has {
+				assert.Contains(t, res.Stderr, want)
+			}
+			for _, unwanted := range tc.hasNot {
+				assert.NotContains(t, res.Stderr, unwanted, "another command's flag leaked in")
+			}
+		})
+	}
+}
+
+// TestCommandsVersionNamesThePlatform: --version answers without a config
+// file, and says which build is running — a version alone does not
+// distinguish the release's binaries from each other.
+func TestCommandsVersionNamesThePlatform(t *testing.T) {
+	r := harness.New(t)
+	res := r.Command("--version")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Regexp(t, `dispat \S+ \(`+runtime.GOOS+`_`+runtime.GOARCH+`\)`, res.Stdout)
 }

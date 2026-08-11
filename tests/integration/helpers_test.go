@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -127,25 +128,61 @@ func buildRuns(r *harness.Repo) int {
 	return len(strings.Split(trimmed, "\n"))
 }
 
-// githubFake serves the two calls the GitHub recorder makes — the upfront
-// verification GET (200) and the create-release POST (201) — recording every
-// POST body. Each test decodes the bodies into whatever shape it asserts on,
-// so one fake serves tests with different views of the payload; the
-// attachment test keeps its own server (it also serves the upload endpoint).
+// githubTagProbe answers the lookup the recorder makes before creating
+// anything — "does this tag already have a release?" — with the 404 that
+// means no, so that a first release goes through. published names the tags
+// the fake should instead report as already there; a nil map means none.
+// It reports whether it handled the request.
+func githubTagProbe(w http.ResponseWriter, req *http.Request, published map[string]bool) bool {
+	_, tag, found := strings.Cut(req.URL.Path, "/releases/tags/")
+	if req.Method != http.MethodGet || !found {
+		return false
+	}
+	if decoded, err := url.PathUnescape(tag); err == nil {
+		tag = decoded
+	}
+	if published[tag] {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": 1}`))
+		return true
+	}
+	w.WriteHeader(http.StatusNotFound)
+	return true
+}
+
+// githubFake serves the three calls the GitHub recorder makes — the upfront
+// verification GET (200), the release lookup (404, nothing published yet)
+// and the create-release POST (201) — recording every POST body. Each test
+// decodes the bodies into whatever shape it asserts on, so one fake serves
+// tests with different views of the payload; the attachment test keeps its
+// own server (it also serves the upload endpoint).
+//
+// Every created tag is remembered, so a second run over the same plan sees
+// the release it already made and skips it, exactly as GitHub would.
 func githubFake(t *testing.T) (srv *httptest.Server, bodies func() [][]byte) {
 	t.Helper()
 	var mu sync.Mutex
 	var recorded [][]byte
+	published := map[string]bool{}
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if githubTagProbe(w, req, published) {
+			return
+		}
 		switch req.Method {
 		case http.MethodGet: // upfront verification
 			w.WriteHeader(http.StatusOK)
 		case http.MethodPost:
 			data, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
-			mu.Lock()
 			recorded = append(recorded, data)
-			mu.Unlock()
+			var created struct {
+				TagName string `json:"tag_name"`
+			}
+			if json.Unmarshal(data, &created) == nil && created.TagName != "" {
+				published[created.TagName] = true
+			}
 			w.WriteHeader(http.StatusCreated)
 		}
 	}))

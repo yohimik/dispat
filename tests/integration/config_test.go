@@ -420,6 +420,9 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 	var uploads []upload
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if githubTagProbe(w, req, nil) {
+			return
+		}
 		switch {
 		case req.Method == http.MethodGet:
 			w.WriteHeader(http.StatusOK)
@@ -1109,4 +1112,63 @@ func TestConfigSpaceLayerRejections(t *testing.T) {
 			assert.Empty(t, r.TagList(), "nothing may be released from a refused config")
 		})
 	}
+}
+
+// TestConfigParserQuiet: parser.quiet hides the commit-message parser's own
+// findings from the log for a repository whose history predates the
+// convention. It hides lines and nothing else — the diagnostics are still
+// counted, the summary says how many went unprinted, a hidden error still
+// refuses the release under commitErrors "error", and the planner's own
+// diagnostics are never hidden, because they explain release outcomes a
+// reader of the commit log cannot account for.
+func TestConfigParserQuiet(t *testing.T) {
+	// seed returns a repository whose history carries one parser error (an
+	// unknown type under strictTypes, E140) and one planner error (a scope
+	// naming no package, E130), plus real work so a plan exists.
+	seed := func(t *testing.T, quiet bool, commitErrors string) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.CommitErrors = commitErrors
+		cfg.Parser = &models.ParserConfig{
+			Quiet:       quiet,
+			StrictTypes: true,
+			Types:       map[string]string{"feat": "minor", "fix": "patch"},
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): real work")
+		r.CommitEmpty("wat(core): a type nobody declared")
+		r.CommitEmpty("fix(nosuch): a scope naming no package")
+		return r
+	}
+
+	loud := seed(t, false, "").StatusOK()
+	require.True(t, harness.HasCode(loud.Events, "E140"), "the parser finding prints by default")
+	require.True(t, harness.HasCode(loud.Events, "E130"), "so does the planner's")
+
+	quiet := seed(t, true, "").StatusOK()
+	assert.False(t, harness.HasCode(quiet.Events, "E140"), "parser.quiet hides the parser's finding")
+	assert.True(t, harness.HasCode(quiet.Events, "E130"),
+		"a planner finding explains a release outcome and is never hidden")
+	assert.Contains(t, quiet.Stdout, `"hidden":1`,
+		"a hidden diagnostic is still counted, and the count says how many")
+
+	// The flag overrides the config in both directions.
+	r := seed(t, true, "")
+	shown := r.Command("status", "--quiet-parser=false")
+	require.Equal(t, 0, shown.Code, "stderr:\n%s", shown.Stderr)
+	assert.True(t, harness.HasCode(shown.Events, "E140"), "--quiet-parser=false brings the findings back")
+
+	r = seed(t, false, "")
+	hushed := r.Command("status", "--quiet-parser")
+	require.Equal(t, 0, hushed.Code, "stderr:\n%s", hushed.Stderr)
+	assert.False(t, harness.HasCode(hushed.Events, "E140"), "--quiet-parser hides them for one invocation")
+
+	// Display only: a hidden error still refuses the release.
+	blocked := seed(t, true, "error").Release()
+	assert.Equal(t, 1, blocked.Code, "a hidden error still blocks under commitErrors=error")
+	assert.False(t, harness.HasCode(blocked.Events, "E140"))
+	assert.Contains(t, blocked.Stdout, "refusing to release",
+		"the refusal itself is never hidden, or the run would stop for no stated reason")
 }

@@ -200,3 +200,76 @@ func TestPackagesComputeRemoveFromEntry(t *testing.T) {
 	assert.Equal(t, 0, r.Command("compute", "--check").Code)
 	r.StatusOK()
 }
+
+// TestPackagesSrcNarrowsChangeDetection: a package's `src` narrows which of
+// its files count as changes to it. A scopeless commit touching only the
+// package's docs stops releasing it; one touching src releases it as before.
+// Everything else about the package is unchanged: scripts still run in the
+// package folder and the changelog is still written there, outside src.
+//
+// A commit that names the package by scope always addresses it, wherever its
+// files are — src narrows the file-derived fallback, not the scope set.
+func TestPackagesSrcNarrowsChangeDetection(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Packages = map[string]models.PackageConfig{"core": {Src: "lib"}}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("packages/core/lib/parser.txt", "code\n")
+	r.WriteFile("packages/core/docs/guide.md", "prose\n")
+	r.SeedPackage("packages", "plain")
+	r.Commit("feat(core,plain): first release of both")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.FileExists(t, r.Path("packages/core/CHANGELOG.md"),
+		"the changelog is still written in the package folder, outside src")
+
+	// A scopeless commit touching only what lies outside src releases nothing.
+	r.WriteFile("packages/core/docs/guide.md", "more prose\n")
+	r.Commit("fix: polish the guide")
+	r.ReleaseOK()
+	assert.Equal(t, 1, r.TagCount("core@"), "a change outside src is not a change to the package")
+
+	// The same commit shape inside src does release it.
+	r.WriteFile("packages/core/lib/parser.txt", "better code\n")
+	r.Commit("fix: tighten the parser")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("core@0.1.1"), "a change inside src releases as before; tags: %v", r.TagList())
+
+	// A package that declares no src keeps its whole folder.
+	r.WriteFile("packages/plain/docs/guide.md", "prose\n")
+	r.Commit("fix: document plain")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("plain@0.1.1"), "tags: %v", r.TagList())
+
+	// Naming the package by scope reaches it wherever the files are.
+	r.WriteFile("packages/core/docs/guide.md", "final prose\n")
+	r.Commit("fix(core): the scope always addresses the package")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("core@0.1.2"), "tags: %v", r.TagList())
+}
+
+// TestPackagesSrcMustNameAFolder: a src that can never match narrows the
+// package to nothing, which would stop it releasing without ever saying why.
+// It fails the config load instead.
+func TestPackagesSrcMustNameAFolder(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src, want string
+	}{
+		"a folder that is not there": {"nope", "names no folder inside the package"},
+		"a path leaving the package": {"../elsewhere", "leaves the package folder"},
+		"the package folder itself":  {".", "is the package folder itself"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			cfg.Packages = map[string]models.PackageConfig{"core": {Src: tc.src}}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first release")
+
+			res := r.Status()
+			assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+		})
+	}
+}

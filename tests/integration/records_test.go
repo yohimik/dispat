@@ -433,3 +433,102 @@ func TestRecordsGitHubAllPackages(t *testing.T) {
 	tags := []string{releases[0].TagName, releases[1].TagName}
 	assert.ElementsMatch(t, []string{"core@0.1.0", "utils@0.1.0"}, tags)
 }
+
+// TestRecordsPrereleaseOptOut: changelog.prerelease and github.prerelease
+// hold the betas back. The beta is still planned, tagged and published — the
+// flow is untouched — but it leaves no changelog entry and no GitHub
+// release; the graduation to stable writes the one entry covering the whole
+// window and creates the one release. Without the opt-out (utils here) both
+// records are written for the beta as before.
+func TestRecordsPrereleaseOptOut(t *testing.T) {
+	type ghRelease struct {
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{Prerelease: models.Bool(false)}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true), Prerelease: models.Bool(false),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	// utils opts back in, so the two policies are compared inside one run.
+	cfg.Packages = map[string]models.PackageConfig{"utils": {
+		Changelog: &models.ChangelogConfig{Prerelease: models.Bool(true)},
+		GitHub:    &models.GitHubConfig{Prerelease: models.Bool(true)},
+	}}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+
+	// Run 1: a beta of both.
+	r.Commit("feat(core,utils)%beta: first work")
+	r.ReleaseOK()
+
+	assert.True(t, r.HasTag("core@0.1.0-beta.0"), "the beta is still tagged and published")
+	assert.NoFileExists(t, r.Path("packages/core/CHANGELOG.md"),
+		"changelog.prerelease false leaves the beta unrecorded")
+	assert.FileExists(t, r.Path("packages/utils/CHANGELOG.md"),
+		"a package that opted back in still records its beta")
+
+	betas := decodeAll[ghRelease](t, bodies())
+	require.Len(t, betas, 1, "only the opted-in package gets a prerelease release")
+	assert.Equal(t, "utils@0.1.0-beta.0", betas[0].TagName)
+	assert.True(t, betas[0].Prerelease)
+
+	// Run 2: graduate both to stable.
+	r.CommitEmpty("release(core,utils)%beta>stable: graduate")
+	r.ReleaseOK()
+
+	core, err := os.ReadFile(r.Path("packages/core/CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(core), "## core@0.1.0 (", "the stable release writes the entry")
+	assert.NotContains(t, string(core), "beta", "no beta entry was ever written")
+	assert.Contains(t, string(core), "first work",
+		"the stable entry covers the work the betas carried")
+
+	releases := decodeAll[ghRelease](t, bodies())
+	require.Len(t, releases, 3, "the two stable releases join the one beta")
+	assert.ElementsMatch(t,
+		[]string{"utils@0.1.0-beta.0", "core@0.1.0", "utils@0.1.0"},
+		[]string{releases[0].TagName, releases[1].TagName, releases[2].TagName})
+}
+
+// TestRecordsGitHubReleaseExistsIsASkip: a release the repository already
+// carries is skipped (W224) instead of failing the run on the API's 422, so
+// a re-run after a later failure — or a flow that published from `dispat
+// github` earlier — converges instead of blocking.
+func TestRecordsGitHubReleaseExistsIsASkip(t *testing.T) {
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	first := r.Command("github", "--package", "core")
+	require.Equal(t, 0, first.Code, "stderr: %s", first.Stderr)
+	require.Len(t, bodies(), 1, "the first invocation creates the release")
+
+	// The same plan again — a re-run after a later stage failed, or a run
+	// following the flow that already published.
+	second := r.Command("github", "--package", "core")
+	assert.Equal(t, 0, second.Code, "stderr: %s", second.Stderr)
+	assert.Len(t, bodies(), 1, "the existing release is never created twice")
+	assert.True(t, harness.HasCode(second.Events, "W224"), "the skip says which code it is")
+
+	// And the release that follows converges too, instead of failing on the
+	// API's 422 for a duplicate tag.
+	r.ReleaseOK()
+	assert.Len(t, bodies(), 1)
+	assert.True(t, r.HasTag("core@0.1.0"))
+}

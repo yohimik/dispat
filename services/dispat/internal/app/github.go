@@ -46,7 +46,7 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 		return err
 	}
 
-	export, exportFor := a.stepExport(targets)
+	export := a.readExport(targets)
 	// One releaser per distinct target the covered policies name, verified
 	// once each before any release work — the same shape githubDispatch
 	// builds for a run, minus the run.
@@ -71,13 +71,13 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 			releasers[spec] = gh
 		}
 		gh.TargetCommitish = opts.Target
-		if export != "" && (exportFor == "" || exportFor == name) {
+		if export.covers(name) {
 			// A step invocation has no run behind it, so the release carries
 			// no outputs of its own; the stage's own environment supplies the
 			// opt-in and the attachment list. Without an export the package
 			// has not opted in, and only github.allPackages releases it —
 			// exactly as during a run.
-			rel.Outputs = append(rel.Outputs, plan.Output{Name: plan.GitHubExport, Value: export})
+			rel.Outputs = append(rel.Outputs, plan.Output{Name: plan.GitHubExport, Value: export.value})
 		}
 		// The releaser reports the outcome itself — created, or skipped with
 		// its reason — so every path through it reads the same in the log,
@@ -101,30 +101,44 @@ func (a *App) githubSpec(spec model.GitHubSpec, opts GitHubOptions) model.GitHub
 	return spec
 }
 
-// stepExport reads the GitHub export out of the process environment and says
-// which covered package it belongs to. Inside a stage script both variables
-// are set, so the export applies to that one package. Outside one — a hand
-// invocation exporting the variable itself — DISPAT_PACKAGE is unset and the
-// export applies to every covered package, which is what a single-package
-// invocation means by it; the empty name says so.
+// stepExport is the GitHub opt-in an invocation found in its environment.
+// Presence is the opt-in and the value is the list of files to attach, so an
+// export set to nothing still means "release this package" — the same rule
+// the run's recorder reads off rel.Outputs.
+type stepExport struct {
+	value   string // the whitespace-separated attachment list, possibly empty
+	present bool   // the variable was set at all: the package opted in
+	// pkg is the package the environment belongs to, or "" when nothing
+	// named one and the export covers every package the invocation covers.
+	pkg string
+}
+
+// covers reports whether the export applies to the named package.
+func (e stepExport) covers(name string) bool {
+	return e.present && (e.pkg == "" || e.pkg == name)
+}
+
+// readExport reads the opt-in out of the process environment. Inside a stage
+// script both variables are set, so the export belongs to that one package.
+// Outside one — a hand invocation exporting the variable itself —
+// DISPAT_PACKAGE is unset and the export covers every package the invocation
+// covers, which is what a single-package invocation means by it.
 //
 // A DISPAT_PACKAGE naming a package this invocation does not cover is a
-// stale environment (a nested invocation narrowed elsewhere), and its export
-// is ignored rather than applied to the wrong release.
-func (a *App) stepExport(targets []string) (export, forPackage string) {
-	export = os.Getenv(plan.GitHubExport)
-	pkg := os.Getenv("DISPAT_PACKAGE")
-	if pkg == "" {
-		return export, ""
+// stale environment (a nested invocation narrowed elsewhere): the export is
+// dropped rather than applied to the wrong release.
+func (a *App) readExport(targets []string) stepExport {
+	value, present := os.LookupEnv(plan.GitHubExport)
+	e := stepExport{value: value, present: present, pkg: os.Getenv("DISPAT_PACKAGE")}
+	if !present || e.pkg == "" {
+		return e
 	}
 	for _, name := range targets {
-		if name == pkg {
-			return export, pkg
+		if name == e.pkg {
+			return e
 		}
 	}
-	if export != "" {
-		a.log.Debug().Str("package", pkg).
-			Msgf("%s belongs to a package this invocation does not cover, ignoring it", plan.GitHubExport)
-	}
-	return "", pkg
+	a.log.Debug().Str("package", e.pkg).
+		Msgf("%s belongs to a package this invocation does not cover, ignoring it", plan.GitHubExport)
+	return stepExport{pkg: e.pkg}
 }

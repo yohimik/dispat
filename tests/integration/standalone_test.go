@@ -9,8 +9,12 @@ package integration
 // inside the tagged tree.
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -290,4 +294,121 @@ func TestStandaloneCommitPushWithoutRemoteFails(t *testing.T) {
 	res := r.Command("commit", "--package", "core", "--tag", "--push")
 	assert.Equal(t, 1, res.Code, "pushing without a remote fails loudly")
 	assert.Equal(t, 1, r.TagCount("core@"), "the local work before the push still happened")
+}
+
+// TestStandaloneGithubPublishesFromAStageScript: the github step command in
+// an announce stage. The build stage exports DISPAT_EXPORT_GITHUB with the
+// files to attach; the announce script runs `dispat github`, which reads
+// that export out of its own environment (the stage handed it over), creates
+// the release for the one package DISPAT_PACKAGE names, and attaches the
+// files. This is the flow the command exists for: the release goes out from
+// the flow's own stage rather than at the end of the run.
+func TestStandaloneGithubPublishesFromAStageScript(t *testing.T) {
+	type upload struct{ name, body string }
+	type ghRelease struct {
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
+	}
+	var mu sync.Mutex
+	var uploads []upload
+	var created [][]byte
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case githubTagProbe(w, req, nil):
+		case req.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+		case req.URL.Path == "/uploads":
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			uploads = append(uploads, upload{name: req.URL.Query().Get("name"), body: string(body)})
+			w.WriteHeader(http.StatusCreated)
+		default:
+			data, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			created = append(created, data)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
+		}
+	}))
+	defer srv.Close()
+
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{
+		"build": `echo binary-bytes > app.bin` +
+			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin" >> "$DISPAT_OUTPUT"`,
+		"publish":  "echo publishing",
+		"announce": "dispat github",
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
+	// The run's own recorder stays off, so every release seen here came from
+	// the step command inside the stage.
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(false), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core": {GitHub: &models.GitHubConfig{Enabled: models.Bool(true)}},
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core,utils): first release of both")
+
+	r.ReleaseOK()
+
+	releases := decodeAll[ghRelease](t, created)
+	require.Len(t, releases, 1, "only the package whose policy is enabled is released")
+	assert.Equal(t, "core@0.1.0", releases[0].TagName)
+	assert.Contains(t, releases[0].Body, "### Features")
+	assert.Contains(t, releases[0].Body, "first release of both")
+	require.Len(t, uploads, 1, "the export named one file to attach")
+	assert.Equal(t, "app.bin", uploads[0].name)
+	assert.Equal(t, "binary-bytes\n", uploads[0].body)
+}
+
+// TestStandaloneGithubSelection: the github command selects packages exactly
+// like the other step commands — an unknown term is an error, a package the
+// plan is not releasing is a logged no-op — and without an opt-in it
+// publishes nothing at all, the same rule the run's recorder follows.
+func TestStandaloneGithubSelection(t *testing.T) {
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "quiet")
+	r.Commit("feat(core): only core has work")
+
+	// No export and no allPackages: nothing has opted in, so nothing is
+	// published, and that is a success rather than an error.
+	res := r.Command("github", "--package", "core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Empty(t, bodies(), "without an opt-in the command publishes nothing")
+
+	// The export in the caller's own environment is the opt-in.
+	res = r.CommandEnv([]string{"DISPAT_EXPORT_GITHUB="}, "github", "--package", "core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Len(t, bodies(), 1, "the exported opt-in publishes the release")
+
+	// A package the plan is not releasing is a logged no-op, not a failure.
+	res = r.CommandEnv([]string{"DISPAT_EXPORT_GITHUB="}, "github", "--package", "quiet")
+	assert.Equal(t, 0, res.Code)
+	assert.Len(t, bodies(), 1)
+	assert.Contains(t, res.Stdout, "package is not releasing, nothing to do")
+
+	// An unknown term is an error, and a positional argument a usage error.
+	assert.Equal(t, 1, r.Command("github", "--package", "ghost").Code)
+	assert.Equal(t, 2, r.Command("github", "core").Code)
 }
