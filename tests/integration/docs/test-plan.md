@@ -22,9 +22,12 @@ The suite was designed against seventeen goals, one test file each:
    `commitErrors` policy, initials baselines, the run-level hook frame, login scripts, the `flow.onFail` /
    `flow.onSkip` outcome scripts, GitHub release assets from build-exported attachments, and original cases the unit
    suites cannot witness.
-5. **Space versioning modes** (`versioning_test.go`): `independent`, `fixed` and `fixedSparse` spaces driven side by
-   side across multiple runs: rides and their "no changes" changelog entries, sparse alignment, the single shared
-   prerelease train, failed-ride catch-up, holds/pins under a shared version, and no bleed between modes.
+5. **Space versioning modes** (`versioning_test.go`): all seven modes driven side by side across multiple runs:
+   `independent`, the full-version `fixed`/`fixedSparse`, and the partial `fixedMajorMinor`/`fixedMajor` pairs that
+   hold only a prefix in common. Rides and their "no changes" changelog entries (naming the part that is shared),
+   sparse alignment, versions diverging again below the shared part, the single shared prerelease train against a
+   train that stays local, failed-ride catch-up, holds and pins under a shared version against pins that stay inside
+   it, mixed shared depths in one group, and no bleed between modes.
 6. **The `dispat run` command** (`run_test.go`): a script executed inside changed packages over the dependency graph
    with the full environment, resolved per package through the three `scripts` levels (package, space, file) so the
    level a name is defined at decides what the run covers, the `dispat <script>` shorthand and the two-word
@@ -278,6 +281,16 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestVersioningFixedExactPinMovesTheSpace`           | An exact pin naming one member moves the whole space to the pinned version; the pin guards (E153) keep applying to the shared version afterwards.                                                                                                                         |
 | `TestVersioningFixedSpaceExecutesEveryMemberScript`  | A ride is a full release at the execution level: build scripts run for the rider too.                                                                                                                                                                                     |
 | `TestVersioningFixedConflictResolutions`             | The two fixed-space conflict warnings: competing exact pins resolve to the newest with W211 (the loser must not also release), and members resolving to different channels release as one channel with W212.                                                              |
+| `TestVersioningFixedMajorLifecycle`                  | Six runs over a `fixedMajor` space: a patch and a minor each move only their own package (no W210), a breaking change moves the whole group to one major with a ride whose changelog entry reads "on one major version" and carries no leaked notes, the group converges, and it diverges again below the major.  |
+| `TestVersioningFixedMajorSparseLifecycle`            | The sparse variant: the unchanged member never rides across a major bump (no W210), and its own next change joins it to the shared major at the start of its own line (`1.0.0`, not a continuation of `0.x`).                                                             |
+| `TestVersioningFixedMajorMinorLifecycle`             | One depth further in: a patch stays with its package while a minor and a breaking change each move the whole group, the ride's entry reading "on one major and minor version".                                                                                            |
+| `TestVersioningFixedMajorMinorSparseLifecycle`       | Depth two, sparse: a member left behind rejoins the shared prefix on its own next change whatever its size, the two are independent again below the minor, and a later minor leaves the other member behind in turn.                                                      |
+| `TestVersioningAllModesSideBySide`                   | All seven modes through one repository and two commits: the minor separates the depths (shared under `fixed` and `fixedMajorMinor`, the package's own under `fixedMajor`), the breaking change every shared mode passes on, sparse members never ride, and all seven converge. |
+| `TestVersioningFixedMajorSharedTrain`                | A train belongs to whatever it moves: a breaking change on `%beta` takes the whole group to `beta.0`, later work continues it to `beta.1` for both, one member's graduation ends it for both, and a `%beta` on a *patch* afterwards stays inside the package that started it. |
+| `TestVersioningPartialPinScope`                      | An exact `Release-As` crossing the shared major moves the whole group; one inside the major releases its own package alone, collects no group-level guard (no E153) and drags nobody along.                                                                               |
+| `TestVersioningFixedMajorRideFailureThenAlignment`   | A partial-mode ride fails like any release, and the next run catches the laggard up to the group's shared major (W210) at the start of its own line, without re-releasing anyone; a further run converges.                                                                |
+| `TestVersioningPartialRideExecutesEveryMemberScript` | A ride under a partial mode is a full release at the execution level too: both members build.                                                                                                                                                                            |
+| `TestVersioningMixedDepthGroupUsesTheDeepest`        | A package overriding its space's `versioning` stays in the space's group with a different depth: the group versions at the deepest declaration (so the minor is shared) and W213 explains the sharing the shallower member never asked for.                               |
 
 ### Goal 6: the `dispat run` command (`run_test.go`)
 
@@ -382,6 +395,7 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestOverridesInFolderFileWins`              | The package folder's own dispat.json is the most local layer: its `tagFormat` beats the `packages` entry's, proven by the tag the release actually creates, while the sibling keeps the repository default.         |
 | `TestOverridesDispatignore`                  | A folder listed in `.dispatignore` is not a package: never released, and a commit scoping it draws the unknown-scope diagnostic (E130) like any non-package name.                                                   |
 | `TestOverridesVersionGroupSpansSpaces`       | A declared `versionGroups` group joined by two spaces versions as one: a change in one space rides the other space's package to the same version (W210 on the rider), and aligned members converge on the next run. |
+| `TestOverridesVersionGroupSharesOnlyTheMajor` | The same two spaces under a `fixedMajor` declaration: a minor stays inside its own space, and only a breaking change brings both spaces to one major (W210 on the rider), converging afterwards. |
 | `TestOverridesPerPackageRecords`             | Record policies resolve per package: one package writes its changelog under an overridden file name, its sibling disables both records, and the GitHub fake receives exactly the enabled package's release.         |
 | `TestOverridesPackageConcurrencyWeight`      | A package whose `concurrency` equals the build budget occupies it whole: its build overlaps no other build on the tsmark timeline while the ordinary packages stay free to overlap each other.                      |
 | `TestOverridesRunShorthandFromPackageFolder` | The config ascent walks past the package's own (spaces-less) override file to the monorepo root, so the run shorthand keeps working from inside a package folder that carries one.                                  |

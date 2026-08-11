@@ -220,6 +220,44 @@ func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
 	assert.Len(t, r.TagList(), 2)
 }
 
+// TestOverridesVersionGroupSharesOnlyTheMajor: a declared group may share a
+// part of the version rather than all of it. The same two spaces under
+// fixedMajor keep their own minors and patches, and come together only when a
+// breaking change reaches the part they do share.
+func TestOverridesVersionGroupSharesOnlyTheMajor(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.VersionGroups = map[string]models.VersionGroupConfig{
+		"platform": {Versioning: models.VersioningFixedMajor},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish(), VersionGroup: "platform"},
+		"svc":  {Path: "services", Flow: buildPublish(), VersionGroup: "platform"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "lib1")
+	r.SeedPackage("services", "app1")
+
+	// A minor is below the shared major: it stays inside its own space.
+	r.Commit("feat(lib1): a minor of lib1's own")
+	res := r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("app1@"), "a minor must not cross the group; tags: %v", r.TagList())
+	assert.False(t, harness.HasCode(res.Events, "W210"), "no ride below the shared major")
+
+	// A breaking change reaches the shared major and moves both spaces.
+	r.CommitEmpty("feat(lib1)!: a breaking change")
+	res = r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@1.0.0"),
+		"the other space's member joins the shared major; tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "app1"))
+
+	r.ReleaseOK()
+	assert.Len(t, r.TagList(), 3, "converged")
+}
+
 // TestOverridesPerPackageRecords: the record policies resolve per package —
 // one package writes its changelog under an overridden file name while its
 // sibling disables both records, and the GitHub recorder receives exactly
