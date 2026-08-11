@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against seventeen goals, one test file each:
+The suite was designed against eighteen goals, one test file each:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -100,6 +100,13 @@ The suite was designed against seventeen goals, one test file each:
     terms and folder inference on `preview`, the step commands and `compute`, whose suggestions are scoped to the
     selected consumers while detection still reads every package's manifests; and a positional package name now being
     a usage error.
+18. **Docker through the binary** (`docker_test.go`): the ecosystem dispat was built around and the last one it could
+    read. What only a real run can show: that `compute` derives an image-to-image edge from a `FROM` line nobody wrote
+    into the config; that a release reconciles the consumer's `FROM` and `COPY --from` tags and a compose file's
+    `image` and `build.tags` to the versions it has just computed, the package's own version in the service it builds
+    and its provider's in the service it pulls; that a build stage and a port mapping are left alone; and that the
+    repository a Docker manifest declares — never a folder name — reaches the workspace index the planner and the
+    writer share.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -169,6 +176,7 @@ tests/integration/
   standalone_test.go        goal 15
   manifests_test.go         goal 16
   filter_test.go            goal 17
+  docker_test.go            goal 18
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -471,6 +479,14 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestFilterPreviewSelects`                      | Preview takes the same terms and folder inference, and names the selection it found nothing pending for.                                                                                                                                          |
 | `TestFilterComputeScopesSuggestions`            | Compute reports and writes only the selected consumers' edges while still detecting against every package's manifests, so a declared edge onto an unselected provider is never proposed for removal; the in-sync line names the scope.            |
 | `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
+
+### Goal 18: Docker through the binary (`docker_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                                          |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestDockerComputeDerivesTheImageChain`         | `compute` reads an image-to-image edge off a `FROM` line that no config declares, names the file it came from, ignores a base that is not a workspace package, writes the edge under `--write` and greens the `--check` gate; the stated `manifestNames` repository is what lets the chain resolve, since an image's identity is never its folder name. |
+| `TestDockerReleaseReconcilesTagsAndCompose`     | A release reconciles both Docker formats at the version stage: the consumer's `FROM` tag and its `COPY --from` image follow the provider's new version, a `COPY --from` naming a build stage is left alone, and the compose file gets the package's own version in the service it builds and every `build.tags` entry, the provider's in the service it pulls, and nothing at all in a port mapping. |
+| `TestDockerManifestCommands`                    | The config-free commands over both formats: `scanner` reports a compose file's identity and a Dockerfile's bases with no config, commit or plan; `writer` rewrites a compose tag and own version proved byte-for-byte on disk; a digest-pinned base is skipped rather than failed, and a missing edit still gates under `--strict`. |
 
 ## Regression fences
 
