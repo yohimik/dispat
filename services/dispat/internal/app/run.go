@@ -6,33 +6,30 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
-	"github.com/yohimik/dispat/services/dispat/internal/filter"
-	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
-// Run script error policies: what a failing run script does to the failed
-// package's dependents (the --on-error flag of `dispat run`).
+// Run script error policies: what a failing package does to its dependents
+// (the --on-error flag every sweeping command takes).
 const (
 	// OnErrorSkip (default) skips the changed dependents of a failed package
 	// — transitively, exactly like a release skips consumers of a failed
 	// provider. Independent packages always keep running.
 	OnErrorSkip = "skip"
-	// OnErrorContinue still runs the dependents; the run's exit code reports
-	// the failure either way.
+	// OnErrorContinue still runs the dependents; the command's exit code
+	// reports the failure either way.
 	OnErrorContinue = "continue"
 )
 
-// ValidOnError reports whether the value is a known run error policy.
+// ValidOnError reports whether the value is a known error policy.
 func ValidOnError(v string) bool { return v == OnErrorSkip || v == OnErrorContinue }
 
 // SinceAll is the reserved --since value selecting every package, changed or
-// not — "run this everywhere".
+// not — "do this everywhere".
 const SinceAll = "all"
 
 // RunOptions selects what RunScript runs over, beyond the script name.
@@ -40,38 +37,9 @@ type RunOptions struct {
 	// OnError is the failure policy for the failed package's dependents:
 	// OnErrorSkip (the default when empty) or OnErrorContinue.
 	OnError string
-	// Filter narrows the run to named packages or spaces (--package,
-	// --space), or to the package or space folder the command was invoked
-	// from. It only ever narrows: the window below decides which packages are
-	// on the table, and the filter picks from them.
-	Filter filter.Filter
-	// Since replaces the "changed since the last release" window with "what
-	// the commits since this git revision address" (rev..HEAD, so a branch
-	// base counts only this branch's own commits). Selection follows the
-	// planner's scope semantics: a commit's written scopes are authoritative,
-	// and only scopeless units fall back to the files the commit changed
-	// (§6.2):
-	//
-	//	HEAD~1        what the last commit addressed (per-commit CI)
-	//	origin/main   what this branch addressed (PR pipelines)
-	//	core@1.2.0    everything since a release tag
-	//	all           every package, changed or not (SinceAll)
-	//
-	// SinceAll is the one way to switch the changed-package window off
-	// entirely, which is what makes `--since all --package core` run core
-	// whether or not it changed. Graph ordering and output carrying still
-	// apply within the selected set.
-	Since string
-	// Consumers additionally selects every package that transitively depends
-	// on a selected one. A window covers only what the commits address, so
-	// without this flag nothing re-runs the downstream packages a provider
-	// change affects; with it, a consumer pulled in brings its own consumers,
-	// all the way down the graph. The expansion happens after the filter, on
-	// purpose: `--package core --consumers` is a request for core's
-	// dependents, and re-filtering them away would make the pair a no-op. The
-	// added packages run whether or not they changed, after their selected
-	// providers, with the same skip cascade as any selected package.
-	Consumers bool
+	// Window is which packages the run covers: the release window or --since,
+	// narrowed by the filter, expanded by --consumers.
+	Window WindowOptions
 }
 
 // RunScript computes the plan and executes the named script inside each
@@ -98,10 +66,6 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		a.log.Error().Err(err).Msg("unknown run script")
 		return err
 	}
-	onError := opts.OnError
-	if onError == "" {
-		onError = OnErrorSkip
-	}
 
 	pl, err := a.computePlan(ctx)
 	if err != nil {
@@ -111,64 +75,24 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return errors.New("no correct plan exists")
 	}
-	selected, err := a.runSelection(ctx, pl, opts)
+	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot run the script")
 		return err
 	}
 
-	// The task graph: one node per selected package, edges from every
-	// selected provider — the same shape the release executor schedules, at
-	// package rather than stage granularity.
-	changed := make(map[string]*plan.Release)
-	sched := graph.NewScheduler[string]()
-	for _, pkg := range selected {
-		changed[pkg] = pl.Releases[pkg]
-		sched.Add(pkg)
-	}
-	// selected, not the changed map: its plan order keeps the scheduler's
-	// insertion order — and with it the launch order — deterministic.
-	for _, pkg := range selected {
-		for _, prov := range pl.Providers[pkg] {
-			if _, ok := changed[prov]; ok {
-				sched.AddEdge(prov, pkg)
-			}
-		}
-	}
-
-	run := &scriptRun{
-		app: a, pl: pl, changed: changed,
-		results: make(map[string]*runOutcome, len(changed)),
+	work := &scriptWork{
+		app: a, pl: pl, name: name,
 		// The workspace listing depends only on the plan, so it is built once
 		// here and shared by every package's environment.
-		wsVars: release.WorkspaceEnv(pl, a.log),
-		name:   name, stage: "run:" + name, onError: onError,
-		runner: &script.ShellRunner{Shell: a.cfg.Shell},
+		wsVars:  release.WorkspaceEnv(pl, a.log),
+		runner:  &script.ShellRunner{Shell: a.cfg.Shell},
+		covered: coveredReleases(pl, covered),
 	}
-	// One class, one budget: the run command reuses the executor's pump,
-	// build budget and build weights included.
-	drainErr := graph.Drain(ctx, sched,
-		func(string) struct{} { return struct{}{} },
-		func(struct{}) int { return a.cfg.BuildConcurrency },
-		func(pkg string) int { return pl.Releases[pkg].Pkg.BuildWeight },
-		func(pkg string) { run.execute(ctx, pkg) })
+	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: opts.OnError})
 
-	ran, failed, skipped, resolved := 0, 0, 0, 0
-	for _, res := range run.results {
-		if res.defined {
-			resolved++
-		}
-		switch {
-		case res.failed:
-			failed++
-		case res.skipped:
-			skipped++
-		case res.ran:
-			ran++
-		}
-	}
-	a.log.Info().Str("script", name).Int("ran", ran).Int("failed", failed).
-		Int("skipped", skipped).Msg("run finished")
+	a.log.Info().Str("script", name).Int("ran", rep.Ran).Int("failed", rep.Failed).
+		Int("skipped", rep.Skipped).Msg("run finished")
 	if drainErr != nil {
 		a.log.Warn().Err(drainErr).Msg("run interrupted")
 		return drainErr
@@ -178,14 +102,14 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	// so the mismatch between the name's level and the selection is an error.
 	// A selection that is empty to begin with is not: nothing changed, and a
 	// run over no packages is an honest no-op.
-	if len(selected) > 0 && resolved == 0 {
+	if len(covered) > 0 && rep.Resolved == 0 {
 		err := fmt.Errorf("no selected package defines script %q (selected: %s)",
-			name, strings.Join(selected, ", "))
+			name, strings.Join(covered, ", "))
 		a.log.Error().Err(err).Msg("nothing to run")
 		return err
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d run script(s) failed", failed)
+	if rep.Failed > 0 {
+		return fmt.Errorf("%d run script(s) failed", rep.Failed)
 	}
 	return nil
 }
@@ -224,141 +148,36 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 	return false
 }
 
-// runSelection is the whole selection rule, in one place: a window decides
-// which packages are on the table — the packages --since addresses, every
-// package for --since all, the release window otherwise — the filter narrows
-// that window, and --consumers then expands the result downstream. A selection
-// the filter empties is an honest no-op, not an error; only a term that
-// matches no package at all is one.
-func (a *App) runSelection(ctx context.Context, pl *plan.Plan, opts RunOptions) ([]string, error) {
-	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
-	if err != nil {
-		return nil, err
-	}
-	var window []string
-	if opts.Since != "" {
-		if window, err = a.sincePackages(ctx, pl, opts.Since); err != nil {
-			return nil, err
-		}
-	} else {
-		for _, rel := range pl.Releasing() {
-			window = append(window, rel.Pkg.Name)
-		}
-	}
-	selected := sel.Keep(window)
-	if opts.Consumers {
-		selected = withConsumers(pl, selected)
-	}
-	return selected, nil
-}
-
-// withConsumers expands a selection with every package that transitively
-// depends on a selected one, returning the union in the plan's dependency
-// order. The whole declared graph is walked — not just edges among the
-// already-selected — so a consumer pulled in brings its own consumers too.
-func withConsumers(pl *plan.Plan, selected []string) []string {
-	consumers := make(map[string][]string) // provider -> direct consumers
-	for _, name := range pl.Order {
-		for _, prov := range pl.Providers[name] {
-			consumers[prov] = append(consumers[prov], name)
-		}
-	}
-	in := make(map[string]bool, len(selected))
-	queue := append([]string(nil), selected...)
-	for _, name := range selected {
-		in[name] = true
-	}
-	for len(queue) > 0 {
-		name := queue[0]
-		queue = queue[1:]
-		for _, c := range consumers[name] {
-			if !in[c] {
-				in[c] = true
-				queue = append(queue, c)
-			}
-		}
-	}
-	out := make([]string, 0, len(in))
-	for _, name := range pl.Order {
-		if in[name] {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-// sincePackages resolves --since onto package names: every package for
-// SinceAll, otherwise the packages the commits in rev..HEAD address under the
-// planner's own scope semantics — a written scope-set is authoritative, and
-// only scopeless units fall back to the commit's changed files (§6.2).
-func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]string, error) {
-	if rev == SinceAll {
-		return append([]string(nil), pl.Order...), nil
-	}
-	opts, err := a.planOptions()
-	if err != nil {
-		return nil, err
-	}
-	selected, err := plan.PackagesChangedSince(ctx, a.git, opts, rev)
-	if err != nil {
-		return nil, fmt.Errorf("resolving --since %q: %w", rev, err)
-	}
-	return selected, nil
-}
-
-// runOutcome is one package's terminal state within a `dispat run`. defined
-// is independent of the other three: it records that the package resolved the
-// script at all, which is what tells a run that covered only packages without
-// it apart from one that genuinely ran nothing.
-type runOutcome struct{ failed, skipped, ran, defined bool }
-
-// scriptRun is the shared state of one RunScript invocation: the plan, the
-// changed packages, the per-package outcomes (mu guards results; everything
-// else is read-only once built) and the run's own parameters.
-type scriptRun struct {
+// scriptWork is `dispat run`'s share of a sweep: one shell command per
+// package, in the package's folder, with the release environment the pipeline's
+// own stages see.
+type scriptWork struct {
 	app     *App
 	pl      *plan.Plan
-	changed map[string]*plan.Release
-	results map[string]*runOutcome
-	wsVars  []string // the shared workspace listing, built once per run
-	mu      sync.Mutex
 	name    string
-	stage   string
-	onError string
+	wsVars  []string // the shared workspace listing, built once per run
 	runner  script.Runner
+	covered map[string]*plan.Release
 }
 
-// blocker returns — with mu held by the caller — the first provider whose
-// script failed or was skipped, or "".
-func (s *scriptRun) blocker(pkg string) string {
-	for _, prov := range s.pl.Providers[pkg] {
-		if r, ok := s.results[prov]; ok && (r.failed || r.skipped) {
-			return prov
-		}
-	}
-	return ""
-}
+func (w *scriptWork) stage() string { return "run:" + w.name }
 
-// execute runs the named script for one package to completion.
-func (s *scriptRun) execute(ctx context.Context, pkg string) {
-	rel := s.changed[pkg]
-	res := &runOutcome{}
-	defer func() {
-		s.mu.Lock()
-		s.results[pkg] = res
-		s.mu.Unlock()
-	}()
-
-	// Carry the changed providers' exports in before anything of this
-	// package runs: the run-command counterpart of the pipeline's
-	// per-package accumulation, transitive by construction (each provider
-	// carried its own providers' exports before exporting). Providers
-	// merge in name order, so a name two of them export resolves
+// resolve carries the changed providers' exports in and looks the script up.
+// A package that resolves nothing is a no-op, said out loud at debug level:
+// the run as a whole decides whether a selection that resolved nothing at all
+// is a mistake.
+func (w *scriptWork) resolve(_ context.Context, rel *plan.Release) (task, error) {
+	pkg := rel.Pkg.Name
+	// Before anything of this package runs: the run-command counterpart of
+	// the pipeline's per-package accumulation, transitive by construction
+	// (each provider carried its own providers' exports before exporting).
+	// Providers merge in name order, so a name two of them export resolves
 	// deterministically; the package's own later export overrides either.
-	provs := append([]string(nil), s.pl.Providers[pkg]...)
+	provs := append([]string(nil), w.pl.Providers[pkg]...)
 	sort.Strings(provs)
 	for _, prov := range provs {
-		if pr, ok := s.changed[prov]; ok {
+		// Only a provider the run actually covered has outputs worth carrying.
+		if pr, ok := w.covered[prov]; ok {
 			release.MergeOutputs(rel, pr.Outputs)
 		}
 	}
@@ -366,36 +185,18 @@ func (s *scriptRun) execute(ctx context.Context, pkg string) {
 	// The one resolution: the package's own scripts over its space's over the
 	// top level's, already merged into the effective map when the package's
 	// space was built.
-	cmd, ok := rel.Pkg.Space.Scripts[strings.ToLower(s.name)]
-	res.defined = ok
-
-	if s.onError == OnErrorSkip {
-		// Providers finished before this package was handed out, so their
-		// outcomes are final; a skipped provider cascades the skip.
-		s.mu.Lock()
-		blocker := s.blocker(pkg)
-		s.mu.Unlock()
-		if blocker != "" {
-			res.skipped = true
-			s.app.log.Warn().Str("package", pkg).Str("stage", s.stage).Str("blockedBy", blocker).
-				Msg("run script skipped: a dependency's script failed or was skipped")
-			return
-		}
-	}
-
+	cmd, ok := rel.Pkg.Space.Scripts[strings.ToLower(w.name)]
 	if !ok {
-		s.app.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
-			Msgf("package does not define script %q, skipping", s.name)
-		return
+		w.app.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
+			Msgf("package does not define script %q, skipping", w.name)
+		return nil, nil
 	}
-	log := s.app.log.With().Str("package", pkg).Str("stage", s.stage).Logger()
-	log.Info().Msg("run script started")
-	seq := release.Sequence{Runner: s.runner, Dir: rel.Pkg.Dir, Stage: s.stage, Commands: []string{cmd},
-		Env: release.CommandEnv(s.pl, pkg, s.stage, s.wsVars), Log: log, FailFast: true}
-	if err := seq.RunMergingOutputs(ctx, rel); err != nil {
-		res.failed = true
-		log.Error().Err(err).Msg("run script failed")
-		return
-	}
-	res.ran = true
+	return func(ctx context.Context) error {
+		log := w.app.log.With().Str("package", pkg).Str("stage", w.stage()).Logger()
+		log.Info().Msg("run script started")
+		seq := release.Sequence{Runner: w.runner, Dir: rel.Pkg.Dir, Stage: w.stage(),
+			Commands: []string{cmd}, Env: release.CommandEnv(w.pl, pkg, w.stage(), w.wsVars),
+			Log: log, FailFast: true}
+		return seq.RunMergingOutputs(ctx, rel)
+	}, nil
 }

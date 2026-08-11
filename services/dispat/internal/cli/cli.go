@@ -235,6 +235,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	// monorepo root the ascent just found: the difference between the two is
 	// exactly what narrows a command to the folder it was invoked from.
 	sel := filter.Filter{Packages: *o.pkgFilter, Spaces: *o.spaceFilter, Groups: *o.groupFilter, Dir: *o.root}
+	// The one window every sweeping command shares: that selection, the
+	// revision the run counts changes from, and the downstream expansion.
+	window := app.WindowOptions{Filter: sel, Since: *o.since, Consumers: *o.consumers}
 
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.
@@ -248,8 +251,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case cmdRun:
-		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *o.onError,
-			Filter: sel, Since: *o.since, Consumers: *o.consumers}) != nil {
+		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *o.onError, Window: window}) != nil {
 			return 1
 		}
 	case cmdPreview:

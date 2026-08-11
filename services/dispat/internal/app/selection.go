@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -84,6 +87,137 @@ func (a *App) narrow(pl *plan.Plan, f filter.Filter) (plan.Narrowing, error) {
 			Msg("selection releases part of a versioning group; the rest catches up on the next run")
 	}
 	return n, nil
+}
+
+// WindowOptions is the selection every package-covering command shares: a
+// window decides which packages are on the table, the filter narrows it, and
+// --consumers expands the result downstream.
+type WindowOptions struct {
+	// Filter narrows the command to named packages, spaces or versioning
+	// groups (--package, --space, --group), or to the package or space folder
+	// it was invoked from. It only ever narrows.
+	Filter filter.Filter
+	// Since replaces the "changed since the last release" window with "what
+	// the commits since this git revision address" (rev..HEAD, so a branch base
+	// counts only this branch's own commits). Selection follows the planner's
+	// scope semantics: a commit's written scopes are authoritative, and only
+	// scopeless units fall back to the files the commit changed (§6.2):
+	//
+	//	HEAD~1        what the last commit addressed (per-commit CI)
+	//	origin/main   what this branch addressed (PR pipelines)
+	//	core@1.2.0    everything since a release tag
+	//	all           every package, changed or not (SinceAll)
+	//
+	// SinceAll is the one way to switch the changed-package window off
+	// entirely, which is what makes `--since all --package core` cover core
+	// whether or not it changed.
+	Since string
+	// Consumers additionally selects every package that transitively depends on
+	// a selected one. A window covers only what the commits address, so without
+	// this flag nothing reaches the downstream packages a provider change
+	// affects; with it, a consumer pulled in brings its own consumers, all the
+	// way down the graph. The expansion happens after the filter, on purpose:
+	// `--package core --consumers` is a request for core's dependents, and
+	// re-filtering them away would make the pair a no-op.
+	Consumers bool
+}
+
+// coveredPackages is the whole selection rule, in one place: a window decides
+// which packages are on the table — the packages --since addresses, every
+// package for --since all, the release window otherwise — the filter narrows
+// that window, and --consumers then expands the result downstream. The result
+// comes back in the plan's dependency order, which is the order every sweep
+// schedules in.
+//
+// A selection the window empties is an honest no-op, not an error; only a term
+// that matches no package at all is one. An explicitly named package the window
+// left out is said out loud, because "I asked for core and nothing happened"
+// deserves a reason.
+func (a *App) coveredPackages(ctx context.Context, pl *plan.Plan, opts WindowOptions) ([]string, error) {
+	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
+	if err != nil {
+		return nil, err
+	}
+	var window []string
+	if opts.Since != "" {
+		if window, err = a.sincePackages(ctx, pl, opts.Since); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, rel := range pl.Releasing() {
+			window = append(window, rel.Pkg.Name)
+		}
+	}
+	covered := sel.Keep(window)
+	if sel.Active() {
+		kept := make(map[string]bool, len(covered))
+		for _, name := range covered {
+			kept[name] = true
+		}
+		for _, name := range sel.Names {
+			if !kept[name] {
+				a.log.Info().Str("package", name).Msg("package is outside the window, nothing to do")
+			}
+		}
+	}
+	if opts.Consumers {
+		covered = withConsumers(pl, covered)
+	}
+	return covered, nil
+}
+
+// withConsumers expands a selection with every package that transitively
+// depends on a selected one, returning the union in the plan's dependency
+// order. The whole declared graph is walked — not just edges among the
+// already-selected — so a consumer pulled in brings its own consumers too.
+func withConsumers(pl *plan.Plan, selected []string) []string {
+	consumers := make(map[string][]string) // provider -> direct consumers
+	for _, name := range pl.Order {
+		for _, prov := range pl.Providers[name] {
+			consumers[prov] = append(consumers[prov], name)
+		}
+	}
+	in := make(map[string]bool, len(selected))
+	queue := append([]string(nil), selected...)
+	for _, name := range selected {
+		in[name] = true
+	}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		for _, c := range consumers[name] {
+			if !in[c] {
+				in[c] = true
+				queue = append(queue, c)
+			}
+		}
+	}
+	out := make([]string, 0, len(in))
+	for _, name := range pl.Order {
+		if in[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// sincePackages resolves --since onto package names: every package for
+// SinceAll, otherwise the packages the commits in rev..HEAD address under the
+// planner's own scope semantics — a written scope-set is authoritative, and
+// only scopeless units fall back to the commit's changed files (§6.2).
+func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]string, error) {
+	if rev == SinceAll {
+		return append([]string(nil), pl.Order...), nil
+	}
+	opts, err := a.planOptions()
+	if err != nil {
+		return nil, err
+	}
+	selected, err := plan.PackagesChangedSince(ctx, a.git, opts, rev)
+	if err != nil {
+		return nil, fmt.Errorf("resolving --since %q: %w", rev, err)
+	}
+	return selected, nil
 }
 
 // selectPackages resolves one command's filter against the workspace. The

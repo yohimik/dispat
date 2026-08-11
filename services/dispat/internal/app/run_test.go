@@ -11,7 +11,6 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
-	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -33,93 +32,50 @@ func runPlan(root string, names []string, providers map[string][]string) *plan.P
 	return pl
 }
 
-func TestWithConsumers(t *testing.T) {
-	// b consumes a, c consumes b, d is independent: selecting a pulls the
-	// whole chain in, transitively, and the result keeps plan order.
-	pl := runPlan(t.TempDir(), []string{"a", "b", "c", "d"},
-		map[string][]string{"b": {"a"}, "c": {"b"}})
-	assert.Equal(t, []string{"a", "b", "c"}, withConsumers(pl, []string{"a"}))
-	assert.Equal(t, []string{"b", "c"}, withConsumers(pl, []string{"b"}))
-	assert.Equal(t, []string{"d"}, withConsumers(pl, []string{"d"}), "no consumers, no additions")
-	assert.Equal(t, []string{"a", "b", "c", "d"}, withConsumers(pl, []string{"d", "a"}),
-		"the union comes out in plan order, not selection order")
-}
-
-// TestRunSelection pins the whole rule: a window decides what is on the table,
-// the filter narrows it, --consumers expands the result.
-func TestRunSelection(t *testing.T) {
-	root := t.TempDir()
-	// b consumes a, c consumes b, d is independent; a and c are releasing.
-	pl := runPlan(root, []string{"a", "b", "c", "d"},
-		map[string][]string{"b": {"a"}, "c": {"b"}})
-	for _, n := range []string{"a", "c"} {
-		pl.Releases[n].Pinned = true
-	}
+// runApp is an App over runPlan's shape: one "libs" space, nothing executed.
+func runApp(root string) *App {
 	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: "libs"}}}
-	app := New(root, cfg, zerolog.Nop())
-	ctx := context.Background()
-
-	for name, tc := range map[string]struct {
-		opts RunOptions
-		want []string
-	}{
-		"no filter is the release window": {
-			RunOptions{}, []string{"a", "c"}},
-		"a package term narrows the window": {
-			RunOptions{Filter: filter.Filter{Packages: []string{"a"}}}, []string{"a"}},
-		"a term outside the window selects nothing": {
-			RunOptions{Filter: filter.Filter{Packages: []string{"b"}}}, []string{}},
-		"a glob term narrows the window": {
-			RunOptions{Filter: filter.Filter{Packages: []string{"*"}}}, []string{"a", "c"}},
-		"a space term narrows the window": {
-			RunOptions{Filter: filter.Filter{Spaces: []string{"libs"}}}, []string{"a", "c"}},
-		"the invocation folder narrows the window": {
-			RunOptions{Filter: filter.Filter{Dir: filepath.Join(root, "libs", "c")}}, []string{"c"}},
-		"since all covers every package": {
-			RunOptions{Since: SinceAll}, []string{"a", "b", "c", "d"}},
-		"since all plus a filter runs an unchanged package": {
-			RunOptions{Since: SinceAll, Filter: filter.Filter{Packages: []string{"b"}}}, []string{"b"}},
-		"consumers expand past the filter": {
-			RunOptions{Filter: filter.Filter{Packages: []string{"a"}}, Consumers: true},
-			[]string{"a", "b", "c"}},
-		"the selection keeps plan order, not term order": {
-			RunOptions{Since: SinceAll, Filter: filter.Filter{Packages: []string{"d", "b"}}},
-			[]string{"b", "d"}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			selected, err := app.runSelection(ctx, pl, tc.opts)
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, selected)
-		})
-	}
-
-	_, err := app.runSelection(ctx, pl, RunOptions{Filter: filter.Filter{Packages: []string{"nope"}}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `--package "nope" matches no package`)
-	assert.Contains(t, err.Error(), "a, b, c, d", "the error lists what was discovered")
+	return New(root, cfg, zerolog.Nop())
 }
 
-func TestSincePackagesAll(t *testing.T) {
+func TestScriptWorkStage(t *testing.T) {
+	w := &scriptWork{name: "Lint"}
+	assert.Equal(t, "run:Lint", w.stage(), "the stage carries the name as the user spelled it")
+}
+
+// TestScriptWorkResolve pins what a package resolving the script means, and
+// what a package that does not resolve it means: a nil task, never an error.
+func TestScriptWorkResolve(t *testing.T) {
 	root := t.TempDir()
-	pl := runPlan(root, []string{"a", "b"}, map[string][]string{})
-	a := New(root, &config.File{}, zerolog.Nop())
-	selected, err := a.sincePackages(context.Background(), pl, SinceAll)
+	pl := runPlan(root, []string{"a", "b"}, map[string][]string{"b": {"a"}})
+	// Only b's space defines "build"; a's does not.
+	pl.Releases["b"].Pkg.Space = &model.Space{Name: "apps", Scripts: map[string]string{"build": "go build"}}
+	a := runApp(root)
+
+	w := &scriptWork{app: a, pl: pl, name: "build", covered: coveredReleases(pl, []string{"a", "b"})}
+	task, err := w.resolve(context.Background(), pl.Releases["b"])
 	require.NoError(t, err)
-	assert.Equal(t, []string{"a", "b"}, selected)
-	selected[0] = "mutated"
-	assert.Equal(t, []string{"a", "b"}, pl.Order, "the selection is a copy, not the plan's own slice")
+	assert.NotNil(t, task, "the package defines the script")
+
+	task, err = w.resolve(context.Background(), pl.Releases["a"])
+	require.NoError(t, err)
+	assert.Nil(t, task, "a package that does not define the script is a no-op, not a failure")
 }
 
-func TestScriptRunBlocker(t *testing.T) {
-	pl := runPlan(t.TempDir(), []string{"a", "b", "c"}, map[string][]string{"c": {"a", "b"}})
-	s := &scriptRun{pl: pl, results: map[string]*runOutcome{
-		"a": {ran: true},
-		"b": {failed: true},
-	}}
-	assert.Equal(t, "b", s.blocker("c"), "a failed provider blocks")
-	s.results["b"] = &runOutcome{skipped: true}
-	assert.Equal(t, "b", s.blocker("c"), "a skipped provider cascades")
-	s.results["b"] = &runOutcome{ran: true}
-	assert.Empty(t, s.blocker("c"), "clean providers block nothing")
-	assert.Empty(t, s.blocker("a"), "no providers at all")
+// TestScriptWorkCarriesProviderOutputs proves the run-command counterpart of
+// the pipeline's accumulation: a covered provider's exports reach the consumer
+// before its script is resolved, and an uncovered provider's do not.
+func TestScriptWorkCarriesProviderOutputs(t *testing.T) {
+	root := t.TempDir()
+	pl := runPlan(root, []string{"a", "b", "c"}, map[string][]string{"c": {"a", "b"}})
+	pl.Releases["a"].Outputs = []plan.Output{{Name: "FROM_A", Value: "1"}}
+	pl.Releases["b"].Outputs = []plan.Output{{Name: "FROM_B", Value: "2"}}
+
+	// The run covers a and c, but not b.
+	w := &scriptWork{app: runApp(root), pl: pl, name: "lint",
+		covered: coveredReleases(pl, []string{"a", "c"})}
+	_, err := w.resolve(context.Background(), pl.Releases["c"])
+	require.NoError(t, err)
+	assert.Equal(t, []plan.Output{{Name: "FROM_A", Value: "1"}}, pl.Releases["c"].Outputs,
+		"only a provider the run covered has outputs worth carrying")
 }
