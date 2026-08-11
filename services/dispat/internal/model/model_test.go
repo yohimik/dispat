@@ -1,6 +1,7 @@
 package model
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -97,4 +98,17 @@ func TestRecordSpecsHoldPrereleasesBack(t *testing.T) {
 			assert.Equal(t, c.want, gh.Records(c.isPre), "both specs answer alike")
 		})
 	}
+}
+
+// TestPackageScopeDir: src narrows which folder a package's changes must sit
+// under, and an unset src leaves the package folder itself.
+func TestPackageScopeDir(t *testing.T) {
+	assert.Equal(t, filepath.Join("packages", "core"),
+		(&Package{Dir: filepath.Join("packages", "core")}).ScopeDir(),
+		"without src the whole package folder counts")
+	assert.Equal(t, filepath.Join("packages", "core", "lib"),
+		(&Package{Dir: filepath.Join("packages", "core"), Src: "lib"}).ScopeDir())
+	assert.Equal(t, filepath.Join("packages", "core", "src", "main"),
+		(&Package{Dir: filepath.Join("packages", "core"), Src: "src/main"}).ScopeDir(),
+		"a slash-separated src is a path on every platform")
 }

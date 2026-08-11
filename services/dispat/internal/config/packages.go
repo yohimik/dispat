@@ -273,6 +273,26 @@ func validatePackageLayer(label string, po PackageConfig) error {
 			return fmt.Errorf("%s: concurrency values must be >= 0, got %v", label, po.Concurrency)
 		}
 	}
+	return validateSrc(label, po.Src)
+}
+
+// validateSrc checks a package's `src` path shape: a folder inside the
+// package, named relative to it. The check is shape only — that the folder
+// exists is checked once the package's location is known, in discovery.
+func validateSrc(label, src string) error {
+	if src == "" {
+		return nil
+	}
+	if filepath.IsAbs(src) {
+		return fmt.Errorf("%s: src %q must be a path relative to the package folder", label, src)
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(src)))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("%s: src %q leaves the package folder; it narrows the package, it cannot move it", label, src)
+	}
+	if clean == "." {
+		return fmt.Errorf("%s: src %q is the package folder itself; leave src unset to cover all of it", label, src)
+	}
 	return nil
 }
 
@@ -416,6 +436,7 @@ type packageExtras struct {
 	github        *GitHubConfig
 	concurrency   []int
 	manifestNames []string
+	src           string
 }
 
 // apply folds one layer's package-only keys in. Changelog and github overlay
@@ -451,6 +472,9 @@ func (ex *packageExtras) apply(c *File, po PackageConfig) {
 		// states what the package is called, and adding to an inherited list
 		// could never take a name away again.
 		ex.manifestNames = po.ManifestNames
+	}
+	if po.Src != "" {
+		ex.src = po.Src
 	}
 }
 

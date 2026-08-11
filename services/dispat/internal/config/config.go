@@ -1274,6 +1274,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				}
 				pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
 				pkg.ManifestNames = ex.manifestNames
+				pkg.Src = ex.src
 				if ex.changelog != nil {
 					pkg.Changelog = changelogSpec(ex.changelog)
 				}
@@ -1388,6 +1389,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		}
 		pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
 		pkg.ManifestNames = ex.manifestNames
+		pkg.Src = ex.src
 		if ex.changelog != nil {
 			pkg.Changelog = changelogSpec(ex.changelog)
 		}
@@ -1424,7 +1426,29 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	if err := checkManifestNames(pkgs); err != nil {
 		return nil, nil, err
 	}
+	if err := checkSrcFolders(pkgs); err != nil {
+		return nil, nil, err
+	}
 	return pkgs, declared, nil
+}
+
+// checkSrcFolders proves every declared `src` names a folder that is there.
+// A misspelled one would silently narrow the package to nothing — no file
+// could ever be under it — and the package would stop releasing without
+// anything ever saying why, release after release.
+func checkSrcFolders(pkgs []*model.Package) error {
+	for _, p := range pkgs {
+		if p.Src == "" {
+			continue
+		}
+		switch fi, err := os.Stat(p.ScopeDir()); {
+		case err != nil:
+			return fmt.Errorf("config: package %q: src %q names no folder inside the package", p.Name, p.Src)
+		case !fi.IsDir():
+			return fmt.Errorf("config: package %q: src %q names a file, want a folder", p.Name, p.Src)
+		}
+	}
+	return nil
 }
 
 // checkManifestNames proves no two packages state the same manifest name. A

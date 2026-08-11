@@ -498,7 +498,21 @@ type PackageConfig struct {
 	// entry whose key matches no space folder: a space package's location is
 	// its folder and cannot be redefined, so neither a space's own `packages`
 	// entry nor a config file inside a folder may set it.
-	Path                  string           `mapstructure:"path" json:"path,omitempty"`
+	Path string `mapstructure:"path" json:"path,omitempty"`
+	// Src narrows which of the package's files count as changes to it: a
+	// folder-relative path, so only what sits under <packageFolder>/<src>
+	// makes a scopeless commit address the package. Everything outside it —
+	// docs, fixtures, a scratch folder — stops triggering releases, while
+	// the package folder stays the package: scripts still run there, the
+	// changelog is still written there, and the release commit still stages
+	// all of it.
+	//
+	// It narrows file-derived scope resolution alone. A commit naming the
+	// package by scope always addresses it, wherever its files sit, and
+	// manifest discovery is deliberately untouched: a manifest usually sits
+	// at the package root, outside src, and auto-versioning must still find
+	// it.
+	Src                   string           `mapstructure:"src" json:"src,omitempty"`
 	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`

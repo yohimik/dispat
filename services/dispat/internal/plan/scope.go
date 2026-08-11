@@ -140,9 +140,12 @@ func (cp *computation) reportScope(res scopeResult, rec *commitRec, where string
 // derived is derived(commit) from §6.2: the packages owning at least one path
 // in the commit's changed-file list.
 //
-// Ownership is by longest matching path prefix, so a file of a package nested
-// inside another belongs to the inner one only. The result is memoised per
-// commit because every unresolved unit in the commit asks for it.
+// Ownership is by longest matching path prefix over each package's scope
+// folder — its own folder, or the `src` sub-folder when it declares one — so
+// a file of a package nested inside another belongs to the inner one only,
+// and a file outside a package's src belongs to whatever encloses it, or to
+// nobody. The result is memoised per commit because every unresolved unit in
+// the commit asks for it.
 func (cp *computation) derived(rec *commitRec) map[string]bool {
 	if rec.derivedSet != nil {
 		return rec.derivedSet
@@ -152,7 +155,7 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 		full := path.Clean(path.Join(cp.rootSlash(), filepath.ToSlash(file)))
 		owner, ownerLen := "", -1
 		for _, p := range cp.pkgs {
-			dir := path.Clean(filepath.ToSlash(p.Dir))
+			dir := path.Clean(filepath.ToSlash(p.ScopeDir()))
 			if !underDir(full, dir) {
 				continue
 			}

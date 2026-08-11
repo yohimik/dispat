@@ -364,3 +364,44 @@ func TestOriginChannel(t *testing.T) {
 	require.NotEmpty(t, cp.diags)
 	assert.Equal(t, CodePropagatedChannelConflict, cp.diags[len(cp.diags)-1].Code)
 }
+
+// TestDerivedOwnershipHonoursSrc: §6.2 ownership is by longest matching path
+// prefix over each package's scope folder, so a package declaring `src`
+// stops owning what lies outside it — and a package nested inside another's
+// src still wins its own files, because it is the longer prefix.
+func TestDerivedOwnershipHonoursSrc(t *testing.T) {
+	pkgs := []*model.Package{
+		{Name: "core", Dir: "/r/packages/core", Src: "lib"},
+		{Name: "inner", Dir: "/r/packages/core/lib/inner"},
+		{Name: "plain", Dir: "/r/packages/plain"},
+	}
+	cp := &computation{root: "/r", pkgs: pkgs}
+
+	for name, tc := range map[string]struct {
+		files []string
+		want  []string
+	}{
+		"a file inside src belongs to the package": {
+			[]string{"packages/core/lib/parser.go"}, []string{"core"}},
+		"a file outside src belongs to nobody": {
+			[]string{"packages/core/docs/guide.md", "packages/core/README.md"}, nil},
+		"the nested package still wins its own files": {
+			[]string{"packages/core/lib/inner/main.go"}, []string{"inner"}},
+		"a package without src owns its whole folder": {
+			[]string{"packages/plain/docs/guide.md"}, []string{"plain"}},
+		"a commit spanning both": {
+			[]string{"packages/core/lib/parser.go", "packages/core/docs/guide.md",
+				"packages/plain/x.go"}, []string{"core", "plain"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &commitRec{commit: gitx.Commit{Files: tc.files}}
+			got := cp.derived(rec)
+			assert.Len(t, got, len(tc.want))
+			for _, want := range tc.want {
+				assert.True(t, got[want], "%s should own one of %v", want, tc.files)
+			}
+			assert.NotNil(t, rec.derivedSet,
+				"the memo is filled even when nothing is owned, so a second ask costs nothing")
+		})
+	}
+}

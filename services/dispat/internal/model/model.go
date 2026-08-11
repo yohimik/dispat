@@ -1,6 +1,8 @@
 // Package model holds the domain types shared across the tool.
 package model
 
+import "path/filepath"
+
 // Versioning is a space's versioning mode: how the versions of the space's
 // packages relate to each other.
 type Versioning string
@@ -250,8 +252,11 @@ func (a *AutoVersion) Reconciles() bool {
 
 // Package is a single releasable folder inside a space.
 type Package struct {
-	Name  string
-	Dir   string // folder in which scripts run
+	Name string
+	Dir  string // folder in which scripts run
+	// Src narrows which of the package's files count as changes to it: a
+	// Dir-relative path, empty for the whole folder. See ScopeDir.
+	Src   string
 	Space *Space
 	// BuildWeight and PublishWeight are the stage-budget slots the package's
 	// tasks occupy, always >= 1; 1 is the ordinary cost. A weight reaching
@@ -268,6 +273,17 @@ type Package struct {
 	// workspace can learn. They outrank a declared name and feed the one
 	// index `dispat compute` and auto-versioning share.
 	ManifestNames []string
+}
+
+// ScopeDir is the folder a changed file must sit under to count as a change
+// to this package: Dir narrowed by Src when the package declares one, and
+// Dir itself otherwise. It is the only place the narrowing lives, so
+// everything that resolves ownership by path agrees on it.
+func (p *Package) ScopeDir() string {
+	if p.Src == "" {
+		return p.Dir
+	}
+	return filepath.Join(p.Dir, filepath.FromSlash(p.Src))
 }
 
 // RecordFormat customises how a release entry renders — the resolved

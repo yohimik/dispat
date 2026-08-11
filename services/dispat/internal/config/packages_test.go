@@ -1774,3 +1774,68 @@ func TestDispatignoreUnreadableHidingConfigs(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), DispatignoreName)
 }
+
+// TestPackageSrcNarrowsTheScopeFolder: src rides the override layers like
+// every other package-only key, and lands on the resolved package as the
+// folder its changes must sit under.
+func TestPackageSrcNarrowsTheScopeFolder(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {Src: "lib"}}
+	root := writeModelRepo(t, cfg,
+		"packages/libs/core/lib", "packages/libs/utils", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	assert.Equal(t, "lib", byName["core"].Src)
+	assert.Equal(t, filepath.Join(root, "packages", "libs", "core", "lib"), byName["core"].ScopeDir())
+	assert.Empty(t, byName["utils"].Src, "a package that says nothing keeps its whole folder")
+	assert.Equal(t, filepath.Join(root, "packages", "libs", "utils"), byName["utils"].ScopeDir())
+}
+
+// TestPackageSrcInFolderLayerWins: the layer nearest the package states the
+// narrowing, exactly like manifestNames.
+func TestPackageSrcInFolderLayerWins(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {Src: "lib"}}
+	root := writeModelRepo(t, cfg,
+		"packages/libs/core/lib", "packages/libs/core/source", "packages/libs/utils", "packages/apps/app")
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{Src: "source"})
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, "source", packagesByName(pkgs)["core"].Src)
+}
+
+// TestPackageSrcValidation: a src that cannot narrow anything is refused at
+// load, because the alternative is a package that quietly stops releasing.
+func TestPackageSrcValidation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src, want string
+	}{
+		"absolute":              {"/abs/lib", "relative to the package folder"},
+		"escaping the package":  {"../elsewhere", "leaves the package folder"},
+		"the package itself":    {".", "is the package folder itself"},
+		"a folder that is gone": {"nope", "names no folder inside the package"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Packages = map[string]PackageConfig{"core": {Src: tc.src}}
+			root := writeModelRepo(t, cfg,
+				"packages/libs/core/lib", "packages/libs/utils", "packages/apps/app")
+			_, err := discoverPackages(t, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+
+	// A src naming a file rather than a folder is the same mistake in
+	// another spelling.
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {Src: "README.md"}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "libs", "core", "README.md"), []byte("x"), 0o644))
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names a file, want a folder")
+}
