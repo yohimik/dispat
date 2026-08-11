@@ -1,12 +1,14 @@
 package integration
 
-// Area 17: the --package and --space selection every package command shares.
-// Both flags take names or globs, repeated or comma-separated, matched
-// case-insensitively; a term matching no package is an error, never an empty
-// selection. Without terms, the folder the command was invoked from is the
+// Area 17: the --package, --space and --group selection every package command
+// shares. All three flags take names or globs, repeated or comma-separated,
+// matched case-insensitively, and they union; a term matching no package is an
+// error, never an empty selection, and it names the flag that would have
+// reached it. Without terms, the folder the command was invoked from is the
 // selection: inside a package folder that package, inside a space folder that
 // space, anywhere else nothing at all — and an explicit term always wins over
-// the folder it was typed in.
+// the folder it was typed in. A versioning group is never inferred from a
+// folder, because it is a versioning relationship rather than a place.
 //
 // The filter narrows, it never widens. `dispat run` picks its window first
 // (the release window, or what --since addresses, or every package for
@@ -19,10 +21,11 @@ package integration
 // is releasing and unselected is withheld for the next run (W230) rather than
 // published ahead of it, while a selection that releases part of a versioning
 // group publishes and warns (W231). --strict refuses either outright, before
-// anything is built.
+// anything is built, and naming the group instead of its members is the
+// selection that cannot split one.
 //
 // A standalone package — a `packages` entry with a path — belongs to no
-// space, so only --package reaches it.
+// space, so only --package and the group it joined reach it.
 
 import (
 	"os"
@@ -75,6 +78,48 @@ func filterRepo(t *testing.T) *harness.Repo {
 	r.WriteFile("apps/group/deep/main.txt", "x")
 	r.WriteFile("tools/tool/main.txt", "x")
 	r.Commit("feat(core,web,site,deep,tool): bootstrap every package")
+	return r
+}
+
+// groupRepo is the fixture for the --group term, laid out so a group is
+// provably not a folder:
+//
+//	packages/core  packages/web   space "libs", joined to the group "shared"
+//	tools/tool                    standalone, joined to "shared" as well
+//	apps/site                     space "apps", versioning as its own group
+//	extras/solo                   space "extras", versioning independently
+//
+// So "shared" spans a space and a standalone package, "apps" is a group
+// nothing declares (a space that versions as one carries its own name), and
+// solo belongs to no group at all. The packages have no dependencies on each
+// other, which keeps the publish order out of these scenarios.
+func groupRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{
+		"build":   echoBuild,
+		"publish": "echo publishing",
+		"stamp":   `echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/stamp.log"`,
+	}
+	cfg.VersionGroups = map[string]models.VersionGroupConfig{
+		"shared": {Versioning: "fixed"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs":   {Path: "packages", VersionGroup: "shared", Flow: buildPublish()},
+		"apps":   {Path: "apps", Versioning: "fixed", Flow: buildPublish()},
+		"extras": {Path: "extras", Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"tool": {Path: "tools/tool", VersionGroup: "shared", Flow: buildPublish()},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.SeedPackage("apps", "site")
+	r.SeedPackage("extras", "solo")
+	r.WriteFile("tools/tool/main.txt", "x")
+	r.Commit("feat(core,web,site,solo,tool): bootstrap every package")
 	return r
 }
 
@@ -536,6 +581,135 @@ func TestFilterStatusSelects(t *testing.T) {
 	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "web").Str("message"))
 
 	assert.Equal(t, 1, r.Status("-p", "ghost").Code, "an unmatched term is an error here too")
+}
+
+// TestFilterSelectsAVersioningGroup: --group names the packages that version
+// together. It is a relationship and not a folder, so one term reaches a whole
+// space, a standalone package outside every space, or both at once, and the
+// spellings are the ones the other two flags take.
+func TestFilterSelectsAVersioningGroup(t *testing.T) {
+	r := groupRepo(t)
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"-g", "shared"}, []string{"core", "web", "tool"}},
+		{[]string{"--group", "SHARED"}, []string{"core", "web", "tool"}},
+		{[]string{"-g", "apps"}, []string{"site"}},
+		{[]string{"-g", "shared,apps"}, []string{"core", "web", "tool", "site"}},
+		{[]string{"-g", "shared", "-g", "apps"}, []string{"core", "web", "tool", "site"}},
+		{[]string{"-g", "*d"}, []string{"core", "web", "tool"}},
+		{[]string{"-g", "*"}, []string{"core", "web", "tool", "site"}},
+		{[]string{"-g", "apps", "-p", "solo"}, []string{"site", "solo"}},
+		{[]string{"-g", "shared", "-s", "extras"}, []string{"core", "web", "tool", "solo"}},
+		{[]string{"-g", "shared", "-p", "core"}, []string{"core", "web", "tool"}},
+	} {
+		reset(r, "stamp.log")
+		res := r.RunScript("stamp", tc.args...)
+		require.Equal(t, 0, res.Code, "args %v — stderr:\n%s", tc.args, res.Stderr)
+		assert.ElementsMatch(t, tc.want, logged(r, "stamp.log"), "args: %v", tc.args)
+	}
+
+	reset(r, "stamp.log")
+	r.RunScriptOK("stamp", "-g", "*")
+	assert.NotContains(t, logged(r, "stamp.log"), "solo",
+		"an independently versioned package belongs to no group, so no group term reaches it")
+}
+
+// TestFilterUnknownGroupTermsAreErrors: the three flags name three different
+// things, so a term in the wrong one is answered with the flag that would have
+// reached it rather than with an empty run.
+func TestFilterUnknownGroupTermsAreErrors(t *testing.T) {
+	r := groupRepo(t)
+
+	res := r.RunScript("stamp", "-g", "ghost")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "matches no versioning group")
+	assert.Contains(t, res.Stdout, "apps, shared", "the error lists the groups there are")
+
+	res = r.RunScript("stamp", "-g", "no-such-*")
+	assert.Equal(t, 1, res.Code, "a glob matching nothing is a typo too")
+
+	res = r.RunScript("stamp", "-g", "extras")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "extras is a space",
+		"a space whose packages version on their own has no group to name")
+
+	res = r.RunScript("stamp", "-g", "core")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "core is a package")
+
+	res = r.RunScript("stamp", "-s", "shared")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "shared is a versioning group")
+
+	res = r.RunScript("stamp", "-p", "shared")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "shared is a versioning group")
+
+	// A repository where every package versions on its own says so, rather
+	// than listing an empty set of groups.
+	plain := filterRepo(t)
+	res = plain.RunScript("lint", "-g", "libs")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "this repository configures none")
+}
+
+// TestFilterGroupSelectsForEveryCommand: the group term is part of the one
+// selection, so the commands that read a plan and the command that reads
+// manifests all narrow by it identically.
+func TestFilterGroupSelectsForEveryCommand(t *testing.T) {
+	r := groupRepo(t)
+
+	res := r.Command("preview", "-g", "apps")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "## site@0.1.0")
+	assert.NotContains(t, res.Stdout, "## core@", "only the group's packages")
+
+	res = r.StatusOK("-g", "shared")
+	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "core").Str("message"))
+	assert.Equal(t, "⊝ not selected", harness.GraphLine(res.Events, "solo").Str("message"))
+
+	res = r.Command("changelog", "-g", "apps")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.FileExists(t, r.Path("apps", "site", "CHANGELOG.md"))
+	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"), "the other group stays untouched")
+
+	res = r.Command("commit", "-g", "apps", "--tag")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, []string{"site@0.1.0"}, r.TagList())
+
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json", `{"name": "@acme/web", "version": "0.0.0",
+		"dependencies": {"@acme/core": "workspace:*"}}`)
+	r.Commit("chore(core,web): manifests")
+	res = r.Command("compute", "-g", "shared")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "web -> core")
+}
+
+// TestFilterReleaseByGroupNeverSplitsIt: a group term takes every member of
+// the group, which is exactly the selection a shared version can be released
+// under — so it releases clean where naming one member warns (W231), and it
+// passes --strict for the same reason.
+func TestFilterReleaseByGroupNeverSplitsIt(t *testing.T) {
+	r := groupRepo(t)
+
+	res := r.Release("-p", "core", "--strict")
+	require.Equal(t, 1, res.Code, "naming one member splits the group\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "W231"))
+	assert.Empty(t, r.TagList())
+
+	res = r.ReleaseOK("-g", "shared", "--strict")
+	assert.False(t, harness.HasCode(res.Events, "W231"), "the whole group goes out at once")
+	assert.ElementsMatch(t, []string{"core@0.1.0", "web@0.1.0", "tool@0.1.0"}, r.TagList(),
+		"the group's members share one version, across the space and the standalone package")
+	assert.Equal(t, "⊝ not selected", harness.GraphLine(res.Events, "solo").Str("message"))
+
+	// The rest of the monorepo is still waiting, and the next run finishes it.
+	r.ReleaseOK()
+	assert.ElementsMatch(t,
+		[]string{"core@0.1.0", "web@0.1.0", "tool@0.1.0", "site@0.1.0", "solo@0.1.0"}, r.TagList())
 }
 
 // TestFilterPositionalPackagesAreAUsageError: the selection is a flag, so a
