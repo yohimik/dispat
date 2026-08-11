@@ -273,3 +273,41 @@ func TestNeedsWorkspaceOnlyWhenSomethingAsksForIt(t *testing.T) {
 	assert.True(t, AutoReplaceOptions{Version: VersionPlaceholder}.needsWorkspace())
 	assert.True(t, AutoReplaceOptions{Edits: []writer.Edit{arSet("a", "^"+VersionPlaceholder)}}.needsWorkspace())
 }
+
+func TestPlannedVersionPrefersTheBaseline(t *testing.T) {
+	_, pl, _ := arRepo(t)
+	web := pl.Releases["web"]
+	web.HasBaseline = true
+	web.Baseline = ccme.Version{Major: 1, Minor: 4}
+	assert.Equal(t, "1.4.0", plannedVersion(web),
+		"an unreleasing package is at the version its last release left it at")
+}
+
+// TestAutoReplaceKeepsGoingPastAManifestItCannotRead: a folder holding one
+// broken manifest and one healthy manifest still gets the healthy one written,
+// which is the partial-result contract every reader here follows.
+func TestAutoReplaceKeepsGoingPastAManifestItCannotRead(t *testing.T) {
+	a, pl, buf := arRepo(t)
+	arSeed(t, a, "packages/web/nested/package.json", "{ this is not json")
+
+	work, err := a.newReplaceWork(context.Background(), pl,
+		AutoReplaceOptions{Manifests: string(model.ScopeAll), Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
+	require.NoError(t, err)
+	mans, err := work.manifests(context.Background(), pl.Releases["web"])
+	require.NoError(t, err)
+	require.Len(t, mans, 1, "the manifest that parsed is still on the list")
+	assert.Equal(t, "package.json", mans[0].Path)
+	assert.Contains(t, buf.String(), "some manifests failed to parse")
+}
+
+func TestAutoReplaceStopsWhenTheContextIsDone(t *testing.T) {
+	a, pl, _ := arRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	work, err := a.newReplaceWork(context.Background(), pl,
+		AutoReplaceOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
+	require.NoError(t, err)
+	_, err = work.manifests(ctx, pl.Releases["web"])
+	require.ErrorIs(t, err, context.Canceled, "an interrupted scan is an interruption, not a partial parse")
+	assert.Contains(t, arRead(t, a, "packages/web/package.json"), `"@acme/core": "^1.0.0"`)
+}

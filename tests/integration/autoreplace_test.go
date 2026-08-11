@@ -207,6 +207,17 @@ func TestAutoReplaceOutcomesReachTheExitCode(t *testing.T) {
 	assert.Equal(t, 2, r.Command("autoreplace", "extra", "--set-version", "1.0.0").Code,
 		"packages are flags, not positional arguments")
 
+	// A selection in which no covered package has a manifest anything can
+	// write is an error, because writing nothing without saying so is how a
+	// mistyped selection hides.
+	r.Remove("packages/core/package.json")
+	r.Remove("packages/web/package.json")
+	r.Commit("chore: drop the manifests")
+	res = r.Command("autoreplace", "--since", "all", "--set", "@acme/core=^1.0.0")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "no covered package has a manifest this command can write")
+	r.Git("revert", "--no-edit", "HEAD")
+
 	// A placeholder naming no package of the workspace is refused before
 	// anything is written.
 	res = r.Command("autoreplace", "--since", "all", "--set", "left-pad=^{version}")
