@@ -46,10 +46,14 @@ The suite was designed against seventeen goals, one test file each:
 10. **The `compute` command** (`compute_test.go`): the manifest-derived dependency graph through the binary: the
     detect/apply/check loop with its backup and convergence, `keep` and removal semantics, and the W220 ambiguity
     reaching the JSON events.
-11. **Native auto-versioning** (`autoversion_test.go`): manifests rewritten by the binary at the version stage:
-    range reconciliation under the match policy, own-version writes, the serialised `syncLock` slot, the
-    W192/W197/W203/W221 diagnostics as JSON events across three runs, and `commit.include` staging the regenerated root
-    lock file into the release commit.
+11. **Native auto-versioning** (`autoversion_test.go`): files reconciled by the binary at the version stage, under
+    either of the two strategies or neither. The parsing one: range reconciliation under the match policy,
+    own-version writes, the W192/W197/W203/W221 diagnostics as JSON events across three runs, and `commit.include`
+    staging the regenerated root lock file into the release commit. The replacing one: literal substitution over a
+    Gradle build script and a README with nothing parsed at all, binary files skipped rather than corrupted, and W222
+    for a rule that matched nothing. Plus the serialised `syncLock` slot, which keeps its budget even when neither
+    strategy is configured and it is the whole of the version stage, and `manifestNames` making a package with no
+    readable identity visible to `compute` and to auto-versioning through the one index they share.
 12. **Per-package overrides, versioning groups and `.dispatignore`** (`overrides_test.go`): the layered configuration
     through the binary: a `packages` entry replacing one flow entry while the sibling keeps the space's, the in-folder
     config file beating the entry (the tag proves it), `.dispatignore` exclusions (never released, unknown scope in
@@ -75,13 +79,14 @@ The suite was designed against seventeen goals, one test file each:
     commit and the outer run skips the pre-written entry (W222) and the pre-created tag (W223), the `--tag`/`--push`
     committer identity and remote delivery, the `DISPAT_OUTPUT` commit pin export, and autoversion's reconcile-once
     plus syncLock-once convergence.
-16. **The manifest commands** (`manifests_test.go`): `dispat scanner` and `dispat writer`, the `pkg/scanner` and
-    `pkg/writer` libraries exposed as commands. What only the binary can witness: that they run with no config file, no
-    commit and no plan at all; that the folder and manifest paths a shell hands them resolve against `--root`; that the
-    scanner's partial-result contract and the three writer outcomes reach the process exit code, plainly and under
-    `--strict`; that a format-preserving rewrite really does leave every other byte alone on disk; that the scanner
-    reads back what the writer just wrote; and that the two new command words did not cost the run shorthand a script
-    of the same name.
+16. **The manifest commands** (`manifests_test.go`): `dispat scanner`, `dispat writer` and `dispat replacer`, the
+    `pkg/scanner` and `pkg/writer` libraries exposed as commands. What only the binary can witness: that they run with
+    no config file, no commit and no plan at all; that the folder and file paths a shell hands them resolve against
+    `--root`; that the scanner's partial-result contract and the three writer and replacer outcomes reach the process
+    exit code, plainly and under `--strict`; that a format-preserving rewrite really does leave every other byte alone
+    on disk; that the replacer replaces every occurrence and chains its substitutions in the order they were given;
+    that the scanner reads back what the writer just wrote; and that the three command words did not cost the run
+    shorthand a script of the same name.
 17. **The `--package` / `--space` selection** (`filter_test.go`): the one selection every package command shares,
     through the binary: name, comma-separated, repeated, glob and case-insensitive terms; a space term staying inside
     its space; a standalone package belonging to no space and reachable only through `--package`; an unmatched term
@@ -354,6 +359,14 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestAutoVersionReleaseRewritesManifests`    | A `workspace:*` range is reconciled to the provider's released version, a hand-pin outside the match globs survives, both own versions advance, and the syncLock snapshot proves it ran after the rewrite.                                                                                                                        |
 | `TestAutoVersionSyncLockSerialised`          | Several packages' syncLock scripts never overlap under the default budget of 1 while builds keep the build budget: the corrupted-shared-lockfile guard over the real scheduler.                                                                                                                                                   |
 | `TestAutoVersionDiagnosticsAndCommitInclude` | Three runs: W221 for a rewritten edge with no configured counterpart (and `commit.include` staging the regenerated root package-lock.json into the release commit); W192+W197 after the manifest was hand-edited backwards; W203 when the provider goes to beta under a stable consumer. All asserted as JSON events per package. |
+| `TestAutoVersionReplaceStrategy`             | A Gradle-shaped space where nothing parses: `manifests: none` plus two replace rules reconcile the provider's coordinate in a build script and the package's own version in a README, every occurrence and no other byte, while a PNG the glob also reached is skipped rather than corrupted.                                     |
+| `TestAutoVersionReplaceRuleMatchedNothing`   | A mistyped rule reconciles nothing and says so (W222) instead of failing silently release after release.                                                                                                                                                                                                                          |
+| `TestAutoVersionManifestNamesMakeAnEdgeVisible` | A package whose files declare no readable identity becomes visible once `manifestNames` states it: `dispat compute` derives the edge and auto-versioning reconciles the coordinate, from the one index the two share.                                                                                                           |
+| `TestAutoVersionSyncLockOnly`                | An `autoVersion` block with neither strategy is how a space asks for lock regeneration alone: the scripts run every release (there is no change to key off) and the budget of 1 still serialises them on the tsmark timeline, with no file rewritten.                                                                              |
+| `TestAutoVersionSyncLockOnlyStandalone`      | The same mode through `dispat autoversion`, where the serial loop is the budget by construction: two invocations, two lock regenerations.                                                                                                                                                                                          |
+| `TestAutoVersionPolicyFlagsStillRunSyncLock` | A flag-overridden policy and the syncLock loop read the same resolved block, so a reconciliation the flags caused still regenerates the lock.                                                                                                                                                                                       |
+| `TestAutoVersionNoReplaceFlag`               | `--no-replace` skips the rules for one invocation and leaves the parsing strategy to do its half; without the flag the same invocation finishes the job.                                                                                                                                                                            |
+| `TestAutoVersionManifestsNoneFlag`           | `--manifests none` turns the parsing strategy off for one invocation, and a value outside the three is a usage error (2).                                                                                                                                                                                                          |
 
 ### Goal 12: per-package overrides, versioning groups and `.dispatignore` (`overrides_test.go`)
 
@@ -414,7 +427,11 @@ in-memory monorepo away instead of one binary invocation.)
 | `TestManifestsWriterEditsInPlace`                | A two-ecosystem batch rewrites only the version text being changed, byte-for-byte elsewhere, in `package.json` (own version plus two fields) and `go.mod` (a require, no own version to write); re-running the same edits converges to `manifest unchanged`. |
 | `TestManifestsWriterRedirects`                   | `--replace` adds the local-folder directive and an empty path removes it, and the scanner reads back what the writer just wrote, which is the pair's whole contract.                                                                  |
 | `TestManifestsWriterOutcomesReachTheExitCode`    | The three outcomes mapped onto exit codes: missing is tolerated (0) until `--strict` (1); a path no writer covers exits 1 while the usable manifests of the same batch are still written; a malformed `--set`, an invocation with nothing to write, and one with no manifest are usage errors (2). |
-| `TestManifestsCommandWordsKeepTheirScripts`      | The two new command words are reserved: the bare `dispat scanner` is the command even where the config defines a `scanner` script, while `dispat run scanner` still reaches the script.                                               |
+| `TestManifestsCommandWordsKeepTheirScripts`      | The command words are reserved: the bare `dispat scanner` is the command even where the config defines a `scanner` script, while `dispat run scanner` still reaches the script.                                                       |
+| `TestManifestsReplacerNeedsNoConfig`             | The replacer runs over files that are not manifests at all, with no config file and no git history: every occurrence replaced, the paths resolved against `--root`, and repeated `--sub` values applied in order, each over what the last left. |
+| `TestManifestsReplacerOutcomesReachTheExitCode`  | Nothing to write, a spec with no separator and no file to work on are usage errors (2); a pattern matching nothing is tolerated (0) until `--strict` (1); an unreadable path exits 1 while the usable files of the same batch are still written. |
+| `TestManifestsReplacerJSONEvents`                | `--log-format json` carries one event per file with its path and occurrence count, plus the summary splitting applied, missing and skipped.                                                                                            |
+| `TestManifestsReplacerWordKeepsItsScript`        | `replacer` is reserved like the other command words, and `dispat run replacer` still reaches a script of that name.                                                                                                                   |
 
 ### Goal 17: the `--package` / `--space` selection (`filter_test.go`)
 

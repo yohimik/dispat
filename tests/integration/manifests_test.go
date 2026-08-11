@@ -1,12 +1,13 @@
 package integration
 
 // Area 16: the manifest commands through the compiled binary. `dispat
-// scanner` and `dispat writer` are the pkg/scanner and pkg/writer libraries
-// exposed as commands, and everything a unit test cannot witness about them
-// lives here: that they run with no config file and no release plan at all,
-// that the folder and manifest paths a shell hands them resolve against
-// --root, that their outcomes reach the exit code over a process boundary,
-// and that the two command words did not cost the run shorthand a script.
+// scanner`, `dispat writer` and `dispat replacer` are the pkg/scanner and
+// pkg/writer libraries exposed as commands, and everything a unit test cannot
+// witness about them lives here: that they run with no config file and no
+// release plan at all, that the folder and file paths a shell hands them
+// resolve against --root, that their outcomes reach the exit code over a
+// process boundary, and that the three command words did not cost the run
+// shorthand a script.
 
 import (
 	"os"
@@ -272,6 +273,112 @@ func TestManifestsCommandWordsKeepTheirScripts(t *testing.T) {
 	assert.NotContains(t, bare.Stdout, "the script ran")
 
 	script := r.RunScript("scanner")
+	require.Equal(t, 0, script.Code, "stderr:\n%s", script.Stderr)
+	assert.Contains(t, script.Stdout, "the script ran", "the two-word spelling still reaches the script")
+}
+
+// TestManifestsReplacerNeedsNoConfig: the replacer command over files that
+// are not manifests at all, in a folder with no dispat config anywhere and no
+// git history. Substitutions apply in the order they were given, every
+// occurrence is replaced, and the paths resolve against --root.
+func TestManifestsReplacerNeedsNoConfig(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("build.gradle", "implementation 'com.acme:core:1.2.0'\ntestImplementation 'com.acme:core:1.2.0'\n")
+	r.WriteFile("docs/README.md", "Requires com.acme:core:1.2.0 and nothing else.\n")
+
+	res := r.Command("replacer", "--sub", "com.acme:core:1.2.0=>com.acme:core:1.3.0",
+		"build.gradle", "docs/README.md")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "2 file(s), 3 occurrence(s): 2 applied, 0 skipped, 0 missing")
+
+	gradle, err := os.ReadFile(r.Path("build.gradle"))
+	require.NoError(t, err)
+	assert.Equal(t, "implementation 'com.acme:core:1.3.0'\ntestImplementation 'com.acme:core:1.3.0'\n", string(gradle))
+	readme, err := os.ReadFile(r.Path("docs", "README.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "Requires com.acme:core:1.3.0 and nothing else.\n", string(readme))
+
+	// Repeated --sub values apply in order, each over what the last left.
+	res = r.Command("replacer", "--sub", "1.3.0=>1.4.0", "--sub", "1.4.0=>2.0.0", "build.gradle")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	gradle, err = os.ReadFile(r.Path("build.gradle"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gradle), "com.acme:core:2.0.0")
+}
+
+// TestManifestsReplacerOutcomesReachTheExitCode: the three ways the command
+// ends, over a process boundary.
+func TestManifestsReplacerOutcomesReachTheExitCode(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("notes.txt", "version 1.0.0\n")
+
+	// Nothing to write is a usage error.
+	assert.Equal(t, 2, r.Command("replacer", "notes.txt").Code)
+	// So is a spec with no separator.
+	assert.Equal(t, 2, r.Command("replacer", "--sub", "no-separator", "notes.txt").Code)
+	// No file to work on is a usage error too.
+	assert.Equal(t, 2, r.Command("replacer", "--sub", "a=>b").Code)
+
+	// A pattern matching nothing is quiet by default and fatal under --strict.
+	assert.Equal(t, 0, r.Command("replacer", "--sub", "absent=>x", "notes.txt").Code)
+	strict := r.Command("replacer", "--strict", "--sub", "absent=>x", "notes.txt")
+	assert.Equal(t, 1, strict.Code)
+	assert.Contains(t, strict.Stdout+strict.Stderr, "matched nothing")
+
+	// An unreadable file fails the command; the others are still attempted.
+	r.WriteFile("keep.txt", "version 1.0.0\n")
+	failed := r.Command("replacer", "--sub", "1.0.0=>1.1.0", "absent.txt", "keep.txt")
+	assert.Equal(t, 1, failed.Code)
+	kept, err := os.ReadFile(r.Path("keep.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "version 1.1.0\n", string(kept), "one bad path must not cost the others their edits")
+}
+
+// TestManifestsReplacerJSONEvents: the machine-readable rendering, one event
+// per file plus a summary, on the same stream CI already ingests.
+func TestManifestsReplacerJSONEvents(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("notes.txt", "keep 1.0.0 keep\n")
+
+	res := r.Command("replacer", "--log-format", "json",
+		"--sub", "1.0.0=>1.1.0", "--sub", "absent=>x", "--sub", "keep=>keep", "notes.txt")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	file := findEvent(t, res.Events, "file updated")
+	assert.Equal(t, "notes.txt", file.Str("path"))
+	summary := findEvent(t, res.Events, "substitution complete")
+	for _, key := range []string{"occurrences", "applied", "missing", "skipped"} {
+		assert.Equal(t, float64(1), summary[key], "%s in %v", key, summary)
+	}
+}
+
+// TestManifestsReplacerWordKeepsItsScript: the command word is reserved like
+// every other one, and the two-word spelling still reaches a run script of
+// the same name.
+func TestManifestsReplacerWordKeepsItsScript(t *testing.T) {
+	r := harness.New(t)
+	f := harness.BaseFile()
+	f.Scripts = map[string]string{
+		"replacer": "echo the script ran",
+		"build":    "echo building",
+		"publish":  "echo publishing",
+	}
+	f.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Flow: buildPublish()},
+	}
+	r.WriteConfigModel(f)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/notes.txt", "version 1.0.0\n")
+	r.Commit("feat(core): first release")
+
+	bare := r.Command("replacer", "--sub", "1.0.0=>1.1.0", "packages/core/notes.txt")
+	require.Equal(t, 0, bare.Code, "stderr:\n%s", bare.Stderr)
+	assert.NotContains(t, bare.Stdout, "the script ran", "the bare word is the command")
+	data, err := os.ReadFile(r.Path("packages", "core", "notes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "version 1.1.0\n", string(data))
+
+	script := r.RunScript("replacer")
 	require.Equal(t, 0, script.Code, "stderr:\n%s", script.Stderr)
 	assert.Contains(t, script.Stdout, "the script ran", "the two-word spelling still reaches the script")
 }
