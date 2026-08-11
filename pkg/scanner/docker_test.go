@@ -253,3 +253,22 @@ func TestComposeEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerfileCommandFlagsAreNotImages(t *testing.T) {
+	dir := t.TempDir()
+	// A --from past the instruction's own arguments is a flag of the command
+	// being run, not a reference to an image.
+	write(t, dir, "Dockerfile", `FROM a/base:1.0
+RUN mytool sync --from=a/other:9.9 --to=/out
+COPY --from=a/tools:2.0 /x /y
+COPY /z /w --from=a/late:3.0
+`)
+	m := scanOne(t, dir)
+	want := []DeclaredDep{
+		{Name: "a/base", Range: "1.0"},
+		{Name: "a/tools", Range: "2.0"},
+	}
+	if !reflect.DeepEqual(m.Deps, want) {
+		t.Errorf("Deps = %+v, want %+v", m.Deps, want)
+	}
+}

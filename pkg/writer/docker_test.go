@@ -419,3 +419,73 @@ func TestDockerUnsupportedNeighbours(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerfileCommandFlagsAreNotImages(t *testing.T) {
+	// A --from after the instruction's own arguments belongs to the command
+	// being run, not to RUN or COPY. Rewriting it would corrupt a shell line.
+	src := "FROM a/b:1.0\n" +
+		"RUN --mount=type=bind,from=a/b:1.0,target=/t mytool sync --from=a/b:1.0 --to=/out\n" +
+		"COPY --from=a/b:1.0 /x /y\n"
+	path := seed(t, "Dockerfile", src)
+	res, err := Rewrite(path, "", []Edit{{Name: "a/b", Range: "2.0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "FROM a/b:2.0\n" +
+		"RUN --mount=type=bind,from=a/b:2.0,target=/t mytool sync --from=a/b:1.0 --to=/out\n" +
+		"COPY --from=a/b:2.0 /x /y\n"
+	if got := read(t, path); got != want {
+		t.Errorf("rewrite produced:\n%q\nwant:\n%q", got, want)
+	}
+	if len(res.Applied) != 1 {
+		t.Errorf("Applied = %v", res.Applied)
+	}
+}
+
+func TestDockerEditsSharingARepositoryResolveTogether(t *testing.T) {
+	// One image declared at two tags produces one edit per declaration, and
+	// only one of them can queue the splice. The other must not come back as
+	// an edit the manifest does not declare.
+	path := seed(t, "Dockerfile", "FROM a/b:1.0 AS x\nFROM a/b:2.0 AS y\n")
+	res, err := Rewrite(path, "", []Edit{
+		{Name: "a/b", Range: "3.0"},
+		{Name: "a/b", Range: "3.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); got != "FROM a/b:3.0 AS x\nFROM a/b:3.0 AS y\n" {
+		t.Errorf("rewrite produced %q", got)
+	}
+	if len(res.Applied) != 2 || len(res.Missing) != 0 {
+		t.Errorf("Applied = %v, Missing = %v, want both applied and none missing", res.Applied, res.Missing)
+	}
+
+	// The same holds for a repository the file declares but cannot write.
+	path = seed(t, "Dockerfile", "FROM a/b\nFROM a/b@sha256:abc\n")
+	res, err = Rewrite(path, "", []Edit{{Name: "a/b", Range: "3.0"}, {Name: "a/b", Range: "3.0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 2 || len(res.Missing) != 0 {
+		t.Errorf("Skipped = %v, Missing = %v, want both skipped", res.Skipped, res.Missing)
+	}
+}
+
+func TestComposeWithoutAVersionArgument(t *testing.T) {
+	// `dispat writer compose.yaml --set redis=7.4` with no --set-version: the
+	// dependency moves and the file's own image is left exactly as it was.
+	src := "services:\n  api:\n    build: .\n    image: a/api:1.0.0\n  cache:\n    image: redis:7.2\n"
+	path := seed(t, "compose.yaml", src)
+	res, err := Rewrite(path, "", []Edit{{Name: "redis", Range: "7.4"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.VersionWritten {
+		t.Error("VersionWritten = true with no version asked for")
+	}
+	want := "services:\n  api:\n    build: .\n    image: a/api:1.0.0\n  cache:\n    image: redis:7.4\n"
+	if got := read(t, path); got != want {
+		t.Errorf("rewrite produced %q, want %q", got, want)
+	}
+}

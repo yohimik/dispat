@@ -48,6 +48,8 @@ func TestDockerfileRefsSkipsWhatIsNotAnImage(t *testing.T) {
 		"COPY --from=2 /e /f\n" +
 		"COPY --from=scratch /g /h\n" +
 		"COPY --from= /i /j\n" +
+		"COPY --chown=root:root /k /l\n" +
+		"RUN mytool --from=a/b:1.0 build\n" +
 		"RUN --mount=type=cache,target=/x make\n" +
 		"RUN --mount=from=,target=/x make\n" +
 		"ENV FROM=redis:7.2\n"

@@ -81,6 +81,15 @@ func DockerfileRefs(lines []string) []DockerRef {
 					args++
 				}
 			case "copy", "run":
+				// A flag only belongs to the instruction while it precedes the
+				// instruction's own arguments. Past the first of those,
+				// "--from=" is a flag of the command being run —
+				// `RUN mytool sync --from=a/b:1.0` names a tool's option, not
+				// an image — and rewriting it would corrupt a shell line.
+				if args > 0 || !strings.HasPrefix(f.text, "--") {
+					args++
+					continue
+				}
 				for _, r := range dockerFromFlag(f) {
 					if stages[strings.ToLower(r.Text)] || r.Text == scratchImage || isStageIndex(r.Text) {
 						continue

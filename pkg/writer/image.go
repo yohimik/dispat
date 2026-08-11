@@ -71,29 +71,46 @@ func newImageTagWriter(path string, edits []Edit) *imageTagWriter {
 }
 
 // match offers one located reference to the requested edits: the first whose
-// name is this reference's repository claims it. A reference names exactly one
-// repository, so no second edit can claim the same bytes and the queued
-// splices can never overlap.
+// name is this reference's repository claims the bytes, and only that one
+// queues a splice, so two edits can never cover the same bytes.
+//
+// The outcome, though, is recorded against *every* edit naming that
+// repository. A file may declare one image twice — two stages on different
+// tags of the same base — and the scan that produced the edits then produced
+// one per declaration. Resolving only the first would leave the rest looking
+// like edits the manifest does not declare, and a caller reporting Missing
+// would warn about a declaration that is plainly there.
 func (w *imageTagWriter) match(line, start int, text string) error {
 	ref := manifest.ParseImageRef(text)
+	claim := -1
 	for i, e := range w.edits {
-		if e.Name != ref.Repository {
-			continue
+		if e.Name == ref.Repository {
+			claim = i
+			break
 		}
-		w.seen[i] = true
-		if !writableImageRef(ref) {
-			return nil
-		}
-		w.found[i] = true
-		if ref.Tag == e.Range {
-			return nil // already the wanted tag: not a change, and not missing
-		}
-		if err := w.queue(line, start, ref, e.Range); err != nil {
-			return err
-		}
-		w.changed[i] = true
+	}
+	if claim < 0 {
 		return nil
 	}
+	mark := func(m map[int]bool) {
+		for i, e := range w.edits {
+			if e.Name == ref.Repository {
+				m[i] = true
+			}
+		}
+	}
+	mark(w.seen)
+	if !writableImageRef(ref) {
+		return nil
+	}
+	mark(w.found)
+	if ref.Tag == w.edits[claim].Range {
+		return nil // already the wanted tag: not a change, and not missing
+	}
+	if err := w.queue(line, start, ref, w.edits[claim].Range); err != nil {
+		return err
+	}
+	mark(w.changed)
 	return nil
 }
 
