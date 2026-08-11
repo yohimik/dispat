@@ -75,6 +75,24 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	if _, ok := pf.Package("app"); ok {
 		t.Error("packages without an entry do not resolve")
 	}
+
+	// The same lookup at the two levels that hold a packages map of their own:
+	// a space in the root file, and a space folder's config file.
+	sp := SpaceConfig{Packages: map[string]PackageConfig{"core": {TagFormat: "s{version}"}}}
+	if pc, ok := sp.Package("CORE"); !ok || pc.TagFormat != "s{version}" {
+		t.Errorf("SpaceConfig.Package(CORE) = %+v, %v", pc, ok)
+	}
+	if _, ok := sp.Package("app"); ok {
+		t.Error("packages without an entry do not resolve")
+	}
+
+	sf := SpaceFile{Packages: map[string]PackageConfig{"core": {TagFormat: "f{version}"}}}
+	if pc, ok := sf.Package("Core"); !ok || pc.TagFormat != "f{version}" {
+		t.Errorf("SpaceFile.Package(Core) = %+v, %v", pc, ok)
+	}
+	if _, ok := sf.Package("app"); ok {
+		t.Error("packages without an entry do not resolve")
+	}
 }
 
 func TestCommandsPreservesOrder(t *testing.T) {
@@ -232,5 +250,63 @@ func TestGitHubAllPackagesEnabled(t *testing.T) {
 	}
 	if (&GitHubConfig{AllPackages: Bool(false)}).AllPackagesEnabled() {
 		t.Error("set false: disabled")
+	}
+}
+
+func TestSpaceFileRoundTrip(t *testing.T) {
+	// A space folder's config file marshals under the config keys and keeps
+	// its tri-state pointers, for the same reason a package override does: an
+	// explicit false has to override the root file's true, and an unset key
+	// has to stay absent so it inherits.
+	sf := SpaceFile{
+		RevertOnFail: Bool(false),
+		TagFormat:    "libs/{name}@{version}",
+		Scripts:      map[string]string{"build": "make"},
+		Flow:         &SpaceFlowConfig{Build: []string{"build"}},
+		Packages: map[string]PackageConfig{
+			"core": {IsBuildWaitingPublish: Bool(true), Dependencies: []string{"utils"}},
+		},
+	}
+	data, err := json.Marshal(sf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	// The space's own location is the folder the file sits in, so the model
+	// has no path field at all to marshal one.
+	if _, ok := raw["path"]; ok {
+		t.Errorf("a space file must not carry a path: %s", data)
+	}
+	for _, key := range []string{"revertOnFail", "tagFormat", "scripts", "flow", "packages"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("space file is missing key %q: %s", key, data)
+		}
+	}
+	if _, ok := raw["versioning"]; ok {
+		t.Errorf("an unset scalar must not marshal: %s", data)
+	}
+
+	var back SpaceFile
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.RevertOnFail == nil || *back.RevertOnFail {
+		t.Errorf("explicit false must survive as false, got %v", back.RevertOnFail)
+	}
+	if back.IsBuildWaitingPublish != nil {
+		t.Errorf("unset pointer must survive as nil, got %v", back.IsBuildWaitingPublish)
+	}
+	pc, ok := back.Package("core")
+	if !ok {
+		t.Fatalf("packages entry lost in the round trip: %s", data)
+	}
+	if pc.IsBuildWaitingPublish == nil || !*pc.IsBuildWaitingPublish {
+		t.Errorf("the entry's own pointer must survive: %+v", pc)
+	}
+	if len(pc.Dependencies) != 1 || pc.Dependencies[0] != "utils" {
+		t.Errorf("entry dependencies lost: %+v", pc)
 	}
 }
