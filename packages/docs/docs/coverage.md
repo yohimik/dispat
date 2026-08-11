@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 89.8%; the integration
-layer's instrumented binary: 85.2%).
+The whole test suite currently covers **95.5%** of the workspace's statements (unit layer alone: 89.7%; the integration
+layer's instrumented binary: 84.8%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -12,36 +12,37 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-11** (after `dispat autoreplace` and the package sweep every covering command now shares, on top of the
-`--group` selection, the narrowed `release` and `status`, the manifest-derived baselines in `dispat compute`, the
-github step command, the prerelease record opt-out, per-command help, `parser.quiet` and the package `src` path) with
-Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
+**2026-08-11** (after `dispat self-update` and the update notice, on top of `dispat autoreplace` and the package sweep
+every covering command now shares, the `--group` selection, the narrowed `release` and `status`, the manifest-derived
+baselines in `dispat compute`, the github step command, the prerelease record opt-out, per-command help,
+`parser.quiet` and the package `src` path) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
 | Module / package                        | Statement coverage                                                                       |
 |-----------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                     | **95.6%**                                                                                |
+| **workspace total**                     | **95.5%**                                                                                |
 | `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)            | 100%                                                                                     |
 | `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
 | `pkg/scanner` (manifest reader)         | **96.3%**, plus two fuzz targets over every registered parser                            |
 | `pkg/writer` (manifest writer)          | **93.7%**, plus fuzz targets proving rewrites never corrupt valid JSON and that the replacer's arithmetic holds |
-| `services/dispat` (all packages)        | **95.7%** aggregate, `main.go` included (the integration suite runs the real binary)     |
-| - `main.go`, `globx`, `model`           | 100%                                                                                     |
+| `services/dispat` (all packages)        | **95.5%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| - `main.go`, `globx`, `model`, `cli`    | 100%                                                                                     |
 | - `filter` (the selection resolver)     | 99.4%                                                                                    |
-| - `cli` (controller)                    | 99.7%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
 | - `plan` (planner)                      | 96.6%                                                                                    |
 | - `changelog`                           | 96.5%                                                                                    |
 | - `release` (executor)                  | 95.9%                                                                                    |
 | - `config`                              | 96.0%                                                                                    |
-| - `app`                                 | 94.3%                                                                                    |
+| - `app`                                 | 94.0%                                                                                    |
 | - `github`                              | 93.9%                                                                                    |
+| - `selfupdate`                          | 93.0%                                                                                    |
 | - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |
 
 The statements still uncovered are almost entirely single-line defensive branches: a `write`/`fsync`/`chmod` failing
-mid-atomic-write, a git subprocess failing for a reason its caller cannot produce on purpose, and internal
-"this cannot happen" guards behind data the same function already validated. Reaching them would mean asserting on
+mid-atomic-write, a git subprocess failing for a reason its caller cannot produce on purpose, the second half of a
+double failure (a rename that fails *and* the rename undoing it failing too), and internal "this cannot happen" guards
+behind data the same function already validated. Reaching them would mean asserting on
 error text rather than on behaviour, so they are left uncovered deliberately.
 
 The per-package test inventory (what each package's suite actually asserts) is in
