@@ -166,6 +166,31 @@ func TestDispatcherRoutesPerPackagePolicy(t *testing.T) {
 	assert.Empty(t, entries, "a disabled package records nothing")
 }
 
+// TestDispatcherHoldsPrereleasesBack: with changelog.prerelease off, the
+// betas of a version leave no entry behind and the graduation to stable
+// writes the one entry covering them.
+func TestDispatcherHoldsPrereleasesBack(t *testing.T) {
+	dir := t.TempDir()
+	d := &Dispatcher{Now: func() time.Time { return testDate }}
+	ctx := context.Background()
+	spec := model.ChangelogSpec{Enabled: true, Prerelease: false}
+
+	beta := testRelease(dir, ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}})
+	beta.Pkg.Changelog = spec
+	require.NoError(t, d.Record(ctx, beta))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a held-back prerelease writes no file at all")
+
+	stable := testRelease(dir, ccme.Version{Major: 2})
+	stable.Pkg.Changelog = spec
+	require.NoError(t, d.Record(ctx, stable))
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "## core@2.0.0 (")
+	assert.NotContains(t, string(data), "beta")
+}
+
 func TestRenderSectionsFallsBackToNamesWithoutVersions(t *testing.T) {
 	// A Release built without version data (Updates empty) still names its
 	// providers rather than dropping the section.

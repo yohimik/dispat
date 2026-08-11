@@ -69,3 +69,32 @@ func TestDepKindString(t *testing.T) {
 	assert.Equal(t, "devDependencies", KindDevDependencies.String())
 	assert.Equal(t, "peerDependencies", KindPeerDependencies.String())
 }
+
+// TestRecordSpecsHoldPrereleasesBack pins the two-part gate both recorders
+// read: the policy must be enabled, and a prerelease must not be held back.
+// The specs answer identically, which is what lets the changelog and the
+// GitHub release be configured the same way.
+func TestRecordSpecsHoldPrereleasesBack(t *testing.T) {
+	cases := []struct {
+		name       string
+		enabled    bool
+		prerelease bool
+		isPre      bool
+		want       bool
+	}{
+		{"stable, all on", true, true, false, true},
+		{"prerelease, all on", true, true, true, true},
+		{"stable, prereleases held back", true, false, false, true},
+		{"prerelease, prereleases held back", true, false, true, false},
+		{"disabled outright", false, true, false, false},
+		{"disabled beats the prerelease flag", false, true, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cl := ChangelogSpec{Enabled: c.enabled, Prerelease: c.prerelease}
+			gh := GitHubSpec{Enabled: c.enabled, Prerelease: c.prerelease}
+			assert.Equal(t, c.want, cl.Records(c.isPre))
+			assert.Equal(t, c.want, gh.Records(c.isPre), "both specs answer alike")
+		})
+	}
+}

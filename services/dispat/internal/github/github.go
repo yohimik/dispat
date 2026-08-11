@@ -21,8 +21,22 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
+
+// LogSkip explains why a resolved policy created no release, so the run's
+// dispatcher and the standalone github command word it the same way. A
+// policy switched off is ordinary configuration and stays at debug level; a
+// prerelease held back is a release-shaped decision the operator should see.
+func LogSkip(log zerolog.Logger, spec model.GitHubSpec, rel *plan.Release) {
+	if !spec.Enabled {
+		log.Debug().Str("package", rel.Pkg.Name).Msg("github release disabled by config")
+		return
+	}
+	log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
+		Msg("github release skipped: github.prerelease is false")
+}
 
 // DefaultAPIURL is the public GitHub REST API endpoint.
 const DefaultAPIURL = "https://api.github.com"

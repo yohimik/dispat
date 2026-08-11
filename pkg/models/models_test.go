@@ -38,6 +38,23 @@ func TestEnabledDefaults(t *testing.T) {
 	if (&CommitConfig{Push: true}).PushEnabled() {
 		t.Error("push without commit is inert")
 	}
+	if !(&ChangelogConfig{}).PrereleaseEnabled() {
+		t.Error("a prerelease gets a changelog entry by default")
+	}
+	if (&ChangelogConfig{Prerelease: Bool(false)}).PrereleaseEnabled() {
+		t.Error("the changelog can hold prereleases back")
+	}
+	if !(&GitHubConfig{}).PrereleaseEnabled() {
+		t.Error("a prerelease gets a github release by default")
+	}
+	if (&GitHubConfig{Prerelease: Bool(false)}).PrereleaseEnabled() {
+		t.Error("github releases can hold prereleases back")
+	}
+	var nilChangelog *ChangelogConfig
+	var nilGitHub *GitHubConfig
+	if !nilChangelog.PrereleaseEnabled() || !nilGitHub.PrereleaseEnabled() {
+		t.Error("an absent object means every default, prereleases included")
+	}
 	if !(&CommitConfig{}).VerifyEnabled() {
 		t.Error("push verification defaults to enabled")
 	}

@@ -65,15 +65,30 @@ type Dispatcher struct {
 }
 
 // Record writes the release entry through the package's policy; a package
-// whose changelog is disabled records nothing.
+// whose changelog is disabled — or whose policy holds prereleases back —
+// records nothing.
 func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 	spec := rel.Pkg.Changelog
-	if !spec.Enabled {
-		d.Log.Debug().Str("package", rel.Pkg.Name).Msg("changelog file disabled by config")
+	if !spec.Records(rel.IsPrerelease()) {
+		LogSkip(d.Log, spec, rel)
 		return nil
 	}
 	w := &FileWriter{File: spec.File, Title: spec.Title, Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log}
 	return w.Record(ctx, rel)
+}
+
+// LogSkip explains why a policy wrote nothing, so the two callers that ask
+// spec.Records — the dispatcher and the standalone changelog command — agree
+// on the wording. A file switched off outright is ordinary configuration and
+// stays at debug level; a prerelease held back is a release-shaped decision
+// the operator should see.
+func LogSkip(log zerolog.Logger, spec model.ChangelogSpec, rel *plan.Release) {
+	if !spec.Enabled {
+		log.Debug().Str("package", rel.Pkg.Name).Msg("changelog file disabled by config")
+		return
+	}
+	log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
+		Msg("changelog entry skipped: changelog.prerelease is false")
 }
 
 // HasEntry reports whether content already carries the release entry for tag:

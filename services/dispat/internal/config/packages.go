@@ -478,6 +478,9 @@ func overlayChangelog(base, over *ChangelogConfig) *ChangelogConfig {
 	if over.Enabled != nil {
 		out.Enabled = over.Enabled
 	}
+	if over.Prerelease != nil {
+		out.Prerelease = over.Prerelease
+	}
 	if over.File != "" {
 		out.File = over.File
 	}
@@ -492,6 +495,9 @@ func overlayGitHub(base, over *GitHubConfig) *GitHubConfig {
 	out := *base
 	if over.Enabled != nil {
 		out.Enabled = over.Enabled
+	}
+	if over.Prerelease != nil {
+		out.Prerelease = over.Prerelease
 	}
 	if over.Owner != "" {
 		out.Owner = over.Owner
@@ -546,10 +552,11 @@ func changelogSpec(cc *ChangelogConfig) model.ChangelogSpec {
 		cc = &ChangelogConfig{}
 	}
 	return model.ChangelogSpec{
-		Enabled: cc.IsEnabled(),
-		File:    cc.File,
-		Title:   cc.Title,
-		Format:  recordFormat(cc.EntryFormatConfig),
+		Enabled:    cc.IsEnabled(),
+		Prerelease: cc.PrereleaseEnabled(),
+		File:       cc.File,
+		Title:      cc.Title,
+		Format:     recordFormat(cc.EntryFormatConfig),
 	}
 }
 
@@ -561,6 +568,7 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 	}
 	return model.GitHubSpec{
 		Enabled:     gc.IsEnabled(),
+		Prerelease:  gc.PrereleaseEnabled(),
 		AllPackages: gc.AllPackagesEnabled(),
 		Owner:       gc.Owner,
 		Repo:        gc.Repo,

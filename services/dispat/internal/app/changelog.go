@@ -37,8 +37,8 @@ func (a *App) Changelog(ctx context.Context, opts ChangelogOptions) error {
 	for _, name := range targets {
 		rel := pl.Releases[name]
 		spec := rel.Pkg.Changelog
-		if !spec.Enabled {
-			a.log.Debug().Str("package", name).Msg("changelog file disabled by config")
+		if !spec.Records(rel.IsPrerelease()) {
+			changelog.LogSkip(a.log, spec, rel)
 			continue
 		}
 		w := &changelog.FileWriter{

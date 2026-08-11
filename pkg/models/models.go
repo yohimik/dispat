@@ -223,15 +223,26 @@ type EntryFormatConfig struct {
 
 // ChangelogConfig customises (or disables) the per-package changelog file.
 type ChangelogConfig struct {
-	Enabled           *bool  `mapstructure:"enabled" json:"enabled,omitempty"` // default true
-	File              string `mapstructure:"file" json:"file,omitempty"`       // default "CHANGELOG.md"
-	Title             string `mapstructure:"title" json:"title,omitempty"`     // default "# Changelog"
+	Enabled *bool  `mapstructure:"enabled" json:"enabled,omitempty"` // default true
+	File    string `mapstructure:"file" json:"file,omitempty"`       // default "CHANGELOG.md"
+	Title   string `mapstructure:"title" json:"title,omitempty"`     // default "# Changelog"
+	// Prerelease writes an entry for a prerelease version too (default true).
+	// Setting it false keeps the file a record of stable releases alone: the
+	// betas of a version leave nothing behind, and the graduation to stable
+	// writes the one entry covering the whole window.
+	Prerelease        *bool `mapstructure:"prerelease" json:"prerelease,omitempty"`
 	EntryFormatConfig `mapstructure:",squash"`
 }
 
 // IsEnabled reports whether the changelog file is written (default true). It
 // is nil-safe: an absent changelog object means all defaults.
 func (c *ChangelogConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
+
+// PrereleaseEnabled reports whether a prerelease version gets a changelog
+// entry (default true). Nil-safe.
+func (c *ChangelogConfig) PrereleaseEnabled() bool {
+	return c == nil || c.Prerelease == nil || *c.Prerelease
+}
 
 // GitHubConfig customises (or disables) GitHub release creation.
 type GitHubConfig struct {
@@ -243,13 +254,24 @@ type GitHubConfig struct {
 	// AllPackages creates a GitHub release for every published package, even
 	// when no script exported DISPAT_EXPORT_GITHUB (the export then only adds
 	// assets). Default false: the export stays the per-package opt-in.
-	AllPackages       *bool `mapstructure:"allPackages" json:"allPackages,omitempty"`
+	AllPackages *bool `mapstructure:"allPackages" json:"allPackages,omitempty"`
+	// Prerelease creates a release for a prerelease version too (default
+	// true; GitHub receives it flagged as a prerelease). Setting it false
+	// keeps the repository's releases page a list of stable releases alone,
+	// while the betas are still tagged and still published by the flow.
+	Prerelease        *bool `mapstructure:"prerelease" json:"prerelease,omitempty"`
 	EntryFormatConfig `mapstructure:",squash"`
 }
 
 // IsEnabled reports whether GitHub releases are created (default true; still
 // requires a resolvable repository and token at runtime). Nil-safe.
 func (c *GitHubConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
+
+// PrereleaseEnabled reports whether a prerelease version gets a GitHub
+// release (default true). Nil-safe.
+func (c *GitHubConfig) PrereleaseEnabled() bool {
+	return c == nil || c.Prerelease == nil || *c.Prerelease
+}
 
 // AllPackagesEnabled reports whether every published package gets a GitHub
 // release regardless of the DISPAT_EXPORT_GITHUB export. Nil-safe.

@@ -157,8 +157,16 @@ type ghDispatch struct {
 	log   zerolog.Logger
 }
 
-// Record implements release.ReleaseRecorder.
+// Record implements release.ReleaseRecorder. It is the one gate both paths
+// pass through — the per-publish recorder and the finalize phase — so the
+// prerelease opt-out is checked here rather than at each caller.
 func (d *ghDispatch) Record(ctx context.Context, rel *plan.Release) error {
+	if spec := rel.Pkg.GitHub; !spec.Records(rel.IsPrerelease()) {
+		github.LogSkip(d.log, spec, rel)
+		return nil
+	}
+	// nil covers a disabled policy and an unresolvable target alike; the
+	// latter already warned once, at resolution.
 	gh := d.byPkg[rel.Pkg.Name]
 	if gh == nil {
 		d.log.Debug().Str("package", rel.Pkg.Name).Msg("github release disabled by config")

@@ -284,9 +284,20 @@ type RecordFormat struct {
 // ChangelogSpec is a package's resolved changelog policy.
 type ChangelogSpec struct {
 	Enabled bool
-	File    string // empty means the writer default (CHANGELOG.md)
-	Title   string // empty means the writer default
-	Format  RecordFormat
+	// Prerelease writes an entry for a prerelease version too; false keeps
+	// the file a record of stable releases alone.
+	Prerelease bool
+	File       string // empty means the writer default (CHANGELOG.md)
+	Title      string // empty means the writer default
+	Format     RecordFormat
+}
+
+// Records reports whether a release on this policy is written at all:
+// enabled, and — when the version is a prerelease — not held back by the
+// prerelease opt-out. The caller passes the release's own answer rather than
+// the release, so the domain model stays free of the planner's types.
+func (s ChangelogSpec) Records(isPrerelease bool) bool {
+	return s.Enabled && (s.Prerelease || !isPrerelease)
 }
 
 // GitHubSpec is a package's resolved GitHub-release policy. Owner/Repo may
@@ -294,6 +305,9 @@ type ChangelogSpec struct {
 // releaser resolution, which is where "unresolvable" is an outcome.
 type GitHubSpec struct {
 	Enabled bool
+	// Prerelease creates a release for a prerelease version too; false keeps
+	// the releases page a list of stable releases alone.
+	Prerelease bool
 	// AllPackages creates a release for every published package, even without
 	// the DISPAT_EXPORT_GITHUB export (which then only adds assets).
 	AllPackages bool
@@ -302,6 +316,12 @@ type GitHubSpec struct {
 	APIURL      string // empty means the public GitHub API
 	TokenEnv    string // empty means GITHUB_TOKEN
 	Format      RecordFormat
+}
+
+// Records reports whether a release on this policy is created at all, the
+// GitHub counterpart of ChangelogSpec.Records.
+func (s GitHubSpec) Records(isPrerelease bool) bool {
+	return s.Enabled && (s.Prerelease || !isPrerelease)
 }
 
 // DepKind is the manifest dependency field a graph edge stands for (§8.4).
