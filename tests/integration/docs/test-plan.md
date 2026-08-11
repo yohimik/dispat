@@ -46,9 +46,10 @@ The suite was designed against eighteen goals, one test file each:
    says, each constructed for real: a dependency cycle (E200), duplicate version tags (E191), and a shallow clone
    (E196). These are the cases where a partial release would be worst, so each asserts the non-zero exit, the code in
    the events, and that nothing was released or executed.
-10. **The `compute` command** (`compute_test.go`): the manifest-derived dependency graph through the binary: the
-    detect/apply/check loop with its backup and convergence, `keep` and removal semantics, and the W220 ambiguity
-    reaching the JSON events.
+10. **The `compute` command** (`compute_test.go`): everything the binary derives from the manifests. The dependency
+    graph: the detect/apply/check loop with its backup and convergence, `keep` and removal semantics, and the W220
+    ambiguity reaching the JSON events. The baselines: `initials` entries seeded from the versions the manifests
+    declare, against real tags, since which packages need one is a question only git can answer.
 11. **Native auto-versioning** (`autoversion_test.go`): files reconciled by the binary at the version stage, under
     either of the two strategies or neither. The parsing one: range reconciliation under the match policy,
     own-version writes, the W192/W197/W203/W221 diagnostics as JSON events across three runs, and `commit.include`
@@ -377,10 +378,16 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestComputeKeepAndRemoval`           | A stale edge is suggested for removal; `keep: true` silences it, survives `--write`, and the config still loads.                                                                                              |
 | `TestComputeAmbiguousNameReportsW220` | Two packages declaring one manifest name derive no edges and the ambiguity reaches the JSON events as W220.                                                                                                   |
 | `TestComputeEditsSpaceLayerDeclarations` | A stale edge declared in a space's `packages` entry is removed from the root config and one declared in a space folder's file from that file, each source named in the listing and each edited file keeping its own `.backup`. |
+| `TestComputeSeedsInitialsFromManifests`  | Adoption end to end: the manifests' versions are offered as `initials`, `--check` gates on them, `--write` lands them and the edges in one write with a single backup from before both, the next `status` plans `1.4.2 -> 1.5.0` with `baselineFromInitials`, and a second run is in sync. |
+| `TestComputeKeepsExistingInitials`       | An entry already in the config is never rewritten, whatever the manifest says: a mixed-case key survives an unrelated `--write` with its spelling, `0.0.0` counts as a decision, and the plan follows the entry rather than the manifest. |
+| `TestComputeSkipsPackagesWithReleaseTags` | A baseline is proposed exactly where the planner would read one: silence for a package with a parseable release tag, a suggestion naming the tag for one whose newest tag is not a version, and a suggestion for one with no tag at all. |
+| `TestComputeSeedsInitialsBeforeTheFirstCommit` | A repository with no commits yet (where adoption often starts) gets its baselines without a tag query, and the first release after committing continues from the manifest's version. |
+| `TestComputeVersionsItCannotUse`         | Two manifests disagreeing about one package's version report W225 and derive nothing, while a `1.0.0-SNAPSHOT` prerelease and a version that is not semver are passed over in silence. |
+| `TestComputeInitialsInYAMLAndTOMLConfigs` | The baselines are written like every other config edit: a YAML config gains the key and keeps its comments, a TOML config prints the paste-ready `[initials]` block, fails, and is left byte-identical with no backup. |
 
 (The command's finer grain, meaning cross-ecosystem matching, interactive selection, the TOML snippet fallback,
-stale-endpoint removals and error paths, is unit-tested in `services/dispat/internal/app`, where each case is one
-in-memory monorepo away instead of one binary invocation.)
+stale-endpoint removals, the manifest-rank and version-shape rules behind a baseline, and error paths, is unit-tested
+in `services/dispat/internal/app`, where each case is one in-memory monorepo away instead of one binary invocation.)
 
 ### Goal 11: native auto-versioning (`autoversion_test.go`)
 
@@ -528,6 +535,7 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **A stale-rule warning (W222) on every re-run.** After the first pass the text a rule looks for is gone, which is indistinguishable from "never matched" without checking whether the file already reads the way the rule wants. | `TestAutoVersionReplaceStrategy` (silent), `TestAutoVersionReplaceRuleMatchedNothing` (loud); `TestReplaceRuleIsQuietOnAnAlreadyReconciledFile` | `autoversion_test.go`; `internal/release` |
 | **W222 for every package a space-wide rule does not apply to.** One rule over `README.md` warned once per package without one, drowning the case that matters. Found by running a release on a scratch repository. | `TestReplaceRuleSelectingNoFileIsNotStale`                                                                                     | `internal/release` |
 | **A provider-scoped rule reading files in a package with no providers.** The rule expanded into nothing, but its globs still selected files to substitute nothing into. | `TestReplaceRuleWithNoProvidersSelectsNothing`                                                                                 | `internal/release` |
+| **One run rewrote the config twice and lost the pre-edit backup.** `compute --write` wrote each affected key on its own, so accepting a top-level edge next to a `packages` entry's removal saved the first write's output as the "previous" copy. Found while adding the baselines, which touch a second key of the same file. | `TestComputeWritesOneBackupPerFile`, `TestComputeSeedsInitialsFromManifests`; `TestReplaceKeysOneWritePerFile` | `internal/app`, `compute_test.go`; `internal/config` |
 | **A package with no parseable manifest never became a name owner**, so `manifestNames` could not make it visible to `dispat compute`.                                                                             | `TestAutoVersionManifestNamesMakeAnEdgeVisible`; `TestComputeStatedManifestNamesDeriveEdges`, `TestComputeStatedNameOutranksADeclaredOne` | `autoversion_test.go`; `internal/app` |
 | **A replacement landing inside a binary file.** A glob reaching a PNG that happens to contain the version text would have corrupted it.                                                                            | `TestAutoVersionReplaceStrategy`; `TestReplaceRuleSkipsBinaryAndOversizedFiles`, `TestSubstituteRefusesABinaryFile`             | `autoversion_test.go`; `internal/release`, `pkg/writer` |
 | **An empty `find` matching at every position.** Both the API and the command line refuse it rather than shredding the file.                                                                                        | `TestSubstituteRefusesAnEmptyFind`, `TestSubstituteBytesIgnoresAnEmptyFind`, `TestParseSubSpec`                                | `pkg/writer`, `internal/cli` |

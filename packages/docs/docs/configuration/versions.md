@@ -67,3 +67,9 @@ Example: `"initials": {"core": "1.0.0"}` with an unparseable newest tag and one 
 `core@1.0.1`. Packages without an entry fall back to `0.0.0` as usual. A parseable latest tag always beats initials.
 Keys are matched case-insensitively against discovered packages (viper lowercases map keys); entries matching no package
 are warned about and ignored.
+
+You rarely have to write these by hand. [`dispat compute`](../cli.md#the-compute-command) reads the version each
+package's manifests declare and proposes the entries for exactly the packages in one of the two situations above, so
+adopting dispat in a repository that already ships versions is one `dispat compute --write` rather than a transcription
+job. What it will not do is overwrite an entry that is already there, which is what makes writing one yourself the way
+to settle the question for good: `"core": "0.0.0"` says "this package starts from zero" and is left alone from then on.

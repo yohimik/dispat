@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **95.5%** of the workspace's statements (unit layer alone: 90.2%; the integration
-layer's instrumented binary: 83.6%).
+The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 90.0%; the integration
+layer's instrumented binary: 84.4%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -12,27 +12,27 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-11** (after the github step command, the prerelease record opt-out, per-command help, `parser.quiet` and the
-package `src` path landed) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
+**2026-08-11** (after `dispat compute` grew the manifest-derived baselines, on top of the github step command, the
+prerelease record opt-out, per-command help, `parser.quiet` and the package `src` path) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
 | Module / package                        | Statement coverage                                                                       |
 |-----------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                     | **95.5%**                                                                                |
+| **workspace total**                     | **95.6%**                                                                                |
 | `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)            | 100%                                                                                     |
 | `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
 | `pkg/scanner` (manifest reader)         | **96.3%**, plus two fuzz targets over every registered parser                            |
 | `pkg/writer` (manifest writer)          | **93.7%**, plus fuzz targets proving rewrites never corrupt valid JSON and that the replacer's arithmetic holds |
-| `services/dispat` (all packages)        | **95.6%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| `services/dispat` (all packages)        | **95.7%** aggregate, `main.go` included (the integration suite runs the real binary)     |
 | - `main.go`, `globx`, `model`           | 100%                                                                                     |
 | - `filter` (package/space selection)    | 99.2%                                                                                    |
-| - `cli` (controller)                    | 99.0%                                                                                    |
+| - `cli` (controller)                    | 99.7%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
 | - `plan` (planner)                      | 96.5%                                                                                    |
 | - `changelog`                           | 96.5%                                                                                    |
 | - `release` (executor)                  | 96.0%                                                                                    |
-| - `config`                              | 95.8%                                                                                    |
-| - `app`                                 | 94.0%                                                                                    |
+| - `config`                              | 96.0%                                                                                    |
+| - `app`                                 | 94.3%                                                                                    |
 | - `github`                              | 93.9%                                                                                    |
 | - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |
@@ -72,7 +72,7 @@ the same `go tool cover -func | tail -n 1` on the filtered profile.
 
 ## What each layer contributes
 
-The unit layer covers every package against in-memory fakes; on its own it reaches ~89%, because the composition (the
+The unit layer covers every package against in-memory fakes; on its own it reaches ~90%, because the composition (the
 compiled binary, the finalize phase, the run/test/preview commands, real git over a process boundary, SIGINT handling)
 lives exclusively in the [black-box integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md), which asserts behaviour
 (git state, JSON log events, execution timelines) rather than statements. Instrumenting the binary it drives is what

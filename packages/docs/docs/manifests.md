@@ -5,8 +5,8 @@ on. npm calls it `package.json`, Go calls it `go.mod`, Rust calls it `Cargo.toml
 the same job under other names. This page calls all of them **manifests**.
 
 dispat reads and writes manifests in several places already. `dispat compute` reads them to work out which package
-depends on which, and auto-versioning writes them so a released package and the packages that consume it agree on the
-new version. Two commands expose that machinery on its own:
+depends on which and which version each package starts from, and auto-versioning writes them so a released package and
+the packages that consume it agree on the new version. Two commands expose that machinery on its own:
 
 - **`dispat scanner`** answers "what does this folder actually declare?"
 - **`dispat writer`** changes a declaration without disturbing anything else in the file.
@@ -172,8 +172,9 @@ command are still written, and the command exits `1` at the end.
 
 ## Which tool for which job
 
-- Deriving a monorepo's dependency graph into the config file is [`dispat compute`](./cli.md#the-compute-command).
-  It uses the scanner underneath and understands your packages; the scanner alone only reports files.
+- Deriving a monorepo's dependency graph, and the baselines its packages start from, into the config file is
+  [`dispat compute`](./cli.md#the-compute-command). It uses the scanner underneath and understands your packages; the
+  scanner alone only reports files.
 - Reconciling manifests to the versions a release just computed is
   [auto-versioning](./configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
   underneath and knows what the new versions are; the writer alone only writes what you tell it.

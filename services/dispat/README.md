@@ -39,7 +39,7 @@ model is the point of the tool; [Concepts](https://yohimik.github.io/dispat/conc
 A few more moves:
 
 ```sh
-$ dispat compute                    # derive the dependency graph from the manifests; --write applies
+$ dispat compute                    # derive the dependency graph and the starting versions from the manifests; --write applies
 $ dispat preview                    # pending release notes, all packages (-p core: just one)
 $ dispat scanner packages/core      # what that folder's manifests declare; no config or git needed
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
@@ -67,8 +67,10 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Any language, any registry, any tooling.** Stages are shell commands fed a rich
   [`DISPAT_*` environment](https://yohimik.github.io/dispat/environment), scripts pass values to each other through `$DISPAT_OUTPUT`, and
   release state lives in git tags, so every build system, CI and caching layer works from inside a script unchanged.
-  `dispat compute` derives the dependency graph from the packages' own manifests (npm, Go, Cargo, Python, Composer,
-  Maven, .NET, Dart), and an `autoVersion` space has dispat rewrite its manifests natively at the version stage.
+  `dispat compute` derives the dependency graph, and the baseline each package starts from, out of the packages' own
+  manifests (npm, Go, Cargo, Python, Composer, Maven, .NET, Dart), so adopting dispat in a repository that already
+  ships versions takes one command; an `autoVersion` space has dispat rewrite its manifests natively at the version
+  stage.
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
   verified before any work, and nothing is ever published against an unpublished dependency.

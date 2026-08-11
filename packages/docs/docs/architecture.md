@@ -163,7 +163,7 @@ sections below.
 | `pkg/writer`         | Format-preserving manifest writer (own module): byte-precise range and version rewrites for **every** manifest the scanner reads, atomic writes, and a result separating applied edits from ones deliberately left alone (a Maven property, a workspace inheritance). Exposed on its own as `dispat writer`. |
 | `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
 | `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `TestScript`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the finalize phase and run-level hooks; wires every other package together.  |
-| `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write`. |
+| `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write` (every key one run touches in a file written in a single pass, so one backup holds the file as it was). |
 | `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration.                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
 | `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs.                                                                    |
@@ -379,11 +379,11 @@ audit) and `W196` (published version adopted from the registry) belong to the sa
 registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`), is implemented and
 emitted.
 
-In the other direction, two codes are dispat's own, outside the specification's registry, attached to the
-manifest-derived features the specification predates: `W220` (ambiguous manifest name) and `W221` (rewritten dependency
-with no configured `dependencies` edge). They follow the registry's numbering conventions and blast-radius rules, and
-are documented where their features are ([`compute`](./cli.md),
-[`autoVersion`](./configuration/spaces.md#autoversion)). `W192`, `W197` and `W203`, the auto-versioning narrations, are
+In the other direction, three codes are dispat's own, outside the specification's registry, attached to the
+manifest-derived features the specification predates: `W220` (ambiguous manifest name), `W221` (rewritten dependency
+with no configured `dependencies` edge) and `W225` (one package's manifests declaring different versions for it). They
+follow the registry's numbering conventions and blast-radius rules, and are documented where their features are
+([`compute`](./cli.md), [`autoVersion`](./configuration/spaces.md#autoversion)). `W192`, `W197` and `W203`, the auto-versioning narrations, are
 the specification's own §9.4/§12.4 codes.
 
 ## Testing

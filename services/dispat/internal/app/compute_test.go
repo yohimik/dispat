@@ -522,3 +522,37 @@ func TestComputeStatedNameOutranksADeclaredOne(t *testing.T) {
 	assert.Contains(t, out.String(), "+ add     web -> renamed (dependencies)")
 	assert.NotContains(t, logBuf.String(), plan.CodeAmbiguousManifestName)
 }
+
+// TestComputeWritesOneBackupPerFile: one run that changes two keys of the
+// root config — the top-level list gains an edge while a packages entry loses
+// one — must write that file once. Writing it twice would save the first
+// write's output as the "previous" copy, leaving no way back to the config as
+// it was found.
+func TestComputeWritesOneBackupPerFile(t *testing.T) {
+	cfg := libsConfig(config.DependencyConfig{Consumer: "web", Provider: "ghost"})
+	cfg.Packages = map[string]config.PackageConfig{"web": {Dependencies: []string{"gone"}}}
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
+
+	before, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.NoError(t, err)
+	assert.Zero(t, open)
+	assert.Contains(t, out.String(), "applied 3 change(s) to dispat.json",
+		"the addition, the stale root edge and the stale packages entry")
+
+	backup, err := os.ReadFile(cfgPath + config.BackupSuffix)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(backup), "the backup is the config from before every edit")
+
+	after, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(after), `"provider": "core"`)
+	assert.NotContains(t, string(after), "ghost")
+	assert.NotContains(t, string(after), "gone")
+}

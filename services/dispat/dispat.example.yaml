@@ -212,6 +212,8 @@ dependencies:
 # Baseline versions used when a package's latest tag is missing or cannot be
 # parsed (e.g. a stray core@0.0.1.0). The next release bumps on top of
 # this value; a parseable latest tag always wins over initials.
+# `dispat compute` proposes these entries from the version the package's
+# manifests declare, and never rewrites one that is already here.
 initials:
   core: 1.0.0
 

@@ -55,7 +55,16 @@ between packages under `dependencies` so bumps propagate and ordering is enforce
 }
 ```
 
-That is a complete, working configuration. Everything else is optional and layered on top:
+That is a complete, working configuration.
+
+If the repository you are pointing it at is not brand new, run [`dispat compute`](cli.md#the-compute-command) once
+before anything else. It reads the packages' manifests and offers you two things the config would otherwise need by
+hand: the `dependencies` edges between them, and an `initials` entry for every package already at a version, so the
+first release continues from where the manifests are instead of starting again at `0.0.1`. Nothing is written until you
+add `--write`. The [adoption recipe](cookbook.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
+through a real one.
+
+Everything else is optional and layered on top:
 
 - concurrency budgets, tag formats, log settings: the [top-level options](configuration/README.md);
 - build/publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](configuration/spaces.md);
@@ -111,6 +120,9 @@ release. Scopes that are deliberately not packages (like `release`) go in `nonPa
 ```sh
 dispat init                 # write a starter dispat.json (--format yaml/toml for the others);
                             # never overwrites an existing file
+dispat compute              # read the manifests and offer the dependency edges and the
+                            # starting versions they imply; --write applies them, --check
+                            # fails CI when the config has fallen behind
 dispat status               # print the project graph and planned versions; changes nothing
 dispat                      # release (default command): full pipeline
 dispat release --root path  # same, explicit
