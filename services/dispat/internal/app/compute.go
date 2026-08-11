@@ -140,9 +140,6 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	sugs := changeSet{deps: a.diffEdges(scoped, scopedManifest, known, scopedDeclared)}
 	initials, baselines := a.suggestInitials(ctx, scanned, sel)
 	sugs.initials = initials
-	// The parsed manifests are evidence and nothing more from here on; a
-	// large monorepo's are worth releasing before the write phase.
-	scanned = nil
 
 	out := opts.Out
 	if out == nil {

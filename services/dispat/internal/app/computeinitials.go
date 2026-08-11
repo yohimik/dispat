@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -76,15 +76,20 @@ func (a *App) suggestInitials(ctx context.Context, scanned []scannedPackage, sel
 // manifestBaselines is every selected package's declared version, minus the
 // packages the configuration already has an answer for.
 func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []manifestBaseline {
+	// An entry already in the config is the operator's own statement, and the
+	// way to silence this suggestion for good: 0.0.0 included, it is never
+	// rewritten. Matching is case-insensitive, the way App.initialVersions
+	// matches them, because viper lowercases map keys.
+	decided := make(map[string]bool, len(a.cfg.Initials))
+	for key := range a.cfg.Initials {
+		decided[strings.ToLower(key)] = true
+	}
 	var out []manifestBaseline
 	for _, s := range scanned {
 		if sel.Active() && !sel.Has(s.pkg.Name) {
 			continue
 		}
-		if a.hasInitial(s.pkg.Name) {
-			// An entry already there is the operator's own statement, and the
-			// way to silence this suggestion for good: 0.0.0 included, it is
-			// never rewritten.
+		if decided[strings.ToLower(s.pkg.Name)] {
 			continue
 		}
 		if found, ok := a.pickManifestVersion(s); ok {
@@ -92,18 +97,6 @@ func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []m
 		}
 	}
 	return out
-}
-
-// hasInitial reports an initials entry for the package, matched the way
-// App.initialVersions matches them: case-insensitively, because viper
-// lowercases map keys.
-func (a *App) hasInitial(pkg string) bool {
-	for key := range a.cfg.Initials {
-		if strings.EqualFold(key, pkg) {
-			return true
-		}
-	}
-	return false
 }
 
 // pickManifestVersion is the version a package's manifests agree it is at.
@@ -133,7 +126,7 @@ func (a *App) pickManifestVersion(s scannedPackage) (manifestBaseline, bool) {
 					Msg("declared version is not a semantic version; no baseline derived from it")
 				continue
 			}
-			if !containsString(seen, v.String()) {
+			if !slices.Contains(seen, v.String()) {
 				seen = append(seen, v.String())
 			}
 			if found.manifest == "" {
@@ -165,17 +158,6 @@ func (a *App) pickManifestVersion(s scannedPackage) (manifestBaseline, bool) {
 	return manifestBaseline{}, false
 }
 
-// containsString is a membership test over the handful of versions one
-// package's manifests declare.
-func containsString(all []string, want string) bool {
-	for _, have := range all {
-		if have == want {
-			return true
-		}
-	}
-	return false
-}
-
 // unreleased keeps the candidates the planner would actually read an entry
 // for: the packages whose tags give no parseable stable baseline, either
 // because there is no stable tag at all or because the newest one cannot be
@@ -199,7 +181,7 @@ func (a *App) unreleased(ctx context.Context, candidates []manifestBaseline) []i
 			detail:  fmt.Sprintf("%s declares %s; %s", c.manifest, c.version, reasons[i]),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].pkg < out[j].pkg })
+	slices.SortFunc(out, func(a, b initialSuggestion) int { return strings.Compare(a.pkg, b.pkg) })
 	return out
 }
 
