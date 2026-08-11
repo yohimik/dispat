@@ -106,8 +106,23 @@ func (tc *taskCtx) reconcileReplace(ctx context.Context, av *model.AutoVersion) 
 				Msg("file reconciled")
 		}
 	}
-	tc.reportRuleOutcomes(av, expansions, provs, matched)
+	tc.reportRuleOutcomes(av, expansions, provs, matched, selectingRules(files))
 	return nil
+}
+
+// selectingRules is the rules that reached at least one file. A rule that
+// reached none has nothing to say about this package: one space-wide rule over
+// "README.md" is the ordinary way to keep every README that exists in step,
+// and warning about each package that has none would drown the warning that
+// matters.
+func selectingRules(files []selectedFile) map[int]bool {
+	out := make(map[int]bool, len(files))
+	for _, f := range files {
+		for _, i := range f.rules {
+			out[i] = true
+		}
+	}
+	return out
 }
 
 // expandRules renders every rule against the package and its providers. A rule
@@ -167,10 +182,10 @@ func (tc *taskCtx) providerFacts(av *model.AutoVersion) []providerFacts {
 
 // reportRuleOutcomes narrates what the rules did that the commit log cannot
 // explain: a provider caught up from an earlier release (W197), a stable
-// release now naming a prerelease provider (W203), and a rule whose text was
-// found nowhere at all (W222).
+// release now naming a prerelease provider (W203), and a rule that reached
+// files but found its text in none of them (W222).
 func (tc *taskCtx) reportRuleOutcomes(av *model.AutoVersion, expansions []expansion,
-	provs []providerFacts, matched map[writer.Substitution]bool) {
+	provs []providerFacts, matched map[writer.Substitution]bool, selecting map[int]bool) {
 	byName := make(map[string]providerFacts, len(provs))
 	for _, p := range provs {
 		byName[p.name] = p
@@ -178,6 +193,9 @@ func (tc *taskCtx) reportRuleOutcomes(av *model.AutoVersion, expansions []expans
 	told := make(map[string]bool, len(provs))
 	for _, e := range expansions {
 		if !matched[e.sub] && !matched[e.probe] {
+			if !selecting[e.rule] {
+				continue // the rule reached no file here; it is about other packages
+			}
 			tc.log.Warn().Str("code", plan.CodeReplaceRuleMatchedNothing).
 				Str("find", e.sub.Find).
 				Strs("files", av.Replace[e.rule].Files).

@@ -428,3 +428,30 @@ func TestReplaceRuleWithNoProvidersSelectsNothing(t *testing.T) {
 	assert.NotContains(t, logBuf.String(), plan.CodeReplaceRuleMatchedNothing,
 		"a rule with no providers to expand for is not a stale rule")
 }
+
+func TestReplaceRuleSelectingNoFileIsNotStale(t *testing.T) {
+	// One space-wide rule over "README.md" is the ordinary way to keep every
+	// README that exists in step. A package without one has nothing for the
+	// rule to say, so it must stay quiet: warning per package would drown the
+	// warning that matters. A rule that *did* reach a file and found nothing
+	// still warns.
+	root := t.TempDir()
+	space := avReplaceSpace(
+		model.ReplaceRule{Files: []string{"README.md"}, Find: "{name}@{previous}", Write: "{name}@{version}"},
+		model.ReplaceRule{Files: []string{"notes.txt"}, Find: "typo-{previous}", Write: "typo-{version}"},
+	)
+	seedFile(t, root, "web/notes.txt", "nothing the second rule looks for\n") // no README.md
+	p := avPlan(root, space, "web")
+
+	var logBuf bytes.Buffer
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1})
+	e.Log = syncedLog(&logBuf)
+	res := e.Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+
+	logs := logBuf.String()
+	assert.Equal(t, 1, strings.Count(logs, plan.CodeReplaceRuleMatchedNothing),
+		"only the rule that reached a file and found nothing is reported")
+	assert.Contains(t, logs, "typo-1.0.0")
+	assert.NotContains(t, logs, "web@1.0.0", "the rule that reached no file says nothing")
+}
