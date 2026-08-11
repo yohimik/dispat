@@ -338,3 +338,54 @@ func writeJSON(t *testing.T, path string, v any) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0o644))
 }
+
+// TestEnvWeakValuesAgreeAcrossFormats: each parser hands back its own Go type
+// for a number — JSON a float64, YAML an int, TOML an int64 — so the three
+// have to be rendered identically or the same configuration would export
+// different values depending on the file extension.
+func TestEnvWeakValuesAgreeAcrossFormats(t *testing.T) {
+	tree := map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+		},
+		"env": map[string]any{
+			"COUNT": 3,
+			"BIG":   1234567890123,
+			"RATIO": 1.5,
+			"FLAG":  true,
+			"TEXT":  "plain",
+		},
+	}
+	want := map[string]string{
+		"COUNT": "3", "BIG": "1234567890123", "RATIO": "1.5", "FLAG": "true", "TEXT": "plain",
+	}
+
+	marshallers := map[string]func() ([]byte, error){
+		"json": func() ([]byte, error) { return json.MarshalIndent(tree, "", "  ") },
+		"yaml": func() ([]byte, error) { return yaml.Marshal(tree) },
+		"toml": func() ([]byte, error) { return toml.Marshal(tree) },
+	}
+	for format, marshal := range marshallers {
+		t.Run(format, func(t *testing.T) {
+			data, err := marshal()
+			require.NoError(t, err)
+			root := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "pkgs", "core"), 0o755))
+			path := filepath.Join(root, "dispat."+format)
+			require.NoError(t, os.WriteFile(path, data, 0o644))
+
+			loaded, err := Load(path, nil)
+			require.NoError(t, err)
+			assert.Equal(t, want, loaded.Env)
+		})
+	}
+}
+
+// TestWeakEnvStringFallsBackForUnexpectedShapes: a value that is not a scalar
+// at all — a list, say — still has to become something rather than panic, so
+// the renderer ends in a plain fallback.
+func TestWeakEnvStringFallsBackForUnexpectedShapes(t *testing.T) {
+	assert.Equal(t, "[a b]", weakEnvString([]any{"a", "b"}))
+	assert.Equal(t, "", weakEnvString(nil))
+}
