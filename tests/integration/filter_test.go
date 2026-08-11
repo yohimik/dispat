@@ -14,6 +14,13 @@ package integration
 // narrow the releasing set the same way; compute scopes its suggestions to
 // the selected consumers while still detecting against the whole workspace.
 //
+// `release` and `status` read the same selection, with one rule of their own:
+// publishing happens in dependency order, so a selected package whose provider
+// is releasing and unselected is withheld for the next run (W230) rather than
+// published ahead of it, while a selection that releases part of a versioning
+// group publishes and warns (W231). --strict refuses either outright, before
+// anything is built.
+//
 // A standalone package — a `packages` entry with a path — belongs to no
 // space, so only --package reaches it.
 
@@ -353,6 +360,182 @@ func TestFilterComputeScopesSuggestions(t *testing.T) {
 	res = r.Command("compute", "--package", "tool")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "+ initial tool 4.2.0")
+}
+
+// TestFilterReleaseSelectsPartOfTheGraph: a release takes the same terms as
+// every other command. What it selects is released for real — versioned,
+// tagged, published — and everything else is left exactly where it was, for a
+// later run to pick up.
+func TestFilterReleaseSelectsPartOfTheGraph(t *testing.T) {
+	r := filterRepo(t)
+
+	res := r.ReleaseOK("-p", "core")
+	assert.Equal(t, []string{"core@0.1.0"}, r.TagList(), "only the selected package is released")
+	assert.Equal(t, "⊝ not selected", harness.GraphLine(res.Events, "site").Str("message"),
+		"the graph says which packages the selection left out")
+
+	// A space term releases that space's packages, and the standalone package
+	// belonging to no space stays behind.
+	r.ReleaseOK("-s", "apps")
+	assert.ElementsMatch(t, []string{"core@0.1.0", "site@0.1.0"}, r.TagList())
+
+	// The unfiltered run finishes the job: web, deep and tool release at the
+	// versions they were always owed, and the packages already out converge.
+	r.ReleaseOK()
+	assert.ElementsMatch(t,
+		[]string{"core@0.1.0", "site@0.1.0", "web@0.1.0", "deep@0.1.0", "tool@0.1.0"}, r.TagList())
+	assert.Equal(t, 1, r.TagCount("core@"), "a package already released is not re-released")
+}
+
+// TestFilterReleaseWithholdsWhatTheOrderCannotReach: publishing a consumer
+// before a provider the same plan releases is the one staleness case the
+// publish order exists to prevent, so a selection that asks for it gets the
+// consumer withheld (W230) instead — named, with what it waits for — and the
+// run still exits 0. Naming the provider too releases both, in order.
+func TestFilterReleaseWithholdsWhatTheOrderCannotReach(t *testing.T) {
+	r := filterRepo(t)
+
+	res := r.ReleaseOK("-p", "web")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
+		"web must be reported as withheld, not silently skipped")
+	assert.Empty(t, r.TagList(), "web depends on a releasing core, so nothing may go out")
+
+	// The finding names the provider to add, and adding it releases both.
+	r.ReleaseOK("-p", "core,web")
+	assert.ElementsMatch(t, []string{"core@0.1.0", "web@0.1.0"}, r.TagList())
+
+	// An unchanged provider is nothing to wait for: once core is out, web
+	// alone is a perfectly good selection.
+	r.WriteFile("packages/web/feature.txt", "x")
+	r.Commit("feat(web): more web")
+	r.ReleaseOK("-p", "web")
+	assert.True(t, r.HasTag("web@0.2.0"), "tags: %v", r.TagList())
+}
+
+// TestFilterReleaseStrictRefusesBeforeAnythingRuns: --strict turns the
+// withholding into a refusal, and the refusal comes before any release work —
+// the packages the selection *could* have released stay untouched too, so a
+// filtered release in CI is all-or-nothing.
+func TestFilterReleaseStrictRefusesBeforeAnythingRuns(t *testing.T) {
+	r := filterRepo(t)
+
+	res := r.Release("-p", "web,site", "--strict")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"))
+	assert.Empty(t, r.TagList(), "site was releasable and must not have been released either")
+	assert.NotContains(t, res.Stdout, "building", "the refusal comes before any stage script")
+
+	// Without --strict the same selection releases what it can.
+	r.ReleaseOK("-p", "web,site")
+	assert.Equal(t, []string{"site@0.1.0"}, r.TagList())
+
+	// A selection the plan can release cleanly is unaffected by --strict.
+	r.ReleaseOK("-p", "core", "--strict")
+	assert.ElementsMatch(t, []string{"site@0.1.0", "core@0.1.0"}, r.TagList())
+}
+
+// TestFilterReleaseSplitsAVersioningGroup: a versioning group is not an
+// ordering constraint, so a selection that takes part of one releases and says
+// so (W231). The group's shared version is untrue until the next run, which
+// rides the members left behind up to it (W210) with nothing for an operator
+// to do. --strict is how a repository opts out of ever being in that state.
+func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Versioning: "fixed", Flow: buildPublish()},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "one")
+	r.SeedPackage("packages", "two")
+	r.Commit("feat(one,two): bootstrap the group")
+
+	res := r.Release("-p", "one", "--strict")
+	require.Equal(t, 1, res.Code, "--strict refuses to split a group\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "W231"))
+	assert.Empty(t, r.TagList())
+
+	res = r.ReleaseOK("-p", "one")
+	assert.True(t, harness.HasCode(res.Events, "W231"), "the split is reported, not refused")
+	assert.Equal(t, []string{"one@0.1.0"}, r.TagList())
+
+	// The next run puts the group back on one version: two releases at the
+	// group's version and one rides along to meet it.
+	res = r.ReleaseOK()
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "one"), "one rides to rejoin the group")
+	assert.ElementsMatch(t, []string{"one@0.1.0", "one@0.2.0", "two@0.2.0"}, r.TagList())
+}
+
+// TestFilterReleaseInfersFromTheInvocationFolder: with no terms the folder is
+// the selection here too, so a release run from inside a package folder is
+// that package's release.
+func TestFilterReleaseInfersFromTheInvocationFolder(t *testing.T) {
+	r := filterRepo(t)
+
+	res := r.CommandAt("packages/core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, []string{"core@0.1.0"}, r.TagList())
+
+	// And from the root it is the whole monorepo, as it always was.
+	r.ReleaseOK()
+	assert.Len(t, r.TagList(), 5)
+}
+
+// TestFilterReleaseRecordsOnlyWhatReleased: the durable records follow the
+// narrowed run and nothing else — the release commit names the tags that were
+// actually created, the changelog of an unreleased package is never written,
+// and no tag exists for a package the selection left out.
+func TestFilterReleaseRecordsOnlyWhatReleased(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.SeedPackage("packages", "other")
+	r.Commit("feat(core,web,other): bootstrap")
+
+	r.ReleaseOK("-p", "other")
+	subject := r.Git("log", "-1", "--format=%s")
+	assert.Contains(t, subject, "other@0.1.0")
+	assert.NotContains(t, subject, "core@", "the release commit names only what was released")
+	assert.Equal(t, []string{"other@0.1.0"}, r.TagList())
+	assert.FileExists(t, r.Path("packages", "other", "CHANGELOG.md"))
+	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+	assert.NoFileExists(t, r.Path("packages", "web", "CHANGELOG.md"))
+}
+
+// TestFilterStatusSelects: status is the release seen in advance, so it takes
+// the same flags, narrows the same plan and reports the same findings — while
+// still printing every package of the graph, which is its job. It keeps its
+// exit-0 contract, and --strict is the one thing that changes it.
+func TestFilterStatusSelects(t *testing.T) {
+	r := filterRepo(t)
+
+	res := r.StatusOK("-p", "core")
+	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "core").Str("message"))
+	assert.Equal(t, "⊝ not selected", harness.GraphLine(res.Events, "web").Str("message"),
+		"every package is still printed, with the selection visible in the graph")
+
+	res = r.StatusOK("-p", "web")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"))
+	assert.Equal(t, "⊘ withheld until its providers release",
+		harness.GraphLine(res.Events, "web").Str("message"))
+	assert.Empty(t, r.TagList(), "status writes nothing, whatever it selects")
+
+	res = r.Status("-p", "web", "--strict")
+	assert.Equal(t, 1, res.Code, "--strict gates a selection before a release is attempted")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
+		"the refusal still explains itself")
+
+	// A space term that brings the provider along with the consumer is a
+	// selection the plan can release as it stands.
+	res = r.StatusOK("-s", "libs", "--strict")
+	assert.False(t, harness.HasCode(res.Events, "W230"))
+	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "web").Str("message"))
+
+	assert.Equal(t, 1, r.Status("-p", "ghost").Code, "an unmatched term is an error here too")
 }
 
 // TestFilterPositionalPackagesAreAUsageError: the selection is a flag, so a

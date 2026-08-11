@@ -47,6 +47,21 @@ func ParseEvents(stdout string) []Event {
 	return out
 }
 
+// GraphLine returns the plan-graph line for one package: the event naming it
+// that also carries its space and no stage, which is the shape only the graph
+// print has. Its "message" is the verdict the graph rendered — "● changed",
+// "‖ held (Release-As: none)", "⊝ not selected" — so a test can assert on what
+// the operator was actually shown. The zero Event when the package has no
+// graph line at all.
+func GraphLine(events []Event, pkg string) Event {
+	for _, e := range events {
+		if e.Package() == pkg && e.Str("space") != "" && e.Str("stage") == "" {
+			return e
+		}
+	}
+	return Event{}
+}
+
 // HasCode reports whether any event carries the given diagnostic code.
 func HasCode(events []Event, code string) bool {
 	for _, e := range events {

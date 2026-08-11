@@ -30,7 +30,7 @@ func TestGitPrerequisitesGuard(t *testing.T) {
 
 	t.Run("no repository root", func(t *testing.T) {
 		a := New(t.TempDir(), cfg, zerolog.Nop()) // no .git
-		err := a.Status(context.Background())
+		err := a.Status(context.Background(), ReleaseOptions{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not a git repository root")
 	})
@@ -40,7 +40,7 @@ func TestGitPrerequisitesGuard(t *testing.T) {
 		require.NoError(t, os.Mkdir(filepath.Join(root, ".git"), 0o755))
 		t.Setenv("PATH", t.TempDir()) // an empty PATH entry: no git anywhere
 		a := New(root, cfg, zerolog.Nop())
-		err := a.Status(context.Background())
+		err := a.Status(context.Background(), ReleaseOptions{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "git executable not found")
 	})

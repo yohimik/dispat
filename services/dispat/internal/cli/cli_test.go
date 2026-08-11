@@ -189,12 +189,16 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 }
 
 func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
-	// The selection flags parse for all seven commands that take them, in both
+	// The selection flags parse for every command that takes them, in both
 	// spellings, and compose with the window flags they used to be rejected
 	// alongside. Exit 1 (config not found in this bare folder) rather than 2
 	// is what proves the command line itself was accepted.
 	root := t.TempDir()
 	for _, args := range [][]string{
+		{"release", "-p", "core"},
+		{"release", "--space", "libs", "--strict"},
+		{"status", "-p", "core,web"},
+		{"status", "-s", "*", "--strict"},
 		{"run", "x", "--package", "core", "--space", "libs"},
 		{"run", "x", "-p", "core,web", "-s", "libs"},
 		{"run", "x", "-p", "core", "--since", "HEAD~1", "--consumers"},
