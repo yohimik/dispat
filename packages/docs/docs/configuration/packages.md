@@ -1,7 +1,12 @@
 # Packages
 
-The top-level `packages` map holds per-package configuration, keyed by package name (matched case-insensitively, like
-every config map key). An entry plays one of two roles:
+A `packages` map holds per-package configuration, keyed by package name (matched case-insensitively, like every config
+map key). The file's own top-level map is the broadest place to write one; a space can hold the same entries for
+[its own packages](./spaces.md#the-spaces-packages-map), and so can a [space configuration
+file](./spaces.md#the-space-configuration-file). They all take the same entry shape, and
+[the override ladder](#the-override-ladder) says which one wins.
+
+A top-level entry plays one of two roles:
 
 - **An override for a space package.** An entry *without* a `path` adjusts the configuration of the package whose folder
   name matches the entry key. Every such key must match exactly one package folder across all
@@ -82,6 +87,53 @@ per-field rules follow from what each object means:
   is called, and adding to an inherited list could never take a name away again.
 - `tagFormat` overrides like everywhere else: package over space over repository.
 
+Two keys are refused on an entry wherever it is written: `packages` and `spaces`. An entry configures one package, so it
+holds neither packages nor spaces of its own. `path` is refused everywhere except the file's top-level map, where it
+declares a [standalone package](#standalone-packages-path).
+
+## The override ladder
+
+One package's configuration can be spoken to from six places. They apply in this order, each overlaying the one before
+it field by field, and the layer nearest the package wins:
+
+| # | Layer                     | Where it lives                                    |
+|---|---------------------------|----------------------------------------------------|
+| 1 | space config              | root file, `spaces.<space>`                        |
+| 2 | space configuration file  | `<space folder>/dispat.json`, its top-level object |
+| 3 | root package entry        | root file, `packages.<package>`                    |
+| 4 | space package entry       | root file, `spaces.<space>.packages.<package>`     |
+| 5 | space file package entry  | `<space folder>/dispat.json`, `packages.<package>` |
+| 6 | package configuration file| `<space folder>/<package>/dispat.json`             |
+
+Layers 1 and 2 are the space, and describe every package in it. Layers 3 to 6 each name one package, ordered by how
+close to it they are written: the repository as a whole, then the space, then the space's own folder, then the package's
+own folder.
+
+"Nearest wins" is per field, not per layer. A farther layer still supplies everything the nearer ones leave unset, so
+setting `changelog.file` at the top level and `revertOnFail` in the package's own file gives the package both.
+
+A [standalone package](#standalone-packages-path) has no space, so only layers 3 and 6 apply, over an empty base.
+
+```json title="root dispat.json"
+{
+  "spaces": {
+    "libs": {
+      "path": "packages",
+      "tagFormat": "libs/{name}@{version}",
+      "packages": { "core": { "revertOnFail": true } }
+    }
+  },
+  "packages": { "core": { "changelog": { "file": "HISTORY.md" } } }
+}
+```
+
+```json title="packages/core/dispat.json"
+{ "tagFormat": "core/{name}@{version}" }
+```
+
+`core` releases under `core/core@1.2.3` (layer 6 beat layer 1), with `revertOnFail` on (layer 4) and its changelog in
+`HISTORY.md` (layer 3, which nothing nearer contradicted).
+
 ## `manifestNames`
 
 dispat works out which package a dependency refers to by reading the name each package's manifests declare. A
@@ -155,19 +207,22 @@ All declarations (the top-level list, every entry's list, every in-folder list) 
 is declared changes nothing about how it plans. The top-level list also accepts a shorthand item keyed by consumer name
 (`{ "web": ["core", "utils"] }` or `{ "web": "core" }`), normalized into full entries at load.
 
-`dispat compute` treats every declaration source as one merged list and edits each declaration **in the file that holds
-it**: a stale package-declared edge is removed from the package's own config (the suggestion names the file), a kind
-correction on one moves the edge to the top-level list (the string form cannot carry a kind), and detected additions
-always land in the top-level list. Each edited file gets its own `.backup`.
+`dispat compute` treats every declaration source as one merged list and edits each declaration **in the entry that holds
+it**, whichever layer that is: a stale edge declared in a space's `packages` entry is removed from the root config, one
+declared in a space file from that file, one declared in a package's own file from there. Every suggestion names its
+source, so `spaces["libs"]: packages["core"]: dependencies[0]` says exactly what an applied change would touch. A kind
+correction moves the edge to the top-level list (the string form cannot carry a kind), detected additions always land
+there too, and each edited file gets its own `.backup`.
 
 ## In-folder configuration files
 
 A package folder may carry a dispat config file of its own, under the same names and formats the root config resolves
-through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins). Its top-level object is exactly
-the package entry object above minus `path` (a file cannot move the folder it lives in), and it is the **most local**
-layer: space config (or the standalone entry's base), then the `packages` entry, then the in-folder file, field by
-field. The same merge rules apply, unknown keys are rejected with the file named, and the file travels with the package:
-a package moved between spaces keeps its exceptions.
+through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins, and a
+[`.dispatignore`](./spaces.md#choosing-between-two-config-files) in the folder chooses between them). Its top-level
+object is exactly the package entry object above minus `path` (a file cannot move the folder it lives in), and it is the
+**most local** layer, the last rung of [the ladder](#the-override-ladder). The same merge rules apply, unknown keys are
+rejected with the file named, and the file travels with the package: a package moved between spaces keeps its
+exceptions.
 
 ```json
 // packages/core/dispat.json
@@ -177,8 +232,11 @@ a package moved between spaces keeps its exceptions.
 }
 ```
 
-An in-folder file that declares `spaces` or `packages` is refused with guidance: the folder holds a monorepo root of its
-own (a vendored or nested repository) and must be excluded via
-[`.dispatignore`](./spaces.md#dispatignore), not half-merged. Config resolution is aware of these files too: running the
-CLI from inside a package folder ascends **past** the package's own file to the config that declares spaces or packages,
-so `cd packages/core && dispat lint` works with or without one.
+A package folder's file that declares `spaces` or `packages` is refused with guidance: the folder holds a monorepo root
+of its own (a vendored or nested repository) and must be excluded via [`.dispatignore`](./spaces.md#dispatignore), not
+half-merged. A space folder's file is the one place `packages` belongs outside the root config; see
+[the space configuration file](./spaces.md#the-space-configuration-file).
+
+Config resolution is aware of every one of these files: running the CLI from inside a package folder ascends **past**
+the package's own file, and past its space's, to the monorepo root, so `cd packages/core && dispat lint` works whatever
+the folders on the way carry.

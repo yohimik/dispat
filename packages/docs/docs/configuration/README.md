@@ -18,8 +18,8 @@ This page covers the top level; the larger objects have their own pages:
 
 | Page                                  | Covers                                                                                                                                      |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, `versioning` and versioning groups, `scripts`, `.dispatignore`.          |
-| [Packages](./packages.md)             | The top-level `packages` map: per-package overrides, standalone packages via `path`, package-declared dependencies, in-folder config files. |
+| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, `versioning` and versioning groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
+| [Packages](./packages.md)             | The `packages` maps: per-package overrides and the ladder that orders them, standalone packages via `path`, package-declared dependencies, in-folder config files. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                                                                    |
 | [Release records](./records.md)       | `changelog`, `github`, `commit`, the shared entry format options.                                                                           |
 | [Commit parsing options](./parser.md) | `commitErrors`, `nonPackageScopes`, `parser`.                                                                                               |

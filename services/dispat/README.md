@@ -84,8 +84,8 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Concepts](https://yohimik.github.io/dispat/concepts)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
-| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, `.dispatignore`.           |
-| [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides, standalone packages, package dependencies, in-folder config files.           |
+| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
+| [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, standalone packages, package dependencies, in-folder config files. |
 | [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
 | [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, the release commit.                                                    |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object.                                            |

@@ -20,8 +20,11 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `scripts`               | map name → shell command | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 
-A single package's departures from these options live in the top-level [`packages`](./packages.md) map, not on the
-space.
+| `packages`              | map name → entry         | no         | Per-package configuration for this space's own packages, in the same entry shape as the top-level [`packages`](./packages.md) map. See [the space's `packages` map](#the-spaces-packages-map).                                                                                                                                                                                          |
+
+A single package's departures from these options live in a `packages` map, never in the space's own keys: either this
+space's map or the top-level one. The space itself can also be configured from inside its folder; see
+[the space configuration file](#the-space-configuration-file).
 
 ## Stages and hooks
 
@@ -451,10 +454,78 @@ carries them through) as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAM
 `--on-error continue` a failed provider's exports still reach its dependents, mirroring what the pipeline's `onFail`
 hooks receive.
 
+## The space's `packages` map
+
+A space can configure its own packages, keyed by folder name:
+
+```json
+{
+  "spaces": {
+    "libs": {
+      "path": "packages",
+      "flow": { "build": "build", "publish": "publish" },
+      "packages": {
+        "core": { "revertOnFail": true },
+        "legacy": { "flow": { "build": "build-legacy" } }
+      }
+    }
+  }
+}
+```
+
+Every entry is exactly a [package entry](./packages.md#package-options) and follows the same merge rules, with two
+restrictions that follow from where it is written:
+
+- **The key must name a folder of this space.** A key matching nothing is the same class of typo as an unknown
+  dependency endpoint and fails the load; a key naming a folder this space [excluded](#dispatignore) is refused with the
+  exclusion spelled out. A package of another space is configured by that space, or by the top-level map.
+- **`path` is not allowed.** A space package's location is its folder. Only the top-level map declares a package
+  somewhere else, through a [standalone entry](./packages.md#standalone-packages-path).
+
+An entry here and a top-level entry can name the same package; the space's entry is the nearer statement, so it wins
+where the two disagree and the top-level one still supplies what the space's leaves unset. The full order is in
+[the override ladder](./packages.md#the-override-ladder).
+
+## The space configuration file
+
+A space folder may carry a dispat config file of its own, under the same names and formats the root config resolves
+through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins). Its top-level object is the
+space: everything the root file's `spaces` entry could say about it, said again and nearer.
+
+```json
+// packages/dispat.json
+{
+  "tagFormat": "libs/{name}@{version}",
+  "flow": { "build": "build-libs" },
+  "packages": {
+    "core": { "revertOnFail": true }
+  }
+}
+```
+
+The file replaces what it names and inherits the rest, field by field, under the same merge rules a package override
+uses: `flow` merges entry by entry, `scripts` name by name, `autoVersion` replaces wholesale, and a boolean written
+here overrides the root file's value in either direction. It is only a layer, never a declaration: the space still has
+to exist in the root config, because that is where its `path` and its name live.
+
+Two keys are refused:
+
+- **`path`**, because the file sits in the space folder, so the folder it is in already is the path. A file able to
+  redefine it could point a space somewhere it is not.
+- **`spaces`**, because a file declaring spaces is a monorepo root of its own. A nested or vendored repository is left
+  out of the root config rather than half-merged.
+
+`packages` is the one map key the file may hold, and it is a layer of its own: nearer than the space's `packages` map
+in the root file, and still under the package's own folder file.
+
+Running the CLI from inside such a space keeps working. A space file declares `packages`, which is also what a monorepo
+of standalone packages declares, so resolution asks the root above whether it claims the folder: if it does, the file
+was a space layer and the root is the config; if nothing above claims it, the folder is a root in its own right.
+
 ## `.dispatignore`
 
-A plain-text file inside a space folder listing direct sub-folders that are not packages, such as scratch areas,
-fixtures or a vendored repository:
+A plain-text file listing names in its own folder that dispat must skip. In a space folder those are the direct
+sub-folders that are not packages, such as scratch areas, fixtures or a vendored repository:
 
 ```
 # not packages
@@ -463,7 +534,35 @@ tmp-*
 ```
 
 One pattern per line; blank lines and `#` comments are skipped, and `*` matches any run of characters (the same glob the
-scope terms and `autoVersion.match` use). Patterns match the space folder's direct sub-folder names only, and each space
-folder carries its own file. An excluded folder is invisible to discovery (never released, never scanned by
-`compute` or `autoVersion`, its name an unknown scope in commits), and a [`packages` entry](./packages.md) naming one is
-rejected with the exclusion spelled out.
+scope terms and `autoVersion.match` use). Each space folder carries its own file. An excluded folder is invisible to
+discovery (never released, never scanned by `compute` or `autoVersion`, its name an unknown scope in commits), and a
+[`packages` entry](./packages.md) naming one is rejected with the exclusion spelled out.
+
+### Choosing between two config files
+
+The same patterns also hide **config file names**, which is how a folder holding more than one of them says which is
+real:
+
+```
+# packages/core/.dispatignore
+dispat.json
+```
+
+With that file in place, `packages/core/dispat.yaml` is the package's configuration and the generated `dispat.json`
+next to it is ignored. The rule holds in every folder dispat looks for a config in, and always applies to that folder
+alone:
+
+| Folder            | What the ignore file decides                                                |
+|-------------------|-----------------------------------------------------------------------------|
+| repository root   | Which file is the root config, before the search climbs to the parents.     |
+| a space folder    | Which file is the [space configuration file](#the-space-configuration-file). |
+| a package folder  | Which file is the package's [in-folder layer](./packages.md#in-folder-configuration-files). |
+
+Hiding every candidate is not an error: the folder simply has nothing to say, and a package or space folder falls back
+to what it inherits. At the repository root it means no config was found at all, and the error names every name tried.
+
+One thing to watch: patterns do not know what they are matching, so a pattern written for a folder can reach a config
+file too. `dispat*`, meant for a `dispat-sandbox` folder, also hides `dispat.json`. Name the folders you mean, or keep
+the folder patterns specific enough not to collide.
+
+An explicit `--config` is exact and is never filtered: naming an ignored file loads it.
