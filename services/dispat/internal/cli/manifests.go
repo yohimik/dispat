@@ -1,9 +1,10 @@
 package cli
 
-// Command-line syntax for the `dispat writer` edits. It lives here rather than
-// in the app package so the application never sees a flag spelling: the
-// controller turns text into pkg/writer values, and a malformed spec is a
-// usage error like any other bad command line.
+// Command-line syntax for the `dispat writer` edits and the `dispat replacer`
+// substitutions. It lives here rather than in the app package so the
+// application never sees a flag spelling: the controller turns text into
+// pkg/writer values, and a malformed spec is a usage error like any other bad
+// command line.
 
 import (
 	"fmt"
@@ -62,6 +63,42 @@ func parseReplaceSpec(spec string) (writer.Replacement, error) {
 		return writer.Replacement{}, fmt.Errorf("--replace %q: no dependency name", spec)
 	}
 	return writer.Replacement{Name: name, Path: path}, nil
+}
+
+// subSeparator joins the two halves of a `--sub` value. It is two characters
+// rather than "=" because both halves are arbitrary literal text and a version
+// string carries "=" often enough (">=1.0", "VERSION=1.2.3") that splitting on
+// it would refuse ordinary substitutions.
+const subSeparator = "=>"
+
+// parseSubSpec reads one `--sub` value: `find=>write`.
+//
+// The split is at the first separator, so a "=>" inside the replacement text
+// survives; a "=>" inside the text being searched for cannot be expressed, and
+// says so rather than silently truncating.
+func parseSubSpec(spec string) (writer.Substitution, error) {
+	find, write, ok := strings.Cut(spec, subSeparator)
+	if !ok {
+		return writer.Substitution{}, fmt.Errorf("--sub %q: want find%swrite", spec, subSeparator)
+	}
+	if find == "" {
+		return writer.Substitution{}, fmt.Errorf("--sub %q: no text to find", spec)
+	}
+	return writer.Substitution{Find: find, Write: write}, nil
+}
+
+// parseSubSpecs reads every `--sub` value of one invocation, keeping the order
+// they were given in, which is the order they apply in.
+func parseSubSpecs(specs []string) ([]writer.Substitution, error) {
+	subs := make([]writer.Substitution, 0, len(specs))
+	for _, spec := range specs {
+		sub, err := parseSubSpec(spec)
+		if err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	return subs, nil
 }
 
 // parseEditSpecs reads every `--set` and `--replace` value of one invocation,

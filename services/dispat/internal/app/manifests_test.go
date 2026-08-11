@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -557,4 +558,143 @@ func TestUnwrapJoined(t *testing.T) {
 
 	second := errors.New("two")
 	assert.Len(t, unwrapJoined(errors.Join(single, second)), 2)
+}
+
+func TestSubstituteFilesReplacesLiteralTextAnywhere(t *testing.T) {
+	// The replacer parses nothing, so it reaches the files no manifest writer
+	// covers: a build script, a Dockerfile, a README.
+	root := manifestRepo(t, map[string]string{
+		"build.gradle": "implementation 'com.acme:core:1.2.0'\ntestImplementation 'com.acme:core:1.2.0'\n",
+		"README.md":    "Use com.acme:core:1.2.0 in your build.\n",
+	})
+	var out bytes.Buffer
+	require.NoError(t, SubstituteFiles(context.Background(), SubstituteOptions{
+		Root:  root,
+		Paths: []string{"build.gradle", "README.md"},
+		Subs:  []writer.Substitution{{Find: "com.acme:core:1.2.0", Write: "com.acme:core:1.3.0"}},
+		Out:   &out, Log: zerolog.Nop(),
+	}))
+
+	gradle, err := os.ReadFile(filepath.Join(root, "build.gradle"))
+	require.NoError(t, err)
+	assert.Equal(t, "implementation 'com.acme:core:1.3.0'\ntestImplementation 'com.acme:core:1.3.0'\n", string(gradle))
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "Use com.acme:core:1.3.0 in your build.\n", string(readme))
+
+	assert.Contains(t, out.String(), "2 file(s), 3 occurrence(s): 2 applied, 0 skipped, 0 missing")
+}
+
+func TestSubstituteFilesStrictWantsEveryPatternFoundSomewhere(t *testing.T) {
+	// A pattern belonging to one file of many is the ordinary case, so strict
+	// asks only that each one matched *somewhere*.
+	files := map[string]string{"a.txt": "alpha 1.0.0\n", "b.txt": "beta 1.0.0\n"}
+	opts := func(root string, subs []writer.Substitution, strict bool, log zerolog.Logger) SubstituteOptions {
+		return SubstituteOptions{
+			Root: root, Paths: []string{"a.txt", "b.txt"}, Subs: subs,
+			Strict: strict, Out: io.Discard, Log: log,
+		}
+	}
+	bothFound := []writer.Substitution{
+		{Find: "alpha 1.0.0", Write: "alpha 1.1.0"},
+		{Find: "beta 1.0.0", Write: "beta 1.1.0"},
+	}
+	require.NoError(t, SubstituteFiles(context.Background(),
+		opts(manifestRepo(t, files), bothFound, true, zerolog.Nop())))
+
+	// One that matches nowhere is quiet by default and fatal under strict.
+	stale := append(append([]writer.Substitution(nil), bothFound...),
+		writer.Substitution{Find: "gamma 1.0.0", Write: "gamma 1.1.0"})
+	require.NoError(t, SubstituteFiles(context.Background(),
+		opts(manifestRepo(t, files), stale, false, zerolog.Nop())))
+
+	var logs bytes.Buffer
+	err := SubstituteFiles(context.Background(),
+		opts(manifestRepo(t, files), stale, true, zerolog.New(&logs)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1 substitution(s) matched nothing")
+	assert.Contains(t, logs.String(), "gamma 1.0.0")
+}
+
+func TestSubstituteFilesAttemptsEveryFileAndJoinsTheFailures(t *testing.T) {
+	// A binary file among the targets must not cost the others their
+	// substitutions, and the run still fails at the end.
+	root := manifestRepo(t, map[string]string{
+		"notes.txt": "version 1.0.0\n",
+		"blob.bin":  "head\x00 version 1.0.0",
+	})
+	var out, logs bytes.Buffer
+	err := SubstituteFiles(context.Background(), SubstituteOptions{
+		Root:  root,
+		Paths: []string{"blob.bin", "notes.txt"},
+		Subs:  []writer.Substitution{{Find: "1.0.0", Write: "1.1.0"}},
+		Out:   &out, Log: zerolog.New(&logs),
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, writer.ErrBinaryFile)
+	assert.Contains(t, logs.String(), "substitution failed")
+
+	data, readErr := os.ReadFile(filepath.Join(root, "notes.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "version 1.1.0\n", string(data), "the usable file was still written")
+}
+
+func TestSubstituteFilesJSONEvents(t *testing.T) {
+	root := manifestRepo(t, map[string]string{"notes.txt": "keep 1.0.0 keep\n"})
+	var out bytes.Buffer
+	require.NoError(t, SubstituteFiles(context.Background(), SubstituteOptions{
+		Root:  root,
+		Paths: []string{"notes.txt"},
+		Subs: []writer.Substitution{
+			{Find: "1.0.0", Write: "1.1.0"},
+			{Find: "absent", Write: "x"},
+			{Find: "keep", Write: "keep"},
+		},
+		JSON: true, Out: &out, Log: zerolog.New(&out),
+	}))
+
+	evs := events(t, out.String())
+	require.Len(t, evs, 2)
+	assert.Equal(t, "file updated", evs[0]["message"])
+	assert.Equal(t, "notes.txt", evs[0]["path"])
+	assert.Equal(t, float64(1), evs[0]["occurrences"])
+	subs := evs[0]["substitutions"].(map[string]any)
+	applied := subs["applied"].([]any)
+	require.Len(t, applied, 1)
+	assert.Equal(t, "1.0.0", applied[0].(map[string]any)["find"])
+	assert.Equal(t, "1.1.0", applied[0].(map[string]any)["write"])
+	require.Len(t, subs["missing"].([]any), 1)
+	require.Len(t, subs["skipped"].([]any), 1)
+
+	assert.Equal(t, "substitution complete", evs[1]["message"])
+	assert.Equal(t, float64(1), evs[1]["occurrences"])
+}
+
+func TestSubstituteFilesSaysWhenNothingChanged(t *testing.T) {
+	root := manifestRepo(t, map[string]string{"notes.txt": "already 1.1.0\n"})
+	var out bytes.Buffer
+	require.NoError(t, SubstituteFiles(context.Background(), SubstituteOptions{
+		Root: root, Paths: []string{"notes.txt"},
+		Subs: []writer.Substitution{{Find: "1.0.0", Write: "1.1.0"}},
+		JSON: true, Out: &out, Log: zerolog.New(&out),
+	}))
+	evs := events(t, out.String())
+	require.Len(t, evs, 2)
+	assert.Equal(t, "file unchanged", evs[0]["message"])
+	assert.Equal(t, float64(0), evs[1]["applied"])
+}
+
+func TestSubstituteFilesPropagatesCancellation(t *testing.T) {
+	root := manifestRepo(t, map[string]string{"notes.txt": "version 1.0.0\n"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := SubstituteFiles(ctx, SubstituteOptions{
+		Root: root, Paths: []string{"notes.txt"},
+		Subs: []writer.Substitution{{Find: "1.0.0", Write: "1.1.0"}},
+		Log:  zerolog.Nop(),
+	})
+	assert.ErrorIs(t, err, context.Canceled)
+	data, readErr := os.ReadFile(filepath.Join(root, "notes.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "version 1.0.0\n", string(data), "nothing may be written after the cancellation")
 }

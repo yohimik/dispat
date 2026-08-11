@@ -1,14 +1,15 @@
 package app
 
-// The two manifest commands: `dispat scanner` reads what a folder declares,
-// `dispat writer` edits it. They are the pkg/scanner and pkg/writer libraries
-// exposed directly, with no config file, no git history and no plan behind
-// them, which is what makes them usable on any checkout and inside a CI step
-// that only wants to look at (or fix) a manifest.
+// The three manifest commands: `dispat scanner` reads what a folder declares,
+// `dispat writer` edits it, and `dispat replacer` replaces literal text in any
+// file at all. They are the pkg/scanner and pkg/writer libraries exposed
+// directly, with no config file, no git history and no plan behind them, which
+// is what makes them usable on any checkout and inside a CI step that only
+// wants to look at (or fix) a file.
 //
-// Both render two ways from one code path: a listing on Out for a terminal,
-// and one structured event per manifest through Log when the run asked for
-// JSON, so the output joins the same event stream CI already ingests.
+// All three render two ways from one code path: a listing on Out for a
+// terminal, and one structured event per file through Log when the run asked
+// for JSON, so the output joins the same event stream CI already ingests.
 
 import (
 	"context"
@@ -71,6 +72,26 @@ type WriteOptions struct {
 	Log zerolog.Logger
 }
 
+// SubstituteOptions is one `dispat replacer` invocation.
+type SubstituteOptions struct {
+	// Root is the folder Paths resolve against.
+	Root string
+	// Paths are the files to edit, relative to Root. Any file at all: the
+	// replacer parses nothing, so nothing has to be a manifest.
+	Paths []string
+	// Subs are the literal find/write pairs, applied to each file in order.
+	Subs []writer.Substitution
+	// Strict turns a substitution that matched nothing anywhere into a failed
+	// command, which is the CI gate for a pattern that has gone stale.
+	Strict bool
+	// JSON renders one event per file through Log instead of a listing.
+	JSON bool
+	// Out receives the listing.
+	Out io.Writer
+	// Log carries the per-file events in JSON mode.
+	Log zerolog.Logger
+}
+
 // depView is one dependency declaration as the JSON output spells it.
 type depView struct {
 	Kind      string `json:"kind"`
@@ -84,6 +105,12 @@ type editView struct {
 	Kind  string `json:"kind"`
 	Name  string `json:"name"`
 	Range string `json:"range"`
+}
+
+// subView is one requested substitution as the JSON output spells it.
+type subView struct {
+	Find  string `json:"find"`
+	Write string `json:"write"`
 }
 
 // replaceView is one requested replacement as the JSON output spells it.
@@ -293,6 +320,128 @@ func writeOne(path string, opts WriteOptions) (writer.Result, writer.ReplaceResu
 		}
 	}
 	return res, replRes, nil
+}
+
+// SubstituteFiles applies the literal substitutions to each named file. Every
+// file is attempted even after one fails, since each file's write is atomic
+// and independent, and the failures are joined into the returned error so one
+// run reports the whole picture.
+//
+// Strict fails on a substitution that matched nothing in any of the files,
+// rather than in each of them: a run over twenty files where the pattern only
+// belongs in one is the ordinary case, and a pattern found nowhere at all is
+// the stale one worth catching.
+func SubstituteFiles(ctx context.Context, opts SubstituteOptions) error {
+	var (
+		errs                      []error
+		applied, skipped, missing int
+		occurrences               int
+		found                     = make(map[writer.Substitution]bool, len(opts.Subs))
+	)
+	out := listing(opts.Out)
+	for _, rel := range opts.Paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
+		res, err := writer.Substitute(path, opts.Subs)
+		if err != nil {
+			opts.Log.Error().Err(err).Str("file", rel).Msg("substitution failed")
+			errs = append(errs, err)
+			continue
+		}
+		for _, s := range res.Applied {
+			found[s] = true
+		}
+		for _, s := range res.Skipped {
+			found[s] = true
+		}
+		applied += len(res.Applied)
+		skipped += len(res.Skipped)
+		missing += len(res.Missing)
+		occurrences += res.Count
+		if opts.JSON {
+			logSubstitute(opts.Log, rel, res)
+			continue
+		}
+		printSubstitute(out, rel, res)
+	}
+
+	if opts.JSON {
+		opts.Log.Info().Int("files", len(opts.Paths)).Int("occurrences", occurrences).
+			Int("applied", applied).Int("skipped", skipped).Int("missing", missing).
+			Msg("substitution complete")
+	} else {
+		fmt.Fprintf(out, "%d file(s), %d occurrence(s): %d applied, %d skipped, %d missing\n",
+			len(opts.Paths), occurrences, applied, skipped, missing)
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		// Each one was already reported against the file it belongs to.
+		return err
+	}
+	if opts.Strict {
+		var stale int
+		for _, s := range opts.Subs {
+			if !found[s] {
+				opts.Log.Error().Str("find", s.Find).Msg("substitution matched nothing")
+				stale++
+			}
+		}
+		if stale > 0 {
+			err := fmt.Errorf("%d substitution(s) matched nothing", stale)
+			opts.Log.Error().Err(err).Msg("substitutions are not clean")
+			return err
+		}
+	}
+	return nil
+}
+
+// printSubstitute writes one file's listing entry: one line per substitution
+// with its outcome, and the occurrence count for the ones that landed.
+func printSubstitute(out io.Writer, rel string, res writer.SubstituteResult) {
+	fmt.Fprintln(out, rel)
+	for _, group := range []struct {
+		outcome string
+		subs    []writer.Substitution
+	}{
+		{"applied", res.Applied}, {"skipped", res.Skipped}, {"missing", res.Missing},
+	} {
+		for _, s := range group.subs {
+			fmt.Fprintf(out, "  %-7s  %s -> %s\n", group.outcome, s.Find, s.Write)
+		}
+	}
+	if res.Count > 0 {
+		fmt.Fprintf(out, "  %d occurrence(s) replaced\n", res.Count)
+	}
+}
+
+// logSubstitute emits one file's result as a structured event.
+func logSubstitute(log zerolog.Logger, rel string, res writer.SubstituteResult) {
+	msg := "file unchanged"
+	if len(res.Applied) > 0 {
+		msg = "file updated"
+	}
+	log.Info().
+		Str("path", rel).
+		Int("occurrences", res.Count).
+		Interface("substitutions", outcomeView[subView]{
+			Applied: subViews(res.Applied),
+			Skipped: subViews(res.Skipped),
+			Missing: subViews(res.Missing),
+		}).
+		Msg(msg)
+}
+
+func subViews(subs []writer.Substitution) []subView {
+	if len(subs) == 0 {
+		return nil
+	}
+	out := make([]subView, 0, len(subs))
+	for _, s := range subs {
+		out = append(out, subView{Find: s.Find, Write: s.Write})
+	}
+	return out
 }
 
 // printWrite writes one manifest's listing entry: what the version field did,

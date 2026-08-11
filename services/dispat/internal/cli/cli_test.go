@@ -215,6 +215,71 @@ func TestManifestCommandWordsAreNotRunScripts(t *testing.T) {
 	assert.Equal(t, 0, Run([]string{"scanner", "--root", root}, &stdout, &stderr))
 	assert.Contains(t, stdout.String(), "0 manifest(s)")
 	assert.Equal(t, 2, Run([]string{"writer", "--root", root}, &stdout, &stderr))
+	assert.Equal(t, 2, Run([]string{"replacer", "--root", root}, &stdout, &stderr))
+}
+
+func TestReplacerCommand(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "README.md")
+	require.NoError(t, os.WriteFile(path, []byte("acme-core:1.0.0 and acme-core:1.0.0\n"), 0o644))
+
+	// No config file and no git repository: the replacer only ever looks at
+	// the files it is pointed at.
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"replacer", "--root", root, "--sub", "acme-core:1.0.0=>acme-core:1.1.0", "README.md"},
+		&stdout, &stderr)
+	assert.Equal(t, 0, code, stderr.String())
+	assert.Contains(t, stdout.String(), "2 occurrence(s) replaced")
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "acme-core:1.1.0 and acme-core:1.1.0\n", string(data))
+
+	// A pattern matching nothing is quiet by default and fatal under --strict.
+	stdout.Reset()
+	stderr.Reset()
+	assert.Equal(t, 0, Run([]string{"replacer", "--root", root, "--sub", "absent=>x", "README.md"},
+		&stdout, &stderr))
+	assert.Equal(t, 1, Run([]string{"replacer", "--root", root, "--strict", "--sub", "absent=>x", "README.md"},
+		&stdout, &stderr))
+
+	// Nothing to write is a usage error, as it is for the writer.
+	assert.Equal(t, 2, Run([]string{"replacer", "--root", root, "README.md"}, &stdout, &stderr))
+	// So is a malformed substitution.
+	assert.Equal(t, 2, Run([]string{"replacer", "--root", root, "--sub", "no-separator", "README.md"},
+		&stdout, &stderr))
+	// A file that is not there fails the command.
+	assert.Equal(t, 1, Run([]string{"replacer", "--root", root, "--sub", "a=>b", "absent.md"},
+		&stdout, &stderr))
+}
+
+func TestParseSubSpec(t *testing.T) {
+	// The split is at the first "=>", so an "=" on either side survives and a
+	// "=>" in the replacement text does too.
+	for _, tc := range []struct {
+		spec string
+		want writer.Substitution
+	}{
+		{"1.0.0=>1.1.0", writer.Substitution{Find: "1.0.0", Write: "1.1.0"}},
+		{"VERSION=1.0.0=>VERSION=1.1.0", writer.Substitution{Find: "VERSION=1.0.0", Write: "VERSION=1.1.0"}},
+		{"a=>b=>c", writer.Substitution{Find: "a", Write: "b=>c"}},
+		// An empty replacement deletes what it finds.
+		{"drop-me=>", writer.Substitution{Find: "drop-me"}},
+		{" spaced =>  padded ", writer.Substitution{Find: " spaced ", Write: "  padded "}},
+	} {
+		got, err := parseSubSpec(tc.spec)
+		require.NoError(t, err, "spec: %s", tc.spec)
+		assert.Equal(t, tc.want, got, "spec: %s", tc.spec)
+	}
+
+	for _, spec := range []string{
+		"no separator",
+		"=>only-a-replacement", // an empty find matches everywhere
+		"",
+	} {
+		_, err := parseSubSpec(spec)
+		assert.Error(t, err, "spec %q must be rejected", spec)
+	}
 }
 
 func TestParseEditSpec(t *testing.T) {

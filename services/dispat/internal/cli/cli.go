@@ -42,9 +42,17 @@ const (
 	// The manifest commands, exposing the pkg/scanner and pkg/writer
 	// libraries directly. Like init, they need no config file and no git
 	// repository: they only ever look at the files they are pointed at.
-	cmdScanner = "scanner" // read what a folder's manifests declare
-	cmdWriter  = "writer"  // edit manifests in place, format-preserving
+	cmdScanner  = "scanner"  // read what a folder's manifests declare
+	cmdWriter   = "writer"   // edit manifests in place, format-preserving
+	cmdReplacer = "replacer" // replace literal text in any file, no parsing
 )
+
+// manifestCommand reports the commands that need neither a config file nor a
+// git repository: they read and write only the files named on the command
+// line, which is what makes them usable on any checkout.
+func manifestCommand(cmd string) bool {
+	return cmd == cmdScanner || cmd == cmdWriter || cmd == cmdReplacer
+}
 
 // Version is the dispat version `--version` reports. The default marks a
 // local build; releases override it at build time from the release tag:
@@ -155,8 +163,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		"writer command: set one dependency's declared range, [kind:]name=range (repeatable)")
 	wrReplace := fs.StringArray("replace", nil,
 		"writer command: point a dependency at a local folder, name=path; an empty path removes the redirect (repeatable)")
+	rpSub := fs.StringArray("sub", nil,
+		"replacer command: replace literal text in the named files, find=>write (repeatable, applied in order)")
 	strict := fs.Bool("strict", false,
-		"scanner and writer commands: exit 1 on a manifest that failed to parse, or an edit the manifest does not declare")
+		"scanner, writer and replacer commands: exit 1 on a manifest that failed to parse, an edit the manifest does not declare, or a --sub that matched nothing")
 	showVersion := fs.Bool("version", false, "print the dispat version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `%s
@@ -201,6 +211,11 @@ commands:
                            --set-version rewrites the own version, --set sets a
                            dependency's range, --replace points one at a local
                            folder. Needs no config file and no git repository
+  replacer <file>...       replace literal text in any file, parsing nothing:
+                           --sub 'find=>write', repeatable and applied in
+                           order, for the versions no manifest writer reaches
+                           (a Gradle coordinate, a Dockerfile, a README).
+                           Needs no config file and no git repository
 
 flags:
 %s`, logo, fs.FlagUsages())
@@ -248,8 +263,8 @@ flags:
 		fmt.Fprintf(stdout, "created %s\n", name)
 		return 0
 	}
-	if cmd == cmdScanner || cmd == cmdWriter {
-		// Also before config loading: these two are the manifest libraries
+	if manifestCommand(cmd) {
+		// Also before config loading: these three are the manifest libraries
 		// themselves, and they read nothing but the files named on the
 		// command line. Their logger comes from the flags alone, since there
 		// is no config file behind them to take a level or a format from.
@@ -259,6 +274,25 @@ flags:
 		if cmd == cmdScanner {
 			if app.ScanManifests(ctx, app.ScanOptions{
 				Root: *root, Dir: inv.dir, RootOnly: *scanRootOnly, Strict: *strict,
+				JSON: *logFormat == "json", Out: stdout, Log: log,
+			}) != nil {
+				return 1
+			}
+			return 0
+		}
+		if cmd == cmdReplacer {
+			subs, err := parseSubSpecs(*rpSub)
+			if err != nil {
+				bootLog.Error().Err(err).Msg("invalid substitution")
+				return 2
+			}
+			if len(subs) == 0 {
+				bootLog.Error().Msg("replacer needs something to write: --sub 'find=>write'")
+				fs.Usage()
+				return 2
+			}
+			if app.SubstituteFiles(ctx, app.SubstituteOptions{
+				Root: *root, Paths: inv.paths, Subs: subs, Strict: *strict,
 				JSON: *logFormat == "json", Out: stdout, Log: log,
 			}) != nil {
 				return 1
@@ -398,7 +432,7 @@ type invocation struct {
 	cmd    string
 	script string   // run: the script name
 	dir    string   // scanner: the optional folder to scan
-	paths  []string // writer: the manifest files to edit
+	paths  []string // writer and replacer: the files to edit
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
@@ -443,6 +477,13 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 	case cmdWriter:
 		if len(rest) < 2 {
 			log.Error().Msg("writer requires at least one manifest file to edit")
+			usage()
+			return inv, true
+		}
+		inv.paths = rest[1:]
+	case cmdReplacer:
+		if len(rest) < 2 {
+			log.Error().Msg("replacer requires at least one file to edit")
 			usage()
 			return inv, true
 		}
