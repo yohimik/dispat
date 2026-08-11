@@ -395,3 +395,44 @@ func FuzzReplace(f *testing.F) {
 		}
 	})
 }
+
+// FuzzSubstituteBytes hammers the zero-parsing replacer. It has no grammar to
+// protect, so its contract is arithmetic instead: it never panics, it never
+// touches the caller's input, and the result is exactly as long as the
+// occurrences it reported say it should be.
+func FuzzSubstituteBytes(f *testing.F) {
+	for _, seed := range []struct{ data, find, write string }{
+		{"acme:1.0.0 acme:1.0.0", "1.0.0", "1.1.0"},
+		{"nothing here", "absent", "x"},
+		{"aaa", "a", "aa"},
+		{"aaa", "aa", "a"},
+		{"same", "same", "same"},
+		{"drop me", " me", ""},
+		{"", "x", "y"},
+		{"\x00\xff binary-ish 1.0", "1.0", "2.0"},
+	} {
+		f.Add(seed.data, seed.find, seed.write)
+	}
+	f.Fuzz(func(t *testing.T, data, find, write string) {
+		in := []byte(data)
+		kept := string(in)
+		subs := []Substitution{{Find: find, Write: write}}
+		out, counts := SubstituteBytes(in, subs)
+		if string(in) != kept {
+			t.Fatalf("input mutated:\n in: %q\nnow: %q", kept, in)
+		}
+		want := len(data)
+		if find != "" && find != write {
+			want += counts[0] * (len(write) - len(find))
+		}
+		if len(out) != want {
+			t.Fatalf("length %d, want %d (%d occurrences of %q -> %q)", len(out), want, counts[0], find, write)
+		}
+		// Matches are taken left to right and never overlap, so a replacement
+		// longer than what it replaced cannot fit more of itself in than the
+		// input had room for.
+		if find != "" && counts[0]*len(find) > len(data) {
+			t.Fatalf("%d occurrences of a %d-byte pattern in %d bytes", counts[0], len(find), len(data))
+		}
+	})
+}
