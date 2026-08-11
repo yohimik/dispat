@@ -29,7 +29,7 @@ const (
 	cmdRun     = "run"     // run a script inside each changed package that has it
 	cmdInit    = "init"    // write a starter config file; needs no config or git
 	cmdPreview = "preview" // print one package's pending release notes
-	cmdCompute = "compute" // derive the dependency graph from manifests
+	cmdCompute = "compute" // derive the graph and the baselines from manifests
 
 	// The standalone step commands, exposing the release pipeline's native
 	// steps to custom flows. Like every command word (and unlike --version),

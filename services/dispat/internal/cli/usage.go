@@ -145,16 +145,18 @@ github.allPackages is the configuration-level opt-in for everything else.`,
 	},
 	{
 		name:  cmdCompute,
-		short: "derive the dependency graph from the manifests",
+		short: "derive the dependency graph and the starting versions from the manifests",
 		long: `Scan every package's manifests (package.json, go.mod, Cargo.toml,
 pyproject.toml, composer.json, pom.xml, *.csproj, pubspec.yaml,
-requirements*.txt, Dockerfile, compose.yaml), derive the dependency graph
-and suggest config changes.
+requirements*.txt, Dockerfile, compose.yaml) and suggest the config changes
+they imply: the dependency edges between packages, and an initials entry for
+every package already at a version no release tag carries yet.
 
 --write applies all of them, --interactive confirms each, --check reports
 only and exits 1 when suggestions exist, which is the CI gate. An edge
-marked keep: true is never suggested for removal, and --package/--space
-scope the suggestions to those packages' edges.`,
+marked keep: true is never suggested for removal, an initials entry already
+in the config is never rewritten, and --package/--space scope the suggestions
+to those packages.`,
 		flags: append([]string{"write", "interactive", "check"}, selectionFlags...),
 	},
 	{

@@ -17,7 +17,7 @@ dispat [command] [flags]
 | `autoversion`             | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
 | `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `github`                  | Create the per-package GitHub release now; see [The step commands](#the-step-commands).                           |
-| `compute`                 | Derive the dependency graph from the packages' manifests; see [The compute command](#the-compute-command).        |
+| `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](#the-compute-command). |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The manifest commands](#the-manifest-commands).                     |
 | `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The manifest commands](#the-manifest-commands).                  |
 | `replacer <file>...`      | Replace literal text in any file, parsing nothing; see [The replacer](./replacer.md).                             |
@@ -40,7 +40,7 @@ dispat [command] [flags]
 | `--format`            | `json`      | `init` only: the config file format to write (`json`, `yaml` or `toml`).                                                                                                                               |
 | `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                    |
 | `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                    |
-| `--check`             |             | `compute` only: report only and exit `1` when suggestions exist: the CI gate for a config lagging the manifests. Overrides both apply modes.                                                           |
+| `--check`             |             | `compute` only: report only and exit `1` when any suggestion exists, edges and baselines alike: the CI gate for a config lagging the manifests. Overrides both apply modes.                            |
 | `--tag`               |             | `commit` only: also create the annotated release tag at the resulting commit; an identical existing tag is skipped.        |
 | `--push`              |             | `commit` only: push the branch, and with `--tag` the tags; tags already on the remote are skipped.                         |
 | `--name`, `--email`   | from config | `commit` only: override the `commit.name` / `commit.email` committer identity.                                             |
