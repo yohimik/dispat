@@ -21,13 +21,13 @@ func (a *App) planWorkspace(pl *plan.Plan) filter.Workspace {
 			pkgs = append(pkgs, rel.Pkg)
 		}
 	}
-	return filter.Workspace{Packages: pkgs, Spaces: a.spacePaths(), Root: a.root}
+	return filter.Workspace{Packages: pkgs, Spaces: a.spacePaths(), Groups: a.groupNames(), Root: a.root}
 }
 
 // discoveredWorkspace is the same for the one selecting command with no plan
 // behind it: compute reads manifests, not history.
 func (a *App) discoveredWorkspace(pkgs []*model.Package) filter.Workspace {
-	return filter.Workspace{Packages: pkgs, Spaces: a.spacePaths(), Root: a.root}
+	return filter.Workspace{Packages: pkgs, Spaces: a.spacePaths(), Groups: a.groupNames(), Root: a.root}
 }
 
 // spacePaths maps every configured space onto its folder. A standalone package
@@ -39,6 +39,19 @@ func (a *App) spacePaths() map[string]string {
 		paths[name] = sc.Path
 	}
 	return paths
+}
+
+// groupNames lists the declared versioning groups. A space that versions as a
+// group is not here — nothing declares it, its packages simply carry its name
+// — and the filter reads the groups off the packages as well, so a term
+// reaches both kinds and a declared group nobody joined is still recognised
+// well enough to be told it holds nothing.
+func (a *App) groupNames() []string {
+	names := make([]string, 0, len(a.cfg.VersionGroups))
+	for name := range a.cfg.VersionGroups {
+		names = append(names, name)
+	}
+	return names
 }
 
 // narrow applies one release's selection to the computed plan and reports what

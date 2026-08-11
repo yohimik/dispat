@@ -234,7 +234,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	// as the user spelled it — where they stood — and not the resolved
 	// monorepo root the ascent just found: the difference between the two is
 	// exactly what narrows a command to the folder it was invoked from.
-	sel := filter.Filter{Packages: *o.pkgFilter, Spaces: *o.spaceFilter, Dir: *o.root}
+	sel := filter.Filter{Packages: *o.pkgFilter, Spaces: *o.spaceFilter, Groups: *o.groupFilter, Dir: *o.root}
 
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.

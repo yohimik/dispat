@@ -41,8 +41,8 @@ type command struct {
 	flags []string
 }
 
-// selectionFlags are the two every package-selecting command shares.
-var selectionFlags = []string{"package", "space"}
+// selectionFlags are the three every package-selecting command shares.
+var selectionFlags = []string{"package", "space", "group"}
 
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
@@ -59,11 +59,12 @@ var commands = []command{
 stages of every changed package, in dependency order, then the release
 commit, the tags and the GitHub releases the configuration asks for.
 
---package and --space release part of the graph instead of all of it, as
-does the package or space folder the command is invoked from. A selected
-package whose provider is releasing and unselected stays behind for the
-next run (W230), and a selection that releases part of a versioning group
-says so (W231); --strict refuses either before anything is published.
+--package, --space and --group release part of the graph instead of all of
+it, as does the package or space folder the command is invoked from. A
+selected package whose provider is releasing and unselected stays behind
+for the next run (W230), and a selection that releases part of a versioning
+group says so (W231); --strict refuses either before anything is published,
+and --group takes a whole group at once so it never splits one.
 
 This is what a bare "dispat" does.`,
 		flags: append([]string{"strict"}, selectionFlags...),
@@ -92,9 +93,9 @@ job; only a repository that cannot produce a correct plan at all — or a
 own scripts, then its space's, then the top-level ones — honouring the
 dependency graph, so a package waits for the providers it depends on.
 
---package and --space narrow that to part of the monorepo, as does the
-package or space folder the command is invoked from. --since replaces the
-release window with the commits since a git revision.
+--package, --space and --group narrow that to part of the monorepo, as does
+the package or space folder the command is invoked from. --since replaces
+the release window with the commits since a git revision.
 
 "dispat <script>" is a shorthand when <script> is not a command name.`,
 		flags: append([]string{"on-error", "since", "consumers"}, selectionFlags...),
@@ -168,8 +169,8 @@ every package already at a version no release tag carries yet.
 --write applies all of them, --interactive confirms each, --check reports
 only and exits 1 when suggestions exist, which is the CI gate. An edge
 marked keep: true is never suggested for removal, an initials entry already
-in the config is never rewritten, and --package/--space scope the suggestions
-to those packages.`,
+in the config is never rewritten, and --package/--space/--group scope the
+suggestions to those packages.`,
 		flags: append([]string{"write", "interactive", "check"}, selectionFlags...),
 	},
 	{

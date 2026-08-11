@@ -22,7 +22,7 @@ type options struct {
 	consumers      *bool
 
 	// selection, shared by every package-selecting command
-	pkgFilter, spaceFilter *[]string
+	pkgFilter, spaceFilter, groupFilter *[]string
 
 	// init
 	initFormat *string
@@ -77,6 +77,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"narrow to the named packages (repeatable and comma-separated; '*' globs, so -p '*' is every package and -p '@acme/*' a prefix); without it, the package folder the command was invoked from")
 	o.spaceFilter = fs.StringSliceP("space", "s", nil,
 		"narrow to every package of the named spaces (repeatable, comma-separated, '*' globs); a standalone package belongs to no space, so --package is the only way to name one")
+	o.groupFilter = fs.StringSliceP("group", "g", nil,
+		"narrow to every package of the named versioning groups (repeatable, comma-separated, '*' globs); a group is a versionGroups entry or a space that versions as one, so it may cross spaces")
 	o.initFormat = fs.String("format", "json",
 		"config file format (json, yaml or toml)")
 	o.computeWrite = fs.Bool("write", false,

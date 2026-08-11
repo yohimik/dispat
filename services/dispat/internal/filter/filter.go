@@ -1,8 +1,13 @@
 // Package filter answers the one question every package-selecting command
-// asks: which packages does this invocation act on? `dispat run`, `preview`,
-// `changelog`, `autoversion`, `commit` and `compute` all resolve their
-// --package and --space terms here, so they cannot disagree about what a name,
-// a glob or a folder means.
+// asks: which packages does this invocation act on? `dispat release`,
+// `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`
+// and `compute` all resolve their --package, --space and --group terms here,
+// so they cannot disagree about what a name, a glob or a folder means.
+//
+// The three flags are the three ways a set of packages is addressed: by their
+// own names, by the space folder they live in, and by the versioning group
+// they share a version with. They compose by union, so naming a package twice
+// over selects it once.
 //
 // The folder a command was invoked from is not a second mechanism: an
 // invocation inside a package folder is turned into the very Filter the user
@@ -37,6 +42,11 @@ type Filter struct {
 	// belongs to no space, so "*" here means every space's packages and not
 	// literally every package.
 	Spaces []string
+	// Groups are the --group terms: the names of versioning groups, or globs
+	// over them. A group is a declared versionGroups entry or the implicit
+	// group of a space that versions as one, so a group may span spaces and
+	// may hold a standalone package no --space term reaches.
+	Groups []string
 	// Dir is the folder the command was invoked from — the --root flag as the
 	// user spelled it. It stands in for the terms they did not type: inside a
 	// package folder it selects that package, inside a space folder that
@@ -45,7 +55,9 @@ type Filter struct {
 }
 
 // terms reports whether the command line named anything explicitly.
-func (f Filter) terms() bool { return len(f.Packages) > 0 || len(f.Spaces) > 0 }
+func (f Filter) terms() bool {
+	return len(f.Packages) > 0 || len(f.Spaces) > 0 || len(f.Groups) > 0
+}
 
 // Workspace is what a Filter resolves against.
 type Workspace struct {
@@ -57,6 +69,12 @@ type Workspace struct {
 	// standalone package has no entry here by construction, which is exactly
 	// why only --package reaches it.
 	Spaces map[string]string
+	// Groups are the declared versionGroups names. Membership is not listed:
+	// a package carries its own group, so the groups a term can match are
+	// these plus the ones the packages themselves name — a space that
+	// versions as a group declares nothing, and a declared group that nobody
+	// joined has no member to carry it.
+	Groups []string
 	// Root is the monorepo root the space paths are relative to; package dirs
 	// were already joined onto it.
 	Root string
@@ -146,7 +164,25 @@ func Resolve(f Filter, ws Workspace) (Result, error) {
 		}
 		if !matched {
 			return Result{}, fmt.Errorf("--space %q matches no package (%s holds none)",
-				term, spaceLabel(sortedSet(names)))
+				term, nameLabel("space", sortedSet(names)))
+		}
+	}
+	for _, term := range f.Groups {
+		names := sortedMatches(term, knownGroups(ws))
+		if len(names) == 0 {
+			return Result{}, unknownGroup(term, ws)
+		}
+		want := foldSet(names)
+		matched := false
+		for _, pkg := range ws.Packages {
+			if want[fold(pkg.VersionGroupName())] {
+				res.set[pkg.Name] = true
+				matched = true
+			}
+		}
+		if !matched {
+			return Result{}, fmt.Errorf("--group %q matches no package (%s holds none)",
+				term, nameLabel("versioning group", names))
 		}
 	}
 
@@ -164,6 +200,9 @@ func Resolve(f Filter, ws Workspace) (Result, error) {
 // match wins, so standing inside a standalone package nested under another
 // package's folder selects the inner one; a package wins an exact-depth tie,
 // being the more specific of the two.
+//
+// A versioning group is never inferred: it is a versioning relationship and
+// not a folder, so nowhere is inside one and only --group names it.
 func infer(dir string, ws Workspace) Filter {
 	target := absClean(dir)
 	best, bestLen := Filter{}, -1
@@ -199,6 +238,41 @@ func spaceNames(term string, ws Workspace) map[string]bool {
 	return out
 }
 
+// knownGroups lists every versioning group a --group term may name: the
+// declared versionGroups entries, and the groups the packages themselves
+// carry. The second half is what makes a space that versions as a group
+// selectable — it declares no group, its members simply hold its name.
+func knownGroups(ws Workspace) []string {
+	seen := make(map[string]bool, len(ws.Groups)+len(ws.Packages))
+	out := make([]string, 0, len(ws.Groups))
+	add := func(name string) {
+		if name == "" || seen[fold(name)] {
+			return
+		}
+		seen[fold(name)] = true
+		out = append(out, name)
+	}
+	for _, name := range ws.Groups {
+		add(name)
+	}
+	for _, pkg := range ws.Packages {
+		add(pkg.VersionGroupName())
+	}
+	sort.Strings(out)
+	return out
+}
+
+// foldSet keys names for a case-insensitive lookup. A group name arrives from
+// two places — a versionGroups key and a space name — and comparing them as
+// typed is how the same group stops matching itself.
+func foldSet(names []string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		out[fold(name)] = true
+	}
+	return out
+}
+
 // spaceOf reports which configured space a package belongs to, by folder
 // parenthood: discovery makes every space package a direct sub-folder of its
 // space's path. The package's own Space.Name cannot answer this — a standalone
@@ -215,22 +289,17 @@ func spaceOf(pkg *model.Package, ws Workspace) string {
 }
 
 // unknownPackage explains a --package term that matched nothing, and points at
-// --space when the term belongs there instead.
+// the flag that would have reached it when the term belongs to another.
 func unknownPackage(term string, ws Workspace) error {
-	var names []string
-	for _, pkg := range ws.Packages {
-		names = append(names, pkg.Name)
-	}
-	msg := fmt.Sprintf("--package %q matches no package (discovered: %s)", term, join(names))
-	if spaces := sortedMatches(term, sortedKeys(ws.Spaces)); len(spaces) > 0 {
-		msg += fmt.Sprintf("; %s is a space — select it with --space", join(spaces))
-	}
+	msg := fmt.Sprintf("--package %q matches no package (discovered: %s)", term, join(packageNames(ws)))
+	msg += hint(term, sortedKeys(ws.Spaces), "space", "--space")
+	msg += hint(term, knownGroups(ws), "versioning group", "--group")
 	return fmt.Errorf("%s", msg)
 }
 
 // unknownSpace explains a --space term that matched no configured space. A
-// standalone package's name lands here, which is why the mirror hint matters:
-// it belongs to no space and is reachable only through --package.
+// standalone package's name lands here, which is why the mirror hints matter:
+// it belongs to no space, and only --package or the group it joined reach it.
 func unknownSpace(term string, ws Workspace) error {
 	spaces := sortedKeys(ws.Spaces)
 	if len(spaces) == 0 {
@@ -238,28 +307,56 @@ func unknownSpace(term string, ws Workspace) error {
 			"(this repository configures none; every package is standalone — select it with --package)", term)
 	}
 	msg := fmt.Sprintf("--space %q matches no configured space (configured: %s)", term, join(spaces))
-	var pkgs []string
-	for _, pkg := range ws.Packages {
-		if globx.Match(fold(term), fold(pkg.Name)) {
-			pkgs = append(pkgs, pkg.Name)
-		}
-	}
-	if len(pkgs) > 0 {
-		msg += fmt.Sprintf("; %s is a package — select it with --package", join(pkgs))
-	}
+	msg += hint(term, packageNames(ws), "package", "--package")
+	msg += hint(term, knownGroups(ws), "versioning group", "--group")
 	return fmt.Errorf("%s", msg)
 }
 
-// spaceLabel renders one or more space names for a message.
-func spaceLabel(names []string) string {
+// unknownGroup explains a --group term that named no versioning group. The
+// common mistake is naming a space that versions its packages independently:
+// it has no group to speak of, and --space is what covers it.
+func unknownGroup(term string, ws Workspace) error {
+	groups := knownGroups(ws)
+	if len(groups) == 0 {
+		return fmt.Errorf("--group %q matches no versioning group "+
+			"(this repository configures none; every package versions on its own — select it with --package or --space)", term)
+	}
+	msg := fmt.Sprintf("--group %q matches no versioning group (configured: %s)", term, join(groups))
+	msg += hint(term, sortedKeys(ws.Spaces), "space", "--space")
+	msg += hint(term, packageNames(ws), "package", "--package")
+	return fmt.Errorf("%s", msg)
+}
+
+// hint is the pointer a failed term earns when another flag would have reached
+// it: the whole reason a typo and a misfiled name read differently.
+func hint(term string, candidates []string, noun, flag string) string {
+	found := sortedMatches(term, candidates)
+	if len(found) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %s is a %s — select it with %s", join(found), noun, flag)
+}
+
+// packageNames lists the workspace's packages, in resolution order.
+func packageNames(ws Workspace) []string {
+	out := make([]string, 0, len(ws.Packages))
+	for _, pkg := range ws.Packages {
+		out = append(out, pkg.Name)
+	}
+	return out
+}
+
+// nameLabel renders one or more names of one kind for a message: "space
+// "libs"", "versioning groups "a", "b"".
+func nameLabel(noun string, names []string) string {
 	quoted := make([]string, 0, len(names))
 	for _, n := range names {
 		quoted = append(quoted, fmt.Sprintf("%q", n))
 	}
 	if len(names) == 1 {
-		return "space " + quoted[0]
+		return noun + " " + quoted[0]
 	}
-	return "spaces " + join(quoted)
+	return noun + "s " + join(quoted)
 }
 
 // describe names a selection for a message. A single literal package term is
@@ -267,7 +364,7 @@ func spaceLabel(names []string) string {
 // the same and carry the package's configured spelling; everything else is
 // rendered as the terms, which is what the reader typed.
 func describe(f Filter, names []string) string {
-	if len(f.Spaces) == 0 && len(f.Packages) == 1 && !isGlob(f.Packages[0]) {
+	if len(f.Spaces) == 0 && len(f.Groups) == 0 && len(f.Packages) == 1 && !isGlob(f.Packages[0]) {
 		return join(names)
 	}
 	var parts []string
@@ -279,15 +376,27 @@ func describe(f Filter, names []string) string {
 	case len(f.Packages) > 1:
 		parts = append(parts, "packages "+join(f.Packages))
 	}
-	switch {
-	case len(f.Spaces) == 1 && !isGlob(f.Spaces[0]):
-		parts = append(parts, spaceLabel(f.Spaces))
-	case len(f.Spaces) == 1:
-		parts = append(parts, fmt.Sprintf("spaces matching %q", f.Spaces[0]))
-	case len(f.Spaces) > 1:
-		parts = append(parts, spaceLabel(f.Spaces))
+	if part := describeTerms("space", f.Spaces); part != "" {
+		parts = append(parts, part)
+	}
+	if part := describeTerms("versioning group", f.Groups); part != "" {
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, " and ")
+}
+
+// describeTerms renders the terms of one flag: the names as typed, or the glob
+// that stood for them, which is what the reader recognises from their own
+// command line.
+func describeTerms(noun string, terms []string) string {
+	switch {
+	case len(terms) == 0:
+		return ""
+	case len(terms) == 1 && isGlob(terms[0]):
+		return fmt.Sprintf("%ss matching %q", noun, terms[0])
+	default:
+		return nameLabel(noun, terms)
+	}
 }
 
 func isGlob(term string) bool { return strings.Contains(term, "*") }
