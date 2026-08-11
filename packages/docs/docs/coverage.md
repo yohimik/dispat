@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **94.9%** of the workspace's statements (unit layer alone: 89.4%; the integration
-layer's instrumented binary: 82.5%).
+The whole test suite currently covers **95.3%** of the workspace's statements (unit layer alone: 89.9%; the integration
+layer's instrumented binary: 82.7%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -12,26 +12,26 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-11** (after the `--package` / `--space` selection landed) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
+**2026-08-11** (after the replacer and the auto-versioning strategies landed) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.
 
 | Module / package                        | Statement coverage                                                                       |
 |-----------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                     | **94.9%**                                                                                |
+| **workspace total**                     | **95.3%**                                                                                |
 | `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
 | `pkg/models` (public config)            | 100%                                                                                     |
 | `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
 | `pkg/scanner` (manifest reader)         | **96.2%**, plus two fuzz targets over every registered parser                            |
-| `pkg/writer` (manifest writer)          | **92.6%**, plus a fuzz target proving rewrites never corrupt valid JSON                  |
-| `services/dispat` (all packages)        | **95.1%** aggregate, `main.go` included (the integration suite runs the real binary)     |
+| `pkg/writer` (manifest writer)          | **93.6%**, plus fuzz targets proving rewrites never corrupt valid JSON and that the replacer's arithmetic holds |
+| `services/dispat` (all packages)        | **95.3%** aggregate, `main.go` included (the integration suite runs the real binary)     |
 | - `main.go`, `globx`, `model`           | 100%                                                                                     |
 | - `filter` (package/space selection)    | 99.2%                                                                                    |
-| - `cli` (controller)                    | 99.0%                                                                                    |
+| - `cli` (controller)                    | 99.2%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
 | - `plan` (planner)                      | 96.4%                                                                                    |
 | - `changelog`                           | 96.3%                                                                                    |
-| - `release` (executor)                  | 95.1%                                                                                    |
-| - `config`                              | 95.0%                                                                                    |
-| - `app`                                 | 93.3%                                                                                    |
+| - `release` (executor)                  | 95.7%                                                                                    |
+| - `config`                              | 95.1%                                                                                    |
+| - `app`                                 | 93.9%                                                                                    |
 | - `github`                              | 93.0%                                                                                    |
 | - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |

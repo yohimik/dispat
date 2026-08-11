@@ -466,6 +466,23 @@ produced a plausible-looking but wrong plan, so a regression fails exactly one c
    mode being fenced: dependants left on the train (W200/W206) by the exact form the configuration page documents for
    ending one.
 
+## Bug fences
+
+Guard tests for defects found by review or by building the feature that exposed them. Each one names the defect, the
+test that would now fail, and where that test lives, so a regression fails exactly one clearly-labelled case rather
+than showing up as a puzzling behaviour change somewhere downstream.
+
+| Defect                                                                                                                                                                                                          | Guarded by                                                                                                                    | Where |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|-------|
+| **`syncLock` never fired for a space that reconciles nothing.** The scripts were gated on a file having changed, and a block with neither reconciling strategy produces no such signal, so the mode was unreachable. | `TestAutoVersionSyncLockOnly`, `TestAutoVersionSyncLockOnlyStandalone`; `TestSyncLockRunsWithNeitherStrategy`, `TestSyncLockOnlyStaysSerialised`, `TestSyncLockOnlyBudgetConfigurable` | `autoversion_test.go`; `internal/release` |
+| **`dispat autoversion --sync-lock` read the space's `autoVersion` block instead of the policy the flags resolved.** A flag-forced reconciliation wrote files whose lock nothing then regenerated.                   | `TestAutoVersionPolicyFlagsStillRunSyncLock`                                                                                  | `autoversion_test.go` |
+| **A folder the walk could not enter failed the whole release.** A replace rule's file walk returned the error instead of stepping over the sub-tree, so an unreadable `node_modules` aborted a release no rule was going to touch. | `TestReplaceRuleStepsOverAnUnreadableFolder`, and `TestReplaceRuleFailsOnAnUnreadablePackageFolder` for the case that *must* still fail | `internal/release` |
+| **A stale-rule warning (W222) on every re-run.** After the first pass the text a rule looks for is gone, which is indistinguishable from "never matched" without checking whether the file already reads the way the rule wants. | `TestAutoVersionReplaceStrategy` (silent), `TestAutoVersionReplaceRuleMatchedNothing` (loud); `TestReplaceRuleIsQuietOnAnAlreadyReconciledFile` | `autoversion_test.go`; `internal/release` |
+| **A package with no parseable manifest never became a name owner**, so `manifestNames` could not make it visible to `dispat compute`.                                                                             | `TestAutoVersionManifestNamesMakeAnEdgeVisible`; `TestComputeStatedManifestNamesDeriveEdges`, `TestComputeStatedNameOutranksADeclaredOne` | `autoversion_test.go`; `internal/app` |
+| **A replacement landing inside a binary file.** A glob reaching a PNG that happens to contain the version text would have corrupted it.                                                                            | `TestAutoVersionReplaceStrategy`; `TestReplaceRuleSkipsBinaryAndOversizedFiles`, `TestSubstituteRefusesABinaryFile`             | `autoversion_test.go`; `internal/release`, `pkg/writer` |
+| **An empty `find` matching at every position.** Both the API and the command line refuse it rather than shredding the file.                                                                                        | `TestSubstituteRefusesAnEmptyFind`, `TestSubstituteBytesIgnoresAnEmptyFind`, `TestParseSubSpec`                                | `pkg/writer`, `internal/cli` |
+| **Two span replacements covering the same bytes**, or spans queued against a file a writer also regenerated whole: the result would have depended on the order they were queued in.                                | `TestReplacerRefusesOverlappingPatches`, `TestReplacerRefusesSpansOnARegeneratedFile`                                          | `pkg/writer` |
+
 ## Running
 
 ```sh

@@ -151,6 +151,11 @@ whose publish nothing waited for.
 
 If a rule mentions no provider placeholder, it is applied once, for the package's own version.
 
+One rule expanded across several providers still substitutes in the order the providers are declared, each over what
+the last left. That matters when two providers' versions overlap: a rule finding a bare `{providerPrevious}` for a
+provider moving `1.0.0` to `1.1.0` and another moving `1.1.0` to `1.2.0` will run the first result through the second
+rule. Name the provider in the pattern, as every example here does, and the two cannot collide.
+
 ### Which files a rule reaches
 
 `files` is a list of globs relative to the package folder. `*` matches any run of characters, **separators included**,

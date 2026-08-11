@@ -41,3 +41,9 @@ One test file per goal:
 Two planner properties carry dedicated guard tests: a rejected `Release-As` pin must not swallow a sibling bump, and a
 propagated graduation transition must graduate the dependants. See the
 [regression fences in the test plan](./test-plan.md#regression-fences).
+
+## Bug fences
+
+Every defect found by review carries a named guard test, listed with the failure it fences in the
+[bug fences table](./test-plan.md#bug-fences). Some of those tests live in the unit suites rather than here, because
+that is where the defect is cheapest to pin; the table says which is which.
