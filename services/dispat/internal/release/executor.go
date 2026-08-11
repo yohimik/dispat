@@ -593,15 +593,19 @@ func (r *run) execute(ctx context.Context, t task) {
 	case taskSyncLock:
 		// The lock-sync sequence: no hooks of its own, budgeted separately —
 		// and skipped outright when this package's version stage changed no
-		// manifest, so a quiet release does not serialise one lock
-		// regeneration per package for nothing.
+		// file, so a quiet release does not serialise one lock regeneration
+		// per package for nothing.
+		//
+		// A space that configured neither reconciling strategy is the
+		// exception: it never produces that signal, so gating on one would
+		// mean its scripts never ran at all.
 		r.mu.Lock()
-		manifestsChanged := r.avChanged[t.pkg]
+		filesChanged := r.avChanged[t.pkg]
 		r.mu.Unlock()
-		if manifestsChanged {
+		if filesChanged || !space.AutoVersion.Reconciles() {
 			frame = stage{commands: space.AutoVersion.SyncLock}
 		} else {
-			log.Debug().Msg("syncLock: no manifest changed, nothing to regenerate")
+			log.Debug().Msg("syncLock: nothing was reconciled, nothing to regenerate")
 		}
 	default:
 		// postPublish is not part of this frame: it only runs after the

@@ -528,3 +528,75 @@ func TestAutoVersionPackagesPolicyOverride(t *testing.T) {
 	assert.True(t, changed["core"])
 	assert.Contains(t, fileText(t, root, "core/package.json"), `"version": "1.0.1"`)
 }
+
+// The syncLock-only strategy: neither reconciling strategy is configured, so
+// the version stage does nothing but the lock scripts still run. A space
+// wanting "go mod tidy between version and build, serialised" has no manifest
+// change to key off, so the change gate has to step aside for it.
+
+// syncLockOnlySpace is that space: an autoVersion block carrying scripts and
+// nothing else.
+func syncLockOnlySpace(concurrency int) *model.Space {
+	return avSpace(&model.AutoVersion{
+		Manifests:           model.ScopeNone,
+		Kinds:               allKinds(),
+		SyncLock:            []string{"locksync"},
+		SyncLockConcurrency: concurrency,
+	})
+}
+
+func TestSyncLockRunsWithNeitherStrategy(t *testing.T) {
+	root := t.TempDir()
+	space := syncLockOnlySpace(0)
+	assert.False(t, space.AutoVersion.Reconciles())
+	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	p := avPlan(root, space, "a")
+
+	r := &fakeRunner{}
+	res := newExecutor(execSpec{Runner: r, Build: 1, Publish: 1}).Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
+	dir := filepath.Join(root, "a")
+	assert.NotEqual(t, -1, r.indexOf("locksync "+dir),
+		"a space with no reconciling strategy still runs its lock scripts")
+	assert.Less(t, r.indexOf("locksync "+dir), r.indexOf("build "+dir),
+		"still between version and build")
+	// The manifest was left exactly as it was found: nothing reconciles.
+	assert.Contains(t, fileText(t, root, "a/package.json"), `"version": "1.0.0"`)
+}
+
+func TestSyncLockOnlyStaysSerialised(t *testing.T) {
+	// The budget is the whole point of the mode: parallel writers corrupt a
+	// shared lock file whether or not anything was reconciled first.
+	root := t.TempDir()
+	space := syncLockOnlySpace(0)
+	names := []string{"a", "b", "c"}
+	for _, n := range names {
+		seedFile(t, root, n+"/package.json", `{"name": "@acme/`+n+`"}`)
+	}
+	p := avPlan(root, space, names...)
+
+	r := &fakeRunner{delay: 30 * time.Millisecond}
+	res := newExecutor(execSpec{Runner: r, Build: 4, Publish: 4}).Run(context.Background(), p)
+	for _, n := range names {
+		require.Equal(t, StatusPublished, res[n].Status, "%s: %v", n, res[n].Err)
+	}
+	assert.Equal(t, 3, r.countPrefix("locksync"), "every package regenerated its lock")
+	assert.Equal(t, 1, r.maxCur["locksync"], "the default budget still serialises them")
+}
+
+func TestSyncLockOnlyBudgetConfigurable(t *testing.T) {
+	root := t.TempDir()
+	space := syncLockOnlySpace(3)
+	names := []string{"a", "b", "c"}
+	for _, n := range names {
+		seedFile(t, root, n+"/package.json", `{"name": "@acme/`+n+`"}`)
+	}
+	p := avPlan(root, space, names...)
+
+	r := &fakeRunner{delay: 30 * time.Millisecond}
+	res := newExecutor(execSpec{Runner: r, Build: 4, Publish: 4}).Run(context.Background(), p)
+	for _, n := range names {
+		require.Equal(t, StatusPublished, res[n].Status, "%s: %v", n, res[n].Err)
+	}
+	assert.Greater(t, r.maxCur["locksync"], 1, "a configured budget lifts the serialisation here too")
+}

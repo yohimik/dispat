@@ -48,7 +48,10 @@ func (a *App) AutoVersion(ctx context.Context, opts AutoVersionOptions) error {
 		return err
 	}
 
-	var policy func(*plan.Release) *model.AutoVersion
+	// One policy resolver, used by the reconciliation and by the syncLock
+	// loop alike: reading the space's block directly in the second would mean
+	// a flag override reconciled files whose lock nothing then regenerated.
+	policy := func(rel *plan.Release) *model.AutoVersion { return rel.Pkg.Space.AutoVersion }
 	if opts.hasPolicy() {
 		policy = func(rel *plan.Release) *model.AutoVersion {
 			av := effectivePolicy(rel.Pkg.Space.AutoVersion)
@@ -85,12 +88,14 @@ func (a *App) AutoVersion(ctx context.Context, opts AutoVersionOptions) error {
 	runner := &script.ShellRunner{Shell: a.cfg.Shell}
 	for _, name := range targets {
 		rel := pl.Releases[name]
-		av := rel.Pkg.Space.AutoVersion
+		av := policy(rel)
 		if av == nil || len(av.SyncLock) == 0 {
 			continue
 		}
-		if !changed[name] {
-			a.log.Debug().Str("package", name).Msg("syncLock: no manifest changed, nothing to regenerate")
+		// A space with neither reconciling strategy produces no change to key
+		// off, so its scripts run every time, exactly as they do in a release.
+		if !changed[name] && av.Reconciles() {
+			a.log.Debug().Str("package", name).Msg("syncLock: nothing was reconciled, nothing to regenerate")
 			continue
 		}
 		log := a.log.With().Str("package", name).Str("stage", "syncLock").Logger()
