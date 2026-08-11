@@ -38,7 +38,9 @@
 // Underneath both sits one replacer. Every format writer reads its file
 // through it and writes its file through it, so the read cap, the splice, the
 // proof that the result still parses and the atomic write happen in one place
-// for all of them.
+// for all of them. Substitute is that same machinery with the format knowledge
+// taken away: literal text in, literal text out, over any file at all, for the
+// versions no manifest writer can reach.
 package writer
 
 import (
