@@ -146,6 +146,43 @@ func TestAutoVersionLiteralRangeAndTemplate(t *testing.T) {
 	assert.Equal(t, ">=2.0.0", rangeText(">={version}", "2.0.0", "npm"))
 	assert.Equal(t, "~2.0.0", rangeText("tilde", "2.0.0", "npm"))
 	assert.Equal(t, "v2.0.0", rangeText("caret", "2.0.0", "gomod"), "go.mod always gets exact canonical versions")
+	assert.Equal(t, "==2.0.0", rangeText("caret", "2.0.0", "python"), "Python specifiers have no caret")
+	assert.Equal(t, "2.0.0", rangeText("caret", "2.0.0", "docker"), "a Docker tag is a plain label, never a range")
+	assert.Equal(t, "2.0.0", rangeText("exact", "2.0.0", "docker"))
+	assert.Equal(t, "2.0.0-alpine", rangeText("{version}-alpine", "2.0.0", "docker"),
+		"a template still passes through, which is how a variant tag is spelled")
+}
+
+func TestAutoVersionDocker(t *testing.T) {
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true})
+	// The base image declares nothing readable, so it answers to the name its
+	// consumers use — exactly what manifestNames is for.
+	seedFile(t, root, "svc/Dockerfile",
+		"FROM registry.example.com/core:1.0.0 AS build\nCOPY --from=build /a /b\n")
+	seedFile(t, root, "svc/compose.yaml",
+		"services:\n  svc:\n    build: .\n    image: registry.example.com/svc:1.0.0\n  base:\n    image: registry.example.com/core:1.0.0\n")
+	p := avPlan(root, space, "core", "svc")
+	p.Releases["core"].Pkg.ManifestNames = []string{"registry.example.com/core"}
+	// The two versions must differ, or the assertions below could not tell the
+	// package's own version from its provider's.
+	core := p.Releases["core"]
+	core.Bump = ccme.BumpMinor
+	core.Next = core.Current.Bumped(core.Bump)
+
+	res := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2}).Run(context.Background(), p)
+	require.Equal(t, StatusPublished, res["svc"].Status, "%v", res["svc"].Err)
+
+	dockerfile := fileText(t, root, "svc/Dockerfile")
+	assert.Contains(t, dockerfile, "FROM registry.example.com/core:1.1.0 AS build",
+		"the base image tag follows the provider's new version")
+	assert.Contains(t, dockerfile, "COPY --from=build /a /b", "a stage alias is not an image")
+
+	compose := fileText(t, root, "svc/compose.yaml")
+	assert.Contains(t, compose, "image: registry.example.com/svc:1.0.1",
+		"the built service carries the package's own version")
+	assert.Contains(t, compose, "image: registry.example.com/core:1.1.0",
+		"the pulled service carries the provider's")
 }
 
 func TestAutoVersionGoMod(t *testing.T) {

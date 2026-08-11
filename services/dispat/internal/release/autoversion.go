@@ -299,8 +299,9 @@ func lastNameSegment(name string) string {
 // rangeText renders the policy against the provider's version. Ecosystems
 // with their own version spelling override the keyword policies: go.mod
 // declares exact canonical versions (vX.Y.Z), Python specifiers have no
-// caret/tilde so the keywords all pin (==X.Y.Z); a {version} template or a
-// verbatim literal always passes through.
+// caret/tilde so the keywords all pin (==X.Y.Z), and a Docker tag is a plain
+// label with no range syntax at all, so the keywords all write the bare
+// version; a {version} template or a verbatim literal always passes through.
 func rangeText(policy, version, ecosystem string) string {
 	switch ecosystem {
 	case scanner.EcosystemGoMod:
@@ -309,6 +310,14 @@ func rangeText(policy, version, ecosystem string) string {
 		switch policy {
 		case "", "caret", "tilde", "exact":
 			return "==" + version
+		}
+	case scanner.EcosystemDocker:
+		switch policy {
+		case "", "caret", "tilde", "exact":
+			// "^1.2.3" is not a tag any registry can resolve. A caret asked
+			// for here means "track this provider", and the closest a tag can
+			// come to that is naming the version outright.
+			return version
 		}
 	}
 	switch policy {
