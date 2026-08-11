@@ -348,7 +348,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 		}
 	case cmdRun:
 		if len(rest) != 2 {
-			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package or --space)")
+			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package, --space or --group)")
 			usage(inv.cmd)
 			return inv, true
 		}
@@ -356,7 +356,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 	case cmdPreview, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).
-				Msgf("%s takes no arguments (select packages with --package or --space)", inv.cmd)
+				Msgf("%s takes no arguments (select packages with --package, --space or --group)", inv.cmd)
 			usage(inv.cmd)
 			return inv, true
 		}

@@ -189,10 +189,10 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 }
 
 func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
-	// The selection flags parse for every command that takes them, in both
-	// spellings, and compose with the window flags they used to be rejected
-	// alongside. Exit 1 (config not found in this bare folder) rather than 2
-	// is what proves the command line itself was accepted.
+	// The three selection flags parse for every command that takes them, in
+	// both spellings, compose with each other and with the window flags. Exit
+	// 1 (config not found in this bare folder) rather than 2 is what proves
+	// the command line itself was accepted.
 	root := t.TempDir()
 	for _, args := range [][]string{
 		{"release", "-p", "core"},
@@ -203,12 +203,21 @@ func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
 		{"run", "x", "-p", "core,web", "-s", "libs"},
 		{"run", "x", "-p", "core", "--since", "HEAD~1", "--consumers"},
 		{"run", "x", "-p", "*"},
+		{"run", "x", "-g", "libs", "-p", "core", "-s", "apps"},
 		{"preview", "-p", "core"},
 		{"changelog", "--space", "libs"},
 		{"autoversion", "-p", "core"},
 		{"commit", "-s", "libs"},
 		{"github", "-p", "core"},
 		{"compute", "-p", "core"},
+		{"release", "-g", "libs"},
+		{"status", "--group", "libs,apps"},
+		{"preview", "-g", "*"},
+		{"changelog", "-g", "libs"},
+		{"autoversion", "--group", "libs"},
+		{"commit", "-g", "libs"},
+		{"github", "-g", "libs"},
+		{"compute", "-g", "libs"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
@@ -217,9 +226,9 @@ func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
 }
 
 func TestSinceHasNoShorthand(t *testing.T) {
-	// -s belongs to --space, so the two selection flags own the two
-	// shorthands. A `-s` value is a space term and reaches config loading
-	// (exit 1); nothing silently reads it as a git revision.
+	// -s belongs to --space, so the three selection flags own -p, -s and -g.
+	// A `-s` value is a space term and reaches config loading (exit 1);
+	// nothing silently reads it as a git revision.
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 1, Run([]string{"run", "x", "-s", "HEAD~1", "--root", root}, &stdout, &stderr))

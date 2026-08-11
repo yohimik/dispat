@@ -22,23 +22,36 @@ import (
 // "group" is listed before "deep" on purpose: a resolver taking the first
 // matching folder rather than the deepest would answer "group" for a dir
 // inside "deep".
+//
+// The versioning groups cut across that layout, which is the point of having
+// them: "libs" versions its two packages as one, so its name is a group as
+// well as a space, and the declared group "shared" is joined by a package of
+// the apps space and by a standalone package, so no folder describes it.
 func fixture(t *testing.T) Workspace {
 	t.Helper()
 	root := t.TempDir()
-	pkg := func(name, dir string) *model.Package {
-		return &model.Package{Name: name, Dir: filepath.Join(root, filepath.FromSlash(dir))}
+	libs := &model.Space{Name: "libs", Versioning: model.VersioningFixed}
+	apps := &model.Space{Name: "apps"}
+	// site's config joins a declared group, so it carries a derived copy of
+	// its space; tool is standalone, and its synthetic space joins the same
+	// group.
+	appsShared := &model.Space{Name: "apps", Versioning: model.VersioningFixedMajor, VersionGroup: "shared"}
+	toolShared := &model.Space{Name: "tool", Versioning: model.VersioningFixed, VersionGroup: "shared"}
+	pkg := func(name, dir string, space *model.Space) *model.Package {
+		return &model.Package{Name: name, Dir: filepath.Join(root, filepath.FromSlash(dir)), Space: space}
 	}
 	return Workspace{
 		Root: root,
 		Packages: []*model.Package{
-			pkg("core", "packages/core"),
-			pkg("web", "packages/web"),
-			pkg("group", "apps/group"),
-			pkg("site", "apps/site"),
-			pkg("deep", "apps/group/deep"),
-			pkg("tool", "tools/tool"),
+			pkg("core", "packages/core", libs),
+			pkg("web", "packages/web", libs),
+			pkg("group", "apps/group", apps),
+			pkg("site", "apps/site", appsShared),
+			pkg("deep", "apps/group/deep", nil),
+			pkg("tool", "tools/tool", toolShared),
 		},
 		Spaces: map[string]string{"libs": "packages", "apps": "apps"},
+		Groups: []string{"shared"},
 	}
 }
 
@@ -122,11 +135,50 @@ func TestResolveSpaceTerms(t *testing.T) {
 	})
 }
 
+// TestResolveGroupTerms: a --group term names the packages that version
+// together, which is a relationship and not a folder — it may hold packages
+// from several spaces, and it holds nothing that versions on its own.
+func TestResolveGroupTerms(t *testing.T) {
+	ws := fixture(t)
+	for name, tc := range map[string]struct {
+		terms []string
+		want  []string
+	}{
+		"a space that versions as one group": {[]string{"libs"}, []string{"core", "web"}},
+		"a declared group crossing a space and a standalone package": {
+			[]string{"shared"}, []string{"site", "tool"}},
+		"both groups":  {[]string{"libs", "shared"}, []string{"core", "web", "site", "tool"}},
+		"case-blind":   {[]string{"SHARED"}, []string{"site", "tool"}},
+		"a group glob": {[]string{"*d"}, []string{"site", "tool"}},
+		"star is every grouped package, and no independent one": {
+			[]string{"*"}, []string{"core", "web", "site", "tool"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, err := Resolve(Filter{Groups: tc.terms}, ws)
+			require.NoError(t, err)
+			assert.True(t, res.Active())
+			assert.Equal(t, tc.want, res.Names, "the selection comes out in workspace order")
+		})
+	}
+}
+
 func TestResolveUnionOfPackageAndSpaceTerms(t *testing.T) {
-	res, err := Resolve(Filter{Packages: []string{"tool"}, Spaces: []string{"libs"}}, fixture(t))
+	ws := fixture(t)
+	res, err := Resolve(Filter{Packages: []string{"tool"}, Spaces: []string{"libs"}}, ws)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"core", "web", "tool"}, res.Names)
 	assert.Equal(t, `package tool and space "libs"`, res.Description)
+
+	res, err = Resolve(Filter{Packages: []string{"group"}, Spaces: []string{"libs"},
+		Groups: []string{"shared"}}, ws)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core", "web", "group", "site", "tool"}, res.Names,
+		"the three flags union, in workspace order")
+	assert.Equal(t, `package group and space "libs" and versioning group "shared"`, res.Description)
+
+	res, err = Resolve(Filter{Packages: []string{"core"}, Groups: []string{"libs"}}, ws)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core", "web"}, res.Names, "a package named twice over is selected once")
 }
 
 func TestResolveUnknownPackageIsAnError(t *testing.T) {
@@ -142,7 +194,11 @@ func TestResolveUnknownPackageIsAnError(t *testing.T) {
 	_, err = Resolve(Filter{Packages: []string{"libs"}}, ws)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `libs is a space — select it with --space`,
-		"the miss looks across the other flag")
+		"the miss looks across the other flags")
+
+	_, err = Resolve(Filter{Packages: []string{"shared"}}, ws)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `shared is a versioning group — select it with --group`)
 }
 
 func TestResolveUnknownSpaceIsAnError(t *testing.T) {
@@ -157,10 +213,50 @@ func TestResolveUnknownSpaceIsAnError(t *testing.T) {
 	assert.Contains(t, err.Error(), `tool is a package — select it with --package`,
 		"a standalone package belongs to no space, so its name lands here")
 
+	_, err = Resolve(Filter{Spaces: []string{"shared"}}, ws)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `shared is a versioning group — select it with --group`,
+		"a group spans spaces, so its name is not one")
+
 	bare := Workspace{Root: ws.Root, Packages: ws.Packages}
 	_, err = Resolve(Filter{Spaces: []string{"libs"}}, bare)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "this repository configures none")
+}
+
+// TestResolveUnknownGroupIsAnError: naming a group that does not version as
+// one is the mistake worth explaining, so the miss lists the groups there are
+// and looks across the other two flags.
+func TestResolveUnknownGroupIsAnError(t *testing.T) {
+	ws := fixture(t)
+	_, err := Resolve(Filter{Groups: []string{"ghost"}}, ws)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `--group "ghost" matches no versioning group`)
+	assert.Contains(t, err.Error(), "configured: libs, shared")
+
+	_, err = Resolve(Filter{Groups: []string{"apps"}}, ws)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `apps is a space — select it with --space`,
+		"a space whose packages version on their own has no group to name")
+
+	_, err = Resolve(Filter{Groups: []string{"core"}}, ws)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `core is a package — select it with --package`)
+
+	bare := Workspace{Root: ws.Root, Packages: []*model.Package{{Name: "solo"}}}
+	_, err = Resolve(Filter{Groups: []string{"libs"}}, bare)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "this repository configures none")
+}
+
+// TestResolveGroupWithNoPackagesIsAnError: a group declared and joined by
+// nobody is recognised, and still refuses to act on nothing.
+func TestResolveGroupWithNoPackagesIsAnError(t *testing.T) {
+	ws := fixture(t)
+	ws.Groups = append(ws.Groups, "empty")
+	_, err := Resolve(Filter{Groups: []string{"empty"}}, ws)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `--group "empty" matches no package (versioning group "empty" holds none)`)
 }
 
 func TestResolveSpaceWithNoPackagesIsAnError(t *testing.T) {
@@ -300,6 +396,12 @@ func TestDescriptionRenderings(t *testing.T) {
 			Filter{Spaces: []string{"libs", "apps"}}, `spaces "libs", "apps"`},
 		"a space glob": {
 			Filter{Spaces: []string{"*s"}}, `spaces matching "*s"`},
+		"one group term": {
+			Filter{Groups: []string{"shared"}}, `versioning group "shared"`},
+		"several group terms": {
+			Filter{Groups: []string{"shared", "libs"}}, `versioning groups "shared", "libs"`},
+		"a group glob": {
+			Filter{Groups: []string{"*d"}}, `versioning groups matching "*d"`},
 		"the inferred folder reads like the term it stands for": {
 			Filter{Dir: filepath.Join(ws.Root, "apps", "site")}, "site"},
 	} {
