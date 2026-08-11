@@ -23,6 +23,9 @@ func BaseFile(concurrency ...int) models.File {
 		LogLevel:    "info",
 		LogFormat:   "json",
 		GitHub:      &models.GitHubConfig{Enabled: models.Bool(false)},
+		// Said outright as well as implied by the JSON format: no test asks
+		// GitHub whether a newer dispat is out.
+		UpdateCheck: models.Bool(false),
 	}
 }
 

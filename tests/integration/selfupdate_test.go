@@ -1,0 +1,468 @@
+package integration
+
+// Area 20: dispat replacing its own binary, through the compiled binary and
+// against a fake releases API. Everything here is real: two binaries built at
+// two versions, one downloaded over HTTP, checked, and moved into the other's
+// place, then run again to see which one answers. Nothing else in the suite
+// can witness that, because nothing else in the suite replaces the file it is
+// running from.
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/tests/integration/internal/harness"
+)
+
+// The two versions the scenarios move between.
+const (
+	suOld = "1.0.0"
+	suNew = "1.1.0"
+)
+
+// suRepo is the fixture: a copy of the old binary in a directory of its own,
+// so a self-update replaces the copy rather than the suite's shared build, and
+// a fake API offering the new one for this platform.
+//
+// The copy matters. Every other test in this suite runs one cached binary, and
+// this is the one that overwrites what it runs.
+type suRepo struct {
+	*harness.Repo
+	exe    string // the copy under test
+	backup string
+	api    string
+	assets map[string][]byte // asset name -> the binary that version serves
+}
+
+func newSURepo(t *testing.T) *suRepo {
+	t.Helper()
+	r := &suRepo{Repo: harness.New(t), assets: map[string][]byte{}}
+	r.exe = filepath.Join(t.TempDir(), "dispat"+exeSuffix())
+	copyFile(t, harness.BuildVersioned(t, suOld), r.exe)
+	r.backup = backupPath(r.exe)
+	r.serve(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+	return r
+}
+
+// serve stands up the fake API. versions maps a version to the binary its
+// release hands out, which is what lets a scenario ask for a version and get
+// that version rather than whatever is on disk.
+func (r *suRepo) serve(t *testing.T, versions map[string]string) {
+	t.Helper()
+	type entry struct {
+		tag, version string
+		prerelease   bool
+		assetName    string
+	}
+	var entries []entry
+	for version, path := range versions {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		name := assetName()
+		r.assets[version] = data
+		entries = append(entries, entry{
+			tag: "services/dispat/v" + version, version: version,
+			prerelease: strings.Contains(version, "-"), assetName: name,
+		})
+	}
+
+	// The download URL has to name the server the handler is running in, so
+	// the address is read off the listener and the server is only started once
+	// every closure can see it.
+	var base string
+	release := func(e entry) map[string]any {
+		sum := sha256.Sum256(r.assets[e.version])
+		return map[string]any{
+			"tag_name": e.tag, "draft": false, "prerelease": e.prerelease,
+			"assets": []map[string]any{{
+				"name": e.assetName, "size": len(r.assets[e.version]),
+				"browser_download_url": base + "/dl/" + e.version,
+				"digest":               "sha256:" + hex.EncodeToString(sum[:]),
+			}},
+		}
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if version, ok := strings.CutPrefix(req.URL.Path, "/dl/"); ok {
+			data, known := r.assets[version]
+			if !known {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			_, _ = w.Write(data)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, tag, ok := strings.Cut(req.URL.Path, "/releases/tags/"); ok {
+			for _, e := range entries {
+				if e.tag == tag {
+					_ = json.NewEncoder(w).Encode(release(e))
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"message":"Not Found"}`)
+			return
+		}
+		list := make([]map[string]any, 0, len(entries)+1)
+		// Another module's release, higher than any of dispat's: the listing
+		// of a monorepo that publishes one release per package, and the reason
+		// /releases/latest is no use here.
+		list = append(list, map[string]any{"tag_name": "pkg/ccme/v9.9.9", "draft": false,
+			"prerelease": false, "assets": []map[string]any{}})
+		for _, e := range entries {
+			list = append(list, release(e))
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	}))
+	base = "http://" + srv.Listener.Addr().String()
+	srv.Start()
+	t.Cleanup(srv.Close)
+	r.api = base
+}
+
+// update runs the binary under test with the fake API wired in.
+func (r *suRepo) update(args ...string) harness.RunResult {
+	r.T.Helper()
+	full := append([]string{"self-update", "--api-url", r.api, "--owner", "o", "--repo", "r"}, args...)
+	return r.CommandBin(r.exe, full...)
+}
+
+// version asks a binary which one it is.
+func (r *suRepo) version(path string) string {
+	r.T.Helper()
+	res := r.CommandBin(path, "--version")
+	require.Equal(r.T, 0, res.Code, "stderr:\n%s", res.Stderr)
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "dispat "); ok {
+			v, _, _ := strings.Cut(rest, " (")
+			return v
+		}
+	}
+	r.T.Fatalf("no version line in:\n%s", res.Stdout)
+	return ""
+}
+
+func assetName() string {
+	name := "dispat-" + runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+func backupPath(exe string) string {
+	if ext := filepath.Ext(exe); ext != "" {
+		return strings.TrimSuffix(exe, ext) + ".backup" + ext
+	}
+	return exe + ".backup"
+}
+
+func copyFile(t *testing.T, from, to string) {
+	t.Helper()
+	data, err := os.ReadFile(from)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(to, data, 0o755))
+}
+
+// TestSelfUpdateReplacesTheRunningBinary: the whole thing, over the process
+// boundary. The binary downloads its successor, checks it against what the
+// release published, runs it to be sure, and steps aside for it — and the
+// proof is that the same path now answers with a different version.
+func TestSelfUpdateReplacesTheRunningBinary(t *testing.T) {
+	r := newSURepo(t)
+
+	// --check first: it changes nothing and exits 1 because there is
+	// something to install, which is what makes it a gate.
+	res := r.update("--check")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "current   dispat "+suOld)
+	assert.Contains(t, res.Stdout, "available dispat "+suNew)
+	assert.Equal(t, suOld, r.version(r.exe), "--check touches nothing")
+	assert.NoFileExists(t, r.backup)
+
+	res = r.update()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "installed dispat "+suNew)
+	assert.Equal(t, suNew, r.version(r.exe), "the path now runs the new binary")
+	assert.Equal(t, suOld, r.version(r.backup), "and the old one is beside it")
+
+	// Now current: the same command is a no-op that says so, and --check
+	// agrees by exiting 0.
+	res = r.update()
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "already the latest release")
+	assert.Equal(t, 0, r.update("--check").Code)
+
+	// --force installs it again anyway, which is how a damaged binary is
+	// repaired, and the backup becomes the copy it just replaced.
+	res = r.update("--force")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, suNew, r.version(r.exe))
+	assert.Equal(t, suNew, r.version(r.backup))
+}
+
+// TestSelfUpdateRollsBackAndBackAgain: the backup is only useful if it can be
+// restored, and the restore is only safe if it is itself reversible. Rolling
+// back twice returns to where it started, so nobody has to be sure before
+// pressing it.
+func TestSelfUpdateRollsBackAndBackAgain(t *testing.T) {
+	r := newSURepo(t)
+	require.Equal(t, 0, r.update().Code)
+	require.Equal(t, suNew, r.version(r.exe))
+
+	res := r.CommandBin(r.exe, "self-update", "--check", "--rollback")
+	assert.Equal(t, 1, res.Code, "there is something to restore")
+	assert.Contains(t, res.Stdout, "is dispat "+suOld)
+	assert.Equal(t, suNew, r.version(r.exe), "--check restores nothing")
+
+	res = r.CommandBin(r.exe, "self-update", "--rollback")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "rolled back to dispat "+suOld)
+	assert.Equal(t, suOld, r.version(r.exe))
+	assert.Equal(t, suNew, r.version(r.backup), "the binary it replaced is the new backup")
+
+	res = r.CommandBin(r.exe, "self-update", "--rollback")
+	require.Equal(t, 0, res.Code)
+	assert.Equal(t, suNew, r.version(r.exe), "a second rollback returns")
+	assert.Equal(t, suOld, r.version(r.backup))
+
+	entries, err := os.ReadDir(filepath.Dir(r.exe))
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "nothing is parked and forgotten between the renames")
+}
+
+// TestSelfUpdateInstallsANamedVersion: --release reaches any published
+// version, downgrades included, which is what makes a bad release recoverable
+// after the week the backup lives for.
+func TestSelfUpdateInstallsANamedVersion(t *testing.T) {
+	r := newSURepo(t)
+	// This fixture serves both versions, so a named older one really is an
+	// older binary rather than the same file under another name.
+	r.serve(t, map[string]string{
+		suOld: harness.BuildVersioned(t, suOld),
+		suNew: harness.BuildVersioned(t, suNew),
+	})
+
+	require.Equal(t, 0, r.update().Code)
+	require.Equal(t, suNew, r.version(r.exe))
+
+	res := r.update("--release", "v"+suOld)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, suOld, r.version(r.exe), "a named version is installed even going backwards")
+
+	res = r.update("--release", "9.9.9")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "services/dispat/v9.9.9")
+	assert.Equal(t, suOld, r.version(r.exe), "a version nobody published changes nothing")
+}
+
+// TestSelfUpdateRefusesWhatItCannotTrust: the checks stand between a download
+// and the only binary the user has, so a release whose checksum does not
+// describe what arrives is refused with the working binary still in place.
+func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
+	r := newSURepo(t)
+
+	// A release that advertises the right size and a checksum of something
+	// else: what a corrupted or substituted download looks like.
+	var base string
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		data := r.assets[suNew]
+		if strings.HasPrefix(req.URL.Path, "/dl/") {
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			_, _ = w.Write(data)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"tag_name": "services/dispat/v" + suNew, "draft": false, "prerelease": false,
+			"assets": []map[string]any{{
+				"name": assetName(), "size": len(data),
+				"browser_download_url": base + "/dl/x",
+				"digest":               "sha256:" + strings.Repeat("00", 32),
+			}},
+		}})
+	}))
+	base = "http://" + srv.Listener.Addr().String()
+	srv.Start()
+	defer srv.Close()
+
+	res := r.CommandBin(r.exe, "self-update", "--api-url", base, "--owner", "o", "--repo", "r")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "hashes to")
+	assert.Equal(t, suOld, r.version(r.exe), "the working binary is untouched")
+	assert.NoFileExists(t, r.backup, "and nothing was moved, so there is no backup")
+
+	entries, err := os.ReadDir(filepath.Dir(r.exe))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "the refused download is cleaned up: %v", entries)
+}
+
+// TestSelfUpdateWithNothingForThisPlatform: a release cut before a platform
+// joined the build matrix has no binary to offer it, and the refusal names
+// what it does have rather than leaving the reader guessing.
+func TestSelfUpdateWithNothingForThisPlatform(t *testing.T) {
+	r := newSURepo(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"tag_name": "services/dispat/v" + suNew, "draft": false, "prerelease": false,
+			"assets": []map[string]any{{"name": "dispat-plan9-386", "size": 1,
+				"browser_download_url": "http://example.invalid/x"}},
+		}})
+	}))
+	defer srv.Close()
+
+	res := r.CommandBin(r.exe, "self-update", "--api-url", srv.URL, "--owner", "o", "--repo", "r")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, assetName(), "it says which binary it wanted")
+	assert.Contains(t, res.Stdout, "dispat-plan9-386", "and which ones exist")
+	assert.Equal(t, suOld, r.version(r.exe))
+}
+
+// TestSelfUpdateAndPrereleases: by default a release candidate is not an
+// update, because a stable line should stay a stable line without anyone
+// asking. --prerelease is how someone opts into the candidates, and --force
+// is how they get back off that line.
+func TestSelfUpdateAndPrereleases(t *testing.T) {
+	const candidate = "1.2.0-rc.1"
+	r := newSURepo(t)
+	r.serve(t, map[string]string{
+		suNew:     harness.BuildVersioned(t, suNew),
+		candidate: harness.BuildVersioned(t, candidate),
+	})
+
+	require.Equal(t, 0, r.update().Code)
+	assert.Equal(t, suNew, r.version(r.exe), "the candidate is passed over")
+
+	res := r.update("--prerelease")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, candidate, r.version(r.exe), "asked for, it is installed")
+
+	// Off the candidate line again: the stable is older, so only --force
+	// reaches it.
+	res = r.update()
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "already the latest release")
+	assert.Equal(t, candidate, r.version(r.exe), "nothing downgrades on its own")
+
+	res = r.update("--force")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, suNew, r.version(r.exe), "--force is the way back to the stable line")
+}
+
+// TestSelfUpdateWithoutAStableRelease: the state dispat's own repository is in
+// before 1.0.0, where every tag is a candidate. Saying "no matching release"
+// and naming the flag that would find one beats saying "you are up to date".
+func TestSelfUpdateWithoutAStableRelease(t *testing.T) {
+	r := newSURepo(t)
+	r.serve(t, map[string]string{"1.2.0-rc.1": harness.BuildVersioned(t, "1.2.0-rc.1")})
+
+	res := r.update("--check")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "no matching release")
+	assert.Contains(t, res.Stdout, "--prerelease")
+	assert.Equal(t, suOld, r.version(r.exe))
+}
+
+// TestSelfUpdateBackupExpiresOnItsOwn: the copy is kept for a week and then
+// removed by whatever dispat command runs next. Nothing has to be cleaned up
+// by hand, and nothing else in the directory is ever touched.
+func TestSelfUpdateBackupExpiresOnItsOwn(t *testing.T) {
+	r := newSURepo(t)
+	require.Equal(t, 0, r.update().Code)
+	require.FileExists(t, r.backup)
+
+	sixDays := time.Now().Add(-6 * 24 * time.Hour)
+	require.NoError(t, os.Chtimes(r.backup, sixDays, sixDays))
+	require.Equal(t, 0, r.CommandBin(r.exe, "--version").Code)
+	assert.FileExists(t, r.backup, "inside the week it stays, whatever runs")
+
+	eightDays := time.Now().Add(-8 * 24 * time.Hour)
+	require.NoError(t, os.Chtimes(r.backup, eightDays, eightDays))
+	require.Equal(t, 0, r.CommandBin(r.exe, "--version").Code)
+	assert.NoFileExists(t, r.backup, "past the week the next command clears it")
+	assert.Equal(t, suNew, r.version(r.exe), "and only the backup is ever removed")
+
+	// With the backup gone there is nothing to roll back to, and the refusal
+	// says how to get an old version anyway.
+	res := r.CommandBin(r.exe, "self-update", "--rollback")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "--release")
+}
+
+// TestSelfUpdateNotice: the notice is the other half of this feature — the
+// part that reaches someone who was not thinking about updating at all. It
+// rides out on an ordinary command, says nothing when the output is meant for
+// a machine, and says nothing when the configuration asked it not to.
+func TestSelfUpdateNotice(t *testing.T) {
+	r := newSURepo(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.LogFormat = "pretty"
+	cfg.UpdateCheck = nil // the default, which is on
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	on := []string{"DISPAT_UPDATE_CHECK=1"}
+	args := []string{"status", "--api-url", r.api, "--owner", "o", "--repo", "r"}
+
+	res := r.CommandBinEnv(r.exe, on, args...)
+	assert.Contains(t, res.Stdout, "a newer stable release is available: "+suNew,
+		"an ordinary command carries the news")
+	assert.Contains(t, res.Stdout, `run "dispat self-update" to install it`)
+
+	// JSON output is read by something that cannot act on a suggestion, and
+	// the suggestion must not turn up inside the stream either.
+	res = r.CommandBinEnv(r.exe, on, append(args, "--log-format", "json")...)
+	assert.NotContains(t, res.Stdout, "newer stable release")
+
+	// And the configuration can simply say no.
+	cfg.UpdateCheck = boolPtr(false)
+	r.WriteConfigModel(cfg)
+	res = r.CommandBinEnv(r.exe, on, args...)
+	assert.NotContains(t, res.Stdout, "newer stable release")
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// TestSelfUpdateCommandWordKeepsItsScript: every command word permanently
+// shadows a run script of the same name, which is why the word is
+// "self-update" and not "update". A script called self-update is unreachable
+// by name, and that has to be a deliberate, tested fact rather than a
+// surprise.
+func TestSelfUpdateCommandWordKeepsItsScript(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["self-update"] = "echo the script ran"
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Command("self-update", "--check")
+	assert.NotContains(t, res.Stdout, "the script ran", "the command word wins")
+
+	res = r.RunScript("self-update", "--since", "all")
+	assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "the script ran", "the two-word spelling still reaches it")
+}

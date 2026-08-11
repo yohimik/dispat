@@ -249,6 +249,22 @@ func (r *Repo) DispatCommand(args ...string) string {
 	return shQuote(r.dispatBin) + " " + strings.Join(args, " ")
 }
 
+// CommandBin runs an arbitrary invocation of a *different* dispat binary —
+// one BuildVersioned stamped with a version, or one a self-update just put in
+// place. Everything else is the ordinary path, so the counters of the binary
+// being driven land in the coverage profile like any other run's.
+func (r *Repo) CommandBin(bin string, args ...string) RunResult {
+	r.T.Helper()
+	return r.runBin(bin, r.Root, nil, "", args...)
+}
+
+// CommandBinEnv is CommandBin with extra environment pairs, which is how the
+// self-update scenarios turn the update check back on for one invocation.
+func (r *Repo) CommandBinEnv(bin string, env []string, args ...string) RunResult {
+	r.T.Helper()
+	return r.runBin(bin, r.Root, env, "", args...)
+}
+
 // run executes the dispat binary against this repository, always appending
 // --root. It fails the test only when the binary could not be launched at
 // all — a non-zero exit is a normal outcome most scenarios assert on.
@@ -267,9 +283,19 @@ func (r *Repo) runAt(root string, args ...string) RunResult {
 // commands that ask questions, stdin already holding the answers.
 func (r *Repo) runAtEnv(root string, env []string, stdin string, args ...string) RunResult {
 	r.T.Helper()
+	return r.runBin(r.dispatBin, root, env, stdin, args...)
+}
+
+// runBin is the single choke point every invocation goes through, whichever
+// binary is being driven.
+func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...string) RunResult {
+	r.T.Helper()
 	full := append(append([]string{}, args...), "--root", root)
-	cmd := exec.Command(r.dispatBin, full...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd := exec.Command(bin, full...)
+	// No test may reach api.github.com. The kill switch goes in before the
+	// caller's own pairs, and exec keeps the last value for a repeated key, so
+	// a scenario that wants the update check can still ask for it.
+	cmd.Env = append(append(os.Environ(), "DISPAT_UPDATE_CHECK=0"), env...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}

@@ -96,6 +96,56 @@ func build() (dispat, tsmark string, err error) {
 	return dispat, tsmark, nil
 }
 
+// stamped caches the version-stamped builds, one per version, for the same
+// reason binaries caches the plain one: a `go build` per test case is not a
+// price a suite this size can pay twice.
+var stamped struct {
+	sync.Mutex
+	byVersion map[string]string
+}
+
+// BuildVersioned compiles dispat with a version baked in, exactly the way
+// scripts/build-dispat.sh does for a release, and returns the path.
+//
+// Some behaviour only exists on a released binary: it is the one that reports
+// a real version, checks for updates, and can replace itself. An unstamped
+// build says "dev", which is deliberately none of those things, so those
+// scenarios need this.
+func BuildVersioned(t testing.TB, version string) string {
+	t.Helper()
+	// The plain build owns the temp directory and its cleanup, so ask for it
+	// first and put the stamped binaries alongside.
+	Build(t)
+
+	stamped.Lock()
+	defer stamped.Unlock()
+	if path, ok := stamped.byVersion[version]; ok {
+		return path
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("go toolchain not found on PATH: %v", err)
+	}
+	root, err := monorepoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(binaries.dir, "dispat-"+version)
+	args := []string{"-ldflags",
+		"-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=" + version}
+	if coverDir() != "" {
+		args = append(args, "-cover", "-covermode=atomic", "-coverpkg=./...")
+	}
+	if err := goBuild(goBin, out, filepath.Join(root, "services", "dispat"), args...); err != nil {
+		t.Fatalf("building dispat %s: %v", version, err)
+	}
+	if stamped.byVersion == nil {
+		stamped.byVersion = map[string]string{}
+	}
+	stamped.byVersion[version] = out
+	return out
+}
+
 func goBuild(goBin, out, dir string, extraArgs ...string) error {
 	args := append(append([]string{"build"}, extraArgs...), "-o", out, ".")
 	cmd := exec.Command(goBin, args...)

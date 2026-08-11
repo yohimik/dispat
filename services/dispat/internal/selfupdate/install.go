@@ -88,11 +88,13 @@ func (i *Installer) Install(ctx context.Context, a Asset, want string) (backup s
 		return "", fmt.Errorf("selfupdate: %s: %w", tmpName, err)
 	}
 	// The replacement inherits the mode of the binary it replaces, so an
-	// install that was group-readable or setuid stays that way, with the
-	// execute bits forced on because the next step runs it.
+	// install that was deliberately group-only stays that way rather than
+	// being widened to whatever the umask allows. Owner-execute is the one
+	// bit forced on, because the next step runs the file; the binary being
+	// replaced is running, so in practice its mode already carries it.
 	mode := os.FileMode(0o755)
 	if info, statErr := os.Stat(exe); statErr == nil {
-		mode = info.Mode().Perm() | 0o111
+		mode = info.Mode().Perm() | 0o100
 	}
 	if err = os.Chmod(tmpName, mode); err != nil {
 		return "", fmt.Errorf("selfupdate: %s: %w", tmpName, err)
