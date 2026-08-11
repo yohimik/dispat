@@ -102,7 +102,6 @@
     "fixesTitle": "Fixes",
     "dependenciesTitle": "Dependencies",
     "footer": [
-      "",
       { "line": "Published from the acme monorepo.", "space": "libs" }
     ]
   },
@@ -121,6 +120,6 @@
     "tokenEnv": "GITHUB_TOKEN",
     "featuresTitle": "Features",
     "releaseName": "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
-    "footer": ["", "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"]
+    "footer": ["Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"]
   }
 }

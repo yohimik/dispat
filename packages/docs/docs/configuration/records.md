@@ -139,8 +139,8 @@ A list holds three kinds of element, and you can mix them freely:
 {
   "changelog": {
     "footer": [
-      "",
-      ["Questions? Open an issue.", "Thanks for reading."],
+      "Thanks for reading.",
+      ["", "Questions? Open an issue."],
       { "line": "Published from the acme monorepo.", "space": "libs" }
     ]
   }
@@ -151,6 +151,9 @@ A list holds three kinds of element, and you can mix them freely:
 * An **array of strings** is several lines, written one after another.
 * An **object** is one or more lines plus the filters that decide which packages get them. `line` holds the text, as a
   string or an array of strings.
+
+Each block is already separated from what surrounds it by one blank line, so you only need an empty string where you
+want more space than that.
 
 ### Choosing which packages a line reaches
 

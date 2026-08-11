@@ -271,7 +271,6 @@ changelog:
   # after them. An element is a line, an array of lines, or an object whose
   # package/space/group globs decide which packages get it.
   footer:
-    - ""
     - line: "Published from the acme monorepo."
       space: libs
 
@@ -333,5 +332,4 @@ github:
   featuresTitle: "Features"
   releaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}"   # default: the tag
   footer:
-    - ""
     - "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"
