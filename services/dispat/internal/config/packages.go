@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -171,6 +172,90 @@ func collectPackageDeps(declared []DeclaredDependency, pkg string, src DepSource
 	return declared, nil
 }
 
+// packageEntryKeys are the keys a `packages` entry may never hold. A package
+// entry configures one package, so it holds neither spaces nor packages of
+// its own; UnmarshalExact would refuse them as unknown keys, and naming them
+// here says why and points at the levels that do take them.
+var packageEntryKeys = []string{"spaces", "packages"}
+
+// refusePackageEntryKeys walks a raw `packages` map straight from the config
+// reader — before decoding, which is the only moment the offending key still
+// exists — and rejects an entry holding one of packageEntryKeys. label names
+// the map for the error; keys arrive lowercased, like every viper map key.
+func refusePackageEntryKeys(label string, entries map[string]any) error {
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names) // one config, one first error
+	for _, name := range names {
+		fields, ok := entries[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, refused := range packageEntryKeys {
+			if _, bad := fields[refused]; bad {
+				return fmt.Errorf(
+					"%s[%q]: %s cannot be set on a package entry: an entry configures one package, so it holds no spaces or packages of its own; declare them in the root config or in a space folder's config file",
+					label, name, refused)
+			}
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns a raw map's keys in order, so a config with several
+// mistakes always reports the same one first.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// rawEntries reads a raw map value out of a config reader, at the key path
+// given. Anything that is not a map of objects yields nothing: decoding is
+// what reports a malformed shape, in its own words.
+func rawEntries(v *viper.Viper, keyPath ...string) map[string]any {
+	var cur any = v.Get(keyPath[0])
+	for _, key := range keyPath[1:] {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = m[key]
+	}
+	m, _ := cur.(map[string]any)
+	return m
+}
+
+// validateSpacePackages checks a space's own `packages` map: every entry is
+// held to the same rules as a top-level one, and none of them may carry a
+// `path` — a space configures the packages inside its folder, and cannot move
+// one elsewhere.
+func validateSpacePackages(label string, entries map[string]PackageConfig) error {
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if name == "" {
+			return fmt.Errorf("%s: package name must not be empty", label)
+		}
+		entryLabel := fmt.Sprintf("%s[%q]", label, name)
+		if entries[name].Path != "" {
+			return fmt.Errorf("%s: %s", entryLabel, pathRefused("a space's packages entry"))
+		}
+		if err := validatePackageLayer(entryLabel, entries[name]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // validatePackageLayer checks what can be wrong with one override layer on
 // its own, before it is merged.
 func validatePackageLayer(label string, po PackageConfig) error {
@@ -232,6 +317,61 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		sc.AutoVersion = po.AutoVersion
 	}
 	return sc
+}
+
+// spaceOverride reduces a space folder's file to the space-shaped override it
+// is, so the merge a package entry already goes through serves the space
+// layer too. Its `packages` map is not part of the merge: it is a layer of
+// its own, applied per package.
+func spaceOverride(f SpaceFile) PackageConfig {
+	return PackageConfig{
+		IsBuildWaitingPublish: f.IsBuildWaitingPublish,
+		RevertOnFail:          f.RevertOnFail,
+		Flow:                  f.Flow,
+		TagFormat:             f.TagFormat,
+		Versioning:            f.Versioning,
+		VersionGroup:          f.VersionGroup,
+		Scripts:               f.Scripts,
+		AutoVersion:           f.AutoVersion,
+	}
+}
+
+// overrideLayer is one layer of a package's configuration: the entry itself,
+// the label errors about it carry, and where its dependency declarations
+// live. The layers are applied in order, nearest the package last.
+type overrideLayer struct {
+	po    PackageConfig
+	label string
+	src   DepSource
+}
+
+// applyLayers folds every present override layer onto a space-shaped base,
+// in order, and returns the merged configuration together with the
+// package-only knobs, whether any layer set an autoVersion block, and the
+// dependency declarations the layers contribute.
+//
+// One loop serves both kinds of package: a space package folds its four
+// layers onto its space, a standalone package folds its two onto a synthetic
+// base. The base's own `packages` map is dropped, because the result
+// describes one package and a package holds no packages.
+func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
+	declared []DeclaredDependency) (SpaceConfig, *packageExtras, bool, []DeclaredDependency, error) {
+	ex := &packageExtras{}
+	autoVersioned := false
+	base.Packages = nil
+	for _, l := range layers {
+		if err := validatePackageLayer(l.label, l.po); err != nil {
+			return base, ex, autoVersioned, declared, err
+		}
+		base = mergePackageOverride(base, l.po)
+		ex.apply(c, l.po)
+		autoVersioned = autoVersioned || l.po.AutoVersion != nil
+		var err error
+		if declared, err = collectPackageDeps(declared, pkg, l.src, l.po.Dependencies); err != nil {
+			return base, ex, autoVersioned, declared, err
+		}
+	}
+	return base, ex, autoVersioned, declared, nil
 }
 
 // mergeFlow overlays flow entries one by one: a nil entry inherits, a
@@ -506,6 +646,9 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	if v.IsSet("path") {
 		return sf, p, fmt.Errorf("%s: %s", p, pathRefused("a space folder's config file"))
 	}
+	if err := refusePackageEntryKeys(p+": packages", rawEntries(v, "packages")); err != nil {
+		return sf, p, err
+	}
 	if err := v.UnmarshalExact(&sf, weakDecode); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
@@ -521,7 +664,55 @@ func pathRefused(where string) string {
 		where)
 }
 
-// loadIgnore reads a space folder's .dispatignore patterns; an absent file
+// ignoredDir is a folder a space's .dispatignore kept out of discovery, so an
+// entry naming it can be told apart from an entry naming nothing at all.
+type ignoredDir struct{ space, name string }
+
+// keyCheck proves that every key of a `packages` map matched exactly one
+// folder. An unmatched key is the same class of typo as an unknown dependency
+// endpoint; a key matching two folders (names differing only by case) has no
+// single package to configure; a key naming an excluded folder gets the
+// exclusion spelled out rather than the typo message.
+type keyCheck struct {
+	label      string                   // the map, as the error names it
+	entries    map[string]PackageConfig // the keys to account for
+	consumed   map[string][]string      // key -> folders it matched
+	ignored    []ignoredDir             // folders excluded by .dispatignore
+	missing    string                   // what a key matching nothing means
+	standalone bool                     // entries with a path declare one, and match no folder
+}
+
+func (k keyCheck) run() error {
+	keys := make([]string, 0, len(k.entries))
+	for key := range k.entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys) // one config, one first error
+	for _, key := range keys {
+		if k.standalone && k.entries[key].Path != "" {
+			continue
+		}
+		matches := k.consumed[key]
+		if len(matches) > 1 {
+			sort.Strings(matches)
+			return fmt.Errorf("config: %s[%q] matches folders %s ambiguously (keys are matched case-insensitively)",
+				k.label, key, strings.Join(matches, ", "))
+		}
+		if len(matches) == 1 {
+			continue
+		}
+		for _, ig := range k.ignored {
+			if strings.EqualFold(ig.name, key) {
+				return fmt.Errorf("config: %s[%q]: folder %q in space %q is excluded by %s",
+					k.label, key, ig.name, ig.space, DispatignoreName)
+			}
+		}
+		return fmt.Errorf("config: %s[%q] %s", k.label, key, k.missing)
+	}
+	return nil
+}
+
+// loadIgnore reads a folder's .dispatignore patterns; an absent file
 // means none.
 func loadIgnore(dir string) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(dir, DispatignoreName))
@@ -540,6 +731,21 @@ func loadIgnore(dir string) ([]string, error) {
 		patterns = append(patterns, line)
 	}
 	return patterns, nil
+}
+
+// sameDir reports whether two paths name the same folder, by identity rather
+// than by string, so a symlinked, relative or differently-cased path still
+// matches itself. A path that cannot be stat'ed is nobody's twin.
+func sameDir(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
 }
 
 // ignoredName reports whether a folder name matches one of the space's

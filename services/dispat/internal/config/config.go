@@ -406,6 +406,19 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 		}
 	}
 
+	// The keys a package entry may never hold are refused by name, at every
+	// map that holds entries, before decoding drops them into an unknown-key
+	// error that could not say why.
+	if err := refusePackageEntryKeys("packages", rawEntries(v, "packages")); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	for _, sn := range sortedKeys(rawEntries(v, "spaces")) {
+		if err := refusePackageEntryKeys(fmt.Sprintf("spaces[%q]: packages", sn),
+			rawEntries(v, "spaces", sn, "packages")); err != nil {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+	}
+
 	var cfg File
 	// UnmarshalExact rejects unknown keys, catching config typos early.
 	// WeaklyTypedInput lets a scalar concurrency value decode into the slice,
@@ -687,9 +700,12 @@ func validate(c *File) error {
 	if err := gitx.TagFormat(c.TagFormat).Validate(); err != nil {
 		return err
 	}
-	for name, s := range c.Spaces {
-		validated, err := validateSpace(name, s)
+	for _, name := range sortedSpaceNames(c) {
+		validated, err := validateSpace(name, c.Spaces[name])
 		if err != nil {
+			return err
+		}
+		if err := validateSpacePackages(fmt.Sprintf("spaces[%q]: packages", name), validated.Packages); err != nil {
 			return err
 		}
 		c.Spaces[name] = validated
@@ -953,27 +969,36 @@ type DepSource struct {
 	// File is the config file holding the declaration; empty means the
 	// loaded root config itself.
 	File string
-	// KeyPath is the key path of the list inside that file:
-	// ["dependencies"], or ["packages", <key>, "dependencies"] for a
-	// packages entry of the root config.
+	// KeyPath is the key path of the list inside that file, ending in
+	// "dependencies" and preceded by a map name and a key for every level
+	// above it: ["dependencies"] for a file's own list, ["packages", <key>,
+	// "dependencies"] for a packages entry, and ["spaces", <space>,
+	// "packages", <key>, "dependencies"] for a space's packages entry of the
+	// root config.
 	KeyPath []string
 	// Index is the entry's position within that list.
 	Index int
 }
 
 // Label renders the source for error messages and suggestion listings:
-// "dependencies[2]", `packages["core"]: dependencies[0]`, or
+// "dependencies[2]", `packages["core"]: dependencies[0]`,
+// `spaces["libs"]: packages["core"]: dependencies[0]`, or
 // "packages/core/dispat.json: dependencies[0]".
 func (s DepSource) Label() string {
+	if len(s.KeyPath) == 0 {
+		return "dependencies"
+	}
 	var b strings.Builder
 	if s.File != "" {
 		b.WriteString(s.File)
 		b.WriteString(": ")
 	}
-	if len(s.KeyPath) == 3 {
-		fmt.Fprintf(&b, "packages[%q]: ", s.KeyPath[1])
+	// Every level above the list itself is a map name and the key inside it,
+	// so the path renders the same way however deep it goes.
+	for i := 0; i+1 < len(s.KeyPath); i += 2 {
+		fmt.Fprintf(&b, "%s[%q]: ", s.KeyPath[i], s.KeyPath[i+1])
 	}
-	fmt.Fprintf(&b, "dependencies[%d]", s.Index)
+	fmt.Fprintf(&b, "%s[%d]", s.KeyPath[len(s.KeyPath)-1], s.Index)
 	return b.String()
 }
 
@@ -989,6 +1014,18 @@ func (s DepSource) IsRootList() bool {
 type DeclaredDependency struct {
 	DependencyConfig
 	Source DepSource
+}
+
+// sortedSpaceNames returns the configured space names in order, so validation
+// and discovery always visit them the same way and a config with several
+// mistakes always reports the same one first.
+func sortedSpaceNames(c *File) []string {
+	names := make([]string, 0, len(c.Spaces))
+	for n := range c.Spaces {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Discover walks every space folder and returns the packages found inside
@@ -1037,11 +1074,7 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 // every space, validated here because the override layers need the folders
 // to exist.
 func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, error) {
-	spaceNames := make([]string, 0, len(c.Spaces))
-	for n := range c.Spaces {
-		spaceNames = append(spaceNames, n)
-	}
-	sort.Strings(spaceNames) // deterministic discovery order
+	spaceNames := sortedSpaceNames(c) // deterministic discovery order
 
 	baseChangelog := changelogSpec(c.Changelog)
 	baseGitHub := githubSpec(c.GitHub)
@@ -1064,10 +1097,36 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	var pkgs []*model.Package
 	owner := make(map[string]string)      // package name -> space name
 	consumed := make(map[string][]string) // packages key -> matching folders
-	type ignoredDir struct{ space, name string }
 	var ignoredDirs []ignoredDir
+	spaceConfigs := make(map[string]SpaceConfig, len(spaceNames))
 	for _, sn := range spaceNames {
 		sc := c.Spaces[sn]
+		dir := filepath.Join(root, sc.Path)
+		// The space folder's own config file, the layer between the root
+		// file's space entry and anything said about one package. A space
+		// rooted at the repository itself has no such layer: the file in that
+		// folder is the root config, and merging it into itself would be
+		// reading one statement twice.
+		var spaceFile SpaceFile
+		var spaceSrc string
+		if !sameDir(dir, root) {
+			var err error
+			if spaceFile, spaceSrc, err = loadSpaceFile(dir); err != nil {
+				return nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
+			}
+		}
+		if spaceSrc != "" {
+			label := fmt.Sprintf("space %q (%s)", sn, spaceSrc)
+			sc = mergePackageOverride(sc, spaceOverride(spaceFile))
+			var err error
+			if sc, err = validateSpaceAs(label, sc); err != nil {
+				return nil, nil, fmt.Errorf("config: %w", err)
+			}
+			if err := validateSpacePackages(label+": packages", spaceFile.Packages); err != nil {
+				return nil, nil, fmt.Errorf("config: %w", err)
+			}
+		}
+		spaceConfigs[sn] = sc
 		baseScope := packageScope(c, sc)
 		base, err := buildSpace(c, baseScope, fmt.Sprintf("space %q", sn), sn, sc)
 		if err != nil {
@@ -1077,7 +1136,6 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		// its references are the same question with the same answer: ask once,
 		// under the name of the first package that asked.
 		baseRefsChecked := false
-		dir := filepath.Join(root, sc.Path)
 		ignore, err := loadIgnore(dir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: space %q: %s: %w", sn, DispatignoreName, err)
@@ -1086,13 +1144,18 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
+		// The space's two package-level maps account for their keys against
+		// the folders of this space alone.
+		spaceIgnored := make([]ignoredDir, 0)
+		spaceConsumed := make(map[string][]string)
+		fileConsumed := make(map[string][]string)
 		for _, e := range entries {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
 			name := e.Name()
 			if ignoredName(ignore, name) {
-				ignoredDirs = append(ignoredDirs, ignoredDir{sn, name})
+				spaceIgnored = append(spaceIgnored, ignoredDir{sn, name})
 				continue
 			}
 			if prev, dup := owner[name]; dup {
@@ -1111,40 +1174,44 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				GitHub:        baseGitHub,
 			}
 
-			entryPO, hasEntry := c.Package(name)
-			if hasEntry {
+			key := strings.ToLower(name)
+			label := fmt.Sprintf("space %q: package %q", sn, name)
+			var layers []overrideLayer
+			if entryPO, ok := c.Package(name); ok {
 				if entryPO.Path != "" {
 					return nil, nil, fmt.Errorf(
 						"config: packages[%q]: package %q belongs to space %q — its location is the space folder, so path cannot be set",
-						strings.ToLower(name), name, sn)
+						key, name, sn)
 				}
-				key := strings.ToLower(name)
 				consumed[key] = append(consumed[key], name)
+				layers = append(layers, overrideLayer{entryPO, label,
+					DepSource{KeyPath: []string{"packages", key, "dependencies"}}})
 			}
-			filePO, fileSrc, err := loadPackageFile(pkg.Dir)
+			if spacePO, ok := sc.Package(name); ok {
+				spaceConsumed[key] = append(spaceConsumed[key], name)
+				layers = append(layers, overrideLayer{spacePO, label + ": the space's packages entry",
+					DepSource{KeyPath: []string{"spaces", sn, "packages", key, "dependencies"}}})
+			}
+			if filePO, ok := spaceFile.Package(name); ok {
+				fileConsumed[key] = append(fileConsumed[key], name)
+				layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s: packages entry)", label, spaceSrc),
+					DepSource{File: spaceSrc, KeyPath: []string{"packages", key, "dependencies"}}})
+			}
+			folderPO, folderSrc, err := loadPackageFile(pkg.Dir)
 			if err != nil {
 				return nil, nil, fmt.Errorf("config: space %q: package %q: %w", sn, name, err)
 			}
-			if hasEntry || fileSrc != "" {
-				label := fmt.Sprintf("space %q: package %q", sn, name)
-				merged := sc
-				ex := &packageExtras{}
-				if hasEntry {
-					if err := validatePackageLayer(label, entryPO); err != nil {
-						return nil, nil, fmt.Errorf("config: %w", err)
-					}
-					merged = mergePackageOverride(merged, entryPO)
-					ex.apply(c, entryPO)
-				}
-				if fileSrc != "" {
-					if err := validatePackageLayer(fmt.Sprintf("%s (%s)", label, fileSrc), filePO); err != nil {
-						return nil, nil, fmt.Errorf("config: %w", err)
-					}
-					merged = mergePackageOverride(merged, filePO)
-					ex.apply(c, filePO)
-				}
-				merged, err = validateSpaceAs(label, merged)
+			if folderSrc != "" {
+				layers = append(layers, overrideLayer{folderPO, fmt.Sprintf("%s (%s)", label, folderSrc),
+					DepSource{File: folderSrc, KeyPath: []string{"dependencies"}}})
+			}
+			if len(layers) > 0 {
+				merged, ex, autoVersioned, withDeps, err := applyLayers(c, sc, name, layers, declared)
 				if err != nil {
+					return nil, nil, fmt.Errorf("config: %w", err)
+				}
+				declared = withDeps
+				if merged, err = validateSpaceAs(label, merged); err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
 				scope := packageScope(c, merged)
@@ -1154,7 +1221,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				if pkg.Space, err = buildSpace(c, scope, label, sn, merged); err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
-				if (hasEntry && entryPO.AutoVersion != nil) || filePO.AutoVersion != nil {
+				if autoVersioned {
 					onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 				}
 				pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
@@ -1170,57 +1237,42 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				// references, but the error still names the package, because
 				// the scope a reference has to resolve in is always a
 				// package's.
-				label := fmt.Sprintf("space %q: package %q", sn, name)
 				if err := baseScope.checkSpaceRefs(label, sc); err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
 				baseRefsChecked = true
 			}
-			if hasEntry {
-				declared, err = collectPackageDeps(declared, name,
-					DepSource{KeyPath: []string{"packages", strings.ToLower(name), "dependencies"}},
-					entryPO.Dependencies)
-				if err != nil {
-					return nil, nil, fmt.Errorf("config: %w", err)
-				}
-			}
-			if fileSrc != "" {
-				declared, err = collectPackageDeps(declared, name,
-					DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}, filePO.Dependencies)
-				if err != nil {
-					return nil, nil, fmt.Errorf("config: %w", err)
-				}
-			}
 			pkgs = append(pkgs, pkg)
 		}
+		if err := (keyCheck{
+			label:    fmt.Sprintf("spaces[%q]: packages", sn),
+			entries:  sc.Packages,
+			consumed: spaceConsumed,
+			ignored:  spaceIgnored,
+			missing:  fmt.Sprintf("matches no folder of space %q (a package of another space is configured by that space, or by the top-level packages map)", sn),
+		}).run(); err != nil {
+			return nil, nil, err
+		}
+		if err := (keyCheck{
+			label:    fmt.Sprintf("%s: packages", spaceSrc),
+			entries:  spaceFile.Packages,
+			consumed: fileConsumed,
+			ignored:  spaceIgnored,
+			missing:  fmt.Sprintf("matches no folder of space %q", sn),
+		}).run(); err != nil {
+			return nil, nil, err
+		}
+		ignoredDirs = append(ignoredDirs, spaceIgnored...)
 	}
-	// Every `packages` key without a path must have matched exactly one
-	// folder: an unmatched key is the same class of typo as an unknown
-	// dependency endpoint, and a key matching two folders (names differing
-	// only by case, possibly across spaces) has no single package to
-	// configure.
-	for key, po := range c.Packages {
-		if po.Path != "" {
-			continue
-		}
-		matches := consumed[key]
-		if len(matches) > 1 {
-			sort.Strings(matches)
-			return nil, nil, fmt.Errorf(
-				"config: packages[%q] matches folders %s ambiguously (keys are matched case-insensitively)",
-				key, strings.Join(matches, ", "))
-		}
-		if len(matches) == 0 {
-			for _, ig := range ignoredDirs {
-				if strings.EqualFold(ig.name, key) {
-					return nil, nil, fmt.Errorf(
-						"config: packages[%q]: folder %q in space %q is excluded by %s",
-						key, ig.name, ig.space, DispatignoreName)
-				}
-			}
-			return nil, nil, fmt.Errorf(
-				"config: packages[%q] matches no package folder (a standalone package needs a path)", key)
-		}
+	if err := (keyCheck{
+		label:      "packages",
+		entries:    c.Packages,
+		consumed:   consumed,
+		ignored:    ignoredDirs,
+		missing:    "matches no package folder (a standalone package needs a path)",
+		standalone: true,
+	}).run(); err != nil {
+		return nil, nil, err
 	}
 
 	// Standalone packages: entries with a path, in deterministic key order.
@@ -1257,26 +1309,23 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		// single-package space built through the same layers as an override —
 		// the entry, then the in-folder file — so a standalone package can
 		// never express something a space package cannot.
-		merged := SpaceConfig{Path: po.Path, Flow: &SpaceFlowConfig{}}
-		ex := &packageExtras{}
-		if err := validatePackageLayer(label, po); err != nil {
-			return nil, nil, fmt.Errorf("config: %w", err)
-		}
-		merged = mergePackageOverride(merged, po)
-		ex.apply(c, po)
+		layers := []overrideLayer{{po, label,
+			DepSource{KeyPath: []string{"packages", key, "dependencies"}}}}
 		filePO, fileSrc, err := loadPackageFile(dir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %s: %w", label, err)
 		}
 		if fileSrc != "" {
-			if err := validatePackageLayer(fmt.Sprintf("%s (%s)", label, fileSrc), filePO); err != nil {
-				return nil, nil, fmt.Errorf("config: %w", err)
-			}
-			merged = mergePackageOverride(merged, filePO)
-			ex.apply(c, filePO)
+			layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s)", label, fileSrc),
+				DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}})
 		}
-		merged, err = validateSpaceAs(label, merged)
+		merged, ex, autoVersioned, withDeps, err := applyLayers(c, SpaceConfig{Path: po.Path, Flow: &SpaceFlowConfig{}},
+			key, layers, declared)
 		if err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		declared = withDeps
+		if merged, err = validateSpaceAs(label, merged); err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
 		scope := packageScope(c, merged)
@@ -1286,7 +1335,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		if pkg.Space, err = buildSpace(c, scope, label, key, merged); err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
-		if po.AutoVersion != nil || filePO.AutoVersion != nil {
+		if autoVersioned {
 			onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 		}
 		pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
@@ -1297,18 +1346,6 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		if ex.github != nil {
 			pkg.GitHub = githubSpec(ex.github)
 		}
-		declared, err = collectPackageDeps(declared, key,
-			DepSource{KeyPath: []string{"packages", key, "dependencies"}}, po.Dependencies)
-		if err != nil {
-			return nil, nil, fmt.Errorf("config: %w", err)
-		}
-		if fileSrc != "" {
-			declared, err = collectPackageDeps(declared, key,
-				DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}, filePO.Dependencies)
-			if err != nil {
-				return nil, nil, fmt.Errorf("config: %w", err)
-			}
-		}
 		pkgs = append(pkgs, pkg)
 	}
 
@@ -1316,7 +1353,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	// the same class of typo as an unknown dependency endpoint. Only enabled
 	// blocks are held to it: a disabled block is inert configuration.
 	for _, sn := range spaceNames {
-		av := c.Spaces[sn].AutoVersion
+		av := spaceConfigs[sn].AutoVersion
 		if av == nil || !av.IsEnabled() {
 			continue
 		}

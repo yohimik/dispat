@@ -700,6 +700,13 @@ func (c *File) Package(name string) (PackageConfig, bool) {
 	return pc, ok
 }
 
+// Package resolves one of the space file's `packages` entries by package
+// name, case-insensitively for the same viper reason as File.Package.
+func (f SpaceFile) Package(name string) (PackageConfig, bool) {
+	pc, ok := f.Packages[strings.ToLower(name)]
+	return pc, ok
+}
+
 // Package resolves one of the space's own `packages` entries by package name,
 // case-insensitively for the same viper reason as File.Package. It looks no
 // further than this level: the file's entry is a separate layer, applied
