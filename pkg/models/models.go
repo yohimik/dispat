@@ -64,6 +64,19 @@ type File struct {
 	// Shell is the command prefix scripts are appended to, e.g.
 	// ["bash", "-c"] or ["cmd", "/C"]. Default: ["/bin/sh", "-c"].
 	Shell []string `mapstructure:"shell" json:"shell,omitempty"`
+	// Env is static environment added to every script the run executes,
+	// exported with the keys spelled exactly as the file writes them. Spaces
+	// and packages declare their own `env` objects; the layers merge key by
+	// key with the most local winning — package over space over this map —
+	// and the computed DISPAT_* variables always win over static env. Values
+	// may reference other variables ($NAME, ${NAME}), resolved against the
+	// computed set first and the process environment second.
+	Env map[string]string `mapstructure:"env" json:"env,omitempty"`
+	// Custom is an optional free-form object dispat itself never reads: a
+	// place for anything the repository's own tooling wants to keep in the
+	// config file without tripping the unknown-key guard. Spaces and package
+	// entries have their own independent `custom` objects; nothing merges.
+	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
 	// Initials maps package names to the baseline version used when the
 	// package's latest release tag is missing or unparseable (e.g. a stray
 	// "pkg@0.0.1.0" tag). The next release bumps on top of this value.
@@ -216,7 +229,14 @@ type ParserLimitsConfig struct {
 // beforeCommit / afterCommit around the release commit, postCommit after
 // commit and tags — and the push hooks bracket the push; all of them are
 // no-ops unless the corresponding phase is enabled and something published.
+//
+// AllowBranch is not a hook but a guard: when set, a release run refuses to
+// start unless the checked-out branch matches one of its globs ("main",
+// "release/*"). A detached HEAD matches nothing. Read-only commands are not
+// guarded, and neither are the step commands, which run inside a release
+// stage the guard has already cleared.
 type RunConfig struct {
+	AllowBranch  []string `mapstructure:"allowBranch" json:"allowBranch,omitempty"`
 	BeforeAll    []string `mapstructure:"beforeAll" json:"beforeAll,omitempty"`
 	PostAll      []string `mapstructure:"postAll" json:"postAll,omitempty"`
 	BeforeCommit []string `mapstructure:"beforeCommit" json:"beforeCommit,omitempty"`
@@ -466,6 +486,13 @@ type SpaceConfig struct {
 	// before any flow.version script runs. nil means off. See
 	// AutoVersionConfig.
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	// Env is static environment for every script of the space's packages —
+	// its stages, hooks, run scripts and its login script — merged over the
+	// top-level map key by key; see File.Env.
+	Env map[string]string `mapstructure:"env" json:"env,omitempty"`
+	// Custom is an optional free-form object dispat itself never reads; see
+	// File.Custom.
+	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
 	// Packages holds per-package configuration for this space's packages
 	// alone, keyed by folder name — the same entry shape as the file's own
 	// `packages` map, scoped to the space that owns the folders. Every key
@@ -501,6 +528,8 @@ type SpaceFile struct {
 	VersionGroup          string                   `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
 	Scripts               map[string]string        `mapstructure:"scripts" json:"scripts,omitempty"`
 	AutoVersion           *AutoVersionConfig       `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	Env                   map[string]string        `mapstructure:"env" json:"env,omitempty"`
+	Custom                map[string]any           `mapstructure:"custom" json:"custom,omitempty"`
 	Packages              map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
 }
 
@@ -606,6 +635,14 @@ type PackageConfig struct {
 	// declared in the top-level list instead. Entry-layer and in-folder-layer
 	// lists both count: all declarations merge with the top-level list.
 	Dependencies []string `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	// Env is static environment for this package's scripts, merged key by key
+	// over the space's map (and the in-folder layer over the entry layer);
+	// see File.Env.
+	Env map[string]string `mapstructure:"env" json:"env,omitempty"`
+	// Custom is an optional free-form object dispat itself never reads; see
+	// File.Custom. Like every other field it belongs to its layer: an entry's
+	// object and an in-folder file's object are independent, not merged.
+	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
 }
 
 // AutoVersionConfig is a space's `autoVersion` object: the native

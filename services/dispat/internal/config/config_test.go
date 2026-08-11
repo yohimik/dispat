@@ -1868,3 +1868,46 @@ func TestLoadRecordLineUnusableShapeIsReportedByTheDecoder(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadAllowBranchRejectsAnEmptyPattern: an empty glob would match nothing
+// and silently make every branch forbidden, so it is a config error rather
+// than a guard nobody can satisfy.
+func TestLoadAllowBranchRejectsAnEmptyPattern(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Run.AllowBranch = []string{"main", ""}
+	_, err := loadModel(t, cfg, "pkgs/core")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "run.allowBranch contains an empty pattern")
+
+	cfg.Run.AllowBranch = []string{"main", "release/*"}
+	loaded, err := loadModel(t, cfg, "pkgs/core")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"main", "release/*"}, loaded.Run.AllowBranch)
+}
+
+// TestLoadCustomObjectIsCarriedButNeverRead: `custom` exists so a repository's
+// own tooling can keep data in the config file without tripping the
+// unknown-key guard. It loads at every level, nothing merges it, and dispat
+// itself never looks at it.
+func TestLoadCustomObjectIsCarriedButNeverRead(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Custom = map[string]any{"team": "platform", "budget": 3}
+	withLibs(&cfg, func(s *SpaceConfig) { s.Custom = map[string]any{"owner": "libs"} })
+	cfg.Packages = map[string]PackageConfig{"core": {Custom: map[string]any{"tier": "one"}}}
+
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err, "a free-form object must not be an unknown key")
+	// Keys arrive lowercased, like every viper map key: the object is opaque
+	// data, so nothing re-reads it the way the env objects are re-read.
+	assert.Equal(t, "platform", loaded.Custom["team"])
+	assert.Equal(t, float64(3), loaded.Custom["budget"], "JSON numbers decode as float64")
+	assert.Equal(t, map[string]any{"owner": "libs"}, loaded.Spaces["libs"].Custom)
+
+	// Discovery is unaffected: the object reaches no part of the model a
+	// package is built from.
+	pkgs, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "core", pkgs[0].Name)
+}

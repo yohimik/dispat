@@ -337,3 +337,98 @@ func TestSpaceFileRoundTrip(t *testing.T) {
 		t.Errorf("entry dependencies lost: %+v", pc)
 	}
 }
+
+func TestEnvAndCustomRoundTrip(t *testing.T) {
+	// The static env and the free-form custom object exist at four levels,
+	// and every one of them has to survive a marshal/unmarshal cycle under
+	// its config key: the model is what external tooling authors configs
+	// with, and an env key that does not round-trip is a variable a script
+	// never sees.
+	f := File{
+		Env:    map[string]string{"MiXed_Case": "kept", "SHARED": "root"},
+		Custom: map[string]any{"team": "platform"},
+		Run:    &RunConfig{AllowBranch: []string{"main", "release/*"}},
+		Spaces: map[string]SpaceConfig{
+			"libs": {
+				Path:   "packages",
+				Env:    map[string]string{"SHARED": "space"},
+				Custom: map[string]any{"owner": "libs-team"},
+			},
+		},
+		Packages: map[string]PackageConfig{
+			"core": {
+				Env:    map[string]string{"SHARED": "package"},
+				Custom: map[string]any{"tier": "1"},
+			},
+		},
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"env", "custom"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("top level is missing key %q: %s", key, data)
+		}
+		space := raw["spaces"].(map[string]any)["libs"].(map[string]any)
+		if _, ok := space[key]; !ok {
+			t.Errorf("space is missing key %q: %s", key, data)
+		}
+		pkg := raw["packages"].(map[string]any)["core"].(map[string]any)
+		if _, ok := pkg[key]; !ok {
+			t.Errorf("package entry is missing key %q: %s", key, data)
+		}
+	}
+	if _, ok := raw["run"].(map[string]any)["allowBranch"]; !ok {
+		t.Errorf("run.allowBranch must marshal under its config key: %s", data)
+	}
+
+	var back File
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	// Case is the whole point of the env objects: the model must not fold it.
+	if back.Env["MiXed_Case"] != "kept" {
+		t.Errorf("env key case lost in the round trip: %+v", back.Env)
+	}
+	if back.Spaces["libs"].Env["SHARED"] != "space" {
+		t.Errorf("space env lost: %+v", back.Spaces["libs"].Env)
+	}
+	pc, ok := back.Package("core")
+	if !ok || pc.Env["SHARED"] != "package" {
+		t.Errorf("package env lost: %+v", pc)
+	}
+	if back.Custom["team"] != "platform" || pc.Custom["tier"] != "1" {
+		t.Errorf("custom objects lost: %+v / %+v", back.Custom, pc.Custom)
+	}
+	if len(back.Run.AllowBranch) != 2 || back.Run.AllowBranch[1] != "release/*" {
+		t.Errorf("allowBranch lost: %+v", back.Run)
+	}
+}
+
+func TestSpaceFileCarriesEnvAndCustom(t *testing.T) {
+	// A space folder's own config file is a fourth env layer, so it needs the
+	// same two keys as the root file's space entry.
+	sf := SpaceFile{
+		Env:    map[string]string{"GOFLAGS": "-mod=mod"},
+		Custom: map[string]any{"note": "in-folder"},
+	}
+	data, err := json.Marshal(sf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back SpaceFile
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Env["GOFLAGS"] != "-mod=mod" {
+		t.Errorf("space file env lost: %s", data)
+	}
+	if back.Custom["note"] != "in-folder" {
+		t.Errorf("space file custom lost: %s", data)
+	}
+}

@@ -273,6 +273,9 @@ func validatePackageLayer(label string, po PackageConfig) error {
 			return fmt.Errorf("%s: concurrency values must be >= 0, got %v", label, po.Concurrency)
 		}
 	}
+	if err := validateEnv(label+": env", po.Env); err != nil {
+		return err
+	}
 	return validateSrc(label, po.Src)
 }
 
@@ -333,6 +336,7 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		}
 		sc.Scripts = merged
 	}
+	sc.Env = mergeEnv(sc.Env, po.Env)
 	if po.AutoVersion != nil {
 		sc.AutoVersion = po.AutoVersion
 	}
@@ -353,6 +357,8 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		VersionGroup:          f.VersionGroup,
 		Scripts:               f.Scripts,
 		AutoVersion:           f.AutoVersion,
+		Env:                   f.Env,
+		Custom:                f.Custom,
 	}
 }
 
@@ -704,6 +710,15 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		return pc, p, fmt.Errorf(
 			"%s: %s", p, pathRefused("a package folder's config file"))
 	}
+	// Env keys must keep their exact case; viper lowercased them. Only a file
+	// that actually configures env pays the second parse.
+	if len(pc.Env) > 0 {
+		env, err := envCaseFromFile(p)
+		if err != nil {
+			return pc, p, err
+		}
+		pc.Env = env
+	}
 	return pc, p, nil
 }
 
@@ -731,7 +746,37 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	if err := v.UnmarshalExact(&sf, weakDecode); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
+	// The space folder's own env layer and those of the packages entries next
+	// to it, with their keys spelled as written. One restorer parses the file
+	// once however many of its levels carry env; a file with none is not
+	// re-read at all.
+	if err := restoreSpaceFileEnvCase(p, &sf); err != nil {
+		return sf, p, err
+	}
 	return sf, p, nil
+}
+
+// restoreSpaceFileEnvCase replaces a space folder file's viper-lowercased env
+// maps — the space's own and each of its packages entries' — with exact-case
+// ones read straight from the file.
+func restoreSpaceFileEnvCase(path string, sf *SpaceFile) error {
+	hasEnv := len(sf.Env) > 0
+	for _, pc := range sf.Packages {
+		hasEnv = hasEnv || len(pc.Env) > 0
+	}
+	if !hasEnv {
+		return nil
+	}
+	r, err := newEnvRestorer(path)
+	if err != nil {
+		return err
+	}
+	sf.Env = r.envAt("env")
+	for name, pc := range sf.Packages {
+		pc.Env = r.envAt("packages", name, "env")
+		sf.Packages[name] = pc
+	}
+	return nil
 }
 
 // pathRefused is the one sentence every layer that may not set `path` gives,

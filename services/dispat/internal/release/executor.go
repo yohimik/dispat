@@ -669,7 +669,7 @@ func (tc *taskCtx) loginGate(ctx context.Context) error {
 		// gate: a login script reading a local file must see the same folder
 		// on every run.
 		seq := Sequence{Runner: tc.Runner, Dir: filepath.Dir(tc.rel.Pkg.Dir), Stage: "login",
-			Commands: space.LoginScript, Env: loginEnv(space.Name, tc.wsVars),
+			Commands: space.LoginScript, Env: loginEnv(space.Name, space.Env, tc.wsVars),
 			Log: lg, FailFast: true}
 		outs, seqErr, parseErr := seq.capture(ctx, space.Name+":login")
 		sl.outputs = outs
@@ -798,7 +798,22 @@ type tagInspector interface {
 // there. A tag at any other commit stays a hard error, because a wrong tag
 // silently accepted would corrupt every future baseline.
 func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, log zerolog.Logger) error {
+	return CreateReleaseTagAs(ctx, tagger, rel, "", log)
+}
+
+// CreateReleaseTagAs is CreateReleaseTag with the tag name supplied rather
+// than computed, and an empty name computes it as usual.
+//
+// It exists for the nested case. A step command running inside a release stage
+// is planning a second time, after earlier packages of the same run have
+// already tagged, and a version shared by a fixed versioning group moves under
+// it when they do. Naming the tag the outer run decided on is what keeps the
+// two agreeing.
+func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, name string, log zerolog.Logger) error {
 	tag := rel.TagName()
+	if name != "" {
+		tag = name
+	}
 	if insp, ok := tagger.(tagInspector); ok {
 		if tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat()); err == nil {
 			for _, t := range tags {
@@ -829,9 +844,14 @@ func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, log
 // space affair — which package's publish happens to trigger it is a scheduling
 // accident — so it deliberately carries no package variables: only the space,
 // the stage and the workspace listing.
-func loginEnv(space string, wsVars []string) []string {
+//
+// The space's static env does reach it, because a login script is one of the
+// scripts a space's env exists for: the registry a package publishes to is
+// configuration, and the command authenticating against it needs the same
+// value the publish will use. static is the space's resolved pairs.
+func loginEnv(space string, static, wsVars []string) []string {
 	env := []string{"DISPAT_SPACE=" + space, "DISPAT_STAGE=login"}
-	return append(env, wsVars...)
+	return StaticEnv(static, append(env, wsVars...))
 }
 
 // revert rolls back all local changes inside the package folder. Used for

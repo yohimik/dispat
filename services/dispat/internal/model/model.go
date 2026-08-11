@@ -116,6 +116,14 @@ type Space struct {
 	// executing the command inside each changed package that has one, in
 	// topological order, with the package's full DISPAT_* environment.
 	Scripts map[string]string
+	// Env is the static environment of this package's scripts: the
+	// configuration's env layers (top level, space, space folder file, package
+	// overrides) merged key by key and flattened to sorted KEY=value pairs,
+	// keys spelled exactly as the file wrote them. Script execution places
+	// these before the computed DISPAT_* variables — so a static key can never
+	// shadow a computed one — and expands $NAME references in the values
+	// against the computed set and the process environment.
+	Env []string
 	// BuildWaitsPublish: when true, consumers of packages from this space may
 	// only start building after the provider has been published (not merely
 	// built).

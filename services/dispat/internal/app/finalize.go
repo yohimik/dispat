@@ -48,8 +48,12 @@ func (h *runHooks) exec(ctx context.Context, name string, refs []string, failFas
 	}
 	log := h.log.With().Str("stage", name).Logger()
 	log.Debug().Msg("hook started")
+	computed := append(append([]string{}, h.env...), "DISPAT_STAGE="+name)
+	// A run hook executes at the repository root with no package in view, so
+	// only the top-level static env applies: no space or package layer has a
+	// package to belong to here.
 	seq := release.Sequence{Runner: h.runner, Dir: h.root, Stage: name, Commands: commands,
-		Env: append(append([]string{}, h.env...), "DISPAT_STAGE="+name), Log: log, FailFast: failFast}
+		Env: release.StaticEnv(config.EnvPairs(h.cfg.Env), computed), Log: log, FailFast: failFast}
 	return seq.Run(ctx)
 }
 

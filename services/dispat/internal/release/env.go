@@ -7,6 +7,7 @@ package release
 // executor's pump in executor.go.
 
 import (
+	"os"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -14,6 +15,47 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
+
+// StaticEnv places the configuration's static env pairs before the computed
+// ones. exec's last-wins duplicate rule then keeps a static key from ever
+// shadowing a computed DISPAT_* variable, which is what makes the computed
+// namespace dependable: a script reads DISPAT_VERSION knowing no configuration
+// could have redefined it.
+//
+// Static values are expanded first. $NAME and ${NAME} resolve against the
+// computed set, then the process environment, because cmd.Env values are never
+// shell-expanded and `CUSTOM_TAG: custom_$DISPAT_VERSION` has to mean what it
+// reads. $$ is a literal dollar and an unknown name expands to nothing, as in
+// the shell.
+//
+// A configuration with no static env pays nothing: computed is returned as it
+// arrived, with no map built and no allocation made.
+func StaticEnv(static, computed []string) []string {
+	if len(static) == 0 {
+		return computed
+	}
+	vars := make(map[string]string, len(computed))
+	for _, kv := range computed {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			vars[k] = v
+		}
+	}
+	lookup := func(name string) string {
+		if name == "$" {
+			return "$"
+		}
+		if v, ok := vars[name]; ok {
+			return v
+		}
+		return os.Getenv(name)
+	}
+	out := make([]string, 0, len(static)+len(computed))
+	for _, kv := range static {
+		k, v, _ := strings.Cut(kv, "=")
+		out = append(out, k+"="+os.Expand(v, lookup))
+	}
+	return append(out, computed...)
+}
 
 // providerUpdate is one live provider update, flattened into the
 // DISPAT_UPDATED_* variables of a consumer's scripts.
@@ -274,7 +316,10 @@ func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpd
 	// package exported through their DISPAT_OUTPUT files, as
 	// DISPAT_OUTPUT_<NAME> variables plus the DISPAT_OUTPUTS listing.
 	env = append(env, rel.OutputVars()...)
-	return env
+	// The configuration's static env, already resolved for this package (the
+	// top-level, space and package layers merged at load time), goes in front
+	// so every computed variable above wins a name clash.
+	return StaticEnv(rel.Pkg.Space.Env, env)
 }
 
 // dependencyLines renders the live provider updates the way the changelog's

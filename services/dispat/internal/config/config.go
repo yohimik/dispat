@@ -473,6 +473,12 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	if err := v.UnmarshalExact(&cfg, weakDecode); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
+	// Env keys must keep their exact case; viper lowercased them along with
+	// every other map key. This runs before validation so the keys it reports
+	// on are the ones the file actually wrote.
+	if err := restoreEnvCase(path, &cfg); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
@@ -847,6 +853,19 @@ func validate(c *File) error {
 	}
 	if err := gitx.TagFormat(c.TagFormat).Validate(); err != nil {
 		return err
+	}
+	for _, pattern := range c.Run.AllowBranch {
+		if pattern == "" {
+			return errors.New("run.allowBranch contains an empty pattern")
+		}
+	}
+	if err := validateEnv("env", c.Env); err != nil {
+		return err
+	}
+	for _, name := range sortedSpaceNames(c) {
+		if err := validateEnv(fmt.Sprintf("space %q: env", name), c.Spaces[name].Env); err != nil {
+			return err
+		}
 	}
 	for _, name := range sortedSpaceNames(c) {
 		validated, err := validateSpace(name, c.Spaces[name])
@@ -1596,8 +1615,13 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 		tagFormat = c.TagFormat
 	}
 	return &model.Space{
-		Name:                 spaceName,
-		Path:                 sc.Path,
+		Name: spaceName,
+		Path: sc.Path,
+		// The env layers merge key by key, most local last. sc arrives already
+		// carrying the space plus any package override layers — the same
+		// invariant packageScope relies on — so only the top level is left to
+		// put underneath.
+		Env:                  EnvPairs(mergeEnv(c.Env, sc.Env)),
 		BuildWaitsPublish:    sc.IsBuildWaitingPublish,
 		RevertOnFail:         sc.RevertOnFail,
 		Versioning:           model.Versioning(mode),
