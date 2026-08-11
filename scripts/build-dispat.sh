@@ -1,13 +1,18 @@
 #!/bin/sh
-# The dispat CLI's own build stage: cross-compiles the three release binaries
-# with the release version baked in, and exports them as the GitHub release
-# assets. Runs inside services/dispat with the stage environment
+# The dispat CLI's own build stage: cross-compiles the release binaries with
+# the release version baked in, and exports them as the GitHub release assets.
+# Runs inside services/dispat with the stage environment
 # ($DISPAT_NEW_VERSION, $DISPAT_OUTPUT).
+#
+# One binary per mainstream platform, because `dispat self-update` downloads
+# the asset named after the running platform: a target missing here is a
+# platform that cannot update itself.
 set -eu
 
 rm -rf dist
 mkdir -p dist
-for target in linux/amd64 darwin/arm64 windows/amd64; do
+ASSETS=""
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
   GOOS="${target%/*}"
   GOARCH="${target#*/}"
   case "$GOOS" in
@@ -21,6 +26,9 @@ for target in linux/amd64 darwin/arm64 windows/amd64; do
     -ldflags "-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${DISPAT_NEW_VERSION}" \
     -o "$OUT" .
   echo "built $OUT (version ${DISPAT_NEW_VERSION})"
+  # Accumulated here rather than listed again below, so the export and the
+  # loop can never disagree about which binaries exist.
+  ASSETS="${ASSETS}${ASSETS:+ }$PWD/$OUT"
 done
 
-echo "DISPAT_EXPORT_GITHUB=$PWD/dist/dispat-linux-amd64 $PWD/dist/dispat-darwin-arm64 $PWD/dist/dispat-windows-amd64.exe" >> "$DISPAT_OUTPUT"
+echo "DISPAT_EXPORT_GITHUB=$ASSETS" >> "$DISPAT_OUTPUT"
