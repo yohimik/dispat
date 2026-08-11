@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -82,160 +83,25 @@ func resolvedVersion() string {
 	return Version
 }
 
-// logo is the dispat mark rendered for terminals — the block twin of
-// imgs/logo.png: two same-size 6×6 squares,
-// frame 1 thick, the filled square overlapping a quarter of the frame's
-// inner area. Each logical pixel is a double `█`, which is what keeps the
-// squares square in a terminal's ~1:2 character cells.
-const logo = `
-████████████
-██        ██
-██        ██
-██    ████████████
-██    ████████████
-██████████████████
-      ████████████
-      ████████████
-      ████████████`
+// versionLine is the whole of what --version reports: the version, and the
+// platform the binary was built for. The platform is there because "dispat
+// 1.4.0" alone does not say which of the release's three binaries is
+// running, and that is the first thing a bug report needs.
+func versionLine() string {
+	return "dispat " + resolvedVersion() + " (" + runtime.GOOS + "_" + runtime.GOARCH + ")"
+}
 
 // Run is the program entry point; it returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
-	root := fs.String("root", ".", "monorepo root folder")
-	cfgName := fs.String("config", "dispat.json",
-		"config file name, relative to --root; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
-	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")
-	logLevel := fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
-	logFormat := fs.String("log-format", "", "override the configured logFormat (pretty, json)")
-	onError := fs.String("on-error", app.OnErrorSkip,
-		"run command: what a failing script does to the failed package's dependents (skip or continue)")
-	since := fs.String("since", "",
-		"run command: select the packages the commits since the git revision address (scopes first, changed files for scopeless commits; e.g. HEAD~1, origin/main, a tag; 'all' selects every package) instead of the release window")
-	consumers := fs.Bool("consumers", false,
-		"run command: additionally run every package that transitively depends on a selected one, so downstream consumers are re-run with the change")
-	pkgFilter := fs.StringSliceP("package", "p", nil,
-		"run, preview, changelog, autoversion, commit and compute commands: narrow to the named packages (repeatable and comma-separated; '*' globs, so -p '*' is every package and -p '@acme/*' a prefix); without it, the package folder the command was invoked from")
-	spaceFilter := fs.StringSliceP("space", "s", nil,
-		"run, preview, changelog, autoversion, commit and compute commands: narrow to every package of the named spaces (repeatable, comma-separated, '*' globs); a standalone package belongs to no space, so --package is the only way to name one")
-	initFormat := fs.String("format", "json",
-		"init command: config file format (json, yaml or toml)")
-	computeWrite := fs.Bool("write", false,
-		"compute command: apply every suggestion to the config file")
-	computeInteractive := fs.BoolP("interactive", "i", false,
-		"compute command: confirm each suggestion before applying it")
-	computeCheck := fs.Bool("check", false,
-		"compute command: report only and exit 1 when suggestions exist (CI gate)")
-	commitTag := fs.Bool("tag", false,
-		"commit command: also create the annotated release tag at the resulting commit; an identical existing tag is skipped")
-	commitPush := fs.Bool("push", false,
-		"commit command: push the branch, and with --tag the tag(s); tags already on the remote are skipped")
-	commitName := fs.String("name", "",
-		"commit command: override the commit.name committer identity")
-	commitEmail := fs.String("email", "",
-		"commit command: override the commit.email committer identity")
-	commitRemote := fs.String("remote", "",
-		"commit command: override the commit.remote push target")
-	commitMessage := fs.String("message-format", "",
-		"commit command: override the commit.messageFormat template ({tags}, {packages})")
-	commitInclude := fs.StringSlice("include", nil,
-		"commit command: override the commit.include extra staged paths")
-	ghOwner := fs.String("owner", "",
-		"github command: override the github.owner repository owner")
-	ghRepo := fs.String("repo", "",
-		"github command: override the github.repo repository name")
-	ghAPIURL := fs.String("api-url", "",
-		"github command: override the github.apiUrl API endpoint (for GitHub Enterprise)")
-	ghTokenEnv := fs.String("token-env", "",
-		"github command: override the github.tokenEnv variable the token is read from")
-	ghTarget := fs.String("target", "",
-		"github command: create the tag at this commit or branch (target_commitish); only safe once the commit is on the remote")
-	clFile := fs.String("file", "",
-		"changelog command: override the changelog.file name")
-	clTitle := fs.String("title", "",
-		"changelog command: override the changelog.title first line")
-	clDateFormat := fs.String("date-format", "",
-		"changelog command: override the changelog.dateFormat entry date layout")
-	avRange := fs.String("range", "",
-		"autoversion command: override the autoVersion.range write policy")
-	avMatch := fs.StringSlice("match", nil,
-		"autoversion command: override the autoVersion.match range globs")
-	avManifests := fs.String("manifests", "",
-		"autoversion command: override autoVersion.manifests (root, all or none)")
-	avNoReplace := fs.Bool("no-replace", false,
-		"autoversion command: skip the autoVersion.replace rules for this invocation")
-	avWriteVersion := fs.Bool("write-version", true,
-		"autoversion command: override autoVersion.writeVersion")
-	avSyncLock := fs.Bool("sync-lock", true,
-		"autoversion command: run the space's syncLock scripts for changed packages")
-	scanRootOnly := fs.Bool("root-only", false,
-		"scanner command: read only the manifests sitting directly in the folder, without descending")
-	wrSetVersion := fs.String("set-version", "",
-		"writer command: rewrite each manifest's own version field to this version")
-	wrSet := fs.StringArray("set", nil,
-		"writer command: set one dependency's declared range, [kind:]name=range (repeatable)")
-	wrReplace := fs.StringArray("replace", nil,
-		"writer command: point a dependency at a local folder, name=path; an empty path removes the redirect (repeatable)")
-	rpSub := fs.StringArray("sub", nil,
-		"replacer command: replace literal text in the named files, find=>write (repeatable, applied in order)")
-	strict := fs.Bool("strict", false,
-		"scanner, writer and replacer commands: exit 1 on a manifest that failed to parse, an edit the manifest does not declare, or a --sub that matched nothing")
-	showVersion := fs.Bool("version", false, "print the dispat version and exit")
-	fs.Usage = func() {
-		fmt.Fprintf(stderr, `%s
-
-usage: dispat [command] [flags]
-
-commands:
-  release                  build and publish changed packages (default)
-  status                   print the project graph and new versions, without building
-  run <script>             run the named script inside each changed package that
-                           defines it — its own scripts, then its space's, then the
-                           top-level ones — honouring the dependency graph.
-                           --package and --space narrow that to part of the
-                           monorepo, as does the package or space folder the
-                           command is invoked from. "dispat <script>" is a
-                           shorthand when <script> is not a command name
-  init                     write a starter config file (--format json, yaml or toml)
-                           at the git repository root, unless one already exists
-  preview                  print the pending release notes (breaking changes,
-                           features, fixes) for every package with something
-                           pending, or for the selected ones
-  changelog                write the pending changelog entry now, so a custom
-                           flow can land it inside the release commit;
-                           already-written entries are skipped
-  autoversion              reconcile manifests to the planned versions (native
-                           auto-versioning) and run syncLock where they changed
-  commit                   create the per-package release commit; --tag tags
-                           it, --push pushes the branch and tags
-  github                   create the per-package GitHub release now, so a
-                           flow can publish it from its own stage;
-                           already-published releases are skipped
-  compute                  scan every package's manifests (package.json, go.mod,
-                           Cargo.toml, pyproject.toml, composer.json, pom.xml,
-                           *.csproj, pubspec.yaml, requirements*.txt), derive
-                           the dependency graph and suggest config changes;
-                           --write applies all, --interactive confirms each,
-                           --check gates CI; an edge marked keep: true is
-                           never suggested for removal, and --package/--space
-                           scope the suggestions to those packages' edges
-  scanner [folder]         print what the folder's manifests declare: identity,
-                           ecosystem and every dependency with its range;
-                           --root-only stays out of sub-folders. Needs no
-                           config file and no git repository
-  writer <manifest>...     edit manifests in place, preserving their formatting:
-                           --set-version rewrites the own version, --set sets a
-                           dependency's range, --replace points one at a local
-                           folder. Needs no config file and no git repository
-  replacer <file>...       replace literal text in any file, parsing nothing:
-                           --sub 'find=>write', repeatable and applied in
-                           order, for the versions no manifest writer reaches
-                           (a Gradle coordinate, a Helm chart, a README).
-                           Needs no config file and no git repository
-
-flags:
-%s`, logo, fs.FlagUsages())
-	}
+	o := declareFlags(fs)
+	// Declaring --help is what makes it a flag rather than pflag's own
+	// interception, which fires during Parse — before the command word is
+	// read — and is why help used to be the whole program's, whatever
+	// command was asked for.
+	fs.Usage = func() { printUsage(stderr, fs) }
+	usageForCommand := func(cmd string) { printCommandUsage(stderr, fs, cmd) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, pflag.ErrHelp) {
 			return 0
@@ -246,10 +112,21 @@ flags:
 		fs.Usage()
 		return 2
 	}
-	if *showVersion {
+	if *o.showVersion {
 		// Before anything else: the version must print without a config file.
 		fmt.Fprintln(stdout, logo)
-		fmt.Fprintln(stdout, "\ndispat "+resolvedVersion())
+		fmt.Fprintln(stdout, "\n"+versionLine())
+		return 0
+	}
+	if *o.showHelp {
+		// Also before anything else, and before the arity checks: `dispat
+		// writer --help` should help rather than complain that it was given
+		// no manifests. With no command word at all, the program help.
+		if word := commandWord(fs.Args()); word != "" {
+			usageForCommand(word)
+		} else {
+			fs.Usage()
+		}
 		return 0
 	}
 
@@ -258,20 +135,20 @@ flags:
 	bootLog := zerolog.New(zerolog.ConsoleWriter{Out: stderr, TimeFormat: "15:04:05"}).
 		With().Timestamp().Logger()
 
-	inv, badArgs := parseInvocation(fs.Args(), fs.Usage, bootLog)
+	inv, badArgs := parseInvocation(fs.Args(), usageForCommand, bootLog)
 	if badArgs {
 		return 2
 	}
 	cmd, runScript := inv.cmd, inv.script
-	if cmd == cmdRun && !app.ValidOnError(*onError) {
-		bootLog.Error().Str("on-error", *onError).Msgf("unknown --on-error value (want %q or %q)",
+	if cmd == cmdRun && !app.ValidOnError(*o.onError) {
+		bootLog.Error().Str("on-error", *o.onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
 		return 2
 	}
 	if cmd == cmdInit {
 		// Before config loading: init is what creates the config, so there is
 		// nothing to load yet (and no git repository is needed either).
-		name, err := app.InitConfig(*root, *initFormat)
+		name, err := app.InitConfig(*o.root, *o.initFormat)
 		if err != nil {
 			bootLog.Error().Err(err).Msg("init failed")
 			return 1
@@ -284,20 +161,20 @@ flags:
 		// themselves, and they read nothing but the files named on the
 		// command line. Their logger comes from the flags alone, since there
 		// is no config file behind them to take a level or a format from.
-		log := newLogger(orDefault(*logLevel, "info"), orDefault(*logFormat, "pretty"), stdout)
+		log := newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stdout)
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		if cmd == cmdScanner {
 			if app.ScanManifests(ctx, app.ScanOptions{
-				Root: *root, Dir: inv.dir, RootOnly: *scanRootOnly, Strict: *strict,
-				JSON: *logFormat == "json", Out: stdout, Log: log,
+				Root: *o.root, Dir: inv.dir, RootOnly: *o.scanRootOnly, Strict: *o.strict,
+				JSON: *o.logFormat == "json", Out: stdout, Log: log,
 			}) != nil {
 				return 1
 			}
 			return 0
 		}
 		if cmd == cmdReplacer {
-			subs, err := parseSubSpecs(*rpSub)
+			subs, err := parseSubSpecs(*o.rpSub)
 			if err != nil {
 				bootLog.Error().Err(err).Msg("invalid substitution")
 				return 2
@@ -308,27 +185,27 @@ flags:
 				return 2
 			}
 			if app.SubstituteFiles(ctx, app.SubstituteOptions{
-				Root: *root, Paths: inv.paths, Subs: subs, Strict: *strict,
-				JSON: *logFormat == "json", Out: stdout, Log: log,
+				Root: *o.root, Paths: inv.paths, Subs: subs, Strict: *o.strict,
+				JSON: *o.logFormat == "json", Out: stdout, Log: log,
 			}) != nil {
 				return 1
 			}
 			return 0
 		}
-		edits, repls, err := parseEditSpecs(*wrSet, *wrReplace)
+		edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrReplace)
 		if err != nil {
 			bootLog.Error().Err(err).Msg("invalid edit")
 			return 2
 		}
-		if *wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
+		if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
 			bootLog.Error().Msg("writer needs something to write: --set-version, --set or --replace")
 			fs.Usage()
 			return 2
 		}
 		if app.WriteManifests(ctx, app.WriteOptions{
-			Root: *root, Paths: inv.paths, Version: *wrSetVersion,
-			Edits: edits, Replacements: repls, Strict: *strict,
-			JSON: *logFormat == "json", Out: stdout, Log: log,
+			Root: *o.root, Paths: inv.paths, Version: *o.wrSetVersion,
+			Edits: edits, Replacements: repls, Strict: *o.strict,
+			JSON: *o.logFormat == "json", Out: stdout, Log: log,
 		}) != nil {
 			return 1
 		}
@@ -340,7 +217,7 @@ flags:
 	// so the CLI works from inside a package folder with the config's own
 	// directory as the effective monorepo root. `dispat init --format yaml`
 	// and a plain `dispat status` compose without flags either way.
-	cfgPath, resolvedRoot, err := config.ResolveFile(*root, *cfgName, fs.Changed("config"))
+	cfgPath, resolvedRoot, err := config.ResolveFile(*o.root, *o.cfgName, fs.Changed("config"))
 	if err != nil {
 		bootLog.Error().Err(err).Msg("config file not found")
 		return 1
@@ -349,6 +226,12 @@ flags:
 	if err != nil {
 		bootLog.Error().Err(err).Msg("invalid configuration")
 		return 1
+	}
+	if fs.Changed("quiet-parser") {
+		// The config states the repository's habit; the flag states this
+		// invocation's, in both directions — --quiet-parser=false brings the
+		// parser's findings back for one run without editing the config.
+		cfg.Parser.Quiet = *o.quietParser
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, stdout)
 
@@ -359,7 +242,7 @@ flags:
 	// as the user spelled it — where they stood — and not the resolved
 	// monorepo root the ascent just found: the difference between the two is
 	// exactly what narrows a command to the folder it was invoked from.
-	sel := filter.Filter{Packages: *pkgFilter, Spaces: *spaceFilter, Dir: *root}
+	sel := filter.Filter{Packages: *o.pkgFilter, Spaces: *o.spaceFilter, Dir: *o.root}
 
 	// The application does the work and logs its own findings; the controller
 	// only maps the outcome onto an exit code.
@@ -370,8 +253,8 @@ flags:
 			return 1
 		}
 	case cmdRun:
-		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *onError,
-			Filter: sel, Since: *since, Consumers: *consumers}) != nil {
+		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *o.onError,
+			Filter: sel, Since: *o.since, Consumers: *o.consumers}) != nil {
 			return 1
 		}
 	case cmdPreview:
@@ -389,42 +272,42 @@ flags:
 		}
 	case cmdChangelog:
 		if a.Changelog(ctx, app.ChangelogOptions{Filter: sel,
-			File: *clFile, Title: *clTitle, DateFormat: *clDateFormat}) != nil {
+			File: *o.clFile, Title: *o.clTitle, DateFormat: *o.clDateFormat}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
 		opts := app.AutoVersionOptions{Filter: sel,
-			Range: *avRange, Match: *avMatch, SyncLock: *avSyncLock, NoReplace: *avNoReplace}
-		switch *avManifests {
+			Range: *o.avRange, Match: *o.avMatch, SyncLock: *o.avSyncLock, NoReplace: *o.avNoReplace}
+		switch *o.avManifests {
 		case "", "root", "all", "none":
-			opts.Manifests = *avManifests
+			opts.Manifests = *o.avManifests
 		default:
-			bootLog.Error().Str("manifests", *avManifests).
+			bootLog.Error().Str("manifests", *o.avManifests).
 				Msg("unknown --manifests value (want root, all or none)")
 			return 2
 		}
 		if fs.Changed("write-version") {
-			opts.WriteVersion = avWriteVersion
+			opts.WriteVersion = o.avWriteVersion
 		}
 		if a.AutoVersion(ctx, opts) != nil {
 			return 1
 		}
 	case cmdCommit:
 		if a.Commit(ctx, app.CommitOptions{Filter: sel,
-			Tag: *commitTag, Push: *commitPush, Name: *commitName, Email: *commitEmail,
-			Remote: *commitRemote, Message: *commitMessage, Include: *commitInclude}) != nil {
+			Tag: *o.commitTag, Push: *o.commitPush, Name: *o.commitName, Email: *o.commitEmail,
+			Remote: *o.commitRemote, Message: *o.commitMessage, Include: *o.commitInclude}) != nil {
 			return 1
 		}
 	case cmdGithub:
-		if a.GitHub(ctx, app.GitHubOptions{Filter: sel, Owner: *ghOwner, Repo: *ghRepo,
-			APIURL: *ghAPIURL, TokenEnv: *ghTokenEnv, Target: *ghTarget}) != nil {
+		if a.GitHub(ctx, app.GitHubOptions{Filter: sel, Owner: *o.ghOwner, Repo: *o.ghRepo,
+			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget}) != nil {
 			return 1
 		}
 	case cmdCompute:
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
-			Write:       *computeWrite,
-			Interactive: *computeInteractive,
-			Check:       *computeCheck,
+			Write:       *o.computeWrite,
+			Interactive: *o.computeInteractive,
+			Check:       *o.computeCheck,
 			Filter:      sel,
 			In:          os.Stdin,
 			Out:         stdout,
@@ -432,7 +315,7 @@ flags:
 		if err != nil {
 			return 1
 		}
-		if *computeCheck && open > 0 {
+		if *o.computeCheck && open > 0 {
 			return 1
 		}
 	default:
@@ -456,7 +339,7 @@ type invocation struct {
 // each command's arity — all before any config is loaded, so a usage mistake
 // costs nothing. bad reports an unusable command line (the usage exit, 2),
 // already logged and, where it helps, followed by the usage text.
-func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invocation, bad bool) {
+func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv invocation, bad bool) {
 	inv = invocation{cmd: cmdRelease}
 	if len(rest) == 0 {
 		return inv, false
@@ -471,7 +354,7 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 	case cmdRun:
 		if len(rest) != 2 {
 			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package or --space)")
-			usage()
+			usage(inv.cmd)
 			return inv, true
 		}
 		inv.script = rest[1]
@@ -479,13 +362,13 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).
 				Msgf("%s takes no arguments (select packages with --package or --space)", inv.cmd)
-			usage()
+			usage(inv.cmd)
 			return inv, true
 		}
 	case cmdScanner:
 		if len(rest) > 2 {
 			log.Error().Msg("scanner takes at most one argument: the folder to scan")
-			usage()
+			usage(inv.cmd)
 			return inv, true
 		}
 		if len(rest) == 2 {
@@ -494,14 +377,14 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 	case cmdWriter:
 		if len(rest) < 2 {
 			log.Error().Msg("writer requires at least one manifest file to edit")
-			usage()
+			usage(inv.cmd)
 			return inv, true
 		}
 		inv.paths = rest[1:]
 	case cmdReplacer:
 		if len(rest) < 2 {
 			log.Error().Msg("replacer requires at least one file to edit")
-			usage()
+			usage(inv.cmd)
 			return inv, true
 		}
 		inv.paths = rest[1:]
@@ -511,12 +394,26 @@ func parseInvocation(rest []string, usage func(), log zerolog.Logger) (inv invoc
 		// later, which also catches command typos.
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
-			usage()
+			usage(cmdRun) // the shorthand's own help, not the program's
 			return inv, true
 		}
 		inv.script, inv.cmd = inv.cmd, cmdRun
 	}
 	return inv, false
+}
+
+// commandWord answers which command's help an invocation is asking for,
+// without validating anything: the command word when the first argument is
+// one, cmdRun when it is the run shorthand, and "" when there is no
+// positional argument at all, which is a request for the program help.
+func commandWord(rest []string) string {
+	if len(rest) == 0 {
+		return ""
+	}
+	if _, ok := lookupCommand(rest[0]); ok {
+		return rest[0]
+	}
+	return cmdRun
 }
 
 // orDefault answers with fallback when the flag was left at its empty

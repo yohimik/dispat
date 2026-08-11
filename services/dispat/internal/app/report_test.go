@@ -131,3 +131,67 @@ func TestPreviewOne(t *testing.T) {
 	assert.Contains(t, notes, "## changed@1.1.0", "the header carries the tag")
 	assert.Contains(t, notes, "add streaming")
 }
+
+// TestPrintDiagnosticsQuietParser: parser.quiet hides the commit-message
+// parser's findings and nothing else. The planner's own diagnostics still
+// print, every diagnostic is still counted, and the summary says how many
+// lines went unprinted — a silent hidden error would be worse than a noisy
+// one.
+func TestPrintDiagnosticsQuietParser(t *testing.T) {
+	diags := []plan.Diagnostic{
+		{Code: ccme.CodeE100, Level: plan.LevelError, Commit: "abcdef1234567890", Message: "header does not match"},
+		{Code: ccme.CodeW140, Level: plan.LevelWarn, Commit: "abcdef1234567890", Message: "unknown type"},
+		{Code: plan.CodeCatchUp, Level: plan.LevelWarn, Pkg: "core", Message: "catching up"},
+		{Code: plan.CodeDependencyCycle, Level: plan.LevelError, Message: "cycle"},
+	}
+
+	for name, tc := range map[string]struct {
+		quiet   bool
+		printed []string
+		absent  []string
+		summary string
+	}{
+		"loud, the default": {
+			quiet:   false,
+			printed: []string{"E100", "W140", plan.CodeCatchUp, plan.CodeDependencyCycle},
+			summary: `"warnings":2,"errors":2`,
+		},
+		"quiet": {
+			quiet:   true,
+			printed: []string{plan.CodeCatchUp, plan.CodeDependencyCycle},
+			absent:  []string{"E100", "W140", "header does not match", "unknown type"},
+			summary: `"warnings":2,"errors":2,"hidden":2`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cfg := &config.File{Parser: &config.ParserConfig{Quiet: tc.quiet}}
+			a := New(t.TempDir(), cfg, zerolog.New(&buf))
+			a.printDiagnostics(&plan.Plan{Diagnostics: diags})
+
+			out := buf.String()
+			for _, want := range tc.printed {
+				assert.Contains(t, out, want)
+			}
+			for _, unwanted := range tc.absent {
+				assert.NotContains(t, out, unwanted)
+			}
+			assert.Contains(t, out, tc.summary,
+				"a hidden diagnostic is still counted, and the count says how many are hidden")
+		})
+	}
+}
+
+// TestPrintDiagnosticsQuietWithNothingHidden: the hidden count is only
+// reported when something actually was, so an ordinary quiet run reads the
+// same as a loud one.
+func TestPrintDiagnosticsQuietWithNothingHidden(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := &config.File{Parser: &config.ParserConfig{Quiet: true}}
+	a := New(t.TempDir(), cfg, zerolog.New(&buf))
+	a.printDiagnostics(&plan.Plan{Diagnostics: []plan.Diagnostic{
+		{Code: plan.CodeCatchUp, Level: plan.LevelWarn, Pkg: "core", Message: "catching up"},
+	}})
+	assert.Contains(t, buf.String(), `"warnings":1,"errors":0`)
+	assert.NotContains(t, buf.String(), "hidden")
+}

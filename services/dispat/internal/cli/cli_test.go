@@ -13,8 +13,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,10 +31,11 @@ func TestVersionFlag(t *testing.T) {
 	// works outside a monorepo. The output is the terminal logo followed by
 	// the version line; the default "dev" marks a local build, releases
 	// override Version at build time from the release tag.
+	platform := "(" + runtime.GOOS + "_" + runtime.GOARCH + ")"
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--version"}, &stdout, &stderr)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, logo+"\n\ndispat dev\n", stdout.String())
+	assert.Equal(t, logo+"\n\ndispat dev "+platform+"\n", stdout.String())
 	assert.Empty(t, stderr.String())
 
 	old := Version
@@ -41,17 +44,103 @@ func TestVersionFlag(t *testing.T) {
 	stdout.Reset()
 	code = Run([]string{"--version"}, &stdout, &stderr)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, logo+"\n\ndispat 1.2.3\n", stdout.String())
+	assert.Equal(t, logo+"\n\ndispat 1.2.3 "+platform+"\n", stdout.String(),
+		"the platform says which of the release's binaries is running")
 }
 
 func TestHelpFlag(t *testing.T) {
 	// --help exits 0 (asking for help is not an error) after the usage text,
-	// and needs no config file or repository.
+	// and needs no config file or repository. Without a command word it is
+	// the program help: every command, and the global flags only.
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--help"}, &stdout, &stderr)
 	assert.Equal(t, 0, code)
-	assert.Contains(t, stderr.String(), "usage: dispat")
-	assert.Contains(t, stderr.String(), "flags:")
+	out := stderr.String()
+	assert.Contains(t, out, "usage: dispat [command] [flags]")
+	assert.Contains(t, out, "global flags:")
+	for _, c := range commands {
+		assert.Contains(t, out, c.short, "every command is listed")
+	}
+	assert.NotContains(t, out, "--set-version", "a command's own flags are one --help away")
+	assert.Contains(t, out, `run "dispat <command> --help"`)
+}
+
+func TestHelpIsScopedToTheCommand(t *testing.T) {
+	// The complaint this fixes: `dispat run --help` used to print the whole
+	// program's help, because pflag intercepts an undeclared --help during
+	// Parse, before the command word is read.
+	for name, tc := range map[string]struct {
+		args        []string
+		usage       string
+		has, hasNot []string
+	}{
+		"run": {
+			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [flags]",
+			has:    []string{"--on-error", "--since", "--consumers", "--package"},
+			hasNot: []string{"--set-version", "--tag", "--sub", "--interactive"},
+		},
+		"commit": {
+			args: []string{"commit", "--help"}, usage: "usage: dispat commit [flags]",
+			has:    []string{"--tag", "--push", "--message-format", "--space"},
+			hasNot: []string{"--on-error", "--set-version"},
+		},
+		"github": {
+			args: []string{"github", "--help"}, usage: "usage: dispat github [flags]",
+			has:    []string{"--owner", "--repo", "--api-url", "--token-env", "--target"},
+			hasNot: []string{"--tag", "--file"},
+		},
+		"writer, which would otherwise fail arity first": {
+			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",
+			has:    []string{"--set-version", "--set", "--replace", "--strict"},
+			hasNot: []string{"--package", "--tag"},
+		},
+		"the run shorthand": {
+			args: []string{"lint", "--help"}, usage: "usage: dispat run <script> [flags]",
+			has:    []string{"--on-error"},
+			hasNot: []string{"--set-version"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, 0, Run(tc.args, &stdout, &stderr))
+			out := stderr.String()
+			assert.Contains(t, out, tc.usage)
+			assert.Contains(t, out, "global flags:")
+			for _, want := range tc.has {
+				assert.Contains(t, out, want)
+			}
+			for _, unwanted := range tc.hasNot {
+				assert.NotContains(t, out, unwanted, "another command's flag leaked in")
+			}
+		})
+	}
+}
+
+func TestEveryFlagIsClaimedByACommand(t *testing.T) {
+	// The drift guard: a flag added to the set but to no command's entry
+	// would be invisible in every help rendering, and the command table is
+	// the only place that mapping lives, so nothing else can catch it.
+	claimed := make(map[string]bool, len(globalFlags))
+	for _, n := range globalFlags {
+		claimed[n] = true
+	}
+	for _, c := range commands {
+		for _, n := range c.flags {
+			claimed[n] = true
+		}
+	}
+	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	declareFlags(fs)
+	fs.VisitAll(func(f *pflag.Flag) {
+		assert.True(t, claimed[f.Name], "flag --%s belongs to no command and to no global set", f.Name)
+	})
+	// ...and the other way: a table naming a flag the set does not declare
+	// would render nothing, silently.
+	for _, c := range commands {
+		for _, n := range append(append([]string{}, c.flags...), globalFlags...) {
+			assert.NotNil(t, fs.Lookup(n), "command %q names --%s, which is declared nowhere", c.name, n)
+		}
+	}
 }
 
 func TestUnknownFlagPrintsUsage(t *testing.T) {

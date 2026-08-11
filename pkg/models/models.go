@@ -127,6 +127,13 @@ type ParserConfig struct {
 	// StrictTypes turns an unknown commit type into an error (E140) instead
 	// of a warning.
 	StrictTypes bool `mapstructure:"strictTypes" json:"strictTypes,omitempty"`
+	// Quiet hides the parser's own diagnostics — the E0xx/E1xx errors and
+	// W0xx/W1xx warnings a commit message earns — from the log. It is a
+	// display decision alone: a hidden error still counts, still blocks the
+	// run under commitErrors "error", and is still summarised, so a
+	// repository with a noisy history can read its plan without losing the
+	// signal that something is wrong.
+	Quiet bool `mapstructure:"quiet" json:"quiet,omitempty"`
 	// Lenient downgrades selected authoring errors to warnings: an uppercase
 	// type is lowercased, a missing space after ':' is accepted, and a footer
 	// contradicting an inline directive wins instead of erroring.

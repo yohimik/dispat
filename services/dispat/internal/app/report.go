@@ -5,6 +5,8 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/yohimik/dispat/pkg/ccme"
+
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
@@ -14,15 +16,31 @@ import (
 // non-suppressible precisely because they explain a release outcome that a
 // reader of the commit log alone cannot account for (§16), so they must reach
 // the operator rather than sit unread on the plan.
+//
+// parser.quiet (or --quiet-parser) hides the commit-message parser's own
+// findings, for a repository whose history predates the convention. It hides
+// lines and nothing else: every diagnostic is still counted, the summary says
+// how many went unprinted, and what a hidden error does to the run is
+// unchanged — the §16 codes above belong to the planner, not the parser, so
+// they cannot be hidden at all.
 func (a *App) printDiagnostics(pl *plan.Plan) {
-	warnings, errors := 0, 0
+	quiet := a.cfg.Parser != nil && a.cfg.Parser.Quiet
+	warnings, errors, hidden := 0, 0, 0
 	for _, d := range pl.Diagnostics {
-		ev := a.log.Warn()
 		if d.Level == plan.LevelError {
-			ev = a.log.Error()
 			errors++
 		} else {
 			warnings++
+		}
+		// Before the event is built, not after: a zerolog event taken from
+		// the pool and never sent is a leak.
+		if quiet && ccme.IsDiagnosticCode(d.Code) {
+			hidden++
+			continue
+		}
+		ev := a.log.Warn()
+		if d.Level == plan.LevelError {
+			ev = a.log.Error()
 		}
 		ev = ev.Str("code", d.Code)
 		if d.Pkg != "" {
@@ -34,7 +52,11 @@ func (a *App) printDiagnostics(pl *plan.Plan) {
 		ev.Msg(d.Message)
 	}
 	if warnings+errors > 0 {
-		a.log.Info().Int("warnings", warnings).Int("errors", errors).Msg("plan diagnostics")
+		ev := a.log.Info().Int("warnings", warnings).Int("errors", errors)
+		if hidden > 0 {
+			ev = ev.Int("hidden", hidden)
+		}
+		ev.Msg("plan diagnostics")
 	}
 }
 

@@ -58,6 +58,33 @@ const (
 // cannot be mutated even from inside the package.
 var silentFailureCodes = [...]string{CodeW155, CodeW156}
 
+// diagnosticCodes is every code this package can emit, as a set built once at
+// startup so that classifying a code costs a map lookup rather than a scan.
+var diagnosticCodes = func() map[string]bool {
+	codes := [...]string{
+		CodeE001, CodeE002, CodeE100, CodeE101, CodeE102, CodeE103, CodeE104,
+		CodeE110, CodeE111, CodeE112, CodeE113, CodeE120, CodeE121, CodeE140,
+		CodeE141, CodeE151, CodeE154, CodeE170, CodeE171, CodeE158, CodeE180,
+		CodeE181,
+		CodeW001, CodeW101, CodeW110, CodeW112, CodeW120, CodeW121, CodeW132,
+		CodeW133, CodeW140, CodeW141, CodeW150, CodeW151, CodeW152, CodeW155,
+		CodeW156, CodeW157, CodeW201, CodeW207,
+	}
+	set := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		set[c] = true
+	}
+	return set
+}()
+
+// IsDiagnosticCode reports whether code is one this package emits — a
+// finding about a commit message itself, as opposed to one about the
+// workspace, the graph or the git history, which are the caller's to
+// produce. A tool presenting both kinds together uses it to tell them
+// apart: to group them, to count them, or to let an operator silence the
+// authoring findings of a history that predates the convention.
+func IsDiagnosticCode(code string) bool { return diagnosticCodes[code] }
+
 // SilentFailureCodes returns the warnings §16 singles out as
 // silent-wrong-answer warnings rather than style notes: each one means the
 // message says something different from what its author meant, with no error

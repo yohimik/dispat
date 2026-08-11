@@ -500,3 +500,37 @@ func TestErrorsInvalidateOnlyTheirOwnUnit(t *testing.T) {
 		t.Errorf("Errors() = %d, want 2 (codes: %s)", got, codesOf(res))
 	}
 }
+
+// TestIsDiagnosticCode: the set answers for every code this package declares
+// and for nothing else, so a caller grouping findings by origin cannot mix a
+// workspace finding in with an authoring one.
+func TestIsDiagnosticCode(t *testing.T) {
+	for _, code := range []string{
+		CodeE001, CodeE100, CodeE113, CodeE121, CodeE140, CodeE151, CodeE158,
+		CodeE170, CodeE181, CodeW001, CodeW101, CodeW120, CodeW133, CodeW152,
+		CodeW155, CodeW157, CodeW201, CodeW207,
+	} {
+		if !IsDiagnosticCode(code) {
+			t.Errorf("%s is emitted by this package but not recognised as its own", code)
+		}
+	}
+	// Codes the specification assigns to a workspace, a dependency graph or
+	// git history: this package cannot produce them, so it must not claim
+	// them either.
+	for _, code := range []string{"W130", "W193", "W210", "E130", "E195", "E200", "", "nonsense"} {
+		if IsDiagnosticCode(code) {
+			t.Errorf("%s needs a workspace to detect and is not this package's", code)
+		}
+	}
+}
+
+// TestEveryDeclaredCodeIsInTheSet walks the codes the package emits through
+// the parser itself: a code raised but left out of the set would make a
+// caller's grouping silently wrong.
+func TestEveryDeclaredCodeIsInTheSet(t *testing.T) {
+	for _, code := range SilentFailureCodes() {
+		if !IsDiagnosticCode(code) {
+			t.Errorf("silent-failure code %s is missing from the diagnostic set", code)
+		}
+	}
+}
