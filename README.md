@@ -7,6 +7,19 @@
 versions (propagating bumps to dependants), and builds and publishes them in the right order, in parallel, with
 changelogs, git tags and GitHub releases on the way out.
 
+```sh
+curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+```
+
+```yaml
+# ...or on GitHub Actions
+- uses: yohimik/dispat@v1
+- run: dispat --log-format json
+```
+
+Container images for every other CI system: `yohimik/dispat-alpine`, `-ubuntu`, `-debian`, `-dind`. See
+[dispat in CI](https://yohimik.github.io/dispat/ci).
+
 ## Why one more monorepo tool?
 
 Every major monorepo tool can topologically sort a dependency graph: build everything in order, then publish everything,
@@ -97,6 +110,8 @@ dispat stands on the shoulders of two things:
 - **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for **every** manifest
   the scanner reads, with atomic writes and validated output; the library behind auto-versioning and the `dispat
   writer` command.
+- **[docker](./docker)**: the four container images, each a dispat package whose `docker-compose.yml` *is* its
+  manifest — so the build and publish stages are nothing but `docker compose build` and `docker compose push`.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 - **[docs](./packages/docs)**: the documentation site itself, released by dispat like any other package: how to run it

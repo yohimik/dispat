@@ -1,0 +1,12 @@
+# The tags a release-candidate release of dispat-ubuntu answers to. See
+# stable.yml for why these live outside the manifest and how the file is chosen.
+#
+# A prerelease answers to its channel and to its exact version, and to nothing
+# else: `latest` and the `1` / `1.0` series must keep pointing at the last
+# stable release, or someone pinning them ends up running a candidate they never
+# asked for.
+services:
+  dispat:
+    build:
+      tags:
+        - docker.io/yohimik/dispat-ubuntu:rc

@@ -33,6 +33,7 @@ const sidebars: SidebarsConfig = {
     {type: 'doc', id: 'replacer', label: 'The replacer'},
     {type: 'doc', id: 'commits', label: 'Commit messages'},
     {type: 'doc', id: 'environment', label: 'Script environment'},
+    {type: 'doc', id: 'ci', label: 'dispat in CI'},
     {type: 'doc', id: 'self-update', label: 'Updating dispat'},
     'architecture',
     'coverage',

@@ -50,6 +50,18 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      # The docker space builds two architectures per image, so the arm64 legs
+      # run emulated. The containerd image store is what lets a multi-platform
+      # `docker compose build` keep its manifest list locally for the push that
+      # follows; without it the build has nowhere to put the result.
+      - name: Set up Docker
+        uses: docker/setup-docker-action@v4
+        with:
+          daemon-config: |
+            { "features": { "containerd-snapshotter": true } }
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
       - name: Build dispat from the checkout
         run: go build -C services/dispat -o "$PWD/dispat" .
 
@@ -65,6 +77,9 @@ jobs:
           # own modules directly from the repository, skipping the proxy and
           # the sum database, both of which lag fresh tags.
           GOPRIVATE: github.com/yohimik/dispat
+          # The docker space's login stage authenticates the image pushes.
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         # The checkout dir leads PATH so the nested `dispat changelog` /
         # `dispat commit` invocations inside the stage scripts resolve the
         # same freshly built binary this release ships. The committer

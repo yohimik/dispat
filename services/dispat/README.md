@@ -108,6 +108,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [The replacer](https://yohimik.github.io/dispat/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
 | [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
 | [Script environment](https://yohimik.github.io/dispat/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
+| [dispat in CI](https://yohimik.github.io/dispat/ci)                             | The GitHub Action, the container images, the install script: getting dispat onto a runner.          |
 | [Updating dispat](https://yohimik.github.io/dispat/self-update)                 | `dispat self-update`: how the binary replaces itself, the backup and the rollback, the update notice. |
 | [Architecture](https://yohimik.github.io/dispat/architecture)                   | Modules, algorithms, execution model, design decisions, testing.                                    |
 | [Test coverage](https://yohimik.github.io/dispat/coverage)                      | The per-package statement coverage table and how to reproduce it.                                   |

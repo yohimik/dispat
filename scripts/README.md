@@ -8,8 +8,15 @@ repository root as `../../`. Everything they need arrives in the environment: th
 | Script                                       | Package  | `flow` slot | Reads                                                        | Produces                                                                                     |
 |----------------------------------------------|----------|-------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------|
 | [`build-dispat.sh`](./build-dispat.sh)       | `dispat` | `build`     | `DISPAT_NEW_VERSION`, `DISPAT_OUTPUT`                        | One cross-compiled binary per platform in `services/dispat/dist`, exported as GitHub release assets through `DISPAT_EXPORT_GITHUB`. |
+| [`tag-action.sh`](./tag-action.sh)           | `dispat` | `announce`  | `CI`, `DISPAT_NEW_VERSION`, `DISPAT_IS_PRERELEASE`           | The bare `v<version>` tag the composite action is consumed through, and the moving `v<major>` on a stable release. Stands in for a package emitting more than one tag; its header carries the configuration that would replace it. |
 | [`cut-docs-version.sh`](./cut-docs-version.sh) | `docs`   | `version`   | `DISPAT_IS_PRERELEASE`, `DISPAT_VERSION`, `DISPAT_NEW_VERSION` | A `packages/docs/versioned_docs/version-<minor>` snapshot, once per stable minor. Nothing on a prerelease. |
 | [`deploy-docs.sh`](./deploy-docs.sh)         | `docs`   | `publish`   | `CI`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `DISPAT_NEW_VERSION` | A force-pushed orphan `gh-pages` branch carrying `packages/docs/build`.                       |
+
+The `docker` space has no scripts here at all. Its stages are
+[`docker compose build` and `docker compose push`](../docker/README.md) with a `docker login` one-liner, written
+straight into [`dispat.json`](../dispat.json), because that is all they are: the image's version lives in its
+`docker-compose.yml`, which dispat reads and rewrites as a manifest, and its moving tags live in a per-channel file the
+stage selects with `-f $DISPAT_CHANNEL.yml`. Nothing is left for a shell to decide.
 
 Each script's own header comment carries the reasoning behind it: why the binaries are built with `GOWORK=off`, why a
 docs snapshot is cut per minor rather than per patch, and why the deploy pushes a branch instead of using
@@ -25,9 +32,14 @@ run the script only when the package is in the release window.
 dispat run build-dispat --since all -p dispat        # cross-compiles into services/dispat/dist
 dispat run build-docs --since all -p docs            # pnpm install + docusaurus build
 dispat run cut-docs-version --since all -p docs      # writes a versioned_docs snapshot if the version warrants one
+dispat run build-image --since all -s docker         # docker compose build, all four images, pushing nothing
 ```
 
-`deploy-docs.sh` is the exception: **do not run it**, by hand or through `dispat run`. It force-pushes the live site,
+`deploy-docs.sh` and `tag-action.sh` are the exceptions: **do not run them**, by hand or through `dispat run`. Each
+one publishes something — a site, the refs the GitHub Action resolves — and both refuse unless `CI=true` for the
+reason spelled out next.
+
+`deploy-docs.sh` is the clearest case of it. It force-pushes the live site,
 and the tag dispat writes afterwards is the only record that the leg completed, so a deploy outside a release run
 publishes a working tree to production and leaves nothing behind saying so. The script refuses unless `CI=true` for
 exactly that reason. Note that these are top-level `scripts`, so every changed package resolves them: without a

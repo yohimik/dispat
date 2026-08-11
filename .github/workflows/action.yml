@@ -1,0 +1,64 @@
+name: Action
+
+# The composite action and the installer under it, exercised on all three runner
+# operating systems. This is the only place install.ps1 runs on real Windows, so
+# a change to either script is only really tested here.
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - install.sh
+      - install.ps1
+      - .github/workflows/action.yml
+  push:
+    branches: [main]
+    paths:
+      - action.yml
+      - install.sh
+      - install.ps1
+      - .github/workflows/action.yml
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # `uses: ./` is the action as a caller gets it, rather than the scripts it
+      # happens to wrap: the inputs, the outputs and the PATH entry are all part
+      # of what is being tested.
+      #
+      # A version is pinned rather than left to resolve, because the resolution
+      # path needs a stable release to find and this repository is still on its
+      # rc train. Swap this for the empty default once 1.0.0 is out — that is
+      # the path most callers take.
+      - id: setup
+        uses: ./
+        with:
+          version: 1.0.0-rc.3
+
+      - name: The action reports what it installed
+        shell: bash
+        run: |
+          set -eu
+          echo "version output: ${{ steps.setup.outputs.version }}"
+          echo "path output:    ${{ steps.setup.outputs.path }}"
+          test "${{ steps.setup.outputs.version }}" = "1.0.0-rc.3"
+          test -x "${{ steps.setup.outputs.path }}"
+
+      - name: dispat is on PATH and runs
+        shell: bash
+        run: |
+          set -eu
+          # Straight off PATH, the way a job after this action would call it:
+          # the $GITHUB_PATH entry is half of what the action promises.
+          dispat --version
+          dispat --version | grep -q '1.0.0-rc.3'

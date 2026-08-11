@@ -370,6 +370,12 @@ dispat never rewrites an interpolated reference, so this one is left alone by de
 `--build-arg BASE_VERSION=$DISPAT_UPDATED_BASE_NEW_VERSION` (falling back to `$DISPAT_WORKSPACE_BASE_VERSION` when base
 is not part of this run; see [the script environment](environment.md)).
 
+**A worked example, in this repository.** dispat's own
+[container images](https://github.com/yohimik/dispat/tree/main/docker) are four packages set up this way, and they go
+one step further: each one's `docker-compose.yml` *is* its manifest, so the version lives there and the whole of the
+build and publish stages is `docker compose build` and `docker compose push`. The same file shows both halves of this
+section — a rewritten literal (`image:`) beside an interpolated reference dispat leaves alone (the channel tag).
+
 ## An Android app
 
 Gradle projects fit the same two slots. The version travels through environment variables into Gradle properties, and

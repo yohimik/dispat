@@ -5,15 +5,36 @@ the release into CI.
 
 ## Install
 
-The CLI lives in the `services/dispat` module of the repository (the binary installs as `dispat`):
+The install script downloads the release binary for your platform, checks it against the checksum GitHub published,
+and puts it on your `PATH`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+```
+
+It takes options if you want them — a version to pin, somewhere else to install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --version 1.2.3
+curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --bin-dir ~/.local/bin
+```
+
+`--version` accepts either spelling, `1.2.3` or `services/dispat/v1.2.3`; with no version it installs the latest
+stable release. `--help` lists the rest. On Windows,
+[`install.ps1`](https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1) does the same with `-Version` and
+`-BinDir`.
+
+Two other ways, if they suit you better:
 
 ```sh
 go install github.com/yohimik/dispat/services/dispat@latest
 ```
 
-Prebuilt binaries for Linux, macOS and Windows, on Intel and on ARM, are attached to every
-[GitHub release](https://github.com/yohimik/dispat/releases); download one and put it on your `PATH` if you prefer not
-to build from source.
+or download one of the prebuilt binaries for Linux, macOS and Windows, on Intel and on ARM, attached to every
+[GitHub release](https://github.com/yohimik/dispat/releases), and put it on your `PATH` yourself.
+
+In CI you usually want neither: GitHub Actions has [a composite action](./ci.md#the-github-action), and every other
+system can use [the container images](./ci.md#the-container-images) or the install script above.
 
 A downloaded binary keeps itself current: `dispat self-update` replaces it with the latest release and keeps the old
 one beside it for a week in case you want it back. Every command mentions a newer release on its way out, so you find
@@ -200,13 +221,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
-      - uses: actions/setup-go@v5
-      - run: go run . --log-format json
+      - uses: yohimik/dispat@v1
+      - run: dispat --log-format json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # GITHUB_REPOSITORY is set automatically by Actions
       - run: git push origin --tags   # publish the tags dispat created
 ```
+
+[dispat in CI](./ci.md) covers the action's inputs, the container images for every other CI system, and what a job
+needs beyond this.
 
 Notes:
 

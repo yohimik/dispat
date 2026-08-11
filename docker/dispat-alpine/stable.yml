@@ -1,0 +1,11 @@
+# The tags a stable release of dispat-alpine answers to, merged over
+# docker-compose.yml by the build and publish stages. See
+# docker/dispat-ubuntu/stable.yml for why these live outside the manifest.
+services:
+  dispat:
+    build:
+      tags:
+        - docker.io/yohimik/dispat-alpine:latest
+        - docker.io/yohimik/dispat-alpine:stable
+        - docker.io/yohimik/dispat-alpine:${DISPAT_MAJOR:?}
+        - docker.io/yohimik/dispat-alpine:${DISPAT_MAJOR:?}.${DISPAT_MINOR:?}

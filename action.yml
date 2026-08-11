@@ -1,0 +1,83 @@
+name: Setup dispat
+description: Install the dispat release orchestrator and put it on PATH.
+author: yohimik
+
+branding:
+  icon: package
+  color: blue
+
+# A composite action is checked out with the repository it lives in, so the
+# installer this runs is the one sitting beside it at whatever ref the caller
+# pinned. Nothing is downloaded to bootstrap, and the action cannot drift from
+# the script it wraps.
+inputs:
+  version:
+    description: >-
+      Version or tag to install: 1.2.3, v1.2.3 or services/dispat/v1.2.3.
+      Defaults to the latest stable release.
+    required: false
+    default: ''
+  bin-dir:
+    description: >-
+      Where to install. Defaults to a directory under HOME, which needs no sudo
+      and behaves the same on all three runner operating systems.
+    required: false
+    default: ''
+  github-token:
+    description: >-
+      Token for the releases API. It only raises the rate limit — dispat's
+      releases are public — but a shared CI egress address reaches the
+      unauthenticated limit easily.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: The version that was installed.
+    value: ${{ steps.unix.outputs.version || steps.windows.outputs.version }}
+  path:
+    description: The installed binary's full path.
+    value: ${{ steps.unix.outputs.path || steps.windows.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - id: unix
+      if: runner.os != 'Windows'
+      shell: sh
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BIN_DIR: ${{ inputs.bin-dir }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -eu
+        BIN_DIR="${INPUT_BIN_DIR:-$HOME/.dispat/bin}"
+        # install.sh prints the resolved version to stdout and everything else to
+        # stderr, which is the whole of what this needs to report what it did.
+        if [ -n "$INPUT_VERSION" ]; then
+          VERSION=$(sh "$GITHUB_ACTION_PATH/install.sh" --version "$INPUT_VERSION" --bin-dir "$BIN_DIR")
+        else
+          VERSION=$(sh "$GITHUB_ACTION_PATH/install.sh" --bin-dir "$BIN_DIR")
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "path=$BIN_DIR/dispat" >> "$GITHUB_OUTPUT"
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+    - id: windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BIN_DIR: ${{ inputs.bin-dir }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $binDir = if ($env:INPUT_BIN_DIR) { $env:INPUT_BIN_DIR } else { Join-Path $env:USERPROFILE '.dispat\bin' }
+        # Not $args: that is an automatic variable, and splatting over it is a
+        # trap rather than a style question.
+        $params = @{ BinDir = $binDir }
+        if ($env:INPUT_VERSION) { $params['Version'] = $env:INPUT_VERSION }
+        $version = & "$env:GITHUB_ACTION_PATH/install.ps1" @params
+        "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "path=$(Join-Path $binDir 'dispat.exe')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        $binDir | Out-File -FilePath $env:GITHUB_PATH -Append

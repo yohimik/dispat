@@ -1,0 +1,30 @@
+# The manifest of the dispat-ubuntu package, and the command that builds it.
+#
+# dispat reads this file the way it reads a package.json: the service that both
+# declares a build section and carries a tagged image is what the folder ships,
+# so `image:` below is this package's name and version, and the version stage
+# rewrites the tag on release.
+#
+# The moving tags live in the per-channel files beside this one — stable.yml,
+# rc.yml — which the build and publish stages merge in by channel name. Compose
+# appends `build.tags` across `-f` files, so each release gets its versioned tag
+# from here and its moving tags from whichever channel it is on.
+services:
+  dispat:
+    image: docker.io/yohimik/dispat-ubuntu:1.0.0
+    build:
+      # The repository root, so the Dockerfile can COPY install.sh with nothing
+      # staged first. The root .dockerignore keeps that context to one file.
+      context: ../..
+      dockerfile: docker/dispat-ubuntu/Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      args:
+        # The CLI release to install, which is not this image's own version: an
+        # image-only patch ships the CLI that is already out. The workspace
+        # listing carries exactly that number — the planned version while the
+        # CLI is releasing in this run, its baseline otherwise.
+        DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}
+      labels:
+        io.dispat.cli.version: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}

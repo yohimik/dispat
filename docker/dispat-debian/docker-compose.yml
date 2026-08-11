@@ -1,0 +1,16 @@
+# The manifest of the dispat-debian package, and the command that builds it. The
+# moving tags live in stable.yml / rc.yml beside it, merged in by channel.
+# docker/dispat-ubuntu/docker-compose.yml carries the reasoning behind the shape.
+services:
+  dispat:
+    image: docker.io/yohimik/dispat-debian:1.0.0
+    build:
+      context: ../..
+      dockerfile: docker/dispat-debian/Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      args:
+        DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}
+      labels:
+        io.dispat.cli.version: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}

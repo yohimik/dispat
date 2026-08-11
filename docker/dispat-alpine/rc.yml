@@ -1,0 +1,8 @@
+# The tags a release-candidate release of dispat-alpine answers to. A prerelease
+# answers to its channel and its exact version and nothing else; see
+# docker/dispat-ubuntu/rc.yml.
+services:
+  dispat:
+    build:
+      tags:
+        - docker.io/yohimik/dispat-alpine:rc

@@ -1,0 +1,7 @@
+# The image builds use the repository root as their context so their Dockerfiles
+# can COPY install.sh directly, with nothing staged first. Nothing else in the
+# repository belongs in a build context — packages/docs/build alone is tens of
+# megabytes — so the context is defined by what it may contain rather than by
+# what it must exclude.
+*
+!install.sh

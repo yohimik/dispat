@@ -1,0 +1,26 @@
+# The tags a stable release of dispat-ubuntu answers to, merged over
+# docker-compose.yml by the build and publish stages:
+#
+#   docker compose -f docker-compose.yml -f stable.yml build
+#
+# Compose appends `build.tags` across files, so these join the versioned tag the
+# manifest declares rather than replacing it, and one build pushes all of them
+# at the same digest.
+#
+# The file name matters. dispat recognises manifests by exact name — eight
+# spellings of compose.yaml / docker-compose.yml — and this is none of them, so
+# autoVersion never rewrites what is in here. That is the whole reason `latest`
+# can stay `latest` instead of being reconciled to the version on every release.
+#
+# Selection is by channel name rather than by a condition: the stage runs
+# `-f $DISPAT_CHANNEL.yml`, so a stable release picks this file and a prerelease
+# picks rc.yml. A channel with no file fails the build, which is the right
+# answer — a new train should not silently inherit `latest`.
+services:
+  dispat:
+    build:
+      tags:
+        - docker.io/yohimik/dispat-ubuntu:latest
+        - docker.io/yohimik/dispat-ubuntu:stable
+        - docker.io/yohimik/dispat-ubuntu:${DISPAT_MAJOR:?}
+        - docker.io/yohimik/dispat-ubuntu:${DISPAT_MAJOR:?}.${DISPAT_MINOR:?}
