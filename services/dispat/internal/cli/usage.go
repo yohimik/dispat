@@ -77,6 +77,11 @@ for the next run (W230), and a selection that releases part of a versioning
 group says so (W231); --strict refuses either before anything is published,
 and --group takes a whole group at once so it never splits one.
 
+Before anything else the run takes the release lock: a "dispat-release-lock"
+tag pushed to the remote, removed when the run ends. A second release while
+one is running is refused rather than raced. DISPAT_UNSAFE_DISABLE_LOCK=true
+switches it off for repositories with no remote to coordinate through.
+
 This is what a bare "dispat" does.`,
 		flags: append([]string{"strict"}, selectionFlags...),
 	},

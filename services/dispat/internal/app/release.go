@@ -50,6 +50,29 @@ type ReleaseOptions struct {
 // reached execution (a blocked plan, failed verification, a failed gating
 // hook).
 func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*release.Result, error) {
+	// The lock comes before the plan, not before the publish: two runs that
+	// both got as far as planning have already read the same tags and decided
+	// on the same versions, and whichever of them notices second has wasted
+	// the work either way. checkGit runs first so a repository without git
+	// still fails in its own words rather than on a raw `git tag`.
+	if err := a.checkGit(); err != nil {
+		return nil, err
+	}
+	if !lockDisabled() {
+		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
+		if err := lock.Acquire(ctx); err != nil {
+			a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", a.pushRemote()).
+				Str("remedy", release.LockRemedy).Msg("unable to create the release lock tag")
+			return nil, err
+		}
+		// Deferred, so every way out of this function goes through it: a
+		// refusal, a failed package, a finished run. Detached from
+		// cancellation, so a Ctrl-C unlocks too — an interrupted run has more
+		// reason to give the lock back than a finished one, since nobody is
+		// standing by to do it by hand.
+		defer lock.Release(context.WithoutCancel(ctx))
+	}
+
 	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -67,10 +90,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 
 	commitMode := a.cfg.Commit.IsEnabled()
 	pushMode := a.cfg.Commit.PushEnabled()
-	remote := a.cfg.Commit.Remote
-	if remote == "" {
-		remote = "origin"
-	}
+	remote := a.pushRemote()
 
 	// Resolve the GitHub releasers: one per distinct target the packages'
 	// resolved policies name — most runs resolve to a single one. Empty
