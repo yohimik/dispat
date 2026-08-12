@@ -105,7 +105,7 @@ Three flags decide what happens, and each may be repeated:
 |------------------|----------------------------------------------------------------------------------|
 | `--set-version`  | Rewrites the manifest's own version field                                        |
 | `--set`          | Sets one dependency's declared range                                             |
-| `--replace`      | Points one dependency at a local folder, or removes that redirect                |
+| `--link`      | Points one dependency at a local folder, or removes that redirect                |
 
 You can name several manifests in one invocation, including manifests of different ecosystems. Each file is written
 on its own and only if something in it actually changed, so re-running the same command a second time is a no-op.
@@ -128,11 +128,11 @@ $ dispat writer packages/web/package.json \
 
 ### Pointing a dependency at a folder
 
-`--replace name=path` writes the directive that redirects a dependency to a local folder, in whichever way the format
+`--link name=path` writes the directive that redirects a dependency to a local folder, in whichever way the format
 spells it. A `go.mod` gets a `replace` line, a `package.json` gets a `file:` range, and so on:
 
 ```console
-$ dispat writer services/api/go.mod --replace github.com/acme/core=../../packages/core
+$ dispat writer services/api/go.mod --link github.com/acme/core=../../packages/core
 services/api/go.mod
   applied  replace  github.com/acme/core  ../../packages/core
 1 manifest(s): 1 applied, 0 skipped, 0 missing
@@ -142,7 +142,7 @@ Leaving the path empty removes the redirect and lets the declaration resolve nor
 happen before anything is published:
 
 ```console
-$ dispat writer services/api/go.mod --replace 'github.com/acme/core='
+$ dispat writer services/api/go.mod --link 'github.com/acme/core='
 services/api/go.mod
   applied  replace  github.com/acme/core  (removed)
 ```
@@ -176,7 +176,7 @@ command are still written, and the command exits `1` at the end.
   [`dispat compute`](./cli.md#the-compute-command). It uses the scanner underneath and understands your packages; the
   scanner alone only reports files.
 - Making the same change in every package the plan picks, instead of in the files you name, is
-  [`dispat autoreplace`](./autoreplace.md). Same three flags, same outcomes; it finds the manifests itself.
+  [`dispat autowriter`](./autowriter.md). Same three flags, same outcomes; it finds the manifests itself.
 - Reconciling manifests to the versions a release just computed is
   [auto-versioning](./configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
   underneath and knows what the new versions are; the writer alone only writes what you tell it.

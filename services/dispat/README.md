@@ -43,7 +43,8 @@ $ dispat compute                    # derive the dependency graph and the starti
 $ dispat preview                    # pending release notes, all packages (-p core: just one)
 $ dispat scanner packages/core      # what that folder's manifests declare; no config or git needed
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
-$ dispat autoreplace --set @acme/utils='^{version}' --since all       # ...the same edit in every package
+$ dispat autowriter --set @acme/utils='^{version}' --since all       # ...the same edit in every package
+$ dispat autowriter --set-local --since all                          # ...or every workspace range, worked out
 $ dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle   # literal text, no parsing
 $ dispat run build --since all -p core   # try the build script in packages/core with the real DISPAT_* env
 $ dispat release -g platform        # release one versioning group; -s libs releases one space
@@ -109,7 +110,8 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, your own header and footer lines, holding prereleases back, the release commit. |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object, quieting the parser's diagnostics.         |
 | [Manifest tools](https://yohimik.github.io/dispat/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
-| [Editing across the monorepo](https://yohimik.github.io/dispat/autoreplace)      | `dispat autoreplace`: one manifest edit applied to every package the plan selects.                  |
+| [Editing across the monorepo](https://yohimik.github.io/dispat/autowriter)      | `dispat autowriter`: one manifest edit applied to every package the plan selects, or edits derived from the workspace. |
+| [Substituting across the monorepo](https://yohimik.github.io/dispat/autosubstitute) | `dispat autosubstitute`: literal text replaced in every package the plan selects.               |
 | [The replacer](https://yohimik.github.io/dispat/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
 | [Commit messages](https://yohimik.github.io/dispat/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
 | [Script environment](https://yohimik.github.io/dispat/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |

@@ -14,7 +14,7 @@ appear in CI's job summary.
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
 **2026-08-12** (after the release lock, the consumer-keyed `dependencies`, the version component variables, the
 post-publish critical model, `commit.force` and alias tags, on top of the static `env` and `custom` config objects, the `run.allowBranch` and
-behind-remote release guards and `dispat commit --tag-name`, on top of `dispat self-update` and the update notice, on top of `dispat autoreplace` and the package sweep
+behind-remote release guards and `dispat commit --tag-name`, on top of `dispat self-update` and the update notice, on top of `dispat autowriter` and the package sweep
 every covering command now shares, the `--group` selection, the narrowed `release` and `status`, the manifest-derived
 baselines in `dispat compute`, the github step command, the prerelease record opt-out, per-command help,
 `parser.quiet` and the package `src` path) with Go 1.26 using the steps under [Reproducing](#reproducing), and drifts until someone regenerates it.

@@ -346,7 +346,7 @@ func FuzzRewriteNuGetLists(f *testing.F) {
 
 // FuzzLink hammers the insertion path across every format that has a
 // redirect. Insertion can change a file's structure where a splice cannot, so
-// the contract is the same but the risk is higher: a failed replace never
+// the contract is the same but the risk is higher: a failed link never
 // modifies the file, and a successful one never turns a parseable manifest
 // into an unparseable one.
 func FuzzLink(f *testing.F) {
@@ -377,7 +377,7 @@ func FuzzLink(f *testing.F) {
 			}
 			if err != nil {
 				if string(data) != content {
-					t.Fatalf("%s: a failed replace modified the file:\n in: %q\nout: %q", file, content, data)
+					t.Fatalf("%s: a failed link modified the file:\n in: %q\nout: %q", file, content, data)
 				}
 				continue
 			}
@@ -385,11 +385,11 @@ func FuzzLink(f *testing.F) {
 			case "Cargo.toml", "pyproject.toml":
 				var in, out map[string]any
 				if toml.Unmarshal([]byte(content), &in) == nil && toml.Unmarshal(data, &out) != nil {
-					t.Fatalf("%s: replace corrupted valid TOML:\n in: %q\nout: %q", file, content, data)
+					t.Fatalf("%s: a link corrupted valid TOML:\n in: %q\nout: %q", file, content, data)
 				}
 			case "package.json":
 				if json.Valid([]byte(content)) && !json.Valid(data) {
-					t.Fatalf("replace corrupted valid JSON:\n in: %q\nout: %q", content, data)
+					t.Fatalf("a link corrupted valid JSON:\n in: %q\nout: %q", content, data)
 				}
 			}
 		}

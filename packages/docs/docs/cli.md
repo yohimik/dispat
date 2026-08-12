@@ -15,7 +15,8 @@ dispat [command] [flags]
 | `preview`                 | Print pending release notes and exit; see [The preview command](#the-preview-command).                            |
 | `changelog`               | Write the pending changelog entry now; see [The step commands](#the-step-commands).                               |
 | `autoversion`             | Reconcile manifests to the planned versions; see [The step commands](#the-step-commands).                         |
-| `autoreplace`             | Apply one set of manifest edits to every covered package; see [The autoreplace command](#the-autoreplace-command). |
+| `autowriter`             | Apply one set of manifest edits to every covered package; see [The autowriter command](#the-autowriter-command). |
+| `autosubstitute`         | Replace literal text across every covered package; see [The autosubstitute command](#the-autosubstitute-command). |
 | `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `github`                  | Create the per-package GitHub release now; see [The step commands](#the-step-commands).                           |
 | `if <cond>`               | Run one of several shell scripts, chosen by a condition on the environment; see [Shell helpers](./shell-helpers.md). |
@@ -33,7 +34,7 @@ dispat [command] [flags]
 | `--root`              | `.`         | Where to start config resolution, usually where you stand. The *effective* monorepo root is the directory the config file is found in (see `--config`), so the CLI works from inside a package folder. |
 | `--config`            | auto        | Config file name, relative to `--root`. When not set, the file is discovered under the [resolution rules](./configuration/README.md); an explicit name is used as-is, with no fallback and no ascent.  |
 | `--concurrency`       | from config | Override: one value for both stages (`7`) or `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
-| `--on-error`          | `skip`      | Every sweeping command (`run`, `autoreplace`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
+| `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autosubstitute`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
 | `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
 | `--space`, `-s`       |             | The same nine commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
 | `--group`, `-g`       |             | The same nine commands: narrow to every package of the named [versioning groups](./versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
@@ -63,22 +64,25 @@ dispat [command] [flags]
 | `--file`, `--file-title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation. `--file-title` states the whole title as one line. |
 | `--release-name`      | from config | `changelog` and `github`: override [`releaseName`](./configuration/records.md#your-own-words-around-an-entry) for the invocation. `$VAR` and `${VAR}` expand as they do in the config. |
 | `--range`, `--match`, `--write-version` | from config | `autoversion` only: override the matching `autoVersion.*` policy for the invocation.                             |
-| `--manifests`         | from config | `autoversion` and `autoreplace`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
-| `--only-updated`      |             | `autoversion` and `autoreplace`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
+| `--manifests`         | from config | `autoversion` and `autowriter`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
+| `--only-updated`      |             | `autoversion` and `autowriter`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
 | `--no-replace`        |             | `autoversion` only: skip the `autoVersion.replace` rules for this invocation.                                     |
-| `--sync-lock`         | `true`      | `autoversion` and `autoreplace`: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them. |
+| `--sync-lock`         | `true`      | `autoversion` and `autowriter`: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them. |
 | `--root-only`         |             | `scanner` only: read the folder's own manifests without descending into sub-folders.                                       |
-| `--set-version`       |             | `writer` and `autoreplace`: rewrite the manifest's own version field. For `autoreplace`, `{version}` writes the covered package's planned version, and only its root manifests are touched. |
-| `--set`               |             | `writer` and `autoreplace`: set one dependency's declared range, `[kind:]name=range`; repeatable. For `autoreplace`, `{version}` in the range is the planned version of the package the edit names. |
-| `--replace`           |             | `writer` and `autoreplace`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
-| `--sub`               |             | `replacer` only: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
+| `--set-version`       |             | `writer` and `autowriter`: rewrite the manifest's own version field. For `autowriter`, `{version}` writes the covered package's planned version, and only its root manifests are touched. |
+| `--set`               |             | `writer` and `autowriter`: set one dependency's declared range, `[kind:]name=range`; repeatable. For `autowriter`, `{version}` in the range is the planned version of the package the edit names. |
+| `--link`              |             | `writer` and `autowriter`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
+| `--set-local`         |             | `autowriter` only: set every declared workspace dependency to its provider's version, spelled by `--range`. |
+| `--link-local`        |             | `autowriter` only: point every declared workspace dependency at its folder. `--unlink-local` removes those redirects again; the two cannot be combined. |
+| `--files`             |             | `autosubstitute` only: which files of each covered package to rewrite, as globs relative to its folder; repeatable. |
+| `--sub`               |             | `replacer` and `autosubstitute`: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
 | `--then`, `--elif`, `--else` |      | `if` only: the script a condition runs, another condition, and the script for when none held. `--then` and `--elif` are repeatable and pair in order. See [Shell helpers](./shell-helpers.md#dispat-if). |
 | `--for-package`, `--for-space` |    | `exec` only: the subject of the invocation, which decides both the level the script name is looked up in and the environment the script gets. One exact name, no globs. See [Shell helpers](./shell-helpers.md#one-subject-decides-everything). |
 | `--fallback`          |             | `exec` only: resolve the script name the way `dispat run` does, walking from the package to its space to the top level, instead of reading the named level alone. |
 | `--script-from`       |             | `exec` only: take the script text from `pkg:<name>`, `space:<name>` or `root`, leaving the environment with the subject. See [Taking the script from somewhere else](./shell-helpers.md#taking-the-script-from-somewhere-else). |
 | `--env`               | `static`    | `exec` only: what the subject adds to the environment. `static` is its declared `env`, `dispat` the `DISPAT_*` release variables, `both` what a stage script sees. The last two compute a plan, and nothing else in the command does. |
 | `--on-failure`        |             | `if` and `exec`: run this script when the chosen script fails, and exit with the failure script's code instead of the failed script's. |
-| `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. `autoreplace`: an edit that matched no manifest anywhere; see [Editing across the monorepo](./autoreplace.md#applied-skipped-and-missing-across-many-packages). |
+| `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. `autowriter`: an edit that matched no manifest anywhere; see [Editing across the monorepo](./autowriter.md#applied-skipped-and-missing-across-many-packages). `autosubstitute`: a `--sub` that matched nothing in any covered package. |
 | `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`, and a binary installed with `go install` says so in the same parenthesis, since that decides how it is [updated](./self-update.md#how-you-installed-it-matters). |
 | `--help`, `-h`        |             | Print help and exit. Without a command word, the command list and the global flags; after one, that command's synopsis and its own flags. See [Getting help](#getting-help).                            |
 
@@ -275,10 +279,10 @@ export out of its own environment — the stage handed it over, along with `DISP
 attaches the files it lists. Run by hand with the variable exported, it covers every package the invocation selects.
 Without either opt-in the command publishes nothing, and says so with exit `0`.
 
-## The autoreplace command
+## The autowriter command
 
-`dispat autoreplace` is `dispat writer` pointed at a selection instead of a list of files: `--set-version`, `--set` and
-`--replace` mean exactly what they mean there, but the manifests are found by scanning each covered package and the
+`dispat autowriter` is `dispat writer` pointed at a selection instead of a list of files: `--set-version`, `--set` and
+`--link` mean exactly what they mean there, but the manifests are found by scanning each covered package and the
 packages are the ones the plan and the window pick. It takes the same selection and window flags as the step commands,
 so `--package`, `--space`, `--group`, `--since` and `--consumers` all read the same.
 
@@ -289,9 +293,33 @@ own — written to its root manifests alone. `--only-updated` drops every edit n
 update, and `--strict` fails on an edit that matched no manifest anywhere, which is the cross-package reading of
 missing: an edit absent from one manifest of twenty is the ordinary case.
 
+`--set-local`, `--link-local` and `--unlink-local` derive the edits instead of taking them: every dependency a
+manifest declares that names another package in the workspace has its range reconciled to that package's version
+(spelled by `--range`), its local folder redirect written, or that redirect removed. A dependency named by `--set` or
+`--link` keeps what the command line said. Derived links skip `package.json`, since npm refuses an override for a
+directly declared dependency, and a local link must be removed with `--unlink-local` before publishing because no
+release removes one.
+
 A covered package with no manifest anything can write is a no-op; a selection in which none of them has one is an
 error. The whole command, with worked examples, is in
-[Editing across the monorepo](./autoreplace.md).
+[Editing across the monorepo](./autowriter.md).
+
+## The autosubstitute command
+
+`dispat autosubstitute` is `dispat replacer` pointed at a selection instead of a list of files: `--sub 'find=>write'`
+means exactly what it means there, and `--files` says which of each covered package's files to look in, as globs
+relative to that package's folder. Both are repeatable, and each package folder is walked once however many globs
+there are.
+
+A `--sub` carrying `{provider}`, `{providerVersion}` or `{providerPrevious}` is rendered once per workspace package the
+covered package declares, so one pattern reaches every hand-written coordinate without naming a dependency. `{name}`,
+`{version}` and `{previous}` render the covered package itself. `--only-updated` narrows the fan-out to the providers
+this run releases.
+
+The packages carrying these coordinates are usually the consumers of what just changed, and the window covers only what
+the commits touched, so `--consumers` is what reaches them. `--strict` fails on a `--sub` that matched nothing in any
+covered package. The whole command is in
+[Substituting text across the monorepo](./autosubstitute.md).
 
 ## The compute command
 
@@ -387,7 +415,7 @@ listing for one event per file.
 identity, ecosystem and dependency declarations. A manifest that fails to parse is reported while the rest are still
 listed, and `--strict` turns that into exit `1`.
 
-`dispat writer <manifest>...` applies `--set-version`, `--set` and `--replace` to each named manifest. Every edit ends
+`dispat writer <manifest>...` applies `--set-version`, `--set` and `--link` to each named manifest. Every edit ends
 as applied, skipped (a version deferring to something outside the file, which is normal and never fails the command)
 or missing (a dependency the manifest does not declare, which fails only under `--strict`). A path no writer covers
 always exits `1`.

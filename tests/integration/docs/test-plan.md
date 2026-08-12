@@ -112,7 +112,7 @@ The suite was designed against twenty-one goals, one test file each:
     and its provider's in the service it pulls; that a build stage and a port mapping are left alone; and that the
     repository a Docker manifest declares — never a folder name — reaches the workspace index the planner and the
     writer share.
-19. **The `autoreplace` command** (`autoreplace_test.go`): `dispat writer`'s edits applied to the packages the plan
+19. **The `autowriter` command** (`autowriter_test.go`): `dispat writer`'s edits applied to the packages the plan
     selects. What only the binary can witness: that the manifests it writes are the ones it found by scanning each
     covered package rather than any it was told about; that the edits land byte for byte, leaving every other byte of
     the fixture alone, and converge on a second pass; that `{version}` resolves against the plan the binary has just
@@ -120,7 +120,7 @@ The suite was designed against twenty-one goals, one test file each:
     naming no package of the workspace is refused before a file is opened; that `--manifests root` stops at the package
     folder while `all` descends without stamping a nested manifest's own version; that `--only-updated` follows the
     plan, so the same command is a clean no-op once everything it named has been released; that `--strict` is asked
-    across the whole sweep rather than per file; that `--replace` adds and removes a redirect; that the syncLock
+    across the whole sweep rather than per file; that `--link` adds and removes a redirect; that the syncLock
     scripts run exactly where a manifest changed and `--sync-lock=false` skips them; and that every refusal (a stale
     edit, a malformed spec, an unknown scope, nothing to write, a positional argument) reaches the process exit code.
 
@@ -262,7 +262,8 @@ tests/integration/
   manifests_test.go         goal 16
   filter_test.go            goal 17
   docker_test.go            goal 18
-  autoreplace_test.go       goal 19
+  autowriter_test.go       goal 19
+  autosubstitute_test.go    goal 20b
   selfupdate_test.go        goal 20
   guard_test.go             goal 21
   if_test.go                goal 22 (dispat if)
@@ -578,7 +579,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestManifestsScannerJSONEvents`                | `--log-format json` is this command's machine contract too: one event per manifest carrying path, ecosystem, identity and every declaration with its kind spelled out, plus the summary counts.                                       |
 | `TestManifestsScannerStrictGatesBrokenManifests` | The partial-result contract reaching the exit code: a broken manifest is reported while the healthy ones are still listed and the run exits 0; `--strict` refuses the same repository with the partial result still printed.          |
 | `TestManifestsWriterEditsInPlace`                | A two-ecosystem batch rewrites only the version text being changed, byte-for-byte elsewhere, in `package.json` (own version plus two fields) and `go.mod` (a require, no own version to write); re-running the same edits converges to `manifest unchanged`. |
-| `TestManifestsWriterRedirects`                   | `--replace` adds the local-folder directive and an empty path removes it, and the scanner reads back what the writer just wrote, which is the pair's whole contract.                                                                  |
+| `TestManifestsWriterRedirects`                   | `--link` adds the local-folder directive and an empty path removes it, and the scanner reads back what the writer just wrote, which is the pair's whole contract.                                                                  |
 | `TestManifestsWriterOutcomesReachTheExitCode`    | The three outcomes mapped onto exit codes: missing is tolerated (0) until `--strict` (1); a path no writer covers exits 1 while the usable manifests of the same batch are still written; a malformed `--set`, an invocation with nothing to write, and one with no manifest are usage errors (2). |
 | `TestManifestsCommandWordsKeepTheirScripts`      | The command words are reserved: the bare `dispat scanner` is the command even where the config defines a `scanner` script, while `dispat run scanner` still reaches the script.                                                       |
 | `TestManifestsReplacerNeedsNoConfig`             | The replacer runs over files that are not manifests at all, with no config file and no git history: every occurrence replaced, the paths resolved against `--root`, and repeated `--sub` values applied in order, each over what the last left. |
@@ -622,19 +623,45 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestDockerReleaseReconcilesTagsAndCompose`     | A release reconciles both Docker formats at the version stage: the consumer's `FROM` tag and its `COPY --from` image follow the provider's new version, a `COPY --from` naming a build stage is left alone, and the compose file gets the package's own version in the service it builds and every `build.tags` entry, the provider's in the service it pulls, and nothing at all in a port mapping. |
 | `TestDockerManifestCommands`                    | The config-free commands over both formats: `scanner` reports a compose file's identity and a Dockerfile's bases with no config, commit or plan; `writer` rewrites a compose tag and own version proved byte-for-byte on disk; a digest-pinned base is skipped rather than failed, and a missing edit still gates under `--strict`. |
 
-### Goal 19: the `autoreplace` command (`autoreplace_test.go`)
+### Goal 19: the `autowriter` command (`autowriter_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                          |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `TestAutoReplaceEditsEveryCoveredPackage`       | One invocation reaches every package the window covers, writing the fixture back with exactly the edited bytes changed; `{version}` resolves against the plan the binary just computed, in a range and in the own-version field alike; a second pass leaves the working tree untouched. |
-| `TestAutoReplaceSelectsLikeEveryOtherCommand`   | The selection is the shared one: a `--package` term, the invocation folder standing in for it, `--consumers` reaching a package that declares nothing itself, and an unmatched term exiting 1.                                          |
-| `TestAutoReplaceOnlyUpdatedFollowsThePlan`      | `--only-updated` keeps an edit while the package it names is releasing and drops one naming no package of the workspace; once everything is released the same command writes nothing and says so, exiting 0.                            |
-| `TestAutoReplaceManifestScope`                  | `--manifests root` stops at the package folder while `all` reaches a nested manifest, and the own-version write stays on the root manifests under either scope.                                                                        |
-| `TestAutoReplaceRedirects`                      | `--replace` adds the local-folder directive across the selection and an empty path restores the declared range.                                                                                                                       |
-| `TestAutoReplaceOutcomesReachTheExitCode`       | `--strict` is asked across the sweep (an edit landing in one package of two is clean, one landing nowhere exits 1, and without the flag the same run exits 0); nothing to write, a malformed spec, an unknown `--manifests` value and a positional argument are usage errors (2); an unresolvable `{version}` exits 1 with nothing written. |
-| `TestAutoReplaceJSONEvents`                     | The machine contract: one event per manifest carrying its path and the package it belongs to, plus the run's applied/skipped/missing tally.                                                                                            |
-| `TestAutoReplaceSyncLock`                       | The syncLock scripts run exactly where a manifest changed, not where it did not, never on a converged re-run, and not at all under `--sync-lock=false`.                                                                                |
-| `TestAutoReplaceCommandWordKeepsItsScript`      | `autoreplace` is reserved like every other command word, and `dispat run autoreplace` still reaches a script of that name.                                                                                                             |
+| `TestAutoWriterEditsEveryCoveredPackage`       | One invocation reaches every package the window covers, writing the fixture back with exactly the edited bytes changed; `{version}` resolves against the plan the binary just computed, in a range and in the own-version field alike; a second pass leaves the working tree untouched. |
+| `TestAutoWriterSelectsLikeEveryOtherCommand`   | The selection is the shared one: a `--package` term, the invocation folder standing in for it, `--consumers` reaching a package that declares nothing itself, and an unmatched term exiting 1.                                          |
+| `TestAutoWriterOnlyUpdatedFollowsThePlan`      | `--only-updated` keeps an edit while the package it names is releasing and drops one naming no package of the workspace; once everything is released the same command writes nothing and says so, exiting 0.                            |
+| `TestAutoWriterManifestScope`                  | `--manifests root` stops at the package folder while `all` reaches a nested manifest, and the own-version write stays on the root manifests under either scope.                                                                        |
+| `TestAutoWriterRedirects`                      | `--link` adds the local-folder directive across the selection and an empty path restores the declared range.                                                                                                                       |
+| `TestAutoWriterOutcomesReachTheExitCode`       | `--strict` is asked across the sweep (an edit landing in one package of two is clean, one landing nowhere exits 1, and without the flag the same run exits 0); nothing to write, a malformed spec, an unknown `--manifests` value and a positional argument are usage errors (2); an unresolvable `{version}` exits 1 with nothing written. |
+| `TestAutoWriterJSONEvents`                     | The machine contract: one event per manifest carrying its path and the package it belongs to, plus the run's applied/skipped/missing tally.                                                                                            |
+| `TestAutoWriterSyncLock`                       | The syncLock scripts run exactly where a manifest changed, not where it did not, never on a converged re-run, and not at all under `--sync-lock=false`.                                                                                |
+| `TestAutoWriterCommandWordKeepsItsScript`      | `autowriter` is reserved like every other command word, and `dispat run autowriter` still reaches a script of that name.                                                                                                             |
+| `TestAutoWriterSetLocalDerivesEveryWorkspaceRange` | `--set-local` writes the provider's planned version into every declaration naming a package here, spelled by `--range`, with no dependency typed and a third-party range untouched.                                            |
+| `TestAutoWriterSetLocalConverges`              | A second `--set-local` pass computes the same ranges, writes nothing and reports nothing applied, so a converged run cannot re-trigger the syncLock scripts.                                                                       |
+| `TestAutoWriterSetLocalYieldsToTheCommandLine` | A dependency named by `--set` keeps what the operator asked for; the derived edit steps aside.                                                                                                                                    |
+| `TestAutoWriterSetLocalSpellsEachEcosystemItsOwnWay` | One `--range` keyword crosses ecosystems through the shared renderer: go.mod keeps its canonical `v`, and a Docker tag stays a bare label rather than growing a caret.                                                       |
+| `TestAutoWriterSetLocalTemplateRangeIsVerbatim` | A `--range` template passes through untouched, so over a mixed workspace it can hand a Docker manifest something no registry accepts, and the writer refuses it rather than write it.                                             |
+| `TestAutoWriterLinkLocalRoundTrips`            | `--link-local` writes the folder redirect with a path relative to the manifest, and `--unlink-local` restores the file byte for byte, which is what proves the derived paths and their removal agree.                             |
+| `TestAutoWriterLinkLocalResolvesFromTheManifestFolder` | A nested manifest resolves its link from its own directory, one level deeper, rather than from the package folder.                                                                                                       |
+| `TestAutoWriterLinkLocalSkipsNpm`              | A derived link leaves `package.json` alone and says why: npm refuses an override for a directly declared dependency unless the specs match exactly.                                                                               |
+| `TestAutoWriterLinkLocalWarnsAboutPublishing`  | Every `--link-local` run warns that no release removes a local link, so one left in place ships a manifest consumers cannot resolve.                                                                                              |
+| `TestAutoWriterSetLocalAndLinkLocalInOnePass`  | The two derive from one reading of the same declarations, so asking for both writes both.                                                                                                                                        |
+| `TestAutoWriterLinkLocalLeavesTheComputedGraphAlone` | Writing a link suggests no config change compute did not already suggest, so a local checkout does not move the graph.                                                                                                     |
+| `TestAutoWriterLocalFlagsReachTheExitCode`     | `--link-local` with `--unlink-local` is a usage error (2); a bare local flag is a complete request; and a derived edit never trips the `--strict` stale gate.                                                                     |
+
+### Goal 20b: the `autosubstitute` command (`autosubstitute_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                                          |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestAutoSubstituteFansOutAcrossWorkspaceProviders` | A `{provider}` pattern is rendered once per workspace package the covered package declares, so a coordinate follows its provider with no dependency named on the command line.                                                     |
+| `TestAutoSubstitutePackageScopedPatternRunsOnce` | A `--sub` naming no provider is about the covered package itself and writes its own version.                                                                                                                                         |
+| `TestAutoSubstituteGlobsSelectWithinThePackage` | A glob reaches only what it names, inside the package folder the sweep handed over; a file no glob selected is untouched.                                                                                                             |
+| `TestAutoSubstituteOnlyUpdatedNarrowsTheFanOut` | `--only-updated` drops a provider released outside this run, so its coordinate is left as it is.                                                                                                                                      |
+| `TestAutoSubstituteConsumersReachesThePackagesTheWindowLeftOut` | The package carrying a stale coordinate is the one nothing changed in, so the window excludes it; `--consumers` is what pulls it in and closes the gap.                                                                |
+| `TestAutoSubstituteConvergesUnderStrict`        | The probe tells "already reconciled" apart from "never matched", so a converged re-run of a `{previous}=>{version}` pattern is clean rather than stale.                                                                               |
+| `TestAutoSubstituteLeavesANestedPackageToItsOwner` | A package nested inside another declines that package's files, which its owner's own turn writes, so one file is never written from two goroutines.                                                                                |
+| `TestAutoSubstituteOutcomesReachTheExitCode`    | `--strict` is asked across the sweep; no `--sub`, no `--files`, a malformed spec and a positional argument are usage errors (2).                                                                                                      |
+| `TestAutoSubstituteCommandWordKeepsItsScript`   | `autosubstitute` is reserved like every other command word, and `dispat run autosubstitute` still reaches a script of that name.                                                                                                      |
 
 ### Goal 21: the release guards (`guard_test.go`)
 
