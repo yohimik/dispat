@@ -2676,3 +2676,36 @@ func TestIgnoreInvalidPattern(t *testing.T) {
 	assert.Contains(t, err.Error(), "re-includes nothing")
 	assert.Contains(t, err.Error(), `package "core"`, "the refusal says whose pattern it is")
 }
+
+// TestIgnoreFileUnreadable: a .dispatignore that cannot be read (here: a
+// directory of that name) fails the load with the file named, rather than
+// silently counting files the author meant to exclude.
+func TestIgnoreFileUnreadable(t *testing.T) {
+	for _, dir := range []string{".", "packages/libs", "packages/libs/core"} {
+		t.Run(dir, func(t *testing.T) {
+			root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
+			require.NoError(t, os.MkdirAll(
+				filepath.Join(root, filepath.FromSlash(dir), DispatignoreName, "x"), 0o755))
+			_, err := discoverPackages(t, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), DispatignoreName)
+		})
+	}
+}
+
+// TestIgnoreFileInASpaceFolder: the space level can be written as a file too,
+// and it reaches every package of that space and no other.
+func TestIgnoreFileInASpaceFolder(t *testing.T) {
+	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	writeIgnoreFile(t, root, "packages/libs", "fixtures/\n")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	for _, name := range []string{"core", "utils"} {
+		assert.True(t, byName[name].Ignore.Ignores(
+			slash(root, "packages/libs/"+name+"/fixtures/a.json")), name)
+	}
+	assert.True(t, byName["app"].Counts(slash(root, "packages/apps/app/fixtures/a.json")),
+		"another space is untouched")
+}
