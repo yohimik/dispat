@@ -314,13 +314,13 @@ func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []confi
 }
 
 // tomlFallback is what a refused TOML edit prints: the block to paste and the
-// name of what it replaces. The root dependency list has a renderer of its
+// name of what it replaces. The root dependency object has a renderer of its
 // own, because its entries are objects whose empty fields the config reads as
 // absent and a generic marshal would spell out.
 func tomlFallback(e config.Edit) (what, block string, err error) {
-	if deps, ok := e.Value.([]config.DependencyConfig); ok {
+	if deps, ok := e.Value.(config.Dependencies); ok {
 		block, err = config.RenderDependenciesTOML(deps)
-		return "[[dependencies]] blocks", block, err
+		return "[dependencies] table", block, err
 	}
 	block, err = config.RenderKeyTOML(e.KeyPath, e.Value)
 	return e.KeyPath[len(e.KeyPath)-1], block, err

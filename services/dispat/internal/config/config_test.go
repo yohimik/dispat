@@ -874,10 +874,19 @@ func TestDiscoverScriptReferenceErrors(t *testing.T) {
 
 func TestExampleConfigsAreValid(t *testing.T) {
 	// The annotated examples double as documentation; they must always load.
+	loaded := make([]*File, 0, 2)
 	for _, f := range []string{"dispat.example.json", "dispat.example.yaml"} {
-		_, err := Load(filepath.Join("..", "..", f), nil)
+		cfg, err := Load(filepath.Join("..", "..", f), nil)
 		require.NoError(t, err, f)
+		loaded = append(loaded, cfg)
 	}
+	// Both examples document the same two ways of declaring an edge, and they
+	// have to agree about them: an example is the shape most people copy, and
+	// two that disagree teach two different config languages.
+	assert.Equal(t, loaded[0].Dependencies, loaded[1].Dependencies,
+		"the examples must declare the same top-level dependencies")
+	assert.Equal(t, loaded[0].Packages["cli"].Dependencies, loaded[1].Packages["cli"].Dependencies,
+		"and the same package-level ones")
 }
 
 func TestLoadVersioning(t *testing.T) {
@@ -1582,6 +1591,10 @@ func TestDepSourceLabel(t *testing.T) {
 		src  DepSource
 		want string
 	}{
+		// The root object is labelled by consumer: its Index counts the merged
+		// list, which is not a position anyone can find in the file.
+		{DepSource{KeyPath: []string{"dependencies"}, Index: 2, Key: "app", KeyIndex: 1},
+			`dependencies["app"][1]`},
 		{DepSource{KeyPath: []string{"dependencies"}, Index: 2}, "dependencies[2]"},
 		{DepSource{KeyPath: []string{"packages", "core", "dependencies"}},
 			`packages["core"]: dependencies[0]`},

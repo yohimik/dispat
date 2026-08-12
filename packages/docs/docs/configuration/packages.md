@@ -239,21 +239,39 @@ like space names.
 
 ## Package dependencies
 
-A package may declare the providers it depends on directly in its entry (or in its in-folder file): one provider name or
-an array of names. The consumer is the package itself and the edge kind is the default (`dependencies`); an edge that
-needs another kind or [`keep`](./README.md#dependencies) is declared in the top-level
-[`dependencies`](./README.md#dependencies) list instead.
+A package may declare the providers it depends on directly in its entry (or in its in-folder file), which keeps its
+dependencies next to the rest of its configuration:
 
-All declarations (the top-level list, every entry's list, every in-folder list) **merge into one list**; where an edge
-is declared changes nothing about how it plans. The top-level list also accepts a shorthand item keyed by consumer name
-(`{ "web": ["core", "utils"] }` or `{ "web": "core" }`), normalized into full entries at load.
+```json
+{
+  "packages": {
+    "web": {
+      "dependencies": [
+        "core",
+        { "provider": "utils", "keep": true },
+        { "provider": "tooling", "kind": "devDependencies" }
+      ]
+    }
+  }
+}
+```
+
+The entries are the ones a consumer lists in the top-level [`dependencies`](./README.md#dependencies) object, so an
+edge reads the same wherever it is declared and moving one between the two places is a cut and a paste. The consumer is
+the package itself. One provider needs no array: `"dependencies": "core"`.
+
+All declarations (the top-level object, every entry's list, every in-folder list) **merge into one list**; where an
+edge is declared changes nothing about how it plans.
 
 `dispat compute` treats every declaration source as one merged list and edits each declaration **in the entry that holds
 it**, whichever layer that is: a stale edge declared in a space's `packages` entry is removed from the root config, one
 declared in a space file from that file, one declared in a package's own file from there. Every suggestion names its
 source, so `spaces["libs"]: packages["core"]: dependencies[0]` says exactly what an applied change would touch. A kind
-correction moves the edge to the top-level list (the string form cannot carry a kind), detected additions always land
-there too, and each edited file gets its own `.backup`.
+correction is applied in place, since a package's list carries a kind as readily as the top-level object does.
+
+A **detected addition goes where its consumer already declares its providers**, and to the top-level object when it
+declares none. A config that keeps each package's dependencies in that package's entry stays that way instead of
+growing a second home for the edges the next `compute` finds. Each edited file gets its own `.backup`.
 
 ## In-folder configuration files
 

@@ -36,7 +36,7 @@ callable without a command line.
    space's `packages` entry, the space file's `packages` entry and the package folder's own file), each configured package getting a derived
    space value with the merged configuration (a standalone package a single-package space of its own), so everything
    downstream reads per-package behaviour without knowing the layers exist. Dependency declarations are collected from
-   every source (the root list, the entries, the in-folder files) into one merged list.
+   every source (the root object, the entries, the in-folder files) into one merged list.
 4. Build the dependency graph from the merged relations; topologically sort it (cycles abort with the members named).
 5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
    compute direct bumps, run the three propagation phases, then versions, with every versioning group (a space with

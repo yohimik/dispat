@@ -207,7 +207,7 @@ func TestPackageConfigRoundTrip(t *testing.T) {
 				VersionGroup: "core",
 				Concurrency:  []int{2, 1},
 				Changelog:    &ChangelogConfig{Enabled: Bool(false)},
-				Dependencies: []string{"core"},
+				Dependencies: Providers("core"),
 			},
 			"cli": {Path: "tools/cli"},
 		},
@@ -233,7 +233,7 @@ func TestPackageConfigRoundTrip(t *testing.T) {
 	if pc.VersionGroup != "core" || len(pc.Concurrency) != 2 {
 		t.Errorf("scalar fields lost: %+v", pc)
 	}
-	if len(pc.Dependencies) != 1 || pc.Dependencies[0] != "core" {
+	if len(pc.Dependencies) != 1 || pc.Dependencies[0].Provider != "core" {
 		t.Errorf("dependencies lost: %+v", pc)
 	}
 	if cli, ok := back.Package("cli"); !ok || cli.Path != "tools/cli" {
@@ -300,7 +300,7 @@ func TestSpaceFileRoundTrip(t *testing.T) {
 		Scripts:      map[string]string{"build": "make"},
 		Flow:         &SpaceFlowConfig{Build: []string{"build"}},
 		Packages: map[string]PackageConfig{
-			"core": {IsBuildWaitingPublish: Bool(true), Dependencies: []string{"utils"}},
+			"core": {IsBuildWaitingPublish: Bool(true), Dependencies: Providers("utils")},
 		},
 	}
 	data, err := json.Marshal(sf)
@@ -342,7 +342,7 @@ func TestSpaceFileRoundTrip(t *testing.T) {
 	if pc.IsBuildWaitingPublish == nil || !*pc.IsBuildWaitingPublish {
 		t.Errorf("the entry's own pointer must survive: %+v", pc)
 	}
-	if len(pc.Dependencies) != 1 || pc.Dependencies[0] != "utils" {
+	if len(pc.Dependencies) != 1 || pc.Dependencies[0].Provider != "utils" {
 		t.Errorf("entry dependencies lost: %+v", pc)
 	}
 }

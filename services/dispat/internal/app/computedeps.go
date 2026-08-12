@@ -59,6 +59,17 @@ func (s suggestion) render() string {
 	}
 }
 
+// pkgListEdit accumulates everything one package-level dependency list is
+// about to have done to it. The three happen together — an edge removed, one
+// corrected, one added — and the list is rewritten whole, so they are
+// collected per source rather than applied one at a time.
+type pkgListEdit struct {
+	src    config.DepSource
+	remove map[int]bool   // entry positions to drop
+	kind   map[int]string // entry positions whose kind changes, and to what
+	add    []config.DependencyConfig
+}
+
 // detectedEdge is one manifest-derived consumer -> provider relation with the
 // declaration that produced it.
 type detectedEdge struct {
@@ -176,9 +187,8 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 			detail: detDetail[p][kind],
 		})
 	}
-	// Corrections and removals, in declaration order: the root list first,
-	// then each package's lists. A package-declared edge carries no keep, so
-	// silencing its removal means redeclaring it at the top level.
+	// Corrections and removals, in declaration order: the root object first,
+	// then each package's lists.
 	for _, d := range declared {
 		p := pair{d.Consumer, d.Provider}
 		kinds, found := detKinds[p]
@@ -187,10 +197,9 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 		// disagrees" when the pair is detected, and as an ordinary removal
 		// candidate otherwise.
 		declaredKind, kindErr := config.DepKind(d.Kind)
-		silence := "keep: true silences this"
-		if !d.Source.IsRootList() {
-			silence = "a top-level entry with keep: true silences this"
-		}
+		// Every declaration carries keep, wherever it is written, so the way
+		// to silence a removal is the same everywhere.
+		const silence = "keep: true silences this"
 		switch {
 		case !d.Keep && (!known[d.Consumer] || !known[d.Provider]):
 			gone := d.Consumer
@@ -263,11 +272,15 @@ func containsKind(kinds []model.DepKind, k model.DepKind) bool {
 }
 
 // collectDepEdits turns the accepted edge suggestions into edits, each aimed
-// at the file that holds the declaration: the root config's list gets its
-// removals, kind rewrites and every addition; a package-level list (a
-// packages entry of the root config, or a package folder's own config file)
-// gets its removals — a kind correction there moves the edge to the root
-// list, because the provider-string form cannot carry a kind.
+// at the file that holds the declaration: an edge is removed and corrected
+// exactly where it was written, whether that is the root config's
+// `dependencies` object, a packages entry of the root config, or a package
+// folder's own config file.
+//
+// An addition goes where its consumer already declares its providers, and to
+// the root object when it declares none. A config that keeps a package's
+// dependencies next to the rest of that package's configuration stays that
+// way, instead of growing a second home for edges the next compute finds.
 //
 // The in-memory config is aligned with what the edits say. The process exits
 // right after, but a future long-lived caller must not see a config that
@@ -279,42 +292,58 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 	sourceKey := func(s config.DepSource) string {
 		return s.File + "\x00" + strings.Join(s.KeyPath, "\x00")
 	}
+	// Where each consumer already declares, so an addition can join it. The
+	// first package-level source wins: a consumer declaring in two layers has
+	// them merged anyway, and the nearest is not more correct than the first.
+	pkgListOf := make(map[string]config.DepSource)
+	for _, d := range declared {
+		if d.Source.IsRootList() {
+			continue
+		}
+		if _, seen := pkgListOf[d.Consumer]; !seen {
+			pkgListOf[d.Consumer] = d.Source
+		}
+	}
+
 	rootRemove := make(map[int]bool)
 	rootKind := make(map[int]string)
 	var adds []config.DependencyConfig
-	pkgRemove := make(map[string]map[int]bool)
-	pkgSource := make(map[string]config.DepSource)
-	markPkg := func(s config.DepSource) {
+	pkgEdit := make(map[string]*pkgListEdit)
+	markPkg := func(s config.DepSource) *pkgListEdit {
 		k := sourceKey(s)
-		if pkgRemove[k] == nil {
-			pkgRemove[k] = make(map[int]bool)
-			pkgSource[k] = s
+		if pkgEdit[k] == nil {
+			pkgEdit[k] = &pkgListEdit{src: s, remove: map[int]bool{}, kind: map[int]string{}}
 		}
-		pkgRemove[k][s.Index] = true
+		return pkgEdit[k]
 	}
 	for _, s := range apply {
 		switch s.action {
 		case actionAdd:
+			if src, ok := pkgListOf[s.entry.Consumer]; ok {
+				markPkg(src).add = append(markPkg(src).add, s.entry)
+				continue
+			}
 			adds = append(adds, s.entry)
 		case actionRemove:
 			if s.src.IsRootList() {
 				rootRemove[s.src.Index] = true
 			} else {
-				markPkg(s.src)
+				markPkg(s.src).remove[s.src.Index] = true
 			}
 		case actionKind:
+			// A package list carries a kind as readily as the root object
+			// does, so a correction is applied where the edge already lives.
 			if s.src.IsRootList() {
 				rootKind[s.src.Index] = s.entry.Kind
 			} else {
-				markPkg(s.src)
-				adds = append(adds, s.entry)
+				markPkg(s.src).kind[s.src.Index] = s.entry.Kind
 			}
 		}
 	}
 
 	if len(adds) > 0 || len(rootRemove) > 0 || len(rootKind) > 0 {
 		// Declared entries keep their file order; accepted additions append.
-		next := make([]config.DependencyConfig, 0, len(a.cfg.Dependencies)+len(adds))
+		next := make(config.Dependencies, 0, len(a.cfg.Dependencies)+len(adds))
 		for i, d := range a.cfg.Dependencies {
 			if rootRemove[i] {
 				continue
@@ -325,26 +354,41 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 			next = append(next, d)
 		}
 		next = append(next, adds...)
+		// The value is written as config.Dependencies, not as a bare slice, so
+		// the file gets the canonical consumer-keyed object whichever form it
+		// was authored in.
 		edits.add(cfgPath, config.Edit{KeyPath: []string{"dependencies"}, Value: next})
 		a.cfg.Dependencies = next
 	}
 
-	// Package-level lists, in deterministic order. The remaining provider
-	// names are reconstructed from the merged declaration list, which holds
-	// every entry of every source in order.
-	sources := make([]string, 0, len(pkgRemove))
-	for k := range pkgRemove {
+	// Package-level lists, in deterministic order. The surviving entries are
+	// reconstructed from the merged declaration list, which holds every entry
+	// of every source in order.
+	sources := make([]string, 0, len(pkgEdit))
+	for k := range pkgEdit {
 		sources = append(sources, k)
 	}
 	sort.Strings(sources)
 	for _, k := range sources {
-		src := pkgSource[k]
-		remaining := []string{}
+		edit := pkgEdit[k]
+		src := edit.src
+		remaining := config.ProviderList{}
 		for _, d := range declared {
-			if sourceKey(d.Source) != k || pkgRemove[k][d.Source.Index] {
+			if sourceKey(d.Source) != k || edit.remove[d.Source.Index] {
 				continue
 			}
-			remaining = append(remaining, d.Provider)
+			entry := d.DependencyConfig
+			if kind, ok := edit.kind[d.Source.Index]; ok {
+				entry.Kind = kind
+			}
+			// The consumer is the package the list belongs to, so writing it
+			// into the entry would spell out what the key already says.
+			entry.Consumer = ""
+			remaining = append(remaining, entry)
+		}
+		for _, add := range edit.add {
+			add.Consumer = ""
+			remaining = append(remaining, add)
 		}
 		target := src.File
 		if target == "" {

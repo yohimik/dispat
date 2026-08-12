@@ -70,7 +70,7 @@
     "cli": {
       "path": "tools/cli",
       "flow": { "build": "build-go", "publish": "publish-go" },
-      "dependencies": ["core"]
+      "dependencies": ["core", { "provider": "utils", "keep": true }]
     }
   },
   "versionGroups": {
@@ -79,10 +79,9 @@
   "run": {"allowBranch": ["main", "release/*"], "postAll": "notify"},
   "env": {"NPM_CONFIG_REGISTRY": "https://registry.npmjs.org", "CUSTOM_TAG": "custom_$DISPAT_VERSION"},
   "custom": {"team": "platform"},
-  "dependencies": [
-    { "consumer": "app", "provider": "core" },
-    { "consumer": "app", "provider": "utils", "keep": true }
-  ],
+  "dependencies": {
+    "app": ["core", { "provider": "utils", "keep": true }]
+  },
   "initials": {
     "core": "1.0.0"
   },

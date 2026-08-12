@@ -313,8 +313,8 @@ PEP 503-normalised, Maven names are `groupId:artifactId`, Docker names are image
 - `- remove` for a declared pair no manifest supports. Removal is only suggested when the consumer actually has parsed
   manifests, plus, unconditionally, when an edge names a package that no longer exists on disk (the one drift every
   other command refuses to load). An edge marked `keep: true` is never suggested for removal: the escape hatch for
-  deliberate relations no manifest declares, a Docker image chain being the usual one. A package-declared edge cannot
-  carry `keep`; redeclaring it in the top-level list with `keep: true` silences the suggestion the same way.
+  deliberate relations no manifest declares, a Docker image chain being the usual one. `keep` works wherever the edge
+  is declared, a package's own list included.
 - `+ initial` for a package whose starting version only its manifests know, described below.
 
 A suggestion against a package-declared edge names its source (`[packages/core/dispat.json: dependencies[0]]`), so the
@@ -350,10 +350,10 @@ the edges are computed as usual.
 
 **How changes are applied.** Nothing is written by default. The listing puts the edges first and the baselines after
 them, by package name. `--write` applies every suggestion, `--interactive` asks `y`/`N` per suggestion on stdin. Each
-change is applied to the file that holds the declaration: additions append to the root config's top-level
-`dependencies` list, a removal edits the declaring source (the root list, the `packages.<name>.dependencies` entry, or
-the package's own in-folder config file), a kind correction on a package-declared edge moves it to the root list (the
-provider-string form cannot carry a kind), and a baseline goes into the root config's `initials` map. Everything one
+change is applied to the file that holds the declaration: additions go into the root config's top-level
+`dependencies` object under their consumer, unless that consumer already declares its providers in a
+`packages.<name>.dependencies` entry or its own in-folder file, in which case the addition joins them there. A removal
+and a kind correction edit the declaring source in place, and a baseline goes into the root config's `initials` map. Everything one
 file receives is written in a single pass, so a run that changes two of its keys still leaves one backup. Every edited
 file is first copied to `<name>.backup` (untracked files worth a `.gitignore` entry; overwritten on every applying
 run), and each write is atomic. A TOML file is not rewritten in place: `--write` prints a paste-ready block for it and

@@ -172,11 +172,15 @@ packages:
     flow:
       build: build-go
       publish: publish-go
-    # Provider names this package depends on (one name or an array); the
-    # consumer is the package itself and the kind is "dependencies". Merged
-    # with the top-level list below; an edge needing another kind or keep
-    # belongs there instead.
-    dependencies: [core]
+    # The providers this package depends on: one name, or an array of names
+    # and objects, exactly as a consumer lists them in the top-level
+    # `dependencies` below. The consumer is the package itself. Everything
+    # merges into one list, so where an edge is written changes nothing about
+    # how it plans.
+    dependencies:
+      - core
+      - provider: utils
+        keep: true
 
 # Shared-versioning groups that cut across spaces, joined by name through a
 # space's or package's versionGroup key. The declaration owns the group's
@@ -221,21 +225,22 @@ env:
 custom:
   team: platform
 
-# Consumer -> provider relations. Besides the full objects, an item may be a
-# shorthand keyed by consumer name whose value is a provider name or an array
-# of names (- web: [core, utils]); packages may also declare their own
-# providers in their `packages` entry or in-folder file, and everything
-# merges into one list. `dispat compute` derives the list from the packages'
-# manifests and suggests additions/removals/kind corrections, editing each
-# declaration in the file that holds it; keep: true marks a deliberate edge
-# no manifest declares (a Docker chain), which compute then never suggests
-# removing.
+# Consumer -> provider relations, keyed by the consumer. A provider is a bare
+# name, or an object when the edge carries kind or keep. An array of
+# {consumer, provider} objects is accepted too, which is what a generated
+# config usually has to hand.
+#
+# Packages may also declare their own providers in their `packages` entry or
+# in-folder file, and everything merges into one list. `dispat compute`
+# derives the edges from the packages' manifests and suggests
+# additions/removals/kind corrections, editing each declaration in the file
+# that holds it; keep: true marks a deliberate edge no manifest declares (a
+# Docker chain), which compute then never suggests removing.
 dependencies:
-  - consumer: app
-    provider: core
-  - consumer: app
-    provider: utils
-    keep: true
+  app:
+    - core
+    - provider: utils
+      keep: true
 
 # Baseline versions used when a package's latest tag is missing or cannot be
 # parsed (e.g. a stray core@0.0.1.0). The next release bumps on top of

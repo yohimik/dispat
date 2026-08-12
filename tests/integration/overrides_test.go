@@ -539,7 +539,7 @@ func TestOverridesSpaceLayerDependencies(t *testing.T) {
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
-			"mid": {Dependencies: []string{"core"}},
+			"mid": {Dependencies: models.Providers("core")},
 		}},
 	}
 	r.WriteConfigModel(cfg)
@@ -547,7 +547,7 @@ func TestOverridesSpaceLayerDependencies(t *testing.T) {
 	r.SeedPackage("packages", "mid")
 	r.SeedPackage("packages", "web")
 	spaceFile(t, r, "packages", models.SpaceFile{
-		Packages: map[string]models.PackageConfig{"web": {Dependencies: []string{"mid"}}},
+		Packages: map[string]models.PackageConfig{"web": {Dependencies: models.Providers("mid")}},
 	})
 	r.Commit("feat(core,mid,web): bootstrap the chain")
 	r.ReleaseOK()

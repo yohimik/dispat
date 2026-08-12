@@ -122,7 +122,7 @@ between them; the single-package setup is just the smallest case of the general 
 ## Let the manifests declare the graph
 
 Instead of maintaining `dependencies` by hand and writing a version-sync script, let dispat read both from the
-manifests. One space, `autoVersion` turned on, and no `dependencies` list yet:
+manifests. One space, `autoVersion` turned on, and no `dependencies` yet:
 
 ```json
 {
@@ -232,9 +232,9 @@ The config now carries both, and the previous version of the file is beside it a
 
 ```json title="dispat.json"
 {
-  "dependencies": [
-    {"consumer": "web", "provider": "core"}
-  ],
+  "dependencies": {
+    "web": ["core"]
+  },
   "initials": {
     "core": "1.4.2",
     "web": "2.1.0"
@@ -289,12 +289,9 @@ can only be *built* after the base image is *pushed* to the registry. The per-sp
       }
     }
   },
-  "dependencies": [
-    {
-      "consumer": "app",
-      "provider": "base"
-    }
-  ]
+  "dependencies": {
+    "app": ["base"]
+  }
 }
 ```
 
@@ -443,16 +440,10 @@ service. Each space brings its own scripts and its own ordering rule; the depend
       }
     }
   },
-  "dependencies": [
-    {
-      "consumer": "service",
-      "provider": "sdk"
-    },
-    {
-      "consumer": "service-image",
-      "provider": "service"
-    }
-  ]
+  "dependencies": {
+    "service": ["sdk"],
+    "service-image": ["service"]
+  }
 }
 ```
 

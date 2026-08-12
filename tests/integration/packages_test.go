@@ -38,6 +38,23 @@ func dependsOn(res harness.RunResult, pkg string) string {
 	return ""
 }
 
+// dueTo extracts the providers a package was bumped for from status events.
+func dueTo(res harness.RunResult, pkg string) string {
+	for _, e := range res.Events {
+		if e.Package() != pkg {
+			continue
+		}
+		if list, ok := e["dueToProviders"].([]any); ok {
+			parts := make([]string, len(list))
+			for i, v := range list {
+				parts[i], _ = v.(string)
+			}
+			return strings.Join(parts, ",")
+		}
+	}
+	return ""
+}
+
 // TestPackagesStandalonePath: a packages entry with a path releases as a full
 // package outside the space folders — its own flow runs in its own folder, it
 // tags under the repository format, and the space packages are untouched.
@@ -107,18 +124,66 @@ func TestPackagesDependencyEdges(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Packages = map[string]models.PackageConfig{
-		"web": {Dependencies: []string{"core"}},
+		"web": {Dependencies: models.Providers("core")},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "web")
 	r.SeedPackage("packages", "app")
-	packageFile(t, r, "packages/app", models.PackageConfig{Dependencies: []string{"core"}})
+	packageFile(t, r, "packages/app", models.PackageConfig{Dependencies: models.Providers("core")})
 	r.Commit("feat(core,web,app): bootstrap all three")
 
 	status := r.StatusOK()
 	assert.Contains(t, dependsOn(status, "web"), "core", "the entry-declared edge orders the graph")
 	assert.Contains(t, dependsOn(status, "app"), "core", "the in-folder-declared edge orders the graph")
+}
+
+// TestPackagesDependenciesCarryKindAndKeep: a package's own list holds
+// everything the top-level object holds, so a kind reaches propagation and a
+// keep survives compute, both declared next to the package they belong to.
+func TestPackagesDependenciesCarryKindAndKeep(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	// A default propagation depth, so a provider's bump reaches its consumers
+	// with no directive in the message: what the declared kinds decide here.
+	cfg.Parser = &models.ParserConfig{
+		Propagation: &models.ParserPropagationConfig{Depth: "all"},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"web": {Dependencies: models.ProviderList{
+			{Provider: "core"},
+			{Provider: "tooling", Kind: "devDependencies"},
+			{Provider: "pinned", Keep: true},
+		}},
+	}
+	r.WriteConfigModel(cfg)
+	for _, p := range []string{"core", "tooling", "pinned", "web"} {
+		r.SeedPackage("packages", p)
+	}
+	r.WriteFile("packages/web/package.json", `{"name": "@acme/web", "version": "0.0.0"}`)
+	r.Commit("feat(core,tooling,pinned,web): bootstrap")
+
+	status := r.StatusOK()
+	assert.Contains(t, dependsOn(status, "web"), "core")
+	assert.Contains(t, dependsOn(status, "web"), "pinned", "the kept edge is an ordinary edge to the planner")
+
+	// devDependencies is the one kind propagation skips by default, so the
+	// kind written in the package's own list decides whether a provider's bump
+	// travels. Released first, so the next commits are the only pending work.
+	require.Equal(t, 0, r.Release().Code)
+
+	r.CommitEmpty("feat(tooling): a change that must not propagate")
+	assert.NotContains(t, dueTo(r.StatusOK(), "web"), "tooling",
+		"a devDependencies edge is the one propagation skips by default")
+
+	r.CommitEmpty("feat(core): a change that must propagate")
+	assert.Contains(t, dueTo(r.StatusOK(), "web"), "core",
+		"while the plain edge beside it still carries a bump")
+
+	// keep: true silences the removal wherever the edge is declared.
+	res := r.Command("compute")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.NotContains(t, res.Stdout, "remove  web -> pinned")
 }
 
 // TestPackagesComputeRemoveFromInFolder: a stale edge declared in a package
@@ -133,7 +198,7 @@ func TestPackagesComputeRemoveFromInFolder(t *testing.T) {
 	r.SeedPackage("packages", "app")
 	packageFile(t, r, "packages/web", models.PackageConfig{
 		TagFormat:    "web-{name}@{version}",
-		Dependencies: []string{"core"},
+		Dependencies: models.Providers("core"),
 	})
 	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
 	r.WriteFile("packages/web/package.json", `{"name": "@acme/web", "version": "0.0.0"}`)
@@ -161,8 +226,8 @@ func TestPackagesComputeRemoveFromInFolder(t *testing.T) {
 
 	rootCfg, err := os.ReadFile(r.Path("dispat.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(rootCfg), `"consumer": "app"`, "the addition lands in the root list")
-	assert.NotContains(t, string(rootCfg), `"consumer": "web"`)
+	assert.Contains(t, string(rootCfg), `"app": [`, "the addition lands in the root object, keyed by consumer")
+	assert.NotContains(t, string(rootCfg), `"web": [`)
 
 	assert.Equal(t, 0, r.Command("compute", "--check").Code)
 	r.StatusOK()
@@ -175,7 +240,7 @@ func TestPackagesComputeRemoveFromEntry(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Packages = map[string]models.PackageConfig{
-		"web": {TagFormat: "web-{name}@{version}", Dependencies: []string{"core"}},
+		"web": {TagFormat: "web-{name}@{version}", Dependencies: models.Providers("core")},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")

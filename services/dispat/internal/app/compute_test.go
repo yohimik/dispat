@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
@@ -120,6 +121,119 @@ func TestComputeWriteAppliesAndBacksUp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, open)
 	assert.Contains(t, out.String(), "in sync")
+}
+
+// TestComputeWriteConvertsAnEdgeListToTheCanonicalForm: whichever form a
+// config was authored in, what compute writes back is the consumer-keyed
+// object. It is a whole-key rewrite either way, and leaving two spellings of
+// the same key in circulation is how a project ends up with both.
+func TestComputeWriteConvertsAnEdgeListToTheCanonicalForm(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages"), 0o755))
+	cfgPath := filepath.Join(root, "dispat.json")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`{
+  "scripts": {"build": "true"},
+  "spaces": {"libs": {"path": "packages", "flow": {"build": ["build"]}}},
+  "dependencies": [
+    {"consumer": "web", "provider": "core"}
+  ]
+}
+`), 0o644))
+	loaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	a := New(root, loaded, zerolog.Nop())
+
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/utils/package.json", `{"name": "@acme/utils"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "^1", "@acme/utils": "^1"}}`)
+
+	var out bytes.Buffer
+	_, err = a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.NoError(t, err)
+
+	written, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(written), `"dependencies": {`, "written as the canonical object")
+	assert.NotContains(t, string(written), `"consumer"`, "the consumer is the key now")
+	assert.Contains(t, string(written), `"core"`)
+	assert.Contains(t, string(written), `"utils"`)
+
+	// Converted, not corrupted: the config still loads and still says the
+	// same thing, and a second run has nothing left to suggest.
+	reloaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	assert.Equal(t, config.Dependencies{
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "web", Provider: "utils"},
+	}, reloaded.Dependencies)
+
+	out.Reset()
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
+	require.NoError(t, err)
+	assert.Zero(t, open, "converged")
+}
+
+// TestComputeWriteKeepsEdgesWhereTheConsumerDeclaresThem: a config that keeps
+// a package's dependencies next to the rest of that package's configuration
+// stays that way. Additions join the list the consumer already has, and a
+// kind correction is applied in place now that a package list carries a kind
+// as readily as the root object does.
+func TestComputeWriteKeepsEdgesWhereTheConsumerDeclaresThem(t *testing.T) {
+	cfg := libsConfig()
+	cfg.Packages = map[string]config.PackageConfig{
+		"web": {Dependencies: config.ProviderList{
+			{Provider: "core", Kind: "devDependencies"}, // manifests say otherwise
+			{Provider: "pinned", Keep: true},            // no manifest declares it
+		}},
+	}
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages/pinned"), 0o755))
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/utils/package.json", `{"name": "@acme/utils"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "^1", "@acme/utils": "^1"}}`)
+
+	var out bytes.Buffer
+	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.NoError(t, err)
+
+	reloaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	assert.Empty(t, reloaded.Dependencies, "nothing was moved to the root object")
+	assert.Equal(t, config.ProviderList{
+		{Provider: "core"},               // kind corrected in place
+		{Provider: "pinned", Keep: true}, // keep survives untouched
+		{Provider: "utils"},              // the detected edge joined the list
+	}, reloaded.Packages["web"].Dependencies)
+
+	out.Reset()
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
+	require.NoError(t, err)
+	assert.Zero(t, open, "converged")
+}
+
+// TestComputeWriteDropsAnEmptiedConsumer: a consumer whose last provider is
+// removed loses its key, and a config left with no edges at all keeps an
+// object rather than a null the next reader cannot interpret.
+func TestComputeWriteDropsAnEmptiedConsumer(t *testing.T) {
+	root, cfgPath, a := computeRepo(t, libsConfig(
+		config.DependencyConfig{Consumer: "web", Provider: "ghost"},
+	), zerolog.Nop())
+	seedManifest(t, root, "packages/web/package.json", `{"name": "@acme/web"}`)
+
+	var out bytes.Buffer
+	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.NoError(t, err)
+
+	written, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(written), `"dependencies": {}`, "an empty object, never null")
+	assert.NotContains(t, string(written), "ghost")
+
+	reloaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	assert.Empty(t, reloaded.Dependencies)
 }
 
 func TestComputeRemovalAndKeepAndKindChange(t *testing.T) {
@@ -253,10 +367,10 @@ func TestComputeTOMLConfigPrintsSnippet(t *testing.T) {
 	var out bytes.Buffer
 	_, err = a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
 	require.ErrorIs(t, err, config.ErrTOMLEdit)
-	assert.Contains(t, out.String(), "[[dependencies]]")
+	assert.Contains(t, out.String(), "[dependencies]")
 	before, readErr := os.ReadFile(cfgPath)
 	require.NoError(t, readErr)
-	assert.NotContains(t, string(before), "[[dependencies]]", "config untouched")
+	assert.NotContains(t, string(before), "[dependencies]", "config untouched")
 }
 
 func TestComputeSuggestsRemovalOfStaleEndpoints(t *testing.T) {
@@ -427,8 +541,8 @@ build = "build"
 	var out bytes.Buffer
 	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
 	require.ErrorIs(t, err, config.ErrTOMLEdit)
-	assert.Contains(t, out.String(), "# paste over the [[dependencies]] blocks in dispat.toml:")
-	assert.Contains(t, out.String(), "[[dependencies]]")
+	assert.Contains(t, out.String(), "# paste over the [dependencies] table in dispat.toml:")
+	assert.Contains(t, out.String(), "[[dependencies.web]]")
 	assert.Contains(t, out.String(), "web")
 	assert.Contains(t, out.String(), "core")
 
@@ -530,7 +644,7 @@ func TestComputeStatedNameOutranksADeclaredOne(t *testing.T) {
 // it was found.
 func TestComputeWritesOneBackupPerFile(t *testing.T) {
 	cfg := libsConfig(config.DependencyConfig{Consumer: "web", Provider: "ghost"})
-	cfg.Packages = map[string]config.PackageConfig{"web": {Dependencies: []string{"gone"}}}
+	cfg.Packages = map[string]config.PackageConfig{"web": {Dependencies: models.Providers("gone")}}
 	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
 	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
 	seedManifest(t, root, "packages/web/package.json",
@@ -552,7 +666,15 @@ func TestComputeWritesOneBackupPerFile(t *testing.T) {
 
 	after, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(after), `"provider": "core"`)
+	// web already declares its providers in its packages entry, so the new
+	// edge joins them there rather than opening a second home for web's
+	// dependencies in the top-level object.
+	assert.Contains(t, string(after), `"core"`)
+	assert.Contains(t, string(after), `"dependencies": {}`, "the last root edge was the stale one")
 	assert.NotContains(t, string(after), "ghost")
 	assert.NotContains(t, string(after), "gone")
+
+	reloaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	assert.Equal(t, config.Providers("core"), reloaded.Packages["web"].Dependencies)
 }

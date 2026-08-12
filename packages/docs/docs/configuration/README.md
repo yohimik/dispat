@@ -38,7 +38,7 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | `spaces`           | map name → space                           | see note | Package groups sharing build/publish behaviour; see [Spaces](./spaces.md). At least one space **or** one `packages` entry is required.                                 |
 | `packages`         | map name → package                         | no       | Per-package configuration: overrides for space packages (key = folder name), and standalone packages outside every space via `path`; see [Packages](./packages.md).    |
 | `versionGroups`    | map name → `{versioning}`                  | no       | Shared-versioning groups that cut across spaces, joined by name via a space's or package's `versionGroup` key. A group may share the whole version, the major and minor, or the major alone; see [Versioning groups](./spaces.md#versioning-groups) and the [Shared versions](../versioning.md) walkthrough. |
-| `dependencies`     | list of `{consumer, provider, kind, keep}` | no       | Package-level consumer → provider relations; see [`dependencies`](#dependencies) below.                                                                                |
+| `dependencies`     | map consumer → providers                   | no       | Package-level consumer → provider relations; see [`dependencies`](#dependencies) below.                                                                                |
 | `concurrency`      | int or `[int, int]`                        | no       | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.                                             |
 | `logLevel`         | string                                     | no       | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                                                              |
 | `logFormat`        | string                                     | no       | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                                                         |
@@ -58,25 +58,52 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 
 ## dependencies
 
-The `dependencies` list declares the consumer → provider relations the graph orders releases by:
+`dependencies` declares the consumer → provider relations the graph orders releases by. It is an object keyed by the
+consumer, and each consumer lists what it depends on:
 
 ```yaml
 dependencies:
-  - consumer: app
-    provider: core
-  - web: [core, utils]   # shorthand: consumer key, provider name or array
+  app: [core, utils]
+  web: core            # one provider needs no array
 ```
 
-Both packages must exist; self-dependencies and cycles are rejected; duplicates are ignored. The shorthand form is
-expanded at load. Packages can also declare their own providers in their `packages` entry or in-folder file (see
-[package dependencies](./packages.md#package-dependencies)), and every declaration merges into one list.
+A provider is a bare name when that is all there is to say about the edge. When it carries more, write it as an object:
 
-The optional `kind` names the manifest field the edge stands for: `dependencies` (default), `devDependencies`,
+```yaml
+dependencies:
+  app:
+    - core
+    - provider: utils
+      keep: true
+    - provider: tooling
+      kind: devDependencies
+```
+
+`kind` names the manifest field the edge stands for: `dependencies` (the default), `devDependencies`,
 `peerDependencies` or `optionalDependencies`. Propagation follows or ignores the edge according to
 `parser.propagation.kinds`, whose default is every kind except `devDependencies`.
 
 `keep: true` marks an edge [`dispat compute`](../cli.md#commands) must never suggest removing: a deliberate relation no
 manifest declares, such as a Docker base-image chain. The planner treats kept edges like any other.
+
+Both packages must exist, and their names are matched the way every other name-keyed part of the config is matched,
+without regard to case. Self-dependencies and cycles are rejected; duplicates are ignored. Packages can also declare
+their own providers in their `packages` entry or in-folder file (see
+[package dependencies](./packages.md#package-dependencies)), and every declaration merges into one list.
+
+### The array form
+
+An array of `{consumer, provider}` objects is accepted too, which is the shape a generated config usually has to hand:
+
+```yaml
+dependencies:
+  - consumer: app
+    provider: core
+  - web: [core, utils]   # an item may be keyed by consumer, as above
+```
+
+The two forms mean the same thing and may sit in one file. `dispat compute --write` writes the consumer-keyed object,
+so a config it edits comes back in that form.
 
 ## Script sequences
 

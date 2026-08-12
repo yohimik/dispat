@@ -1032,8 +1032,8 @@ func TestPackageDependenciesCollected(t *testing.T) {
 	cfg := validConfig()
 	cfg.Dependencies = []DependencyConfig{{Consumer: "app", Provider: "core"}}
 	cfg.Packages = map[string]PackageConfig{
-		"utils": {Dependencies: []string{"core"}},
-		"cli":   {Path: "tools/cli", Dependencies: []string{"core"}},
+		"utils": {Dependencies: models.Providers("core")},
+		"cli":   {Path: "tools/cli", Dependencies: models.Providers("core")},
 	}
 	root := writeModelRepo(t, cfg,
 		"packages/libs/core", "packages/libs/utils", "packages/apps/app", "tools/cli")
@@ -1079,20 +1079,20 @@ func TestPackageDependenciesCollected(t *testing.T) {
 // and an unknown provider are rejected with the declaring source labeled.
 func TestPackageDependenciesInvalid(t *testing.T) {
 	cfg := validConfig()
-	cfg.Packages = map[string]PackageConfig{"utils": {Dependencies: []string{""}}}
+	cfg.Packages = map[string]PackageConfig{"utils": {Dependencies: models.Providers("")}}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `packages["utils"]: dependencies[0]`)
 	assert.Contains(t, err.Error(), "must not be empty")
 
-	cfg.Packages = map[string]PackageConfig{"utils": {Dependencies: []string{"Utils"}}}
+	cfg.Packages = map[string]PackageConfig{"utils": {Dependencies: models.Providers("Utils")}}
 	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	_, err = discoverPackages(t, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot depend on itself")
 
-	cfg.Packages = map[string]PackageConfig{"utils": {Dependencies: []string{"ghost"}}}
+	cfg.Packages = map[string]PackageConfig{"utils": {Dependencies: models.Providers("ghost")}}
 	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
@@ -1126,6 +1126,171 @@ func TestDependencyShorthand(t *testing.T) {
 	assert.Equal(t, DependencyConfig{Consumer: "app", Provider: "utils"}, cfg.Dependencies[3])
 }
 
+// TestPackageDependenciesCarryKindAndKeep: a package's own list holds exactly
+// what a consumer's list in the top-level object holds, so an edge needing a
+// kind or a keep can live next to the rest of that package's configuration
+// instead of being exiled to the root.
+func TestPackageDependenciesCarryKindAndKeep(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{
+				"path": "pkgs",
+				"flow": map[string]any{"build": "build"},
+				"packages": map[string]any{
+					"web": map[string]any{"dependencies": []any{
+						"core",
+						map[string]any{"provider": "utils", "keep": true},
+						map[string]any{"provider": "tooling", "kind": "devDependencies"},
+					}},
+				},
+			},
+		},
+	}, "pkgs/core", "pkgs/utils", "pkgs/tooling", "pkgs/web")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	_, declared, err := DiscoverPackages(cfg, root)
+	require.NoError(t, err)
+	require.Len(t, declared, 3)
+	for _, d := range declared {
+		assert.Equal(t, "web", d.Consumer, "the consumer is the package the list belongs to")
+	}
+	assert.Equal(t, DependencyConfig{Consumer: "web", Provider: "core"}, declared[0].DependencyConfig)
+	assert.Equal(t, DependencyConfig{Consumer: "web", Provider: "utils", Keep: true}, declared[1].DependencyConfig)
+	assert.Equal(t, DependencyConfig{Consumer: "web", Provider: "tooling", Kind: "devDependencies"},
+		declared[2].DependencyConfig)
+
+	// And the kind reaches the graph, which is the whole point of carrying it.
+	_, deps, err := Discover(cfg, root)
+	require.NoError(t, err)
+	require.Len(t, deps, 3)
+	assert.Equal(t, model.KindDevDependencies, deps[2].Kind)
+}
+
+// TestPackageDependenciesScalarAndSelfReference: the one-name shorthand still
+// works, and a package naming itself is refused wherever it is written.
+func TestPackageDependenciesScalarAndSelfReference(t *testing.T) {
+	base := func(deps any) map[string]any {
+		return map[string]any{
+			"scripts": map[string]any{"build": "echo b"},
+			"spaces": map[string]any{
+				"libs": map[string]any{
+					"path":     "pkgs",
+					"flow":     map[string]any{"build": "build"},
+					"packages": map[string]any{"web": map[string]any{"dependencies": deps}},
+				},
+			},
+		}
+	}
+
+	root := writeRawRepo(t, base("core"), "pkgs/core", "pkgs/web")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, deps, err := Discover(cfg, root)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "core", deps[0].Provider)
+
+	root = writeRawRepo(t, base([]any{map[string]any{"provider": "web"}}), "pkgs/core", "pkgs/web")
+	cfg, err = Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, _, err = DiscoverPackages(cfg, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `package "web" cannot depend on itself`)
+}
+
+// TestDependencyMapForm: the canonical shape — one object keyed by consumer,
+// each value a provider name or an object saying more about the edge —
+// through the real loader, viper's key folding and all.
+func TestDependencyMapForm(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+		},
+		"dependencies": map[string]any{
+			"web": []any{"core", map[string]any{"provider": "utils", "keep": true}},
+			"app": map[string]any{"provider": "core", "kind": "devDependencies"},
+			"cli": "core",
+		},
+	}, "pkgs/core", "pkgs/utils", "pkgs/web", "pkgs/app", "pkgs/cli")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, Dependencies{
+		{Consumer: "app", Provider: "core", Kind: "devDependencies"},
+		{Consumer: "cli", Provider: "core"},
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "web", Provider: "utils", Keep: true},
+	}, cfg.Dependencies, "consumers sorted, each consumer's providers in file order")
+
+	// And the whole graph is discoverable, which is what the form exists for.
+	_, deps, err := Discover(cfg, root)
+	require.NoError(t, err)
+	assert.Len(t, deps, 4)
+}
+
+// TestDependencyMapFormMatchesPackageNamesCaseInsensitively: viper lowercases
+// every map key, so a consumer keyed by a package whose folder carries capital
+// letters arrives folded. It has to resolve back onto the package it names —
+// the same rule `packages` and `spaces` entry keys already follow — or the
+// map form would silently exclude every package that is not all lowercase.
+func TestDependencyMapFormMatchesPackageNamesCaseInsensitively(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+		},
+		"dependencies": map[string]any{"Web": []any{"Core"}},
+	}, "pkgs/Core", "pkgs/Web")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	_, deps, err := Discover(cfg, root)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "Web", deps[0].Consumer, "the package's own spelling, not the folded key")
+	assert.Equal(t, "Core", deps[0].Provider)
+}
+
+// TestCanonicaliseEndpoints covers the resolver on its own: two packages
+// differing only in case cannot both exist on a case-insensitive filesystem,
+// so the ambiguity it has to refuse is not something a temp directory can be
+// made to reproduce.
+func TestCanonicaliseEndpoints(t *testing.T) {
+	pkgs := []*model.Package{{Name: "Core"}, {Name: "Web"}}
+	src := DepSource{KeyPath: []string{"dependencies"}, Key: "web"}
+
+	t.Run("a folded key resolves to the package it names", func(t *testing.T) {
+		declared := []DeclaredDependency{
+			{DependencyConfig: DependencyConfig{Consumer: "web", Provider: "core"}, Source: src},
+		}
+		require.NoError(t, canonicaliseEndpoints(declared, pkgs))
+		assert.Equal(t, "Web", declared[0].Consumer)
+		assert.Equal(t, "Core", declared[0].Provider)
+	})
+
+	t.Run("an endpoint naming nothing keeps the author's spelling", func(t *testing.T) {
+		// compute loads configs Discover would refuse, and suggests removing
+		// exactly these. Rewriting them would report a name nobody wrote.
+		declared := []DeclaredDependency{
+			{DependencyConfig: DependencyConfig{Consumer: "web", Provider: "Ghost"}, Source: src},
+		}
+		require.NoError(t, canonicaliseEndpoints(declared, pkgs))
+		assert.Equal(t, "Ghost", declared[0].Provider)
+	})
+
+	t.Run("two packages differing only in case are ambiguous", func(t *testing.T) {
+		declared := []DeclaredDependency{
+			{DependencyConfig: DependencyConfig{Consumer: "web", Provider: "core"}, Source: src},
+		}
+		err := canonicaliseEndpoints(declared, []*model.Package{{Name: "Core"}, {Name: "core"}, {Name: "Web"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"core" matches packages Core, core ambiguously`)
+		assert.Contains(t, err.Error(), `dependencies["web"][0]`, "the entry is located by consumer")
+	})
+}
+
 // TestDependencyShorthandInvalidValue: a shorthand value that is neither a
 // name nor an array of names fails the load with the item located.
 func TestDependencyShorthandInvalidValue(t *testing.T) {
@@ -1138,7 +1303,8 @@ func TestDependencyShorthandInvalidValue(t *testing.T) {
 	}, "pkgs/core")
 	_, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "provider name or an array of names")
+	assert.Contains(t, err.Error(), `dependencies[0]["web"]`, "the item is located, array position included")
+	assert.Contains(t, err.Error(), "wants a provider name, or an array of provider names and objects")
 }
 
 // TestPackageManifestNames: a package can be told what its manifests are
@@ -1418,12 +1584,12 @@ func TestSpaceLayerDependencies(t *testing.T) {
 	cfg := validConfig()
 	cfg.Dependencies = nil
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Packages = map[string]PackageConfig{"utils": {Dependencies: []string{"core"}}}
+		s.Packages = map[string]PackageConfig{"utils": {Dependencies: models.Providers("core")}}
 	})
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/libs/web",
 		"packages/apps/app")
 	writeSpaceFile(t, root, "packages/libs", SpaceFile{
-		Packages: map[string]PackageConfig{"web": {Dependencies: []string{"utils"}}},
+		Packages: map[string]PackageConfig{"web": {Dependencies: models.Providers("utils")}},
 	})
 	_, declared, err := discoverAll(t, root)
 	require.NoError(t, err)

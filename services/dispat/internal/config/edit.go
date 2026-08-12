@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -141,21 +140,31 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-// RenderDependenciesTOML renders the dependencies list as [[dependencies]]
-// blocks — the paste-ready fallback for TOML configs.
-func RenderDependenciesTOML(deps []DependencyConfig) (string, error) {
-	// Lowercase-keyed maps, because DependencyConfig has no toml tags and the
-	// file's keys are the mapstructure ones.
-	rows := make([]map[string]any, 0, len(deps))
-	for _, d := range deps {
-		row := map[string]any{"consumer": d.Consumer, "provider": d.Provider}
-		if d.Kind != "" {
-			row["kind"] = d.Kind
+// RenderDependenciesTOML renders the dependencies as a `dependencies` table
+// keyed by consumer — the paste-ready fallback for TOML configs, in the same
+// consumer-keyed form the JSON and YAML writers splice in.
+//
+// Every provider is written as a table, even one carrying nothing but its
+// name. The other two formats shorten that to the bare name, but an array
+// holding a name beside a table is not something a TOML encoder will write,
+// and one uniform shape beats a rendering that fails on the configs that most
+// need the fallback.
+func RenderDependenciesTOML(deps Dependencies) (string, error) {
+	grouped := deps.Grouped()
+	rows := make(map[string][]map[string]any, len(grouped))
+	for consumer, providers := range grouped {
+		for _, p := range providers {
+			// Lowercase keys, because DependencyConfig has no toml tags and
+			// the file's keys are the mapstructure ones.
+			row := map[string]any{"provider": p.Provider}
+			if p.Kind != "" {
+				row["kind"] = p.Kind
+			}
+			if p.Keep {
+				row["keep"] = true
+			}
+			rows[consumer] = append(rows[consumer], row)
 		}
-		if d.Keep {
-			row["keep"] = d.Keep
-		}
-		rows = append(rows, row)
 	}
 	out, err := toml.Marshal(map[string]any{"dependencies": rows})
 	return string(out), err
@@ -239,11 +248,15 @@ func lookupFold(node map[string]any, key string) (any, bool) {
 	return nil, false
 }
 
-// emptyList reports a zero-length (or nil) slice value, which must render as
-// "[]" rather than "null".
-func emptyList(value any) bool {
-	v := reflect.ValueOf(value)
-	return v.Kind() == reflect.Slice && v.Len() == 0
+// nullRendering reports that a value marshalled to JSON's "null", which is
+// what a nil slice does. An emptied list must read as "[]": a key holding
+// null is a config that no longer says "nothing depends on anything", it says
+// nothing at all.
+//
+// A value that renders itself — Dependencies writes its own "{}" — never
+// produces null, so this leaves it alone.
+func nullRendering(rendered []byte) bool {
+	return bytes.Equal(bytes.TrimSpace(rendered), []byte("null"))
 }
 
 // replaceValueJSON splices a re-rendered value over the existing one at
@@ -255,7 +268,7 @@ func replaceValueJSON(data []byte, keyPath []string, value any) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	if emptyList(value) {
+	if nullRendering(rendered) {
 		rendered = []byte("[]")
 	}
 

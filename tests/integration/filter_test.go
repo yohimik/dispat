@@ -391,8 +391,8 @@ func TestFilterComputeScopesSuggestions(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	data, err := os.ReadFile(r.Path("dispat.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"provider": "tool"`)
-	assert.NotContains(t, string(data), `"consumer": "site"`)
+	assert.Contains(t, string(data), `"tool"`)
+	assert.NotContains(t, string(data), `"site": [`, "the deselected consumer got no key")
 
 	res = r.Command("compute", "--package", "web")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)

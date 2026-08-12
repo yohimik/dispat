@@ -202,11 +202,11 @@ func TestCollectInitialEditsMergeWithoutRenaming(t *testing.T) {
 func TestTOMLFallbackNamesWhatItReplaces(t *testing.T) {
 	what, block, err := tomlFallback(config.Edit{
 		KeyPath: []string{"dependencies"},
-		Value:   []config.DependencyConfig{{Consumer: "web", Provider: "core"}},
+		Value:   config.Dependencies{{Consumer: "web", Provider: "core"}},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "[[dependencies]] blocks", what)
-	assert.Contains(t, block, "[[dependencies]]")
+	assert.Equal(t, "[dependencies] table", what)
+	assert.Contains(t, block, "[[dependencies.web]]")
 
 	what, block, err = tomlFallback(config.Edit{
 		KeyPath: []string{"initials"},

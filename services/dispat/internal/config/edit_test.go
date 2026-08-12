@@ -9,6 +9,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	public "github.com/yohimik/dispat/pkg/models"
 )
 
 // The write-back contract: only the top-level dependencies key changes, every
@@ -217,14 +218,15 @@ func TestReplaceDependenciesTOMLRefuses(t *testing.T) {
 	_, statErr := os.Stat(path + BackupSuffix)
 	assert.True(t, os.IsNotExist(statErr), "refusal writes nothing")
 
-	snippet, err := RenderDependenciesTOML([]DependencyConfig{
+	snippet, err := RenderDependenciesTOML(Dependencies{
 		{Consumer: "a", Provider: "b", Kind: "devDependencies", Keep: true},
 	})
 	require.NoError(t, err)
-	assert.Contains(t, snippet, "[[dependencies]]")
-	assert.Contains(t, snippet, "consumer = 'a'")
+	assert.Contains(t, snippet, "[[dependencies.a]]", "the table is keyed by consumer")
+	assert.Contains(t, snippet, "provider = 'b'")
 	assert.Contains(t, snippet, "kind = 'devDependencies'")
 	assert.Contains(t, snippet, "keep = true")
+	assert.NotContains(t, snippet, "consumer = ", "the consumer is the key, not a field")
 }
 
 func TestEditAtomicWriteErrors(t *testing.T) {
@@ -299,24 +301,23 @@ func TestRenderTOMLFallbacks(t *testing.T) {
 	// A TOML config is refused for in-place editing, so the command prints a
 	// paste-ready block instead. It has to be valid TOML carrying exactly the
 	// fields the config model reads back.
-	block, err := RenderDependenciesTOML([]DependencyConfig{
-		{Consumer: "web", Provider: "core"},
+	want := Dependencies{
 		{Consumer: "api", Provider: "core", Kind: "devDependencies", Keep: true},
-	})
+		{Consumer: "web", Provider: "core"},
+	}
+	block, err := RenderDependenciesTOML(want)
 	require.NoError(t, err)
-	assert.Contains(t, block, "[[dependencies]]")
+	assert.Contains(t, block, "[[dependencies.web]]")
 	assert.NotContains(t, block, "keep = false", "a false keep is left out, as the model reads it")
 
-	// Pasted back, the block has to parse into exactly what was rendered:
-	// string matching would pass on a block no TOML reader accepts.
-	var back struct {
-		Dependencies []DependencyConfig `toml:"dependencies"`
-	}
-	require.NoError(t, toml.Unmarshal([]byte(block), &back))
-	assert.Equal(t, []DependencyConfig{
-		{Consumer: "web", Provider: "core"},
-		{Consumer: "api", Provider: "core", Kind: "devDependencies", Keep: true},
-	}, back.Dependencies)
+	// Pasted back, the block has to load as exactly what was rendered — and
+	// through the real decoder, not a struct tag that happens to line up:
+	// string matching would pass on a block dispat cannot read.
+	var doc map[string]any
+	require.NoError(t, toml.Unmarshal([]byte(block), &doc))
+	back, err := public.NormalizeDependencies(doc["dependencies"])
+	require.NoError(t, err)
+	assert.Equal(t, want, back, "consumers come back sorted, each provider in declared order")
 
 	nested, err := RenderKeyTOML([]string{"packages", "web", "dependencies"}, []string{"core", "utils"})
 	require.NoError(t, err)

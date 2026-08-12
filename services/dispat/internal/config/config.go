@@ -47,10 +47,16 @@ type (
 	AutoVersionConfig        = public.AutoVersionConfig
 	AutoVersionReplaceConfig = public.AutoVersionReplaceConfig
 	DependencyConfig         = public.DependencyConfig
-	ParserConfig             = public.ParserConfig
-	ParserPropagationConfig  = public.ParserPropagationConfig
-	ParserLimitsConfig       = public.ParserLimitsConfig
+	Dependencies             = public.Dependencies
+	ProviderList             = public.ProviderList
+
+	ParserConfig            = public.ParserConfig
+	ParserPropagationConfig = public.ParserPropagationConfig
+	ParserLimitsConfig      = public.ParserLimitsConfig
 )
+
+// Providers builds a package's dependency list out of plain provider names.
+var Providers = public.Providers
 
 // Values of the commitErrors key; see the public package for semantics.
 const (
@@ -485,48 +491,31 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	return &cfg, nil
 }
 
-// dependenciesType is the decode target the shorthand hook watches for: the
-// top-level `dependencies` list.
-var dependenciesType = reflect.TypeOf([]public.DependencyConfig(nil))
+// dependenciesType is the decode target the dependency hook watches for: the
+// top-level `dependencies` key.
+var dependenciesType = reflect.TypeOf(public.Dependencies(nil))
 
-// dependencyShorthandHook expands shorthand items of the `dependencies`
-// array before decoding. A full entry is an object carrying a `consumer` or
-// `provider` key; any other object is shorthand — each key a consumer name,
-// its value a provider name or array of names — and expands to one full
-// entry per provider. Viper lowercases map keys, so shorthand consumer names
-// are matched like every other name-keyed map in the config.
-func dependencyShorthandHook(_, to reflect.Type, data any) (any, error) {
-	if to != dependenciesType {
+// providerListType is the same hook's other target: a package's own list.
+var providerListType = reflect.TypeOf(public.ProviderList(nil))
+
+// dependencyFormHook expands the `dependencies` key into the flat edge list
+// before decoding, whichever of its forms the file used.
+//
+// The expansion itself lives in pkg/models, so this and the public type's own
+// UnmarshalJSON cannot come to disagree about what the config language is.
+// The one thing that differs here is the input: viper has already lowercased
+// every map key by the time the hook sees it, so consumer names arrive folded
+// — exactly like the keys of `packages` and `spaces`, and resolved back onto
+// the packages they name in discovery.
+func dependencyFormHook(_, to reflect.Type, data any) (any, error) {
+	switch to {
+	case dependenciesType:
+		return public.NormalizeDependencies(data)
+	case providerListType:
+		return public.NormalizeProviders(data, "dependencies")
+	default:
 		return data, nil
 	}
-	items, ok := data.([]any)
-	if !ok {
-		return data, nil
-	}
-	out := make([]any, 0, len(items))
-	for i, item := range items {
-		m, ok := stringKeyMap(item)
-		if !ok || isEdgeObject(m) {
-			out = append(out, item)
-			continue
-		}
-		consumers := make([]string, 0, len(m))
-		for k := range m {
-			consumers = append(consumers, k)
-		}
-		sort.Strings(consumers)
-		for _, consumer := range consumers {
-			providers, ok := stringList(m[consumer])
-			if !ok {
-				return nil, fmt.Errorf(
-					"dependencies[%d]: %q wants a provider name or an array of names", i, consumer)
-			}
-			for _, p := range providers {
-				out = append(out, map[string]any{"consumer": consumer, "provider": p})
-			}
-		}
-	}
-	return out, nil
 }
 
 // validateRecords checks the record-line lists of every layer that may carry
@@ -653,20 +642,8 @@ func stringKeyMap(v any) (map[string]any, bool) {
 	return nil, false
 }
 
-// isEdgeObject reports whether a dependencies item is a full edge object
-// rather than a consumer-keyed shorthand.
-func isEdgeObject(m map[string]any) bool {
-	for k := range m {
-		switch strings.ToLower(k) {
-		case "consumer", "provider":
-			return true
-		}
-	}
-	return false
-}
-
 // stringList reads the config's recurring "one name or an array of names"
-// shape: a dependency shorthand's providers, a record line's text.
+// shape: a record line's text.
 func stringList(v any) ([]string, bool) {
 	switch x := v.(type) {
 	case string:
@@ -1143,14 +1120,26 @@ type DepSource struct {
 	// "packages", <key>, "dependencies"] for a space's packages entry of the
 	// root config.
 	KeyPath []string
-	// Index is the entry's position within that list.
+	// Index is the entry's position within the merged list. It is the edit
+	// identity — which entry of the loaded config an edit is aimed at — and
+	// deliberately not a position anyone can point to in a file.
 	Index int
+	// Key and KeyIndex are where the entry sits in a consumer-keyed
+	// `dependencies` object: the consumer, and the position within that one
+	// consumer's providers. Only a label uses them, and only the root object
+	// has them — a package's own list is a plain array of provider names.
+	Key      string
+	KeyIndex int
 }
 
 // Label renders the source for error messages and suggestion listings:
-// "dependencies[2]", `packages["core"]: dependencies[0]`,
+// `dependencies["app"][0]`, `packages["core"]: dependencies[0]`,
 // `spaces["libs"]: packages["core"]: dependencies[0]`, or
 // "packages/core/dispat.json: dependencies[0]".
+//
+// The root object is labelled by consumer rather than by position, because
+// that is what a reader can find in the file: its `dependencies` is keyed by
+// consumer, and Index counts the merged list, which the file never spells.
 func (s DepSource) Label() string {
 	if len(s.KeyPath) == 0 {
 		return "dependencies"
@@ -1165,7 +1154,12 @@ func (s DepSource) Label() string {
 	for i := 0; i+1 < len(s.KeyPath); i += 2 {
 		fmt.Fprintf(&b, "%s[%q]: ", s.KeyPath[i], s.KeyPath[i+1])
 	}
-	fmt.Fprintf(&b, "%s[%d]", s.KeyPath[len(s.KeyPath)-1], s.Index)
+	last := s.KeyPath[len(s.KeyPath)-1]
+	if s.Key != "" {
+		fmt.Fprintf(&b, "%s[%q][%d]", last, s.Key, s.KeyIndex)
+	} else {
+		fmt.Fprintf(&b, "%s[%d]", last, s.Index)
+	}
 	return b.String()
 }
 
@@ -1254,11 +1248,18 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	// The merged declaration list: the root config's own `dependencies`
 	// first, in file order, then each package's lists in discovery order.
 	declared := make([]DeclaredDependency, 0, len(c.Dependencies))
+	perConsumer := make(map[string]int, len(c.Dependencies))
 	for i, d := range c.Dependencies {
 		declared = append(declared, DeclaredDependency{
 			DependencyConfig: d,
-			Source:           DepSource{KeyPath: []string{"dependencies"}, Index: i},
+			Source: DepSource{
+				KeyPath:  []string{"dependencies"},
+				Index:    i,
+				Key:      d.Consumer,
+				KeyIndex: perConsumer[d.Consumer],
+			},
 		})
+		perConsumer[d.Consumer]++
 	}
 
 	var pkgs []*model.Package
@@ -1550,7 +1551,56 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	if err := checkSrcFolders(pkgs); err != nil {
 		return nil, nil, err
 	}
+	if err := canonicaliseEndpoints(declared, pkgs); err != nil {
+		return nil, nil, err
+	}
 	return pkgs, declared, nil
+}
+
+// canonicaliseEndpoints rewrites every declared edge's endpoints to the exact
+// name of the package they mean.
+//
+// The `dependencies` map is keyed by consumer, and viper lowercases the keys
+// of every map in the config, so a package folder named "Web" is declared as
+// "web" by the time discovery sees it. That is the same fold `packages` and
+// `spaces` entries already go through, and it is resolved the same way: keys
+// are matched case-insensitively, and a key matching two packages is
+// ambiguous rather than arbitrarily assigned.
+//
+// An endpoint matching no package is left exactly as it was written. Discover
+// reports it as unknown, and `dispat compute` — which loads configs Discover
+// would refuse — needs the author's own spelling to suggest removing it.
+func canonicaliseEndpoints(declared []DeclaredDependency, pkgs []*model.Package) error {
+	byFold := make(map[string][]string, len(pkgs))
+	for _, p := range pkgs {
+		fold := strings.ToLower(p.Name)
+		byFold[fold] = append(byFold[fold], p.Name)
+	}
+	resolve := func(name string, src DepSource) (string, error) {
+		matches := byFold[strings.ToLower(name)]
+		switch len(matches) {
+		case 0:
+			return name, nil
+		case 1:
+			return matches[0], nil
+		default:
+			sort.Strings(matches)
+			return "", fmt.Errorf("config: %s: %q matches packages %s ambiguously (names are matched case-insensitively)",
+				src.Label(), name, strings.Join(matches, ", "))
+		}
+	}
+	for i := range declared {
+		consumer, err := resolve(declared[i].Consumer, declared[i].Source)
+		if err != nil {
+			return err
+		}
+		provider, err := resolve(declared[i].Provider, declared[i].Source)
+		if err != nil {
+			return err
+		}
+		declared[i].Consumer, declared[i].Provider = consumer, provider
+	}
+	return nil
 }
 
 // checkSrcFolders proves every declared `src` names a folder that is there.

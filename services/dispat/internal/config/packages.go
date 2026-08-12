@@ -152,22 +152,21 @@ func validatePackageEntries(c *File) error {
 	return nil
 }
 
-// collectPackageDeps appends one package layer's provider names to the
-// declared-edge list: the consumer is the package itself and the kind is the
-// default. The source's Index is filled per entry.
-func collectPackageDeps(declared []DeclaredDependency, pkg string, src DepSource, providers []string) ([]DeclaredDependency, error) {
+// collectPackageDeps appends one package layer's providers to the declared-edge
+// list: the consumer is the package itself, and whatever else each entry says
+// — its kind, its keep — travels with it. The source's Index is filled per
+// entry.
+func collectPackageDeps(declared []DeclaredDependency, pkg string, src DepSource, providers ProviderList) ([]DeclaredDependency, error) {
 	for i, p := range providers {
 		src.Index = i
-		if strings.TrimSpace(p) == "" {
+		if strings.TrimSpace(p.Provider) == "" {
 			return nil, fmt.Errorf("%s: provider name must not be empty", src.Label())
 		}
-		if strings.EqualFold(p, pkg) {
+		if strings.EqualFold(p.Provider, pkg) {
 			return nil, fmt.Errorf("%s: package %q cannot depend on itself", src.Label(), pkg)
 		}
-		declared = append(declared, DeclaredDependency{
-			DependencyConfig: DependencyConfig{Consumer: pkg, Provider: p},
-			Source:           src,
-		})
+		p.Consumer = pkg
+		declared = append(declared, DeclaredDependency{DependencyConfig: p, Source: src})
 	}
 	return declared, nil
 }
@@ -684,7 +683,7 @@ func openFolderConfig(dir string) (*viper.Viper, string, error) {
 // shorthand the root accepts must not be a syntax error one folder down.
 func weakDecode(dc *mapstructure.DecoderConfig) {
 	dc.WeaklyTypedInput = true
-	hooks := []mapstructure.DecodeHookFunc{dependencyShorthandHook, entryLinesHook}
+	hooks := []mapstructure.DecodeHookFunc{dependencyFormHook, entryLinesHook}
 	if dc.DecodeHook != nil {
 		hooks = append(hooks, dc.DecodeHook)
 	}

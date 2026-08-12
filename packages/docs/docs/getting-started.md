@@ -71,12 +71,9 @@ between packages under `dependencies` so bumps propagate and ordering is enforce
 
 ```json
 {
-  "dependencies": [
-    {
-      "consumer": "app",
-      "provider": "core"
-    }
-  ]
+  "dependencies": {
+    "app": ["core"]
+  }
 }
 ```
 

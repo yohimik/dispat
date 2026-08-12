@@ -52,7 +52,8 @@ func TestComputeDetectApplyStatus(t *testing.T) {
 	assert.Contains(t, res.Stdout, "applied 1 change(s)")
 	configAfter, err := os.ReadFile(r.Path("dispat.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(configAfter), `"provider": "core"`)
+	assert.Contains(t, string(configAfter), `"web": [`, "written as the consumer-keyed object")
+	assert.Contains(t, string(configAfter), `"core"`)
 	backup, err := os.ReadFile(r.Path("dispat.json.backup"))
 	require.NoError(t, err)
 	assert.Equal(t, string(configBefore), string(backup), "backup is the pre-edit config")
@@ -142,7 +143,7 @@ func TestComputeEditsSpaceLayerDeclarations(t *testing.T) {
 	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
-			"web": {Dependencies: []string{"ghost"}},
+			"web": {Dependencies: models.Providers("ghost")},
 		}},
 	}
 	r.WriteConfigModel(cfg)
@@ -150,7 +151,7 @@ func TestComputeEditsSpaceLayerDeclarations(t *testing.T) {
 	r.SeedPackage("packages", "ghost")
 	r.SeedPackage("packages", "web")
 	spaceFile(t, r, "packages", models.SpaceFile{
-		Packages: map[string]models.PackageConfig{"core": {Dependencies: []string{"ghost"}}},
+		Packages: map[string]models.PackageConfig{"core": {Dependencies: models.Providers("ghost")}},
 	})
 	// Both consumers carry a manifest, so their declarations are judged
 	// against something: an edge no manifest declares is stale.
@@ -215,7 +216,7 @@ func TestComputeSeedsInitialsFromManifests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(configAfter), `"core": "1.4.2"`)
 	assert.Contains(t, string(configAfter), `"web": "2.1.0"`)
-	assert.Contains(t, string(configAfter), `"provider": "core"`)
+	assert.Contains(t, string(configAfter), `"web": [`, "the edge is keyed by consumer")
 	backup, err := os.ReadFile(r.Path("dispat.json.backup"))
 	require.NoError(t, err)
 	assert.Equal(t, string(configBefore), string(backup), "one backup, from before both edits")
@@ -441,7 +442,7 @@ func TestComputeInteractiveChoosesAmongBothKinds(t *testing.T) {
 
 	configAfter, err := os.ReadFile(r.Path("dispat.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(configAfter), `"provider": "core"`)
+	assert.Contains(t, string(configAfter), `"web": [`, "the edge is keyed by consumer")
 	assert.Contains(t, string(configAfter), `"core": "1.4.2"`)
 	assert.NotContains(t, string(configAfter), `"web": "2.1.0"`, "the declined baseline was not written")
 

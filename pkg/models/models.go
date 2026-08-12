@@ -38,13 +38,11 @@ type File struct {
 	// filesystem, keyed by group name. Spaces and packages join a group by
 	// naming it in their versionGroup key; see VersionGroupConfig.
 	VersionGroups map[string]VersionGroupConfig `mapstructure:"versionGroups" json:"versionGroups,omitempty"`
-	// Dependencies declares consumer -> provider edges. Besides the full
-	// {consumer, provider, kind, keep} objects, the CLI's loader accepts
-	// shorthand array items — an object keyed by consumer name whose value is
-	// a provider name or array of names — normalized into full entries at
-	// load time. Packages may also declare their own providers; see
-	// PackageConfig.Dependencies. All declarations merge into one list.
-	Dependencies []DependencyConfig `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	// Dependencies declares consumer -> provider edges, as an object keyed by
+	// consumer. See the Dependencies type for the forms it accepts. Packages
+	// may also declare their own providers; see PackageConfig.Dependencies.
+	// All declarations merge into one list.
+	Dependencies Dependencies `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	// Concurrency accepts a single value applied to both stages
 	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
 	// 0 entries mean "number of CPUs".
@@ -628,13 +626,12 @@ type PackageConfig struct {
 	// top-level key, where 0 means "number of CPUs" — a weight has no CPU
 	// reading.)
 	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
-	// Dependencies names the provider packages this package depends on — a
-	// package name or an array of names (weak decoding lifts the scalar into
-	// a slice). The consumer is the package itself and the edge kind is the
-	// default ("dependencies"); an edge needing another kind or `keep` is
-	// declared in the top-level list instead. Entry-layer and in-folder-layer
-	// lists both count: all declarations merge with the top-level list.
-	Dependencies []string `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	// Dependencies names the provider packages this package depends on: one
+	// name, or an array of names and objects, exactly as a consumer lists
+	// them in the top-level object. The consumer is the package itself.
+	// Entry-layer and in-folder-layer lists both count: all declarations
+	// merge with the top-level object.
+	Dependencies ProviderList `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	// Env is static environment for this package's scripts, merged key by key
 	// over the space's map (and the in-folder layer over the entry layer);
 	// see File.Env.
@@ -789,7 +786,10 @@ type SpaceFlowConfig struct {
 	OnSkip []string `mapstructure:"onSkip" json:"onSkip,omitempty"`
 }
 
-// DependencyConfig is one consumer -> provider relation.
+// DependencyConfig is one consumer -> provider relation: the decoded form of
+// every shape the `dependencies` key accepts, and the element type of
+// Dependencies.
+//
 // The yaml tags exist because the CLI's compute command re-encodes this one
 // struct when editing a YAML config in place; without them the encoder would
 // write lowercased field names with `kind: ""` / `keep: false` noise on every
