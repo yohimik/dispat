@@ -9,8 +9,12 @@ package integration
 // and everything pushable to a real remote.
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1009,4 +1013,134 @@ func TestRecordsAliasTags(t *testing.T) {
 	status := r.StatusOK()
 	assert.NotContains(t, status.Stdout, "0.1.0 ->", "the baseline is the newest release, not an alias")
 	assert.Contains(t, status.Stdout, `"version":"0.2.0"`, "status:\n%s", status.Stdout)
+}
+
+// --- The GitHub recorder driven through real channel transitions and a
+// build's exported attachments. These sit with the other release records
+// because they are the same artefact story: what a run leaves behind.
+
+// githubConfig returns a config whose GitHub recorder points at the given
+// fake API server, with the token read from DISPAT_IT_TOKEN. The publish
+// script exports an empty DISPAT_EXPORT_GITHUB — the recorder acts only on
+// packages that opted in.
+func githubConfig(apiURL string) models.File {
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{
+		"build":   "echo building",
+		"publish": `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`,
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		Build: []string{"build"}, Publish: []string{"publish"}}}}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
+		APIURL: apiURL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	return cfg
+}
+
+// TestConfigGithubReleasePrereleaseFlagFollowsChannel exercises the GitHub
+// release recorder through a real train and its graduation, end to end
+// rather than in isolation: the same package's releases must flip
+// `prerelease` true then false as its channel actually changes.
+func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
+	type ghRelease struct {
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	r.WriteConfigModel(githubConfig(srv.URL))
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core)%beta: start the train")
+
+	r.ReleaseOK()
+	r.CommitEmpty("release(core)%stable: graduate")
+	r.ReleaseOK()
+
+	releases := decodeAll[ghRelease](t, bodies())
+	require.Len(t, releases, 2)
+	assert.Equal(t, "core@0.1.0-beta.0", releases[0].TagName)
+	assert.True(t, releases[0].Prerelease, "the beta release must be marked a prerelease")
+	assert.Equal(t, "core@0.1.0", releases[1].TagName)
+	assert.False(t, releases[1].Prerelease, "the graduated release must not be")
+}
+
+// TestConfigGithubReleaseAttachments exercises the whole script-output and
+// attachment path through the real binary: the build script exports
+// DISPAT_EXPORT_GITHUB (two files) — opting the package into a GitHub
+// release — plus an ordinary output into $DISPAT_OUTPUT, the publish and
+// announce scripts must see them again (the export under its full name, the
+// output as DISPAT_OUTPUT_*), and the created GitHub release must receive
+// both files as assets at the endpoint the release itself advertised
+// (upload_url).
+func TestConfigGithubReleaseAttachments(t *testing.T) {
+	type upload struct {
+		name, body string
+	}
+	var mu sync.Mutex
+	var uploads []upload
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if githubTagProbe(w, req, nil) {
+			return
+		}
+		switch {
+		case req.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+		case req.URL.Path == "/uploads":
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			mu.Lock()
+			uploads = append(uploads, upload{name: req.URL.Query().Get("name"), body: string(body)})
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+		default: // release creation: advertise this server as the asset endpoint
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
+		}
+	}))
+	defer srv.Close()
+
+	r := harness.New(t)
+	cfg := githubConfig(srv.URL)
+	cfg.Scripts = map[string]string{
+		"build": `echo binary-bytes > app.bin && echo docs-bytes > docs.txt` +
+			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin $PWD/docs.txt" >> "$DISPAT_OUTPUT"` +
+			` && echo "BUILD_FLAVOUR=release" >> "$DISPAT_OUTPUT"`,
+		"publish":  `echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`,
+		"announce": `echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`,
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release with artefacts")
+
+	r.ReleaseOK()
+
+	// The ordinary output reached the later stages as DISPAT_OUTPUT_*; the
+	// GitHub export travelled under its full name and stayed out of the
+	// DISPAT_OUTPUTS listing.
+	pubEnv, err := os.ReadFile(r.Path("publish-env.txt"))
+	require.NoError(t, err)
+	assert.Contains(t, string(pubEnv), "publish: BUILD_FLAVOUR / ")
+	assert.Contains(t, string(pubEnv), "/app.bin")
+	assert.Contains(t, string(pubEnv), "/docs.txt")
+	annEnv, err := os.ReadFile(r.Path("announce-env.txt"))
+	require.NoError(t, err)
+	assert.Contains(t, string(annEnv), "announce: release")
+
+	// Both files landed on the release as assets, named after their files.
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, uploads, 2, "uploads: %v", uploads)
+	byName := map[string]string{}
+	for _, u := range uploads {
+		byName[u.name] = u.body
+	}
+	assert.Equal(t, "binary-bytes\n", byName["app.bin"])
+	assert.Equal(t, "docs-bytes\n", byName["docs.txt"])
 }

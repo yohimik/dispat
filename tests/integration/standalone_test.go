@@ -3,7 +3,7 @@ package integration
 // Goal 15: the standalone step commands. `dispat changelog`, `dispat commit`
 // and `dispat autoversion` expose the pipeline's native steps to custom
 // flows, and the release stage skips work they already did: a pre-written
-// changelog entry is a W222 skip, a pre-created tag at the release commit a
+// changelog entry is a W226 skip, a pre-created tag at the release commit a
 // W223 skip. The central claim is the ordering fix the commands exist for:
 // a changelog written by a stage script before the per-package commit lands
 // inside the tagged tree.
@@ -38,10 +38,10 @@ func TestStandaloneChangelogWritesAndIsIdempotent(t *testing.T) {
 	assert.Contains(t, string(data), "first feature")
 	assert.Empty(t, r.TagList(), "the changelog command releases nothing")
 
-	// A second invocation is a W222 skip and changes nothing.
+	// A second invocation is a W226 skip and changes nothing.
 	res = r.Command("changelog", "--package", "core")
 	require.Equal(t, 0, res.Code)
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W222", "core"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W226", "core"))
 	after, err := os.ReadFile(log)
 	require.NoError(t, err)
 	assert.Equal(t, string(data), string(after), "a repeated write is byte-identical")
@@ -63,7 +63,7 @@ func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
 	// The dogfood flow: beforePublish runs the nested `dispat changelog` and
 	// `dispat commit --tag`, so the changelog lands inside the tagged commit
 	// (the fix under test), and the outer run's own recorder and tagging
-	// find the work done: W222 and W223, zero errors.
+	// find the work done: W226 and W223, zero errors.
 	r := singlePackageRepo(t, echoBuild)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["step-changelog"] = r.DispatCommand("changelog")
@@ -76,7 +76,7 @@ func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
 	r.Commit("feat(core): flowing feature")
 
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W222", "core"), "the recorder skipped the pre-written entry")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W226", "core"), "the recorder skipped the pre-written entry")
 	assert.True(t, harness.HasCode(res.Events, "W223"), "tagging skipped the pre-created tag")
 	assert.Equal(t, 1, r.TagCount("core@"))
 
