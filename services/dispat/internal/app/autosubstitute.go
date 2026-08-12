@@ -149,7 +149,7 @@ func (w *substituteWork) stage() string { return "autosubstitute" }
 // resolve prepares one package's substitution. Every covered package has files
 // to offer, so unlike the writer's sweep this one never resolves to nothing:
 // whether the globs select anything is the walk's answer, not this one's.
-func (w *substituteWork) resolve(_ context.Context, rel *plan.Release) (task, error) {
+func (w *substituteWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
 	sub := release.Substituter{
 		Dir:   rel.Pkg.Dir,
 		Rules: w.rules,
@@ -159,7 +159,7 @@ func (w *substituteWork) resolve(_ context.Context, rel *plan.Release) (task, er
 			Previous:   rel.Previous().String(),
 			Prerelease: rel.IsPrerelease(),
 		},
-		Providers: w.providers(rel),
+		Providers: w.providers(ctx, rel),
 		Owned:     w.ownedBy(rel),
 		Log:       w.app.log.With().Str("package", rel.Pkg.Name).Str("stage", w.stage()).Logger(),
 	}
@@ -181,8 +181,8 @@ func (w *substituteWork) resolve(_ context.Context, rel *plan.Release) (task, er
 // commands never disagree about which declarations are internal. Nothing is
 // published on the strength of it, so an edge the config does not declare is
 // not the warning here that it is during a release.
-func (w *substituteWork) providers(rel *plan.Release) []release.ProviderFacts {
-	mans, err := w.app.scan.ScanRoot(context.Background(), rel.Pkg.Dir)
+func (w *substituteWork) providers(ctx context.Context, rel *plan.Release) []release.ProviderFacts {
+	mans, err := w.app.scan.ScanRoot(ctx, rel.Pkg.Dir)
 	if err != nil {
 		w.app.log.Debug().Err(err).Str("package", rel.Pkg.Name).
 			Msg("some root manifests failed to parse")
