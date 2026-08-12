@@ -167,6 +167,18 @@ packages:
     # declarations naming it. A stated name beats a declared one, and no two
     # packages may state the same name.
     manifestNames: ["com.acme:core"]
+    # Which of the package's own files count as changes to it. `src` picks
+    # one folder; `ignore` excludes from whatever is left. Both are also
+    # settable on a space and at the top level, where they become the
+    # default; `ignore` levels add up rather than replace, and a "!" pattern
+    # re-includes. A .dispatignore file in the folder says the same thing,
+    # one pattern per line. Neither hides the package: a commit naming it by
+    # scope still releases it, and the release commit still stages all of it.
+    src: lib
+    ignore:
+      - "docs/"
+      - "*.snap"
+      - "!docs/api.md"
   cli:
     path: tools/cli                   # standalone: lives outside the spaces
     flow:

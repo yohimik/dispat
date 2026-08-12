@@ -20,8 +20,9 @@ This page covers the top level; the larger objects have their own pages:
 
 | Page                                  | Covers                                                                                                                                      |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the seven `versioning` modes and versioning groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatexclude`. |
+| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the seven `versioning` modes and versioning groups, `scripts`, the space's `packages` map and `dependencies`, the space configuration file, `.dispatexclude`. |
 | [Packages](./packages.md)             | The `packages` maps: per-package overrides and the ladder that orders them, standalone packages via `path`, package-declared dependencies, in-folder config files. |
+| [What counts as a change](./change-scope.md) | `src` and `ignore`: which of a package's files make a scopeless commit address it, and the `.dispatignore` file. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                                                                    |
 | [Alias tags](./alias-tags.md)         | `aliasTags`: the extra names a release is written under, beside its real tag.                                                               |
 | [Release records](./records.md)       | `changelog`, `github`, `commit`, the shared entry format options.                                                                           |
@@ -55,6 +56,8 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | `env`              | map name → value                           | no       | Fixed environment variables added to every script the run executes. Spaces and packages layer their own maps on top; see [Static env](#static-env).                     |
 | `custom`           | object                                     | no       | Free-form data dispat never reads: somewhere to keep your own tooling's settings without the unknown-key check rejecting them. Spaces and packages have their own; see [custom](#custom).  |
 | `run`              | object                                     | no       | The branch guard (`allowBranch`) and the run-level hooks (`beforeAll` ... `afterPush`), keyed by name; see [Run-level hooks](#run-level-hooks) and [The branch guard](#the-branch-guard).  |
+| `src`              | string                                     | no       | Default scope folder for every package, resolved against each package's own folder; see [What counts as a change](./change-scope.md#src-only-this-folder-is-the-package). |
+| `ignore`           | array of strings                           | no       | Default change-scope ignore patterns; see [What counts as a change](./change-scope.md#ignore-everything-except-these).                                                  |
 | `flow`             | object                                     | no       | Default stages and hooks for every space; see [Stages and hooks](./spaces.md#stages-and-hooks). A space, and then a package, replaces the entries it names and keeps the rest. `login` may be declared here and still runs once per space.  |
 | `autoVersion`      | object                                     | no       | Default manifest-rewriting policy; see [`autoVersion`](./spaces.md#autoversion). A level that states one replaces it whole rather than merging into it.                 |
 | `isBuildWaitingPublish` | bool                                  | no       | Default for every space; see [Space options](./spaces.md#space-options). Default `false`.                                                                              |
@@ -63,6 +66,60 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | `parser`           | object                                     | no       | Commit-message parser options; see [`parser`](./parser.md#parser). Everything unset keeps the specification default.                                                   |
 | `updateCheck`      | bool                                       | no       | Whether dispat looks for a newer release of itself and mentions one on a command's way out. Default `true`; never runs under `logFormat: json`, and never delays a command. See [Updating dispat](../self-update.md#being-told-there-is-an-update).  |
 | `unsafeDisableLock`| bool                                       | no       | Release without the [release lock](../release-lock.md), the tag a release pushes to the remote so that two runs at once are refused rather than raced. Default `false`. For repositories with no remote to coordinate through; `DISPAT_UNSAFE_DISABLE_LOCK=true` says the same for one invocation.  |
+
+## Where a setting can live
+
+Most of what configures a package can be written at more than one level, and the nearest one to the package wins:
+
+**package → space → root**
+
+The root file says what everything does by default, a space narrows it for its packages, and a package entry (or a
+package's own config file) settles it for one package. A level that says nothing inherits, which is why the boolean
+options are three-state: writing `false` in a space is not the same as leaving it out, and only the first of those
+overrides a `true` above it.
+
+| Setting | root | space | package |
+|---------|------|-------|---------|
+| `flow` | yes | yes | yes, except `flow.login` |
+| `scripts` | yes | yes | yes |
+| `env` | yes | yes | yes |
+| `custom` | yes | yes | yes |
+| `tagFormat` | yes | yes | yes |
+| `aliasTags` | yes | yes | yes |
+| `autoVersion` | yes | yes | yes |
+| `isBuildWaitingPublish` | yes | yes | yes |
+| `revertOnFail` | yes | yes | yes |
+| `versioning` | yes | yes | yes |
+| `versionGroup` | no | yes | yes |
+| `dependencies` | yes | yes | yes |
+| `changelog`, `github` | yes | yes | yes |
+| `src`, `ignore` | yes | yes | yes |
+| `concurrency` | yes, as the budget | yes, as a weight | yes, as a weight |
+| `manifestNames` | no | no | yes |
+| `path` | no | yes, the space's own | yes, for a standalone package |
+
+How a level combines with the one below it depends on the setting:
+
+- **Replaced.** Single values such as `tagFormat`, `versioning` and `src`. The nearest statement is the answer.
+- **Merged entry by entry.** `flow`, `scripts`, `env`. A level replaces the entries it names and keeps the rest, so
+  `flow: {build: build-libs}` in a space changes the build and leaves publish alone. An explicit empty array clears an
+  inherited entry.
+- **Replaced whole.** `autoVersion`, `aliasTags`, `manifestNames`. Their empty fields carry meaning against their
+  siblings, so a partial overlay could not express what they mean. An empty `aliasTags: []` is how a package opts out.
+- **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.
+- **Merged, never overridden.** `dependencies`. Every declaration at every level adds to one graph.
+- **Concatenated.** `ignore`. Later levels add patterns, and a `!` pattern re-includes what an earlier level excluded.
+
+One warning about `concurrency`: at the root it is the **budget**, the number of slots a stage may use at once, and
+`0` means the number of CPUs. On a space or a package it is a **weight**, the number of slots that package's task
+occupies, and `0` or absent means 1. They are the two sides of the same number and they are not interchangeable.
+
+Everything else is repository-wide and only exists at the root: `spaces`, `packages`, `versionGroups`, `initials`,
+`commit`, `shell`, `run`, `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`, `updateCheck` and
+`unsafeDisableLock`.
+
+The full order for one package, from weakest to strongest, is in
+[the override ladder](./packages.md#the-override-ladder).
 
 ## dependencies
 
@@ -95,9 +152,11 @@ dependencies:
 manifest declares, such as a Docker base-image chain. The planner treats kept edges like any other.
 
 Both packages must exist, and their names are matched the way every other name-keyed part of the config is matched,
-without regard to case. Self-dependencies and cycles are rejected; duplicates are ignored. Packages can also declare
-their own providers in their `packages` entry or in-folder file (see
-[package dependencies](./packages.md#package-dependencies)), and every declaration merges into one list.
+without regard to case. Self-dependencies and cycles are rejected; duplicates are ignored. The same object can be
+written on a space, for the edges that belong next to it (see
+[the space's `dependencies`](./spaces.md#the-spaces-dependencies)), and a package can list its own providers in its
+`packages` entry or in-folder file (see [package dependencies](./packages.md#package-dependencies)). Every
+declaration merges into one list.
 
 The object keyed by consumer is the only shape the key accepts. An entry inside a consumer's list may not name a
 `consumer` of its own, because the key it sits under already says which package the edge belongs to.

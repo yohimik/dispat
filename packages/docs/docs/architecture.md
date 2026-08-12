@@ -40,7 +40,8 @@ as a release tag.
    flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatexclude`, names
    unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here,
-   through the six-layer ladder (the space, the space folder's config file, then the top-level `packages` entry, the
+   through the seven-layer ladder (the root file's own defaults, the space, the space folder's config file, then the
+   top-level `packages` entry, the
    space's `packages` entry, the space file's `packages` entry and the package folder's own file), each configured package getting a derived
    space value with the merged configuration (a standalone package a single-package space of its own), so everything
    downstream reads per-package behaviour without knowing the layers exist. Dependency declarations are collected from
@@ -188,6 +189,7 @@ sections below.
 | `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
 | `internal/filter`    | The one selection resolver every package-selecting command shares, `release` and `status` included: `--package` / `--space` / `--group` terms, their globs, and the invocation folder that stands in for the first two.                              |
 | `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatexclude` and the selection terms share.                                                                                                        |
+| `internal/ignore`    | The change-scope ignore rules: `ignore` patterns and `.dispatignore` files compiled into one chain per package (repository, space, package), asked once per changed file after ownership is decided. Built on `globx`, so there is still one glob dialect.                                                    |
 
 ## Graph algorithms
 

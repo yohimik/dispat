@@ -21,24 +21,41 @@
       "scripts": {
         "lint": "npm run lint"
       },
-      "env": {"GOFLAGS": "-mod=mod"},
-      "custom": {"owner": "libs-team"},
+      "env": {
+        "GOFLAGS": "-mod=mod"
+      },
+      "custom": {
+        "owner": "libs-team"
+      },
       "autoVersion": {
-        "match": ["workspace:*"],
+        "match": [
+          "workspace:*"
+        ],
         "range": "caret",
-        "kinds": ["dependencies", "devDependencies", "peerDependencies"],
+        "kinds": [
+          "dependencies",
+          "devDependencies",
+          "peerDependencies"
+        ],
         "replace": [
           {
-            "files": ["*.gradle"],
+            "files": [
+              "*.gradle"
+            ],
             "find": "com.acme:{provider}:{providerPrevious}",
             "write": "com.acme:{provider}:{providerVersion}"
           }
         ],
-        "syncLock": ["npm-install"],
+        "syncLock": [
+          "npm-install"
+        ],
         "syncLockConcurrency": 1
       },
       "flow": {
-        "build": ["install", "build"],
+        "build": [
+          "install",
+          "build"
+        ],
         "publish": "publish",
         "version": "sync-deps",
         "login": "npm-login",
@@ -59,46 +76,111 @@
   "packages": {
     "core": {
       "revertOnFail": false,
-      "scripts": { "lint": "npm run lint -- --strict" },
-      "flow": { "build": "build" },
+      "scripts": {
+        "lint": "npm run lint -- --strict"
+      },
+      "flow": {
+        "build": "build"
+      },
       "versionGroup": "platform",
-      "concurrency": [2, 1],
-      "changelog": { "file": "HISTORY.md" },
-      "github": { "enabled": false },
-      "manifestNames": ["com.acme:core"]
+      "concurrency": [
+        2,
+        1
+      ],
+      "changelog": {
+        "file": "HISTORY.md"
+      },
+      "github": {
+        "enabled": false
+      },
+      "manifestNames": [
+        "com.acme:core"
+      ],
+      "src": "lib",
+      "ignore": [
+        "docs/",
+        "*.snap",
+        "!docs/api.md"
+      ]
     },
     "cli": {
       "path": "tools/cli",
-      "flow": { "build": "build-go", "publish": "publish-go" },
-      "dependencies": ["core", { "provider": "utils", "keep": true }],
+      "flow": {
+        "build": "build-go",
+        "publish": "publish-go"
+      },
+      "dependencies": [
+        "core",
+        {
+          "provider": "utils",
+          "keep": true
+        }
+      ],
       "aliasTags": [
-        { "format": "cli-v{version}" },
-        { "format": "cli-v{major}", "moving": true, "channels": ["stable"] }
+        {
+          "format": "cli-v{version}"
+        },
+        {
+          "format": "cli-v{major}",
+          "moving": true,
+          "channels": [
+            "stable"
+          ]
+        }
       ]
     }
   },
   "versionGroups": {
-    "platform": { "versioning": "fixed" }
+    "platform": {
+      "versioning": "fixed"
+    }
   },
-  "run": {"allowBranch": ["main", "release/*"], "postAll": "notify"},
-  "env": {"NPM_CONFIG_REGISTRY": "https://registry.npmjs.org", "CUSTOM_TAG": "custom_$DISPAT_VERSION"},
-  "custom": {"team": "platform"},
+  "run": {
+    "allowBranch": [
+      "main",
+      "release/*"
+    ],
+    "postAll": "notify"
+  },
+  "env": {
+    "NPM_CONFIG_REGISTRY": "https://registry.npmjs.org",
+    "CUSTOM_TAG": "custom_$DISPAT_VERSION"
+  },
+  "custom": {
+    "team": "platform"
+  },
   "dependencies": {
-    "app": ["core", { "provider": "utils", "keep": true }]
+    "app": [
+      "core",
+      {
+        "provider": "utils",
+        "keep": true
+      }
+    ]
   },
   "initials": {
     "core": "1.0.0"
   },
   "tagFormat": "{name}@{version}",
   "commitErrors": "warn",
-  "nonPackageScopes": ["release"],
-  "concurrency": [4, 2],
+  "nonPackageScopes": [
+    "release"
+  ],
+  "concurrency": [
+    4,
+    2
+  ],
   "logLevel": "info",
   "logFormat": "pretty",
   "unsafeDisableLock": false,
-  "shell": ["/bin/sh", "-c"],
+  "shell": [
+    "/bin/sh",
+    "-c"
+  ],
   "parser": {
-    "propagation": { "depth": 0 }
+    "propagation": {
+      "depth": 0
+    }
   },
   "changelog": {
     "enabled": true,
@@ -110,7 +192,10 @@
     "fixesTitle": "Fixes",
     "dependenciesTitle": "Dependencies",
     "footer": [
-      { "line": "Published from the acme monorepo.", "space": "libs" }
+      {
+        "line": "Published from the acme monorepo.",
+        "space": "libs"
+      }
     ]
   },
   "commit": {
@@ -128,6 +213,8 @@
     "tokenEnv": "GITHUB_TOKEN",
     "featuresTitle": "Features",
     "releaseName": "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
-    "footer": ["Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"]
+    "footer": [
+      "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"
+    ]
   }
 }

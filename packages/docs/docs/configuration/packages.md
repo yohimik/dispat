@@ -63,7 +63,8 @@ keys:
 | `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                        |
 | `dependencies` | string or array | Provider names this package [depends on](#package-dependencies); the consumer is the package itself.                                                                                                                                                                                                  |
 | `manifestNames` | array of strings | The manifest names this package answers to, stated rather than read from its files. See [`manifestNames`](#manifestnames) below.                                                                                                                                                                     |
-| `src`          | string          | A folder-relative path narrowing which of the package's files count as changes to it. See [`src`](#src) below.                                                                                                                                                                                        |
+| `src`          | string          | A folder-relative path narrowing which of the package's files count as changes to it. Also settable on a space or at the root. See [`src`](#src) below.                                                                                                                                                                                        |
+| `ignore`       | array of strings | Patterns keeping some of the package's own files from counting as changes to it. Also settable on a space or at the root, where the levels add up. See [What counts as a change](./change-scope.md).                                                                                                                                                                                        |
 | `env`          | map name → value | Fixed environment variables for this package's scripts, merged key by key over the space's map and the top-level one; see [Static env](./README.md#static-env).                                                                                                                                      |
 | `custom`       | object          | Free-form data dispat never reads; see [`custom`](./README.md#custom). Nothing merges it: an entry's object and an in-folder file's object are independent.                                                                                                                                           |
 
@@ -104,6 +105,7 @@ it field by field, and the layer nearest the package wins:
 
 | # | Layer                     | Where it lives                                    |
 |---|---------------------------|----------------------------------------------------|
+| 0 | root defaults             | root file, the top-level space-shaped keys        |
 | 1 | space config              | root file, `spaces.<space>`                        |
 | 2 | space configuration file  | `<space folder>/dispat.json`, its top-level object |
 | 3 | root package entry        | root file, `packages.<package>`                    |
@@ -111,14 +113,17 @@ it field by field, and the layer nearest the package wins:
 | 5 | space file package entry  | `<space folder>/dispat.json`, `packages.<package>` |
 | 6 | package configuration file| `<space folder>/<package>/dispat.json`             |
 
-Layers 1 and 2 are the space, and describe every package in it. Layers 3 to 6 each name one package, ordered by how
-close to it they are written: the repository as a whole, then the space, then the space's own folder, then the package's
-own folder.
+Layer 0 is the repository's own defaults for the keys a space could state — `flow`, `autoVersion`, `versioning`,
+`tagFormat`, `aliasTags`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail` — so a setting every space shares
+is written once; see [Where a setting can live](./README.md#where-a-setting-can-live). Layers 1 and 2 are the space,
+and describe every package in it. Layers 3 to 6 each name one package, ordered by how close to it they are written:
+the repository as a whole, then the space, then the space's own folder, then the package's own folder.
 
 "Nearest wins" is per field, not per layer. A farther layer still supplies everything the nearer ones leave unset, so
 setting `changelog.file` at the top level and `revertOnFail` in the package's own file gives the package both.
 
-A [standalone package](#standalone-packages-path) has no space, so only layers 3 and 6 apply, over an empty base.
+A [standalone package](#standalone-packages-path) has no space, so only layers 3 and 6 apply, over the root
+defaults: it is its own space.
 
 ```json title="root dispat.json"
 {
@@ -202,8 +207,9 @@ A `src` that could never match is refused at load: a folder that is not there, a
 package folder itself. Each of those would narrow the package to nothing, and a package that quietly stops releasing
 is the failure this check exists to prevent.
 
-Like `manifestNames`, the key belongs to a package rather than a space, so it lives in a `packages` entry or in the
-package's own [in-folder file](#in-folder-configuration-files).
+`src` can also be written on a space or at the root, where it becomes the default for every package it reaches,
+still resolved against each package's own folder. To exclude some files rather than pick one folder, see
+[`ignore`](./change-scope.md#ignore-everything-except-these); the two work together.
 
 ## Package weights: `concurrency`
 

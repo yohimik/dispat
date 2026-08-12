@@ -102,8 +102,9 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Partial releases](https://yohimik.github.io/dispat/partial-releases)           | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`. |
 | [The release lock](https://yohimik.github.io/dispat/release-lock)               | Why two releases at once are refused rather than raced, and how to clear a lock a killed run left behind. |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
-| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatexclude`. |
+| [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map and `dependencies`, the space configuration file, `.dispatexclude`. |
 | [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, `src`, standalone packages, package dependencies, in-folder config files. |
+| [What counts as a change](https://yohimik.github.io/dispat/configuration/change-scope) | `src` and `ignore`: which of a package's files make a scopeless commit address it, and the `.dispatignore` file. |
 | [Tags and baselines](https://yohimik.github.io/dispat/configuration/versions)   | `tagFormat` and `initials`.                                                                         |
 | [Release records](https://yohimik.github.io/dispat/configuration/records)       | Changelogs, GitHub releases, your own header and footer lines, holding prereleases back, the release commit. |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser) | `commitErrors`, `nonPackageScopes`, the `parser` object, quieting the parser's diagnostics.         |
