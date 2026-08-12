@@ -73,6 +73,14 @@ type TagFormat string
 // DefaultTagFormat is the format §14 makes normative.
 const DefaultTagFormat TagFormat = "{name}@{version}"
 
+// LockTagName is the one tag name dispat reserves for itself: the release
+// lock (see release.Lock), which says a release is running against this
+// repository. It is a coordination ref and never a release record, so Tags
+// keeps it out of every package's history whatever the tag format is broad
+// enough to match — and it lives here, beside the reading of tags, because
+// that is where the reservation has to hold.
+const LockTagName = "dispat-release-lock"
+
 const (
 	tagNamePlaceholder    = "{name}"
 	tagVersionPlaceholder = "{version}"
@@ -474,6 +482,13 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 			continue
 		}
 		name := strings.TrimSpace(f[0])
+		if name == LockTagName {
+			// dispat's own coordination ref, which is on HEAD for the whole of
+			// the run doing the planning. A format broad enough to match it —
+			// "{version}" makes the glob "*" — would otherwise adopt it as the
+			// package's newest tag and read the window as empty.
+			continue
+		}
 		// The glob is not precise enough on its own: "*" matches any run of
 		// characters, so under "{name}@{version}" the pattern "core@*" also
 		// matches a tag of a package called "core@extra". Re-checking the

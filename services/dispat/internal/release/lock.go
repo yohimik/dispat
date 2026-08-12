@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
 // The release lock: one tag on the remote that says a release is running here.
@@ -24,10 +26,11 @@ import (
 // about the lock is local state: the tag in this clone is scratch, and every
 // question about who holds the lock is answered by the remote.
 
-// LockTagName is the ref every release contends for. It is not a release tag
-// and is never read back as one: no tag format produces this name, and an
-// alias format cannot either, since aliases must carry a version placeholder.
-const LockTagName = "dispat-release-lock"
+// LockTagName is the ref every release contends for. It is never read back as
+// a release tag: gitx reserves the name and drops it from every package's
+// history, however broad the tag format, and an alias format cannot produce
+// it, since an alias must carry a version placeholder.
+const LockTagName = gitx.LockTagName
 
 // LockRemedy is what to do about a lock that will not budge, carried on both
 // the failure to take it and the failure to give it back. Both readers of

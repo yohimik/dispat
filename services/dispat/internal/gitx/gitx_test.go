@@ -625,6 +625,27 @@ func TestDeleteTagLocalAndRemote(t *testing.T) {
 		"a fully qualified refspec makes the remote delete idempotent")
 }
 
+// TestTagsIgnoreTheReleaseLock: the lock tag sits on HEAD for the whole of
+// the run that is doing the planning, so a format broad enough to match it
+// would read it as the package's newest release and see no pending commits at
+// all. The name is reserved instead of relying on the format to be narrow.
+func TestTagsIgnoreTheReleaseLock(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+
+	require.NoError(t, cli.CreateTag(ctx, "0.1.0", "release 0.1.0", ""))
+	require.NoError(t, cli.CreateTag(ctx, LockTagName, "held", ""))
+
+	// "{version}" is the broadest format there is: its glob is "*" and its
+	// shape check accepts any name at all.
+	tags := tagsOf(t, cli, ctx, "core", "{version}")
+	names := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		names = append(names, tag.Name)
+	}
+	assert.Equal(t, []string{"0.1.0"}, names, "in %s", root)
+}
+
 // remoteTagObject reads the tag object a name resolves to in a bare
 // repository, which is what distinguishes two annotated tags of the same name
 // at the same commit.
