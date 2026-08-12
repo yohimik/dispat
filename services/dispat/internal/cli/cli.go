@@ -436,6 +436,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if a.Commit(ctx, app.CommitOptions{Window: window, OnError: *o.onError,
 			Tag: *o.commitTag, Push: *o.commitPush, Name: *o.commitName, Email: *o.commitEmail,
 			Remote: *o.commitRemote, Message: *o.commitMessage, TagName: *o.commitTagName,
+			NoForce: *o.commitNoForce,
 			Include: *o.commitInclude}) != nil {
 			return 1
 		}

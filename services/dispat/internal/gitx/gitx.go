@@ -626,7 +626,27 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 // CreateTag creates an annotated tag at target (any commit-ish), or at HEAD
 // when target is empty.
 func (c *CLI) CreateTag(ctx context.Context, name, message, target string) error {
-	args := []string{"tag", "-a", name, "-m", message}
+	return c.createTag(ctx, name, message, target, false)
+}
+
+// CreateTagForce is CreateTag with `git tag -f`: a name the repository already
+// carries is rewritten instead of refused.
+//
+// It is what a moving tag needs — an alias like "v1" means "the newest 1.x"
+// and has to be re-pointed on every release — and what keeps a run from
+// dying on a tag some earlier attempt left behind. It is deliberately a
+// separate method rather than a flag on CreateTag: overwriting a release
+// record is not something a caller should be able to do by passing false.
+func (c *CLI) CreateTagForce(ctx context.Context, name, message, target string) error {
+	return c.createTag(ctx, name, message, target, true)
+}
+
+func (c *CLI) createTag(ctx context.Context, name, message, target string, force bool) error {
+	args := []string{"tag"}
+	if force {
+		args = append(args, "-f")
+	}
+	args = append(args, "-a", name, "-m", message)
 	if target != "" {
 		args = append(args, target)
 	}
@@ -778,34 +798,64 @@ func (c *CLI) RemoteTags(ctx context.Context, remote string) (map[string]bool, e
 	return tags, nil
 }
 
-// Push pushes the current branch (HEAD) and then the given tags to the
-// remote. Tags that already exist on the remote are skipped rather than
-// failing the push and returned for reporting, so a re-run after a partially
-// pushed release converges instead of dying on "tag already exists".
+// PushReport says what the push did about tags the remote already carried.
+// Exactly one of the two lists is ever populated, decided by force.
+type PushReport struct {
+	// Skipped are tags left as they were, because the remote already had
+	// them and force was off.
+	Skipped []string
+	// Replaced are tags the remote already had and that were overwritten.
+	Replaced []string
+}
+
+// Push pushes the current branch (HEAD) and then the given tags to the remote.
 // Requires a checked-out branch (not a detached HEAD).
-func (c *CLI) Push(ctx context.Context, remote string, tags []string) (skipped []string, err error) {
+//
+// With force, the tags are pushed with --force and a tag the remote already
+// carries is overwritten; the report names those, because replacing a
+// published ref is worth saying out loud even when it is what was asked for.
+// Without it, such a tag is left alone and reported as skipped, so a re-run
+// after a partially pushed release converges instead of dying on "already
+// exists".
+//
+// **The branch is never force pushed.** A rejected branch push means someone
+// else pushed while this run was working, and the answer to that is to look,
+// not to overwrite their commits. Only the tag refs — dispat's own namespace —
+// are ever forced.
+func (c *CLI) Push(ctx context.Context, remote string, tags []string, force bool) (PushReport, error) {
+	var report PushReport
 	if _, err := c.run(ctx, "push", remote, "HEAD"); err != nil {
-		return nil, err
+		return report, err
 	}
 	if len(tags) == 0 {
-		return nil, nil
+		return report, nil
 	}
 	existing, err := c.RemoteTags(ctx, remote)
 	if err != nil {
-		return nil, err
+		return report, err
 	}
-	var toPush []string
+	refs := make([]string, 0, len(tags))
 	for _, t := range tags {
-		if existing[t] {
-			skipped = append(skipped, t)
+		switch {
+		case !existing[t]:
+		case force:
+			report.Replaced = append(report.Replaced, t)
+		default:
+			report.Skipped = append(report.Skipped, t)
 			continue
 		}
-		toPush = append(toPush, "refs/tags/"+t)
+		refs = append(refs, "refs/tags/"+t)
 	}
-	if len(toPush) > 0 {
-		if _, err := c.run(ctx, append([]string{"push", remote}, toPush...)...); err != nil {
-			return skipped, err
-		}
+	if len(refs) == 0 {
+		return report, nil
 	}
-	return skipped, nil
+	args := []string{"push"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, remote)
+	if _, err := c.run(ctx, append(args, refs...)...); err != nil {
+		return report, err
+	}
+	return report, nil
 }

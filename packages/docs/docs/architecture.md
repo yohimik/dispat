@@ -374,8 +374,9 @@ too; one package's tag failing says nothing about the next package's; a failed p
 releases that document the same work. Each step runs, each failure is recorded, and the exit code adds them up.
 
 `E211` is the one case that also declines to act. A tag already sitting at another commit is left exactly where it is
-rather than moved onto this release: it is a record some earlier run made, and rewriting it here would replace one
-release's history with another's.
+rather than moved onto this release: it is a record some earlier run made, and with
+[force](./configuration/records.md#force) on, a tag moved here would be carried over the copy on the remote, turning one
+local mistake into everyone's.
 
 ## Design decisions
 

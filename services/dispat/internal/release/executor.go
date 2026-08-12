@@ -135,6 +135,11 @@ type Executor struct {
 	Tagger             Tagger
 	Recorders          []ReleaseRecorder // run in order after each successful publish
 	Reverter           Reverter          // rolls back package folders for revertOnFail spaces
+	// Force rewrites a tag the repository already carries instead of failing
+	// on it (commit.force, default true). The pre-existing-tag rules still
+	// come first: a tag already at the release commit is a skip, and one at a
+	// different commit is left alone whatever this says.
+	Force bool
 	// Scanner reads manifests for the autoVersion spaces' native rewriting;
 	// nil defaults to the filesystem scanner.
 	Scanner scanner.Scanner
@@ -769,7 +774,7 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error
 		}
 	}
 	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
-		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.log); err != nil {
+		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.Force, tc.log); err != nil {
 			tc.critical(res, TagFailureCode(err), err, "tagging failed")
 		}
 	}
@@ -832,6 +837,24 @@ type tagInspector interface {
 	ResolveCommit(ctx context.Context, rev string) (string, error)
 }
 
+// forceTagger is the optional Tagger extension that can rewrite a tag the
+// repository already carries; *gitx.CLI implements it. A Tagger without it
+// simply never forces, which is the right default for a test double or a
+// custom tagger written before the option existed.
+type forceTagger interface {
+	CreateTagForce(ctx context.Context, name, message, target string) error
+}
+
+// writeTag creates one tag, forcing when asked and the tagger can.
+func writeTag(ctx context.Context, tagger Tagger, force bool, name, message, target string) error {
+	if force {
+		if ft, ok := tagger.(forceTagger); ok {
+			return ft.CreateTagForce(ctx, name, message, target)
+		}
+	}
+	return tagger.CreateTag(ctx, name, message, target)
+}
+
 // CreateReleaseTag creates rel's annotated release tag — the one place the
 // tag message is rendered and the PACKAGE_<KEY> export is honoured, shared by
 // the in-run tagging above and the finalize phase's deferred tagging: an
@@ -842,8 +865,8 @@ type tagInspector interface {
 // stage script — and the durable record the tag exists to be is already
 // there. A tag at any other commit stays a hard error, because a wrong tag
 // silently accepted would corrupt every future baseline.
-func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, log zerolog.Logger) error {
-	return CreateReleaseTagAs(ctx, tagger, rel, "", log)
+func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, force bool, log zerolog.Logger) error {
+	return CreateReleaseTagAs(ctx, tagger, rel, "", force, log)
 }
 
 // CreateReleaseTagAs is CreateReleaseTag with the tag name supplied rather
@@ -854,7 +877,7 @@ func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, log
 // already tagged, and a version shared by a fixed versioning group moves under
 // it when they do. Naming the tag the outer run decided on is what keeps the
 // two agreeing.
-func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, name string, log zerolog.Logger) error {
+func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, name string, force bool, log zerolog.Logger) error {
 	tag := rel.TagName()
 	if name != "" {
 		tag = name
@@ -883,7 +906,7 @@ func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, n
 			}
 		}
 	}
-	return tagger.CreateTag(ctx, tag, "release "+tag, rel.ExportedCommit())
+	return writeTag(ctx, tagger, force, tag, "release "+tag, rel.ExportedCommit())
 }
 
 // loginEnv is the space-scoped environment of a login script. Login is a

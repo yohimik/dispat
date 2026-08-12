@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
@@ -140,7 +141,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	for _, rel := range rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
-		if err := release.CreateReleaseTag(ctx, a.git, rel, a.log); err != nil {
+		if err := release.CreateReleaseTag(ctx, a.git, rel, a.cfg.Commit.ForceEnabled(), a.log); err != nil {
 			// One package's tag failing says nothing about the next one's.
 			fin.crit.record(a.log, release.TagFailureCode(err), err, "tagging failed",
 				func(e *zerolog.Event) *zerolog.Event {
@@ -151,11 +152,8 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)
 	if a.cfg.Commit.PushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
-		skipped, err := a.git.Push(ctx, fin.remote, tags)
-		for _, tag := range skipped {
-			a.log.Warn().Str("tag", tag).Str("remote", fin.remote).
-				Msg("tag already exists on the remote, skipped")
-		}
+		report, err := a.git.Push(ctx, fin.remote, tags, a.cfg.Commit.ForceEnabled())
+		a.reportPush(report, fin.remote)
 		if err != nil {
 			// The commit and the tags are local records already; the remote
 			// copy is what is missing, and a later push sends it. The GitHub
@@ -190,6 +188,21 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 					func(e *zerolog.Event) *zerolog.Event { return e.Str("package", rel.Pkg.Name) })
 			}
 		}
+	}
+}
+
+// reportPush logs what the push did about tags the remote already carried.
+// Both push sites report it identically, because the distinction matters to
+// whoever reads the log: a skipped tag means the remote kept what it had,
+// a replaced one means this run overwrote a published ref.
+func (a *App) reportPush(report gitx.PushReport, remote string) {
+	for _, tag := range report.Skipped {
+		a.log.Warn().Str("tag", tag).Str("remote", remote).
+			Msg("tag already exists on the remote, skipped")
+	}
+	for _, tag := range report.Replaced {
+		a.log.Warn().Str("tag", tag).Str("remote", remote).
+			Msg("tag already existed on the remote and was overwritten")
 	}
 }
 

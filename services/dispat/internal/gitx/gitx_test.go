@@ -449,9 +449,9 @@ func TestVerifyRemoteAndPush(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, committed)
 	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
-	skipped, err := cli.Push(ctx, "origin", []string{"core@0.1.0"})
+	report, err := cli.Push(ctx, "origin", []string{"core@0.1.0"}, false)
 	require.NoError(t, err)
-	assert.Empty(t, skipped, "a fresh tag is pushed, not skipped")
+	assert.Empty(t, report.Skipped, "a fresh tag is pushed, not skipped")
 
 	out, err := exec.Command("git", "-C", bare, "tag").Output()
 	require.NoError(t, err)
@@ -470,9 +470,9 @@ func TestPushSkipsTagsAlreadyOnTheRemote(t *testing.T) {
 	bare := addBareRemote(t, root)
 
 	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
-	skipped, err := cli.Push(ctx, "origin", []string{"core@0.1.0"})
+	report, err := cli.Push(ctx, "origin", []string{"core@0.1.0"}, false)
 	require.NoError(t, err)
-	require.Empty(t, skipped)
+	require.Empty(t, report.Skipped)
 
 	// RemoteTags sees the pushed tag under its plain name (annotated tags
 	// list twice on the wire; the peeled duplicate must not leak through).
@@ -488,13 +488,99 @@ func TestPushSkipsTagsAlreadyOnTheRemote(t *testing.T) {
 	require.True(t, committed)
 	require.NoError(t, cli.CreateTag(ctx, "core@0.2.0", "release core@0.2.0", ""))
 
-	skipped, err = cli.Push(ctx, "origin", []string{"core@0.1.0", "core@0.2.0"})
+	report, err = cli.Push(ctx, "origin", []string{"core@0.1.0", "core@0.2.0"}, false)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"core@0.1.0"}, skipped, "the existing tag is skipped, not an error")
+	assert.Equal(t, []string{"core@0.1.0"}, report.Skipped, "the existing tag is skipped, not an error")
+	assert.Empty(t, report.Replaced, "nothing is overwritten without force")
 
 	out, err := exec.Command("git", "-C", bare, "tag").Output()
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "core@0.2.0", "the new tag still arrives")
+}
+
+// TestPushForceReplacesTagsOnTheRemote: with force on, a tag the remote
+// already carries is overwritten and reported, rather than skipped forever —
+// which is the only way a moving tag can ever move. The branch is still
+// pushed without force under the same setting: a rejected branch push means
+// someone else pushed, and the answer to that is never to overwrite them.
+func TestPushForceReplacesTagsOnTheRemote(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+
+	require.NoError(t, cli.CreateTag(ctx, "v1", "the 1.x line", ""))
+	report, err := cli.Push(ctx, "origin", []string{"v1"}, true)
+	require.NoError(t, err)
+	require.Empty(t, report.Replaced, "nothing to replace the first time")
+	first := remoteTagCommit(t, bare, "v1")
+
+	// A later release moves the tag locally, then pushes it again.
+	pkg := filepath.Join(root, "packages", "core")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "CHANGELOG.md"), []byte("# Changelog\n"), 0o644))
+	committed, err := cli.CommitDirs(ctx, []string{pkg}, "chore(release): more")
+	require.NoError(t, err)
+	require.True(t, committed)
+	require.NoError(t, cli.CreateTagForce(ctx, "v1", "the 1.x line", ""))
+
+	report, err = cli.Push(ctx, "origin", []string{"v1"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"v1"}, report.Replaced, "the overwrite is reported, not silent")
+	assert.Empty(t, report.Skipped, "force skips nothing")
+
+	moved := remoteTagCommit(t, bare, "v1")
+	assert.NotEqual(t, first, moved, "the remote tag now points at the new commit")
+}
+
+// TestPushNeverForcesTheBranch: the tag refs are dispat's own namespace and
+// may be replaced; the branch carries other people's commits and may not.
+func TestPushNeverForcesTheBranch(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+
+	_, err := cli.Push(ctx, "origin", nil, true)
+	require.NoError(t, err)
+
+	// A commit lands on the remote that this clone does not have, so a
+	// fast-forward is impossible. Even with force asked for, the branch push
+	// must be refused rather than overwrite it.
+	other := t.TempDir()
+	runGit(t, other, "clone", bare, ".")
+	runGit(t, other, "config", "user.email", "other@example.com")
+	runGit(t, other, "config", "user.name", "Other")
+	require.NoError(t, os.WriteFile(filepath.Join(other, "theirs.txt"), []byte("theirs\n"), 0o644))
+	runGit(t, other, "add", ".")
+	runGit(t, other, "commit", "-m", "someone else's work")
+	runGit(t, other, "push", "origin", "HEAD")
+	theirs := strings.TrimSpace(runGit(t, other, "rev-parse", "HEAD"))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "mine.txt"), []byte("mine\n"), 0o644))
+	_, err = cli.CommitDirs(ctx, []string{root}, "chore: mine")
+	require.NoError(t, err)
+
+	_, err = cli.Push(ctx, "origin", nil, true)
+	require.Error(t, err, "a diverged branch push is refused even with force on")
+
+	out, err := exec.Command("git", "-C", bare, "rev-parse", "HEAD").Output()
+	require.NoError(t, err)
+	assert.Equal(t, theirs, strings.TrimSpace(string(out)), "their commit is still the remote tip")
+}
+
+// remoteTagCommit reads what a tag points at in a bare repository.
+func remoteTagCommit(t *testing.T, bare, tag string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", bare, "rev-list", "-n1", tag).Output()
+	require.NoError(t, err)
+	return strings.TrimSpace(string(out))
+}
+
+// runGit runs one git command in dir and returns its output, for the tests
+// that need a second working copy to act as somebody else.
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+	return string(out)
 }
 
 func TestTagNameNormativeForm(t *testing.T) {
@@ -526,7 +612,7 @@ func TestHeadSHANoCommits(t *testing.T) {
 
 func TestPushNoRemote(t *testing.T) {
 	_, cli := initRepo(t)
-	_, err := cli.Push(context.Background(), "origin", nil)
+	_, err := cli.Push(context.Background(), "origin", nil, false)
 	require.Error(t, err, "pushing without a remote fails loudly")
 }
 
@@ -668,7 +754,7 @@ func TestBehindRemote(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, behind, "a branch absent from the remote is not behind")
 
-	_, err = cli.Push(ctx, "origin", nil)
+	_, err = cli.Push(ctx, "origin", nil, false)
 	require.NoError(t, err)
 	behind, err = cli.BehindRemote(ctx, "origin", "main")
 	require.NoError(t, err)
@@ -713,7 +799,7 @@ func TestBehindRemoteIgnoresTailMatchingRefs(t *testing.T) {
 	ctx := context.Background()
 	gitIn(t, root, "checkout", "-q", "-B", "main")
 	addBareRemote(t, root)
-	_, err := cli.Push(ctx, "origin", nil)
+	_, err := cli.Push(ctx, "origin", nil, false)
 	require.NoError(t, err)
 
 	// The decoy carries a commit main does not have. Read as the tip it would

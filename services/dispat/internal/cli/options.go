@@ -39,7 +39,7 @@ type options struct {
 	check *bool
 
 	// commit
-	commitTag, commitPush                                               *bool
+	commitTag, commitPush, commitNoForce                                *bool
 	commitName, commitEmail, commitRemote, commitMessage, commitTagName *string
 	commitInclude                                                       *[]string
 
@@ -121,7 +121,9 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.commitTag = fs.Bool("tag", false,
 		"also create the annotated release tag at the resulting commit; an identical existing tag is skipped")
 	o.commitPush = fs.Bool("push", false,
-		"push the branch, and with --tag the tag(s); tags already on the remote are skipped")
+		"push the branch, and with --tag the tag(s)")
+	o.commitNoForce = fs.Bool("no-force", false,
+		"turn commit.force off: leave a tag the repository or the remote already carries as it is")
 	o.commitName = fs.String("name", "",
 		"override the commit.name committer identity")
 	o.commitEmail = fs.String("email", "",

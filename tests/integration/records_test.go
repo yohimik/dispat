@@ -134,6 +134,10 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Dependencies = models.Dependencies{{Consumer: "consumer", Provider: "core"}}
+	// Force off, so the pre-existing tag below actually refuses the write.
+	// With force on it would simply be rewritten, which is the point of the
+	// setting and is covered by TestRecordsForceRewritesAnUnreachableTag.
+	cfg.Commit = &models.CommitConfig{Force: models.Bool(false)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "consumer")
@@ -167,6 +171,32 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 	// record this run did not make.
 	assert.Equal(t, "someone else's tag",
 		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@0.1.0"))
+}
+
+// TestRecordsForceRewritesAnUnreachableTag: the other side of the same setup.
+// A tag on a commit this branch cannot reach is invisible to the planner, so
+// dispat has no way to plan around it and no basis for treating it as a
+// record of anything. With force on — the default — the write simply
+// succeeds and the tag names this release.
+//
+// A tag dispat *can* see at a different commit is still left alone (E211).
+// Force means "do not fail because the ref exists", not "overwrite whatever
+// is there".
+func TestRecordsForceRewritesAnUnreachableTag(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): first release")
+
+	r.WriteFile("decoy.txt", "not the release commit\n")
+	r.Commit("chore: elsewhere")
+	r.Git("tag", "-a", "core@0.1.0", "-m", "someone else's tag")
+	r.Git("reset", "--hard", "HEAD~1")
+
+	r.ReleaseOK()
+
+	assert.Equal(t, "release core@0.1.0",
+		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@0.1.0"),
+		"the tag now records this release")
+	assert.Equal(t, r.Git("rev-parse", "HEAD"), r.Git("rev-list", "-n1", "core@0.1.0"))
 }
 
 // TestRecordsTagAtAnotherCommitIsLeftAlone: the sharper half of the same
@@ -268,11 +298,15 @@ func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.
 // TestRecordsPushSkipsExistingRemoteTags: a tag already present on the remote
 // (left by a partially pushed earlier run) is skipped with the rest of the
 // push going through — the branch, the release commit and every new tag —
-// and the pre-existing remote tag keeps its original target.
+// and the pre-existing remote tag keeping its original target, because this
+// run turns force off. With force on (the default) the same tag is replaced;
+// see TestRecordsPushForceReplacesExistingRemoteTags.
 func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Commit = &models.CommitConfig{
+		Enabled: models.Bool(true), Push: true, Force: models.Bool(false),
+	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -295,6 +329,32 @@ func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
 	assert.Contains(t, remoteRefs, head, "the release commit arrives")
 	stillAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
 	assert.Equal(t, remoteTarget, stillAt, "the existing remote tag is skipped, not overwritten")
+}
+
+// TestRecordsPushForceReplacesExistingRemoteTags: the default. A tag the
+// remote already carries is overwritten rather than skipped forever, which is
+// what closes the window between the check and the push — and the only way a
+// moving tag could ever move. The replacement is reported, not silent.
+func TestRecordsPushForceReplacesExistingRemoteTags(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.AddBareRemote()
+	r.Commit("feat(a): first release")
+
+	r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier partial push")
+	r.Git("push", "-q", "origin", "a@0.1.0")
+	staleTarget := r.Git("rev-list", "-n1", "a@0.1.0")
+	r.Git("tag", "-d", "a@0.1.0")
+
+	res := r.ReleaseOK()
+	assert.Contains(t, res.Stdout, "overwritten", "the replacement is reported")
+
+	nowAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
+	assert.NotEqual(t, staleTarget, nowAt, "the remote tag was moved onto this release")
+	assert.Equal(t, r.Git("rev-list", "-n1", "a@0.1.0"), nowAt, "and agrees with the local tag")
 }
 
 // TestRecordsExportedPackageCommitPinsTheTag: a release script exporting

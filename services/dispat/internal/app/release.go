@@ -127,6 +127,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		Tagger:             tagger,
 		Recorders:          a.recorders(gh, commitMode),
 		Reverter:           a.git,
+		Force:              a.cfg.Commit.ForceEnabled(),
 		Scanner:            a.scan,
 		Log:                a.log,
 	}

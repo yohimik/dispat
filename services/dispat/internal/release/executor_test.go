@@ -1554,7 +1554,7 @@ func TestCreateReleaseTagSkipsIdenticalExistingTag(t *testing.T) {
 		existing: gitx.Tags{{Name: rel.TagName(), Commit: "fullsha"}},
 		resolved: map[string]string{"abc123": "fullsha"},
 	}
-	require.NoError(t, CreateReleaseTag(context.Background(), tg, rel, zerolog.Nop()))
+	require.NoError(t, CreateReleaseTag(context.Background(), tg, rel, false, zerolog.Nop()))
 	assert.Empty(t, tg.tags, "no CreateTag call for an identical existing tag")
 }
 
@@ -1565,7 +1565,7 @@ func TestCreateReleaseTagRejectsTagAtDifferentCommit(t *testing.T) {
 		existing: gitx.Tags{{Name: rel.TagName(), Commit: "elsewhere"}},
 		resolved: map[string]string{"HEAD": "fullsha"},
 	}
-	err := CreateReleaseTag(context.Background(), tg, rel, zerolog.Nop())
+	err := CreateReleaseTag(context.Background(), tg, rel, false, zerolog.Nop())
 	require.Error(t, err, "a tag at another commit would corrupt every future baseline")
 	assert.Contains(t, err.Error(), "already exists at")
 	assert.Empty(t, tg.tags)
@@ -1576,6 +1576,6 @@ func TestCreateReleaseTagWithoutInspectorUnchanged(t *testing.T) {
 	// CreateTag — the right default for fakes and custom taggers.
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	tg := &fakeTagger{}
-	require.NoError(t, CreateReleaseTag(context.Background(), tg, p.Releases["a"], zerolog.Nop()))
+	require.NoError(t, CreateReleaseTag(context.Background(), tg, p.Releases["a"], false, zerolog.Nop()))
 	assert.Equal(t, []string{"a@1.0.1"}, tg.tags)
 }

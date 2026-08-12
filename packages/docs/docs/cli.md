@@ -46,8 +46,9 @@ dispat [command] [flags]
 | `--write`             |             | `compute` only: apply every suggestion to the config file (previous copy saved as `<name>.backup`).                                                                                                    |
 | `--interactive`, `-i` |             | `compute` only: confirm each suggestion (`y`/`N` on stdin) before applying it; wins over `--write`.                                                                                                    |
 | `--check`             |             | `compute` and `self-update`: report only, change nothing, and exit `1` when there is something to do. For `compute`, any suggestion at all, edges and baselines alike, which is the CI gate for a config lagging the manifests, and it overrides both apply modes. For `self-update`, a release it would install.  |
-| `--tag`               |             | `commit` only: also create the annotated release tag at the resulting commit; an identical existing tag is skipped.        |
-| `--push`              |             | `commit` only: push the branch, and with `--tag` the tags; tags already on the remote are skipped.                         |
+| `--tag`               |             | `commit` only: also create the annotated release tag at the resulting commit; an identical existing tag is skipped, and one at a different commit is left alone and reported (`E211`).        |
+| `--push`              |             | `commit` only: push the branch, and with `--tag` the tags.                         |
+| `--no-force`          |             | `commit` only: turn [`commit.force`](./configuration/records.md#force) off for this invocation, leaving a tag the repository or the remote already carries as it is.                         |
 | `--name`, `--email`   | from config | `commit` only: override the `commit.name` / `commit.email` committer identity.                                             |
 | `--remote`            | from config | `commit` only: override the `commit.remote` push target.                                                                   |
 | `--tag-name`          | computed    | `commit` only: name the annotated tag instead of computing it; pass `$DISPAT_TAG` from a release stage. One package only.   |

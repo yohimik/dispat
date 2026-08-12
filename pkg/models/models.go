@@ -362,10 +362,20 @@ type CommitConfig struct {
 	// MessageFormat supports {tags} and {packages} placeholders (comma-
 	// separated lists). Default: "chore(release): {tags}".
 	MessageFormat string `mapstructure:"messageFormat" json:"messageFormat,omitempty"`
-	// Push pushes the release commit and tags. Tags that already exist on
-	// the remote are skipped with a warning; the rest are pushed.
+	// Push pushes the release commit and tags.
 	Push   bool   `mapstructure:"push" json:"push,omitempty"`     // default false
 	Remote string `mapstructure:"remote" json:"remote,omitempty"` // default "origin"
+	// Force writes tags that the repository or the remote already carries,
+	// instead of leaving them as they are. Default true.
+	//
+	// It exists because a tag the remote already has is otherwise skipped
+	// forever, which is what a moving tag (see PackageConfig.AliasTags) can
+	// never live with, and because a tag appearing between the check and the
+	// push would otherwise reject the whole push at the very end of a release.
+	// The branch is never force pushed under either setting, and a release tag
+	// found sitting at a different commit is still left alone: force means
+	// "do not fail because the ref exists", not "overwrite whatever is there".
+	Force *bool `mapstructure:"force" json:"force,omitempty"` // default true
 	// Verify controls the upfront remote-access check (git ls-remote) run
 	// before any release work when Push is enabled. Default true; set false
 	// to skip it, e.g. for a remote that rejects ls-remote but accepts
@@ -392,6 +402,10 @@ func (c *CommitConfig) IsEnabled() bool { return c != nil && c.Enabled != nil &&
 // PushEnabled reports whether the release commit and tags are pushed; only
 // meaningful with the commit enabled. Nil-safe.
 func (c *CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
+
+// ForceEnabled reports whether tags are written over ones that already exist
+// (default true). Nil-safe.
+func (c *CommitConfig) ForceEnabled() bool { return c == nil || c.Force == nil || *c.Force }
 
 // VerifyEnabled reports whether remote access is verified before any release
 // work when pushing (default true). Nil-safe.

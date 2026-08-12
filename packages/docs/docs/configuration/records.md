@@ -265,7 +265,8 @@ history of its stable releases, with the beta traffic staying in the tags, wants
 |-----------------|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`       | `false`                  | Create one release commit at the end of a successful run.                                                                                                                                                                                                                                                                                                                                         |
 | `messageFormat` | `chore(release): {tags}` | Template; `{tags}` and `{packages}` become comma-separated lists.                                                                                                                                                                                                                                                                                                                                 |
-| `push`          | `false`                  | Push the release commit and tags. Tags that already exist on the remote are skipped with a warning; the rest are pushed. Only applies when `enabled` is true.                                                                                                                                                                                                                                     |
+| `push`          | `false`                  | Push the release commit and tags. Only applies when `enabled` is true.                                                                                                                                                                                                                                     |
+| `force`         | `true`                   | Write tags the repository or the remote already carries, instead of leaving them alone. The branch is never force pushed, and a release tag found at a different commit is still left as it is; see [Force](#force) below. `dispat commit --no-force` turns it off for one invocation.                                                                     |
 | `remote`        | `origin`                 | Remote to push to.                                                                                                                                                                                                                                                                                                                                                                                |
 | `name`, `email` | unset                    | The git identity every commit and annotated tag dispat creates is authored under, so a CI run needs no `git config` step. Unset values fall back to git's own configuration.  |
 | `verify`        | `true`                   | Verify remote access (`git ls-remote`) before any release work when `push` is enabled. Set `false` to skip the check, e.g. for a remote that rejects ls-remote but accepts pushes.                                                                                                                                                                                                                |
@@ -285,11 +286,36 @@ changed on disk (e.g. changelogs disabled), no empty commit is created but tags 
 to the end of the run and document the release commit in their body; what the GitHub side does in each mode is described
 under [`github`](#github).
 
-Pushing pushes the branch first and the run's tags after it, skipping any tag that already exists on the remote (with a
-warning naming it), so a re-run after a partially pushed release converges instead of dying on "tag already exists". It
+Pushing pushes the branch first and the run's tags after it. It
 requires a checked-out branch (not a detached HEAD; use `actions/checkout` with a `ref`). When `push` is enabled, remote
 access is **verified before any release work starts** (`git ls-remote`, switched off by
 `verify: false`), so a misconfigured remote fails the run before anything is built; an enabled GitHub configuration is
 likewise verified up front, push or not (see [
-`github`](#github)). A failure during the finalize phase itself (commit, tag, push, GitHub release) exits 1, but
-already-published registry artifacts stay published.
+`github`](#github)). A failure during the finalize phase itself (commit, tag, push, GitHub release) exits 1 with
+everything else in the phase still done, and already-published registry artifacts stay published; see
+[After the point of no return](../architecture.md#after-the-point-of-no-return).
+
+### Force
+
+`force` (default `true`) decides what happens when a tag is already there.
+
+With it on, a tag the repository already carries is rewritten (`git tag -f`), and one the remote already carries is
+replaced (`git push --force` on that one ref, reported with a warning naming it). Without it, both are left as they are
+and reported as skipped, which is the older behaviour: a re-run after a partially pushed release converges instead of
+dying on "tag already exists".
+
+The default is on for two reasons. A tag the remote already has is otherwise skipped on every future run, so a *moving*
+tag could never move. And a tag appearing between dispat's check and its push would otherwise reject the whole push at
+the very end of a release, after every artefact is already out.
+
+Two things `force` deliberately does not do:
+
+- **The branch is never force pushed**, under either setting. A rejected branch push means someone else pushed while
+  the run was working, and the answer to that is to look, not to overwrite their commits.
+- **A release tag found at a different commit is left alone.** That is reported as `E211` and the tag is not written at
+  all, because it is a record some earlier run made, and a tag moved here would then be force pushed over the copy on
+  the remote, turning one local mistake into everyone's. Force means "do not fail because the ref exists", not
+  "overwrite whatever is there".
+
+The one case force does change for release tags is a tag on a commit the current branch cannot reach: dispat's baseline
+query cannot see it, so nothing planned around it, and the write simply succeeds.

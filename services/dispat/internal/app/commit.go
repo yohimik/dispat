@@ -34,6 +34,9 @@ type CommitOptions struct {
 	// exactly one package, since one name cannot serve several.
 	TagName string
 	Include []string
+	// NoForce turns commit.force off for this invocation: a tag the
+	// repository or the remote already carries is left as it is.
+	NoForce bool
 }
 
 // Commit creates each covered package's release commit: the package folder
@@ -93,8 +96,12 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		remote = "origin"
 	}
 
+	force := a.cfg.Commit.ForceEnabled()
+	if opts.NoForce {
+		force = false
+	}
 	work := &commitWork{app: a, git: git, tag: opts.Tag, tagName: opts.TagName,
-		format: format, include: include, crit: &criticals{}}
+		format: format, include: include, force: force, crit: &criticals{}}
 	rep, err := a.sweepStep(ctx, pl, covered, work, opts.OnError, "commit")
 	if err != nil {
 		return err
@@ -102,11 +109,8 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 	if !opts.Push || rep.Ran == 0 {
 		return work.crit.err()
 	}
-	skipped, pushErr := git.Push(ctx, remote, work.tags)
-	for _, tag := range skipped {
-		a.log.Warn().Str("tag", tag).Str("remote", remote).
-			Msg("tag already exists on the remote, skipped")
-	}
+	report, pushErr := git.Push(ctx, remote, work.tags, force)
+	a.reportPush(report, remote)
 	if pushErr != nil {
 		// The commits and tags this run made are already in the repository,
 		// so the push is the copy that is missing, not the work.
@@ -134,6 +138,7 @@ type commitWork struct {
 	tagName string
 	format  string
 	include []string
+	force   bool
 	tags    []string
 	// crit collects the failures that happen once this package's commit
 	// exists: the tag, and the push at the end. They do not fail the package —
@@ -180,7 +185,7 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 			// The commit above is made and cannot be taken back, so a tag that
 			// cannot be written is reported rather than thrown: failing the
 			// package here would skip consumers whose commits are fine.
-			if err := release.CreateReleaseTagAs(ctx, w.git, rel, w.tagName, log); err != nil {
+			if err := release.CreateReleaseTagAs(ctx, w.git, rel, w.tagName, w.force, log); err != nil {
 				w.crit.record(log, release.TagFailureCode(err), err, "tagging failed",
 					func(e *zerolog.Event) *zerolog.Event { return e.Str("tag", tag) })
 			} else {
