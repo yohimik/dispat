@@ -2,11 +2,12 @@
 # Install the dispat CLI from its GitHub release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 #
 # One script for every Unix: the release binaries are static (CGO_ENABLED=0, see
 # scripts/build-dispat.sh), so there is nothing to compile and nothing to link
 # against, and the only tools this needs are the ones every base image already
-# has — a POSIX shell and either curl or wget.
+# has: a POSIX shell and either curl or wget.
 #
 # The Docker images under docker/ run this same file rather than a copy of its
 # logic, which is why it takes --os/--arch/--bin-dir: a cross-built image knows
@@ -169,7 +170,7 @@ if [ -z "$VERSION" ]; then
 	log "resolving the latest stable release..."
 	# Highest, not most recent: a patch cut on an older line comes back first
 	# and would otherwise look like an upgrade to everyone on the newer one.
-	# Prereleases drop out on the "-" test, which needs no JSON structure —
+	# Prereleases drop out on the "-" test, which needs no JSON structure:
 	# a stable version has no hyphen in it.
 	VERSION=$(
 		get "${API_URL}/repos/${OWNER}/${REPO}/releases?per_page=100" |

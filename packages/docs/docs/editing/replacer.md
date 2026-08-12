@@ -96,9 +96,9 @@ $ dispat replacer --log-format json --sub '1.2.0=>1.3.0' build.gradle
 
 ### Exit codes
 
-`0` when everything asked for was done, `1` for a file that cannot be read or written or a `--strict` run with a
-pattern that matched nothing, and `2` for a command line that does not make sense (no file named, no `--sub` given, a
-`--sub` with no separator or with nothing to find).
+`0` when everything asked for was done. `1` for a file that cannot be read or written, or a `--strict` run with a
+pattern that matched nothing. `2` for a command line that does not make sense: no file named, no `--sub` given, or a
+`--sub` with no separator or with nothing to find.
 
 ## Replacing during a release
 

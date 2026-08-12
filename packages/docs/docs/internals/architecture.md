@@ -23,38 +23,39 @@ as a release tag.
    that is not a git repository root. The run command computes the plan, then runs the script inside each changed
    package that has one (looked up in the package's `scripts`, then its space's, then the file's) over the dependency
    graph (build concurrency budget; `--on-error` decides whether a failure skips the failed package's dependents) and
-   stops. Which packages that covers is decided in three steps by the shared `internal/filter` resolver: a window
-   (the release window, what `--since <rev>` addresses — scopes first, changed files for scopeless units, §6.2 — or
-   every package for `--since all`), then the `--package` / `--space` / `--group` terms narrowing it (the invocation folder
-   standing in for the terms nobody typed), then `--consumers` expanding the result downstream. Nothing below step 6
+   stops. Which packages that covers is decided in three steps by the shared `internal/filter` resolver. First a
+   window: the release window, or what `--since <rev>` addresses (scopes first, changed files for scopeless units per
+   §6.2), or every package for `--since all`. Then the `--package` / `--space` / `--group` terms narrow it, with the
+   invocation folder standing in for the terms nobody typed. Finally `--consumers` expands the result downstream. Nothing below step 6
    applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (every
    pending package's in publish order, under the same filter), and stops. `scanner` and `writer` also
-   answer before any config is loaded, and for the same reason as `init`: they are the `pkg/scanner` and `pkg/writer`
-   libraries exposed directly (see [Manifest tools](../editing/manifests.md)), reading nothing but the paths named on the
-   command line, so a monorepo root, a plan and a git history are all beside the point.
+   answer before any config is loaded, for the same reason as `init`. They are the `pkg/scanner` and `pkg/writer`
+   libraries exposed directly (see [Manifest tools](../editing/manifests.md)), reading nothing but the paths named on
+   the command line. A monorepo root, a plan and a git history are all beside the point.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root; a folder's `.dispatexclude` chooses between the candidate names). A file declaring `spaces`
-   ends the ascent; one declaring only `packages` is a candidate that yields to a root above claiming its folder as a
-   space, which is how a space folder's file is told from a monorepo of standalone packages; a file declaring neither
-   (a package's in-folder override) does not end the ascent. Then load and validate it (viper; unknown keys rejected;
+   ends the ascent. One declaring only `packages` is a candidate that yields to a root above claiming its folder as a
+   space, which is how a space folder's file is told from a monorepo of standalone packages. A file declaring neither,
+   meaning a package's in-folder override, does not end the ascent. Then load and validate it (viper; unknown keys rejected;
    flag bindings applied).
 3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatexclude`, names
    unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here,
-   through the seven-layer ladder (the root file's own defaults, the space, the space folder's config file, then the
-   top-level `packages` entry, the
-   space's `packages` entry, the space file's `packages` entry and the package folder's own file), each configured package getting a derived
-   space value with the merged configuration (a standalone package a single-package space of its own), so everything
-   downstream reads per-package behaviour without knowing the layers exist. Dependency declarations are collected from
+   through the seven-layer ladder: the root file's own defaults, the space, the space folder's config file, then the
+   top-level `packages` entry, the space's `packages` entry, the space file's `packages` entry and the package folder's
+   own file. Each configured package gets a derived space value carrying the merged configuration, a standalone package
+   becoming a single-package space of its own. Everything downstream then reads per-package behaviour without knowing
+   the layers exist. Dependency declarations are collected from
    every source (the root object, the entries, the in-folder files) into one merged list.
 4. Build the dependency graph from the merged relations; topologically sort it (cycles abort with the members named).
 5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
-   compute direct bumps, run the three propagation phases, then versions, with every versioning group (a space with
-   its own shared mode, or a declared `versionGroups` entry its members joined) versioned as one (see "Versioning
-   groups" below).
-6. Print the diagnostics; narrow the plan to the invocation's `--package` / `--space` / `--group` selection (`plan.Narrow`: every
-   unselected releasing package is deselected, a selected one whose provider is releasing and unselected is withheld
-   for the next run as `W230`, and a versioning group the selection splits is reported as `W231`); then print the full
-   graph with `old -> new` versions and channel transitions, in publish order, the deselected packages marked as such.
+   compute direct bumps, run the three propagation phases, then versions. Every versioning group is versioned as one,
+   whether it is a space with its own shared mode or a declared `versionGroups` entry its members joined (see
+   "Versioning groups" below).
+6. Print the diagnostics, then narrow the plan to the invocation's `--package` / `--space` / `--group` selection.
+   `plan.Narrow` does three things: every unselected releasing package is deselected, a selected one whose provider is
+   releasing and unselected is withheld for the next run as `W230`, and a versioning group the selection splits is
+   reported as `W231`. Then print the full graph with `old -> new` versions and channel transitions, in publish order,
+   the deselected packages marked as such.
    `--strict` refuses a selection carrying either finding, after the graph and before any release work. `status` stops
    here.
 7. Refuse to release when the plan has a repository-scoped error, or any error at all under `commitErrors: "error"`.
@@ -65,16 +66,16 @@ as a release tag.
     concurrency budgets. Each stage is bracketed by the space's gating hooks (`beforeAll`,
     `beforeVersion`/`postVersion`, `beforeBuild`/`postBuild`, `beforePublish`), and a space's `flow.login` runs once
     before its first publish, every other publish of the space waiting on it.
-11. After each successful publish: run the release recorders (changelog file; GitHub release unless in release-commit
-    mode), then create the annotated tag (deferred in release-commit mode; a `PACKAGE_<KEY>` script export pins it to
-    the exported commit instead of HEAD), then the warn-only `postPublish` hook and the warn-only announce frame
-    (`beforeAnnounce`, the announce stage, `postAnnounce`). The publish having succeeded, none of this can fail the
+11. After each successful publish, three things run in order. First the release recorders: the changelog file, and the
+    GitHub release unless in release-commit mode. Then the annotated tag, which is deferred in release-commit mode, and
+    which a `PACKAGE_<KEY>` script export pins to the exported commit instead of HEAD. Then the warn-only `postPublish`
+    hook and the warn-only announce frame (`beforeAnnounce`, the announce stage, `postAnnounce`). The publish having succeeded, none of this can fail the
     package any more: a failure here is a [critical](#after-the-point-of-no-return).
 12. Run the warn-only `postAll` hook with the run outcome (`DISPAT_RESULT_*`).
-13. Finalize phase (when `commit` is enabled): one release commit staging all published packages, tags on that commit
-    (or on a package's exported `PACKAGE_<KEY>` commit), then the push when `commit.push` is enabled: the branch first,
-    then the run's tags with any tag already existing on the remote skipped (warned, not fatal), then GitHub releases
-    referencing the pushed tags. The warn-only commit/push hooks bracket these operations (`beforeCommit`/`afterCommit`,
+13. Finalize phase (when `commit` is enabled): one release commit staging all published packages, then tags on that
+    commit, or on a package's exported `PACKAGE_<KEY>` commit. When `commit.push` is enabled the push follows, branch
+    first, then the run's tags, with any tag already on the remote skipped (warned, not fatal). GitHub releases
+    referencing the pushed tags come last. The warn-only commit/push hooks bracket these operations (`beforeCommit`/`afterCommit`,
     `postCommit` after tags,
     `beforePush`/`afterPush`). Every package here has published, so nothing in this phase aborts it either: each step
     runs, and each failure is a [critical](#after-the-point-of-no-return).
@@ -146,23 +147,27 @@ guards included: one shared next version, one prerelease train, one pin per grou
 scope breadth is one by construction, since the group holds one shared prefix).
 
 **The engagement rule** is what makes a partial depth work, and it is a single predicate evaluated after that
-computation: the group takes its members over only when the computed version leaves the group's prefix behind, or the
-group already sits on a prerelease train whose prefix left the stable line (that train's later prereleases and its
-graduation belong to the whole group even though neither moves the prefix again). At the full depth the predicate is
+computation. The group takes its members over in two cases only: when the computed version leaves the group's prefix
+behind, or when the group already sits on a prerelease train whose prefix left the stable line. In that second case the
+train's later prereleases and its graduation belong to the whole group, even though neither moves the prefix again. At the full depth the predicate is
 constantly true, so `fixed` and `fixedSparse` run the path they always did. A pin is admitted to the group computation
 under the same rule: one naming the prefix the group already carries is left to its own package's `applyPin`, so a
-member's local `Release-As` is never measured against the group's aggregate. When the group does not engage, every
-member goes through the ordinary per-member `versionOne`, and an alignment pass then keeps the invariant: a member
-releasing below the group's prefix adopts it (which is how a sparse member's first change lands it on the shared part),
-and a non-sparse member with nothing pending whose baseline lags is released at the prefix with `W210`.
+member's local `Release-As` is never measured against the group's aggregate.
 
-Assignment is where sparseness shows, and the mode is each member's own (a joined group can mix them): a plain mode
-releases every non-held member at the group version, marking members with no cause of their own as rides (`W210`,
-non-suppressible, with a "no changes" changelog entry naming the shared part); a sparse mode assigns the group version
-only to members with a cause of their own. Scope resolution is untouched: each member keeps its *own* units for
-changelog and release notes. Two convergence properties are preserved: a quiet group whose members agree on the prefix
-releases nothing, and a non-sparse member left behind (a failed ride, a mid-life adoption) is re-released on the next
-run, at exactly the group's published version under `fixed` and at the start of its own line under a partial mode.
+When the group does not engage, every member goes through the ordinary per-member `versionOne`, and an alignment pass
+then keeps the invariant. A member releasing below the group's prefix adopts it, which is how a sparse member's first
+change lands it on the shared part. And a non-sparse member with nothing pending whose baseline lags is released at the
+prefix with `W210`.
+
+Assignment is where sparseness shows, and the mode is each member's own, so a joined group can mix them. A plain mode
+releases every non-held member at the group version, marking members with no cause of their own as rides: `W210`,
+non-suppressible, with a "no changes" changelog entry naming the shared part. A sparse mode assigns the group version
+only to members with a cause of their own. Scope resolution is untouched either way, so each member keeps its *own*
+units for changelog and release notes.
+
+Two convergence properties are preserved. A quiet group whose members agree on the prefix releases nothing. And a
+non-sparse member left behind, by a failed ride or a mid-life adoption, is re-released on the next run: at exactly the
+group's published version under `fixed`, and at the start of its own line under a partial mode.
 
 ## Module map
 
@@ -269,9 +274,9 @@ awaited, the rest are reported cancelled), and a frontier that empties with node
 instead of deadlocking.
 
 Two things drain: the release executor, over `(package, stage)` nodes and the budgets above, and the *package sweep* in
-`internal/app`, over package names and one budget. The sweep is what every command covering a set of packages runs on
-— `run`, `autowriter`, and the four step commands — and it decides who runs, in what order, under which budget and
-what a failure does to the dependents. A command supplies only a `packageWork`: given one package's release, hand back
+`internal/app`, over package names and one budget. The sweep is what every command covering a set of packages runs on:
+`run`, `autowriter`, `autosubstitute` and the four step commands. It decides who runs, in what order, under which
+budget, and what a failure does to the dependents. A command supplies only a `packageWork`: given one package's release, hand back
 the work to do, or nothing when there is none. `commit` and `github` declare themselves serial, since a repository has
 one index and one HEAD; the rest ride the build budget. Adding a command that covers packages is therefore one small
 file, not a copy of the scheduling.
@@ -340,9 +345,9 @@ release (`DueTo` then contains an *unchanged* provider: it gets no task nodes, a
 version). A consumer that was never released while a provider has been is the same case, with the whole history as its
 window. Such a release is labelled a catch-up and reported with the origin's published version.
 
-Because admission is a window test, the guarantees are structural rather than heuristic: a contribution survives every
-run until the dependant releases past it and is not re-admitted afterwards; the version a package is caught up at is the
-one it was planned at originally; and a later run's target set is always a subset of the first run's, so a failed
+Because admission is a window test, the guarantees are structural rather than heuristic. A contribution survives every
+run until the dependant releases past it, and is not re-admitted afterwards. The version a package is caught up at is
+the one it was planned at originally. And a later run's target set is always a subset of the first run's, so a failed
 publish can never widen a commit's blast radius.
 
 A skipped package is recorded as *blocked* with the dependency responsible, rather than being silently absent from the
@@ -373,9 +378,10 @@ that lost part of its record never looks green in CI.
 | `E214` | The push failed |
 
 The reason none of these fails the package is that failing it would be a lie with consequences. The package *is*
-published: marking it failed would revert its folder, throwing away the version bump of something already on a
-registry; it would run its `onFail` script; and it would skip every consumer, none of which has anything wrong with it
-and all of which have a real published provider to build against. None of that un-publishes anything. So the status
+published, so marking it failed would do three wrong things. It would revert the package folder, throwing away the
+version bump of something already on a registry. It would run the `onFail` script. And it would skip every consumer,
+none of which has anything wrong with it, and all of which have a real published provider to build against. None of
+that un-publishes anything. So the status
 stays `published`, the summary line for that package turns into an error carrying what went missing, and the operator
 gets told exactly what to go and repair.
 
@@ -384,9 +390,9 @@ too; one package's tag failing says nothing about the next package's; a failed p
 releases that document the same work. Each step runs, each failure is recorded, and the exit code adds them up.
 
 `E211` is the one case that also declines to act. A tag already sitting at another commit is left exactly where it is
-rather than moved onto this release: it is a record some earlier run made, and with
-[force](../configuration/records.md#force) on, a tag moved here would be carried over the copy on the remote, turning one
-local mistake into everyone's.
+rather than moved onto this release, because it is a record some earlier run made. With
+[force](../configuration/records.md#force) on, a tag moved here would be carried over the copy on the remote, turning
+one local mistake into everyone's.
 
 ## Design decisions
 
@@ -405,11 +411,14 @@ same changelog sections (shared `changelog.Format`, zero-value fields fall back 
 destination, a file prepend vs. a REST call. Recorders run in order after each successful publish; a recorder error is
 a critical (`E212`) and the remaining recorders and the tag still follow.
 
-Other choices: versions in git tags only (no version files to commit); one `git tag`/`git log` pair per package rather
-than a global log walk (simple and correct for per-package tag baselines); shelling out to the git binary to match CI
-byte-for-byte; script output streamed line-by-line into the structured logger so parallel package logs stay
-attributable; deterministic ordering everywhere (alphabetical tie-breaks in the toposort, sorted space iteration in
-discovery).
+Other choices:
+
+- Versions in git tags only, so there are no version files to commit.
+- One `git tag`/`git log` pair per package rather than a global log walk, which is simple and correct for per-package
+  tag baselines.
+- Shelling out to the git binary, to match CI byte-for-byte.
+- Script output streamed line-by-line into the structured logger, so parallel package logs stay attributable.
+- Deterministic ordering everywhere: alphabetical tie-breaks in the toposort, sorted space iteration in discovery.
 
 Two diagnostics are deliberately not suppressible, because each explains a release outcome a reader of the commit log
 alone cannot account for: a **catch-up** and a **channel-only** release explain a package's *presence* in a plan, and a
@@ -421,7 +430,7 @@ bounded `git log` per package, execution O (V+E) scheduling overhead on top of s
 Two places where that bound is easy to lose, and both are guarded by construction rather than by care. A package needs
 two baselines, and asking for them separately runs the same tag query twice, so the listing is the primitive and both
 are selections over it. And the propagation phase split costs a second pass over the *unit list* and a second set of
-graph traversals, but not a second pass over history: commit walking, window computation, parsing and scope resolution
+graph traversals, but not a second pass over history. Commit walking, window computation, parsing and scope resolution
 all happen once, before either phase runs, and the expensive part of a run is going to the object store. In a repository
 running no prerelease train no unit carries a channel directive at all and the channel phase does nothing.
 

@@ -8,7 +8,8 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-The suite was designed against twenty-one goals, one test file each:
+The suite covers twenty-seven goals across twenty-eight test files, one file each except goal 22, which the two shell
+helpers split between `if_test.go` and `exec_test.go`:
 
 1. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
@@ -110,7 +111,7 @@ The suite was designed against twenty-one goals, one test file each:
     into the config; that a release reconciles the consumer's `FROM` and `COPY --from` tags and a compose file's
     `image` and `build.tags` to the versions it has just computed, the package's own version in the service it builds
     and its provider's in the service it pulls; that a build stage and a port mapping are left alone; and that the
-    repository a Docker manifest declares — never a folder name — reaches the workspace index the planner and the
+    repository a Docker manifest declares, never a folder name, reaches the workspace index the planner and the
     writer share.
 19. **The `autowriter` command** (`autowriter_test.go`): `dispat writer`'s edits applied to the packages the plan
     selects. What only the binary can witness: that the manifests it writes are the ones it found by scanning each
@@ -143,7 +144,7 @@ The suite was designed against twenty-one goals, one test file each:
     branch and the patterns, with nothing built or tagged, while `dispat status` keeps working anywhere and a `*` glob
     reaches slashed names. The push-mode behind-remote check compares the checkout against the branch it would push to
     and refuses a stale one, because that plan was computed from tags another clone has already moved past. The pair is
-    also proven to be off unless asked for, and to sit behind `commit.verify` — the run that skips the check is carried
+    also proven to be off unless asked for, and to sit behind `commit.verify`: the run that skips the check is carried
     all the way to its rejected push, which is the wasted release the check exists to prevent.
 
 22. **The shell helpers** (`if_test.go`, `exec_test.go`): the two commands that run one script instead of sweeping a
@@ -166,7 +167,7 @@ The suite was designed against twenty-one goals, one test file each:
 
 24. **Dependency edges declared by a space** (`spacedeps_test.go`): a space states the edges of its own packages next
     to the space, in the same object keyed by consumer the root file uses, and every declaration merges into one
-    graph — so an edge written here orders a release exactly as one written at the root does, whether it was declared
+    graph, so an edge written here orders a release exactly as one written at the root does, whether it was declared
     in the root file's space entry or in the space folder's own config file. The rule that makes the level worth
     having is that an edge must touch the space it sits in: one touching neither end is refused before anything runs,
     naming the space and pointing at the root object. `dispat compute --write` is held to the same shape, correcting
@@ -176,14 +177,14 @@ The suite was designed against twenty-one goals, one test file each:
 25. **The configuration ladder from the root down** (`levels_test.go`): the root file is the bottom layer of the same
     fold a space and a package go through, so a space-shaped setting written once at the top reaches every space and
     every standalone package. Each level below can still say otherwise, including saying `false` against a `true`,
-    which is what makes the boolean options three-state rather than plain — the claim an ordinary bool could not
+    which is what makes the boolean options three-state rather than plain: the claim an ordinary bool could not
     carry, because unset and false would look the same. A root `versioning` is proven to apply under each space's
     *own* group rather than joining the spaces into one, and the space level is proven to carry `changelog`,
     `github`, `src` and `concurrency`, each with a package departing from it.
 
 26. **Change-scope ignore** (`ignorescope_test.go`): which of a package's own files make a scopeless commit address
     it. A commit touching only ignored files releases nothing and says so (W131), one ordinary file among them brings
-    the package back, and the levels — repository, space, package — add up, with only the package able to re-include
+    the package back, and the levels (repository, space, package) add up, with only the package able to re-include
     what a broader level excluded and only for itself. The `ignore` key and a `.dispatignore` file are proven to say
     the same thing, `--since` is proven to select from the same resolution, and the load-bearing negative is that
     ignoring narrows scope resolution alone: a commit naming the package by scope still releases it, and the release
@@ -262,12 +263,16 @@ tests/integration/
   manifests_test.go         goal 16
   filter_test.go            goal 17
   docker_test.go            goal 18
-  autowriter_test.go       goal 19
-  autosubstitute_test.go    goal 20b
+  autowriter_test.go        goal 19
   selfupdate_test.go        goal 20
+  autosubstitute_test.go    goal 20b
   guard_test.go             goal 21
   if_test.go                goal 22 (dispat if)
   exec_test.go              goal 22 (dispat exec)
+  lock_test.go              goal 23
+  spacedeps_test.go         goal 24
+  levels_test.go            goal 25
+  ignorescope_test.go       goal 26
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -422,7 +427,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestRunInFixedSpaceIncludesRides`                 | In a fixed space a ride is a changed package, so the run script executes in every member.                                                                                                                                                                                                                   |
 | `TestRunFilterNarrowsToANamedPackage`              | `--package` runs exactly the named package within the window and errors on an unknown package or one that does not resolve the script; an unchanged package needs `--since all`, because the filter narrows the window rather than replacing it.                                                            |
 | `TestRunNarrowsToTheInvokedPackage`                | Both spellings from inside a package folder (or a nested subdirectory) run only that package, riding the config ascent; from the monorepo top they still cover every changed package; an explicit `-p` beats the folder it was typed in.                                                                    |
-| `TestRunSinceSelectsByCommitScopes`                | `--since HEAD~1` narrows the run to what the last commit addressed (the written scope wins over the changed files, a scopeless unit derives from its files, §6.2), `--since all` selects every package, an unknown revision exits 1, and a package filter narrows whichever window the flag chose — to nothing, honestly, when the two do not meet. |
+| `TestRunSinceSelectsByCommitScopes`                | `--since HEAD~1` narrows the run to what the last commit addressed (the written scope wins over the changed files, a scopeless unit derives from its files, §6.2), `--since all` selects every package, an unknown revision exits 1, and a package filter narrows whichever window the flag chose, to nothing, honestly, when the two do not meet. |
 | `TestRunConsumersExpandTransitively`               | `--consumers` widens a `--since` window with every transitive dependent (the far end of a three-link chain is reached through the middle package, providers still first) while packages nothing depends on stay out, and `--since all --consumers` is a no-op expansion.                                    |
 | `TestRunConsumersOnReleaseWindow`                  | The default release window has the same gap under depth-0 propagation, and `--consumers` closes it there too: a `feat(core)` window runs core alone plainly, core + its transitive consumers with the flag.                                                                                                 |
 | `TestRunConsumersSkipCascade`                      | An expanded consumer is a full member of the run: a failing provider script skips it transitively under the default `--on-error skip` (exit 1), and `--on-error continue` runs it anyway.                                                                                                                   |
@@ -454,7 +459,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestRecordsGitHubBodyOrder`                                      | In a GitHub release the name is `releaseName` while `tag_name` stays the tag, and the body reads header, sections, the `### Release` block, footer.                                                                                                                             |
 | `TestRecordsLineOverrideReplacesInherited`                        | A package's own list states what that package writes and does not extend the inherited one, which the other packages still get.                                                                                                                                                |
 | `TestRecordsLineWithoutTextIsAConfigError`                        | A line object that selects packages and writes nothing to them fails the load (exit 1), named by its list and index.                                                                                                                                                            |
-| `TestRecordsLineShorthandsInAPackageFolder`                       | The three element shapes — a string, an array of strings, an object — decode the same in an in-folder package config as in the root config.                                                                                                                                     |
+| `TestRecordsLineShorthandsInAPackageFolder`                       | The three element shapes (a string, an array of strings, an object) decode the same in an in-folder package config as in the root config.                                                                                                                                     |
 
 ### Goal 8: the init and preview commands (`commands_test.go`)
 
@@ -539,7 +544,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestPackagesDependencyEdges`           | Provider lists declared in a `packages` entry and in an in-folder config file order the graph exactly like top-level edges (`status` dependsOn proves it).                                                                                    |
 | `TestPackagesComputeRemoveFromInFolder` | A stale in-folder edge is suggested with its declaring file named, `--check` gates on it, and `--write` removes it from that file (other keys intact, own `.backup`) while a manifest-detected addition still lands in the root list.         |
 | `TestPackagesSrcNarrowsChangeDetection` | A package's `src` narrows file-derived change detection: a scopeless commit touching only what lies outside src releases nothing, one touching src releases as before, a package without src keeps its whole folder, and a commit naming the package by scope reaches it wherever its files are. |
-| `TestPackagesSrcMustNameAFolder`        | A `src` that could never match — a missing folder, a path leaving the package, the package folder itself — fails the load rather than narrowing the package to nothing.                                                                                                                          |
+| `TestPackagesSrcMustNameAFolder`        | A `src` that could never match (a missing folder, a path leaving the package, the package folder itself) fails the load rather than narrowing the package to nothing.                                                                                                                          |
 | `TestPackagesComputeRemoveFromEntry`    | A stale edge under `packages.<name>.dependencies` in the root config is emptied in place (the entry's other keys and the rest of the file survive) and the gate converges.                                                                    |
 
 ### Goal 14: interruption (`interrupt_test.go`)
@@ -591,13 +596,13 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 
 | Test                                            | Claim proven                                                                                                                                                                                                                                     |
 |-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `TestFilterSelectsNamedPackages`                | Every `--package` spelling — one name, comma-separated, repeated, upper-case, a glob, `'*'` — narrows the window to exactly those packages, in graph order.                                                                                       |
+| `TestFilterSelectsNamedPackages`                | Every `--package` spelling (one name, comma-separated, repeated, upper-case, a glob, `'*'`) narrows the window to exactly those packages, in graph order.                                                                                       |
 | `TestFilterNarrowsTheWindowNeverWidensIt`       | After a release a filtered run does nothing and exits 0, while `--since all` puts every package on the table for the same filter to pick from.                                                                                                    |
-| `TestFilterUnmatchedTermsAreErrors`             | A term matching no package exits 1 listing what was discovered — a literal and a glob alike — and each flag's miss names the other when the term belongs there: a space in `--package`, a package (a standalone one included) in `--space`.       |
+| `TestFilterUnmatchedTermsAreErrors`             | A term matching no package exits 1 listing what was discovered, a literal and a glob alike, and each flag's miss names the other when the term belongs there: a space in `--package`, a package (a standalone one included) in `--space`.       |
 | `TestFilterSpaceTermStaysInItsSpace`            | A `--space` term selects that space's packages and no others; several terms, a glob and `'*'` union the spaces they match; a package term unions on top.                                                                                          |
 | `TestFilterStandalonePackageBelongsToNoSpace`   | A `packages` entry with a path is reachable through `--package` and `--package '*'` and never through `--space`, not even the space whose folder it sits under; naming it in `--space` exits 1.                                                   |
 | `TestFilterInfersFromTheInvocationFolder`       | With no terms the folder is the selection: a package folder or any subfolder of it, a space folder, the root and a folder outside every space each select what they should, and the deepest match wins over an enclosing one.                     |
-| `TestFilterExplicitTermsBeatTheFolder`          | A term typed on the command line is the whole answer, whichever folder it was typed in — for both flags.                                                                                                                                          |
+| `TestFilterExplicitTermsBeatTheFolder`          | A term typed on the command line is the whole answer, whichever folder it was typed in, for both flags.                                                                                                                                          |
 | `TestFilterRefusesASelectionWithoutTheScript`   | A filter reaching only packages that resolve no command for the name exits 1, the same guard a whole-monorepo run applies.                                                                                                                        |
 | `TestFilterStepCommandsSelect`                  | The step commands take the same terms and the same folder inference; a selected package the recomputed plan is no longer releasing is a logged no-op, not a failure; an unmatched term exits 1.                                                   |
 | `TestFilterPreviewSelects`                      | Preview takes the same terms and folder inference, and names the selection it found nothing pending for.                                                                                                                                          |
@@ -703,9 +708,9 @@ these tests ask for it back.
 | Test                                       | Claim proven                                                                                                                                                                                                                              |
 |--------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestReleaseLockRoundTrip`                 | The tag is on the remote while the run works and gone from both copies once it is over, release and all; a second run with nothing left to release takes and returns it just the same.                                                     |
-| `TestReleaseLockHeldElsewhere`             | A lock already on the remote refuses the run (exit 1) with the remedy in the message, nothing built and nothing tagged, and — the part that matters — the holder's tag object is untouched. The same repository releases once it is freed.  |
+| `TestReleaseLockHeldElsewhere`             | A lock already on the remote refuses the run (exit 1) with the remedy in the message, nothing built and nothing tagged, and, the part that matters, the holder's tag object is untouched. The same repository releases once it is freed.  |
 | `TestReleaseLockIgnoresCommitForce`        | `commit.force` rewrites a run's own records, never another run's lock: a repository configured to force everything still bounces off a held lock.                                                                                          |
-| `TestReleaseLockBlocksConcurrentRuns`      | Two real releases against one remote: the first holds the lock inside a gated hook, the second is refused while it is held and goes through once it is released. No sleeps — the second starts only once the lock is provably on the remote. |
+| `TestReleaseLockBlocksConcurrentRuns`      | Two real releases against one remote: the first holds the lock inside a gated hook, the second is refused while it is held and goes through once it is released. No sleeps: the second starts only once the lock is provably on the remote. |
 | `TestReleaseLockIndependentOfPush`         | With no release commit configured, the lock is still taken and cleared, and the remote ends with no tag and no branch: the lock is not the release push.                                                                                   |
 | `TestReleaseLockWithoutRemote`             | With the lock on, a repository with no remote cannot coordinate and does not release. The cost of the guard, stated.                                                                                                                       |
 | `TestReleaseLockKillSwitch`                | Through the binary: `true`/`1`/`TRUE` release a remoteless repository unguarded, while `false`, `0`, an empty value and a typo all keep the lock on.                                                                                       |
@@ -714,7 +719,7 @@ these tests ask for it back.
 | `TestReleaseLockStaleLocalTag`             | A lock tag left in the clone by a killed run says nothing about who holds the lock, so the next release overwrites it locally and carries on.                                                                                              |
 | `TestReleaseLockCleanupFailureIsNotFatal`  | A remote that has become unreachable by the end of the run is reported with the remedy and leaves the exit code to the release itself (0), the stranded tag confirmed on the remote.                                                       |
 | `TestReleaseLockAppliesOnlyToRelease`      | `status`, `preview`, `run`, `changelog`, `autoversion`, `commit` and `scanner` take no lock, which is why they still work in a repository with no remote.                                                                                  |
-| `TestReleaseLockIsNotAReleaseTag`          | The lock is on HEAD while the plan is computed, so a `{version}` tag format — the broadest there is — still reads 0.1.0 as the baseline and releases 0.2.0.                                                                                |
+| `TestReleaseLockIsNotAReleaseTag`          | The lock is on HEAD while the plan is computed, so a `{version}` tag format, the broadest there is, still reads 0.1.0 as the baseline and releases 0.2.0.                                                                                |
 
 ### Goal 24: dependency edges declared by a space (`spacedeps_test.go`)
 
@@ -737,7 +742,7 @@ version only one versioning mode computes, a file only one `revertOnFail` settin
 | Test                                      | Claim proven                                                                                                                                                                                    |
 |-------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestLevelsRootFlowReachesEverySpace`     | One root `flow` runs for every package of every space; a space and then a package replace the entries they name and keep the rest, so three packages run three different builds and one shared publish. |
-| `TestLevelsRootBooleansAreThreeState`     | A root `revertOnFail: true` reaches the space that says nothing, and the space that says `false` against it keeps what its build wrote — the distinction a plain bool could not express.        |
+| `TestLevelsRootBooleansAreThreeState`     | A root `revertOnFail: true` reaches the space that says nothing, and the space that says `false` against it keeps what its build wrote, the distinction a plain bool could not express.        |
 | `TestLevelsRootVersioningAppliesPerSpace` | A root `versioning: fixed` applies under each space's own group: one space's packages move together while the space that opted out is untouched, which is what separates it from `versionGroups`. |
 | `TestLevelsRootReachesAStandalonePackage` | A package outside every space is its own space, so the root's `tagFormat` and `flow` reach it through the same fold.                                                                            |
 | `TestLevelsSpaceRecordsAndSrc`            | The space level carries `changelog` (a package overriding it, another space keeping the root's) and `src` (a change outside it leaving the package inert, W131).                                |
@@ -750,7 +755,7 @@ negatives matter as much as the positives here: the feature is one narrowing, no
 | Test                                                | Claim proven                                                                                                                                                                       |
 |-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestIgnoreScopeKeepsAFolderFromTriggeringARelease` | A commit touching only ignored files releases nothing and reports the inert unit (W131); the same commit plus one ordinary file releases as usual, so one file that counts is enough. |
-| `TestIgnoreScopeDoesNotHideThePackage`              | A commit naming the package by scope releases it whatever it touched, and the release commit still stages the ignored files — the working tree is clean afterwards.                  |
+| `TestIgnoreScopeDoesNotHideThePackage`              | A commit naming the package by scope releases it whatever it touched, and the release commit still stages the ignored files, and the working tree is clean afterwards.                  |
 | `TestIgnoreScopeLevelsConcatenate`                  | Repository, space and package patterns all apply; the package re-includes one of the repository's exclusions with `!`, and its sibling does not inherit that.                        |
 | `TestIgnoreScopeFileAndKeyAgree`                    | A `.dispatignore` at the repository root and one in a package folder do exactly what the `ignore` key does at those levels.                                                          |
 | `TestIgnoreScopeAppliesToSince`                     | `--since` selects from the same file-derived resolution, so the package whose only change was ignored is not selected and its script never runs.                                     |

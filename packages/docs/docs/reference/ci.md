@@ -20,7 +20,7 @@ All three end at the same binary, and the last two are the same script: the imag
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The action installs the CLI and puts it on `PATH`. It does not run it — like `setup-go` and `setup-node`, it leaves
+The action installs the CLI and puts it on `PATH`. It does not run it: like `setup-go` and `setup-node`, it leaves
 that to a step of your own, which is what lets you pass your own flags, environment and working directory.
 
 ### Inputs
@@ -41,7 +41,7 @@ Pin a version when a release should be reproducible a year from now:
 
 ### Outputs
 
-`version` is what was installed, and `path` is the binary's full path — useful when a later step wants to be explicit
+`version` is what was installed, and `path` is the binary's full path, useful when a later step wants to be explicit
 rather than rely on `PATH`:
 
 ```yaml
@@ -74,7 +74,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Whatever your stage scripts shell out to — `node`, `go`, `cargo`, `docker` — is still yours to set up in steps before
+Whatever your stage scripts shell out to (`node`, `go`, `cargo`, `docker`) is still yours to set up in steps before
 this one. dispat itself needs only `git` and a POSIX shell.
 
 `contents: write` is needed even by a job that pushes nothing: the run claims the repository with a
@@ -121,7 +121,7 @@ docker run --rm -v "$PWD:/workspace" yohimik/dispat-alpine:1 dispat status
 A release publishes every tag from one build, so `1`, `1.4` and `latest` are the same digest as the version they
 follow rather than a later copy of it.
 
-Pin `1` in a pipeline. `latest` never points at a prerelease — that is what the channel tags are for.
+Pin `1` in a pipeline. `latest` never points at a prerelease: that is what the channel tags are for.
 
 ### Two things worth knowing
 
@@ -142,11 +142,12 @@ The same script the images use, and the one [Getting started](../getting-started
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 
 It resolves the latest stable release (or takes `--version`), downloads the binary for the platform it is running on,
 verifies it against the checksum GitHub published, and installs it into `--bin-dir`. It needs `curl` or `wget` and
-nothing else — no package manager, no Go toolchain.
+nothing else: no package manager, no Go toolchain.
 
 | Option | Default | Meaning |
 |---|---|---|

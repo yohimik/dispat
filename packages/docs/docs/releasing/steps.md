@@ -18,7 +18,7 @@ There are four:
 | `dispat commit`     | Makes each package's release commit, and can tag and push it        |
 | `dispat github`     | Creates each package's GitHub release                               |
 
-[`dispat autowriter`](../editing/autowriter.md) is not one of them — it does something a release never does on its own — but
+[`dispat autowriter`](../editing/autowriter.md) is not one of them, since it does something a release never does on its own, but
 it covers packages by the same rules, so everything on this page about choosing what a command covers applies to it
 too.
 

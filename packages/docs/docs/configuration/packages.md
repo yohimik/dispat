@@ -113,8 +113,8 @@ it field by field, and the layer nearest the package wins:
 | 5 | space file package entry  | `<space folder>/dispat.json`, `packages.<package>` |
 | 6 | package configuration file| `<space folder>/<package>/dispat.json`             |
 
-Layer 0 is the repository's own defaults for the keys a space could state — `flow`, `autoVersion`, `versioning`,
-`tagFormat`, `aliasTags`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail` — so a setting every space shares
+Layer 0 is the repository's own defaults for the keys a space could state (`flow`, `autoVersion`, `versioning`,
+`tagFormat`, `aliasTags`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail`), so a setting every space shares
 is written once; see [Where a setting can live](./README.md#where-a-setting-can-live). Layers 1 and 2 are the space,
 and describe every package in it. Layers 3 to 6 each name one package, ordered by how close to it they are written:
 the repository as a whole, then the space, then the space's own folder, then the package's own folder.
@@ -269,9 +269,9 @@ the package itself. One provider needs no array: `"dependencies": "core"`.
 All declarations (the top-level object, every entry's list, every in-folder list) **merge into one list**; where an
 edge is declared changes nothing about how it plans.
 
-`dispat compute` treats every declaration source as one merged list and edits each declaration **in the entry that holds
-it**, whichever layer that is: a stale edge declared in a space's `packages` entry is removed from the root config, one
-declared in a space file from that file, one declared in a package's own file from there. Every suggestion names its
+`dispat compute` treats every declaration source as one merged list, then edits each declaration **in the entry that
+holds it**, whichever layer that is. A stale edge declared in a space's `packages` entry is removed from the root
+config. One declared in a space file is removed from that file, and one declared in a package's own file from there. Every suggestion names its
 source, so `spaces["libs"]: packages["core"]: dependencies[0]` says exactly what an applied change would touch. A kind
 correction is applied in place, since a package's list carries a kind as readily as the top-level object does.
 

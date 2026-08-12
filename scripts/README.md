@@ -24,13 +24,13 @@ docs snapshot is cut per minor rather than per patch, and why the deploy pushes 
 `build-dispat.sh` is the one with a bracket around it. The versions `services/dispat/go.mod` pins are only as fresh as
 the last release that bumped them, so a `pkg/*` module changed without a version bump would ship as its published copy
 while every test in CI ran the working tree. `dispat autowriter --link-local` points each one at its folder for the
-duration of the build and `--unlink-local` takes the redirects back out — before `beforePublish` runs
+duration of the build and `--unlink-local` takes the redirects back out, before `beforePublish` runs
 `dispat commit --tag --push`, which stages `services/dispat` and would otherwise publish a `go.mod` no consumer can
 resolve. A `trap` covers the failure and interrupt paths, and the script re-checks both `go.mod` and `go.sum` at the end
 rather than trusting either. `GOWORK=off` stays: only the intra-repo modules are redirected, so the build still proves
 this module's own `go.mod` and `go.sum` cover its third-party requirements.
 
-Do not run `go work sync` or `go mod tidy` while the links are in place — both delete the `go.sum` entries a local
+Do not run `go work sync` or `go mod tidy` while the links are in place: both delete the `go.sum` entries a local
 redirect makes redundant, and unlinking needs them back. That is what `--sync-lock=false` is for, and the `lint` job in
 [tests.yml](../.github/workflows/tests.yml) checks for both leaks on every commit.
 

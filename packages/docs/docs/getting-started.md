@@ -3,26 +3,45 @@
 From zero to a releasing monorepo: install the binary, write one config file, name packages in your commits, and wire
 the release into CI.
 
+dispat is built for polyglot monorepos. A package is a folder and a stage is a shell command, so it does not care
+whether a package is npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS or Android. They all go in the same
+dependency graph and release in the same run. Nothing below assumes a particular language.
+
 ## Install
 
 The install script downloads the release binary for your platform, checks it against the checksum GitHub published,
-and puts it on your `PATH`:
+and puts it on your `PATH`.
+
+On Linux and macOS, with either curl or wget:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 
-It takes options if you want them — a version to pin, somewhere else to install:
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
+```
+
+It takes options if you want them: a version to pin, somewhere else to install.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --version 1.2.3
-curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --bin-dir ~/.local/bin
+wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --bin-dir ~/.local/bin
 ```
 
-`--version` accepts either spelling, `1.2.3` or `services/dispat/v1.2.3`; with no version it installs the latest
-stable release. `--help` lists the rest. On Windows,
-[`install.ps1`](https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1) does the same with `-Version` and
-`-BinDir`.
+`--version` accepts either spelling, `1.2.3` or `services/dispat/v1.2.3`. With no version it installs the latest
+stable release, and `--help` lists the rest.
+
+The Windows script takes the same options as `-Version` and `-BinDir`. Piping into `iex` leaves no way to pass them,
+so download the script first:
+
+```powershell
+irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 -OutFile install.ps1
+.\install.ps1 -Version 1.2.3
+```
 
 Two other ways, if they suit you better:
 

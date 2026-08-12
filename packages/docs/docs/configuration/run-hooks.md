@@ -71,5 +71,5 @@ everything was built, published and tagged. Failing at the start costs nothing; 
 
 `git pull` and run again. Two cases are deliberately not treated as behind: a branch the remote does not have yet,
 because the first push is what creates it, and a detached HEAD, where there is no branch to compare. The check is an
-`ls-remote`, so `commit.verify: false` — the escape hatch for remotes that reject `ls-remote` but accept pushes — turns
+`ls-remote`, so `commit.verify: false`, the escape hatch for remotes that reject `ls-remote` but accept pushes, turns
 it off along with the reachability check.

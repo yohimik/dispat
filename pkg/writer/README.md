@@ -58,7 +58,7 @@ registry. Only five formats have such a directive to manage, which is why the re
 a NuGet package reference or a Maven coordinate names a package and nothing else, and there is no spelling for
 "resolve this one locally" for `Relink` to add or remove. `SupportsLink` reports the same five at runtime.
 
-A Docker image is named rather than located too. A reference points at a registry, so there is no redirect to manage —
+A Docker image is named rather than located too. A reference points at a registry, so there is no redirect to manage:
 building the image from a folder in this repository is what a compose file's `build:` says, and that is the author's
 structure rather than a version dispat reconciles.
 

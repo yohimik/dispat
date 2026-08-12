@@ -21,7 +21,7 @@ Selection happens in three steps, in this order:
 2. **The filter** picks from that window: `--package` / `--space` / `--group`, or the folder you are standing in, as described in
    [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core when
    core changed and nothing at all when it did not. `--since all -p core` is how you run a script in a package
-   regardless — the way to try one script under the exact input its stage would give it, without releasing anything.
+   regardless, and the way to try one script under the exact input its stage would give it, without releasing anything.
    An unchanged package carries its baseline as both the old and the new version.
 3. **`--consumers`** then expands the result with every package that transitively depends on a selected one (a
    consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone would
@@ -55,14 +55,14 @@ standalone package belongs to no space, so `--package` (or `-p '*'`) is the only
 group; `-s '*'` means every configured space and leaves it out.
 
 With no terms at all, the folder the command was invoked from is the selection: inside a package folder (or any
-subdirectory of it) that package, inside a space folder that space, anywhere else — the monorepo root included —
+subdirectory of it) that package, inside a space folder that space, anywhere else, the monorepo root included,
 nothing, so the command covers its usual set. The deepest match wins, so a standalone package nested inside another
 package's folder still selects itself. A term on the command line always beats the folder it was typed in. A group is
 never inferred this way, because no folder is a group; `--group` is the only way to name one.
 
 Nine commands read the same selection: `release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`,
-`github` and `compute`. What each of them *does* with it differs — a release additionally has to respect publish
-order, described in [Releasing part of the graph](./release.md) — but which packages a term picks out
+`github` and `compute`. What each of them *does* with it differs (a release additionally has to respect publish
+order, described in [Releasing part of the graph](./release.md)), but which packages a term picks out
 never does.
 
 ## Flags
@@ -71,9 +71,9 @@ Beside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same nine commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same nine commands: narrow to every package of the named [versioning groups](../releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
-| `--since`             |             | The same six commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
-| `--consumers`         |             | The same six commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
+| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autosubstitute`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
+| `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
+| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
+| `--since`             |             | The same seven commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
+| `--consumers`         |             | The same seven commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
 | `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autosubstitute`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |

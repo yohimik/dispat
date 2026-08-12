@@ -92,14 +92,18 @@ from its publish stage onward, sourced `<space>:login`.
 ### `flow.announce`
 
 A fourth per-package stage, run after the publish frame completes (publish script, release records, tag,
-`flow.postPublish`). Its job is pushing the release out to update channels (a Slack or Discord message, a webhook, a
-docs feed), so alongside the full stage environment it is the natural consumer of the
-[release-notes variables](../reference/environment.md#release-notes-data) (`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES`,
-`DISPAT_FIXES`) and the channel variables (`DISPAT_CHANNEL`, `DISPAT_OLD_CHANNEL`, `DISPAT_IS_PRERELEASE`) for choosing
-where and how to announce. It has the same hook structure as the other stages (`flow.beforeAnnounce` /
-`flow.postAnnounce`) but none of their authority: the release is already out, so an error in the stage or either hook
-only warns, the package stays published, and no failure among the three sequences stops the others from running. The
-frame is skipped entirely when the publish failed; there is nothing to announce.
+`flow.postPublish`). Its job is pushing the release out to update channels: a Slack or Discord message, a webhook, a
+docs feed.
+
+That makes it the natural consumer of the release-notes and channel variables, which it gets alongside the full stage
+environment. The [release-notes variables](../reference/environment.md#release-notes-data) are
+`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES` and `DISPAT_FIXES`; the channel variables are `DISPAT_CHANNEL`,
+`DISPAT_OLD_CHANNEL` and `DISPAT_IS_PRERELEASE`. Between them they decide where and how to announce.
+
+It has the same hook structure as the other stages (`flow.beforeAnnounce` / `flow.postAnnounce`) but none of their
+authority. The release is already out, so an error in the stage or either hook only warns and the package stays
+published. No failure among the three sequences stops the others from running. The frame is skipped entirely when the
+publish failed, since there is nothing to announce.
 
 ### `flow.onFail` and `flow.onSkip`
 
@@ -148,10 +152,12 @@ components below the shared part at zero, so a `fixedMajor` group reaching major
 **How the group version is computed.** When the shared part moves, the group versions **as if it were one package**:
 over the group's highest baseline, with the max bump across all members. It runs a single prerelease train (a channel
 directive on one member moves the whole group; a graduation ends the train for all of it), and an exact `Release-As`
-naming one member pins the group's version, with the usual pin guards applied to it. Under a partial mode both of those
-are scoped by the same rule as everything else: a train started by a bump that reaches the shared part is the group's,
-a train below it is one package's, and a pin naming a different shared part moves the group while a pin inside the
-current one applies to the package that wrote it, with its own guards rather than the group's. A `Release-As: none`
+naming one member pins the group's version, with the usual pin guards applied to it.
+
+Under a partial mode both of those are scoped by the same rule as everything else. A train started by a bump that
+reaches the shared part is the group's; a train below it is one package's. A pin naming a different shared part moves
+the group, while a pin inside the current one applies only to the package that wrote it, under its own guards rather
+than the group's. A `Release-As: none`
 hold always applies to the member it names: the held member stays behind and catches up when resumed.
 
 Scopes (commit scope-sets and changed files) keep exactly one job in a versioning group: deciding which changelog
@@ -162,10 +168,11 @@ reported as `W210` (non-suppressible, like the catch-up codes: nothing in the co
 is a full release at the execution level: its version/build/publish scripts, hooks, tag and records all run.
 
 Two convergence properties are worth knowing. A group whose members all agree on the shared part releases nothing on a
-quiet run, exactly like independent packages. And a non-sparse member left *behind* the group's shared part (its ride
-failed in an earlier run, or the group formed with unequal versions) is caught up on the next run (also `W210`),
-restoring the invariant: at exactly the group's published version under `fixed`, at the start of its own line under a
-partial mode. The sparse modes deliberately never do this, since staying behind is their point.
+quiet run, exactly like independent packages. And a non-sparse member left *behind* the group's shared part is caught
+up on the next run (also `W210`). A member falls behind when its ride failed in an earlier run, or when the group
+formed with unequal versions. The catch-up restores the invariant: exactly the group's published version under `fixed`,
+the start of its own line under a partial mode. The sparse modes deliberately never do this, since staying behind is
+their point.
 
 Dependency edges stay package-scoped whichever mode is in force: a provider propagating into one member bumps that
 member (which then carries its group along, if the bump reaches the shared part), and only the member with provider
@@ -238,11 +245,12 @@ With an `autoVersion` object present, dispat keeps the space's files in sync wit
 
 There are two strategies, and they are independent. You can use either, both, or neither.
 
-The **parsing** strategy is the default one described below: dispat scans the package's manifests, matches each declared
-dependency against the workspace (by manifest name, by a name the configuration states through
+The **parsing** strategy is the default one described below. dispat scans the package's manifests, matches each
+declared dependency against the workspace, and rewrites the declaration to the provider's end-of-run version. A
+dependency matches in one of three ways: by manifest name, by a name the configuration states through
 [`manifestNames`](./packages.md#manifestnames), or by a declared local path such as `file:`, a relative `replace` or
-`path =`), and rewrites the declaration to the provider's end-of-run version. That is the planned version when the
-provider is releasing and has not failed, and its baseline otherwise. `manifests: none` turns it off.
+`path =`. The end-of-run version is the planned version when the provider is releasing and has not failed, and its
+baseline otherwise. `manifests: none` turns it off.
 
 The **replacing** strategy is the `replace` list: literal find-and-write over whatever files its globs select, parsing
 nothing, for the versions no manifest holds (a Gradle coordinate, a README example, a CI workflow). It has
@@ -296,10 +304,10 @@ scripts:
   pnpm-lock: pnpm install --lockfile-only
 ```
 
-The same reconciliation is callable outside a release as
-[`dispat autoversion`](../cli/autoversion.md), with flags overriding the block's policy for the invocation
-(`--manifests none` turns the parsing strategy off, `--no-replace` skips the rules); a custom flow uses it to reconcile
-at the moment it needs, and the version stage later finds nothing left to rewrite.
+The same reconciliation is callable outside a release as [`dispat autoversion`](../cli/autoversion.md). Flags override
+the block's policy for that invocation: `--manifests none` turns the parsing strategy off, and `--no-replace` skips the
+rules. A custom flow uses it to reconcile at the moment it needs, and the version stage later finds nothing left to
+rewrite.
 
 Three shapes cover most repositories:
 
@@ -429,15 +437,15 @@ dispat run lint -p '*'              # every package
 ```
 
 No word is reserved, so a package named `all` is selected by `all` and by nothing else. A term matching nothing is an
-error listing what was discovered — the same reason an unknown script name is one — and the error looks across the
-other flags: a space named in `--package`, a group named in `--space`, or a package named in `--group`, says so and
-points at the flag that reaches it. A [standalone package](./packages.md#standalone-packages-path) belongs to no
+error listing what was discovered, the same reason an unknown script name is one. The error also looks across the other
+flags: a space named in `--package`, a group named in `--space`, or a package named in `--group` says so, and points at
+the flag that reaches it. A [standalone package](./packages.md#standalone-packages-path) belongs to no
 space, so `-p <name>` or `-p '*'` is the only way to name one unless it joined a group; `-s '*'` means every
 configured space and leaves it out.
 
 With no terms, the folder you are standing in is the selection. dispat finds the monorepo root by walking up to the
 config file, so `cd packages/core && dispat lint` lints `core` and nothing else, and so does any folder below it.
-Standing in a space folder — `cd packages && dispat lint` — covers that space; standing at the top of the repository,
+Standing in a space folder (`cd packages && dispat lint`) covers that space; standing at the top of the repository,
 or anywhere outside every space, covers the usual set. The deepest match wins, so a standalone package nested inside
 another package's folder still selects itself, and a flag on the command line always beats the folder it was typed in.
 
@@ -449,11 +457,11 @@ Every command that acts on a subset of packages reads the same three flags and t
 
 ### Windows: `--since` and `--consumers`
 
-The filter narrows; a **window** decides what there is to narrow. By default the window is the release window — the
-changed packages. `--since <rev>` replaces it with the packages the commits in `rev..HEAD` address:
-`--since HEAD~1` runs the script over what the last commit addressed (per-commit CI), `--since origin/main` over this
-branch's own commits (PR pipelines; the base moving on does not widen the set), `--since <tag>` since a release, and
-the reserved `--since all` selects every package, changed or not. Selection follows the same scope semantics as
+The filter narrows; a **window** decides what there is to narrow. By default the window is the release window: the
+changed packages. `--since <rev>` replaces it with the packages the commits in `rev..HEAD` address. `--since HEAD~1`
+runs the script over what the last commit addressed, which suits per-commit CI. `--since origin/main` covers this
+branch's own commits, which suits PR pipelines, and the base moving on does not widen the set. `--since <tag>` reaches
+back to a release. The reserved `--since all` selects every package, changed or not. Selection follows the same scope semantics as
 planning: a commit's written scopes are authoritative (globs, exclusions and `nonPackageScopes` included), and only a
 unit with no scope-set falls back to the files it changed (longest path prefix; see
 [scope sets](../reference/commits.md#scope-sets)). Ordering, concurrency and output carrying apply to the selected set exactly as
@@ -468,14 +476,14 @@ dispat run build -p core                  # core, and only if it changed
 ```
 
 That last line is worth reading twice: a filter never widens a window, so `--since all` is how you reach a package the
-window does not cover — the way to try one script by hand under exactly the environment its stage would give it,
+window does not cover, and the way to try one script by hand under exactly the environment its stage would give it,
 without releasing anything.
 
 A window covers only the packages the commits **address**, never the packages a change *affects*:
 `dispat run test --since HEAD~1` re-tests the changed provider, not the consumers that depend on it. The `--consumers`
 flag closes that gap: it additionally selects every package that **transitively depends** on a selected one; a consumer
 pulled in brings its own consumers, all the way down the graph. The expansion happens after the filter and is not
-filtered back out — `-p core --consumers` is a request for core's dependents, so it reaches packages the filter never
+filtered back out: `-p core --consumers` is a request for core's dependents, so it reaches packages the filter never
 named. The added packages run whether or not they changed, after their selected providers, and a failing provider's
 script skips them under the default `--on-error skip` exactly like any selected dependent.
 
@@ -589,8 +597,9 @@ to what the root file's space entry declares rather than replacing it, under the
 space.
 
 Running the CLI from inside such a space keeps working. A space file declares `packages`, which is also what a monorepo
-of standalone packages declares, so resolution asks the root above whether it claims the folder: if it does, the file
-was a space layer and the root is the config; if nothing above claims it, the folder is a root in its own right.
+of standalone packages declares, so the two look alike. Resolution settles it by asking the root above whether it
+claims the folder. If it does, the file was a space layer and the root is the config. If nothing above claims it, the
+folder is a root in its own right.
 
 ## `.dispatexclude`
 

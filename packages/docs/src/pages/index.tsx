@@ -39,7 +39,8 @@ const FEATURES: Feature[] = [
     body: (
       <>
         Packages are folders and stages are plain shell commands, so any language, build system, registry, CI or cache
-        plugs in with zero integration work: npm next to Docker next to Go in one dependency graph. Each{' '}
+        plugs in with zero integration work. dispat reads and rewrites twelve manifest families: npm, Go, Cargo,
+        Python, Composer, Maven, .NET, Dart, Ruby, Docker, and iOS and Android. Each{' '}
         <Link to="/concepts">space</Link> states through <code>isBuildWaitingPublish</code> whether a consumer&apos;s
         build needs its provider merely <em>built</em> (node) or already <em>published</em> (docker), so a four-level
         npm-to-docker chain schedules correctly out of the box.
@@ -51,7 +52,7 @@ const FEATURES: Feature[] = [
     body: (
       <>
         A failure never aborts the run: the broken package&apos;s consumers are skipped unless they have changes of their
-        own, and every unaffected subgraph keeps releasing. Failed and skipped consumers are never lost — the next run
+        own, and every unaffected subgraph keeps releasing. Failed and skipped consumers are never lost. The next run
         catches them up at the exact version they were owed, with no state file and no double release.{' '}
         <Link to="/concepts">Recovery is just re-running.</Link>
       </>
@@ -81,8 +82,38 @@ const FEATURES: Feature[] = [
         Publishing a graph means irreversible writes across independent services with no rollback. Each package&apos;s
         leg commits by durably recording its completion: the annotated git tag, written only after the publish
         succeeded. No state files, no registry queries, so nothing can drift from what happened. Recovery is
-        deterministic replay — the plan is a pure function of history, graph and configuration.{' '}
+        deterministic replay: the plan is a pure function of history, graph and configuration.{' '}
         <Link to="/internals/architecture">How it works.</Link>
+      </>
+    ),
+  },
+  {
+    title: 'Edit every package at once',
+    body: (
+      <>
+        <Link to="/cli/autowriter">
+          <code>dispat autowriter</code>
+        </Link>{' '}
+        applies one manifest edit across every package the plan selects, finding each package&apos;s manifests itself,
+        and{' '}
+        <Link to="/cli/autosubstitute">
+          <code>dispat autosubstitute</code>
+        </Link>{' '}
+        does the same for literal text, so hand-written coordinates in READMEs and install snippets follow a release
+        too. Both take the same selection flags as <code>dispat run</code>.{' '}
+        <Link to="/editing/autowriter">Editing across the monorepo.</Link>
+      </>
+    ),
+  },
+  {
+    title: 'Every release step is also a command',
+    body: (
+      <>
+        <code>dispat changelog</code>, <code>autoversion</code>, <code>commit</code> and <code>github</code> run one
+        thing the release normally does, at the moment your own flow needs it, and the release stage then finds the
+        work done and skips it. <code>dispat if</code> branches on an environment variable and <code>dispat exec</code>{' '}
+        runs one declared script once.{' '}
+        <Link to="/releasing/steps">Release steps.</Link>
       </>
     ),
   },
@@ -183,17 +214,18 @@ function Features(): React.ReactElement {
 // One row per ecosystem, mirroring the tables in pkg/scanner's README. The
 // writer covers every manifest the reader does, so the list serves both.
 const MANIFESTS: [language: string, files: string][] = [
-  ['JavaScript, TypeScript — npm, pnpm, Yarn', 'package.json'],
+  ['JavaScript, TypeScript: npm, pnpm, Yarn', 'package.json'],
   ['Go', 'go.mod'],
-  ['Rust — Cargo', 'Cargo.toml'],
-  ['Python — PEP 621, PEP 735, Poetry, pip', 'pyproject.toml, requirements*.txt'],
-  ['PHP — Composer', 'composer.json'],
-  ['Java, Kotlin, Scala — Maven', 'pom.xml'],
-  ['C#, F#, VB — .NET, NuGet', '*.csproj, *.fsproj, *.vbproj, *.nuspec, Directory.Packages.props, packages.config'],
-  ['Dart, Flutter — pub', 'pubspec.yaml'],
-  ['Ruby — Bundler, RubyGems', 'Gemfile, *.gemspec'],
-  ['Swift, Objective-C — iOS, CocoaPods', 'Info.plist, project.pbxproj, Podfile, *.podspec'],
-  ['Kotlin, Java — Android, Gradle', 'AndroidManifest.xml, libs.versions.toml, build.gradle(.kts)'],
+  ['Rust: Cargo', 'Cargo.toml'],
+  ['Python: PEP 621, PEP 735, Poetry, pip', 'pyproject.toml, requirements*.txt'],
+  ['PHP: Composer', 'composer.json'],
+  ['Java, Kotlin, Scala: Maven', 'pom.xml'],
+  ['C#, F#, VB: .NET, NuGet', '*.csproj, *.fsproj, *.vbproj, *.nuspec, Directory.Packages.props, packages.config'],
+  ['Dart, Flutter: pub', 'pubspec.yaml'],
+  ['Ruby: Bundler, RubyGems', 'Gemfile, *.gemspec'],
+  ['Swift, Objective-C: iOS, CocoaPods', 'Info.plist, project.pbxproj, Podfile, *.podspec'],
+  ['Kotlin, Java: Android, Gradle', 'AndroidManifest.xml, libs.versions.toml, build.gradle(.kts)'],
+  ['Docker: images and Compose', 'Dockerfile, compose.yaml, docker-compose.yml, and their .override spellings'],
 ];
 
 // dispat's pieces are separate Go modules, usable with no dispat in sight, and
@@ -212,7 +244,7 @@ function Libraries(): React.ReactElement {
         <Link to={`${GITHUB}/tree/main/pkg/manifest`}>
           <code>pkg/manifest</code>
         </Link>{' '}
-        — dependency kinds, manifest file-name rules, PEP 503 normalisation — so the reader and the writer can never
+        (dependency kinds, manifest file-name rules, PEP 503 normalisation) so the reader and the writer can never
         drift apart.
       </p>
       <div className={styles.libraries}>
@@ -220,12 +252,12 @@ function Libraries(): React.ReactElement {
           <Heading as="h3" className={styles.featureTitle}>
             <Link to={`${GITHUB}/tree/main/pkg/ccme`}>
               <code>pkg/ccme</code>
-            </Link>{' '}
-            — the commit parser
+            </Link>
+            : the commit parser
           </Heading>
           <p>
             Conventional Commits, Monorepo Extension: a strict superset of Conventional Commits 1.0.0 that adds scopes as
-            packages, propagation depth and prerelease channels. No regular expressions — one left-to-right index scan
+            packages, propagation depth and prerelease channels. No regular expressions: one left-to-right index scan
             with a byte of lookahead, no backtracking, no recursion, O(n) time and O(1) working space, which is what
             matters when the input is untrusted commit messages in CI. The specification is vendored beside it as{' '}
             <Link to={`${GITHUB}/blob/main/pkg/ccme/SPEC.md`}>
@@ -238,8 +270,8 @@ function Libraries(): React.ReactElement {
           <Heading as="h3" className={styles.featureTitle}>
             <Link to={`${GITHUB}/tree/main/pkg/scanner`}>
               <code>pkg/scanner</code>
-            </Link>{' '}
-            — the manifest reader
+            </Link>
+            : the manifest reader
           </Heading>
           <p>
             Thin per-format parsers turning every manifest below into one ecosystem-neutral shape: declared identity,
@@ -251,12 +283,12 @@ function Libraries(): React.ReactElement {
           <Heading as="h3" className={styles.featureTitle}>
             <Link to={`${GITHUB}/tree/main/pkg/writer`}>
               <code>pkg/writer</code>
-            </Link>{' '}
-            — the manifest writer
+            </Link>
+            : the manifest writer
           </Heading>
           <p>
             Format-preserving in-place edits for every manifest the scanner reads: only the version text being changed
-            is replaced, and every other byte — indentation, key order, comments — survives verbatim. Writes are atomic
+            is replaced, and every other byte (indentation, key order, comments) survives verbatim. Writes are atomic
             (temp file, fsync, rename) and skipped when nothing changed, and the result separates what was applied from
             what was deliberately left alone, such as a value that defers to a Maven property or a workspace
             inheritance.
@@ -314,7 +346,7 @@ function Reference(): React.ReactElement {
           release into CI.
         </li>
         <li>
-          <Link to="/cookbook">Cookbook</Link>: real setups — npm, Docker, Go, Python, mobile, and the pnpm workspace
+          <Link to="/cookbook">Cookbook</Link>: real setups: npm, Docker, Go, Python, mobile, and the pnpm workspace
           case.
         </li>
         <li>
@@ -342,8 +374,8 @@ function Reference(): React.ReactElement {
 export default function Home(): React.ReactElement {
   return (
     <Layout
-      title="Monorepo releases from conventional commits"
-      description="dispat releases monorepos: it reads conventional commits, computes semantic versions with propagation to dependants, and builds and publishes packages in graph order, in parallel, with changelogs, git tags and GitHub releases.">
+      title="Release orchestration for polyglot monorepos"
+      description="dispat is release orchestration for polyglot monorepos: it reads conventional commits, computes semantic versions with propagation to dependants, and builds and publishes packages in graph order, in parallel, with changelogs, git tags and GitHub releases. Packages are folders and stages are shell commands, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.">
       <Hero />
       <main>
         <Features />

@@ -3,12 +3,22 @@
 [![tests](https://github.com/yohimik/dispat/actions/workflows/tests.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 [![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
-**dispat** releases monorepos. It reads conventional commits to track changed packages, computes their next semantic
-versions (propagating bumps to dependants), and builds and publishes them in the right order, in parallel, with
-changelogs, git tags and GitHub releases on the way out.
+**dispat** is release orchestration for polyglot monorepos. It reads conventional commits to track changed packages,
+computes their next semantic versions (propagating bumps to dependants), and builds and publishes them in the right
+order, in parallel, with changelogs, git tags and GitHub releases on the way out.
+
+Polyglot is the point. A package is just a folder and a stage is just a shell command, so npm, Go, Cargo, Maven, .NET,
+Python, Ruby, Dart, Docker, iOS and Android sit in one dependency graph and release together.
 
 ```sh
+# Linux and macOS, with curl or wget
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+```
+
+```powershell
+# Windows, in PowerShell
+irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 ```
 
 ```yaml
@@ -47,8 +57,12 @@ $ dispat
 ```
 
 - **Polyglot by construction.** Packages are just folders and stages are plain shell commands, so any language, build
-  system, registry, CI or cache plugs in with zero integration work. Whatever a stage uses (BuildKit layers, an Nx or
-  Bazel cache, a compiler cache) is the stage's business, and none of it can confuse the release computation. The
+  system, registry, CI or cache plugs in with zero integration work. dispat reads and rewrites twelve manifest
+  families on top of that: npm, Go, Cargo, Python, Composer, Maven, the .NET project/nuspec family, Dart, Ruby,
+  Dockerfiles and compose files, and the mobile platforms (Info.plist, project.pbxproj, Podfile and .podspec on iOS;
+  AndroidManifest.xml, Gradle build scripts and version catalogs on Android). Whatever a stage uses (BuildKit layers,
+  an Nx or Bazel cache, a compiler cache) is the stage's business, and none of it can confuse the release
+  computation. The
   per-[space](https://yohimik.github.io/dispat/concepts) `isBuildWaitingPublish` option states whether a consumer's build needs
   the provider merely *built* (node) or already *published* (docker), so a four-level npm-to-docker chain schedules
   correctly out of the box.
@@ -58,7 +72,7 @@ $ dispat
   with no state file and no double release. Recovery is just re-running.
 - **The graph can come from the manifests themselves.** `dispat compute` reads the packages' project files
   (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements files,
-  Dockerfiles and compose files) and derives the consumer/provider graph from them — including an image chain, read
+  Dockerfiles and compose files) and derives the consumer/provider graph from them, including an image chain, read
   straight off the `FROM` lines. Suggestions are previewable, confirmable one by one or applied wholesale; `--check`
   gates CI on a drifted graph, and `keep: true` marks deliberate relations no manifest declares. A space with an `autoVersion` block goes further: dispat rewrites its manifests at the version
   stage, reconciling declared ranges to end-of-run versions format-preservingly, with `syncLock` scripts (`npm install`)
@@ -105,30 +119,22 @@ dispat stands on the shoulders of two things:
 - **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library: package.json, go.mod, Cargo.toml,
   pyproject.toml, composer.json, pom.xml, the .NET project/nuspec/packages family, pubspec.yaml, Gemfile, .gemspec and
   requirements files parsed into one ecosystem-neutral shape, plus Dockerfiles and compose files, and the mobile
-  platforms — Info.plist, project.pbxproj, Podfile and .podspec on iOS, AndroidManifest.xml, Gradle version catalogs
+  platforms: Info.plist, project.pbxproj, Podfile and .podspec on iOS, AndroidManifest.xml, Gradle version catalogs
   and build scripts on Android; the library behind `dispat compute`, auto-versioning and the `dispat scanner` command.
 - **[writer](./pkg/writer)**: the manifest writer: format-preserving, byte-precise in-place edits for **every** manifest
   the scanner reads, with atomic writes and validated output; the library behind auto-versioning and the `dispat
   writer` command.
 - **[docker](./docker)**: the four container images, each a dispat package whose `docker-compose.yml` *is* its
-  manifest — so the build and publish stages are nothing but `docker compose build` and `docker compose push`.
+  manifest, so the build and publish stages are nothing but `docker compose build` and `docker compose push`.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories; setup, running, results and the test plan.
 - **[docs](./packages/docs)**: the documentation site itself, released by dispat like any other package: how to run it
   locally, why its build is the link checker, and how a version snapshot and a deploy are cut.
 
-## Planned features
-
-- **Extendable config.** Configuration will be splittable across multiple files, so large monorepos don't have to keep
-  every space and package declaration in one flat file.
-- **Build numbers for mobile releases.** The mobile manifests carry a monotonic counter beside their marketing version
-  (`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`). The scanner reads it, but nothing computes one
-  yet, so bumping it still belongs to a `flow.version` script.
-
 ## Projects using dispat (Real-world examples)
 
 - **dispat itself**: this repository is a Go multi-module workspace released by the dispat binary built from its own
-  checkout — every release starting with the very first `1.0.0-rc.0` was cut this way (only the `0.0.0` prototype
+  checkout. Every release starting with the very first `1.0.0-rc.0` was cut this way (only the `0.0.0` prototype
   predates it). One run rewrites the six modules' go.mods to the released versions, regenerates their go.sums, tags each
   module Go-style (`pkg/ccme/v1.0.0-rc.0`, `services/dispat/v1.0.0-rc.0`), and publishes a GitHub release per module
   with the cross-compiled binaries attached to the CLI's, which is what keeps

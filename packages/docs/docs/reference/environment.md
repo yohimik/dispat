@@ -7,7 +7,7 @@ Every script receives, on top of the parent environment, any
 release the same way).
 
 The order matters when a name appears twice. The static variables are placed first, so a computed `DISPAT_*` variable
-always wins, and a static value referring to one — `custom_$DISPAT_VERSION` — is expanded against the values in this
+always wins, and a static value referring to one (`custom_$DISPAT_VERSION`) is expanded against the values in this
 table before the script starts.
 
 These variables come from the release plan, so ordinarily a release is what produces them.
@@ -156,10 +156,10 @@ echo "IMAGE_DIGEST=..." >> "$DISPAT_OUTPUT"     # the same output, bare spelling
 echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz $PWD/dist/SHA256SUMS" >> "$DISPAT_OUTPUT"
 ```
 
-Outputs accumulate across the package's pipeline into one store: every later script and hook of the package (the outcome
-scripts `onFail`/`onSkip` included, so a notifier can report with them) receives each export as
-`DISPAT_OUTPUT_<NAME>`, plus `DISPAT_OUTPUTS` listing the exported names (space-separated; set but empty when nothing
-was exported) and `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script each export came from, as
+Outputs accumulate across the package's pipeline into one store. Every later script and hook of the package receives
+each export as `DISPAT_OUTPUT_<NAME>`, and that includes the outcome scripts `onFail` and `onSkip`, so a notifier can
+report with them. Two more variables come along: `DISPAT_OUTPUTS` lists the exported names, space-separated and set but
+empty when nothing was exported, and `DISPAT_OUTPUT_SOURCE_<NAME>` names the script each export came from, as
 `<package>:<stage>` (`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage
 scripts: a `beforeBuild` export reaches the build, the publish and everything after. The **login script's**
 exports are space-scoped: they reach every package of the space from its publish stage (the stage that waits for the

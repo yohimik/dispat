@@ -1,4 +1,4 @@
 .idea
 /dispat
-dispat.json.backup
+dispat.*.backup
 node_modules

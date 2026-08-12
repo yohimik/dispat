@@ -6,7 +6,7 @@ const GITHUB = 'https://github.com/yohimik/dispat';
 
 const config: Config = {
   title: 'dispat',
-  tagline: 'Releases monorepos: conventional commits in, ordered parallel publishes out',
+  tagline: 'Release orchestration for polyglot monorepos: conventional commits in, ordered parallel publishes out',
   favicon: 'logo.png',
 
   url: 'https://yohimik.github.io',
@@ -100,9 +100,10 @@ const config: Config = {
         '@type': 'SoftwareSourceCode',
         name: 'dispat',
         description:
-          'A monorepo release manager: reads conventional commits, computes semantic versions with propagation to ' +
-          'dependants, and builds and publishes packages in dependency order, in parallel, with changelogs, git tags ' +
-          'and GitHub releases.',
+          'A release manager for polyglot monorepos: reads conventional commits, computes semantic versions with ' +
+          'propagation to dependants, and builds and publishes packages in dependency order, in parallel, with ' +
+          'changelogs, git tags and GitHub releases. Packages are folders and stages are shell commands, so npm, Go, ' +
+          'Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.',
         url: 'https://yohimik.github.io/dispat/',
         codeRepository: GITHUB,
         programmingLanguage: 'Go',
@@ -110,7 +111,9 @@ const config: Config = {
         author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
         keywords: [
           'monorepo',
+          'polyglot monorepo',
           'release automation',
+          'release orchestration',
           'conventional commits',
           'semantic versioning',
           'changelog',
@@ -128,14 +131,15 @@ const config: Config = {
       {
         name: 'description',
         content:
-          'dispat releases monorepos: conventional commits in, ordered parallel publishes out, with changelogs, git ' +
-          'tags and GitHub releases.',
+          'dispat is release orchestration for polyglot monorepos: conventional commits in, ordered parallel ' +
+          'publishes out, with changelogs, git tags and GitHub releases.',
       },
       {
         name: 'keywords',
         content:
-          'monorepo, release, conventional commits, semantic versioning, changelog, git tags, github releases, npm, ' +
-          'docker, go modules, lerna alternative',
+          'monorepo, polyglot monorepo, release, release orchestration, conventional commits, semantic versioning, ' +
+          'changelog, git tags, github releases, npm, docker, go modules, cargo, maven, nuget, pypi, rubygems, ' +
+          'pub, ios, android, lerna alternative',
       },
       // og:title/og:image/og:description come from the page title, themeConfig
       // image and each page's description. A 1200x630 social card would render

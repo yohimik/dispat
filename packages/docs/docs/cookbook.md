@@ -350,8 +350,8 @@ FROM registry.example.com/base:0.1.0
 ```
 
 After the run above, that line reads `registry.example.com/base:0.2.0` and every other byte of the file is untouched.
-The base's package must answer to the repository name for the two to connect — `"packages": {"base": {"manifestNames":
-["registry.example.com/base"]}}` — because an image is called `registry.example.com/base` while the folder is called
+The base's package must answer to the repository name for the two to connect (`"packages": {"base": {"manifestNames":
+["registry.example.com/base"]}}`), because an image is called `registry.example.com/base` while the folder is called
 `base`. With that in place `dispat compute` will even propose the `app -> base` edge for you, straight off the `FROM`
 line, so the `dependencies` block above need not be written by hand. The details are in
 [manifests](./editing/manifests.md#docker).
@@ -371,7 +371,7 @@ is not part of this run; see [the script environment](./reference/environment.md
 [container images](https://github.com/yohimik/dispat/tree/main/docker) are four packages set up this way, and they go
 one step further: each one's `docker-compose.yml` *is* its manifest, so the version lives there and the whole of the
 build and publish stages is `docker compose build` and `docker compose push`. The same file shows both halves of this
-section — a rewritten literal (`image:`) beside an interpolated reference dispat leaves alone (the channel tag).
+section: a rewritten literal (`image:`) beside an interpolated reference dispat leaves alone (the channel tag).
 
 ## An Android app
 
@@ -499,13 +499,13 @@ has an opinion about the state of your git tree.
   declared ranges never need rewriting. `range: "workspace:*"` is a literal, written back verbatim, which keeps the
   protocol intact if a range is rewritten at all.
 - **`pnpm-lock.yaml` is outside every package folder.** `syncLock` regenerates it after the version stage, and
-  [`commit.include`](./configuration/records.md#commit) is what puts it in the release commit — without that line the
+  [`commit.include`](./configuration/records.md#commit) is what puts it in the release commit. Without that line the
   release commit carries rewritten manifests and a stale lock file. The one-at-a-time
   [`syncLockConcurrency`](./configuration/spaces.md#autoversion) default matters here for the same reason: every package in
   the workspace regenerates the *same* file.
 - **`--no-git-checks`.** `pnpm publish` refuses to publish from a branch that is not the release branch or from a dirty
   working tree. A dispat run is exactly that situation: the version stage has just rewritten manifests, and the release
-  commit is created after the publishes. The check has nothing to add — the annotated tag is the record of what shipped.
+  commit is created after the publishes. The check has nothing to add: the annotated tag is the record of what shipped.
 
 Yarn workspaces work the same way with `yarn.lock` in `commit.include` and `yarn npm publish` in the publish slot.
 

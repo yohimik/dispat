@@ -89,8 +89,8 @@ This is what a bare "dispat" does.`,
 	{
 		name:  cmdStatus,
 		short: "print the project graph and new versions, without building",
-		long: `Compute the same plan a release would and print it — every package, its
-new version, its channel transition and why it is releasing — without
+		long: `Compute the same plan a release would and print it: every package, its
+new version, its channel transition and why it is releasing, without
 building, tagging or writing anything.
 
 It takes the release's own selection flags and narrows the plan exactly as
@@ -98,16 +98,16 @@ a release would, so the graph shows what "dispat release" with the same
 flags is about to do.
 
 Exits 0 even when a release would refuse, because showing the plan is the
-job; only a repository that cannot produce a correct plan at all — or a
---strict selection the plan cannot release — exits 1.`,
+job; only a repository that cannot produce a correct plan at all, or a
+--strict selection the plan cannot release, exits 1.`,
 		flags: append([]string{"strict"}, selectionFlags...),
 	},
 	{
 		name:  cmdRun,
 		args:  "<script>",
 		short: "run the named script inside each changed package that defines it",
-		long: `Run the named script inside each changed package that defines it — its
-own scripts, then its space's, then the top-level ones — honouring the
+		long: `Run the named script inside each changed package that defines it (its
+own scripts, then its space's, then the top-level ones), honouring the
 dependency graph, so a package waits for the providers it depends on.
 
 --package, --space and --group narrow that to part of the monorepo, as does
@@ -127,7 +127,7 @@ already exists. Needs no configuration and no git repository of its own.`,
 	{
 		name:  cmdPreview,
 		short: "print the pending release notes",
-		long: `Print the pending release notes — breaking changes, features, fixes —
+		long: `Print the pending release notes (breaking changes, features, fixes)
 for every package with something pending, or for the selected ones.
 Nothing is written and nothing is released.`,
 		flags: selectionFlags,
@@ -144,8 +144,8 @@ release stage skip the entries written here.`,
 	{
 		name:  cmdAutoversion,
 		short: "reconcile manifests to the planned versions",
-		long: `Reconcile each covered package's manifests to the planned versions —
-native auto-versioning, the same work the version stage does — and run the
+		long: `Reconcile each covered package's manifests to the planned versions:
+native auto-versioning, the same work the version stage does, plus the
 space's syncLock scripts where the manifests changed.
 
 --only-updated leaves a range that had fallen behind a provider released
@@ -219,7 +219,7 @@ shared version has moved under it; it covers one package only.`,
 		name:  cmdGithub,
 		short: "create the per-package GitHub release now",
 		long: `Create each covered package's GitHub release now, so a flow can publish
-it from its own stage — an announce script, say — instead of waiting for
+it from its own stage (an announce script, say) instead of waiting for
 the end of the run. A release the repository already carries is skipped
 (W224), so a re-run after a later failure is a no-op.
 
@@ -336,7 +336,7 @@ Needs no config file and no git repository.`,
 		short: "replace literal text in any file, parsing nothing",
 		long: `Replace literal text in the named files, parsing nothing: --sub
 'find=>write', repeatable and applied in order, for the versions no
-manifest writer reaches — a Gradle coordinate, a Helm chart, a README.
+manifest writer reaches: a Gradle coordinate, a Helm chart, a README.
 Needs no config file and no git repository.`,
 		flags: []string{"sub", "strict"},
 	},

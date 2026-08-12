@@ -7,7 +7,7 @@ and tags. It is what a bare `dispat` does.
 
 `dispat release` and `dispat status` read the same [selection](./run.md#choosing-the-packages) every other command does:
 `--package`, `--space`, `--group`, or the package or space folder the command was invoked from. The plan is computed for the
-whole repository and narrowed afterwards, so a selection decides *what* is released and never *at which version* —
+whole repository and narrowed afterwards, so a selection decides *what* is released and never *at which version*:
 `dispat release -p core` releases core at exactly the version a full release would have given it.
 
 One rule is the selection's own, and it comes from publish order. A selected package whose provider is releasing in
@@ -47,7 +47,7 @@ Beside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same nine commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same nine commands: narrow to every package of the named [versioning groups](../releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
+| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autosubstitute`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
+| `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
+| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
 | `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](./release.md). |

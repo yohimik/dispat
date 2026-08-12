@@ -17,8 +17,8 @@ new one, so if the new version turns out to be wrong for you, one command puts
 the old one back.
 
 This is the command for a binary that is already installed and wants to become a
-newer one. Installing dispat in the first place — or pinning a version in a
-container image, where a self-update cannot outlive the container anyway — is
+newer one. Installing dispat in the first place, or pinning a version in a
+container image, where a self-update cannot outlive the container anyway, is
 [the install script's](./ci.md#the-install-script) job instead.
 
 ## What it does, step by step

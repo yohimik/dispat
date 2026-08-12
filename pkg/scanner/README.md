@@ -52,7 +52,7 @@ service name, because a YAML mapping decodes in no order worth trusting and the 
 compose file that only wires third-party services together declares no identity at all, which is the honest answer
 rather than a guess. A Dockerfile never declares one: what it builds is named on the command line, not in the file.
 
-The name a Docker manifest declares is an image repository — `ghcr.io/acme/api`, not `api` — so a package usually
+The name a Docker manifest declares is an image repository (`ghcr.io/acme/api`, not `api`), so a package usually
 either states `manifestNames` or leans on the substring name matching, whose last-segment rule maps the two onto each
 other.
 
@@ -79,7 +79,7 @@ rewrites it.
 declarations. Only `go.mod` has the distinction and only its parser fills the field; a requirement in `Deps` never
 appears there as well, and an indirect require that a relative `replace` pins locally counts as a declaration and stays
 in `Deps`. Keeping the two apart is what lets a caller reconcile ranges without touching a version the toolchain owns,
-while still being able to redirect a module reached only transitively — which a Go build needs, since it honours
+while still being able to redirect a module reached only transitively, which a Go build needs, since it honours
 `replace` in the main module alone.
 
 Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, stated names first, then root

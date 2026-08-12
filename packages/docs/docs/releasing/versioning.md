@@ -100,7 +100,7 @@ which package, so the passenger's entry is a single line saying why the version 
 ```markdown
 ## ui@2.0.0 (2026-08-11)
 
-No changes — version bump to keep the versioning group on one major version.
+No changes. Version bump to keep the versioning group on one major version.
 ```
 
 The wording names the part that is actually shared, so a reader of a `fixedMajor` changelog is not told that the whole

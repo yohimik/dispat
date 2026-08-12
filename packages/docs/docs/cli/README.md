@@ -19,9 +19,9 @@ dispat [command] [flags]
 | `autosubstitute`         | Replace literal text across every covered package; see [The autosubstitute command](./autosubstitute.md). |
 | `commit`                  | Create the per-package release commit; see [The commit command](./commit.md).                               |
 | `github`                  | Create the per-package GitHub release now; see [The github command](./github.md).                           |
+| `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
 | `if <cond>`               | Run one of several shell scripts, chosen by a condition on the environment; see [The if command](./if.md). |
 | `exec <script>`           | Run one declared script here, once, for a named subject; see [The exec command](./exec.md). |
-| `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
 | `self-update`             | Replace this binary with the latest release; see [The self-update command](./self-update.md).                             |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The scanner command](./scanner.md).                     |
 | `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The writer command](./writer.md).                  |
@@ -48,7 +48,7 @@ Flag precedence (via viper): explicitly set flag > config file > flag default > 
 
 `dispat --help` lists every command with a one-line summary, plus the flags that apply everywhere. A command's own
 flags are one step away: `dispat <command> --help` prints that command's synopsis, what it does, and the flags it
-reads — and nothing else, so the page stays readable however many commands dispat grows.
+reads, and nothing else, so the page stays readable however many commands dispat grows.
 
 ```sh
 dispat --help              # the command list and the global flags
@@ -73,10 +73,12 @@ changelog entry, GitHub release, release commit or push that fails after that po
 remaining work already done.
 
 Both `release` and `status` print the plan's diagnostics before the graph, and both narrow it to their
-[selection](./release.md) between the two. `status` exits `1` only for a repository-scoped failure (an
-unreadable tag, a version that would go backwards, a dependency cycle, a shallow clone) or for a `--strict` selection
-the plan cannot release, because for anything else the plan it just printed is the plan a release would use; when a
-release *would* refuse (for example under `commitErrors: error`) it says so in a warning and still exits `0`. A
+[selection](./release.md) between the two.
+
+`status` exits `1` in only two cases: a repository-scoped failure (an unreadable tag, a version that would go
+backwards, a dependency cycle, a shallow clone), or a `--strict` selection the plan cannot release. For anything else
+the plan it just printed is the plan a release would use, so there is nothing to fail over. When a release *would*
+refuse, for example under `commitErrors: error`, `status` says so in a warning and still exits `0`. A
 withheld package or a split versioning group is a warning on both commands and exits `0` without `--strict`.
 
 The two [shell helpers](./if.md#exit-codes) are the exception: `if` and `exec` hand back the exit code of the

@@ -230,7 +230,7 @@ a caret policy writes the plain version. A `{version}` template still passes thr
 
 ### Which service names a compose file
 
-A Dockerfile has no identity of its own — what it builds is named on the `docker build` command line, not in the file.
+A Dockerfile has no identity of its own: what it builds is named on the `docker build` command line, not in the file.
 A compose file usually does have one, and dispat reads it off the services:
 
 ```yaml
@@ -246,8 +246,8 @@ services:
 ```
 
 The service that both declares a `build` section and carries a tagged `image` is the one producing an image here, so
-`ghcr.io/acme/api` at `1.4.2` is what this file is called and what version it is at. Every other service's image —
-`redis:7.2` — is a dependency. When nothing builds, the tagged image the most services share wins instead, since a
+`ghcr.io/acme/api` at `1.4.2` is what this file is called and what version it is at. Every other service's image,
+`redis:7.2`, is a dependency. When nothing builds, the tagged image the most services share wins instead, since a
 scaled service appears several times under one image while the third-party ones beside it appear once each. Ties go to
 the lowest service name, so the answer never depends on the order the file happened to be written in. A compose file
 that only wires third-party services together has no identity, and that is reported as no identity rather than as a
@@ -271,7 +271,7 @@ None of these is an error. They are how a careful Dockerfile is written, and a r
 
 ### Naming a Docker package
 
-The name a Docker manifest declares is an image repository — `ghcr.io/acme/api` — and your package is almost certainly
+The name a Docker manifest declares is an image repository (`ghcr.io/acme/api`), and your package is almost certainly
 a folder called `api`. Two ways to connect them: state the repository under
 [`manifestNames`](../configuration/packages.md), or set `autoVersion.nameMatch` to `substring`, whose last-segment rule
 maps `ghcr.io/acme/api` onto `api` on its own. The first is explicit and worth preferring when the repository name and
@@ -279,6 +279,6 @@ the folder name really do differ.
 
 ## Exit codes
 
-`0` when everything asked for was done, `1` for a folder that cannot be read, a manifest no writer covers, a failed
-write, or a `--strict` run with a parse failure or a missing edit, and `2` for a command line that does not make sense
-(no manifest named, nothing to write, a malformed `--set`).
+`0` when everything asked for was done. `1` for a folder that cannot be read, a manifest no writer covers, a failed
+write, or a `--strict` run with a parse failure or a missing edit. `2` for a command line that does not make sense: no
+manifest named, nothing to write, or a malformed `--set`.

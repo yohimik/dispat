@@ -75,10 +75,9 @@ feat(core): second feature         ->  core@1.4.0-beta.0   (the train's target r
 release(core)%stable: promote      ->  core@1.4.0
 ```
 
-Release notes follow the train's shape: each
-prerelease's changelog entry and GitHub release document only its own changeset (`beta.1` does not repeat `beta.0`'s
-notes), and the graduation collects the whole train into the one entry the stable line's readers see, while the version
-is always computed over the whole train.
+Release notes follow the train's shape. Each prerelease's changelog entry and GitHub release document only its own
+changeset, so `beta.1` does not repeat `beta.0`'s notes. The graduation then collects the whole train into the one
+entry the stable line's readers see. The version, by contrast, is always computed over the whole train.
 
 ### Space versioning modes
 
@@ -168,11 +167,11 @@ Acting on the provider does nothing: its version is already public, and cancella
    before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with
    `false` it waits for the provider's *build* only.
-2. **build**: the package's build command. Like every script it may export outputs by appending
-   `DISPAT_OUTPUT_NAME=value` (or bare `NAME=value`) lines to the file `$DISPAT_OUTPUT` points at: each value travels to
-   every later script of the package as `DISPAT_OUTPUT_<NAME>` (with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the exporter),
-   and the `DISPAT_EXPORT_GITHUB` export (absolute file paths) opts the package into a GitHub release with those files
-   as assets.
+2. **build**: the package's build command. Like every script it may export outputs, by appending
+   `DISPAT_OUTPUT_NAME=value` (or bare `NAME=value`) lines to the file `$DISPAT_OUTPUT` points at. Each value travels to
+   every later script of the package as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the exporter.
+   One export is special: `DISPAT_EXPORT_GITHUB` (absolute file paths) opts the package into a GitHub release with
+   those files as assets.
 3. **publish**: waits for the package's own build and always for its providers' publishes. A space with a
    `flow.login` authenticates **once per space** before its first publish (every other publish of the space waits for
    it; a login failure fails them all); the login's exports reach every package of the space from its publish onward. On
@@ -199,12 +198,15 @@ because a package whose window never advances reappears in every plan for ever. 
 are the one thing that legitimately persists across runs, and they are excluded from the pipeline entirely.
 
 Optionally the run can end with a *finalize phase* (disabled by default): the `commit` option creates one release commit
-capturing all published packages' changelog and manifest changes. Tags then point at that commit, GitHub releases move
-to the end of the run, and `commit.push` pushes the commit and tags, skipping any tag already on the remote so a
-partially pushed run converges (git and GitHub access are verified up front, before any work starts, and a push-mode
-run additionally refuses a checkout that is behind the remote branch, since its plan was computed from stale tags and
-its push would be rejected anyway). The phase is
-bracketed by the warn-only run hooks
+capturing all published packages' changelog and manifest changes. Tags then point at that commit, and GitHub releases
+move to the end of the run. `commit.push` pushes the commit and tags, skipping any tag already on the remote, so a
+partially pushed run converges.
+
+Two guards protect that phase. Git and GitHub access are verified up front, before any work starts. And a push-mode run
+refuses a checkout that is behind the remote branch, because its plan was computed from stale tags and its push would
+be rejected anyway.
+
+The phase is bracketed by the warn-only run hooks
 `run.beforeCommit`/`run.afterCommit`, `run.postCommit` (after commit and tags) and `run.beforePush`/`run.afterPush`.
 
 Build and publish have independent concurrency budgets (`concurrency: [build, publish]`); version tasks share the build
@@ -212,9 +214,13 @@ budget. A stage without a configured script still runs, keeping ordering, status
 just executes no shell command.
 
 Outside the release pipeline, `dispat run <name>` (or just `dispat <name>`) runs the
-[script](./configuration/spaces.md#scripts-and-dispat-run) of that name inside each changed package that has one — or
-inside the packages [`--package` / `--space` / `--group`](./configuration/spaces.md#choosing-the-packages) select, the folder you
-stand in included — honouring the dependency graph within the build concurrency budget (the configured value, or `--concurrency`'s first
-value when given; `--on-error` decides whether a failure skips the dependents), with the same `DISPAT_*` environment
-and nothing released or tagged. It uses the same three-level `scripts` lookup the stages use, so where you define a
-name (the file, a space, or one package) is what decides how far the run reaches.
+[script](./configuration/spaces.md#scripts-and-dispat-run) of that name inside each changed package that has one. The
+[`--package` / `--space` / `--group`](./configuration/spaces.md#choosing-the-packages) flags pick a different set
+instead, and the folder you stand in counts as one of those terms.
+
+The run honours the dependency graph and stays inside the build concurrency budget, which is the configured value or
+`--concurrency`'s first value when given. `--on-error` decides whether a failure skips the dependents. Scripts get the
+same `DISPAT_*` environment they get during a release, but nothing is released or tagged.
+
+It uses the same three-level `scripts` lookup the stages use, so where you define a name (the file, a space, or one
+package) is what decides how far the run reaches.

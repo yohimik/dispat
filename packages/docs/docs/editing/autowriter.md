@@ -136,7 +136,7 @@ module. Go honours `replace` in the **main module's** `go.mod` and ignores it
 everywhere else, so redirecting `core` at its folder is not enough if your local
 `core` needs a newer `leaf` than the version your own `go.mod` records: `leaf`
 has to be redirected from your `go.mod` too. `go.mod` marks it `// indirect`,
-which `--set-local` leaves alone — that version belongs to the toolchain — but
+which `--set-local` leaves alone, since that version belongs to the toolchain, but
 `--link-local` writes the redirect and `--unlink-local` takes it away again.
 
 `--link-local` needs no repair afterwards. With the links in place your
@@ -145,7 +145,7 @@ workspace builds, vets and tests exactly as before, and no `go.sum` changes.
 :::warning
 Do not run `go work sync` while the links are in place. A local folder needs no
 checksum, so the sync helpfully deletes the `go.sum` entries for every linked
-module — and they are needed again the moment you unlink. The result is a
+module, and they are needed again the moment you unlink. The result is a
 module that builds fine for you and fails for everyone else with
 `missing go.sum entry`. The same goes for `go mod tidy`, which is why the
 [`syncLock`](../configuration/spaces.md#autoversion) scripts are worth turning
@@ -162,9 +162,9 @@ left in place ships a manifest your consumers cannot resolve. Run
 
 The case the two warnings above are really about. A release stage that compiles
 a binary resolves its workspace dependencies from the versions `go.mod` pins,
-and those are only as fresh as the last release that bumped them: a provider
-changed without a version bump ships as its published copy, while every test in
-CI ran your working tree. Bracketing the build closes the gap. dispat's own
+and those are only as fresh as the last release that bumped them. So a provider
+changed without a version bump ships as its published copy, even though every
+test in CI ran your working tree. Bracketing the build closes the gap. dispat's own
 [`build-dispat.sh`](https://github.com/yohimik/dispat/blob/main/scripts/build-dispat.sh)
 is exactly this:
 
@@ -192,7 +192,7 @@ build, for the main-module reason above.
 
 `GOWORK=off` is worth keeping alongside the links. Only the intra-repo modules
 are redirected, so the build still proves the module's own `go.mod` and `go.sum`
-cover its third-party requirements — which a workspace build would satisfy from
+cover its third-party requirements, which a workspace build would satisfy from
 some other module's requires.
 
 ### When to use this instead of autoversion

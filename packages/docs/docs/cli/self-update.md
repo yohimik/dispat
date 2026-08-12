@@ -24,7 +24,7 @@ running binary is reported as "already the latest" unless one of those two flags
 `--rollback` restores the kept binary and downloads nothing. It rotates rather than moves, so the binary it replaces
 becomes the new backup and a second `--rollback` returns.
 
-A binary installed with `go install` is not replaced — the next `go install` would undo it — and `--check` prints the
+A binary installed with `go install` is not replaced, since the next `go install` would undo it, and `--check` prints the
 `go install` command that does update it. A local build (`dev`) is refused for the same reason.
 
 Every other command reports a newer stable release on its way out, without ever waiting for the answer. Set

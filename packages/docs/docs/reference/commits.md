@@ -94,13 +94,15 @@ propagation never graduates a dependant; only a direct directive or a transition
 cannot happen by accident.
 
 A train converges the same way stable releases do: work a prerelease has already published cannot release again. The
-version of the *next* prerelease (and of the graduation) is still computed over the whole train (a breaking change
-shipped in `beta.0` keeps the target at the next major), but with no new commits since the last prerelease tag a re-run
-finds nothing to do, a `Release-As` consumed by a prerelease is no longer in force, and a `cancel` cannot retract
-train-published work (a *live* cancel aimed at published work warns `W170`). Convergence is quiet: the directive that
-started the train is contained in the tag it produced, so it is not re-reported as "already on beta"
-(`W199`) on later runs (that warning is reserved for a *fresh* directive pointing where the package already is), and a
-spent cancel (one every package it names has released past) is not re-reported either.
+version of the *next* prerelease, and of the graduation, is still computed over the whole train, so a breaking change
+shipped in `beta.0` keeps the target at the next major. But with no new commits since the last prerelease tag, a re-run
+finds nothing to do. A `Release-As` consumed by a prerelease is no longer in force, and a `cancel` cannot retract
+train-published work (a *live* cancel aimed at published work warns `W170`).
+
+Convergence is quiet. The directive that started the train is contained in the tag it produced, so it is not
+re-reported as "already on beta" (`W199`) on later runs. That warning is reserved for a *fresh* directive pointing
+where the package already is. A spent cancel, one every package it names has released past, is not re-reported
+either.
 
 ## Release control
 

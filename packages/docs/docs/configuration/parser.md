@@ -22,7 +22,7 @@ would not exceed the baseline, a graduation that would go backwards, a dependenc
 exists, so the run always aborts before releasing anything. They are fixed by correcting the repository (usually a tag)
 and re-running, not by editing a commit.
 
-Diagnostics are printed either way, with their code (`E130`, `W193`, ...), the package and the commit — unless
+Diagnostics are printed either way, with their code (`E130`, `W193`, ...), the package and the commit, unless
 [`parser.quiet`](#quiet) hides the parser's own, which changes what you read and nothing about what the run does.
 
 ## `nonPackageScopes`
@@ -30,10 +30,10 @@ Diagnostics are printed either way, with their code (`E130`, `W193`, ...), the p
 Scope names that are deliberately not packages, so naming one is not the typo the unknown-package error exists to catch.
 A unit scoping only these resolves to nothing, silently and with no diagnostic.
 
-The default is `["release"]`, and it is load-bearing rather than cosmetic: dispat's own release commit is
-`chore(release): {tags}`, so without the exemption every run in [`commit`](./records.md#commit) mode would leave an
-error behind for the next run to trip over; under `commitErrors: "error"` that would be a tool that breaks its own
-repository on the second release. Add your own conventions (`deps`, `ci`, ...) as needed; setting it to `[]`
+The default is `["release"]`, and it is load-bearing rather than cosmetic. dispat's own release commit is
+`chore(release): {tags}`. Without the exemption, every run in [`commit`](./records.md#commit) mode would leave an error
+behind for the next run to trip over. Under `commitErrors: "error"` that would be a tool that breaks its own repository
+on the second release. Add your own conventions (`deps`, `ci`, ...) as needed; setting it to `[]`
 disables the exemption entirely.
 
 ## `parser`
@@ -79,8 +79,8 @@ parser:
 ### Quiet
 
 A repository whose history predates the convention earns a diagnostic on nearly every old commit, and the noise buries
-the findings that matter. `parser.quiet: true` hides the parser's own findings — the ones about the text of a commit
-message, codes `E0xx`/`E1xx` and `W0xx`/`W1xx` — from the log.
+the findings that matter. `parser.quiet: true` hides the parser's own findings from the log: the ones about the text
+of a commit message, codes `E0xx`/`E1xx` and `W0xx`/`W1xx`.
 
 ```yaml
 parser:
@@ -96,8 +96,9 @@ lines went unprinted, so "nothing is wrong" and "you asked not to see it" never 
 INF plan diagnostics warnings=12 errors=1 hidden=13
 ```
 
-Findings about the workspace rather than the message — an unknown scope (`E130`), a catch-up (`W193`), a blocked
-package (`W194`), a package a [selection](../releasing/partial-releases.md) could not release yet (`W230`) — are never hidden.
+Findings about the workspace rather than the message are never hidden: an unknown scope (`E130`), a catch-up
+(`W193`), a blocked package (`W194`), a package a [selection](../releasing/partial-releases.md) could not release yet
+(`W230`).
 They explain a release outcome that a reader of the commit log alone cannot account for, which is the whole reason
 they exist.
 

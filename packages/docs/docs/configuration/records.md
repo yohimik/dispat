@@ -95,8 +95,8 @@ directory) is skipped with a warning while the release and the remaining files g
 file still fails the package like any other recording failure.
 
 **Creating a release twice.** A release the repository already carries for the planned tag is a skip (`W224`), not the
-API's duplicate-tag rejection, so a run repeated after a later stage failed — and the
-[`dispat github`](../cli/github.md) step command run twice — converge instead of failing.
+API's duplicate-tag rejection, so a run repeated after a later stage failed, and the
+[`dispat github`](../cli/github.md) step command run twice, converge instead of failing.
 
 ## Your own words around an entry
 
@@ -277,10 +277,10 @@ publish succeeds and points at the commit the run released from: `HEAD` of the c
 run since nothing is committed. Whatever the release changed on disk (changelog files, version-script manifest edits) is
 left in the worktree, and pushing the tags is left to CI (`git push origin --tags`).
 
-When **enabled**, the run instead finishes with a *finalize phase*: all published packages' folders are staged and
-committed in a single commit (changelog files, version-script manifest changes, plus any `include` paths that exist; add
-build outputs to your `.gitignore` or they get committed too), and the release tags are created **on that commit**
-instead of during each publish. A package whose scripts exported [`PACKAGE_<KEY>`](../reference/environment.md#script-outputs) is
+When **enabled**, the run instead finishes with a *finalize phase*. All published packages' folders are staged and
+committed in a single commit, and the release tags are created **on that commit** instead of during each publish. The
+commit carries changelog files, version-script manifest changes, and any `include` paths that exist. Add build outputs
+to your `.gitignore` or they get committed too. A package whose scripts exported [`PACKAGE_<KEY>`](../reference/environment.md#script-outputs) is
 the exception: its tag is excluded from the release commit and created at the exported commit hash instead. If nothing
 changed on disk (e.g. changelogs disabled), no empty commit is created but tags are still placed. GitHub releases move
 to the end of the run and document the release commit in their body; what the GitHub side does in each mode is described
