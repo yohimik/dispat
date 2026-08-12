@@ -58,9 +58,9 @@ The suite was designed against twenty-one goals, one test file each:
     for a rule that matched nothing. Plus the serialised `syncLock` slot, which keeps its budget even when neither
     strategy is configured and it is the whole of the version stage, and `manifestNames` making a package with no
     readable identity visible to `compute` and to auto-versioning through the one index they share.
-12. **Per-package overrides, versioning groups and `.dispatignore`** (`overrides_test.go`): the layered configuration
+12. **Per-package overrides, versioning groups and `.dispatexclude`** (`overrides_test.go`): the layered configuration
     through the binary: a `packages` entry replacing one flow entry while the sibling keeps the space's, the in-folder
-    config file beating the entry (the tag proves it), `.dispatignore` exclusions (never released, unknown scope in
+    config file beating the entry (the tag proves it), `.dispatexclude` exclusions (never released, unknown scope in
     commits), a declared `versionGroups` group spanning two spaces to one version (with the W210 ride) and its
     convergence, per-package changelog/GitHub record policies, the concurrency weight serialising a heavyweight build on
     the tsmark timeline, the config ascent walking past an in-folder file for the run shorthand, `scripts` defined at
@@ -157,6 +157,37 @@ The suite was designed against twenty-one goals, one test file each:
     is that a declared script reading `DISPAT_*` becomes runnable outside a release: `--env both` computes the plan on
     demand, the default scope computes none at all (proven by taking the repository away), and inside a `run` script
     the variables arrive by inheritance with no flag.
+
+23. **The release lock** (`lock_test.go`): one tag on the remote decides who releases. Two runs against one repository
+    is not a race dispat can win by being careful, so it refuses to enter it: the first to push the lock tag releases,
+    the second is told to come back later, and the tag is gone by the time either exits. Every claim is read from the
+    bare repository the fixtures push to, and what was true *during* a run is read from a hook that runs while the
+    lock is held.
+
+24. **Dependency edges declared by a space** (`spacedeps_test.go`): a space states the edges of its own packages next
+    to the space, in the same object keyed by consumer the root file uses, and every declaration merges into one
+    graph — so an edge written here orders a release exactly as one written at the root does, whether it was declared
+    in the root file's space entry or in the space folder's own config file. The rule that makes the level worth
+    having is that an edge must touch the space it sits in: one touching neither end is refused before anything runs,
+    naming the space and pointing at the root object. `dispat compute --write` is held to the same shape, correcting
+    an edge where it was written and keyed by consumer, while sending a new one to the root object rather than
+    guessing which space may hold it.
+
+25. **The configuration ladder from the root down** (`levels_test.go`): the root file is the bottom layer of the same
+    fold a space and a package go through, so a space-shaped setting written once at the top reaches every space and
+    every standalone package. Each level below can still say otherwise, including saying `false` against a `true`,
+    which is what makes the boolean options three-state rather than plain — the claim an ordinary bool could not
+    carry, because unset and false would look the same. A root `versioning` is proven to apply under each space's
+    *own* group rather than joining the spaces into one, and the space level is proven to carry `changelog`,
+    `github`, `src` and `concurrency`, each with a package departing from it.
+
+26. **Change-scope ignore** (`ignorescope_test.go`): which of a package's own files make a scopeless commit address
+    it. A commit touching only ignored files releases nothing and says so (W131), one ordinary file among them brings
+    the package back, and the levels — repository, space, package — add up, with only the package able to re-include
+    what a broader level excluded and only for itself. The `ignore` key and a `.dispatignore` file are proven to say
+    the same thing, `--since` is proven to select from the same resolution, and the load-bearing negative is that
+    ignoring narrows scope resolution alone: a commit naming the package by scope still releases it, and the release
+    commit still stages the ignored files.
 
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
@@ -335,7 +366,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestConfigRunLevelHooks`                              | The run-level hook frame against a real remote: every hook fires in phase order in the monorepo root, postAll sees the run outcome and the workspace listing, and a quiet second run keeps the commit/push hooks off because their phases never happen.                                                                                                                                                                       |
 | `TestConfigRunLevelHookFailureSemantics`               | A failing warn-only run hook (postAll) does not fail the run and its sequence continues; the gating beforeAll aborts the run before any release work.                                                                                                                                                                                                                                                                         |
 | `TestConfigFormatsSmoke`                               | One minimal smoke per config format: the same monorepo releases through the binary under dispat.json, dispat.yaml and the init command's dispat.toml starter; the json leg also pins that `status` reports without tagging.                                                                                                                                                                                                   |
-| `TestConfigDispatignoreSelectsTheConfigFile`           | A folder holding two config files names the one to skip in its `.dispatignore`, and the surviving file decides: proven at the repository root, in a space folder and in a package folder, each by the tag only that file's format could produce.                                                                              |
+| `TestConfigDispatexcludeSelectsTheConfigFile`           | A folder holding two config files names the one to skip in its `.dispatexclude`, and the surviving file decides: proven at the repository root, in a space folder and in a package folder, each by the tag only that file's format could produce.                                                                              |
 | `TestConfigResolutionAscendsPastASpaceFile`            | A space folder's file declares `packages`, like a monorepo of standalone packages does; run from inside the space and from the space folder itself, resolution still reaches the root above, because that root claims the folder.                                                                                             |
 | `TestConfigSpaceLayerRejections`                       | What the new layers may not say, each refused before any work: `path` on a space's `packages` entry, `path` and `spaces` in a space file, `packages` on a package entry, and a space `packages` key matching no folder of that space.                                                                                          |
 | `TestConfigAllStageHooksFireInOrder`                   | Every one of the nine per-package hooks plus the announce stage fires, in the documented frame order, on a provider/consumer pair; the consumer additionally runs the version stage with its two hooks inside the same frame.                                                                                                                                                                                                 |
@@ -478,7 +509,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestAutoVersionNoReplaceFlag`               | `--no-replace` skips the rules for one invocation and leaves the parsing strategy to do its half; without the flag the same invocation finishes the job.                                                                                                                                                                            |
 | `TestAutoVersionManifestsNoneFlag`           | `--manifests none` turns the parsing strategy off for one invocation, and a value outside the three is a usage error (2).                                                                                                                                                                                                          |
 
-### Goal 12: per-package overrides, versioning groups and `.dispatignore` (`overrides_test.go`)
+### Goal 12: per-package overrides, versioning groups and `.dispatexclude` (`overrides_test.go`)
 
 | Test                                         | Claim proven                                                                                                                                                                                                        |
 |----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -486,7 +517,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestOverridesFlowScriptResolvesPerPackage`  | One `flow.build: build` reaches three different commands in one release: the package's own `scripts`, its space's, and the file's, resolved most-local-first for whichever package the stage runs for.             |
 | `TestOverridesFlowScriptSuppliedByEveryPackage` | A space's flow entry may name a script only its packages define, and the release runs each package's own; removing one package's entry fails the config with an error naming that package.                       |
 | `TestOverridesInFolderFileWins`              | The package folder's own dispat.json is the most local layer: its `tagFormat` beats the `packages` entry's, proven by the tag the release actually creates, while the sibling keeps the repository default.         |
-| `TestOverridesDispatignore`                  | A folder listed in `.dispatignore` is not a package: never released, and a commit scoping it draws the unknown-scope diagnostic (E130) like any non-package name.                                                   |
+| `TestOverridesDispatexclude`                 | A folder listed in `.dispatexclude` is not a package: never released, and a commit scoping it draws the unknown-scope diagnostic (E130) like any non-package name.                                                   |
 | `TestOverridesVersionGroupSpansSpaces`       | A declared `versionGroups` group joined by two spaces versions as one: a change in one space rides the other space's package to the same version (W210 on the rider), and aligned members converge on the next run. |
 | `TestOverridesVersionGroupSharesOnlyTheMajor` | The same two spaces under a `fixedMajor` declaration: a minor stays inside its own space, and only a breaking change brings both spaces to one major (W210 on the rider), converging afterwards. |
 | `TestOverridesPerPackageRecords`             | Record policies resolve per package: one package writes its changelog under an overridden file name, its sibling disables both records, and the GitHub fake receives exactly the enabled package's release.         |
@@ -657,6 +688,46 @@ these tests ask for it back.
 | `TestReleaseLockCleanupFailureIsNotFatal`  | A remote that has become unreachable by the end of the run is reported with the remedy and leaves the exit code to the release itself (0), the stranded tag confirmed on the remote.                                                       |
 | `TestReleaseLockAppliesOnlyToRelease`      | `status`, `preview`, `run`, `changelog`, `autoversion`, `commit` and `scanner` take no lock, which is why they still work in a repository with no remote.                                                                                  |
 | `TestReleaseLockIsNotAReleaseTag`          | The lock is on HEAD while the plan is computed, so a `{version}` tag format — the broadest there is — still reads 0.1.0 as the baseline and releases 0.2.0.                                                                                |
+
+### Goal 24: dependency edges declared by a space (`spacedeps_test.go`)
+
+The edges are proven through what they order, not through what the config says: a consumer with nothing of its own to
+release moves only because a provider's bump travelled down an edge the space declared.
+
+| Test                                              | Claim proven                                                                                                                                                                                                    |
+|---------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestSpaceDependenciesOrderTheRelease`            | An edge in `spaces.<name>.dependencies` reaches the graph: the consumer, which says nothing of its own, is carried along by the provider's bump.                                                                |
+| `TestSpaceDependenciesCrossSpaceEdge`             | An edge with one end in the space is what the level is for, and either end may declare it: a library's space declares its consumer in another space, and the consumer follows.                                  |
+| `TestSpaceDependenciesRefuseAnEdgeItDoesNotTouch` | An edge touching neither end of the space it is written in is refused before anything runs, naming the space, both endpoints and the root object as where it belongs. Nothing is tagged.                        |
+| `TestSpaceFileDependencies`                       | The space folder's own config file declares edges too, and they add to the root file's space entry rather than replacing it: only the file's edge can explain the consumer's release.                           |
+| `TestSpaceDependenciesComputeEditsThemInPlace`    | `compute --write` corrects a kind and drops a dead edge inside the space's object, keyed by consumer, and appends the newly detected edge to the root object instead. A second run has nothing left to say.     |
+
+### Goal 25: the configuration ladder from the root down (`levels_test.go`)
+
+Each claim is made through something only one layer could have produced: a build log line only one script writes, a
+version only one versioning mode computes, a file only one `revertOnFail` setting leaves behind.
+
+| Test                                      | Claim proven                                                                                                                                                                                    |
+|-------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestLevelsRootFlowReachesEverySpace`     | One root `flow` runs for every package of every space; a space and then a package replace the entries they name and keep the rest, so three packages run three different builds and one shared publish. |
+| `TestLevelsRootBooleansAreThreeState`     | A root `revertOnFail: true` reaches the space that says nothing, and the space that says `false` against it keeps what its build wrote — the distinction a plain bool could not express.        |
+| `TestLevelsRootVersioningAppliesPerSpace` | A root `versioning: fixed` applies under each space's own group: one space's packages move together while the space that opted out is untouched, which is what separates it from `versionGroups`. |
+| `TestLevelsRootReachesAStandalonePackage` | A package outside every space is its own space, so the root's `tagFormat` and `flow` reach it through the same fold.                                                                            |
+| `TestLevelsSpaceRecordsAndSrc`            | The space level carries `changelog` (a package overriding it, another space keeping the root's) and `src` (a change outside it leaving the package inert, W131).                                |
+
+### Goal 26: change-scope ignore (`ignorescope_test.go`)
+
+Every claim is about what a *scopeless* commit resolves to, since that is the only thing ignoring changes. The
+negatives matter as much as the positives here: the feature is one narrowing, not a way to hide a package.
+
+| Test                                                | Claim proven                                                                                                                                                                       |
+|-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestIgnoreScopeKeepsAFolderFromTriggeringARelease` | A commit touching only ignored files releases nothing and reports the inert unit (W131); the same commit plus one ordinary file releases as usual, so one file that counts is enough. |
+| `TestIgnoreScopeDoesNotHideThePackage`              | A commit naming the package by scope releases it whatever it touched, and the release commit still stages the ignored files — the working tree is clean afterwards.                  |
+| `TestIgnoreScopeLevelsConcatenate`                  | Repository, space and package patterns all apply; the package re-includes one of the repository's exclusions with `!`, and its sibling does not inherit that.                        |
+| `TestIgnoreScopeFileAndKeyAgree`                    | A `.dispatignore` at the repository root and one in a package folder do exactly what the `ignore` key does at those levels.                                                          |
+| `TestIgnoreScopeAppliesToSince`                     | `--since` selects from the same file-derived resolution, so the package whose only change was ignored is not selected and its script never runs.                                     |
+| `TestIgnoreScopeRefusesAPatternItCannotCarryOut`    | A pattern that means nothing as written (a lone `!`) fails the load rather than silently doing nothing, and nothing is released.                                                     |
 
 ## Regression fences
 

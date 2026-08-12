@@ -1,4 +1,4 @@
-// Goal 24: change-scope ignore. A package's own files can be kept from
+// Goal 26: change-scope ignore. A package's own files can be kept from
 // counting as changes to it, so the folders that do not deserve a release —
 // docs, fixtures, a scratch area — stop triggering one while the package
 // stays the package: its scripts still run there, its changelog is still

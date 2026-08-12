@@ -1,4 +1,4 @@
-// Goal 22: dependency edges declared by a space. A space states the edges
+// Goal 24: dependency edges declared by a space. A space states the edges
 // between its own packages next to the space, in the same object keyed by
 // consumer the root file uses, and every declaration merges into one graph —
 // so an edge declared here orders a release exactly as one declared at the

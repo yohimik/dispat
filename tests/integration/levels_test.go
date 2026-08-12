@@ -1,4 +1,4 @@
-// Goal 23: the configuration ladder from the root down. The root file is the
+// Goal 25: the configuration ladder from the root down. The root file is the
 // bottom layer of the same fold a space and a package go through, so a
 // space-shaped setting written once at the top reaches every space and every
 // standalone package, and any level below can still say otherwise — including
