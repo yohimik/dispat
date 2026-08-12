@@ -1,0 +1,263 @@
+# Shell helpers
+
+Everything dispat runs is a shell command. Stages, hooks and `run` scripts are
+all strings handed to `/bin/sh -c`, which works well until a script needs to do
+one of two ordinary things: branch on a variable, or call another script you
+already wrote.
+
+Two small commands cover those.
+
+```console
+$ dispat if CI --then 'make ci' --else 'make dev'
+$ dispat exec build --for-package core
+```
+
+Neither one plans a release, sweeps your packages or touches the dependency
+graph. They run one script and get out of the way.
+
+## Which command do I want
+
+| You want to                                        | Use                          |
+|----------------------------------------------------|------------------------------|
+| run a script in every changed package, in order     | `dispat run <script>`        |
+| run one declared script, once, right here           | `dispat exec <script>`       |
+| choose between shell commands based on a variable   | `dispat if <cond>`           |
+
+`dispat run` is the one that knows about your monorepo. It computes a plan,
+works out which packages changed and runs the script in each of them in
+dependency order. `dispat exec` does none of that. It looks up one script by
+name and runs it, which is what you want when you are already inside a stage
+script and just need to call something else.
+
+## dispat if
+
+```
+dispat if <cond> --then <script> [--elif <cond> --then <script>]... [--else <script>]
+```
+
+The leading condition takes the first `--then`. Each `--elif` takes the next
+one. `--else` runs when nothing else matched.
+
+```sh
+dispat if 'ENV=prod'      --then 'deploy prod' \
+       --elif 'ENV=stage' --then 'deploy stage' \
+       --else               'echo nothing to deploy'
+```
+
+The first condition that holds wins, and the rest are skipped without being
+looked at. So a chain of `--elif` is a switch, and `--else` is its default case.
+
+If nothing matches and you gave no `--else`, nothing runs and the command exits
+`0`. That is deliberate: a guard that finds nothing to do has done its job.
+
+The scripts are shell text, not script names. This is the shell's own
+if/elif/else, spelled so it fits on one line inside a JSON or YAML config file
+where a real `if` block would be unreadable.
+
+### Conditions
+
+| Condition       | True when                                          |
+|-----------------|-----------------------------------------------------|
+| `NAME`          | the variable is set and not empty                   |
+| `!NAME`         | the variable is unset, or set to nothing            |
+| `NAME=value`    | it is exactly that value                            |
+| `NAME!=value`   | it is anything else                                 |
+| `NAME~glob`     | it matches the pattern, where `*` matches anything  |
+| `NAME!~glob`    | it does not match the pattern                       |
+
+"Set" means set and not empty, the same thing `[ -n "$NAME" ]` means in the
+shell. CI systems export empty variables all the time, and an empty value is
+almost never a yes. If you specifically want to ask whether a variable is empty,
+`NAME=` is the way, because an unset variable expands to nothing exactly as it
+would in a shell.
+
+The value can contain anything, operators included. Only the first operator ends
+the variable name, so `URL=a~b` asks whether `URL` is the text `a~b`.
+
+Globs use the same matcher as everywhere else in dispat, where `*` matches any
+run of characters including slashes:
+
+```sh
+dispat if 'BRANCH~release/*' --then 'dispat release'
+```
+
+Conditions read the environment the command was given, and nothing else. There
+is no config file to load and no repository to be standing in, so `dispat if`
+works anywhere.
+
+### Nesting
+
+A branch is just shell text, so another dispat command is a perfectly ordinary
+thing to put in one:
+
+```sh
+dispat if CI --then 'dispat if TIER=gold --then "deploy gold" --else "deploy standard"'
+```
+
+## dispat exec
+
+```
+dispat exec <script> [--for-package <name> | --for-space <name>] [--fallback]
+                     [--script-from pkg:<name> | space:<name> | root]
+                     [--env static|dispat|both]
+```
+
+`dispat exec` runs one script your config declares, in the current folder, once.
+
+### One subject decides everything
+
+`--for-package core` names the subject of the invocation. The subject decides
+two things at once: which `scripts` map the name is looked up in, and whose
+environment the script runs with.
+
+| Flag                   | Subject       |
+|------------------------|---------------|
+| none                   | the top level |
+| `--for-package core`   | that package  |
+| `--for-space libs`     | that space    |
+
+This is how workspace tools generally behave. `npm -w core run build` is core's
+script with core's environment, not two separate decisions, and `dispat exec` is
+the same idea.
+
+The folder you happen to be standing in is never consulted. The flags decide, so
+the same command means the same thing whether you run it from the repository
+root, from inside a package, or from a CI job that starts somewhere unpredictable.
+
+### Finding the script
+
+By default only the level you named is read:
+
+```console
+$ dispat exec build --for-package core
+core-build
+$ dispat exec deploy --for-package core
+error: no script "deploy" in package "core"
+```
+
+That second failure is on purpose. If `deploy` is declared at the top level and
+you asked for core's, running the top-level one quietly would hide a mistake
+that is easy to make and hard to notice.
+
+When you do want a name to be found further up, `--fallback` resolves it the way
+`dispat run` does, walking from the package to its space to the top level:
+
+| Invocation                                         | Order tried                              |
+|----------------------------------------------------|------------------------------------------|
+| `dispat exec build --for-package core --fallback`  | core, then core's space, then the top level |
+| `dispat exec build --for-space libs --fallback`    | the space, then the top level            |
+| `dispat exec build --fallback`                     | the top level, same as without it        |
+
+The nearer level still wins, so a package that declares its own `build` gets its
+own. If nothing in the chain has the name, the error lists every level it looked
+in, which is what tells a missing script apart from a misplaced one.
+
+### Taking the script from somewhere else
+
+Once in a while the script you want to run belongs to one package and the thing
+you want to run it against is another. `--script-from` says so:
+
+```sh
+dispat exec verify --for-package api --script-from pkg:core
+```
+
+That runs core's `verify` text with api's environment. It accepts `pkg:<name>`,
+`space:<name>` and `root`, and it moves the lookup only. The environment always
+stays with the subject.
+
+### What the script gets
+
+Your config's `env` block belongs to the script, so it is always applied, layered
+from the file up through the space to the package. Nothing to switch on.
+
+The `DISPAT_*` release variables are different. They describe one package's
+release, so working them out means computing a plan, and that reads git tags and
+history. `--env` is where you ask for that:
+
+| `--env`            | The script also gets                                                    | Cost               |
+|--------------------|-------------------------------------------------------------------------|--------------------|
+| `static` (default) | your declared `env`                                                     | nothing            |
+| `dispat`           | `DISPAT_VERSION`, `DISPAT_TAG`, `DISPAT_PACKAGE`, and the rest           | a plan, so git     |
+| `both`             | both of the above, which is exactly what `dispat run` gives a script     | the same plan      |
+
+```console
+$ dispat exec announce --for-package core --fallback --env both
+announcing core at 1.4.0
+```
+
+That is the useful part: a script written against `$DISPAT_VERSION` can now be
+run on its own, without running a release to get at it.
+
+The release variables need a package, since a space has no version of its own to
+report, so `--env dispat` without `--for-package` is refused rather than quietly
+handing you a smaller environment.
+
+**No `dispat exec` reads git unless `--env` asked it to.** Worth remembering if
+you are calling it in a loop.
+
+### Inside a stage or a run script
+
+When `dispat exec` is called from somewhere dispat already set up, the `DISPAT_*`
+variables are in the process environment already, and the script inherits them
+with no flag at all:
+
+```json title="dispat.json"
+{
+  "scripts": {
+    "announce": "echo announcing $DISPAT_PACKAGE at $DISPAT_VERSION",
+    "ci": "dispat exec announce"
+  }
+}
+```
+
+Run under `dispat run ci`, the inner `announce` sees the whole release
+environment. This is the case `dispat exec` was written for, and it costs
+nothing.
+
+## Exit codes
+
+Both commands hand back the exit code of the script they ran. `dispat if CI
+--then 'exit 7'` exits `7`. That keeps them transparent in a pipeline: whatever
+you were gating on still works with a helper in the middle.
+
+`--on-failure` changes that. It runs when the chosen script fails, and its own
+exit code becomes the command's:
+
+```console
+$ dispat exec deploy --on-failure 'notify-slack "deploy failed"; exit 1'
+```
+
+The failure script runs even when the first one was killed by Ctrl-C, so a
+cleanup still gets its chance.
+
+`2` still means the command line itself did not make sense, which is worth
+knowing if your script also exits `2`. Ending `--on-failure` with an explicit
+`exit 1` removes the ambiguity.
+
+## Every flag
+
+### dispat if
+
+| Flag                  | Effect                                                                        |
+|-----------------------|--------------------------------------------------------------------------------|
+| `--then <script>`     | The script the preceding condition runs. Repeatable, one per condition.        |
+| `--elif <cond>`       | Another condition, tried when every earlier one was false. Repeatable.         |
+| `--else <script>`     | The script to run when no condition held.                                      |
+| `--on-failure <script>` | Run this when the chosen script fails, and exit with its code instead.       |
+
+Needs no config file and no git repository. The shell is `/bin/sh -c`, since
+there is no config here to take a `shell` setting from.
+
+### dispat exec
+
+| Flag                    | Effect                                                                                |
+|-------------------------|-----------------------------------------------------------------------------------------|
+| `--for-package <name>`  | Run the named package's script, in its environment. One exact name, no globs.           |
+| `--for-space <name>`    | The same for a space.                                                                   |
+| `--fallback`            | Resolve the name the way `dispat run` does, walking up to the top level.                |
+| `--script-from <ref>`   | Take the script text from `pkg:<name>`, `space:<name>` or `root`, leaving the environment with the subject. |
+| `--env <scope>`         | What the subject adds: `static` (default), `dispat` or `both`.                          |
+| `--on-failure <script>` | Run this when the script fails, and exit with its code instead.                         |
+
+Needs a config file, since the script name comes from it. Uses the configured
+`shell` if you set one.

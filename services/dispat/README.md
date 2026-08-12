@@ -96,6 +96,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Shared versions](https://yohimik.github.io/dispat/versioning)                  | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups. |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
 | [Release steps](https://yohimik.github.io/dispat/steps)                         | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.  |
+| [Shell helpers](https://yohimik.github.io/dispat/shell-helpers)                 | `dispat if` and `dispat exec`: branching on a variable, and running one declared script on its own. |
 | [Partial releases](https://yohimik.github.io/dispat/partial-releases)           | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`. |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
 | [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |

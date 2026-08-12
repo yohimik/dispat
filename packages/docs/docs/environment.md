@@ -10,6 +10,10 @@ The order matters when a name appears twice. The static variables are placed fir
 always wins, and a static value referring to one — `custom_$DISPAT_VERSION` — is expanded against the values in this
 table before the script starts.
 
+These variables come from the release plan, so ordinarily a release is what produces them.
+[`dispat exec --env both`](./shell-helpers.md#what-the-script-gets) computes the same plan on demand, which is how a
+script written against `$DISPAT_VERSION` is run on its own without releasing anything.
+
 | Variable                      | Example              | Meaning                                                                                                                                                                                 |
 |-------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `DISPAT_PACKAGE`              | `core`               | Package name.                                                                                                                                                                           |

@@ -18,6 +18,8 @@ dispat [command] [flags]
 | `autoreplace`             | Apply one set of manifest edits to every covered package; see [The autoreplace command](#the-autoreplace-command). |
 | `commit`                  | Create the per-package release commit; see [The step commands](#the-step-commands).                               |
 | `github`                  | Create the per-package GitHub release now; see [The step commands](#the-step-commands).                           |
+| `if <cond>`               | Run one of several shell scripts, chosen by a condition on the environment; see [Shell helpers](./shell-helpers.md). |
+| `exec <script>`           | Run one declared script here, once, for a named subject; see [Shell helpers](./shell-helpers.md). |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](#the-compute-command). |
 | `self-update`             | Replace this binary with the latest release; see [Updating dispat](./self-update.md).                             |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The manifest commands](#the-manifest-commands).                     |
@@ -69,6 +71,12 @@ dispat [command] [flags]
 | `--set`               |             | `writer` and `autoreplace`: set one dependency's declared range, `[kind:]name=range`; repeatable. For `autoreplace`, `{version}` in the range is the planned version of the package the edit names. |
 | `--replace`           |             | `writer` and `autoreplace`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
 | `--sub`               |             | `replacer` only: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](./replacer.md). |
+| `--then`, `--elif`, `--else` |      | `if` only: the script a condition runs, another condition, and the script for when none held. `--then` and `--elif` are repeatable and pair in order. See [Shell helpers](./shell-helpers.md#dispat-if). |
+| `--for-package`, `--for-space` |    | `exec` only: the subject of the invocation, which decides both the level the script name is looked up in and the environment the script gets. One exact name, no globs. See [Shell helpers](./shell-helpers.md#one-subject-decides-everything). |
+| `--fallback`          |             | `exec` only: resolve the script name the way `dispat run` does, walking from the package to its space to the top level, instead of reading the named level alone. |
+| `--script-from`       |             | `exec` only: take the script text from `pkg:<name>`, `space:<name>` or `root`, leaving the environment with the subject. See [Taking the script from somewhere else](./shell-helpers.md#taking-the-script-from-somewhere-else). |
+| `--env`               | `static`    | `exec` only: what the subject adds to the environment. `static` is its declared `env`, `dispat` the `DISPAT_*` release variables, `both` what a stage script sees. The last two compute a plan, and nothing else in the command does. |
+| `--on-failure`        |             | `if` and `exec`: run this script when the chosen script fails, and exit with the failure script's code instead of the failed script's. |
 | `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](#releasing-part-of-the-graph). `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. `autoreplace`: an edit that matched no manifest anywhere; see [Editing across the monorepo](./autoreplace.md#applied-skipped-and-missing-across-many-packages). |
 | `--version`           |             | Print the dispat logo, version and platform (`dispat 1.2.3 (darwin_arm64)`) and exit; needs no config file. Release binaries carry the release tag's version, local builds report `dev`, and a binary installed with `go install` says so in the same parenthesis, since that decides how it is [updated](./self-update.md#how-you-installed-it-matters). |
 | `--help`, `-h`        |             | Print help and exit. Without a command word, the command list and the global flags; after one, that command's synopsis and its own flags. See [Getting help](#getting-help).                            |
@@ -422,6 +430,11 @@ unreadable tag, a version that would go backwards, a dependency cycle, a shallow
 the plan cannot release, because for anything else the plan it just printed is the plan a release would use; when a
 release *would* refuse (for example under `commitErrors: error`) it says so in a warning and still exits `0`. A
 withheld package or a split versioning group is a warning on both commands and exits `0` without `--strict`.
+
+The two [shell helpers](./shell-helpers.md#exit-codes) are the exception: `if` and `exec` hand back the exit code of the
+script they ran, so `dispat if CI --then 'exit 7'` exits `7` and a pipeline gating on a specific code still works with a
+helper in the middle. `--on-failure` replaces that code with its own. `2` still means a bad command line, which is worth
+knowing if a script exits `2` itself.
 
 ## Interruption
 
