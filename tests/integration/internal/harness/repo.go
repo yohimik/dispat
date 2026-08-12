@@ -304,8 +304,7 @@ func (r *Repo) runAtEnv(root string, env []string, stdin string, args ...string)
 // binary is being driven.
 func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...string) RunResult {
 	r.T.Helper()
-	full := append(append([]string{}, args...), "--root", root)
-	cmd := exec.Command(bin, full...)
+	cmd := exec.Command(bin, withRoot(args, root)...)
 	// No test may reach api.github.com, and most fixtures have no remote to
 	// take the release lock on. Both kill switches go in before the caller's
 	// own pairs, and exec keeps the last value for a repeated key, so a
@@ -331,6 +330,28 @@ func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...stri
 		code = exitErr.ExitCode()
 	}
 	return RunResult{Code: code, Stdout: stdout.String(), Stderr: stderr.String(), Events: ParseEvents(stdout.String())}
+}
+
+// withRoot appends dispat's own --root to an invocation, ahead of any `--`
+// the scenario typed.
+//
+// `--root` is dispat's flag, not the script's, and everything after `--`
+// belongs to whatever `dispat run` or `dispat exec` is about to execute. A
+// scenario forwarding arguments would otherwise hand the script the harness's
+// plumbing and leave the binary pointed at the test process's own working
+// directory. Without a `--`, this is the append it always was.
+func withRoot(args []string, root string) []string {
+	at := len(args)
+	for i, a := range args {
+		if a == "--" {
+			at = i
+			break
+		}
+	}
+	full := make([]string, 0, len(args)+2)
+	full = append(full, args[:at]...)
+	full = append(full, "--root", root)
+	return append(full, args[at:]...)
 }
 
 // defaultEnv is what every invocation starts from unless the scenario says

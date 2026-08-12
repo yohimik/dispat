@@ -160,7 +160,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	bootLog := zerolog.New(zerolog.ConsoleWriter{Out: stderr, TimeFormat: "15:04:05"}).
 		With().Timestamp().Logger()
 
-	inv, badArgs := parseInvocation(fs.Args(), usageForCommand, bootLog)
+	inv, badArgs := parseInvocation(fs.Args(), fs.ArgsLenAtDash(), usageForCommand, bootLog)
 	if badArgs {
 		return 2
 	}
@@ -264,7 +264,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		execOpts = app.ExecOptions{
 			Script: inv.script, Subject: subj, ScriptFrom: from,
 			Fallback: *o.execFallback, Env: *o.execEnv, OnFailure: *o.onFailure,
-			Dir: *o.root, Stdout: stdout, Stderr: stderr,
+			Args: inv.args, Dir: *o.root, Stdout: stdout, Stderr: stderr,
 		}
 	}
 	if cmd == cmdInit || manifestCommand(cmd) {
@@ -432,7 +432,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case cmdRun:
-		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *o.onError, Window: window}) != nil {
+		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *o.onError, Window: window, Args: inv.args}) != nil {
 			return 1
 		}
 	case cmdPreview:
@@ -530,18 +530,47 @@ type invocation struct {
 	cond   string   // if: the leading condition
 	dir    string   // scanner: the optional folder to scan
 	paths  []string // writer and replacer: the files to edit
+	args   []string // run and exec: what followed `--`, for the script
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
 // each command's arity — all before any config is loaded, so a usage mistake
 // costs nothing. bad reports an unusable command line (the usage exit, 2),
 // already logged and, where it helps, followed by the usage text.
-func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv invocation, bad bool) {
+//
+// dash is pflag's ArgsLenAtDash: -1 when no `--` was typed, otherwise the
+// index in rest where the arguments after it begin. Only `run` and `exec`
+// forward those to their script; for every other command a `--` is a mistake
+// worth naming rather than a list to ignore.
+//
+// Splitting on the dash before the arity checks is what lets both rules hold
+// at once. The checks below still see positional arguments alone, so
+// `dispat run lint core` remains the usage error it has always been — the
+// selection is a flag — while `dispat run lint -- core` hands `core` to the
+// script, because the operator said which one they meant.
+func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Logger) (inv invocation, bad bool) {
 	inv = invocation{cmd: cmdRelease}
+	var forwarded []string
+	if dash >= 0 && dash <= len(rest) {
+		forwarded, rest = rest[dash:], rest[:dash]
+	}
 	if len(rest) == 0 {
+		if len(forwarded) > 0 {
+			// `dispat -- something`: no command to forward to.
+			log.Error().Strs("args", forwarded).
+				Msg("arguments after `--` need a command that forwards them: run or exec")
+			return inv, true
+		}
 		return inv, false
 	}
 	inv.cmd = rest[0]
+	if len(forwarded) > 0 && !forwardsArgs(inv.cmd) {
+		log.Error().Strs("args", forwarded).
+			Msgf("%s does not forward arguments; only run and exec pass what follows `--` to a script", inv.cmd)
+		usage(commandWord(rest))
+		return inv, true
+	}
+	inv.args = forwarded
 	switch inv.cmd {
 	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate:
 		if len(rest) > 1 {
@@ -550,7 +579,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 		}
 	case cmdRun:
 		if len(rest) != 2 {
-			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package, --space or --group)")
+			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package, --space or --group; pass arguments to the script after `--`)")
 			usage(inv.cmd)
 			return inv, true
 		}
@@ -564,7 +593,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 		inv.cond = rest[1]
 	case cmdExec:
 		if len(rest) != 2 {
-			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for-package or --for-space)")
+			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for-package or --for-space; pass arguments to the script after `--`)")
 			usage(inv.cmd)
 			return inv, true
 		}
@@ -611,6 +640,23 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 		inv.script, inv.cmd = inv.cmd, cmdRun
 	}
 	return inv, false
+}
+
+// forwardsArgs reports whether a command word passes what follows `--` to the
+// script it runs.
+//
+// Only the two commands whose whole job is running one named script do: `run`
+// (in both spellings, so an unknown word — the run shorthand — counts) and
+// `exec`. `if` is deliberately not among them: its branches are shell text the
+// operator already writes in full, so there is nothing a forwarded argument
+// would reach that the branch could not say itself. Neither are the release
+// commands, where an argument typed at the terminal has no business entering a
+// pipeline whose record is a tag.
+func forwardsArgs(cmd string) bool {
+	if _, known := lookupCommand(cmd); !known {
+		return true // the run shorthand: `dispat lint -- --fix`
+	}
+	return cmd == cmdRun || cmd == cmdExec
 }
 
 // commandWord answers which command's help an invocation is asking for,

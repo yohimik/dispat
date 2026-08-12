@@ -94,6 +94,10 @@ type ExecOptions struct {
 	Env string
 	// OnFailure runs when the script fails and decides the exit code.
 	OnFailure string
+	// Args are the arguments typed after `--`, appended to the resolved
+	// command. They reach the script and nothing else: OnFailure is about the
+	// failure rather than about the work, so it is left as it was written.
+	Args []string
 	// Dir is the working directory: --root, as the user spelled it.
 	Dir            string
 	Stdout, Stderr io.Writer
@@ -155,7 +159,7 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 	log := a.log.With().Str("script", opts.Script).Logger()
 	log.Debug().Str("subject", opts.Subject.label()).Str("from", from.label()).Msg("running script")
 	return shellCall{
-		Runner: runner, Dir: opts.Dir, Script: command, Env: env,
+		Runner: runner, Dir: opts.Dir, Script: script.AppendArgs(command, opts.Args), Env: env,
 		OnFailure: opts.OnFailure, Stdout: opts.Stdout, Stderr: opts.Stderr, Log: log,
 	}.run(ctx)
 }

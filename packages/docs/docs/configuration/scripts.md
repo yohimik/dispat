@@ -17,3 +17,8 @@ on what the sequence gates:
   outcome scripts `onFail` / `onSkip`, and every other run-level hook) never fail anything: a failing command is logged
   as a warning and **the remaining commands of the sequence still run**. These hooks observe work that has already
   happened, so stopping the sequence could not undo it.
+
+A script named here is a fixed command, but it does not have to be the whole of one:
+[`dispat run`](../cli/run.md#passing-arguments-to-the-script) and [`dispat exec`](../cli/exec.md) append anything
+typed after `--` to it, so `dispat run test -- --watch` runs the `test` script with `--watch` without the config
+changing. The release stages never take arguments this way; what a release runs is what the file says.

@@ -166,7 +166,7 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 		has, hasNot []string
 	}{
 		"run": {
-			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [flags]",
+			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [-- args...] [flags]",
 			has:    []string{"--on-error", "--since", "--consumers"},
 			hasNot: []string{"--set-version", "--tag", "--owner"},
 		},

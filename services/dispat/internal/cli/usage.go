@@ -34,11 +34,24 @@ const logo = `
 // arguments it takes, the one line the command list shows, the paragraphs
 // its own help adds, and the flags it reads.
 type command struct {
-	name  string
-	args  string
-	short string
-	long  string
-	flags []string
+	name string
+	args string
+	// argsLong is the invocation line for the command's own help, where there
+	// is room to spell an optional part out. The command list is a fixed-width
+	// column, so anything longer than a short "<script>" belongs here rather
+	// than in args. Empty means args serves both.
+	argsLong string
+	short    string
+	long     string
+	flags    []string
+}
+
+// usageArgs is what a command's own help shows after its name.
+func (c command) usageArgs() string {
+	if c.argsLong != "" {
+		return c.argsLong
+	}
+	return c.args
 }
 
 // selectionFlags are the three every package-selecting command shares.
@@ -103,9 +116,10 @@ job; only a repository that cannot produce a correct plan at all, or a
 		flags: append([]string{"strict"}, selectionFlags...),
 	},
 	{
-		name:  cmdRun,
-		args:  "<script>",
-		short: "run the named script inside each changed package that defines it",
+		name:     cmdRun,
+		args:     "<script>",
+		argsLong: "<script> [-- args...]",
+		short:    "run the named script inside each changed package that defines it",
 		long: `Run the named script inside each changed package that defines it (its
 own scripts, then its space's, then the top-level ones), honouring the
 dependency graph, so a package waits for the providers it depends on.
@@ -113,6 +127,11 @@ dependency graph, so a package waits for the providers it depends on.
 --package, --space and --group narrow that to part of the monorepo, as does
 the package or space folder the command is invoked from. --since replaces
 the release window with the commits since a git revision.
+
+Anything after "--" is appended to each package's command, so
+"dispat run test -- --watch" runs the test script with --watch in every
+package the run covers. A bare word without the "--" is still a usage error:
+packages are selected with flags.
 
 "dispat <script>" is a shorthand when <script> is not a command name.`,
 		flags: windowFlags,
@@ -267,9 +286,10 @@ git repository.`,
 		flags: append(append([]string{}, ifFlags...), "on-failure"),
 	},
 	{
-		name:  cmdExec,
-		args:  "<script>",
-		short: "run one declared script here, once",
+		name:     cmdExec,
+		args:     "<script>",
+		argsLong: "<script> [-- args...]",
+		short:    "run one declared script here, once",
 		long: `Run one script the configuration declares, in the current folder, once.
 Unlike "dispat run" it computes no plan, sweeps nothing and consults no
 dependency graph, which is what makes it usable as a step inside another
@@ -288,7 +308,11 @@ alone, leaving the environment with the subject.
 
 --env says what the subject adds: static, its declared env, which is the
 default; dispat, the DISPAT_* release variables; or both. The last two compute
-a plan, and nothing else here does.`,
+a plan, and nothing else here does.
+
+Anything after "--" is appended to the declared command, so a script in the
+configuration takes a value from the terminal without being edited. The
+--on-failure script never receives them.`,
 		flags: append(append([]string{}, execFlags...), "on-failure"),
 	},
 	{
@@ -393,7 +417,7 @@ func printCommandUsage(out io.Writer, master *pflag.FlagSet, name string) {
 	}
 	var b strings.Builder
 	b.WriteString(logo)
-	b.WriteString("\n\nusage: dispat " + strings.TrimSpace(c.name+" "+c.args) + " [flags]\n\n")
+	b.WriteString("\n\nusage: dispat " + strings.TrimSpace(c.name+" "+c.usageArgs()) + " [flags]\n\n")
 	b.WriteString(c.long)
 	b.WriteString("\n")
 	if own := flagBlock(master, c.flags); own != "" {

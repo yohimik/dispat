@@ -40,6 +40,12 @@ type RunOptions struct {
 	// Window is which packages the run covers: the release window or --since,
 	// narrowed by the filter, expanded by --consumers.
 	Window WindowOptions
+	// Args are the arguments typed after `--`, appended to whatever command
+	// each covered package resolves the name to. Every covered package gets
+	// them, which is the point: `dispat run test -- --watch` is one intent
+	// about the whole selection, not about whichever package happens to run
+	// first.
+	Args []string
 }
 
 // RunScript computes the plan and executes the named script inside each
@@ -82,7 +88,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	}
 
 	work := &scriptWork{
-		app: a, pl: pl, name: name,
+		app: a, pl: pl, name: name, args: opts.Args,
 		// The workspace listing depends only on the plan, so it is built once
 		// here and shared by every package's environment.
 		wsVars:  release.WorkspaceEnv(pl, a.log),
@@ -155,6 +161,7 @@ type scriptWork struct {
 	app     *App
 	pl      *plan.Plan
 	name    string
+	args    []string // what followed `--`, appended to every package's command
 	wsVars  []string // the shared workspace listing, built once per run
 	runner  script.Runner
 	covered map[string]*plan.Release
@@ -195,8 +202,9 @@ func (w *scriptWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 		log := w.app.log.With().Str("package", pkg).Str("stage", w.stage()).Logger()
 		log.Info().Msg("run script started")
 		seq := release.Sequence{Runner: w.runner, Dir: rel.Pkg.Dir, Stage: w.stage(),
-			Commands: []string{cmd}, Env: release.CommandEnv(w.pl, pkg, w.stage(), w.wsVars),
-			Log: log, FailFast: true}
+			Commands: []string{script.AppendArgs(cmd, w.args)},
+			Env:      release.CommandEnv(w.pl, pkg, w.stage(), w.wsVars),
+			Log:      log, FailFast: true}
 		return seq.RunMergingOutputs(ctx, rel)
 	}, nil
 }

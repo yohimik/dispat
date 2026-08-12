@@ -65,6 +65,51 @@ Nine commands read the same selection: `release`, `status`, `run`, `preview`, `c
 order, described in [Releasing part of the graph](./release.md)), but which packages a term picks out
 never does.
 
+## Passing arguments to the script
+
+Everything after `--` goes to the script instead of to dispat:
+
+```sh
+dispat run test -- --watch
+dispat test -- --watch          # the shorthand does the same
+```
+
+With `"test": "vitest run"` in your config, both of those run `vitest run --watch`. The arguments are **appended to
+the command text**, which is the same thing `npm run test -- --watch` does, so nothing in your config has to be
+rewritten to accept them.
+
+Two things follow from that, and both are worth knowing before you rely on it.
+
+**Every covered package gets them.** A run is one intent about a selection, so `dispat run test -- --watch` puts
+`--watch` on the test script of every package the run covers, not just the first. Narrow it with `--package` if that
+is not what you meant.
+
+**They land at the end of the command.** A script that is a single command takes them where you expect. One that ends
+in something else does not:
+
+```json
+{
+  "scripts": {
+    "test": "vitest run",              // dispat run test -- --watch  →  vitest run --watch
+    "check": "npm run lint; vitest run" // →  npm run lint; vitest run --watch
+  }
+}
+```
+
+The second still works, but only because the argument happened to land on the command it was meant for. If a script
+ends in something that should not receive them, wrap the part that should: `sh -c 'vitest run "$@"' _`.
+
+A `--` is required. A bare word after the script name is still an error, because packages are chosen with flags:
+
+```sh
+dispat run test core        # error: the selection is a flag
+dispat run test -p core     # this is how you narrow it
+dispat run test -- core     # and this passes "core" to the script
+```
+
+Arguments carrying spaces or shell characters are quoted for you, so `dispat run test -- --filter 'my suite'` arrives
+as one argument. Only `run` and `exec` forward; every other command refuses a `--` rather than ignoring it.
+
 ## Flags
 
 Beside the [global flags](./README.md#global-flags):

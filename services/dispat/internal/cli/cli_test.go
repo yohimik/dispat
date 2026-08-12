@@ -75,7 +75,7 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		has, hasNot []string
 	}{
 		"run": {
-			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [flags]",
+			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [-- args...] [flags]",
 			has:    []string{"--on-error", "--since", "--consumers", "--package"},
 			hasNot: []string{"--set-version", "--tag", "--sub", "--interactive"},
 		},
@@ -106,7 +106,7 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			hasNot: []string{"--package", "--tag"},
 		},
 		"the run shorthand": {
-			args: []string{"lint", "--help"}, usage: "usage: dispat run <script> [flags]",
+			args: []string{"lint", "--help"}, usage: "usage: dispat run <script> [-- args...] [flags]",
 			has:    []string{"--on-error"},
 			hasNot: []string{"--set-version"},
 		},
@@ -118,7 +118,7 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			hasNot: []string{"--package", "--for-package", "--env", "--tag"},
 		},
 		"exec": {
-			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [flags]",
+			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [-- args...] [flags]",
 			has: []string{"--for-package", "--for-space", "--fallback", "--script-from",
 				"--env", "--on-failure"},
 			hasNot: []string{"--then", "--elif", "--package", "--tag", "--on-error"},
@@ -212,11 +212,54 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"writer", "go.mod"},                   // ...and something to write
 		{"writer", "go.mod", "--set", "nope"},  // a malformed edit spec
 		{"writer", "go.mod", "--link", "nope"}, // ...and a malformed link
+
+		// `--` forwards to a script, so it needs a script to forward to and a
+		// command that has one.
+		{"run", "--", "--fix"},                 // no script name, whatever follows the dash
+		{"--", "--fix"},                        // no command at all
+		{"status", "--", "x"},                  // status runs no script
+		{"commit", "--", "x"},                  // nor do the step commands
+		{"if", "CI", "--then", "a", "--", "x"}, // nor `if`, whose branches are already shell text
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
 		assert.Equal(t, 2, code, "args: %v", args)
 	}
+}
+
+// TestArgsAfterDashAreNotAnArityError: the other side of the table above.
+// Arguments following `--` belong to the script, so they must not be counted
+// as positionals by the arity check — while a bare word still is, because the
+// selection is a flag. Exit 1 (no config file in this bare folder) rather than
+// 2 is what proves the command line parsed.
+func TestArgsAfterDashAreNotAnArityError(t *testing.T) {
+	root := t.TempDir()
+	for name, args := range map[string][]string{
+		"run forwards one":                    {"run", "lint", "--", "--fix"},
+		"run forwards several":                {"run", "test", "--", "--watch", "--reporter=dot"},
+		"run forwards a flag dispat also has": {"run", "test", "--", "--package", "core"},
+		"run with a bare dash":                {"run", "lint", "--"},
+		"the shorthand forwards":              {"lint", "--", "--fix"},
+		"exec forwards":                       {"exec", "build", "--", "--verbose"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(append(args, "--root", root), &stdout, &stderr)
+			assert.Equal(t, 1, code, "the line parses; only the missing config stops it")
+			assert.NotContains(t, stderr.String(), "unexpected arguments")
+			assert.NotContains(t, stderr.String(), "requires exactly one argument")
+		})
+	}
+}
+
+// TestHelpAfterDashBelongsToTheScript: pflag stops reading flags at `--`, so
+// the one flag every program owns is forwarded like any other. Without this a
+// script could never be asked for its own help.
+func TestHelpAfterDashBelongsToTheScript(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"run", "lint", "--", "--help", "--root", t.TempDir()}, &stdout, &stderr)
+	assert.NotEqual(t, 0, code, "dispat's own help must not have been printed")
+	assert.NotContains(t, stdout.String(), "usage: dispat")
 }
 
 func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {

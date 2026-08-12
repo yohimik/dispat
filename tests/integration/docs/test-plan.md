@@ -577,7 +577,8 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRunConsumersSkipCascade`                      | An expanded consumer is a full member of the run: a failing provider script skips it transitively under the default `--on-error skip` (exit 1), and `--on-error continue` runs it anyway.                                                                                                                   |
 | `TestRunConsumersComposeWithAFilter`               | `--consumers` expands a filtered selection instead of refusing it, and the expansion is not filtered back out: `-p mid --consumers` runs mid and its dependents, in graph order, with core and extra staying out. The folder spelling behaves identically.                                                  |
 | `TestRunVersionComponentsOnAPrereleaseTrain` | The three version components split `DISPAT_VERSION` rather than `DISPAT_NEW_VERSION`, so a package mid-train reports the stable release it is heading for: a build tagging an image `1` off a release candidate stays deliberate. |
-
+| `TestRunForwardsArgumentsAfterTheDash` | `dispat run show -- --watch` hands the script what followed the dash, in every covered package: the invocation is one intent about the selection rather than about whichever package the scheduler reaches first. An argument carrying a space arrives whole, a quote or a semicolon in one is text rather than syntax, nothing after the dash appends nothing, and a bare word is still the usage error it always was. |
+| `TestRunShorthandForwardsArgumentsToo` | `dispat show -- --fix` is `dispat run show -- --fix`, so the shorthand is not the spelling that quietly drops them. |
 ### Goal 19: the standalone step commands (`standalone_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                                                 |
@@ -647,7 +648,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestExecPropagatesTheExitCode`                 | The declared script's own code becomes the command's, and `--on-failure` replaces it.                                                                                                                                  |
 | `TestExecComposesInsideARunScript`              | The in-flow case: a `run` script calling `dispat exec` hands the inner script the run's `DISPAT_*` variables through the process environment, with no flag.                                                            |
 | `TestExecIsReservedAndRefusesBadFlags`          | Every malformed invocation is decided by the flags alone and exits 2, while an unknown package is a runtime failure instead, because those flags were well formed.                                                     |
-
+| `TestExecForwardsArgumentsAfterTheDash` | `dispat exec` runs one declared script once, so the arguments after `--` reach it unambiguously and a script in the config takes a terminal value with no config edit. `--on-failure` is proven not to receive them: that script is about the failure, not about the work. |
 ### Goal 22: self-update (`selfupdate_test.go`)
 
 Two binaries are built at two versions and a fake releases API hands one out, so the one command that overwrites the

@@ -264,3 +264,49 @@ func TestExecIsReservedAndRefusesBadFlags(t *testing.T) {
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stderr+res.Stdout, "ghost")
 }
+
+// TestExecForwardsArgumentsAfterTheDash: `dispat exec` runs one declared
+// script once, so forwarding is unambiguous there in a way it is not for a
+// sweep. The arguments are appended to the resolved command's text, which is
+// what lets a script declared in the config take a value at the terminal
+// without the config being edited.
+//
+// The second claim is the one worth pinning: `--on-failure` does not receive
+// them. That script is about the failure rather than about the work, and a
+// cleanup handed the arguments of the thing that just failed would be acting
+// on a request nobody made of it.
+func TestExecForwardsArgumentsAfterTheDash(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]string{
+		"show": `printf 'ARGS[%s]\n'`,
+		// Ends in one program, which is what the appended arguments reach.
+		"boom": `sh -c 'printf "RAN[%s]\n" "$@"; exit 7' _`,
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+
+	res := r.Command("exec", "show", "--", "--verbose", "--out=dist")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "ARGS[--verbose]")
+	assert.Contains(t, res.Stdout, "ARGS[--out=dist]")
+
+	// One argument, not two.
+	res = r.Command("exec", "show", "--", "my value")
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "ARGS[my value]")
+
+	// Without a dash nothing is appended, and a bare word is still a usage
+	// error: exec takes one script name and the subject is a flag.
+	res = r.Command("exec", "show")
+	require.Equal(t, 0, res.Code)
+	assert.Contains(t, res.Stdout, "ARGS[]", "the command ran with nothing appended")
+	assert.Equal(t, 2, r.Command("exec", "show", "extra").Code)
+
+	// The failure handler runs, and runs without them.
+	res = r.Command("exec", "boom", "--on-failure", `printf 'CLEAN[%s]\n'; exit 3`, "--", "--verbose")
+	assert.Equal(t, 3, res.Code, "--on-failure still decides the exit code")
+	assert.Contains(t, res.Stdout, "RAN[--verbose]", "the work got the arguments")
+	assert.Contains(t, res.Stdout, "CLEAN[]", "the cleanup ran without them")
+}

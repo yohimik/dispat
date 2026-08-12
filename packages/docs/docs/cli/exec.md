@@ -149,6 +149,29 @@ Run under `dispat run ci`, the inner `announce` sees the whole release
 environment. This is the case `dispat exec` was written for, and it costs
 nothing.
 
+### Passing arguments to the script
+
+Everything after `--` goes to the script instead of to dispat, appended to the
+command the configuration declares:
+
+```console
+$ dispat exec deploy -- --dry-run
+```
+
+With `"deploy": "./deploy.sh"` that runs `./deploy.sh --dry-run`, so a script
+in the config takes a value from the terminal without being edited. Arguments
+carrying spaces or shell characters are quoted for you.
+
+They reach the script and nothing else: `--on-failure` never receives them,
+because that script is about the failure rather than about the work. And as
+with [`dispat run`](./run.md#passing-arguments-to-the-script), they land at the
+*end* of the command text, so a script that ends in something other than the
+program you meant should wrap it: `sh -c './deploy.sh "$@"' _`.
+
+`dispat if` forwards nothing. Its branches are already shell text you write in
+full, so there is nothing a forwarded argument would reach that the branch
+cannot say itself.
+
 ## Exit codes
 
 Both commands hand back the exit code of the script they ran. `dispat if CI

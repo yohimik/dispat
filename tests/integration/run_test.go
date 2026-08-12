@@ -781,3 +781,85 @@ func TestRunSinceSelectsByCommitScopes(t *testing.T) {
 	r.RunScriptOK("lint", "--since", "HEAD~1", "-p", "a")
 	assert.NoFileExists(t, r.Path("lint.log"), "a package outside the window is an honest no-op")
 }
+
+// argsScript is the fixture the forwarding scenarios share: a helper the run
+// script invokes, which records one line per argument it was handed, tagged
+// with the package it ran in.
+//
+// It is shaped the way a real consumer of this feature is. The arguments are
+// appended to the *command text*, so what receives them is whatever program
+// the script ends in; here that is the helper, which takes the package name
+// first and treats everything after it as forwarded.
+const argsScript = `pkg=$1; shift; for a in "$@"; do printf '%s|%s\n' "$pkg" "$a" >> "$LOG"; done`
+
+// seedArgsFixture writes the helper and returns a reader for what it recorded.
+func seedArgsFixture(r *harness.Repo, cfg *models.File, names []string) func() []string {
+	r.WriteFile("args.sh", argsScript+"\n")
+	cfg.Scripts["show"] = `LOG=../../args.log sh ../../args.sh "$DISPAT_PACKAGE"`
+	r.WriteConfigModel(*cfg)
+	seedIndependentPackages(r, names)
+	return func() []string {
+		data, err := os.ReadFile(r.Path("args.log"))
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	}
+}
+
+// TestRunForwardsArgumentsAfterTheDash: `dispat run show -- --watch` hands the
+// script what followed the dash, the way `npm run test -- --watch` does.
+//
+// Three claims no unit test can make. The arguments reach *every* covered
+// package, because the invocation is one intent about the selection rather
+// than about whichever package the scheduler reaches first. An argument
+// carrying a space arrives as one argument rather than two, which is the whole
+// reason the quoting exists. And a bare word is still a usage error, so the
+// rule that the selection is a flag survives the feature intact.
+func TestRunForwardsArgumentsAfterTheDash(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	lines := seedArgsFixture(r, &cfg, []string{"a", "b"})
+
+	r.RunScriptOK("show", "--", "--watch", "--reporter=dot")
+	assert.ElementsMatch(t, []string{
+		"a|--watch", "a|--reporter=dot",
+		"b|--watch", "b|--reporter=dot",
+	}, lines(), "every covered package gets every argument")
+
+	// One argument, not two: the space is inside it.
+	r.Remove("args.log")
+	r.RunScriptOK("show", "--", "my suite")
+	assert.ElementsMatch(t, []string{"a|my suite", "b|my suite"}, lines(),
+		"an argument carrying a space arrives whole")
+
+	// A quote, a dollar and a semicolon are text, never syntax.
+	r.Remove("args.log")
+	r.RunScriptOK("show", "--", "it's", "$HOME", "a;b")
+	assert.ElementsMatch(t, []string{
+		"a|it's", "a|$HOME", "a|a;b",
+		"b|it's", "b|$HOME", "b|a;b",
+	}, lines(), "a forwarded argument is data, not shell syntax")
+
+	// Nothing after the dash is the invocation that existed before this did.
+	r.Remove("args.log")
+	r.RunScriptOK("show")
+	assert.Empty(t, lines(), "no arguments, nothing appended")
+
+	// The rule that survives all of it.
+	assert.Equal(t, 2, r.RunScript("show", "a").Code,
+		"a bare word is still a usage error: the selection is a flag")
+}
+
+// TestRunShorthandForwardsArgumentsToo: `dispat show -- --fix` is
+// `dispat run show -- --fix`, so the shorthand cannot be the spelling that
+// quietly drops them.
+func TestRunShorthandForwardsArgumentsToo(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	lines := seedArgsFixture(r, &cfg, []string{"a"})
+
+	res := r.Command("show", "--", "--fix")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, []string{"a|--fix"}, lines())
+}
