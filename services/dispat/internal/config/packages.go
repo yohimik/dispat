@@ -314,6 +314,11 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.TagFormat != "" {
 		sc.TagFormat = po.TagFormat
 	}
+	// A nearer list replaces the inherited one whole rather than adding to it,
+	// which is the only way a package can drop an alias its space declared.
+	if po.AliasTags != nil {
+		sc.AliasTags = po.AliasTags
+	}
 	if po.Versioning != "" {
 		sc.Versioning = po.Versioning
 		sc.VersionGroup = ""
@@ -352,6 +357,7 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		RevertOnFail:          f.RevertOnFail,
 		Flow:                  f.Flow,
 		TagFormat:             f.TagFormat,
+		AliasTags:             f.AliasTags,
 		Versioning:            f.Versioning,
 		VersionGroup:          f.VersionGroup,
 		Scripts:               f.Scripts,

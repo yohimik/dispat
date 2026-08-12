@@ -173,3 +173,54 @@ func TestRenderVersion(t *testing.T) {
 		assert.Equal(t, tc.wantStable, f.RenderVersion(stable), "%s, stable", tc.format)
 	}
 }
+
+// TestAliasFormatRendersVersionComponents: the three placeholders an alias
+// adds, which is what a moving series tag is written from.
+func TestAliasFormatRenders(t *testing.T) {
+	v := ccme.Version{Major: 1, Minor: 4, Patch: 2}
+	pre := ccme.Version{Major: 1, Minor: 4, Patch: 2, Prerelease: []string{"rc", "1"}}
+	for _, tc := range []struct{ format, stable, prerelease string }{
+		{"v{version}", "v1.4.2", "v1.4.2-rc.1"},
+		{"v{major}", "v1", "v1"},
+		{"v{major}.{minor}", "v1.4", "v1.4"},
+		{"{name}-{major}.{minor}.{patch}", "pkg-1.4.2", "pkg-1.4.2"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			assert.Equal(t, tc.stable, AliasFormat(tc.format).Render("pkg", v))
+			assert.Equal(t, tc.prerelease, AliasFormat(tc.format).Render("pkg", pre))
+		})
+	}
+}
+
+// TestAliasFormatValidate: an alias is write-only, so it drops the rules that
+// exist purely so a tag can be read back, and keeps the ones that make it a
+// usable ref name.
+func TestAliasFormatValidate(t *testing.T) {
+	for _, ok := range []string{"v{version}", "v{major}", "v{major}.{minor}", "{name}/v{major}"} {
+		assert.NoError(t, AliasFormat(ok).Validate(), ok)
+	}
+	for _, tc := range []struct{ format, want string }{
+		{"latest", "names no part of the version"},
+		{"{name}", "names no part of the version"},
+		{"v{version}-{channel}", "uses {channel} without {counter}"},
+		{"v{version}{version}", "more than one {version} placeholder"},
+		{"/v{major}", "which git rejects"},
+		{"v{major}..{minor}", "which git rejects"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			err := AliasFormat(tc.format).Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestTagFormatRefusesAliasOnlyPlaceholders: a release tag has to be readable
+// back into the version that made it, and "v1" names no release in particular.
+func TestTagFormatRefusesAliasOnlyPlaceholders(t *testing.T) {
+	for _, format := range []string{"{name}@{major}", "{name}@{version}.{minor}", "{name}@{version}+{patch}"} {
+		err := TagFormat(format).Validate()
+		require.Error(t, err, format)
+		assert.Contains(t, err.Error(), "only available in aliasTags")
+	}
+}

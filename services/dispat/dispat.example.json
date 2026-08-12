@@ -70,7 +70,11 @@
     "cli": {
       "path": "tools/cli",
       "flow": { "build": "build-go", "publish": "publish-go" },
-      "dependencies": ["core", { "provider": "utils", "keep": true }]
+      "dependencies": ["core", { "provider": "utils", "keep": true }],
+      "aliasTags": [
+        { "format": "cli-v{version}" },
+        { "format": "cli-v{major}", "moving": true, "channels": ["stable"] }
+      ]
     }
   },
   "versionGroups": {

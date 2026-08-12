@@ -2005,3 +2005,136 @@ func TestPackageSrcValidation(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "names a file, want a folder")
 }
+
+// TestAliasTagsResolveThroughTheLadder: aliasTags follows tagFormat's override
+// ladder, and a nearer list replaces the inherited one whole rather than
+// adding to it, which is the only way a package can drop its space's aliases.
+func TestAliasTagsResolveThroughTheLadder(t *testing.T) {
+	cfg := validConfig()
+	cfg.AliasTags = []AliasTagConfig{{Format: "repo-v{major}"}}
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.AliasTags = []AliasTagConfig{{Format: "libs-v{major}", Moving: true, Channels: []string{"stable"}}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := DiscoverPackages(loaded, root)
+	require.NoError(t, err)
+
+	by := map[string]*model.Package{}
+	for _, p := range pkgs {
+		by[p.Name] = p
+	}
+	require.Contains(t, by, "core")
+	assert.Equal(t, []model.AliasTag{
+		{Format: "libs-v{major}", Moving: true, Channels: []string{"stable"}, Force: true},
+	}, by["core"].Space.AliasTags, "the space's list wins over the repository's")
+	require.Contains(t, by, "app")
+	assert.Equal(t, []model.AliasTag{{Format: "repo-v{major}", Force: true}},
+		by["app"].Space.AliasTags, "a space that declares none inherits the repository's")
+}
+
+// TestAliasTagsEmptyListOptsOut: an empty list is how a package says "none of
+// my space's aliases", and it has to be written literally — the typed model
+// omits an empty slice, so this is a raw config on purpose.
+func TestAliasTagsEmptyListOptsOut(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{
+				"path":      "pkgs",
+				"flow":      map[string]any{"build": "build"},
+				"tagFormat": "pkgs/{name}/v{version}",
+				"aliasTags": []any{map[string]any{"format": "v{major}", "moving": true}},
+				"packages": map[string]any{
+					"utils": map[string]any{"aliasTags": []any{}},
+				},
+			},
+		},
+	}, "pkgs/core", "pkgs/utils")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := DiscoverPackages(loaded, root)
+	require.NoError(t, err)
+
+	by := map[string]*model.Package{}
+	for _, p := range pkgs {
+		by[p.Name] = p
+	}
+	assert.Len(t, by["core"].Space.AliasTags, 1, "the space's alias reaches its packages")
+	assert.Empty(t, by["utils"].Space.AliasTags, "an empty list declared on the package means none")
+}
+
+// TestAliasTagsMovingCannotOptOutOfForce: moving an alias *is* overwriting it,
+// so the pair would silently produce an alias that stopped moving.
+func TestAliasTagsMovingCannotOptOutOfForce(t *testing.T) {
+	cfg := validConfig()
+	cfg.AliasTags = []AliasTagConfig{{Format: "v{major}", Moving: true, Force: models.Bool(false)}}
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "a moving alias cannot set force: false")
+}
+
+// TestAliasTagsMustNotBeReadableAsReleaseTags is the refusal the whole feature
+// rests on. An alias is only ever written, so the one thing keeping it out of a
+// package's history is its name not matching any package's tagFormat.
+func TestAliasTagsMustNotBeReadableAsReleaseTags(t *testing.T) {
+	t.Run("against its own package's format", func(t *testing.T) {
+		cfg := validConfig()
+		withLibs(&cfg, func(s *SpaceConfig) {
+			s.TagFormat = "v{version}"
+			s.AliasTags = []AliasTagConfig{{Format: "v{major}", Moving: true}}
+		})
+		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = DiscoverPackages(loaded, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would be read back as a release tag")
+	})
+
+	t.Run("against another package's format", func(t *testing.T) {
+		// libs tags as "v{version}"; the alias belongs to a package in another
+		// space, and would be read back as one of libs' releases.
+		cfg := validConfig()
+		withLibs(&cfg, func(s *SpaceConfig) { s.TagFormat = "v{version}" })
+		cfg.Packages = map[string]PackageConfig{
+			"tool": {Path: "tools/tool", AliasTags: []AliasTagConfig{{Format: "v{version}"}}},
+		}
+		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = DiscoverPackages(loaded, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would be read back as a release tag")
+	})
+
+	t.Run("path-prefixed formats leave bare aliases alone", func(t *testing.T) {
+		cfg := validConfig()
+		withLibs(&cfg, func(s *SpaceConfig) {
+			s.TagFormat = "packages/{name}/v{version}"
+			s.AliasTags = []AliasTagConfig{{Format: "v{version}"}, {Format: "v{major}", Moving: true}}
+		})
+		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = DiscoverPackages(loaded, root)
+		assert.NoError(t, err, "this is the shape the feature exists for")
+	})
+}
+
+// TestAliasTagsTwoPackagesOneName: a fixed group whose members all declare
+// "v{major}" would force-move one ref between their commits every release.
+func TestAliasTagsTwoPackagesOneName(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.TagFormat = "packages/{name}/v{version}"
+		s.AliasTags = []AliasTagConfig{{Format: "v{major}", Moving: true}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, _, err = DiscoverPackages(loaded, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both write the alias tag")
+}

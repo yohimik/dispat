@@ -951,3 +951,62 @@ func TestRecordsLineShorthandsInAPackageFolder(t *testing.T) {
 	assert.True(t, strings.HasPrefix(log, "# Core\n"), log)
 	assertOrderedIn(t, log, "### Features", "one", "two", "three", "four")
 }
+
+// TestRecordsAliasTags: the whole alias feature end to end — a package that
+// publishes under its own path-prefixed tag and, beside it, the bare refs a
+// consumer pins. The moving one follows the newest stable release; the exact
+// one is written per release and never moves; a prerelease writes its own
+// exact ref and leaves the moving one where it is.
+func TestRecordsAliasTags(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path:      "packages",
+		Flow:      buildPublish(),
+		TagFormat: "packages/{name}/v{version}",
+		AliasTags: []models.AliasTagConfig{
+			{Format: "v{version}"},
+			{Format: "v{major}", Moving: true, Channels: []string{"stable"}},
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.AddBareRemote()
+
+	// Release 1: stable 0.1.0.
+	r.Commit("feat(core): first release")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("packages/core/v0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("v0.1.0"), "the exact alias, tags: %v", r.TagList())
+	require.True(t, r.HasTag("v0"), "the moving alias, tags: %v", r.TagList())
+	firstMajor := r.Git("rev-list", "-n1", "v0")
+
+	// The aliases reach the remote too: a ref nobody can fetch is not a
+	// pointer anyone can pin.
+	remote := r.Git("ls-remote", "origin")
+	assert.Contains(t, remote, "refs/tags/v0.1.0")
+	assert.Contains(t, remote, "refs/tags/v0")
+
+	// Release 2: a prerelease writes its own exact ref and must not move the
+	// major onto a release candidate.
+	r.CommitEmpty("feat(core)%rc: a release candidate")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("v0.2.0-rc.0"), "tags: %v", r.TagList())
+	assert.Equal(t, firstMajor, r.Git("rev-list", "-n1", "v0"),
+		"a prerelease leaves the moving alias where it is")
+
+	// Release 3: the next stable moves the major and leaves every exact ref.
+	r.CommitEmpty("feat(core)%rc>stable: graduate")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("v0.2.0"), "tags: %v", r.TagList())
+	assert.NotEqual(t, firstMajor, r.Git("rev-list", "-n1", "v0"), "the moving alias followed")
+	assert.Equal(t, r.Git("rev-list", "-n1", "packages/core/v0.2.0"), r.Git("rev-list", "-n1", "v0"),
+		"and points at the release it names")
+
+	// And after three releases with aliases live, the baselines still read
+	// correctly: an alias must never become the package's history.
+	status := r.StatusOK()
+	assert.NotContains(t, status.Stdout, "0.1.0 ->", "the baseline is the newest release, not an alias")
+	assert.Contains(t, status.Stdout, `"version":"0.2.0"`, "status:\n%s", status.Stdout)
+}

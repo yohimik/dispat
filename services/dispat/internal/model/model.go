@@ -93,6 +93,20 @@ func (v Versioning) Shared() bool { return v.SharedDepth() > 0 }
 // derived copy with the overrides applied — so every consumer of Space reads
 // per-package behaviour without knowing overrides exist; Name always stays
 // the configured space's name.
+// AliasTag is one resolved alias tag: the template a release is additionally
+// written under, whether it moves, which channels it applies to, and whether
+// it may overwrite a ref that already exists.
+//
+// Aliases are write-only. Nothing parses one, so none of them can ever become
+// a package's baseline; discovery refuses a configuration where one could be
+// read back as some package's release tag.
+type AliasTag struct {
+	Format   string
+	Moving   bool
+	Channels []string
+	Force    bool
+}
+
 type Space struct {
 	Name string
 	// Path of the space folder, relative to the monorepo root. Every direct
@@ -188,6 +202,10 @@ type Space struct {
 	// packages ships with, and a monorepo mixing two of them is the case
 	// worth supporting.
 	TagFormat string
+	// AliasTags are the extra tags each release of this space is written
+	// under, resolved through the same override ladder as TagFormat. They are
+	// only ever written: nothing reads a tag back through them.
+	AliasTags []AliasTag
 	// AutoVersion is the space's resolved native manifest-rewriting policy
 	// for the version stage; nil means the feature is off and manifest
 	// syncing stays the VersionScript's job alone.

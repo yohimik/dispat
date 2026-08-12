@@ -9,7 +9,6 @@
     "build-docs": "pnpm install --frozen-lockfile && pnpm run build",
     "cut-docs-version": "sh ../../scripts/cut-docs-version.sh",
     "deploy-docs": "sh ../../scripts/deploy-docs.sh",
-    "tag-action": "sh ../../scripts/tag-action.sh",
     "docker-login": "printf '%s' \"$DOCKERHUB_TOKEN\" | docker login -u \"$DOCKERHUB_USERNAME\" --password-stdin",
     "build-image": "docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml build",
     "push-image": "docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push"
@@ -120,9 +119,20 @@
             "scanner",
             "writer"
           ],
+          "aliasTags": [
+            {
+              "format": "v{version}"
+            },
+            {
+              "format": "v{major}",
+              "moving": true,
+              "channels": [
+                "stable"
+              ]
+            }
+          ],
           "flow": {
-            "build": "build-dispat",
-            "announce": "tag-action"
+            "build": "build-dispat"
           }
         }
       }

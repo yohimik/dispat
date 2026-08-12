@@ -1,6 +1,7 @@
 package release
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1578,4 +1579,83 @@ func TestCreateReleaseTagWithoutInspectorUnchanged(t *testing.T) {
 	tg := &fakeTagger{}
 	require.NoError(t, CreateReleaseTag(context.Background(), tg, p.Releases["a"], false, zerolog.Nop()))
 	assert.Equal(t, []string{"a@1.0.1"}, tg.tags)
+}
+
+// forcingTagger records which writes asked to force, so the alias tests can
+// tell a moving alias from an immutable one.
+type forcingTagger struct {
+	fakeTagger
+	forced []string
+}
+
+func (f *forcingTagger) CreateTagForce(ctx context.Context, name, message, target string) error {
+	f.mu.Lock()
+	f.forced = append(f.forced, name)
+	f.mu.Unlock()
+	return f.fakeTagger.CreateTag(ctx, name, message, target)
+}
+
+// TestRunWritesAliasTags: the aliases are written beside the release tag, at
+// the same commit, filtered by channel, and a moving one forces while an
+// immutable one does not.
+func TestRunWritesAliasTags(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		channel    string
+		wantTags   []string
+		wantForced []string
+	}{
+		{
+			name:       "stable writes both",
+			channel:    ccme.ChannelStable,
+			wantTags:   []string{"a@1.0.1", "v1.0.1", "v1"},
+			wantForced: []string{"v1"},
+		},
+		{
+			name:       "a prerelease leaves the major alone",
+			channel:    "rc",
+			wantTags:   []string{"a@1.0.1", "v1.0.1"},
+			wantForced: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := mkPlan(planSpec{Names: []string{"a"}})
+			rel := p.Releases["a"]
+			rel.Channel = tc.channel
+			rel.Pkg.Space.AliasTags = []model.AliasTag{
+				{Format: "v{version}"},
+				{Format: "v{major}", Moving: true, Channels: []string{ccme.ChannelStable}, Force: true},
+			}
+			tg := &forcingTagger{}
+			ex := newExecutor(execSpec{Runner: &fakeRunner{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+			ex.Tagger = tg
+			res := ex.Run(context.Background(), p)
+
+			require.Equal(t, StatusPublished, res["a"].Status)
+			assert.Equal(t, tc.wantTags, tg.tags, "the release tag first, then its aliases in order")
+			assert.Equal(t, tc.wantForced, tg.forced, "only a moving alias forces")
+		})
+	}
+}
+
+// TestRunAliasTagFailureDoesNotDisturbTheRelease: an alias is a convenience
+// ref, not the record of the release. Its failure warns and the rest of the
+// aliases are still attempted.
+func TestRunAliasTagFailureDoesNotDisturbTheRelease(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Channel = ccme.ChannelStable
+	p.Releases["a"].Pkg.Space.AliasTags = []model.AliasTag{{Format: "v{major}", Moving: true, Force: true}}
+
+	// A plain Tagger: no force extension, so a moving alias cannot be written.
+	tg := &fakeTagger{}
+	var buf bytes.Buffer
+	ex := newExecutor(execSpec{Runner: &fakeRunner{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	ex.Tagger = tg
+	ex.Log = zerolog.New(&buf)
+	res := ex.Run(context.Background(), p)
+
+	assert.Equal(t, StatusPublished, res["a"].Status)
+	assert.Empty(t, res["a"].Critical, "an alias is not part of the release record")
+	assert.Equal(t, []string{"a@1.0.1"}, tg.tags, "the release tag was still written")
+	assert.Contains(t, buf.String(), plan.CodeAliasTagFailed)
 }

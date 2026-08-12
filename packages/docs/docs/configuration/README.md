@@ -23,6 +23,7 @@ This page covers the top level; the larger objects have their own pages:
 | [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the seven `versioning` modes and versioning groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
 | [Packages](./packages.md)             | The `packages` maps: per-package overrides and the ladder that orders them, standalone packages via `path`, package-declared dependencies, in-folder config files. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                                                                    |
+| [Alias tags](./alias-tags.md)         | `aliasTags`: the extra names a release is written under, beside its real tag.                                                               |
 | [Release records](./records.md)       | `changelog`, `github`, `commit`, the shared entry format options.                                                                           |
 | [Commit parsing options](./parser.md) | `commitErrors`, `nonPackageScopes`, `parser`.                                                                                               |
 
@@ -43,6 +44,7 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | `logLevel`         | string                                     | no       | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                                                              |
 | `logFormat`        | string                                     | no       | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                                                         |
 | `tagFormat`        | string                                     | no       | Release tag template, overridable per space and per package. Default `{name}@{version}`; see [`tagFormat`](./versions.md#tagformat).                                   |
+| `aliasTags`        | array of objects                           | no       | Extra tags each release is written under, beside the one `tagFormat` produces. Overridable per space and per package; see [Alias tags](./alias-tags.md).               |
 | `commitErrors`     | string                                     | no       | What an error in a commit message does to the run: `warn` (default) or `error`; see [`commitErrors`](./parser.md#commiterrors).                                        |
 | `nonPackageScopes` | array of strings                           | no       | Scope names that are deliberately not packages. Default `["release"]`; see [`nonPackageScopes`](./parser.md#nonpackagescopes).                                         |
 | `changelog`        | object                                     | no       | Per-package changelog file options; see [`changelog`](./records.md#changelog).                                                                                         |

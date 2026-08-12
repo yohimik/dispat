@@ -181,6 +181,17 @@ packages:
       - core
       - provider: utils
         keep: true
+    # Extra tags each release is written under, beside the one tagFormat
+    # produces: the refs that follow a line rather than name a release, such
+    # as the "@v1" a GitHub Action is consumed through. `moving` re-points the
+    # alias on every release it applies to; `channels` keeps a moving major
+    # off release candidates. An alias is only ever written, never read back,
+    # and a config where one could be read as a release tag is refused.
+    aliasTags:
+      - format: cli-v{version}
+      - format: cli-v{major}
+        moving: true
+        channels: [stable]
 
 # Shared-versioning groups that cut across spaces, joined by name through a
 # space's or package's versionGroup key. The declaration owns the group's

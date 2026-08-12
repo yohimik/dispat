@@ -86,6 +86,10 @@ type File struct {
 	// "{name}@v{version}" and "services/{name}@v{version}" both work.
 	// Default: "{name}@{version}", the form §14 makes normative.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	// AliasTags are extra tags each release is written under, beside the one
+	// tagFormat produces; see AliasTagConfig. Overridable per space and per
+	// package, where a list replaces the inherited one rather than adding to it.
+	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
 	// CommitErrors decides what an error in a commit message does to the run
 	// (§16):
 	//
@@ -474,6 +478,10 @@ type SpaceConfig struct {
 	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	// AliasTags replaces the inherited alias list for this level; see
+	// AliasTagConfig. An empty list declared here means "no aliases",
+	// which is how a package opts out of its space's.
+	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
 	// "independent" (default) or one of the shared modes. See the Versioning*
 	// constants.
@@ -532,17 +540,21 @@ type SpaceConfig struct {
 // the scalar booleans are pointers here where SpaceConfig's are plain: an
 // override must be able to say nothing.
 type SpaceFile struct {
-	IsBuildWaitingPublish *bool                    `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool                    `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig         `mapstructure:"flow" json:"flow,omitempty"`
-	TagFormat             string                   `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
-	Versioning            string                   `mapstructure:"versioning" json:"versioning,omitempty"`
-	VersionGroup          string                   `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
-	Scripts               map[string]string        `mapstructure:"scripts" json:"scripts,omitempty"`
-	AutoVersion           *AutoVersionConfig       `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
-	Env                   map[string]string        `mapstructure:"env" json:"env,omitempty"`
-	Custom                map[string]any           `mapstructure:"custom" json:"custom,omitempty"`
-	Packages              map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
+	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
+	TagFormat             string           `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	// AliasTags replaces the inherited alias list for this level; see
+	// AliasTagConfig. An empty list declared here means "no aliases",
+	// which is how a package opts out of its space's.
+	AliasTags    []AliasTagConfig         `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	Versioning   string                   `mapstructure:"versioning" json:"versioning,omitempty"`
+	VersionGroup string                   `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
+	Scripts      map[string]string        `mapstructure:"scripts" json:"scripts,omitempty"`
+	AutoVersion  *AutoVersionConfig       `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	Env          map[string]string        `mapstructure:"env" json:"env,omitempty"`
+	Custom       map[string]any           `mapstructure:"custom" json:"custom,omitempty"`
+	Packages     map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
 }
 
 // PackageConfig is one entry of a `packages` map. Without `path` it overrides
@@ -604,6 +616,10 @@ type PackageConfig struct {
 	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
 	TagFormat             string           `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	// AliasTags replaces the inherited alias list for this level; see
+	// AliasTagConfig. An empty list declared here means "no aliases",
+	// which is how a package opts out of its space's.
+	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
 	// Versioning overrides how the package relates to its space's shared
 	// version — most usefully "independent", opting one package out of a
 	// fixed space. Mutually exclusive with naming a declared versionGroup,
@@ -654,6 +670,60 @@ type PackageConfig struct {
 	// File.Custom. Like every other field it belongs to its layer: an entry's
 	// object and an in-folder file's object are independent, not merged.
 	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
+}
+
+// AliasTagConfig is one extra tag a release is written under, beside the tag
+// its TagFormat produces.
+//
+// It exists for the refs that name a *line* rather than a release: a GitHub
+// Action consumed as `uses: owner/repo@v1` needs a bare `v1.4.2` and a `v1`
+// that follows the newest 1.x, neither of which can be the package's real tag
+// in a monorepo whose tags carry path prefixes.
+//
+// An alias is **write-only**. Nothing reads one back, so it never becomes a
+// package's baseline; the config is refused if a package's aliases could be
+// mistaken for any package's release tags.
+type AliasTagConfig struct {
+	// Format is the template. It takes everything tagFormat takes plus
+	// {major}, {minor} and {patch}, and needs at least one of those or
+	// {version}: "v{version}", "v{major}", "{name}-{major}.{minor}".
+	Format string `mapstructure:"format" json:"format"`
+	// Moving says the alias is re-pointed on every release it applies to,
+	// rather than written once and left. "v1" means "the newest 1.x", which is
+	// only true if each 1.x release moves it. A moving alias must be allowed
+	// to force (see Force).
+	Moving bool `mapstructure:"moving" json:"moving,omitempty"`
+	// Channels restricts the alias to releases on these channels. Empty means
+	// every channel. A moving major alias almost always wants ["stable"]: a
+	// "v1" that follows release candidates is not what anyone pinning it
+	// expects.
+	Channels []string `mapstructure:"channels" json:"channels,omitempty"`
+	// Force overrides commit.force for this alias alone. Defaults to the
+	// run's setting; false on a moving alias is refused, since an alias that
+	// cannot overwrite its own previous ref cannot move.
+	Force *bool `mapstructure:"force" json:"force,omitempty"`
+}
+
+// ForceEnabled reports whether this alias overwrites an existing ref, given
+// the run's default.
+func (a AliasTagConfig) ForceEnabled(runDefault bool) bool {
+	if a.Force != nil {
+		return *a.Force
+	}
+	return runDefault
+}
+
+// AppliesTo reports whether the alias is written for a release on channel.
+func (a AliasTagConfig) AppliesTo(channel string) bool {
+	if len(a.Channels) == 0 {
+		return true
+	}
+	for _, c := range a.Channels {
+		if strings.EqualFold(c, channel) {
+			return true
+		}
+	}
+	return false
 }
 
 // AutoVersionConfig is a space's `autoVersion` object: the native

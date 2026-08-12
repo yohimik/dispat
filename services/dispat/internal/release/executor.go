@@ -906,7 +906,43 @@ func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, n
 			}
 		}
 	}
-	return writeTag(ctx, tagger, force, tag, "release "+tag, rel.ExportedCommit())
+	if err := writeTag(ctx, tagger, force, tag, "release "+tag, rel.ExportedCommit()); err != nil {
+		return err
+	}
+	return createAliasTags(ctx, tagger, rel, log)
+}
+
+// createAliasTags writes the extra names a release is published under, after
+// its release tag succeeded and at the same commit.
+//
+// It lives here rather than at each of the three call sites because this is
+// the one function every tagging path goes through; adding it anywhere else
+// would mean one of them silently not writing aliases.
+//
+// A failure is warned about and the remaining aliases are still attempted. An
+// alias is a convenience ref, not the record of the release: the release tag
+// is already written by the time this runs, and losing a "v1" is a thing to
+// re-point, not a reason to report a published release as broken.
+func createAliasTags(ctx context.Context, tagger Tagger, rel *plan.Release, log zerolog.Logger) error {
+	aliases := rel.AliasTags()
+	if len(aliases) == 0 {
+		return nil
+	}
+	_, canForce := tagger.(forceTagger)
+	for _, alias := range aliases {
+		if alias.Force && !canForce {
+			// Without the extension a moving alias cannot move: say so once,
+			// rather than letting it fail on "already exists" every release.
+			log.Warn().Str("code", plan.CodeAliasTagFailed).Str("tag", alias.Name).
+				Msg("alias tag needs to overwrite an existing ref and this tagger cannot force, skipped")
+			continue
+		}
+		if err := writeTag(ctx, tagger, alias.Force, alias.Name, "release "+rel.TagName(), rel.ExportedCommit()); err != nil {
+			log.Warn().Err(err).Str("code", plan.CodeAliasTagFailed).Str("tag", alias.Name).
+				Msg("alias tag failed")
+		}
+	}
+	return nil
 }
 
 // loginEnv is the space-scoped environment of a login script. Login is a

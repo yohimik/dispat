@@ -229,6 +229,12 @@ const (
 	// rides them up to the group's (W210), so the group's shared version is
 	// briefly untrue — deliberate, and worth saying out loud.
 	CodeSelectionSplit = "W231"
+	// CodeAliasTagFailed marks an alias tag that could not be written. The
+	// release tag it accompanies is already there, so the release itself is
+	// recorded; what is missing is a convenience ref, which is re-pointed by
+	// hand or by the next release. A warning rather than a critical for
+	// exactly that reason.
+	CodeAliasTagFailed = "W232"
 
 	// --- after the point of no return ---
 	//
@@ -672,6 +678,51 @@ func TagFormatFor(p *model.Package) gitx.TagFormat {
 // differently silently gives that package no history at all.
 func (r *Release) TagName() string {
 	return r.TagFormat().Render(r.Pkg.Name, r.Next)
+}
+
+// AliasTag is one alias this release is additionally written under.
+type AliasTag struct {
+	Name string
+	// Force allows the write to replace a ref that already exists, which is
+	// what a moving alias needs on every release after its first.
+	Force bool
+}
+
+// AliasTags renders the aliases that apply to this release: the package's
+// configured list, filtered to the ones whose channels admit the channel being
+// released on, each rendered from the version being released.
+//
+// The names come out in configuration order, and a package with no aliases
+// gets nothing, which is every package by default.
+func (r *Release) AliasTags() []AliasTag {
+	if r.Pkg == nil || r.Pkg.Space == nil {
+		return nil
+	}
+	out := make([]AliasTag, 0, len(r.Pkg.Space.AliasTags))
+	for _, a := range r.Pkg.Space.AliasTags {
+		if !aliasAppliesTo(a, r.Channel) {
+			continue
+		}
+		out = append(out, AliasTag{
+			Name:  gitx.AliasFormat(a.Format).Render(r.Pkg.Name, r.Next),
+			Force: a.Force,
+		})
+	}
+	return out
+}
+
+// aliasAppliesTo reports whether an alias is written for a release on channel.
+// An empty channel list means every channel.
+func aliasAppliesTo(a model.AliasTag, channel string) bool {
+	if len(a.Channels) == 0 {
+		return true
+	}
+	for _, c := range a.Channels {
+		if strings.EqualFold(c, channel) {
+			return true
+		}
+	}
+	return false
 }
 
 // SemverTagName is the same release named under the normative

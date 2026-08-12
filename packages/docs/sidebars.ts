@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'configuration/spaces',
         'configuration/packages',
         'configuration/versions',
+        'configuration/alias-tags',
         'configuration/records',
         'configuration/parser',
       ],

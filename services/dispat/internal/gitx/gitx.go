@@ -78,6 +78,10 @@ const (
 	tagVersionPlaceholder = "{version}"
 	tagChannelPlaceholder = "{channel}"
 	tagCounterPlaceholder = "{counter}"
+	// Alias-only: the three numbers of the core version on their own.
+	tagMajorPlaceholder = "{major}"
+	tagMinorPlaceholder = "{minor}"
+	tagPatchPlaceholder = "{patch}"
 )
 
 // WithDefault returns the format, or DefaultTagFormat when it is empty.
@@ -246,6 +250,46 @@ func (f TagFormat) Matches(pkg, tag string) bool {
 // normative "{name}@{version}", so a script written against SemVer keeps a
 // stable input whatever local convention the space's tagFormat encodes.
 func TagName(pkg string, v ccme.Version) string { return DefaultTagFormat.Render(pkg, v) }
+
+// AliasFormat is a template for an alias tag: an extra name a release is
+// written under, beside the tag its package's TagFormat produces.
+//
+// It is deliberately a distinct type from TagFormat rather than the same one
+// with looser rules. The two are validated differently and, more importantly,
+// used differently: a TagFormat is written *and read*, and is how a package's
+// history is found, while an AliasFormat is only ever written. Keeping them
+// apart means no code path can read an alias back by accident, which is the
+// one thing that would turn a convenience ref into a package's baseline.
+//
+// It accepts everything TagFormat does plus {major}, {minor} and {patch}, and
+// needs at least one of those or {version}:
+//
+//	v{version}                  v1.4.2
+//	v{major}                    v1
+//	{name}-{major}.{minor}      core-1.4
+type AliasFormat string
+
+// Validate reports whether the format renders a name git will accept.
+func (f AliasFormat) Validate() error {
+	tpl := compileTagFormat(string(f))
+	if err := tpl.validateAlias(); err != nil {
+		return fmt.Errorf("alias tag format %q: %w", string(f), err)
+	}
+	samples := []ccme.Version{{Minor: 1}, {Minor: 1, Prerelease: []string{"beta", "4"}}}
+	for _, v := range samples {
+		sample := tpl.render("pkg", v)
+		if err := validRefName(sample); err != nil {
+			return fmt.Errorf("alias tag format %q would produce %q, which git rejects: %w",
+				string(f), sample, err)
+		}
+	}
+	return nil
+}
+
+// Render builds the alias name for a package version.
+func (f AliasFormat) Render(pkg string, v ccme.Version) string {
+	return compileTagFormat(string(f)).render(pkg, v)
+}
 
 // Commit is one commit of a pending window.
 type Commit struct {

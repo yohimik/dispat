@@ -49,6 +49,7 @@ type (
 	DependencyConfig         = public.DependencyConfig
 	Dependencies             = public.Dependencies
 	ProviderList             = public.ProviderList
+	AliasTagConfig           = public.AliasTagConfig
 
 	ParserConfig            = public.ParserConfig
 	ParserPropagationConfig = public.ParserPropagationConfig
@@ -828,6 +829,9 @@ func validate(c *File) error {
 	if c.TagFormat == "" {
 		c.TagFormat = string(gitx.DefaultTagFormat)
 	}
+	if err := validateAliasTags("aliasTags", c.AliasTags); err != nil {
+		return err
+	}
 	if err := gitx.TagFormat(c.TagFormat).Validate(); err != nil {
 		return err
 	}
@@ -961,6 +965,9 @@ func validateSpace(name string, s SpaceConfig) (SpaceConfig, error) {
 func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	if s.Path == "" {
 		return s, fmt.Errorf("%s: path is required", label)
+	}
+	if err := validateAliasTags(label+": aliasTags", s.AliasTags); err != nil {
+		return s, err
 	}
 	if s.TagFormat != "" {
 		if err := gitx.TagFormat(s.TagFormat).Validate(); err != nil {
@@ -1175,6 +1182,34 @@ func (s DepSource) IsRootList() bool {
 type DeclaredDependency struct {
 	DependencyConfig
 	Source DepSource
+}
+
+// validateAliasTags checks one level's alias list on its own: each format has
+// to render a name git accepts, and a moving alias has to be allowed to write
+// over its own previous ref. Whether an alias collides with a real release tag
+// needs the discovered packages and is checked in discovery instead.
+func validateAliasTags(label string, aliases []AliasTagConfig) error {
+	for i, a := range aliases {
+		where := fmt.Sprintf("%s[%d]", label, i)
+		if strings.TrimSpace(a.Format) == "" {
+			return fmt.Errorf("%s: format is required", where)
+		}
+		if err := gitx.AliasFormat(a.Format).Validate(); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
+		// A moving alias exists to be re-pointed, and re-pointing is exactly
+		// what force is. Accepting the pair would produce an alias that
+		// silently stopped moving after its first release.
+		if a.Moving && a.Force != nil && !*a.Force {
+			return fmt.Errorf("%s: a moving alias cannot set force: false, since moving it means overwriting it", where)
+		}
+		for _, ch := range a.Channels {
+			if strings.TrimSpace(ch) == "" {
+				return fmt.Errorf("%s: channels must not contain an empty name", where)
+			}
+		}
+	}
+	return nil
 }
 
 // sortedSpaceNames returns the configured space names in order, so validation
@@ -1554,7 +1589,87 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	if err := canonicaliseEndpoints(declared, pkgs); err != nil {
 		return nil, nil, err
 	}
+	if err := checkAliasTagsAreWriteOnly(pkgs); err != nil {
+		return nil, nil, err
+	}
 	return pkgs, declared, nil
+}
+
+// aliasSamples are the versions every alias is rendered for when checking what
+// it can collide with: one stable, one prerelease. Two are enough because an
+// alias's shape does not depend on the numbers, only on which placeholders it
+// uses and whether the version carries a prerelease.
+var aliasSamples = []ccme.Version{
+	{Major: 1, Minor: 4, Patch: 2},
+	{Major: 1, Minor: 4, Patch: 2, Prerelease: []string{"beta", "4"}},
+}
+
+// checkAliasTagsAreWriteOnly refuses a configuration where an alias tag could
+// be read back as a release tag, or where two packages would fight over one
+// alias name.
+//
+// This is the rule the whole feature rests on. An alias is written on every
+// release and never parsed, so nothing keeps it out of a package's history
+// except its name not matching any package's tagFormat. If one did match, the
+// baseline query would pick it up, and a moving alias — always the newest tag
+// by creation date — would be picked *first*:
+//
+//   - a bare "v1" does not parse as a version, and an unparseable newest tag
+//     makes the whole baseline unreadable, so the package would look unreleased
+//     on its very next run;
+//   - a bare "v1.4.2" does parse, and would quietly become some package's
+//     released version.
+//
+// Both are silent until a release goes wrong, which is why this is a load-time
+// refusal rather than a warning.
+func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
+	type rendered struct {
+		tag   string
+		owner string
+	}
+	var all []rendered
+	for _, p := range pkgs {
+		for _, alias := range p.Space.AliasTags {
+			for _, v := range aliasSamples {
+				all = append(all, rendered{gitx.AliasFormat(alias.Format).Render(p.Name, v), p.Name})
+			}
+		}
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	// Against every package's release format, not just the alias owner's: a
+	// tag is read back per package, so an alias of A that reads as a tag of B
+	// corrupts B.
+	for _, a := range all {
+		for _, p := range pkgs {
+			format := gitx.TagFormat(p.Space.TagFormat).WithDefault()
+			if !format.Matches(p.Name, a.tag) {
+				continue
+			}
+			return fmt.Errorf(
+				"config: package %q: alias tag %q would be read back as a release tag of package %q (tagFormat %q); "+
+					"an alias must never be readable as a release tag, or it becomes that package's history",
+				a.owner, a.tag, p.Name, format)
+		}
+	}
+	// And against each other: two packages writing one name — a fixed group
+	// whose members all declare "v{major}" — would force-move it between their
+	// commits on every release.
+	seen := make(map[string]string, len(all))
+	for _, a := range all {
+		if prev, taken := seen[a.tag]; taken && prev != a.owner {
+			first, second := prev, a.owner
+			if second < first {
+				first, second = second, first
+			}
+			return fmt.Errorf(
+				"config: packages %q and %q both write the alias tag %q; one name cannot record two packages",
+				first, second, a.tag)
+		}
+		seen[a.tag] = a.owner
+	}
+	return nil
 }
 
 // canonicaliseEndpoints rewrites every declared edge's endpoints to the exact
@@ -1666,6 +1781,18 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 	if tagFormat == "" {
 		tagFormat = c.TagFormat
 	}
+	aliases := sc.AliasTags
+	if aliases == nil {
+		aliases = c.AliasTags
+	}
+	force := c.Commit.ForceEnabled()
+	resolvedAliases := make([]model.AliasTag, 0, len(aliases))
+	for _, a := range aliases {
+		resolvedAliases = append(resolvedAliases, model.AliasTag{
+			Format: a.Format, Moving: a.Moving, Channels: a.Channels,
+			Force: a.ForceEnabled(force),
+		})
+	}
 	return &model.Space{
 		Name: spaceName,
 		Path: sc.Path,
@@ -1696,6 +1823,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 		OnFailScript:         scope.commands(sc.Flow.OnFail),
 		OnSkipScript:         scope.commands(sc.Flow.OnSkip),
 		TagFormat:            tagFormat,
+		AliasTags:            resolvedAliases,
 		AutoVersion:          resolveAutoVersion(scope, sc.AutoVersion),
 	}, nil
 }

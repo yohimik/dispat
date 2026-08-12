@@ -190,6 +190,9 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 					func(e *zerolog.Event) *zerolog.Event { return e.Str("tag", tag) })
 			} else {
 				w.tags = append(w.tags, tag)
+				for _, alias := range rel.AliasTags() {
+					w.tags = append(w.tags, alias.Name)
+				}
 			}
 		}
 		if out := os.Getenv(release.OutputEnvVar); out != "" {

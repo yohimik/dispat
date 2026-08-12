@@ -3,6 +3,7 @@ package gitx
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -26,6 +27,13 @@ const (
 	segVersion
 	segChannel
 	segCounter
+	// The three core components on their own. They exist for alias tags —
+	// "v{major}" is what a moving major tag is written from — and are refused
+	// in a release tagFormat, which has to be able to read its own tags back
+	// and cannot recover a version from a fragment of one.
+	segMajor
+	segMinor
+	segPatch
 )
 
 type segment struct {
@@ -51,6 +59,9 @@ var placeholders = []struct {
 	{tagVersionPlaceholder, segVersion},
 	{tagChannelPlaceholder, segChannel},
 	{tagCounterPlaceholder, segCounter},
+	{tagMajorPlaceholder, segMajor},
+	{tagMinorPlaceholder, segMinor},
+	{tagPatchPlaceholder, segPatch},
 }
 
 // template compiles the format, applying the default for the empty one. The
@@ -123,6 +134,17 @@ func (t *tagTemplate) count(k segKind) int {
 // readable. Everything it rejects is a format that would either lose
 // information or produce a tag nothing can read back.
 func (t *tagTemplate) validate() error {
+	// A release tag has to be readable back into the version that produced it,
+	// and a fragment of a version cannot do that: "v1" names no release in
+	// particular. They belong to alias tags, which are only ever written.
+	for _, c := range []struct {
+		kind segKind
+		text string
+	}{{segMajor, tagMajorPlaceholder}, {segMinor, tagMinorPlaceholder}, {segPatch, tagPatchPlaceholder}} {
+		if t.count(c.kind) > 0 {
+			return fmt.Errorf("uses %s, which is only available in aliasTags", c.text)
+		}
+	}
 	switch t.count(segVersion) {
 	case 1:
 	case 0:
@@ -160,6 +182,37 @@ func (t *tagTemplate) validate() error {
 			return errors.New("places another placeholder between " +
 				tagChannelPlaceholder + " and " + tagCounterPlaceholder)
 		}
+	}
+	return nil
+}
+
+// validateAlias is validate's counterpart for an alias tag: the same
+// structural rules, minus the ones that exist so a tag can be read back.
+//
+// An alias is write-only. Nothing ever parses one, which is what lets it drop
+// the "exactly one {version}" requirement ("v{major}" has none) and skip the
+// render-and-read-back round trip. What it still needs is something that
+// varies with the version, or every release of every package would write the
+// same ref.
+func (t *tagTemplate) validateAlias() error {
+	if t.count(segVersion) > 1 {
+		return fmt.Errorf("contains more than one %s placeholder", tagVersionPlaceholder)
+	}
+	if t.count(segVersion)+t.count(segMajor)+t.count(segMinor)+t.count(segPatch) == 0 {
+		return fmt.Errorf("names no part of the version: want %s, %s, %s or %s",
+			tagVersionPlaceholder, tagMajorPlaceholder, tagMinorPlaceholder, tagPatchPlaceholder)
+	}
+	if t.count(segChannel) > 1 {
+		return fmt.Errorf("contains more than one %s placeholder", tagChannelPlaceholder)
+	}
+	if t.count(segCounter) > 1 {
+		return fmt.Errorf("contains more than one %s placeholder", tagCounterPlaceholder)
+	}
+	switch {
+	case t.chIdx >= 0 && t.ctIdx < 0:
+		return fmt.Errorf("uses %s without %s", tagChannelPlaceholder, tagCounterPlaceholder)
+	case t.ctIdx >= 0 && t.chIdx < 0:
+		return fmt.Errorf("uses %s without %s", tagCounterPlaceholder, tagChannelPlaceholder)
 	}
 	return nil
 }
@@ -251,10 +304,19 @@ func (t *tagTemplate) render(pkg string, v ccme.Version) string {
 			b.WriteString(channel)
 		case segCounter:
 			b.WriteString(counter)
+		case segMajor:
+			b.WriteString(utoa(v.Major))
+		case segMinor:
+			b.WriteString(utoa(v.Minor))
+		case segPatch:
+			b.WriteString(utoa(v.Patch))
 		}
 	}
 	return b.String()
 }
+
+// utoa renders one version component.
+func utoa(n uint64) string { return strconv.FormatUint(n, 10) }
 
 // renderVersion writes the version section of the tag alone: from {version}
 // through {counter} with the literals between them, excluding everything

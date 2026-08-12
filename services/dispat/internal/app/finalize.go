@@ -109,6 +109,11 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			rel := pl.Releases[name]
 			pkgs = append(pkgs, name)
 			tags = append(tags, rel.TagName())
+			// The aliases travel with the release tag: a "v1" that exists
+			// locally and not on the remote is not the pointer it is for.
+			for _, alias := range rel.AliasTags() {
+				tags = append(tags, alias.Name)
+			}
 			dirs = append(dirs, rel.Pkg.Dir)
 			rels = append(rels, rel)
 		}

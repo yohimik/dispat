@@ -3,6 +3,9 @@
 Versions live exclusively in annotated git tags; these options control how tags are spelled and where a package's
 baseline comes from when its tags cannot provide one.
 
+A package can also be given extra names beside its release tag, for the refs that follow a line rather than name a
+release: see [Alias tags](./alias-tags.md).
+
 ## `tagFormat`
 
 The template release tags are built from and read back with. Four placeholders are substituted; every other byte is
@@ -16,7 +19,9 @@ literal:
 | `{counter}` | The prerelease counter, e.g. `4`.                  |
 
 Exactly one `{version}` is required (none leaves every version indistinguishable, more than one makes parsing
-ambiguous), and every format is validated at load time, including a render-and-read-back round trip. `{name}` may appear
+ambiguous), and every format is validated at load time, including a render-and-read-back round trip. `{major}`,
+`{minor}` and `{patch}` are **not** available here: a release tag has to be readable back into the version that made
+it, and `v1` names no release in particular. They belong to [alias tags](./alias-tags.md), which are only written. `{name}` may appear
 any number of times, including none. The repository-wide format is overridable per space and, through a
 [per-package entry](./packages.md), per package.
 
