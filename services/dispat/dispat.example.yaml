@@ -92,10 +92,10 @@ spaces:
       # {provider}/{providerVersion}/{providerPrevious} for each of its
       # configured providers, and a rule naming one is applied once per
       # provider.
-      # replace:
-      #   - files: ["*.gradle"]
-      #     find:  "com.acme:{provider}:{providerPrevious}"
-      #     write: "com.acme:{provider}:{providerVersion}"
+      replace:
+        - files: ["*.gradle"]
+          find:  "com.acme:{provider}:{providerPrevious}"
+          write: "com.acme:{provider}:{providerVersion}"
       syncLock: [npm-install]    # scripts run after the rewrite, before build
                                  # (with neither strategy configured there is
                                  # no change to key off, so they run always)
@@ -166,7 +166,7 @@ packages:
     # derives the edges pointing at it and auto-versioning reconciles the
     # declarations naming it. A stated name beats a declared one, and no two
     # packages may state the same name.
-    # manifestNames: ["com.acme:core"]
+    manifestNames: ["com.acme:core"]
   cli:
     path: tools/cli                   # standalone: lives outside the spaces
     flow:
@@ -333,8 +333,9 @@ commit:
   # exist at commit time are simply not staged).
   # include: [package-lock.json]
 
-# Shell used for all scripts; default /bin/sh -c.
-# shell: ["bash", "-c"]
+# The command prefix every script is appended to. Default ["/bin/sh", "-c"];
+# ["bash", "-c"] or ["cmd", "/C"] are the other usual ones.
+shell: ["/bin/sh", "-c"]
 
 # Commit-message parser options; everything unset keeps the specification
 # default, so the whole object is optional. `types` REPLACES the standard
@@ -342,7 +343,11 @@ commit:
 # every type you keep. propagation.depth is the knob that turns propagation
 # from opt-in (0, the default) to on-by-default (1 reaches direct consumers
 # with no caret written); a directive on the unit always wins.
-# parser:
+parser:
+  propagation:
+    depth: 0
+# The rest of the object, for reference:
+#
 #   separator: "---"
 #   types: { feat: minor, fix: patch, perf: patch, revert: patch, docs: patch }
 #   strictTypes: false

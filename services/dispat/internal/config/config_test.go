@@ -880,13 +880,12 @@ func TestExampleConfigsAreValid(t *testing.T) {
 		require.NoError(t, err, f)
 		loaded = append(loaded, cfg)
 	}
-	// Both examples document the same two ways of declaring an edge, and they
-	// have to agree about them: an example is the shape most people copy, and
-	// two that disagree teach two different config languages.
-	assert.Equal(t, loaded[0].Dependencies, loaded[1].Dependencies,
-		"the examples must declare the same top-level dependencies")
-	assert.Equal(t, loaded[0].Packages["cli"].Dependencies, loaded[1].Packages["cli"].Dependencies,
-		"and the same package-level ones")
+	// The YAML example opens by calling itself the same configuration as the
+	// JSON one, and it has to be: an example is the shape most people copy,
+	// and two that disagree teach two different things while claiming to
+	// teach one. Comparing the loaded models rather than the text is what
+	// lets each file keep its own comments and key order.
+	assert.Equal(t, loaded[0], loaded[1], "the two examples must describe one configuration")
 }
 
 func TestLoadVersioning(t *testing.T) {
