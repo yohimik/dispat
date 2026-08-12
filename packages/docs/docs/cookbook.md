@@ -364,8 +364,9 @@ FROM registry.example.com/base:${BASE_VERSION}
 ```
 
 dispat never rewrites an interpolated reference, so this one is left alone by design. Pass it in the build script with
-`--build-arg BASE_VERSION=$DISPAT_UPDATED_BASE_NEW_VERSION` (falling back to `$DISPAT_WORKSPACE_BASE_VERSION` when base
-is not part of this run; see [the script environment](./reference/environment.md)).
+`--build-arg BASE_VERSION=$DISPAT_UPDATED_BASE_NEW_VERSION`, which is set whenever base moved in this run, however it
+moved. Use `$DISPAT_WORKSPACE_BASE_VERSION` when you want the version base carries whether or not it is releasing; see
+[the script environment](./reference/environment.md).
 
 **A worked example, in this repository.** dispat's own
 [container images](https://github.com/yohimik/dispat/tree/main/docker) are four packages set up this way, and they go

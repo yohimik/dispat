@@ -392,8 +392,8 @@ type StaleSource struct {
 	Bump     ccme.Bump // the bump the unit propagates
 }
 
-// ProviderUpdate is one provider a release is due to, with the version
-// movement the consumer picks up.
+// ProviderUpdate is one provider whose version this release picks up, with
+// the movement.
 type ProviderUpdate struct {
 	Name     string
 	From, To ccme.Version
@@ -463,10 +463,22 @@ type Release struct {
 
 	DueTo   []string      // providers that forced (at least) part of the bump
 	Sources []StaleSource // the same, with commit and depth detail
-	// Updates is DueTo with the version movement each provider hands the
-	// consumer: From is what the provider last published, To what it releases
-	// this run. The two are equal on a catch-up — the provider's version is
-	// already out, and the consumer is only now picking it up.
+	// Updates is every provider whose version this release picks up:
+	//
+	//	Updates = DueTo ∪ { configured providers releasing this run }
+	//
+	// From is what the provider last published, To what it carries at the end
+	// of the run; the two are equal on a catch-up, whose provider is already
+	// out. It is wider than DueTo on purpose. DueTo answers "why is this
+	// package releasing" and only propagation fills it, but propagation depth
+	// is 0 by default, so a provider and a consumer that each change for their
+	// own reasons propagate nothing to each other and DueTo would answer "no
+	// providers moved" on the most ordinary run there is. The consumer's
+	// manifests, scripts and changelog still have to learn the new version.
+	//
+	// A union rather than a replacement: each set carries a case the other
+	// misses. A catch-up's provider is in DueTo and is *not* releasing
+	// (§13.7a); a non-propagating provider is releasing and is not in DueTo.
 	Updates []ProviderUpdate
 
 	// Held is set when the effective `Release-As` directive is `none`
@@ -1926,15 +1938,7 @@ func (cp *computation) finalise() {
 		if rel == nil {
 			continue
 		}
-		for _, prov := range rel.DueTo {
-			pr := cp.rel[prov]
-			if pr == nil {
-				continue
-			}
-			rel.Updates = append(rel.Updates, ProviderUpdate{
-				Name: prov, From: pr.Previous(), To: pr.Next,
-			})
-		}
+		rel.Updates = cp.providerUpdates(rel, name)
 	}
 
 	cp.reportCatchUp()
@@ -2107,6 +2111,43 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 	// whatever the version itself says (§11.1), so that a pinned
 	// "1.3.0-rc.0" enters the rc line and a pinned "1.3.0" graduates.
 	rel.Channel = channelOf(p.version, true)
+}
+
+// providerUpdates resolves one release's Updates: every provider whose version
+// the package picks up, in DueTo order first and then the remaining configured
+// providers that are releasing, so a reader meets the propagated ones where
+// they always were.
+//
+// cp.providers is indexed by edge, not by provider, so one pair declared under
+// two dependency kinds appears twice; the seen set is what keeps it one update
+// (narrow.go's waitingOn compensates the same way for the same reason).
+func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpdate {
+	provs := cp.providers[name]
+	out := make([]ProviderUpdate, 0, len(rel.DueTo)+len(provs))
+	seen := make(map[string]bool, len(rel.DueTo)+len(provs))
+	add := func(prov string) {
+		if seen[prov] {
+			return
+		}
+		pr := cp.rel[prov]
+		if pr == nil {
+			return
+		}
+		seen[prov] = true
+		out = append(out, ProviderUpdate{Name: prov, From: pr.Previous(), To: pr.Next})
+	}
+	for _, prov := range rel.DueTo {
+		add(prov)
+	}
+	for _, prov := range provs {
+		// A provider that is not releasing has published nothing new for this
+		// run to pick up. It still reaches Updates through DueTo when an
+		// earlier run published it and this one is the catch-up (§13.7a).
+		if pr := cp.rel[prov]; pr != nil && pr.Releasing() {
+			add(prov)
+		}
+	}
+	return out
 }
 
 // logReleases traces what each package resolved to, once the plan is final.

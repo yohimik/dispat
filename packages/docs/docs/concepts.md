@@ -131,7 +131,7 @@ already built (allowed by `isBuildWaitingPublish: false` while the provider was 
 publish once the provider's publish failure is known. Nothing is ever published against an unpublished provider version.
 Skips cascade down the dependency chain by the same rule. A consumer that proceeds on its own reason runs its pipeline
 normally, except that failed and skipped providers are filtered from the `DISPAT_UPDATED_*`
-variables, and if none remain the version script is not executed at all. Spaces with `revertOnFail: true`
+variables, and if it had providers to pick up and none survive, the version script is not executed at all. Spaces with `revertOnFail: true`
 additionally roll back all local changes inside a failing package's folder (tracked files restored, untracked files
 removed), so a half-finished release leaves no residue in the worktree.
 
@@ -162,7 +162,7 @@ Acting on the provider does nothing: its version is already public, and cancella
 
 **Per released package**, up to four stages, each optional to script:
 
-1. **version**: when the package is bumped due to provider updates, and for every releasing package of a space with
+1. **version**: when any provider of the package moved in this run, and for every releasing package of a space with
    [`autoVersion`](./configuration/spaces.md#autoversion) (native reconciliation checks the baselines too); runs right
    before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with

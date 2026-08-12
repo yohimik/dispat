@@ -148,19 +148,20 @@ func RenderSections(rel *plan.Release, f Format) string {
 	collect(f.BreakingTitle, ccme.BumpMajor)
 	collect(f.FeaturesTitle, ccme.BumpMinor)
 	collect(f.FixesTitle, ccme.BumpPatch)
-	if len(rel.DueTo) > 0 {
-		// One line per provider, carrying the version movement the consumer
-		// picks up — a bare name would leave the reader to hunt the provider's
-		// own changelog for what actually changed underneath. On a catch-up
-		// From equals To: the provider's version was already out.
-		var lines []string
+	if len(rel.Updates) > 0 {
+		// One line per provider whose version this release picks up, carrying
+		// the movement — a bare name would leave the reader to hunt the
+		// provider's own changelog for what actually changed underneath. On a
+		// catch-up From equals To: the provider's version was already out.
+		//
+		// Updates rather than DueTo, so the section appears whenever a
+		// provider moved rather than only when it propagated a bump. A
+		// consumer released beside its provider with no caret between them
+		// genuinely ships against the new version, and a changelog that says
+		// nothing about it is the reader's problem later.
+		lines := make([]string, 0, len(rel.Updates))
 		for _, u := range rel.Updates {
 			lines = append(lines, "- "+u.Name+": "+u.From.String()+" -> "+u.To.String())
-		}
-		if len(lines) == 0 { // no version data (e.g. a hand-built Release): names alone
-			for _, name := range rel.DueTo {
-				lines = append(lines, "- "+name)
-			}
 		}
 		parts = append(parts, "### "+f.DependenciesTitle+"\n\n"+strings.Join(lines, "\n")+"\n")
 	}

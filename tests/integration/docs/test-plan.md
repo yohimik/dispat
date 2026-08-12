@@ -33,7 +33,8 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
 5. **Release edge cases** (`edgecases_test.go`): the cases that sit between two features, where each feature is right
    on its own and the interaction is the question. An exact `Release-As` naming a prerelease, where the pin guards
    meet the channel rules; a window where a provider and its consumer each changed for their own reasons with no
-   propagation syntax written, which both auto-versioning strategies have to reconcile with no `DueTo` link to follow;
+   propagation syntax written, which both auto-versioning strategies, the version scripts and the changelog have to
+   account for with no `DueTo` link to follow;
    a package joining a versioning group with no version, and one joining with a version that outranks the group's;
    and the boundary where `revertOnFail` stops. Each one fails by producing a *plausible* release rather than an
    error, which is what makes them worth a file of their own.
@@ -365,7 +366,8 @@ filed under the areas they touch.
 | `TestEdgePinPrereleaseMovesAWholeGroup` | A versioning group runs one train, so a prerelease pin naming one member takes every member onto it (W210 on the rider) rather than graduating the group to stable. |
 | `TestEdgeAutoVersionSyncsWithoutPropagation` | Propagation depth is 0 by default, so a provider and its consumer changed by two separate commits release for their own reasons with no `DueTo` link between them. The parsing strategy still reconciles the declared range, because it resolves providers from what the manifests declare rather than from what bumped the package. |
 | `TestEdgeAutoReplaceSyncsWithoutPropagation` | The same window against the replacing strategy, which reaches the same answer by a different route: its `{provider}` patterns expand over the package's *configured* providers. |
-| `TestEdgeVersionScriptWithoutPropagationRunsNoVersionStage` | The asymmetry the two above are the other side of, stated so nobody finds it in a stale manifest: a hand-written `flow.version` script consumes `DISPAT_UPDATED_*`, so with nothing propagating the package has no version stage at all and the script never runs. A propagated bump gives it one. |
+| `TestEdgeVersionScriptSeesEveryUpdatedProvider` | The same claim from the script side, and the reason the two strategies can no longer disagree: `DISPAT_UPDATED_*` names every provider whose version the package picks up, not only the ones that propagated a bump. Two spaces over one set of commits, one on a hand-written `flow.version` script and one on `autoVersion`, both reconcile. |
+| `TestEdgeChangelogRecordsEveryUpdatedProvider` | The widening in the durable record: a consumer released beside its provider gets a `### Dependencies` line carrying the movement (`- core: 1.0.0 -> 1.1.0`), while a package with no providers gets no section at all. |
 | `TestEdgeGroupNewcomerWithNoVersionJoinsAtTheGroupVersion` | A package joining a group with no tag of its own releases at the group's version rather than at the `0.0.1` its own history would give, is explained by W210, raises no W233, and converges. |
 | `TestEdgeGroupMemberOnAnotherMajorIsReported` | A member carrying a stray `9.0.0` does not join a group on `1.x`: it takes the group to `9.x` in one run, because a group versions from its newest member and none of them may go backwards. The release proceeds, since every version involved is published, and W233 names who decided it. |
 | `TestEdgeGroupMinorSpreadIsNotReported` | The negative that keeps W233 readable: members apart by a minor are the ordinary state a failed ride leaves, already explained by W210, and draw no W233. |

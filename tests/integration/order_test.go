@@ -191,8 +191,8 @@ func TestOrderDiamondDependencyConverges(t *testing.T) {
 // of its own) runs a version task whose DISPAT_UPDATED_* environment names
 // the provider and its old/new versions — the input a version script
 // actually reconciles manifests against. One shared space configures the
-// run.version script for *both* packages, yet the version task only ever exists
-// for a package with a non-empty DueTo, so it must not run for the
+// run.version script for *both* packages, yet a version task only exists for a
+// package that picks a version up from somebody, so it must not run for the
 // provider even though nothing in the config says so.
 func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 	const envFile = "version-env.txt"
@@ -217,7 +217,7 @@ func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 	r.ReleaseOK()
 	require.True(t, r.HasTag("consumer@0.0.1"), "tags: %v", r.TagList())
 	require.NoFileExists(t, r.Path("packages", "provider", envFile),
-		"provider has no DueTo providers of its own; its version task — and run.version script — must not run at all")
+		"the provider has no providers of its own, so it picks up nobody's version: its version task — and run.version script — must not run at all")
 
 	data, err := os.ReadFile(r.Path("packages", "consumer", envFile))
 	require.NoError(t, err)

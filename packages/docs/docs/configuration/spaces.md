@@ -73,7 +73,8 @@ carries the hook's name). Everything up to `flow.beforePublish` exists to *gate*
 the package exactly like a failing stage script: the pipeline stops, nothing is published or tagged, `revertOnFail`
 applies. `flow.postPublish` and the announce hooks run after the package's status has settled and only warn: failing the
 package then would report an unpublished release for a published one. The version hooks share the version stage's skip
-rule: when every provider a package was bumped for failed, neither the version script nor its hooks run.
+rule: when a package had providers to pick a version up from and every one of them failed, neither the version script
+nor its hooks run.
 
 ### `flow.login`
 

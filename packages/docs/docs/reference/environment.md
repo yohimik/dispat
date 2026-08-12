@@ -96,7 +96,7 @@ an *earlier* run whose dependent leg failed, which is exactly the catch-up case.
 with a version newer than the range you declared is that situation. Reconciling against every workspace dependency
 closes it, and is a no-op whenever the narrow rule would already have been right.
 
-The **updated-provider listing** covers the providers this package was bumped for:
+The **updated-provider listing** covers every provider whose version this package picks up in this run:
 
 ```sh
 DISPAT_UPDATED_PACKAGES="CORE"                # empty (not unset) when nothing was updated
@@ -107,10 +107,17 @@ DISPAT_UPDATED_CORE_NEW_VERSION="1.3.0"
 DISPAT_UPDATED_CORE_CHANNEL="stable"
 ```
 
+"Picks up" is deliberately wider than "was bumped by". A provider that releases alongside this package, for its own
+reasons and with no propagation between them, is listed: the two ship together and the consumer's manifests still have
+to name the new version. That is the ordinary case, because [propagation](./commits.md#inline-directives) reaches
+nobody unless a commit or the configuration asks it to. A provider released by an *earlier* run whose consumer leg failed is
+listed too, with `OLD_VERSION` equal to `NEW_VERSION`: the version is already out and this run is only now picking it
+up. A provider that is not releasing at all is not listed, since it published nothing to pick up.
+
 Providers that failed or were skipped are filtered out (their versions were never released), and the listing is resolved
 per stage: a provider can fail between this package's build and its publish, and each stage sees the truth of its own
-moment. If no successfully updated provider remains for a package bumped only by providers (it proceeds on its own
-commits), the *version* script specifically is not executed at all: there is nothing to sync manifests to.
+moment. If a package has providers to pick up and none of them survive, the *version* script specifically is not
+executed at all: there is nothing to sync manifests to.
 
 A package released on `stable` whose dependency currently carries a prerelease version is the one case no range can make
 honest; the remedy is to graduate the provider too, or not to graduate the consumer yet.

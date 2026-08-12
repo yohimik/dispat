@@ -1761,3 +1761,93 @@ func coveredByDocRange(page, code string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Release.Updates: every provider whose version a release picks up
+// ---------------------------------------------------------------------------
+
+func TestUpdatesCoverAReleasingProviderThatPropagatedNothing(t *testing.T) {
+	// The ordinary run on default settings. Propagation depth is 0, so a
+	// `feat(core)` beside a `fix(app)` moves nobody: app releases for its own
+	// reason and DueTo is empty. app still declares core as a provider and
+	// still ships against core's new version, so Updates has to name it —
+	// this is what the manifests, the version script and the changelog all
+	// read.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core): a feature"},
+		commit{sha: "c2", message: "fix(app): something of its own"},
+	).tag("core", "1.0.0", "").tag("app", "2.0.0", "").tag("utils", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	require.True(t, app.Releasing())
+	assert.Empty(t, app.DueTo, "nothing propagated: DueTo answers a different question")
+	require.Len(t, app.Updates, 1, "got %+v", app.Updates)
+	assert.Equal(t, "core", app.Updates[0].Name)
+	assertVersion(t, v(1, 0, 0), app.Updates[0].From)
+	assertVersion(t, v(1, 1, 0), app.Updates[0].To)
+
+	assert.Empty(t, p.Releases["core"].Updates, "core declares no providers")
+}
+
+func TestUpdatesLeaveOutAProviderThatIsNotReleasing(t *testing.T) {
+	// utils declares no work this run, so it publishes nothing for app to
+	// pick up and must stay out — otherwise every consumer's changelog would
+	// list every provider on every release, saying nothing.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core): a feature"},
+		commit{sha: "c2", message: "fix(app): something of its own"},
+	).tag("core", "1.0.0", "").tag("app", "2.0.0", "").tag("utils", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	names := make([]string, 0, 2)
+	for _, u := range p.Releases["app"].Updates {
+		names = append(names, u.Name)
+	}
+	assert.Equal(t, []string{"core"}, names, "utils is quiet this run")
+}
+
+func TestUpdatesKeepACatchUpProviderThatIsNotReleasing(t *testing.T) {
+	// The case that forces a union rather than a replacement (§13.7a). core
+	// published in an earlier run; app's leg failed and is only now catching
+	// up. core is *not* releasing now, so the "releasing providers" half
+	// misses it, and only DueTo carries it. From equals To: the version is
+	// already out.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core)^: reaches its consumers"},
+	).tag("core", "1.0.0", "").tag("core", "1.1.0", "c1").tag("app", "2.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core, app := p.Releases["core"], p.Releases["app"]
+	require.False(t, core.Releasing(), "core already published this work")
+	require.True(t, app.Releasing(), "app is the catch-up")
+	assert.Equal(t, []string{"core"}, app.DueTo)
+	require.Len(t, app.Updates, 1)
+	assert.Equal(t, "core", app.Updates[0].Name)
+	assert.Equal(t, app.Updates[0].From, app.Updates[0].To,
+		"already-published provider: the consumer picks up a version that has not moved since")
+}
+
+func TestUpdatesNameEachProviderOnce(t *testing.T) {
+	// Plan.Providers is indexed by edge, so one pair declared under two
+	// dependency kinds is two entries and one provider. A duplicated update
+	// would duplicate a changelog line and a DISPAT_UPDATED_* entry.
+	pkgs, _ := testPackages()
+	deps := []model.Dependency{
+		{Consumer: "app", Provider: "core", Kind: model.DepKind("dependencies")},
+		{Consumer: "app", Provider: "core", Kind: model.DepKind("devDependencies")},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core): a feature"},
+		commit{sha: "c2", message: "fix(app): something of its own"},
+	).tag("core", "1.0.0", "").tag("app", "2.0.0", "")
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+
+	require.Len(t, p.Releases["app"].Updates, 1, "got %+v", p.Releases["app"].Updates)
+	assert.Equal(t, "core", p.Releases["app"].Updates[0].Name)
+}

@@ -89,24 +89,29 @@ type workspaceVersion struct {
 	Releasing bool
 }
 
-// liveProviderUpdates returns — with mu held — the provider updates the
-// package was bumped for, excluding providers that failed or were skipped:
+// liveProviderUpdates returns — with mu held — the provider versions this
+// package has to pick up, excluding providers that failed or were skipped:
 // their new versions were never released, so manifests must not point at them.
 // Providers whose publish is still pending (possible for the version/build
 // stages when isBuildWaitingPublish is false) are included.
+//
+// The set is plan.Release.Updates, which is every provider that moved rather
+// than only the ones that propagated a bump (see its doc comment). A provider
+// releasing beside its consumer with no caret between them is a version the
+// consumer's scripts have to see, and DueTo does not contain it.
 func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) []providerUpdate {
 	rel := p.Releases[pkg]
-	updates := make([]providerUpdate, 0, len(rel.DueTo))
-	for _, prov := range rel.DueTo {
-		if r, ok := results[prov]; ok && (r.Status == StatusFailed || r.Status == StatusSkipped) {
+	updates := make([]providerUpdate, 0, len(rel.Updates))
+	for _, u := range rel.Updates {
+		if r, ok := results[u.Name]; ok && (r.Status == StatusFailed || r.Status == StatusSkipped) {
 			continue
 		}
-		pr := p.Releases[prov]
+		pr := p.Releases[u.Name]
 		updates = append(updates, providerUpdate{
-			Package:    prov,
+			Package:    u.Name,
 			Space:      pr.Pkg.Space.Name,
-			OldVersion: pr.Previous().String(),
-			NewVersion: pr.Next.String(),
+			OldVersion: u.From.String(),
+			NewVersion: u.To.String(),
 			Channel:    pr.Channel,
 		})
 	}

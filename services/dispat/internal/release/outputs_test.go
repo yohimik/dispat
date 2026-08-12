@@ -279,6 +279,7 @@ func TestCommandEnv(t *testing.T) {
 		Releases:  map[string]*plan.Release{"core": provider, "app": consumer},
 		Providers: map[string][]string{"app": {"core"}},
 	}
+	fillUpdates(p)
 
 	env := CommandEnv(p, "app", "run:lint", WorkspaceEnv(p, zerolog.Nop()))
 	got := map[string]bool{}

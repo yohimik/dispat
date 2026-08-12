@@ -59,6 +59,8 @@ func avPlan(root string, space *model.Space, names ...string) *plan.Plan {
 		p.Releases[n] = rel
 		p.Order = append(p.Order, n)
 	}
+	// Updates is deliberately not filled here: every caller declares the
+	// edges afterwards, so each one calls fillUpdates once it has.
 	return p
 }
 
@@ -258,6 +260,7 @@ func TestAutoVersionFailedProviderFallsBackToBaseline(t *testing.T) {
 		`{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
 	p := avPlan(root, space, "core", "web")
 	p.Providers["web"] = []string{"core"}
+	fillUpdates(p)
 	// No DueTo: web is not bumped *because of* core, so a core failure skips
 	// nothing — but ordering still guarantees core's outcome is known first.
 
@@ -389,6 +392,7 @@ func TestAutoVersionSkipsUserScriptShortCircuitButNotNative(t *testing.T) {
 	p := avPlan(root, space, "core", "web")
 	p.Providers["web"] = []string{"core"}
 	p.Releases["web"].DueTo = []string{"core"}
+	fillUpdates(p)
 
 	coreDir := filepath.Join(root, "core")
 	r := &fakeRunner{fail: map[string]bool{"build " + coreDir: true}}
@@ -488,6 +492,7 @@ func TestAutoVersionUnscheduledEdgeW221(t *testing.T) {
 		`{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
 	p = avPlan(root, space, "core", "web")
 	p.Providers["web"] = []string{"core"}
+	fillUpdates(p)
 	logBuf.Reset()
 	e = newExecutor(execSpec{Runner: &fakeRunner{}, Build: 2, Publish: 2})
 	e.Log = syncedLog(&logBuf)
@@ -526,6 +531,7 @@ func TestAutoVersionPackagesStandalone(t *testing.T) {
 	seedFile(t, root, "web/package.json", `{"name": "web", "version": "1.0.0", "dependencies": {"core": "^1.0.0"}}`)
 	p := avPlan(root, space, "core", "web")
 	p.Providers["web"] = []string{"core"}
+	fillUpdates(p)
 
 	changed, err := autoVersionPackages(p, []string{"core", "web"}, nil)
 	require.NoError(t, err)
@@ -673,9 +679,11 @@ func TestAutoVersionOnlyUpdatedLeavesTheCatchUpAlone(t *testing.T) {
 	p := avPlan(root, avSpace(nil), "core", "web")
 	p.Providers["web"] = []string{"core"}
 	// core is not releasing this run: its baseline comes from an earlier one.
+	// fillUpdates runs after that is set, so core stays out of web's Updates.
 	core := p.Releases["core"]
 	core.OwnBump, core.Bump, core.NewWork, core.Units = ccme.BumpNone, ccme.BumpNone, false, nil
 	core.Next = core.Current
+	fillUpdates(p)
 
 	var logBuf bytes.Buffer
 	policy := func(*plan.Release) *model.AutoVersion {

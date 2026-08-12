@@ -191,14 +191,23 @@ func TestDispatcherHoldsPrereleasesBack(t *testing.T) {
 	assert.NotContains(t, string(data), "beta")
 }
 
-func TestRenderSectionsFallsBackToNamesWithoutVersions(t *testing.T) {
-	// A Release built without version data (Updates empty) still names its
-	// providers rather than dropping the section.
+func TestRenderSectionsDependenciesFollowUpdates(t *testing.T) {
+	// Updates is the whole answer to "which providers does this release pick
+	// up", so it is also the section's gate. Nothing to report, no section —
+	// there is no second source of provider names to fall back to, and a
+	// heading over an empty list would be worse than no heading.
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
+	assert.Contains(t, RenderSections(rel, Format{}), "### Dependencies")
+
 	rel.Updates = nil
 	out := RenderSections(rel, Format{})
-	assert.Contains(t, out, "### Dependencies")
-	assert.Contains(t, out, "- utils")
+	assert.NotContains(t, out, "### Dependencies")
+
+	// DueTo alone does not bring it back: DueTo says why the package is
+	// releasing, Updates says whose version it carries, and only the second
+	// question has an answer to print.
+	rel.DueTo = []string{"utils"}
+	assert.NotContains(t, RenderSections(rel, Format{}), "### Dependencies")
 }
 
 func TestRenderFixedRideNoChangesEntry(t *testing.T) {

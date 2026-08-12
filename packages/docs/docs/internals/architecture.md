@@ -222,9 +222,12 @@ Cost: O ((V+E) log V) for the heap pops; run once per plan.
 
 ### The task graph: what a release actually schedules
 
-Each releasing package contributes up to four task nodes. `version` exists when the package's bump is `DueTo` provider
-updates **or** its space auto-versions (§9.4 reconciles against every workspace dependency, so the stage cannot be
-conditional on this run's updates); `syncLock` exists when an autoVersion space configures the scripts. `build` and
+Each releasing package contributes up to four task nodes. `version` exists when any provider of the package moved in
+this run **or** its space auto-versions (§9.4 reconciles against every workspace dependency, so the stage cannot be
+conditional on this run's updates). "Moved" is `Release.Updates`, which is deliberately wider than `DueTo`: a provider
+releasing beside its consumer with no propagation between them still hands it a version to pick up, and gating on
+`DueTo` made a scripted version stage and a native `autoVersion` block disagree about the same run. `syncLock` exists
+when an autoVersion space configures the scripts. `build` and
 `publish` always exist.
 
 ```
@@ -336,13 +339,14 @@ always waits for its providers' publishes, so a provider's publish failure is gu
 With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage; with `false`
 the consumer may spend a version/build on a release that its publish then skips, the trade-off that flag opts into. The
 version stage filters failed/skipped providers out of the `DISPAT_UPDATED_*` variables and skips its script entirely
-when none remain.
+when it had providers to pick up and none of them survive.
 
 Failed or skipped consumers are not lost across runs, and nothing about that depends on tag creation times; those are
 not stable under merges, rebases or equal timestamps, and are used for reporting only. A commit propagates to a
 dependant while the *dependant's* window still contains it, so a consumer that missed a run is simply still owed its
 release (`DueTo` then contains an *unchanged* provider: it gets no task nodes, and the version stage passes its released
-version). A consumer that was never released while a provider has been is the same case, with the whole history as its
+version — the case that makes `Updates` a union of `DueTo` and this run's releasing providers rather than either
+alone). A consumer that was never released while a provider has been is the same case, with the whole history as its
 window. Such a release is labelled a catch-up and reported with the origin's published version.
 
 Because admission is a window test, the guarantees are structural rather than heuristic. A contribution survives every

@@ -269,10 +269,10 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 	assert.True(t, r.HasTag("themes@0.0.1"), "the space mate rides to the shared version; tags: %v", r.TagList())
 
 	data, err := os.ReadFile(r.Path("ui", "widgets", envFile))
-	require.NoError(t, err, "the DueTo member runs its version task")
+	require.NoError(t, err, "the member that picks up core's version runs its version task")
 	assert.Contains(t, string(data), "DISPAT_UPDATED_CORE_NEW_VERSION=0.1.0")
 	assert.NoFileExists(t, r.Path("ui", "themes", envFile),
-		"the ride has no provider updates, so its version task must not exist")
+		"the ride declares no edge to core, so it picks up no version and has no version task")
 }
 
 // TestVersioningFixedHoldAndResume: Release-As: none on one member keeps

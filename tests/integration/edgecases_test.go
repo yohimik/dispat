@@ -224,24 +224,88 @@ func TestEdgeAutoReplaceSyncsWithoutPropagation(t *testing.T) {
 		"the coordinate follows the provider with no propagation to carry it")
 }
 
-// TestEdgeVersionScriptWithoutPropagationRunsNoVersionStage states the
-// asymmetry the two tests above are the other side of, so that nobody
-// discovers it from a stale manifest.
+// TestEdgeVersionScriptSeesEveryUpdatedProvider is the claim the two tests
+// above share, made from the script side instead of the manifest side.
 //
-// A hand-written `flow.version` script exists to consume `DISPAT_UPDATED_*`,
-// and those name the providers the package was *bumped for*. With no
-// propagation there are none, so the package has no version stage at all and
-// the script does not run. The native strategies are unconditional precisely
-// because they do not depend on that link, which is why a space syncing
-// manifests by script wants a propagation depth set (or `autoVersion`).
-func TestEdgeVersionScriptWithoutPropagationRunsNoVersionStage(t *testing.T) {
+// `DISPAT_UPDATED_*` names every provider whose version this package picks up,
+// not only the ones that propagated a bump into it. Those are different sets
+// whenever a provider and its consumer release for their own reasons, which is
+// what happens by default: propagation depth is 0 unless a unit or the
+// configuration asks for more.
+//
+// The load-bearing half is that a hand-written `flow.version` script and a
+// native `autoVersion` block now answer the same question. Two spaces here,
+// one on each strategy, over the same commits: both reconcile.
+func TestEdgeVersionScriptSeesEveryUpdatedProvider(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]string{
+		"build":   echoBuild,
+		"publish": "echo publishing",
+		// Records which providers the stage was handed, so the assertion is
+		// about the environment rather than about a file the writer touched.
+		"stamp": `echo "$DISPAT_PACKAGE:$DISPAT_UPDATED_PACKAGES" >> ../../version.log`,
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"scripted": {Path: "scripted", Flow: &models.SpaceFlowConfig{
+			Version: []string{"stamp"}, Build: []string{"build"}, Publish: []string{"publish"}}},
+		"native": {Path: "native", Flow: buildPublish(),
+			AutoVersion: &models.AutoVersionConfig{Match: []string{"^*"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "nweb", Provider: "ncore"},
+	}
+	r.WriteConfigModel(cfg)
+	for space, names := range map[string][]string{
+		"scripted": {"core", "web"}, "native": {"ncore", "nweb"},
+	} {
+		for _, n := range names {
+			r.SeedPackage(space, n)
+		}
+	}
+	r.WriteFile("native/ncore/package.json", `{"name": "@acme/ncore", "version": "1.0.0"}`)
+	r.WriteFile("native/nweb/package.json", `{
+  "name": "@acme/nweb",
+  "version": "1.0.0",
+  "dependencies": {"@acme/ncore": "^1.0.0"}
+}`)
+	r.Commit("chore: seed")
+	for _, tag := range []string{"core@1.0.0", "web@1.0.0", "ncore@1.0.0", "nweb@1.0.0"} {
+		tagAt(r, tag, "HEAD")
+	}
+
+	// Two commits, no caret anywhere: nothing propagates, and every one of
+	// these four packages releases for a reason of its own.
+	r.CommitEmpty("feat(core,ncore): something in the providers")
+	r.CommitEmpty("fix(web,nweb): something unrelated in the consumers")
+
+	r.ReleaseOK()
+
+	require.True(t, r.HasTag("core@1.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("web@1.0.1"), "tags: %v", r.TagList())
+
+	// The scripted space: the version stage exists and was told about core.
+	log, err := os.ReadFile(r.Path("version.log"))
+	require.NoError(t, err, "the consumer must have a version stage at all")
+	assert.Contains(t, string(log), "web:CORE",
+		"the provider released beside its consumer, so the script is told about it")
+	assert.NotContains(t, string(log), "core:CORE", "a package is never its own updated provider")
+
+	// The native space reaches the same place through its own strategy.
+	nweb, err := os.ReadFile(r.Path("native", "nweb", "package.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(nweb), `"@acme/ncore": "^1.1.0"`,
+		"both strategies reconcile the same run; neither needs a caret to do it")
+}
+
+// TestEdgeChangelogRecordsEveryUpdatedProvider: the same widening seen in the
+// durable record. A consumer released beside its provider genuinely ships
+// against the provider's new version, so its changelog says which one, and a
+// reader is not left to work out from two files that they moved together.
+func TestEdgeChangelogRecordsEveryUpdatedProvider(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["stamp"] = `echo "$DISPAT_PACKAGE" >> ../../version.log`
-	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
-			Version: []string{"stamp"}, Build: []string{"build"}, Publish: []string{"publish"}}},
-	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -254,17 +318,16 @@ func TestEdgeVersionScriptWithoutPropagationRunsNoVersionStage(t *testing.T) {
 	r.CommitEmpty("fix(web): something unrelated in the consumer")
 	r.ReleaseOK()
 
-	assert.NoFileExists(t, r.Path("version.log"),
-		"no package was bumped for a provider, so nothing has a version stage")
+	webLog, err := os.ReadFile(r.Path("packages", "web", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(webLog), "### Dependencies")
+	assert.Contains(t, string(webLog), "- core: 1.0.0 -> 1.1.0",
+		"the movement, not a bare name: the reader should not have to hunt core's own changelog")
 
-	// The same script with propagation asked for: now web is DueTo core, and
-	// the version stage it exists for runs.
-	r.CommitEmpty("feat(core)^: this one reaches its consumers")
-	r.ReleaseOK()
-
-	log, err := os.ReadFile(r.Path("version.log"))
-	require.NoError(t, err, "the propagated bump gives web a version stage")
-	assert.Contains(t, string(log), "web")
+	// The provider has no providers, so it gets no section at all.
+	coreLog, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(coreLog), "### Dependencies")
 }
 
 // ---------------------------------------------------------------------------

@@ -423,10 +423,16 @@ type run struct {
 }
 
 // hasVersionTask reports whether the package's release runs a version task:
-// it was bumped for provider updates, or its space auto-versions (whose
-// reconciliation is unconditional per §9.4).
+// any provider of it moved, or its space auto-versions (whose reconciliation
+// is unconditional per §9.4).
+//
+// Updates rather than DueTo, so that a hand-written flow.version script and a
+// native autoVersion block answer the same question. Propagation depth is 0 by
+// default, so gating on DueTo meant a consumer whose provider released beside
+// it — without a caret between them — got no version stage at all, while the
+// same space under autoVersion reconciled normally.
 func hasVersionTask(rel *plan.Release) bool {
-	return len(rel.DueTo) > 0 || rel.Pkg.Space.AutoVersion != nil
+	return len(rel.Updates) > 0 || rel.Pkg.Space.AutoVersion != nil
 }
 
 // syncLockBudget resolves the run-wide syncLock concurrency: the smallest
@@ -636,13 +642,13 @@ func (r *run) execute(ctx context.Context, t task) {
 		// package is fully published, further down.
 		frame = stage{commands: space.PublishScript, before: space.BeforePublishScript}
 	}
-	if t.kind == taskVersion && len(tc.updates) == 0 && len(rel.DueTo) > 0 {
-		// Every provider this package was bumped for failed or was skipped
-		// (the package itself proceeds on its own changes): there is nothing
-		// to sync manifests to, so the version scripts — hooks included —
-		// must not run. Native reconciliation is different: it compares
-		// against baselines too (§9.4) and never writes a dead provider's
-		// planned version, so it proceeds.
+	if t.kind == taskVersion && len(tc.updates) == 0 && len(rel.Updates) > 0 {
+		// Every provider this package picks up a version from failed or was
+		// skipped (the package itself proceeds on its own changes): there is
+		// nothing to sync manifests to, so the version scripts — hooks
+		// included — must not run. Native reconciliation is different: it
+		// compares against baselines too (§9.4) and never writes a dead
+		// provider's planned version, so it proceeds.
 		log.Info().Msg("version: no successfully updated providers, skipping scripts")
 		frame.commands, frame.before, frame.after = nil, nil, nil
 	}

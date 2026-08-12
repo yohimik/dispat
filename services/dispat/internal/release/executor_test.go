@@ -205,7 +205,40 @@ func mkPlan(spec planSpec) *plan.Plan {
 		p.Providers[consumer] = provs
 		p.Releases[consumer].DueTo = provs
 	}
+	fillUpdates(p)
 	return p
+}
+
+// fillUpdates derives Release.Updates the way plan.Compute does, so a
+// hand-built plan behaves like a computed one: the union of DueTo and the
+// configured providers that are releasing, deduped, DueTo first.
+//
+// Every fixture in this file goes through it, including the ones assembled
+// literally rather than by mkPlan — the executor reads Updates now, and a plan
+// that sets DueTo and Providers but forgets Updates is a plan describing a
+// state plan.Compute cannot produce.
+func fillUpdates(p *plan.Plan) {
+	for name, rel := range p.Releases {
+		seen := make(map[string]bool)
+		add := func(prov string) {
+			pr := p.Releases[prov]
+			if pr == nil || seen[prov] {
+				return
+			}
+			seen[prov] = true
+			rel.Updates = append(rel.Updates, plan.ProviderUpdate{
+				Name: prov, From: pr.Previous(), To: pr.Next,
+			})
+		}
+		for _, prov := range rel.DueTo {
+			add(prov)
+		}
+		for _, prov := range p.Providers[name] {
+			if pr := p.Releases[prov]; pr != nil && pr.Releasing() {
+				add(prov)
+			}
+		}
+	}
 }
 
 // execSpec is what a test's Executor is assembled from: the fakes it records
@@ -574,6 +607,7 @@ func TestRunVersionStageWorkspaceVersions(t *testing.T) {
 		Bump: ccme.BumpPatch, NewWork: true, Current: ccme.Version{Major: 2},
 		Next: ccme.Version{Major: 2, Patch: 1}, DueTo: []string{"a"},
 	})
+	fillUpdates(p)
 
 	r := &fakeRunner{}
 	newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
@@ -951,6 +985,7 @@ func TestRunCatchUpConsumerWithUnchangedProvider(t *testing.T) {
 		},
 		Providers: map[string][]string{"b": {"a"}},
 	}
+	fillUpdates(p)
 	r := &fakeRunner{}
 	tg := &fakeTagger{}
 	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
