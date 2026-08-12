@@ -59,7 +59,7 @@ name: Release
 on: workflow_dispatch
 
 permissions:
-  contents: write        # create tags, push the release commit, create releases
+  contents: write        # the release lock, tags, the release commit, releases
 
 jobs:
   release:
@@ -76,6 +76,11 @@ jobs:
 
 Whatever your stage scripts shell out to — `node`, `go`, `cargo`, `docker` — is still yours to set up in steps before
 this one. dispat itself needs only `git` and a POSIX shell.
+
+`contents: write` is needed even by a job that pushes nothing: the run claims the repository with a
+[release lock](./release-lock.md) tag on the remote before it plans, so that two jobs releasing at once are refused
+rather than raced. That also makes the job safe to trigger on every merge; the second run stops immediately instead of
+publishing beside the first.
 
 ## The container images
 

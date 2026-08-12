@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
     {type: 'doc', id: 'steps', label: 'Release steps'},
     {type: 'doc', id: 'shell-helpers', label: 'Shell helpers'},
     {type: 'doc', id: 'partial-releases', label: 'Partial releases'},
+    {type: 'doc', id: 'release-lock', label: 'The release lock'},
     {
       type: 'category',
       label: 'Configuration',

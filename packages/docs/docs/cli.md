@@ -8,7 +8,7 @@ dispat [command] [flags]
 
 | Command                   | Effect                                                                                                            |
 |---------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag. `--package` / `--space` / `--group` release part of the graph; see [Releasing part of the graph](#releasing-part-of-the-graph). |
+| `release` (default)       | Plan, print the graph, then run version/build/publish for every changed package, record releases, tag. Takes the [release lock](#the-release-lock) first, so two releases at once are refused rather than raced. `--package` / `--space` / `--group` release part of the graph; see [Releasing part of the graph](#releasing-part-of-the-graph). |
 | `status`                  | Plan and print the graph with computed version bumps, then exit. Nothing is executed, tagged or written. Takes the release's own selection flags.          |
 | `run <script>`            | Run a script in every changed package that has it, graph-ordered; see [The run command](#the-run-command).        |
 | `init`                    | Write a starter config file and exit; see [The init command](#the-init-command).                                  |
@@ -122,6 +122,19 @@ nothing does. On `status` it exits `1` for the same selections, which makes it a
 job. The graph is printed either way, so a refusal always comes with the plan that explains it.
 
 The full guide, with worked output, is [Partial releases](./partial-releases.md).
+
+## The release lock
+
+Before it plans anything, `dispat release` claims the repository: it pushes a `dispat-release-lock` tag to the remote
+(`commit.remote`, by default `origin`) and deletes it when the run ends, however the run ends. A second release started
+while the first is running cannot push that tag, so it is refused with exit `1` before it builds, publishes or tags
+anything.
+
+The lock is taken on every release, whether or not `commit.push` is enabled, so the release job needs write access to
+the remote either way. `DISPAT_UNSAFE_DISABLE_LOCK=true` switches it off, which is what a repository with no remote to
+coordinate through needs. No other command takes it.
+
+The full guide, including how to clear a lock a killed run left behind, is [The release lock](./release-lock.md).
 
 ## The run command
 
@@ -422,8 +435,8 @@ off. The full guide is [Updating dispat](./self-update.md).
 ## Exit codes
 
 Exit codes: `0` success (including "nothing changed"), `1` configuration/planning error, a refused release (see
-[`commitErrors`](./configuration/parser.md#commiterrors)), at least one package failed, a step that failed after its
-release was already out, or an interrupted run, `2` bad command line.
+[`commitErrors`](./configuration/parser.md#commiterrors) and the [release lock](#the-release-lock)), at least one
+package failed, a step that failed after its release was already out, or an interrupted run, `2` bad command line.
 
 A release is refused only *before* any of it happens. Once the first build script runs, nothing aborts the run: a
 package can fail and its consumers can be skipped behind it, but every other package still releases and the finalize

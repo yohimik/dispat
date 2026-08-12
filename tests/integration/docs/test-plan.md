@@ -635,6 +635,28 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestExecComposesInsideARunScript`              | The in-flow case: a `run` script calling `dispat exec` hands the inner script the run's `DISPAT_*` variables through the process environment, with no flag.                                                            |
 | `TestExecIsReservedAndRefusesBadFlags`          | Every malformed invocation is decided by the flags alone and exits 2, while an unknown package is a runtime failure instead, because those flags were well formed.                                                     |
 
+### Goal 23: the release lock (`lock_test.go`)
+
+The lock is a ref on the remote, so every claim here is read from the bare repository the fixtures push to. What was
+true *during* a run is read from a `beforeAll` hook, which runs while the lock is held. The harness disables the lock
+for every other scenario (`DISPAT_UNSAFE_DISABLE_LOCK=true` in `runBin`), since most fixtures have no remote at all;
+these tests ask for it back.
+
+| Test                                       | Claim proven                                                                                                                                                                                                                              |
+|--------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestReleaseLockRoundTrip`                 | The tag is on the remote while the run works and gone from both copies once it is over, release and all; a second run with nothing left to release takes and returns it just the same.                                                     |
+| `TestReleaseLockHeldElsewhere`             | A lock already on the remote refuses the run (exit 1) with the remedy in the message, nothing built and nothing tagged, and — the part that matters — the holder's tag object is untouched. The same repository releases once it is freed.  |
+| `TestReleaseLockIgnoresCommitForce`        | `commit.force` rewrites a run's own records, never another run's lock: a repository configured to force everything still bounces off a held lock.                                                                                          |
+| `TestReleaseLockBlocksConcurrentRuns`      | Two real releases against one remote: the first holds the lock inside a gated hook, the second is refused while it is held and goes through once it is released. No sleeps — the second starts only once the lock is provably on the remote. |
+| `TestReleaseLockIndependentOfPush`         | With no release commit configured, the lock is still taken and cleared, and the remote ends with no tag and no branch: the lock is not the release push.                                                                                   |
+| `TestReleaseLockWithoutRemote`             | With the lock on, a repository with no remote cannot coordinate and does not release. The cost of the guard, stated.                                                                                                                       |
+| `TestReleaseLockKillSwitch`                | Through the binary: `true`/`1`/`TRUE` release a remoteless repository unguarded, while `false`, `0`, an empty value and a typo all keep the lock on.                                                                                       |
+| `TestReleaseLockClearedWhateverHappens`    | The lock is given back on every way out: a failed package, a guard refusing the run after the lock was taken, and a SIGINT mid-build.                                                                                                      |
+| `TestReleaseLockStaleLocalTag`             | A lock tag left in the clone by a killed run says nothing about who holds the lock, so the next release overwrites it locally and carries on.                                                                                              |
+| `TestReleaseLockCleanupFailureIsNotFatal`  | A remote that has become unreachable by the end of the run is reported with the remedy and leaves the exit code to the release itself (0), the stranded tag confirmed on the remote.                                                       |
+| `TestReleaseLockAppliesOnlyToRelease`      | `status`, `preview`, `run`, `changelog`, `autoversion`, `commit` and `scanner` take no lock, which is why they still work in a repository with no remote.                                                                                  |
+| `TestReleaseLockIsNotAReleaseTag`          | The lock is on HEAD while the plan is computed, so a `{version}` tag format — the broadest there is — still reads 0.1.0 as the baseline and releases 0.2.0.                                                                                |
+
 ## Regression fences
 
 Two planner behaviours are subtle enough to earn dedicated guard tests: each pins a property whose violation once

@@ -76,7 +76,9 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   stage.
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
-  verified before any work, and nothing is ever published against an unpublished dependency.
+  verified before any work, and nothing is ever published against an unpublished dependency. Two releases of one
+  repository at once are refused rather than raced: a run claims the repository with a
+  [release lock](https://yohimik.github.io/dispat/release-lock) before it plans anything.
 - **Release part of the monorepo when you need to.** `dispat release --package core` (or `--space libs`, or
   `--group platform` for a whole version group, or just the folder you are standing in) releases a subset at exactly
   the versions a full release would have given it. Publish
@@ -98,6 +100,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Release steps](https://yohimik.github.io/dispat/steps)                         | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.  |
 | [Shell helpers](https://yohimik.github.io/dispat/shell-helpers)                 | `dispat if` and `dispat exec`: branching on a variable, and running one declared script on its own. |
 | [Partial releases](https://yohimik.github.io/dispat/partial-releases)           | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`. |
+| [The release lock](https://yohimik.github.io/dispat/release-lock)               | Why two releases at once are refused rather than raced, and how to clear a lock a killed run left behind. |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)            | Top-level options, script sequences, run-level hooks; links the pages below.                        |
 | [Spaces](https://yohimik.github.io/dispat/configuration/spaces)                 | Space options, stages and hooks, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
 | [Packages](https://yohimik.github.io/dispat/configuration/packages)             | Per-package overrides and the ladder that orders them, `src`, standalone packages, package dependencies, in-folder config files. |

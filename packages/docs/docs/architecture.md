@@ -9,6 +9,13 @@ Steps 1-2 are the command-line controller (`internal/cli`, behind the thin `main
 from discovery on is the `app` package's `Status` (steps 3-6) and `Release` (all of them), so the same operations are
 callable without a command line.
 
+`Release` brackets steps 3 onward with the [release lock](./release-lock.md): an annotated `dispat-release-lock` tag
+pushed, unforced, to `commit.remote` before discovery, and deleted from the remote and the clone on the way out, under
+a context detached from cancellation so an interrupt still gives it back. A rejected push means a release is already
+running against this repository, and the run stops there with exit `1`, before it has read a single tag.
+`DISPAT_UNSAFE_DISABLE_LOCK=true` skips the whole bracket. The name is reserved in `internal/gitx`, so no tag format,
+however broad, can read it back as a release tag.
+
 1. Parse the command line (pflag); dispatch `release`, `status`, `run <script>`, `init` or `preview`. An unknown
    command word is `run`'s shorthand (`dispat lint`).
    `init` writes a starter config and exits before anything else (there is no config to load yet), refusing a `--root`
@@ -172,7 +179,7 @@ sections below.
 | `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write` (every key one run touches in a file written in a single pass, so one backup holds the file as it was). |
 | `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration. Plus `Narrow`, which restricts a computed plan to part of the graph for a filtered release (publish order withholds, versioning-group splits reported).                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
-| `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs.                                                                    |
+| `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs. Plus the release lock, the one-tag mutex a release takes on the remote before it plans.                                                                    |
 | `internal/changelog` | Changelog rendering and the per-package record dispatcher.                                                                                                                                                   |
 | `internal/github`    | The GitHub release recorder: REST calls, asset uploads, up-front verification, and the already-published probe that makes recording repeatable.                                                              |
 | `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
@@ -304,8 +311,8 @@ changes which releases get cancelled or contained.
 ## Failure semantics
 
 **Once the release work starts, no error aborts the run.** Everything that can refuse a release happens before any of
-it: a blocked plan, the branch guard, the behind-remote check, the remote and GitHub verification, and the `beforeAll`
-hook. Those refuse while nothing has happened yet, which is the only moment refusing costs nothing. From the first
+it: the [release lock](./release-lock.md), a blocked plan, the branch guard, the behind-remote check, the remote and
+GitHub verification, and the `beforeAll` hook. Those refuse while nothing has happened yet, which is the only moment refusing costs nothing. From the first
 build script onward the run always goes to the end: a package can fail, and its consumers can be skipped behind it, but
 every other package still releases and the finalize phase still records whatever published. The only thing that stops a
 run early is an interrupt, and even then what already published is still recorded.
