@@ -2435,3 +2435,110 @@ func TestRootVersioningInvalid(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `versioning "fixxed" is invalid`)
 }
+
+// TestSpaceRecordsSrcAndConcurrency: the four keys that used to skip the
+// space level. Each is stated once for a whole space, and a package can still
+// depart from it.
+func TestSpaceRecordsSrcAndConcurrency(t *testing.T) {
+	cfg := validConfig()
+	cfg.Changelog = &ChangelogConfig{Enabled: models.Bool(true), File: "ROOT.md"}
+	cfg.GitHub = &GitHubConfig{Enabled: models.Bool(true), Owner: "acme"}
+	withLibs(&cfg, func(sc *SpaceConfig) {
+		sc.Changelog = &ChangelogConfig{File: "LIBS.md"} // enabled inherited
+		sc.GitHub = &GitHubConfig{Repo: "libs"}          // owner inherited
+		sc.Src = "src"
+		sc.Concurrency = []int{2}
+	})
+	cfg.Packages = map[string]PackageConfig{
+		"utils": {Src: "lib", Concurrency: []int{3, 1}, Changelog: &ChangelogConfig{File: "UTILS.md"}},
+	}
+	root := writeModelRepo(t, cfg,
+		"packages/libs/core/src", "packages/libs/utils/lib", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	core := byName["core"]
+	assert.Equal(t, "src", core.Src, "the space states the layout once")
+	assert.Equal(t, "LIBS.md", core.Changelog.File)
+	assert.True(t, core.Changelog.Enabled, "the root's enabled shows through the space's overlay")
+	assert.Equal(t, "acme", core.GitHub.Owner, "and so does the root's owner")
+	assert.Equal(t, "libs", core.GitHub.Repo)
+	assert.Equal(t, 2, core.BuildWeight, "the space's weight reaches its packages")
+	assert.Equal(t, 2, core.PublishWeight)
+
+	utils := byName["utils"]
+	assert.Equal(t, "lib", utils.Src, "a package departs from its space")
+	assert.Equal(t, "UTILS.md", utils.Changelog.File)
+	assert.True(t, utils.Changelog.Enabled, "still enabled from the root")
+	assert.Equal(t, 3, utils.BuildWeight)
+	assert.Equal(t, 1, utils.PublishWeight)
+
+	app := byName["app"]
+	assert.Empty(t, app.Src, "another space is untouched")
+	assert.Equal(t, "ROOT.md", app.Changelog.File)
+	assert.Equal(t, 1, app.BuildWeight, "and keeps the ordinary weight")
+}
+
+// TestRootSrcReachesEveryPackage: a repository whose packages all keep their
+// sources in the same sub-folder says so once. The strictness is the point:
+// a package without the folder is a load error rather than a package that
+// silently owns no files.
+func TestRootSrcReachesEveryPackage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Src = "src"
+	cfg.Packages = map[string]PackageConfig{"tool": {Path: "tools/tool"}}
+	root := writeModelRepo(t, cfg,
+		"packages/libs/core/src", "packages/apps/app/src", "tools/tool/src")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	for _, p := range pkgs {
+		assert.Equal(t, "src", p.Src, p.Name)
+		assert.Equal(t, filepath.Join(p.Dir, "src"), p.ScopeDir(), p.Name)
+	}
+
+	// One package laid out differently fails the load, and overriding src for
+	// that package is the fix.
+	root = writeModelRepo(t, cfg, "packages/libs/core/src", "packages/apps/app", "tools/tool/src")
+	_, err = discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `package "app": src "src" names no folder inside the package`)
+
+	cfg.Packages["app"] = PackageConfig{Src: "lib"}
+	root = writeModelRepo(t, cfg, "packages/libs/core/src", "packages/apps/app/lib", "tools/tool/src")
+	pkgs, err = discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, "lib", packagesByName(pkgs)["app"].Src)
+}
+
+// TestSpaceFileRecordsAndSrc: the space folder's own config file states them
+// too, nearer than the root file's space entry and still under the package.
+func TestSpaceFileRecordsAndSrc(t *testing.T) {
+	cfg := validConfig()
+	cfg.Changelog = &ChangelogConfig{Enabled: models.Bool(true), File: "ROOT.md"}
+	withLibs(&cfg, func(sc *SpaceConfig) { sc.Src = "src" })
+	root := writeModelRepo(t, cfg, "packages/libs/core/lib", "packages/apps/app")
+	writeFolderConfig(t, root, "packages/libs", "dispat.json", map[string]any{
+		"src":       "lib",
+		"changelog": map[string]any{"file": "LIBS.md"},
+	})
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+	assert.Equal(t, "lib", core.Src, "the space file is nearer than the space entry")
+	assert.Equal(t, "LIBS.md", core.Changelog.File)
+	assert.True(t, core.Changelog.Enabled, "the root's enabled still shows through")
+}
+
+// TestSpaceConcurrencyInvalid: a space's weight is held to the same rule a
+// package's is, with the space named.
+func TestSpaceConcurrencyInvalid(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(sc *SpaceConfig) { sc.Concurrency = []int{1, 2, 3} })
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "concurrency accepts at most two values")
+}

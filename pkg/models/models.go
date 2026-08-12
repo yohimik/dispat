@@ -113,6 +113,11 @@ type File struct {
 	// spaces into one group is what versionGroups is for, and versionGroup
 	// stays a space-and-package key for that reason.
 	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	// Src is the default scope folder, resolved against each package's own
+	// folder exactly as a package's own src is; see PackageConfig.Src. A
+	// package that has no such folder fails the load, because the alternative
+	// is a package that silently owns no files and quietly stops releasing.
+	Src string `mapstructure:"src" json:"src,omitempty"`
 	// CommitErrors decides what an error in a commit message does to the run
 	// (§16):
 	//
@@ -550,6 +555,19 @@ type SpaceConfig struct {
 	// Custom is an optional free-form object dispat itself never reads; see
 	// File.Custom.
 	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
+	// Changelog and GitHub overlay the top-level objects field by field for
+	// this space's packages, and a package's own overlay sits on top of the
+	// result; see File.Changelog.
+	Changelog *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
+	GitHub    *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
+	// Src is the scope folder for this space's packages, resolved against
+	// each package's own folder; see PackageConfig.Src. It is the usual place
+	// for it, since a layout tends to be a property of a space.
+	Src string `mapstructure:"src" json:"src,omitempty"`
+	// Concurrency is the stage-budget weight this space's packages occupy,
+	// the same meaning as PackageConfig.Concurrency and deliberately not the
+	// top-level key's, which is the budget itself.
+	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
 	// Dependencies declares consumer -> provider edges next to the space they
 	// describe, in the same object-keyed-by-consumer shape as File.Dependencies
 	// — a space is not a package, so there is no consumer to leave implicit.
@@ -606,6 +624,12 @@ type SpaceFile struct {
 	AutoVersion  *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
 	Env          map[string]string  `mapstructure:"env" json:"env,omitempty"`
 	Custom       map[string]any     `mapstructure:"custom" json:"custom,omitempty"`
+	// Changelog, GitHub, Src and Concurrency are this space's; see
+	// SpaceConfig.
+	Changelog   *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
+	GitHub      *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
+	Src         string           `mapstructure:"src" json:"src,omitempty"`
+	Concurrency []int            `mapstructure:"concurrency" json:"concurrency,omitempty"`
 	// Dependencies are this space's own edges; see SpaceConfig.Dependencies.
 	// They add to what the root file's space entry declares rather than
 	// replacing it, because dependency declarations never override.

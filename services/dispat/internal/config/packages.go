@@ -312,18 +312,28 @@ func validatePackageLayer(label string, po PackageConfig) error {
 	if po.Versioning != "" && po.VersionGroup != "" {
 		return fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
 	}
-	if len(po.Concurrency) > 2 {
-		return fmt.Errorf("%s: concurrency accepts at most two values [build, publish], got %v", label, po.Concurrency)
-	}
-	for _, v := range po.Concurrency {
-		if v < 0 {
-			return fmt.Errorf("%s: concurrency values must be >= 0, got %v", label, po.Concurrency)
-		}
+	if err := validateWeights(label, po.Concurrency); err != nil {
+		return err
 	}
 	if err := validateEnv(label+": env", po.Env); err != nil {
 		return err
 	}
 	return validateSrc(label, po.Src)
+}
+
+// validateWeights checks a stage-budget weight: at most a [build, publish]
+// pair, and nothing negative. The same shape is written at the space level and
+// at every package layer, so the two are held to one rule.
+func validateWeights(label string, weights []int) error {
+	if len(weights) > 2 {
+		return fmt.Errorf("%s: concurrency accepts at most two values [build, publish], got %v", label, weights)
+	}
+	for _, v := range weights {
+		if v < 0 {
+			return fmt.Errorf("%s: concurrency values must be >= 0, got %v", label, weights)
+		}
+	}
+	return nil
 }
 
 // validateSrc checks a package's `src` path shape: a folder inside the
@@ -392,6 +402,29 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.AutoVersion != nil {
 		sc.AutoVersion = po.AutoVersion
 	}
+	// The record policies overlay field by field, so a level can flip enabled
+	// and keep the titles it inherited, or point at another repository and
+	// keep the token it inherited.
+	if po.Changelog != nil {
+		base := sc.Changelog
+		if base == nil {
+			base = &ChangelogConfig{}
+		}
+		sc.Changelog = overlayChangelog(base, po.Changelog)
+	}
+	if po.GitHub != nil {
+		base := sc.GitHub
+		if base == nil {
+			base = &GitHubConfig{}
+		}
+		sc.GitHub = overlayGitHub(base, po.GitHub)
+	}
+	if po.Src != "" {
+		sc.Src = po.Src
+	}
+	if po.Concurrency != nil {
+		sc.Concurrency = po.Concurrency
+	}
 	return sc
 }
 
@@ -421,6 +454,9 @@ func rootDefaults(c *File) SpaceConfig {
 		AliasTags:             c.AliasTags,
 		Versioning:            c.Versioning,
 		AutoVersion:           c.AutoVersion,
+		Changelog:             c.Changelog,
+		GitHub:                c.GitHub,
+		Src:                   c.Src,
 	}
 }
 
@@ -442,6 +478,10 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 		AutoVersion:           sc.AutoVersion,
 		Env:                   sc.Env,
 		Custom:                sc.Custom,
+		Changelog:             sc.Changelog,
+		GitHub:                sc.GitHub,
+		Src:                   sc.Src,
+		Concurrency:           sc.Concurrency,
 	}
 }
 
@@ -480,6 +520,10 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		AutoVersion:           f.AutoVersion,
 		Env:                   f.Env,
 		Custom:                f.Custom,
+		Changelog:             f.Changelog,
+		GitHub:                f.GitHub,
+		Src:                   f.Src,
+		Concurrency:           f.Concurrency,
 	}
 }
 
@@ -511,7 +555,7 @@ func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
 			return base, ex, autoVersioned, declared, err
 		}
 		base = mergePackageOverride(base, l.po)
-		ex.apply(c, l.po)
+		ex.apply(l.po)
 		autoVersioned = autoVersioned || l.po.AutoVersion != nil
 		var err error
 		if declared, err = collectPackageDeps(declared, pkg, l.src, l.po.Dependencies); err != nil {
@@ -562,14 +606,24 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 	return &out
 }
 
+// applyMerged copies onto the package what its merged configuration and its
+// own layers resolved to. Everything space-shaped is read off the merged
+// config, which is where the whole ladder — root, space, space file, the
+// package's own layers — has already settled it; only the two genuinely
+// package-only answers come from the fold itself.
+func applyMerged(pkg *model.Package, merged SpaceConfig, ex *packageExtras) {
+	pkg.BuildWeight, pkg.PublishWeight = packageWeights(merged.Concurrency)
+	pkg.Src = merged.Src
+	pkg.Changelog = changelogSpec(merged.Changelog)
+	pkg.GitHub = githubSpec(merged.GitHub)
+	pkg.ManifestNames = ex.manifestNames
+	pkg.OwnScripts = ex.ownScripts
+}
+
 // packageExtras carries the package-only override knobs — the keys that are
 // not space-shaped — across the layers.
 type packageExtras struct {
-	changelog     *ChangelogConfig
-	github        *GitHubConfig
-	concurrency   []int
 	manifestNames []string
-	src           string
 	// ownScripts accumulates what the package itself declares, layer by layer
 	// and without its space's or the top level's. mergePackageOverride folds
 	// the same names into the layered map a resolution reads; this keeps the
@@ -577,11 +631,8 @@ type packageExtras struct {
 	ownScripts map[string]string
 }
 
-// apply folds one layer's package-only keys in. Changelog and github overlay
-// the top-level objects field by field (the first layer starts from the
-// global config), so a package can flip enabled and keep the global titles,
-// or point at another repository and keep the global tokenEnv.
-func (ex *packageExtras) apply(c *File, po PackageConfig) {
+// apply folds one layer's package-only keys in.
+func (ex *packageExtras) apply(po PackageConfig) {
 	if len(po.Scripts) > 0 {
 		if ex.ownScripts == nil {
 			ex.ownScripts = make(map[string]string, len(po.Scripts))
@@ -592,37 +643,11 @@ func (ex *packageExtras) apply(c *File, po PackageConfig) {
 			ex.ownScripts[k] = v
 		}
 	}
-	if po.Changelog != nil {
-		base := c.Changelog
-		if base == nil {
-			base = &ChangelogConfig{}
-		}
-		if ex.changelog != nil {
-			base = ex.changelog
-		}
-		ex.changelog = overlayChangelog(base, po.Changelog)
-	}
-	if po.GitHub != nil {
-		base := c.GitHub
-		if base == nil {
-			base = &GitHubConfig{}
-		}
-		if ex.github != nil {
-			base = ex.github
-		}
-		ex.github = overlayGitHub(base, po.GitHub)
-	}
-	if po.Concurrency != nil {
-		ex.concurrency = po.Concurrency
-	}
 	if len(po.ManifestNames) > 0 {
 		// A list replaces rather than appends: the layer nearest the package
 		// states what the package is called, and adding to an inherited list
 		// could never take a name away again.
 		ex.manifestNames = po.ManifestNames
-	}
-	if po.Src != "" {
-		ex.src = po.Src
 	}
 }
 

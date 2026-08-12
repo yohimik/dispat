@@ -983,6 +983,15 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	if err := validateAliasTags(label+": aliasTags", s.AliasTags); err != nil {
 		return s, err
 	}
+	if err := validateSrc(label, s.Src); err != nil {
+		return s, err
+	}
+	if err := validateWeights(label, s.Concurrency); err != nil {
+		return s, err
+	}
+	if err := validateRecordObjects(label+": changelog", label+": github", s.Changelog, s.GitHub); err != nil {
+		return s, err
+	}
 	if s.TagFormat != "" {
 		if err := gitx.TagFormat(s.TagFormat).Validate(); err != nil {
 			return s, fmt.Errorf("%s: %w", label, err)
@@ -1301,8 +1310,6 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, error) {
 	spaceNames := sortedSpaceNames(c) // deterministic discovery order
 
-	baseChangelog := changelogSpec(c.Changelog)
-	baseGitHub := githubSpec(c.GitHub)
 	type onlyCheck struct {
 		label string
 		av    *AutoVersionConfig
@@ -1365,6 +1372,11 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			declared = collectObjectDeps(declared, spaceFile.Dependencies,
 				DepSource{Space: sn, File: spaceSrc, KeyPath: []string{"dependencies"}})
 		}
+		// The space's own resolved answers, shared by every package of it that
+		// adds no layer of its own.
+		spaceChangelog := changelogSpec(sc.Changelog)
+		spaceGitHub := githubSpec(sc.GitHub)
+		spaceBuildWeight, spacePublishWeight := packageWeights(sc.Concurrency)
 		baseScope := packageScope(c, sc)
 		base, err := buildSpace(c, baseScope, fmt.Sprintf("space %q", sn), sn, sc)
 		if err != nil {
@@ -1406,10 +1418,11 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				Name:          name,
 				Dir:           filepath.Join(dir, name),
 				Space:         base,
-				BuildWeight:   1,
-				PublishWeight: 1,
-				Changelog:     baseChangelog,
-				GitHub:        baseGitHub,
+				BuildWeight:   spaceBuildWeight,
+				PublishWeight: spacePublishWeight,
+				Changelog:     spaceChangelog,
+				GitHub:        spaceGitHub,
+				Src:           sc.Src,
 			}
 
 			key := strings.ToLower(name)
@@ -1462,16 +1475,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				if autoVersioned {
 					onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 				}
-				pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
-				pkg.ManifestNames = ex.manifestNames
-				pkg.OwnScripts = ex.ownScripts
-				pkg.Src = ex.src
-				if ex.changelog != nil {
-					pkg.Changelog = changelogSpec(ex.changelog)
-				}
-				if ex.github != nil {
-					pkg.GitHub = githubSpec(ex.github)
-				}
+				applyMerged(pkg, merged, ex)
 			} else if !baseRefsChecked {
 				// No override layer: the package resolves the space's own
 				// references, but the error still names the package, because
@@ -1542,8 +1546,9 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			Dir:           dir,
 			BuildWeight:   1,
 			PublishWeight: 1,
-			Changelog:     baseChangelog,
-			GitHub:        baseGitHub,
+			Changelog:     changelogSpec(c.Changelog),
+			GitHub:        githubSpec(c.GitHub),
+			Src:           c.Src,
 		}
 		// The entry is the package's whole configuration: a synthetic
 		// single-package space built through the same layers as an override —
@@ -1584,16 +1589,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		if autoVersioned {
 			onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 		}
-		pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
-		pkg.ManifestNames = ex.manifestNames
-		pkg.OwnScripts = ex.ownScripts
-		pkg.Src = ex.src
-		if ex.changelog != nil {
-			pkg.Changelog = changelogSpec(ex.changelog)
-		}
-		if ex.github != nil {
-			pkg.GitHub = githubSpec(ex.github)
-		}
+		applyMerged(pkg, merged, ex)
 		pkgs = append(pkgs, pkg)
 	}
 
