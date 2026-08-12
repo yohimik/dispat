@@ -344,12 +344,12 @@ func FuzzRewriteNuGetLists(f *testing.F) {
 	})
 }
 
-// FuzzReplace hammers the insertion path across every format that has a
+// FuzzLink hammers the insertion path across every format that has a
 // redirect. Insertion can change a file's structure where a splice cannot, so
 // the contract is the same but the risk is higher: a failed replace never
 // modifies the file, and a successful one never turns a parseable manifest
 // into an unparseable one.
-func FuzzReplace(f *testing.F) {
+func FuzzLink(f *testing.F) {
 	seeds := []string{
 		"module m\n\ngo 1.25.0\n\nreplace example.com/dep => ../dep\n",
 		"[package]\nname = \"a\"\n\n[patch.crates-io]\nserde = { path = \"../serde\" }\n",
@@ -370,7 +370,7 @@ func FuzzReplace(f *testing.F) {
 			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 				t.Skip()
 			}
-			_, err := Replace(p, []Replacement{{Name: name, Path: path}})
+			_, err := Relink(p, []Link{{Name: name, Path: path}})
 			data, readErr := os.ReadFile(p)
 			if readErr != nil {
 				t.Fatalf("%s: manifest vanished: %v", file, readErr)

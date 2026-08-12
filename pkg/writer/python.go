@@ -295,9 +295,9 @@ func pyBracketDelta(body string) int {
 // rewrite rather than a directive to manage.
 const uvSourcesTable = "tool.uv.sources"
 
-// replacePyproject points distributions at local folders through
+// linkPyproject points distributions at local folders through
 // [tool.uv.sources]. A project not using uv gains the table, which is inert
 // for any other tool reading the file.
-func replacePyproject(path string, replacements []Replacement) (ReplaceResult, error) {
-	return tomlReplace(path, uvSourcesTable, replacements)
+func linkPyproject(path string, links []Link) (LinkResult, error) {
+	return tomlLink(path, uvSourcesTable, links)
 }

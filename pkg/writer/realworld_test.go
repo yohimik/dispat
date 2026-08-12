@@ -227,11 +227,11 @@ func TestRealRailsGemfileRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRealFlutterPubspecReplaceRoundTrip(t *testing.T) {
+func TestRealFlutterPubspecLinkRoundTrip(t *testing.T) {
 	// The pubspec that already carries a block dependency, which is the shape
 	// an override lookup has to tell apart from a package actually named path.
 	path := seed(t, "pubspec.yaml", flutterPubspec)
-	res, err := Replace(path, []Replacement{{Name: "pigeon", Path: "../forks/pigeon"}})
+	res, err := Relink(path, []Link{{Name: "pigeon", Path: "../forks/pigeon"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestRealFlutterPubspecReplaceRoundTrip(t *testing.T) {
 		t.Errorf("result mismatch: %+v", res)
 	}
 	// Removing it returns the file to exactly what it was.
-	if _, err := Replace(path, []Replacement{{Name: "pigeon"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "pigeon"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != flutterPubspec {
@@ -255,9 +255,9 @@ func TestRealFlutterPubspecReplaceRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRealTokioCargoReplaceRoundTrip(t *testing.T) {
+func TestRealTokioCargoLinkRoundTrip(t *testing.T) {
 	path := seed(t, "Cargo.toml", tokioCargoToml)
-	if _, err := Replace(path, []Replacement{{Name: "pin-project-lite", Path: "../forks/pin-project-lite"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "pin-project-lite", Path: "../forks/pin-project-lite"}}); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)
@@ -268,7 +268,7 @@ func TestRealTokioCargoReplaceRoundTrip(t *testing.T) {
 	if !strings.Contains(got, "# - Create \"v1.x.y\" git tag.") {
 		t.Error("the comment block was disturbed")
 	}
-	if _, err := Replace(path, []Replacement{{Name: "pin-project-lite"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "pin-project-lite"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != tokioCargoToml {

@@ -229,24 +229,24 @@ func isYAMLWritable(value string) bool {
 //	    path: ../core
 const pubspecOverrides = "dependency_overrides"
 
-// replacePubspec points packages at local folders through
+// linkPubspec points packages at local folders through
 // dependency_overrides, which is pub's equivalent of a go.mod replace. The
 // scanner already folds these onto the declarations they override, so a
 // dependency showing a LocalPath is one of these.
 //
 // Indentation follows the file. A pubspec written with four spaces keeps four,
 // because the block's own entries decide the width rather than a constant here.
-func replacePubspec(path string, replacements []Replacement) (ReplaceResult, error) {
+func linkPubspec(path string, links []Link) (LinkResult, error) {
 	rep, err := openReplacer(path)
 	if err != nil {
-		return ReplaceResult{}, err
+		return LinkResult{}, err
 	}
 	var (
-		res     ReplaceResult
+		res     LinkResult
 		lines   = rep.lines()
 		changed bool
 	)
-	for _, r := range replacements {
+	for _, r := range links {
 		entry, found := pubspecOverrideEntry(lines, r.Name)
 		switch {
 		case r.Path == "" && !found:
@@ -441,7 +441,7 @@ func pubspecDropOverride(lines []string, entry pubspecOverride) []string {
 
 // pubspecVerifyOverrides re-reads the written bytes and checks every applied
 // redirect reads back as the path it asked for.
-func pubspecVerifyOverrides(out []byte, applied []Replacement) error {
+func pubspecVerifyOverrides(out []byte, applied []Link) error {
 	lines := strings.Split(string(out), "\n")
 	for _, r := range applied {
 		entry, found := pubspecOverrideEntry(lines, r.Name)

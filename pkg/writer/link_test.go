@@ -10,7 +10,7 @@ import (
 	"github.com/yohimik/dispat/pkg/manifest"
 )
 
-func TestGoModReplaceAddsRepointsAndRemoves(t *testing.T) {
+func TestGoModLinkAddsRepointsAndRemoves(t *testing.T) {
 	src := `// The service module.
 module github.com/acme/mono/services/svc
 
@@ -24,7 +24,7 @@ require (
 replace github.com/acme/mono/pkg/core => ../../pkg/core
 `
 	path := seed(t, "go.mod", src)
-	res, err := Replace(path, []Replacement{
+	res, err := Relink(path, []Link{
 		{Name: "github.com/acme/mono/pkg/core", Path: "../../libs/core"}, // repoint
 		{Name: "github.com/rs/zerolog", Path: "../../vendor/zerolog"},    // add
 		{Name: "github.com/gone/module", Path: ""},                       // remove what is not there
@@ -47,17 +47,17 @@ replace github.com/acme/mono/pkg/core => ../../pkg/core
 	}
 }
 
-func TestGoModReplaceRemovesAndRoundTrips(t *testing.T) {
+func TestGoModLinkRemovesAndRoundTrips(t *testing.T) {
 	src := "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n\nreplace example.com/dep => ../dep\n"
 	path := seed(t, "go.mod", src)
-	if _, err := Replace(path, []Replacement{{Name: "example.com/dep"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "example.com/dep"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); strings.Contains(got, "replace") {
 		t.Errorf("the replace should be gone:\n%s", got)
 	}
 	// Putting it back returns the file to what it was.
-	if _, err := Replace(path, []Replacement{{Name: "example.com/dep", Path: "../dep"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "example.com/dep", Path: "../dep"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != src {
@@ -65,10 +65,10 @@ func TestGoModReplaceRemovesAndRoundTrips(t *testing.T) {
 	}
 }
 
-func TestGoModReplaceVersionedLeftSide(t *testing.T) {
+func TestGoModLinkVersionedLeftSide(t *testing.T) {
 	src := "module m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n"
 	path := seed(t, "go.mod", src)
-	if _, err := Replace(path, []Replacement{
+	if _, err := Relink(path, []Link{
 		{Name: "example.com/dep", Version: "v1.0.0", Path: "../dep"},
 	}); err != nil {
 		t.Fatal(err)
@@ -78,14 +78,14 @@ func TestGoModReplaceVersionedLeftSide(t *testing.T) {
 	}
 }
 
-func TestGoModReplaceNoChangeLeavesFileAlone(t *testing.T) {
+func TestGoModLinkNoChangeLeavesFileAlone(t *testing.T) {
 	src := "module m\n\ngo 1.25.0\n\nreplace example.com/dep => ../dep\n"
 	path := seed(t, "go.mod", src)
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Replace(path, []Replacement{{Name: "example.com/dep", Path: "../dep"}})
+	res, err := Relink(path, []Link{{Name: "example.com/dep", Path: "../dep"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestGoModReplaceNoChangeLeavesFileAlone(t *testing.T) {
 	}
 }
 
-func TestCargoReplacePreservesEveryOtherByte(t *testing.T) {
+func TestCargoLinkPreservesEveryOtherByte(t *testing.T) {
 	src := `[package]
 name = "acme"
 version = "1.0.0"   # shipped
@@ -112,7 +112,7 @@ core = { path = "../core", version = "0.3" }
 serde = { path = "../forks/serde" }
 `
 	path := seed(t, "Cargo.toml", src)
-	res, err := Replace(path, []Replacement{
+	res, err := Relink(path, []Link{
 		{Name: "serde", Path: "../vendor/serde"}, // repoint an existing patch
 		{Name: "rand", Path: "../forks/rand"},    // add to the existing table
 	})
@@ -133,10 +133,10 @@ serde = { path = "../forks/serde" }
 	}
 }
 
-func TestCargoReplaceCreatesAndRemovesTheTable(t *testing.T) {
+func TestCargoLinkCreatesAndRemovesTheTable(t *testing.T) {
 	src := "[package]\nname = \"acme\"\nversion = \"1.0.0\"\n\n[dependencies]\nserde = \"1.0\"\n"
 	path := seed(t, "Cargo.toml", src)
-	if _, err := Replace(path, []Replacement{{Name: "serde", Path: "../serde"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "serde", Path: "../serde"}}); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)
@@ -144,7 +144,7 @@ func TestCargoReplaceCreatesAndRemovesTheTable(t *testing.T) {
 		t.Errorf("the table was not created:\n%s", got)
 	}
 	// Removing the only entry takes the header with it and returns the file.
-	if _, err := Replace(path, []Replacement{{Name: "serde"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "serde"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != src {
@@ -152,7 +152,7 @@ func TestCargoReplaceCreatesAndRemovesTheTable(t *testing.T) {
 	}
 }
 
-func TestPubspecReplaceAddsRepointsAndRemoves(t *testing.T) {
+func TestPubspecLinkAddsRepointsAndRemoves(t *testing.T) {
 	src := `name: acme
 version: 1.0.0
 
@@ -168,7 +168,7 @@ dev_dependencies:
   test: ^1.24.0
 `
 	path := seed(t, "pubspec.yaml", src)
-	res, err := Replace(path, []Replacement{
+	res, err := Relink(path, []Link{
 		{Name: "http", Path: "../vendor/http"}, // repoint
 		{Name: "path", Path: "../forks/path"},  // add to the existing block
 	})
@@ -191,17 +191,17 @@ dev_dependencies:
 	}
 }
 
-func TestPubspecReplaceCreatesAndRemovesTheBlock(t *testing.T) {
+func TestPubspecLinkCreatesAndRemovesTheBlock(t *testing.T) {
 	src := "name: acme\nversion: 1.0.0\n\ndependencies:\n  http: ^1.0.0\n"
 	path := seed(t, "pubspec.yaml", src)
-	if _, err := Replace(path, []Replacement{{Name: "http", Path: "../http"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "http", Path: "../http"}}); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)
 	if !strings.Contains(got, "dependency_overrides:") || !strings.Contains(got, "    path: ../http") {
 		t.Errorf("the block was not created:\n%s", got)
 	}
-	if _, err := Replace(path, []Replacement{{Name: "http"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "http"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != src {
@@ -209,10 +209,10 @@ func TestPubspecReplaceCreatesAndRemovesTheBlock(t *testing.T) {
 	}
 }
 
-func TestPyprojectReplaceUsesUvSources(t *testing.T) {
+func TestPyprojectLinkUsesUvSources(t *testing.T) {
 	src := "[project]\nname = \"acme\"\nversion = \"1.0.0\"\ndependencies = [\n    \"requests>=2.0\",\n]\n"
 	path := seed(t, "pyproject.toml", src)
-	if _, err := Replace(path, []Replacement{{Name: "requests", Path: "../requests"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "requests", Path: "../requests"}}); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)
@@ -222,7 +222,7 @@ func TestPyprojectReplaceUsesUvSources(t *testing.T) {
 	if !strings.Contains(got, `"requests>=2.0"`) {
 		t.Error("the dependency array was disturbed")
 	}
-	if _, err := Replace(path, []Replacement{{Name: "requests"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "requests"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != src {
@@ -230,7 +230,7 @@ func TestPyprojectReplaceUsesUvSources(t *testing.T) {
 	}
 }
 
-func TestReplaceOnFormatsWithoutRedirects(t *testing.T) {
+func TestLinkOnFormatsWithoutRedirects(t *testing.T) {
 	// package.json is the one most likely to be mistaken for supporting this.
 	// Its overrides force a version across the tree; they cannot name a folder.
 	for _, tc := range []struct{ name, src string }{
@@ -241,10 +241,10 @@ func TestReplaceOnFormatsWithoutRedirects(t *testing.T) {
 		{"composer.json", `{"name":"a/b","replace":{"c/d":"1.0"}}`},
 	} {
 		path := seed(t, tc.name, tc.src)
-		if SupportsReplace(path) {
+		if SupportsLink(path) {
 			t.Errorf("%s should not report replace support", tc.name)
 		}
-		res, err := Replace(path, []Replacement{{Name: "b", Path: "../b"}})
+		res, err := Relink(path, []Link{{Name: "b", Path: "../b"}})
 		if err != nil {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
@@ -258,18 +258,18 @@ func TestReplaceOnFormatsWithoutRedirects(t *testing.T) {
 	}
 }
 
-func TestReplaceGuards(t *testing.T) {
-	if _, err := Replace("settings.gradle", nil); !errors.Is(err, ErrUnsupportedManifest) {
+func TestLinkGuards(t *testing.T) {
+	if _, err := Relink("settings.gradle", nil); !errors.Is(err, ErrUnsupportedManifest) {
 		t.Errorf("an unknown manifest must give ErrUnsupportedManifest, got %v", err)
 	}
 	path := seed(t, "go.mod", "module m\n")
-	if _, err := Replace(path, []Replacement{{Path: "../x"}}); err == nil {
+	if _, err := Relink(path, []Link{{Path: "../x"}}); err == nil {
 		t.Error("a replacement with no name must be refused")
 	}
-	if !SupportsReplace(path) || SupportsReplace("pom.xml") {
-		t.Error("SupportsReplace disagrees with the replacers table")
+	if !SupportsLink(path) || SupportsLink("pom.xml") {
+		t.Error("SupportsLink disagrees with the linkers table")
 	}
-	res, err := Replace(path, nil)
+	res, err := Relink(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestReplaceGuards(t *testing.T) {
 	}
 }
 
-func TestEveryFormatDeclaresReplaceSupport(t *testing.T) {
+func TestEveryFormatDeclaresLinkSupport(t *testing.T) {
 	// Every format is either implemented or an explicit no-op. A new format
 	// fails here until someone decides which it is.
 	noRedirect := map[manifest.Format]bool{
@@ -297,21 +297,21 @@ func TestEveryFormatDeclaresReplaceSupport(t *testing.T) {
 		manifest.FormatDockerfile: true, manifest.FormatCompose: true,
 	}
 	for _, f := range manifest.Formats {
-		_, implemented := replacers[f]
+		_, implemented := linkers[f]
 		if implemented == noRedirect[f] {
 			t.Errorf("format %q is neither implemented nor a declared no-op", f)
 		}
 	}
 }
 
-func TestReplaceErrorPathsLeaveFilesAlone(t *testing.T) {
+func TestLinkErrorPathsLeaveFilesAlone(t *testing.T) {
 	for _, tc := range []struct{ name, src string }{
 		{"go.mod", "module m\n\nrequire (\n"},
 		{"Cargo.toml", "[package\nbroken"},
 		{"pyproject.toml", "[project\nbroken"},
 	} {
 		path := seed(t, tc.name, tc.src)
-		if _, err := Replace(path, []Replacement{{Name: "x", Path: "../x"}}); err == nil {
+		if _, err := Relink(path, []Link{{Name: "x", Path: "../x"}}); err == nil {
 			t.Errorf("%s: a broken manifest should fail", tc.name)
 		}
 		if read(t, path) != tc.src {
@@ -319,16 +319,16 @@ func TestReplaceErrorPathsLeaveFilesAlone(t *testing.T) {
 		}
 	}
 	// A missing file is an error before anything is parsed.
-	if _, err := Replace("/nonexistent/go.mod", nil); err == nil {
+	if _, err := Relink("/nonexistent/go.mod", nil); err == nil {
 		t.Error("a missing manifest must error")
 	}
 }
 
-func TestReplaceRemovalsAndRepeatedEntries(t *testing.T) {
+func TestLinkRemovalsAndRepeatedEntries(t *testing.T) {
 	// A table holding more than one entry keeps its header when only one goes.
 	src := "[patch.crates-io]\na = { path = \"../a\" }\nb = { path = \"../b\" }\n"
 	path := seed(t, "Cargo.toml", src)
-	res, err := Replace(path, []Replacement{{Name: "a"}})
+	res, err := Relink(path, []Link{{Name: "a"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestReplaceRemovalsAndRepeatedEntries(t *testing.T) {
 	}
 	// Removing something absent is missing, not an error, and writes nothing.
 	before := read(t, path)
-	res, err = Replace(path, []Replacement{{Name: "gone"}})
+	res, err = Relink(path, []Link{{Name: "gone"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,12 +350,12 @@ func TestReplaceRemovalsAndRepeatedEntries(t *testing.T) {
 	}
 }
 
-func TestPubspecReplaceOverwritesANonPathOverride(t *testing.T) {
+func TestPubspecLinkOverwritesANonPathOverride(t *testing.T) {
 	// An override pointing at a git source has no path line to splice, so the
 	// entry is replaced wholesale rather than edited in place.
 	src := "name: a\n\ndependency_overrides:\n  http:\n    git:\n      url: https://example.com/http.git\n"
 	path := seed(t, "pubspec.yaml", src)
-	res, err := Replace(path, []Replacement{{Name: "http", Path: "../http"}})
+	res, err := Relink(path, []Link{{Name: "http", Path: "../http"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestPubspecReplaceOverwritesANonPathOverride(t *testing.T) {
 	}
 }
 
-func TestReplaceOnAnUnreadableAndOversizedManifest(t *testing.T) {
+func TestLinkOnAnUnreadableAndOversizedManifest(t *testing.T) {
 	dir := t.TempDir()
 	big := dir + "/go.mod"
 	f, err := os.Create(big)
@@ -381,12 +381,12 @@ func TestReplaceOnAnUnreadableAndOversizedManifest(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Replace(big, nil); !errors.Is(err, ErrManifestTooLarge) {
+	if _, err := Relink(big, nil); !errors.Is(err, ErrManifestTooLarge) {
 		t.Errorf("an oversized manifest: got %v, want ErrManifestTooLarge", err)
 	}
 }
 
-func TestNpmReplaceUsesOverridesWithAFileSpec(t *testing.T) {
+func TestNpmLinkUsesOverridesWithAFileSpec(t *testing.T) {
 	src := `{
   "name": "@acme/web",
   "version": "1.0.0",
@@ -396,7 +396,7 @@ func TestNpmReplaceUsesOverridesWithAFileSpec(t *testing.T) {
   }
 }`
 	path := seed(t, "package.json", src)
-	res, err := Replace(path, []Replacement{{Name: "@acme/core", Path: "../core"}})
+	res, err := Relink(path, []Link{{Name: "@acme/core", Path: "../core"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestNpmReplaceUsesOverridesWithAFileSpec(t *testing.T) {
 		t.Errorf("result mismatch: %+v", res)
 	}
 	// Removing it returns the file to exactly what it was.
-	if _, err := Replace(path, []Replacement{{Name: "@acme/core"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "@acme/core"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); got != src {
@@ -420,7 +420,7 @@ func TestNpmReplaceUsesOverridesWithAFileSpec(t *testing.T) {
 	}
 }
 
-func TestNpmReplaceFollowsTheFileToYarnAndPnpm(t *testing.T) {
+func TestNpmLinkFollowsTheFileToYarnAndPnpm(t *testing.T) {
 	for _, tc := range []struct{ name, src, want string }{
 		{
 			"an existing resolutions map wins",
@@ -449,7 +449,7 @@ func TestNpmReplaceFollowsTheFileToYarnAndPnpm(t *testing.T) {
 		},
 	} {
 		path := seed(t, "package.json", tc.src)
-		if _, err := Replace(path, []Replacement{{Name: "core", Path: "../core"}}); err != nil {
+		if _, err := Relink(path, []Link{{Name: "core", Path: "../core"}}); err != nil {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
@@ -461,7 +461,7 @@ func TestNpmReplaceFollowsTheFileToYarnAndPnpm(t *testing.T) {
 			t.Errorf("%s: the redirect was not written:\n%s", tc.name, got)
 		}
 		// Whatever field it chose, removing returns the original bytes.
-		if _, err := Replace(path, []Replacement{{Name: "core"}}); err != nil {
+		if _, err := Relink(path, []Link{{Name: "core"}}); err != nil {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
@@ -471,12 +471,12 @@ func TestNpmReplaceFollowsTheFileToYarnAndPnpm(t *testing.T) {
 	}
 }
 
-func TestNpmReplacePreservesEveryOtherByte(t *testing.T) {
+func TestNpmLinkPreservesEveryOtherByte(t *testing.T) {
 	// Tabs, an existing override, a trailing entry after the map, and no
 	// trailing newline. Only the map may change.
 	src := "{\n\t\"name\": \"@acme/web\",\n\t\"overrides\": {\n\t\t\"old\": \"file:../old\"\n\t},\n\t\"scripts\": {\"build\": \"tsc\"}\n}"
 	path := seed(t, "package.json", src)
-	res, err := Replace(path, []Replacement{
+	res, err := Relink(path, []Link{
 		{Name: "old", Path: "../moved"}, // repoint
 		{Name: "new", Path: "../new"},   // add beside it
 	})
@@ -494,10 +494,10 @@ func TestNpmReplacePreservesEveryOtherByte(t *testing.T) {
 	}
 }
 
-func TestNpmReplaceRemovalKeepsSiblingsAndDropsAnEmptyMap(t *testing.T) {
+func TestNpmLinkRemovalKeepsSiblingsAndDropsAnEmptyMap(t *testing.T) {
 	src := "{\n  \"name\": \"a\",\n  \"overrides\": {\n    \"one\": \"file:../one\",\n    \"two\": \"file:../two\"\n  }\n}"
 	path := seed(t, "package.json", src)
-	if _, err := Replace(path, []Replacement{{Name: "one"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "one"}}); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)
@@ -508,7 +508,7 @@ func TestNpmReplaceRemovalKeepsSiblingsAndDropsAnEmptyMap(t *testing.T) {
 		t.Errorf("removal left invalid JSON:\n%s", got)
 	}
 	// Taking the last one drops the map with it.
-	if _, err := Replace(path, []Replacement{{Name: "two"}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "two"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, path); strings.Contains(got, "overrides") {
@@ -516,14 +516,14 @@ func TestNpmReplaceRemovalKeepsSiblingsAndDropsAnEmptyMap(t *testing.T) {
 	}
 }
 
-func TestNpmReplaceNoChangeLeavesFileAlone(t *testing.T) {
+func TestNpmLinkNoChangeLeavesFileAlone(t *testing.T) {
 	src := "{\n  \"overrides\": {\n    \"core\": \"file:../core\"\n  }\n}"
 	path := seed(t, "package.json", src)
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Replace(path, []Replacement{{Name: "core", Path: "../core"}})
+	res, err := Relink(path, []Link{{Name: "core", Path: "../core"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestNpmReplaceNoChangeLeavesFileAlone(t *testing.T) {
 	}
 }
 
-func TestPubspecReplaceHandlesAnInlineOverride(t *testing.T) {
+func TestPubspecLinkHandlesAnInlineOverride(t *testing.T) {
 	// pub writes an override as a nested `path:` line, but the inline form is
 	// legal YAML and appears in hand-written pubspecs. It has to be recognised
 	// as the redirect it is, repointed in place, and removable, rather than
@@ -548,7 +548,7 @@ dependency_overrides:
     path: ../other
 `
 	path := seed(t, "pubspec.yaml", src)
-	res, err := Replace(path, []Replacement{{Name: "core", Path: "../vendor/core"}})
+	res, err := Relink(path, []Link{{Name: "core", Path: "../vendor/core"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ dependency_overrides:
 	}
 
 	// And removing it leaves the sibling and the block behind.
-	if _, err := Replace(path, []Replacement{{Name: "core", Path: ""}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "core", Path: ""}}); err != nil {
 		t.Fatal(err)
 	}
 	got = read(t, path)
@@ -576,7 +576,7 @@ dependency_overrides:
 	}
 }
 
-func TestPubspecReplaceDropsAnEmptiedBlockWithItsBlankLines(t *testing.T) {
+func TestPubspecLinkDropsAnEmptiedBlockWithItsBlankLines(t *testing.T) {
 	// Removing the last override takes the now-pointless block with it, and
 	// the blank line that separated it, so the file does not accumulate
 	// leftovers across releases.
@@ -591,7 +591,7 @@ dev_dependencies:
   test: ^1.0.0
 `
 	path := seed(t, "pubspec.yaml", src)
-	if _, err := Replace(path, []Replacement{{Name: "core", Path: ""}}); err != nil {
+	if _, err := Relink(path, []Link{{Name: "core", Path: ""}}); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, path)

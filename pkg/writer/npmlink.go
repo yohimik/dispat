@@ -49,24 +49,24 @@ func npmOverrideField(doc map[string]any) []string {
 // npmSpec renders a redirect the way all three managers read it.
 func npmSpec(path string) string { return "file:" + path }
 
-// replaceNpm points packages at local folders through the override map. Each
-// replacement is applied to freshly parsed bytes, because an insertion moves
-// every offset after it and one manifest is small enough that re-reading it is
-// cheaper than tracking the shift.
-func replaceNpm(path string, replacements []Replacement) (ReplaceResult, error) {
+// linkNpm points packages at local folders through the override map. Each link
+// is applied to freshly parsed bytes, because an insertion moves every offset
+// after it and one manifest is small enough that re-reading it is cheaper than
+// tracking the shift.
+func linkNpm(path string, links []Link) (LinkResult, error) {
 	rep, err := openReplacer(path)
 	if err != nil {
-		return ReplaceResult{}, err
+		return LinkResult{}, err
 	}
 	data := rep.bytes()
-	var res ReplaceResult
-	for _, r := range replacements {
+	var res LinkResult
+	for _, r := range links {
 		var doc map[string]any
 		if err := json.Unmarshal(data, &doc); err != nil {
 			return res, fmt.Errorf("%s: %w", path, err)
 		}
 		field := npmOverrideField(doc)
-		next, applied, err := npmApplyReplacement(data, field, r)
+		next, applied, err := npmApplyLink(data, field, r)
 		if err != nil {
 			return res, fmt.Errorf("%s: %w", path, err)
 		}
@@ -82,12 +82,12 @@ func replaceNpm(path string, replacements []Replacement) (ReplaceResult, error) 
 		rep.setWhole(data)
 	}
 	return res, rep.commit(func(out []byte) error {
-		return npmVerifyReplacements(out, res.Applied)
+		return npmVerifyLinks(out, res.Applied)
 	})
 }
 
-// npmApplyReplacement writes one redirect, reporting whether anything changed.
-func npmApplyReplacement(data []byte, field []string, r Replacement) ([]byte, bool, error) {
+// npmApplyLink writes one redirect, reporting whether anything changed.
+func npmApplyLink(data []byte, field []string, r Link) ([]byte, bool, error) {
 	obj, found, err := jsonObjectAt(data, field...)
 	if err != nil {
 		return nil, false, err
@@ -124,7 +124,7 @@ func npmApplyReplacement(data []byte, field []string, r Replacement) ([]byte, bo
 
 // npmCreateField writes the override map itself, and the pnpm object around it
 // when that is missing too.
-func npmCreateField(data []byte, field []string, r Replacement) ([]byte, bool, error) {
+func npmCreateField(data []byte, field []string, r Link) ([]byte, bool, error) {
 	inner := jsonEntryText(r.Name, npmSpec(r.Path))
 	// Walk as far down the chain as the file already goes.
 	for depth := len(field); depth > 0; depth-- {
@@ -166,10 +166,10 @@ func npmDropField(data []byte, field []string) []byte {
 	return data
 }
 
-// npmVerifyReplacements re-reads the written bytes and checks every applied
+// npmVerifyLinks re-reads the written bytes and checks every applied
 // redirect reads back as the path it asked for. Insertion can change a
 // document's structure, so proving it parses is not by itself enough.
-func npmVerifyReplacements(out []byte, applied []Replacement) error {
+func npmVerifyLinks(out []byte, applied []Link) error {
 	var doc map[string]any
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return fmt.Errorf("rewrite produced invalid JSON: %w", err)

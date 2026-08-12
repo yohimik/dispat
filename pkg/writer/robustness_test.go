@@ -42,13 +42,13 @@ func TestRewriteReportsAnUnreadableManifest(t *testing.T) {
 	}
 }
 
-func TestReplaceReportsAnUnreadableManifest(t *testing.T) {
+func TestLinkReportsAnUnreadableManifest(t *testing.T) {
 	for _, name := range []string{"package.json", "go.mod", "Cargo.toml", "pyproject.toml", "pubspec.yaml"} {
 		path := filepath.Join(t.TempDir(), name)
 		if err := os.Mkdir(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Replace(path, []Replacement{{Name: "acme", Path: "../acme"}}); err == nil {
+		if _, err := Relink(path, []Link{{Name: "acme", Path: "../acme"}}); err == nil {
 			t.Errorf("%s: an unreadable manifest must be an error", name)
 		}
 	}
@@ -88,11 +88,11 @@ func TestRewriteRefusesAManifestThatDoesNotParse(t *testing.T) {
 	}
 }
 
-func TestReplaceRefusesAManifestThatDoesNotParse(t *testing.T) {
+func TestLinkRefusesAManifestThatDoesNotParse(t *testing.T) {
 	for _, name := range []string{"package.json", "go.mod", "Cargo.toml", "pyproject.toml"} {
 		src := malformed[name]
 		path := seed(t, name, src)
-		if _, err := Replace(path, []Replacement{{Name: "acme", Path: "../acme"}}); err == nil {
+		if _, err := Relink(path, []Link{{Name: "acme", Path: "../acme"}}); err == nil {
 			t.Errorf("%s: a manifest that does not parse must be refused", name)
 			continue
 		}
@@ -114,7 +114,7 @@ func TestRewriteRefusesAManifestOverTheReadCap(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "exceeds 16 MiB") {
 		t.Errorf("an oversized manifest must be refused, got %v", err)
 	}
-	if _, err := Replace(path, []Replacement{{Name: "acme", Path: "../acme"}}); err == nil {
-		t.Error("Replace shares the cap and must refuse it too")
+	if _, err := Relink(path, []Link{{Name: "acme", Path: "../acme"}}); err == nil {
+		t.Error("Link shares the cap and must refuse it too")
 	}
 }

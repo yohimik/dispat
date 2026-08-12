@@ -32,10 +32,10 @@
 // CURRENT_PROJECT_VERSION) are deliberately not written: they are monotonic
 // counters rather than semantic versions.
 //
-// Replace is the other half of the package. Where Rewrite changes the version
-// text a manifest declares, Replace manages the directive that points a
-// dependency at a local folder, the way a go.mod replace does. Four formats
-// have such a directive; SupportsReplace reports which.
+// Relink is the other half of the package. Where Rewrite changes the version
+// text a manifest declares, Relink manages the directive that points a
+// dependency at a local folder, the way a go.mod replace does. Five formats
+// have such a directive; SupportsLink reports which.
 //
 // Underneath both sits one replacer. Every format writer reads its file
 // through it and writes its file through it, so the read cap, the splice, the

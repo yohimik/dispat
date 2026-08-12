@@ -52,11 +52,11 @@ holds the ones the manifest does not declare at all, which usually means the cal
 | `Gemfile`                      | yes (per-line splice, quote style preserved)       | no such field                          | no such directive        |
 | `*.gemspec`                    | yes (per-line splice)                              | yes (`spec.version`)                   | no such directive        |
 
-The last column is `Replace`, the other half of this package. Where `Rewrite` changes the version text a manifest
-declares, `Replace` manages the directive that points a dependency at a folder in the same repository instead of at a
+The last column is `Relink`, the other half of this package. Where `Rewrite` changes the version text a manifest
+declares, `Relink` manages the directive that points a dependency at a folder in the same repository instead of at a
 registry. Only five formats have such a directive to manage, which is why the rest of the column reads the way it does:
 a NuGet package reference or a Maven coordinate names a package and nothing else, and there is no spelling for
-"resolve this one locally" for `Replace` to add or remove. `SupportsReplace` reports the same five at runtime.
+"resolve this one locally" for `Relink` to add or remove. `SupportsLink` reports the same five at runtime.
 
 A Docker image is named rather than located too. A reference points at a registry, so there is no redirect to manage —
 building the image from a folder in this repository is what a compose file's `build:` says, and that is the author's
@@ -97,7 +97,7 @@ repository:
 ```sh
 dispat writer packages/web/package.json --set-version 1.3.0     # the own version
 dispat writer packages/web/package.json --set @acme/core=^1.3.0 # a declared range
-dispat writer services/api/go.mod --replace github.com/acme/core=../core
+dispat writer services/api/go.mod --link github.com/acme/core=../core
 dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a missing edit
 ```
 
@@ -138,14 +138,14 @@ enough context to be unambiguous: `com.acme:core:1.2.0`, not `1.2.0`.
 `go.mod` can point a dependency somewhere else, and a few other formats can too:
 
 ```go
-res, err := writer.Replace("services/svc/go.mod", []writer.Replacement{
+res, err := writer.Relink("services/svc/go.mod", []writer.Link{
 {Name: "github.com/acme/core", Path: "../../pkg/core"},
 })
 // res.Applied, res.Skipped, res.Missing, res.Path
 ```
 
 An empty `Path` removes the redirect instead of adding one, which is what a release does before publishing: a local
-replace that ships to consumers gives them a module they cannot resolve.
+link that ships to consumers gives them a module they cannot resolve.
 
 | Format           | Directive                                      | How the redirect is spelled                       |
 |------------------|------------------------------------------------|---------------------------------------------------|
@@ -155,11 +155,11 @@ replace that ships to consumers gives them a module they cannot resolve.
 | `pyproject.toml` | `[tool.uv.sources]`                            | `core = { path = "../core" }`                     |
 | `package.json`   | `overrides`, `resolutions` or `pnpm.overrides` | `"core": "file:../core"`                          |
 
-`Replacement.Version` narrows the redirect to one required version, which only `go.mod` can express. The others key
-their directive on the name alone and ignore it.
+`Link.Version` narrows the redirect to one required version, which only `go.mod` can express. The others key their
+directive on the name alone and ignore it.
 
-`SupportsReplace` answers in advance whether a file has anywhere to put one. Every other format writes nothing and
-reports each replacement in `Skipped`.
+`SupportsLink` answers in advance whether a file has anywhere to put one. Every other format writes nothing and
+reports each link in `Skipped`.
 
 npm, Yarn and pnpm each name that map differently, so the field is chosen by reading the file rather than by guessing.
 An existing `resolutions` or `pnpm.overrides` wins, then a `packageManager` field naming yarn or pnpm, and npm's

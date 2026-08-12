@@ -24,23 +24,23 @@ import (
 // table, that was not there. The validation is stronger to match: the result
 // has to parse, and the entry has to read back as the path that was asked for.
 
-// tomlReplace applies path redirects to a package-keyed table.
-func tomlReplace(path, table string, replacements []Replacement) (ReplaceResult, error) {
+// tomlLink applies path redirects to a package-keyed table.
+func tomlLink(path, table string, links []Link) (LinkResult, error) {
 	rep, err := openReplacer(path)
 	if err != nil {
-		return ReplaceResult{}, err
+		return LinkResult{}, err
 	}
 	var doc map[string]any
 	if err := toml.Unmarshal(rep.bytes(), &doc); err != nil {
-		return ReplaceResult{}, fmt.Errorf("%s: %w", path, err)
+		return LinkResult{}, fmt.Errorf("%s: %w", path, err)
 	}
 
 	var (
-		res     ReplaceResult
+		res     LinkResult
 		lines   = rep.lines()
 		changed bool
 	)
-	for _, r := range replacements {
+	for _, r := range links {
 		idx, start, end, found := tomlEntryValueSpan(lines, table, r.Name)
 		switch {
 		case r.Path == "" && !found:
@@ -67,7 +67,7 @@ func tomlReplace(path, table string, replacements []Replacement) (ReplaceResult,
 		rep.setLines(lines)
 	}
 	return res, rep.commit(func(out []byte) error {
-		return tomlVerifyReplacements(out, table, res.Applied)
+		return tomlVerifyLinks(out, table, res.Applied)
 	})
 }
 
@@ -179,10 +179,10 @@ func tomlDropEntry(lines []string, table string, idx int) []string {
 	return append(out[:start], out[stop:]...)
 }
 
-// tomlVerifyReplacements re-reads the written bytes and checks every applied
+// tomlVerifyLinks re-reads the written bytes and checks every applied
 // redirect reads back as the path it asked for. Insertion can change a file's
 // structure, so proving it parses is not by itself enough.
-func tomlVerifyReplacements(out []byte, table string, applied []Replacement) error {
+func tomlVerifyLinks(out []byte, table string, applied []Link) error {
 	var doc map[string]any
 	if err := toml.Unmarshal(out, &doc); err != nil {
 		return fmt.Errorf("rewrite produced invalid TOML: %w", err)

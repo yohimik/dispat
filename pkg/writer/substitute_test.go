@@ -37,7 +37,7 @@ func subNames(subs []Substitution) string {
 	return strings.Join(parts, ",")
 }
 
-func TestSubstituteReplacesEveryOccurrence(t *testing.T) {
+func TestSubstituteLinksEveryOccurrence(t *testing.T) {
 	path := seedText(t, "README.md", "acme-core:1.2.3 and again acme-core:1.2.3\nplus acme-core:1.2.3\n")
 	res, err := Substitute(path, []Substitution{{Find: "acme-core:1.2.3", Write: "acme-core:1.3.0"}})
 	if err != nil {
@@ -232,7 +232,7 @@ func TestSubstituteBytesIgnoresAnEmptyFind(t *testing.T) {
 // The internal replacer's own edges, which no format writer can reach on
 // purpose but which stand between a bug and a corrupted manifest.
 
-func TestReplacerRefusesOverlappingPatches(t *testing.T) {
+func TestLinkrRefusesOverlappingPatches(t *testing.T) {
 	path := seedText(t, "notes.txt", "0123456789")
 	rep, err := openReplacer(path)
 	if err != nil {
@@ -249,7 +249,7 @@ func TestReplacerRefusesOverlappingPatches(t *testing.T) {
 	}
 }
 
-func TestReplacerRefusesSpansOnARegeneratedFile(t *testing.T) {
+func TestLinkrRefusesSpansOnARegeneratedFile(t *testing.T) {
 	path := seedText(t, "notes.txt", "0123456789")
 	rep, err := openReplacer(path)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestReplacerRefusesSpansOnARegeneratedFile(t *testing.T) {
 	}
 }
 
-func TestReplacerAppliesPatchesInOffsetOrder(t *testing.T) {
+func TestLinkrAppliesPatchesInOffsetOrder(t *testing.T) {
 	// Queued out of order and of different widths, so a splice that used stale
 	// offsets would land visibly wrong.
 	path := seedText(t, "notes.txt", "aaa bbb ccc")
@@ -284,7 +284,7 @@ func TestReplacerAppliesPatchesInOffsetOrder(t *testing.T) {
 	}
 }
 
-func TestReplacerLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
+func TestLinkrLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
 	path := seedText(t, "notes.txt", "before")
 	rep, err := openReplacer(path)
 	if err != nil {
@@ -300,7 +300,7 @@ func TestReplacerLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
 	}
 }
 
-func TestReplacerAtAndTextReadTheFileAsFound(t *testing.T) {
+func TestLinkrAtAndTextReadTheFileAsFound(t *testing.T) {
 	path := seedText(t, "notes.txt", "hello world")
 	rep, err := openReplacer(path)
 	if err != nil {
@@ -317,7 +317,7 @@ func TestReplacerAtAndTextReadTheFileAsFound(t *testing.T) {
 	}
 }
 
-func TestOpenReplacerRefusesAnOversizedFile(t *testing.T) {
+func TestOpenLinkrRefusesAnOversizedFile(t *testing.T) {
 	path := seedText(t, "huge.txt", "x")
 	if err := os.Truncate(path, maxManifestBytes+1); err != nil {
 		t.Skipf("cannot make a sparse file here: %v", err)

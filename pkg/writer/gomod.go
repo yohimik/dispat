@@ -56,24 +56,24 @@ func rewriteGoMod(path string, edits []Edit) (Result, error) {
 	return res, rep.commit(nil)
 }
 
-// replaceGoMod adds, repoints and removes replace directives. x/mod's modfile
+// linkGoMod adds, repoints and removes replace directives. x/mod's modfile
 // owns the formatting, the same reason rewriteGoMod uses it: AddReplace edits
 // an existing directive in place and appends a new one in the file's own
 // style, DropReplace removes it, and Cleanup tidies the block a removal can
 // leave behind.
 //
-// A replacement carrying a Version narrows the directive to that required
-// version, which is go.mod's own `replace acme/core v1.2.0 => ../core` form.
+// A link carrying a Version narrows the directive to that required version,
+// which is go.mod's own `replace acme/core v1.2.0 => ../core` form.
 // The other formats have no such notion, so this is the only writer that reads
 // the field.
-func replaceGoMod(path string, replacements []Replacement) (ReplaceResult, error) {
+func linkGoMod(path string, links []Link) (LinkResult, error) {
 	rep, err := openReplacer(path)
 	if err != nil {
-		return ReplaceResult{}, err
+		return LinkResult{}, err
 	}
 	f, err := modfile.Parse(path, rep.bytes(), nil)
 	if err != nil {
-		return ReplaceResult{}, fmt.Errorf("%s: %w", path, err)
+		return LinkResult{}, fmt.Errorf("%s: %w", path, err)
 	}
 	// The directives already in the file, so a redirect that is already what
 	// was asked for counts as no change rather than as work done.
@@ -82,8 +82,8 @@ func replaceGoMod(path string, replacements []Replacement) (ReplaceResult, error
 		existing[directive.Old.Path+"\x00"+directive.Old.Version] = directive.New.Path
 	}
 
-	var res ReplaceResult
-	for _, r := range replacements {
+	var res LinkResult
+	for _, r := range links {
 		key := r.Name + "\x00" + r.Version
 		current, declared := existing[key]
 		switch {

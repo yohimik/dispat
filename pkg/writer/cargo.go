@@ -200,9 +200,9 @@ func cargoVersionSpan(index tomlIndex, lines []string, table, key string) (idx, 
 // path standing in for the published crate.
 const cargoPatchTable = "patch.crates-io"
 
-// replaceCargo points crates at local folders through [patch.crates-io], which
+// linkCargo points crates at local folders through [patch.crates-io], which
 // is Cargo's equivalent of a go.mod replace. The older [replace] table does
 // the same job and is deprecated, so a redirect is always written as a patch.
-func replaceCargo(path string, replacements []Replacement) (ReplaceResult, error) {
-	return tomlReplace(path, cargoPatchTable, replacements)
+func linkCargo(path string, links []Link) (LinkResult, error) {
+	return tomlLink(path, cargoPatchTable, links)
 }
