@@ -319,7 +319,7 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 		// The entry was written earlier — by a `dispat changelog` step in the
 		// flow, or by a previous run. Writing again would duplicate it, so
 		// this write, wherever it comes from, is a skip.
-		w.Log.Info().Str("code", plan.CodeChangelogEntryExists).
+		w.Log.Warn().Str("code", plan.CodeChangelogEntryExists).
 			Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
 			Msg("changelog entry already exists, skipped")
 		return nil

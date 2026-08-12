@@ -206,7 +206,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	case err != nil:
 		return err
 	case exists:
-		r.Log.Info().Str("code", plan.CodeGitHubReleaseExists).
+		r.Log.Warn().Str("code", plan.CodeGitHubReleaseExists).
 			Str("package", rel.Pkg.Name).Str("tag", tag).
 			Msg("github release already exists, skipped")
 		return nil
