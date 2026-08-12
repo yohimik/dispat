@@ -30,16 +30,11 @@ import (
 // when it carries `kind` or `keep`. A consumer with exactly one provider may
 // name it directly instead of wrapping it in an array.
 //
-// An array of {consumer, provider} edges is also accepted, since a generated
-// config often has one to hand:
-//
-//	"dependencies": [{ "consumer": "app", "provider": "core" }]
-//
-// Items of that array may themselves be consumer-keyed objects, which is the
-// same shorthand the map form uses for one consumer.
-//
-// The two forms mix freely and merge with the provider lists packages declare
-// for themselves (PackageConfig.Dependencies) into one list.
+// This is the only shape the key accepts. An edge is addressed to a consumer
+// wherever it is written — a space's object is keyed the same way, and a
+// package's own list (ProviderList) is one consumer's entry with the key left
+// implicit — so `consumer` is never a key an author writes, and every
+// declaration merges into one list.
 type Dependencies []DependencyConfig
 
 // MarshalJSON writes the canonical map form. Consumers come out in sorted
@@ -189,54 +184,21 @@ func NormalizeProviders(raw any, where string) (ProviderList, error) {
 	return out, nil
 }
 
-// NormalizeDependencies expands any accepted form of the `dependencies` value
-// into the flat edge list everything downstream works with.
+// NormalizeDependencies expands the `dependencies` value into the flat edge
+// list everything downstream works with.
 //
 // It is the single implementation behind both entry points — UnmarshalJSON
 // here, and the CLI's decode hook, which hands over whatever its config reader
 // produced. Two readers of one syntax would be two syntaxes eventually.
 func NormalizeDependencies(raw any) (Dependencies, error) {
-	switch v := raw.(type) {
-	case nil:
+	if raw == nil {
 		return nil, nil
-	case []any:
-		return normalizeEdgeList(v)
-	default:
-		m, ok := stringKeyed(raw)
-		if !ok {
-			return nil, fmt.Errorf(
-				"dependencies wants an object keyed by consumer, or an array of {consumer, provider} edges")
-		}
-		return normalizeConsumerMap(m, "dependencies")
 	}
-}
-
-// normalizeEdgeList expands the array form. An item carrying a `consumer` or
-// `provider` key is one full edge; any other object is a consumer-keyed group,
-// the same shape the map form is made of.
-func normalizeEdgeList(items []any) (Dependencies, error) {
-	var out Dependencies
-	for i, item := range items {
-		where := fmt.Sprintf("dependencies[%d]", i)
-		m, ok := stringKeyed(item)
-		if !ok {
-			return nil, fmt.Errorf("%s: wants an object", where)
-		}
-		if isEdgeObject(m) {
-			edge, err := edgeFromObject(m, where)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, edge)
-			continue
-		}
-		group, err := normalizeConsumerMap(m, where)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, group...)
+	m, ok := stringKeyed(raw)
+	if !ok {
+		return nil, fmt.Errorf("dependencies wants an object keyed by consumer")
 	}
-	return out, nil
+	return normalizeConsumerMap(m, "dependencies")
 }
 
 // normalizeConsumerMap expands one consumer -> providers object. Consumers are
@@ -279,33 +241,19 @@ func edgeFromItem(item any, where string) (DependencyConfig, error) {
 	if !ok {
 		return DependencyConfig{}, fmt.Errorf("%s: wants a provider name or an object", where)
 	}
-	edge, err := edgeFromObject(m, where)
-	if err != nil {
-		return DependencyConfig{}, err
-	}
-	if edge.Consumer != "" {
-		// A consumer key inside a consumer's own list is a config that means
-		// two different things at once, and guessing which would put the edge
-		// on the wrong package.
-		return DependencyConfig{}, fmt.Errorf(
-			"%s: consumer is already %q here, so the entry must not name another one", where, edge.Consumer)
-	}
-	return edge, nil
+	return edgeFromObject(m, where)
 }
 
-// edgeFromObject reads the four fields of an edge object, rejecting anything
-// else so a typo is a load error rather than a silently ignored key.
+// edgeFromObject reads the three fields of a provider object, rejecting
+// anything else so a typo is a load error rather than a silently ignored key.
+// `consumer` is among the rejected: the key the entry sits under already says
+// which package the edge belongs to, and an entry naming a second one would
+// mean two things at once.
 func edgeFromObject(m map[string]any, where string) (DependencyConfig, error) {
 	var edge DependencyConfig
 	for _, k := range sortedMapKeys(m) {
 		value := m[k]
 		switch strings.ToLower(k) {
-		case "consumer":
-			s, ok := value.(string)
-			if !ok {
-				return edge, fmt.Errorf("%s: consumer wants a package name", where)
-			}
-			edge.Consumer = s
 		case "provider":
 			s, ok := value.(string)
 			if !ok {
@@ -325,7 +273,7 @@ func edgeFromObject(m map[string]any, where string) (DependencyConfig, error) {
 			}
 			edge.Keep = b
 		default:
-			return edge, fmt.Errorf("%s: unknown key %q, want consumer, provider, kind or keep", where, k)
+			return edge, fmt.Errorf("%s: unknown key %q, want provider, kind or keep", where, k)
 		}
 	}
 	return edge, nil
@@ -349,18 +297,6 @@ func itemList(v any) ([]any, bool) {
 		}
 		return nil, false
 	}
-}
-
-// isEdgeObject reports whether an array item is a full edge rather than a
-// consumer-keyed group.
-func isEdgeObject(m map[string]any) bool {
-	for k := range m {
-		switch strings.ToLower(k) {
-		case "consumer", "provider":
-			return true
-		}
-	}
-	return false
 }
 
 // stringKeyed normalises the two object shapes a config reader can produce:

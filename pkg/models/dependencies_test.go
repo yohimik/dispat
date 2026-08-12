@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// The `dependencies` key is the one place the config language accepts more
-// than one shape for the same thing, so what is tested here is that every
-// shape lands on the same edges, that the shape written back is the canonical
-// one, and that a mistake is located precisely enough to fix.
+// The `dependencies` key has exactly one shape: an object keyed by consumer.
+// What is tested here is that every item shape inside it lands on the right
+// edges, that the shape written back is the one that was read, and that a
+// mistake is located precisely enough to fix.
 
 // decode is the public entry point a config file goes through.
 func decode(t *testing.T, src string) Dependencies {
@@ -54,21 +54,9 @@ func TestDependenciesMapForm(t *testing.T) {
 	}, "the map form, with every item shape it accepts")
 }
 
-func TestDependenciesEdgeListForm(t *testing.T) {
-	eq(t, decode(t, `[
-		{"consumer": "app", "provider": "core", "kind": "peerDependencies"},
-		{"web": ["core", {"provider": "utils", "keep": true}]}
-	]`), Dependencies{
-		{Consumer: "app", Provider: "core", Kind: "peerDependencies"},
-		{Consumer: "web", Provider: "core"},
-		{Consumer: "web", Provider: "utils", Keep: true},
-	}, "full edges and consumer-keyed items in one array")
-}
-
 func TestDependenciesEmpty(t *testing.T) {
 	eq(t, decode(t, `{}`), nil, "an empty object declares no edges")
-	eq(t, decode(t, `[]`), nil, "and neither does an empty array")
-	eq(t, decode(t, `null`), nil, "nor an absent value")
+	eq(t, decode(t, `null`), nil, "and neither does an absent value")
 }
 
 func TestDependenciesMarshalsTheCanonicalForm(t *testing.T) {
@@ -123,15 +111,18 @@ func TestDependenciesErrorsLocateTheEntry(t *testing.T) {
 		{"keep is not a boolean", `{"web": [{"provider": "core", "keep": "yes"}]}`,
 			`dependencies["web"][0]: keep wants true or false`},
 		{"unknown key", `{"web": [{"provider": "core", "kepe": true}]}`,
-			`dependencies["web"][0]: unknown key "kepe", want consumer, provider, kind or keep`},
-		{"consumer named twice", `{"web": [{"consumer": "api", "provider": "core"}]}`,
-			`dependencies["web"][0]: consumer is already "api" here, so the entry must not name another one`},
-		{"array item located by position", `[{"web": 7}]`,
-			`dependencies[0]["web"]: wants a provider name`},
-		{"array item is not an object", `["core"]`,
-			`dependencies[0]: wants an object`},
-		{"neither an object nor an array", `"core"`,
-			`dependencies wants an object keyed by consumer, or an array of {consumer, provider} edges`},
+			`dependencies["web"][0]: unknown key "kepe", want provider, kind or keep`},
+		// The key an entry sits under is the consumer. An entry naming one
+		// itself would mean two things at once, so `consumer` is refused like
+		// any other key that does not belong.
+		{"consumer named in an entry", `{"web": [{"consumer": "api", "provider": "core"}]}`,
+			`dependencies["web"][0]: unknown key "consumer", want provider, kind or keep`},
+		{"an array of edges is not a shape", `[{"consumer": "app", "provider": "core"}]`,
+			`dependencies wants an object keyed by consumer`},
+		{"an empty array is not a shape either", `[]`,
+			`dependencies wants an object keyed by consumer`},
+		{"not an object", `"core"`,
+			`dependencies wants an object keyed by consumer`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := decodeErr(t, tc.src); !strings.Contains(got, tc.want) {

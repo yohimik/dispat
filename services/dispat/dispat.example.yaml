@@ -237,9 +237,8 @@ custom:
   team: platform
 
 # Consumer -> provider relations, keyed by the consumer. A provider is a bare
-# name, or an object when the edge carries kind or keep. An array of
-# {consumer, provider} objects is accepted too, which is what a generated
-# config usually has to hand.
+# name, or an object when the edge carries kind or keep. The key an entry sits
+# under is its consumer, so an entry never names one itself.
 #
 # Packages may also declare their own providers in their `packages` entry or
 # in-folder file, and everything merges into one list. `dispat compute`

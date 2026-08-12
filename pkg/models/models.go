@@ -39,8 +39,8 @@ type File struct {
 	// naming it in their versionGroup key; see VersionGroupConfig.
 	VersionGroups map[string]VersionGroupConfig `mapstructure:"versionGroups" json:"versionGroups,omitempty"`
 	// Dependencies declares consumer -> provider edges, as an object keyed by
-	// consumer. See the Dependencies type for the forms it accepts. Packages
-	// may also declare their own providers; see PackageConfig.Dependencies.
+	// consumer. See the Dependencies type. Spaces and packages may declare
+	// their own; see SpaceConfig.Dependencies and PackageConfig.Dependencies.
 	// All declarations merge into one list.
 	Dependencies Dependencies `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	// Concurrency accepts a single value applied to both stages
@@ -882,14 +882,15 @@ type SpaceFlowConfig struct {
 }
 
 // DependencyConfig is one consumer -> provider relation: the decoded form of
-// every shape the `dependencies` key accepts, and the element type of
-// Dependencies.
+// the `dependencies` key, and the element type of Dependencies.
 //
 // The yaml tags exist because the CLI's compute command re-encodes this one
 // struct when editing a YAML config in place; without them the encoder would
 // write lowercased field names with `kind: ""` / `keep: false` noise on every
 // edge.
 type DependencyConfig struct {
+	// Consumer is filled in from the key the entry sits under, never from the
+	// entry itself: a `consumer` key inside a provider object is refused.
 	Consumer string `mapstructure:"consumer" json:"consumer,omitempty" yaml:"consumer"`
 	Provider string `mapstructure:"provider" json:"provider,omitempty" yaml:"provider"`
 	// Kind is the manifest dependency field the edge stands for:

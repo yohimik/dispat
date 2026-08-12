@@ -35,16 +35,19 @@ type Edit struct {
 // ["packages", <key>, "dependencies"] for a packages entry of the root
 // config — leaving every other byte of a JSON config (formatting, key order,
 // comments) untouched; a YAML config keeps its comments but is re-encoded,
-// so unrelated formatting may reflow, and a shorthand-authored list comes
-// back in the canonical object form. The previous bytes are saved at path +
+// so unrelated formatting may reflow. The previous bytes are saved at path +
 // BackupSuffix first, and the write itself is atomic (temp + rename). TOML
 // returns ErrTOMLEdit.
+//
+// deps is the Dependencies type rather than a bare slice so that the value
+// goes through that type's marshaller: the key is written as the object keyed
+// by consumer, which is the only shape the loader reads back.
 //
 // The file is re-read here: deps must be the caller's complete intended
 // list, and an edit made to the file by someone else between the caller's
 // read and this call is overwritten for that one key (every other key keeps
 // the concurrent edit).
-func ReplaceDependencies(path string, keyPath []string, deps []DependencyConfig) error {
+func ReplaceDependencies(path string, keyPath []string, deps Dependencies) error {
 	return ReplaceKeys(path, []Edit{{KeyPath: keyPath, Value: deps}})
 }
 

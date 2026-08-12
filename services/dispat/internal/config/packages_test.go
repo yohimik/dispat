@@ -1101,29 +1101,50 @@ func TestPackageDependenciesInvalid(t *testing.T) {
 	assert.Contains(t, err.Error(), `packages["utils"]: dependencies[0]: unknown provider package "ghost"`)
 }
 
-// TestDependencyShorthand: a dependencies item keyed by consumer name — its
-// value one provider or an array — expands into full entries at load, next
-// to the canonical objects.
-func TestDependencyShorthand(t *testing.T) {
+// TestDependencyArrayFormRefused: `dependencies` has one shape, an object
+// keyed by consumer. An array — of full edges, of consumer-keyed groups, or
+// empty — is refused at load, so a config written the other way is a mistake
+// the author is told about rather than a second syntax to maintain.
+func TestDependencyArrayFormRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		deps any
+	}{
+		{"edge objects", []any{map[string]any{"consumer": "app", "provider": "core"}}},
+		{"consumer-keyed groups", []any{map[string]any{"web": []any{"core", "utils"}}}},
+		{"empty", []any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeRawRepo(t, map[string]any{
+				"scripts": map[string]any{"build": "echo b"},
+				"spaces": map[string]any{
+					"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+				},
+				"dependencies": tc.deps,
+			}, "pkgs/core")
+			_, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "dependencies wants an object keyed by consumer")
+		})
+	}
+}
+
+// TestDependencyConsumerKeyRefused: the key an entry sits under is its
+// consumer, so an entry naming a second one is refused like any other key
+// that does not belong on a provider object.
+func TestDependencyConsumerKeyRefused(t *testing.T) {
 	root := writeRawRepo(t, map[string]any{
 		"scripts": map[string]any{"build": "echo b"},
 		"spaces": map[string]any{
 			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
 		},
-		"dependencies": []any{
-			map[string]any{"consumer": "app", "provider": "core", "kind": "devDependencies"},
-			map[string]any{"web": []any{"core", "utils"}},
-			map[string]any{"app": "utils"},
+		"dependencies": map[string]any{
+			"web": []any{map[string]any{"consumer": "app", "provider": "core"}},
 		},
 	}, "pkgs/core")
-	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
-	require.NoError(t, err)
-	require.Len(t, cfg.Dependencies, 4)
-	assert.Equal(t, DependencyConfig{Consumer: "app", Provider: "core", Kind: "devDependencies"},
-		cfg.Dependencies[0], "the full object decodes as before")
-	assert.Equal(t, DependencyConfig{Consumer: "web", Provider: "core"}, cfg.Dependencies[1])
-	assert.Equal(t, DependencyConfig{Consumer: "web", Provider: "utils"}, cfg.Dependencies[2])
-	assert.Equal(t, DependencyConfig{Consumer: "app", Provider: "utils"}, cfg.Dependencies[3])
+	_, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `dependencies["web"][0]: unknown key "consumer", want provider, kind or keep`)
 }
 
 // TestPackageDependenciesCarryKindAndKeep: a package's own list holds exactly
@@ -1291,19 +1312,19 @@ func TestCanonicaliseEndpoints(t *testing.T) {
 	})
 }
 
-// TestDependencyShorthandInvalidValue: a shorthand value that is neither a
-// name nor an array of names fails the load with the item located.
-func TestDependencyShorthandInvalidValue(t *testing.T) {
+// TestDependencyInvalidValue: a consumer's value that is neither a name nor
+// an array of names fails the load with the consumer located.
+func TestDependencyInvalidValue(t *testing.T) {
 	root := writeRawRepo(t, map[string]any{
 		"scripts": map[string]any{"build": "echo b"},
 		"spaces": map[string]any{
 			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
 		},
-		"dependencies": []any{map[string]any{"web": 7}},
+		"dependencies": map[string]any{"web": 7},
 	}, "pkgs/core")
 	_, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `dependencies[0]["web"]`, "the item is located, array position included")
+	assert.Contains(t, err.Error(), `dependencies["web"]`, "the consumer locates the mistake")
 	assert.Contains(t, err.Error(), "wants a provider name, or an array of provider names and objects")
 }
 

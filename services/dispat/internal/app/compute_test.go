@@ -123,20 +123,21 @@ func TestComputeWriteAppliesAndBacksUp(t *testing.T) {
 	assert.Contains(t, out.String(), "in sync")
 }
 
-// TestComputeWriteConvertsAnEdgeListToTheCanonicalForm: whichever form a
-// config was authored in, what compute writes back is the consumer-keyed
-// object. It is a whole-key rewrite either way, and leaving two spellings of
-// the same key in circulation is how a project ends up with both.
-func TestComputeWriteConvertsAnEdgeListToTheCanonicalForm(t *testing.T) {
+// TestComputeWriteRewritesTheRootObject: an addition to the root
+// `dependencies` object is spliced into the object that is already there,
+// keeping the shape the loader reads — a bare name for a plain edge, the
+// consumer as the key — so the file compute writes is a file compute can read
+// again.
+func TestComputeWriteRewritesTheRootObject(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages"), 0o755))
 	cfgPath := filepath.Join(root, "dispat.json")
 	require.NoError(t, os.WriteFile(cfgPath, []byte(`{
   "scripts": {"build": "true"},
   "spaces": {"libs": {"path": "packages", "flow": {"build": ["build"]}}},
-  "dependencies": [
-    {"consumer": "web", "provider": "core"}
-  ]
+  "dependencies": {
+    "web": ["core"]
+  }
 }
 `), 0o644))
 	loaded, err := config.Load(cfgPath, nil)
@@ -154,13 +155,13 @@ func TestComputeWriteConvertsAnEdgeListToTheCanonicalForm(t *testing.T) {
 
 	written, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(written), `"dependencies": {`, "written as the canonical object")
-	assert.NotContains(t, string(written), `"consumer"`, "the consumer is the key now")
+	assert.Contains(t, string(written), `"dependencies": {`, "still the object keyed by consumer")
+	assert.NotContains(t, string(written), `"consumer"`, "the consumer is the key, never a field")
 	assert.Contains(t, string(written), `"core"`)
 	assert.Contains(t, string(written), `"utils"`)
 
-	// Converted, not corrupted: the config still loads and still says the
-	// same thing, and a second run has nothing left to suggest.
+	// Written, not corrupted: the config still loads and now says both edges,
+	// and a second run has nothing left to suggest.
 	reloaded, err := config.Load(cfgPath, nil)
 	require.NoError(t, err)
 	assert.Equal(t, config.Dependencies{

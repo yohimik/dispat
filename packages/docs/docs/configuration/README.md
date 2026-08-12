@@ -94,19 +94,8 @@ without regard to case. Self-dependencies and cycles are rejected; duplicates ar
 their own providers in their `packages` entry or in-folder file (see
 [package dependencies](./packages.md#package-dependencies)), and every declaration merges into one list.
 
-### The array form
-
-An array of `{consumer, provider}` objects is accepted too, which is the shape a generated config usually has to hand:
-
-```yaml
-dependencies:
-  - consumer: app
-    provider: core
-  - web: [core, utils]   # an item may be keyed by consumer, as above
-```
-
-The two forms mean the same thing and may sit in one file. `dispat compute --write` writes the consumer-keyed object,
-so a config it edits comes back in that form.
+The object keyed by consumer is the only shape the key accepts. An entry inside a consumer's list may not name a
+`consumer` of its own, because the key it sits under already says which package the edge belongs to.
 
 ## Script sequences
 
