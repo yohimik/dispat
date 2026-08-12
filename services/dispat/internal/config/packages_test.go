@@ -2542,3 +2542,137 @@ func TestSpaceConcurrencyInvalid(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "concurrency accepts at most two values")
 }
+
+// writeIgnoreFile drops a .dispatignore into a folder.
+func writeIgnoreFile(t *testing.T, root, dir, body string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(dir), DispatignoreName),
+		[]byte(body), 0o644))
+}
+
+// TestIgnoreChainLevelsConcatenate: the change-scope patterns of every level
+// apply together, nearest last, so a package can re-include what the
+// repository excluded.
+func TestIgnoreChainLevelsConcatenate(t *testing.T) {
+	cfg := validConfig()
+	cfg.Ignore = []string{"*.md"}
+	withLibs(&cfg, func(sc *SpaceConfig) { sc.Ignore = []string{"fixtures/"} })
+	cfg.Packages = map[string]PackageConfig{
+		"core": {Ignore: []string{"!README.md", "scratch/"}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	core := byName["core"]
+	assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/docs/guide.md")),
+		"the repository level reaches every package")
+	assert.False(t, core.Ignore.Ignores(slash(root, "packages/libs/core/README.md")),
+		"and the package lifts it for itself")
+	assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/scratch/x.go")))
+	assert.False(t, core.Counts(slash(root, "packages/libs/core/scratch/x.go")))
+	assert.True(t, core.Counts(slash(root, "packages/libs/core/main.go")),
+		"everything nobody excluded still counts")
+
+	utils := byName["utils"]
+	assert.True(t, utils.Ignore.Ignores(slash(root, "packages/libs/utils/README.md")),
+		"a sibling does not inherit the package's re-inclusion")
+	assert.True(t, utils.Ignore.Ignores(slash(root, "packages/libs/utils/fixtures/a.json")),
+		"the space level reaches its own packages")
+
+	app := byName["app"]
+	assert.False(t, app.Ignore.Ignores(slash(root, "packages/apps/app/fixtures/a.json")),
+		"and not another space's")
+	assert.True(t, app.Ignore.Ignores(slash(root, "packages/apps/app/notes.md")))
+}
+
+// slash builds the absolute slash-separated path the planner asks about.
+func slash(root, rel string) string {
+	return filepath.ToSlash(filepath.Join(root, filepath.FromSlash(rel)))
+}
+
+// TestIgnoreFileAndKeyAgree: a .dispatignore file says what the `ignore` key
+// says, at whichever level it sits in, and the file is read after the key of
+// the same level.
+func TestIgnoreFileAndKeyAgree(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {Ignore: []string{"docs/"}}}
+	root := writeModelRepo(t, cfg, "packages/libs/core/docs", "packages/libs/utils", "packages/apps/app")
+	writeIgnoreFile(t, root, ".", "*.md\n")
+	writeIgnoreFile(t, root, "packages/libs", "# not a release trigger\nfixtures/\n")
+	writeIgnoreFile(t, root, "packages/libs/core", "!docs/api.md\n")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	core := byName["core"]
+	assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/docs/guide.md")),
+		"the entry's key applies")
+	assert.False(t, core.Ignore.Ignores(slash(root, "packages/libs/core/docs/api.md")),
+		"and the folder's file has the last word at that level")
+	assert.True(t, byName["utils"].Ignore.Ignores(slash(root, "packages/libs/utils/fixtures/a.json")))
+	assert.True(t, byName["app"].Ignore.Ignores(slash(root, "packages/apps/app/notes.md")),
+		"the repository's own file reaches every space")
+}
+
+// TestIgnorePackageLayersAccumulate: the four package layers add patterns
+// rather than replacing them, which is the one merge rule this key has.
+func TestIgnorePackageLayersAccumulate(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {Ignore: []string{"docs/"}}}
+	withLibs(&cfg, func(sc *SpaceConfig) {
+		sc.Packages = map[string]PackageConfig{"core": {Ignore: []string{"fixtures/"}}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	writePackageFile(t, root, "packages/libs/core", PackageConfig{Ignore: []string{"scratch/"}})
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+	for _, rel := range []string{"docs/a.md", "fixtures/a.json", "scratch/a.go"} {
+		assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/"+rel)), rel)
+	}
+	assert.True(t, core.Counts(slash(root, "packages/libs/core/main.go")))
+}
+
+// TestIgnoreStandalonePackage: a package outside every space still sits under
+// the repository's patterns and carries its own.
+func TestIgnoreStandalonePackage(t *testing.T) {
+	cfg := validConfig()
+	cfg.Ignore = []string{"*.md"}
+	cfg.Packages = map[string]PackageConfig{"tool": {Path: "tools/tool", Ignore: []string{"testdata/"}}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	tool := packagesByName(pkgs)["tool"]
+	assert.True(t, tool.Ignore.Ignores(slash(root, "tools/tool/README.md")))
+	assert.True(t, tool.Ignore.Ignores(slash(root, "tools/tool/testdata/a.json")))
+	assert.True(t, tool.Counts(slash(root, "tools/tool/main.go")))
+}
+
+// TestIgnoreNothingDeclared: the common case costs nothing — no patterns
+// anywhere means no chain to walk.
+func TestIgnoreNothingDeclared(t *testing.T) {
+	pkgs, err := discoverPackages(t, writeModelRepo(t, validConfig(),
+		"packages/libs/core", "packages/apps/app"))
+	require.NoError(t, err)
+	for _, p := range pkgs {
+		assert.Empty(t, p.Ignore, p.Name)
+		assert.True(t, p.Counts(slash(p.Dir, "anything.md")), p.Name)
+	}
+}
+
+// TestIgnoreInvalidPattern: a pattern that cannot be carried out fails the
+// load, with the folder that holds it named.
+func TestIgnoreInvalidPattern(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"core": {Ignore: []string{"docs/", "!"}}}
+	_, err := discoverPackages(t, writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "re-includes nothing")
+	assert.Contains(t, err.Error(), `package "core"`, "the refusal says whose pattern it is")
+}

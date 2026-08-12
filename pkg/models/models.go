@@ -118,6 +118,9 @@ type File struct {
 	// package that has no such folder fails the load, because the alternative
 	// is a package that silently owns no files and quietly stops releasing.
 	Src string `mapstructure:"src" json:"src,omitempty"`
+	// Ignore are change-scope ignore patterns for every package, matched
+	// against paths relative to the repository root; see PackageConfig.Ignore.
+	Ignore []string `mapstructure:"ignore" json:"ignore,omitempty"`
 	// CommitErrors decides what an error in a commit message does to the run
 	// (§16):
 	//
@@ -568,6 +571,10 @@ type SpaceConfig struct {
 	// the same meaning as PackageConfig.Concurrency and deliberately not the
 	// top-level key's, which is the budget itself.
 	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
+	// Ignore are change-scope ignore patterns for this space's packages,
+	// matched against paths relative to the space folder; see
+	// PackageConfig.Ignore.
+	Ignore []string `mapstructure:"ignore" json:"ignore,omitempty"`
 	// Dependencies declares consumer -> provider edges next to the space they
 	// describe, in the same object-keyed-by-consumer shape as File.Dependencies
 	// — a space is not a package, so there is no consumer to leave implicit.
@@ -630,6 +637,7 @@ type SpaceFile struct {
 	GitHub      *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
 	Src         string           `mapstructure:"src" json:"src,omitempty"`
 	Concurrency []int            `mapstructure:"concurrency" json:"concurrency,omitempty"`
+	Ignore      []string         `mapstructure:"ignore" json:"ignore,omitempty"`
 	// Dependencies are this space's own edges; see SpaceConfig.Dependencies.
 	// They add to what the root file's space entry declares rather than
 	// replacing it, because dependency declarations never override.
@@ -691,7 +699,28 @@ type PackageConfig struct {
 	// manifest discovery is deliberately untouched: a manifest usually sits
 	// at the package root, outside src, and auto-versioning must still find
 	// it.
-	Src                   string           `mapstructure:"src" json:"src,omitempty"`
+	Src string `mapstructure:"src" json:"src,omitempty"`
+	// Ignore keeps some of the package's own files from counting as changes
+	// to it: folder-relative patterns, matched against every changed file
+	// that would otherwise make a scopeless commit address the package.
+	//
+	// Where `src` narrows the package to one folder, this excludes from
+	// whatever is left, which is what a package needs when the files that do
+	// not deserve a release — docs, fixtures, a scratch folder — sit beside
+	// the ones that do. "*" matches any run of characters, separators
+	// included; a pattern without a separator matches at any depth; a
+	// trailing "/" covers a folder; a leading "!" re-includes.
+	//
+	// The levels concatenate rather than replace — the repository's patterns,
+	// then the space's, then the package's — and the last pattern to match
+	// decides, so a package can re-include what a broader level excluded.
+	// A `.dispatignore` file in the folder says the same thing, one pattern
+	// per line, and is read after this list.
+	//
+	// Like `src` it narrows file-derived scope resolution alone: a commit
+	// naming the package by scope still addresses it, the release commit
+	// still stages the whole folder, and manifest discovery is untouched.
+	Ignore                []string         `mapstructure:"ignore" json:"ignore,omitempty"`
 	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`

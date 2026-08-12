@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/yohimik/dispat/services/dispat/internal/ignore"
 )
 
 // Versioning is a space's versioning mode: how the versions of the space's
@@ -318,7 +320,18 @@ type Package struct {
 	// the four layers live in files only discovery reads.
 	OwnScripts    map[string]string
 	ManifestNames []string
+	// Ignore keeps some of the package's own files from counting as changes
+	// to it: the compiled patterns of every level that declared any, weakest
+	// first. Empty for a package nobody wrote a pattern for, which is most of
+	// them. See ScopeDir for the other half of the narrowing.
+	Ignore ignore.Chain
 }
+
+// Counts reports whether a changed file at the given absolute,
+// slash-separated path counts as a change to this package. The caller has
+// already established that the file sits under ScopeDir; this is the second
+// question, and the only one the package's own patterns answer.
+func (p *Package) Counts(file string) bool { return !p.Ignore.Ignores(file) }
 
 // ScopeDir is the folder a changed file must sit under to count as a change
 // to this package: Dir narrowed by Src when the package declares one, and

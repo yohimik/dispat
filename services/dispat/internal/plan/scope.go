@@ -8,6 +8,7 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
 // scopeResult is one resolved scope-set (§6.1) together with the terms that
@@ -144,34 +145,71 @@ func (cp *computation) reportScope(res scopeResult, rec *commitRec, where string
 // folder — its own folder, or the `src` sub-folder when it declares one — so
 // a file of a package nested inside another belongs to the inner one only,
 // and a file outside a package's src belongs to whatever encloses it, or to
-// nobody. The result is memoised per commit because every unresolved unit in
-// the commit asks for it.
+// nobody. The owner then has the last word: a file its `ignore` patterns
+// exclude counts for nobody, rather than falling through to the package that
+// encloses it, because the file is that package's and the package said it
+// does not deserve a release.
+//
+// The result is memoised per commit because every unresolved unit in the
+// commit asks for it, and the scope folders are prepared once per run: this
+// loop is files times packages, and it runs for every commit in every pending
+// window.
 func (cp *computation) derived(rec *commitRec) map[string]bool {
 	if rec.derivedSet != nil {
 		return rec.derivedSet
 	}
+	if cp.scopeDirs == nil {
+		cp.prepareScopeDirs()
+	}
 	out := make(map[string]bool)
 	for _, file := range rec.commit.Files {
 		full := path.Clean(path.Join(cp.rootSlash(), filepath.ToSlash(file)))
-		owner, ownerLen := "", -1
-		for _, p := range cp.pkgs {
-			dir := path.Clean(filepath.ToSlash(p.ScopeDir()))
-			if !underDir(full, dir) {
+		var owner *scopeDir
+		for i := range cp.scopeDirs {
+			sd := &cp.scopeDirs[i]
+			if !underDir(full, sd.dir) {
 				continue
 			}
-			if len(dir) > ownerLen {
-				owner, ownerLen = p.Name, len(dir)
+			if owner == nil || len(sd.dir) > len(owner.dir) {
+				owner = sd
 			}
 		}
-		if owner != "" {
-			out[owner] = true
+		if owner == nil || !owner.pkg.Counts(full) {
+			continue
 		}
+		out[owner.pkg.Name] = true
 	}
 	rec.derivedSet = out
 	return out
 }
 
-func (cp *computation) rootSlash() string { return filepath.ToSlash(cp.root) }
+// scopeDir is one package's prepared scope folder: the cleaned, slashed path
+// a changed file is compared against, kept beside the package so the
+// ownership loop neither re-derives it nor looks the package up again.
+type scopeDir struct {
+	dir string
+	pkg *model.Package
+}
+
+// prepareScopeDirs computes the comparison form of every package's scope
+// folder once, and memoises the repository root in the same form. Both are
+// fixed for the life of a computation and were previously recomputed for
+// every (file, package) pair.
+//
+// It runs on the first ownership question rather than at construction, so a
+// computation assembled by hand needs no setup call to be asked one.
+func (cp *computation) prepareScopeDirs() {
+	cp.root = filepath.ToSlash(cp.root)
+	cp.scopeDirs = make([]scopeDir, 0, len(cp.pkgs))
+	for _, p := range cp.pkgs {
+		cp.scopeDirs = append(cp.scopeDirs, scopeDir{
+			dir: path.Clean(filepath.ToSlash(p.ScopeDir())),
+			pkg: p,
+		})
+	}
+}
+
+func (cp *computation) rootSlash() string { return cp.root }
 
 // underDir reports whether file sits inside dir, respecting path boundaries so
 // that /r/libs/core-extra is not mistaken for a file of /r/libs/core.

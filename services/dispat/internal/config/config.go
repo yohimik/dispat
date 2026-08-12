@@ -1321,6 +1321,13 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	// in discovery order.
 	declared := collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}})
 
+	// The repository's own ignore layer, shared by every package below it.
+	rootIgnore, err := ignoreLayer(root, c.Ignore)
+	if err != nil {
+		return nil, nil, fmt.Errorf("config: %s: %w", DispatignoreName, err)
+	}
+	baseIgnore := appendLayer(nil, rootIgnore)
+
 	var pkgs []*model.Package
 	owner := make(map[string]string)      // package name -> space name
 	consumed := make(map[string][]string) // packages key -> matching folders
@@ -1374,6 +1381,15 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		}
 		// The space's own resolved answers, shared by every package of it that
 		// adds no layer of its own.
+		// The space's level speaks once, whether it was written in the root
+		// file's space entry, in the space folder's own config file, or in a
+		// .dispatignore next to them.
+		spacePatterns := append(append([]string{}, c.Spaces[sn].Ignore...), spaceFile.Ignore...)
+		spaceIgnore, err := ignoreLayer(dir, spacePatterns)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
+		}
+		spaceChain := appendLayer(baseIgnore, spaceIgnore)
 		spaceChangelog := changelogSpec(sc.Changelog)
 		spaceGitHub := githubSpec(sc.GitHub)
 		spaceBuildWeight, spacePublishWeight := packageWeights(sc.Concurrency)
@@ -1476,15 +1492,23 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 					onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 				}
 				applyMerged(pkg, merged, ex)
-			} else if !baseRefsChecked {
-				// No override layer: the package resolves the space's own
-				// references, but the error still names the package, because
-				// the scope a reference has to resolve in is always a
-				// package's.
-				if err := baseScope.checkSpaceRefs(label, sc); err != nil {
-					return nil, nil, fmt.Errorf("config: %w", err)
+				if pkg.Ignore, err = packageIgnore(spaceChain, pkg.Dir, ex.ignore); err != nil {
+					return nil, nil, fmt.Errorf("config: %s: %w", label, err)
 				}
-				baseRefsChecked = true
+			} else {
+				if pkg.Ignore, err = packageIgnore(spaceChain, pkg.Dir, nil); err != nil {
+					return nil, nil, fmt.Errorf("config: %s: %w", label, err)
+				}
+				if !baseRefsChecked {
+					// No override layer: the package resolves the space's own
+					// references, but the error still names the package,
+					// because the scope a reference has to resolve in is
+					// always a package's.
+					if err := baseScope.checkSpaceRefs(label, sc); err != nil {
+						return nil, nil, fmt.Errorf("config: %w", err)
+					}
+					baseRefsChecked = true
+				}
 			}
 			pkgs = append(pkgs, pkg)
 		}
@@ -1590,6 +1614,9 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			onlyChecks = append(onlyChecks, onlyCheck{label, merged.AutoVersion})
 		}
 		applyMerged(pkg, merged, ex)
+		if pkg.Ignore, err = packageIgnore(baseIgnore, pkg.Dir, ex.ignore); err != nil {
+			return nil, nil, fmt.Errorf("config: %s: %w", label, err)
+		}
 		pkgs = append(pkgs, pkg)
 	}
 

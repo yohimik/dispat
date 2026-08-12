@@ -961,6 +961,7 @@ type computation struct {
 	nonPackage map[string]bool
 
 	pkgs      []*model.Package
+	scopeDirs []scopeDir // prepared once; see prepareScopeDirs
 	byName    map[string]*model.Package
 	order     []string
 	providers map[string][]string

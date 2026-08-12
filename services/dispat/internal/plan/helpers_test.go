@@ -9,6 +9,7 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/ignore"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -402,6 +403,54 @@ func TestDerivedOwnershipHonoursSrc(t *testing.T) {
 			}
 			assert.NotNil(t, rec.derivedSet,
 				"the memo is filled even when nothing is owned, so a second ask costs nothing")
+		})
+	}
+}
+
+// TestDerivedOwnershipHonoursIgnore: the owning package has the last word on
+// its own files. A file its patterns exclude counts for nobody — it does not
+// fall through to the package that encloses it, because the file belongs to
+// the package that said it does not deserve a release.
+func TestDerivedOwnershipHonoursIgnore(t *testing.T) {
+	compile := func(patterns ...string) *ignore.Rules {
+		t.Helper()
+		r, err := ignore.Compile(patterns)
+		require.NoError(t, err)
+		return r
+	}
+	outer := ignore.Layer{Dir: "/r", Rules: compile("*.md")}
+	pkgs := []*model.Package{
+		{Name: "core", Dir: "/r/packages/core", Ignore: ignore.Chain{outer,
+			{Dir: "/r/packages/core", Rules: compile("testdata/", "!README.md")}}},
+		{Name: "inner", Dir: "/r/packages/core/inner", Ignore: ignore.Chain{outer}},
+		{Name: "plain", Dir: "/r/packages/plain"},
+	}
+	cp := &computation{root: "/r", pkgs: pkgs}
+
+	for name, tc := range map[string]struct {
+		files []string
+		want  []string
+	}{
+		"an ignored file counts for nobody": {
+			[]string{"packages/core/testdata/a.json"}, nil},
+		"including one the enclosing package would otherwise own": {
+			[]string{"packages/core/inner/notes.md"}, nil},
+		"a package can re-include what the repository excluded": {
+			[]string{"packages/core/README.md"}, []string{"core"}},
+		"but only for itself": {
+			[]string{"packages/core/inner/README.md"}, nil},
+		"a package with no patterns is untouched": {
+			[]string{"packages/plain/notes.md"}, []string{"plain"}},
+		"and one ordinary file in the commit is enough": {
+			[]string{"packages/core/testdata/a.json", "packages/core/main.go"}, []string{"core"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &commitRec{commit: gitx.Commit{Files: tc.files}}
+			got := cp.derived(rec)
+			assert.Len(t, got, len(tc.want))
+			for _, want := range tc.want {
+				assert.True(t, got[want], "%s should own one of %v", want, tc.files)
+			}
 		})
 	}
 }

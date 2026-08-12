@@ -141,6 +141,7 @@ func (a *App) planOptions() (plan.Options, error) {
 		a.log.Error().Err(err).Msg("package discovery failed")
 		return plan.Options{}, err
 	}
+	a.logWorkspace(pkgs, deps)
 	return plan.Options{
 		Packages:         pkgs,
 		Dependencies:     deps,
@@ -149,6 +150,34 @@ func (a *App) planOptions() (plan.Options, error) {
 		NonPackageScopes: a.cfg.NonPackageScopes,
 		ParserConfig:     a.cfg.ResolvedParser,
 	}, nil
+}
+
+// logWorkspace records what discovery resolved, for the two questions a
+// layered configuration makes hard to answer from the file alone: which
+// folder each package is scoped to, and where its dependency edges came from.
+//
+// Neither is an event the user asked about, so nothing here is louder than
+// debug. The per-edge lines are trace, because a large workspace has many
+// more edges than packages and the interesting one is usually a single edge
+// somebody is looking for.
+func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency) {
+	if !a.log.Debug().Enabled() {
+		return
+	}
+	for _, p := range pkgs {
+		ev := a.log.Debug().Str("package", p.Name).Str("scope", p.ScopeDir())
+		if len(p.Ignore) > 0 {
+			ev = ev.Int("ignoreLevels", len(p.Ignore))
+		}
+		ev.Msg("package resolved")
+	}
+	for _, d := range deps {
+		a.log.Trace().
+			Str("consumer", d.Consumer).
+			Str("provider", d.Provider).
+			Str("kind", string(d.Kind)).
+			Msg("dependency edge")
+	}
 }
 
 // plan discovers the workspace and computes the release plan without

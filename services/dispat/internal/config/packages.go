@@ -624,6 +624,11 @@ func applyMerged(pkg *model.Package, merged SpaceConfig, ex *packageExtras) {
 // not space-shaped — across the layers.
 type packageExtras struct {
 	manifestNames []string
+	// ignore accumulates every layer's patterns rather than replacing, which
+	// is the one merge rule this key has: the levels concatenate, so a nearer
+	// layer adds to what it inherited and re-includes with "!" what it wants
+	// back.
+	ignore []string
 	// ownScripts accumulates what the package itself declares, layer by layer
 	// and without its space's or the top level's. mergePackageOverride folds
 	// the same names into the layered map a resolution reads; this keeps the
@@ -643,6 +648,7 @@ func (ex *packageExtras) apply(po PackageConfig) {
 			ex.ownScripts[k] = v
 		}
 	}
+	ex.ignore = append(ex.ignore, po.Ignore...)
 	if len(po.ManifestNames) > 0 {
 		// A list replaces rather than appends: the layer nearest the package
 		// states what the package is called, and adding to an inherited list
