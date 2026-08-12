@@ -76,9 +76,14 @@ type SubstituteReport struct {
 	Changed bool
 	// Files is how many files were rewritten.
 	Files int
-	// Matched is the substitutions that found their text somewhere, whether
-	// they changed it or found it already written.
-	Matched map[writer.Substitution]bool
+	// Occurrences is how many pieces of text were rewritten across them.
+	Occurrences int
+	// Matched indexes into Rules: the rules whose text was found somewhere,
+	// whether this run changed it or found it already written. A rule that
+	// fanned out counts as matched when any one of its expansions did, since
+	// the caller asked for a template rather than for every provider to carry
+	// it.
+	Matched map[int]bool
 }
 
 // Run renders the rules, walks the folder once and rewrites what matches.
@@ -89,7 +94,7 @@ type SubstituteReport struct {
 // or a binary blob a glob happened to reach, are reported and stepped over:
 // failing a release over a PNG would be the worse trade.
 func (s Substituter) Run(ctx context.Context) (SubstituteReport, error) {
-	rep := SubstituteReport{Matched: map[writer.Substitution]bool{}}
+	rep := SubstituteReport{Matched: map[int]bool{}}
 	if len(s.Rules) == 0 {
 		return rep, nil
 	}
@@ -106,6 +111,9 @@ func (s Substituter) Run(ctx context.Context) (SubstituteReport, error) {
 		return rep, err
 	}
 
+	// Keyed by substitution because that is what the writer reports back;
+	// folded onto rule indexes for the caller, which thinks in rules.
+	matched := map[writer.Substitution]bool{}
 	for _, f := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return rep, ctxErr // interrupted mid-stage: no more rewrites
@@ -123,19 +131,25 @@ func (s Substituter) Run(ctx context.Context) (SubstituteReport, error) {
 			return rep, err
 		}
 		for _, sub := range res.Applied {
-			rep.Matched[sub] = true
+			matched[sub] = true
 		}
 		for _, sub := range res.Skipped {
-			rep.Matched[sub] = true
+			matched[sub] = true
 		}
 		if len(res.Applied) > 0 {
 			rep.Changed = true
 			rep.Files++
+			rep.Occurrences += res.Count
 			s.Log.Info().Str("file", f.path).Int("occurrences", res.Count).
 				Msg("file reconciled")
 		}
 	}
-	s.report(expansions, rep.Matched, selectingRules(files))
+	for _, e := range expansions {
+		if matched[e.sub] || matched[e.probe] {
+			rep.Matched[e.rule] = true
+		}
+	}
+	s.report(expansions, matched, selectingRules(files))
 	return rep, nil
 }
 

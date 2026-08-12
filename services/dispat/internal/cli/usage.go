@@ -180,6 +180,25 @@ anywhere.`,
 			"sync-lock", "strict"}, windowFlags...),
 	},
 	{
+		name:  cmdAutosubstitute,
+		short: "replace literal text across every covered package",
+		long: `Replace literal text in every covered package, the way "dispat replacer"
+does it in named files: --sub takes find=>write, --files says which of each
+package's files to look in, as globs relative to that package's folder.
+
+A --sub mentioning {provider}, {providerVersion} or {providerPrevious} is
+rendered once per workspace package the covered package depends on, so one
+pattern reaches every hand-written coordinate without naming a dependency.
+{name}, {version} and {previous} render the covered package itself.
+
+The packages that carry these coordinates are usually the consumers of what
+just changed, and the window covers only what the commits touched, so
+--consumers is what reaches them. --only-updated narrows the fan-out to the
+providers this run releases, and --strict fails when a substitution matched
+nothing in any covered package.`,
+		flags: append([]string{"sub", "files", "only-updated", "strict"}, windowFlags...),
+	},
+	{
 		name:  cmdCommit,
 		short: "create the per-package release commit",
 		long: `Create each covered package's release commit: the package folder staged

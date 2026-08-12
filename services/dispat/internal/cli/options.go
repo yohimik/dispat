@@ -75,6 +75,7 @@ type options struct {
 	wrSet, wrLink                          *[]string
 	wrSetLocal, wrLinkLocal, wrUnlinkLocal *bool
 	rpSub                                  *[]string
+	rpFiles                                *[]string
 	strict                                 *bool
 }
 
@@ -203,6 +204,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"remove the local folder redirect from every declared workspace dependency")
 	o.rpSub = fs.StringArray("sub", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")
+	o.rpFiles = fs.StringArray("files", nil,
+		"autosubstitute: which files of each covered package to rewrite, as globs relative to its folder (repeatable)")
 	o.strict = fs.Bool("strict", false,
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a substitution that matched nothing; for autowriter, an edit that matched no manifest anywhere")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
