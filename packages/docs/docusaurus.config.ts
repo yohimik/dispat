@@ -126,6 +126,14 @@ const config: Config = {
   ],
 
   themeConfig: {
+    // Dark for everyone, on every first visit. respectPrefersColorScheme is
+    // off on purpose: with it on, defaultMode only applies to visitors whose
+    // OS says nothing, so the site would still open light on a light desktop.
+    // The toggle stays, and a visitor's own choice is remembered as before.
+    colorMode: {
+      defaultMode: 'dark',
+      respectPrefersColorScheme: false,
+    },
     image: 'logo.png',
     metadata: [
       {
