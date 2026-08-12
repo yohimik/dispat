@@ -20,7 +20,7 @@ dispat status -p core                # see what that release would do, without d
 [version groups](./versioning.md). All three are repeatable, all three accept comma separated lists, all three match
 without caring about upper or lower case, and all three accept `*` as a wildcard (`-p '@acme/*'`). Quote the wildcard,
 or your shell will try to expand it first. The full rules are in
-[Choosing the packages](./cli.md#choosing-the-packages), and they are the same rules `dispat run` uses.
+[Choosing the packages](../cli/run.md#choosing-the-packages), and they are the same rules `dispat run` uses.
 
 If you pass no flags at all, the folder you are standing in is the selection. Run `dispat release` inside
 `packages/core` and you release core. Run it at the top of the repository and you release everything, exactly as
@@ -180,5 +180,5 @@ steps.
 | See it first                                 | `dispat status -p core`                   |
 | Fail instead of releasing part of it         | add `--strict`                            |
 
-Related reading: [CLI reference](./cli.md), [Release steps](./steps.md) for running one stage of a release by hand,
+Related reading: [CLI reference](../cli/README.md), [Release steps](./steps.md) for running one stage of a release by hand,
 and [Shared versions](./versioning.md) for what a version group promises.

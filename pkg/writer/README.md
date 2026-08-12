@@ -103,7 +103,7 @@ dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a mi
 
 `--set` takes `[kind:]name=range`, where the range starts after the first `=` and the kind prefix is only read as one
 for the four dependency fields, so a Maven `group:artifact` coordinate keeps its colon. The full guide is
-[Manifest tools](https://yohimik.github.io/dispat/manifests).
+[Manifest tools](https://yohimik.github.io/dispat/editing/manifests).
 
 `dispat replacer <file>...` is `Substitute` with the same report attached:
 

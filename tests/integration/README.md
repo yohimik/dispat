@@ -43,4 +43,4 @@ go test ./... -count 5           # stability check: repeated runs pass
 The suite's current status and per-area coverage summary live in **[test results](./docs/test-results.md)**: what passes
 (including `-race` and repeated `-count` runs), what each test file covers, and the planner properties fenced by
 dedicated regression tests. The workspace's unit-test statement coverage table lives in
-**[unit test coverage](https://yohimik.github.io/dispat/coverage)**.
+**[unit test coverage](https://yohimik.github.io/dispat/internals/coverage)**.

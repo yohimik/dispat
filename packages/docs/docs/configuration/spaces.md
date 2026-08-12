@@ -19,14 +19,14 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space whose own versioning is shared. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                        |
 | `scripts`               | map name → shell command | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
-| `env`                   | map name → value         | no         | Fixed environment variables for every script of the space's packages, its login script included, merged over the top-level map key by key; see [Static env](./README.md#static-env).                                                                                                                                                                                                     |
-| `custom`                | object                   | no         | Free-form data dispat never reads; see [`custom`](./README.md#custom).                                                                                                                                                                                                                                                                                                                   |
+| `env`                   | map name → value         | no         | Fixed environment variables for every script of the space's packages, its login script included, merged over the top-level map key by key; see [Static env](./env.md).                                                                                                                                                                                                     |
+| `custom`                | object                   | no         | Free-form data dispat never reads; see [`custom`](./custom.md).                                                                                                                                                                                                                                                                                                                   |
 | `changelog`             | object                   | no         | Changelog options for this space's packages, overlaying the top-level object field by field; a package's own overlay sits on top. See [`changelog`](./records.md#changelog).                                                                                                                            |
 | `github`                | object                   | no         | GitHub release options for this space's packages, overlaying the top-level object field by field. See [`github`](./records.md#github).                                                                                                                                                                  |
 | `src`                   | string                   | no         | Scope folder for this space's packages, resolved against each package's own folder. See [What counts as a change](./change-scope.md#src-only-this-folder-is-the-package).                                                                                                                              |
 | `ignore`                | array of strings         | no         | Change-scope ignore patterns for this space's packages, added to the repository's. See [What counts as a change](./change-scope.md#ignore-everything-except-these).                                                                                                                                    |
 | `concurrency`           | int or `[int, int]`      | no         | Stage-budget **weight** for this space's packages, the same meaning as a package's own and not the top-level budget. See [Package weights](./packages.md#package-weights-concurrency).                                                                                                                  |
-| `dependencies`          | map consumer → providers | no         | Consumer → provider edges written next to the space they describe, in the same shape as the top-level [`dependencies`](./README.md#dependencies). Every edge must touch this space. See [the space's `dependencies`](#the-spaces-dependencies).                                                                                                                                          |
+| `dependencies`          | map consumer → providers | no         | Consumer → provider edges written next to the space they describe, in the same shape as the top-level [`dependencies`](./dependencies.md). Every edge must touch this space. See [the space's `dependencies`](#the-spaces-dependencies).                                                                                                                                          |
 | `packages`              | map name → entry         | no         | Per-package configuration for this space's own packages, in the same entry shape as the top-level [`packages`](./packages.md) map. See [the space's `packages` map](#the-spaces-packages-map).                                                                                                                                                                                          |
 
 Every one of these except `path`, `packages` and `dependencies` can also be written at the top level, where it
@@ -40,7 +40,7 @@ space's map or the top-level one. The space itself can also be configured from i
 ## Stages and hooks
 
 The space's `flow` object, keyed by stage or hook name (every entry a script name or an array of names; see the
-[sequence rules](./README.md#script-sequences)). Each name is looked up against the package the stage is running for,
+[sequence rules](./scripts.md)). Each name is looked up against the package the stage is running for,
 first in that package's `scripts`, then the space's, then the file's. So one `flow.build: build` can mean a single
 shared command, or a different command per package, depending on where you write `build`. See
 [`scripts` and `dispat run`](#scripts-and-dispat-run):
@@ -84,9 +84,9 @@ spaces, n logins), because credentials and registries belong to the space. A fai
 package in the space (none of them could have succeeded without it); other spaces are unaffected. The login runs in the
 space folder (the parent of every member package), so a script reading a local file sees the same folder on every run,
 and gets the space-scoped environment:
-`DISPAT_SPACE`, `DISPAT_STAGE=login`, the [workspace listing](../environment.md#workspace-data) and `DISPAT_OUTPUT`. No
+`DISPAT_SPACE`, `DISPAT_STAGE=login`, the [workspace listing](../reference/environment.md#workspace-data) and `DISPAT_OUTPUT`. No
 package variables, since which package's publish triggered it is a scheduling accident. What it
-[exports](../environment.md#script-outputs) is space-scoped too: every package of the space receives the login's exports
+[exports](../reference/environment.md#script-outputs) is space-scoped too: every package of the space receives the login's exports
 from its publish stage onward, sourced `<space>:login`.
 
 ### `flow.announce`
@@ -94,7 +94,7 @@ from its publish stage onward, sourced `<space>:login`.
 A fourth per-package stage, run after the publish frame completes (publish script, release records, tag,
 `flow.postPublish`). Its job is pushing the release out to update channels (a Slack or Discord message, a webhook, a
 docs feed), so alongside the full stage environment it is the natural consumer of the
-[release-notes variables](../environment.md#release-notes-data) (`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES`,
+[release-notes variables](../reference/environment.md#release-notes-data) (`DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES`,
 `DISPAT_FIXES`) and the channel variables (`DISPAT_CHANNEL`, `DISPAT_OLD_CHANNEL`, `DISPAT_IS_PRERELEASE`) for choosing
 where and how to announce. It has the same hook structure as the other stages (`flow.beforeAnnounce` /
 `flow.postAnnounce`) but none of their authority: the release is already out, so an error in the stage or either hook
@@ -117,13 +117,13 @@ either only warns; both receive the full package environment (`DISPAT_STAGE` is 
 | `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.             |
 
 Neither runs for a package that published (that is `flow.postPublish` and the announce frame), and the run-level
-[run outcome listing](../environment.md#run-outcome-data) carries the same information for every package at once.
+[run outcome listing](../reference/environment.md#run-outcome-data) carries the same information for every package at once.
 
 ## `versioning`
 
 How the versions of a space's packages relate to each other. Two axes decide it: how much of the version the group
 holds in common, and what happens to a member that has nothing of its own to release when the shared part moves. The
-walkthrough with worked examples is [Shared versions](../versioning.md); this is the reference.
+walkthrough with worked examples is [Shared versions](../releasing/versioning.md); this is the reference.
 
 | Value                     | Shares          | Effect                                                                                                                                                                                                                             |
 |---------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -246,7 +246,7 @@ provider is releasing and has not failed, and its baseline otherwise. `manifests
 
 The **replacing** strategy is the `replace` list: literal find-and-write over whatever files its globs select, parsing
 nothing, for the versions no manifest holds (a Gradle coordinate, a README example, a CI workflow). It has
-[a page of its own](../replacer.md).
+[a page of its own](../editing/replacer.md).
 
 A package may use both, in which case its manifests are reconciled first. A block using neither still schedules a
 version task, which is how a space asks for [`syncLock`](#autoversion) and nothing else.
@@ -266,7 +266,7 @@ by provider updates. Second, a rewriting failure fails the version stage, and
 |-----------------------|------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`             | bool             | `true`   | Turns the block off without deleting it. The minimal opt-in block is `{"enabled": true}`: a completely empty `{}` object is pruned by the config loader and reads as absent.                                                                                                                                                                                                                                                                                                                       |
 | `manifests`           | string           | `root`   | The parsing strategy's scope. `root`: only manifests directly in the package folder; `all`: every manifest found under it (dependency, virtual-env and build-output folders such as `node_modules`, `vendor`, `dist` and `venv`, plus every dot-folder, are never entered); `none`: the parsing strategy is off, leaving `replace` and `syncLock` as the whole of the version stage.                                                                                                              |
-| `replace`             | array of objects | none     | The replacing strategy: literal text substitutions applied to the files each rule's globs select, parsing nothing. Each entry takes `files` (globs relative to the package folder), `find` and `write`, all required; `find` and `write` are templates over `{name}`, `{version}`, `{previous}`, `{provider}`, `{providerVersion}` and `{providerPrevious}`, and a rule naming a provider is applied once per provider. See [the replacer](../replacer.md).                                        |
+| `replace`             | array of objects | none     | The replacing strategy: literal text substitutions applied to the files each rule's globs select, parsing nothing. Each entry takes `files` (globs relative to the package folder), `find` and `write`, all required; `find` and `write` are templates over `{name}`, `{version}`, `{previous}`, `{provider}`, `{providerVersion}` and `{providerPrevious}`, and a rule naming a provider is applied once per provider. See [the replacer](../editing/replacer.md).                                        |
 | `kinds`               | array of strings | all four | Restrict rewriting to the named manifest fields (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`).                                                                                                                                                                                                                                                                                                                                                                   |
 | `only`                | array of strings | all      | Restrict rewriting to declarations of the named provider packages; every name must be a discovered package.                                                                                                                                                                                                                                                                                                                                                                                        |
 | `nameMatch`           | string           | `exact`  | How a declared name finds its workspace package when no manifest declares that name and no local path matches: `exact` (such declarations are simply not workspace dependencies) or `substring`; see the note below the table.                                                                                                                                                                                                                                                                     |
@@ -297,7 +297,7 @@ scripts:
 ```
 
 The same reconciliation is callable outside a release as
-[`dispat autoversion`](../cli.md#the-step-commands), with flags overriding the block's policy for the invocation
+[`dispat autoversion`](../cli/autoversion.md), with flags overriding the block's policy for the invocation
 (`--manifests none` turns the parsing strategy off, `--no-replace` skips the rules); a custom flow uses it to reconcile
 at the moment it needs, and the version stage later finds nothing left to rewrite.
 
@@ -407,7 +407,7 @@ typo survives:
 An empty selection is not an error. If nothing changed, there was nothing to look in, and the run succeeds having done
 nothing.
 
-Every script receives the package's full [DISPAT_* environment](../environment.md), with `DISPAT_STAGE` set to
+Every script receives the package's full [DISPAT_* environment](../reference/environment.md), with `DISPAT_STAGE` set to
 `run:<name>`. That is why the same script works as a stage and as a `dispat run` without being rewritten. One caveat on
 naming: dispat's own command words (`status`, `commit`, `changelog` and the rest) win the shorthand, so a script called
 `commit` is reachable as `dispat run commit` but never as `dispat commit`.
@@ -456,7 +456,7 @@ branch's own commits (PR pipelines; the base moving on does not widen the set), 
 the reserved `--since all` selects every package, changed or not. Selection follows the same scope semantics as
 planning: a commit's written scopes are authoritative (globs, exclusions and `nonPackageScopes` included), and only a
 unit with no scope-set falls back to the files it changed (longest path prefix; see
-[scope sets](../commits.md#scope-sets)). Ordering, concurrency and output carrying apply to the selected set exactly as
+[scope sets](../reference/commits.md#scope-sets)). Ordering, concurrency and output carrying apply to the selected set exactly as
 to the changed one.
 
 The window comes first and the filter picks from it, which is what makes the two compose:
@@ -484,7 +484,7 @@ skipped, transitively (the same shape a release gives a failed provider), while 
 `continue` the dependents run anyway. Any failure makes the command exit `1` either way. Nothing is released, tagged or
 written. Names are matched case-insensitively (viper lowercases map keys).
 
-`dispat run` takes part in [script outputs](../environment.md#script-outputs) too, with one extra rule: outputs carry
+`dispat run` takes part in [script outputs](../reference/environment.md#script-outputs) too, with one extra rule: outputs carry
 across packages, down the dependency graph. Each script gets `$DISPAT_OUTPUT` to export through, and a package's
 script receives the exports of its changed providers' scripts (transitively; a package that resolves nothing still
 carries them through) as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` still naming the original exporter
@@ -527,7 +527,7 @@ where the two disagree and the top-level one still supplies what the space's lea
 ## The space's `dependencies`
 
 A space declares the edges of its own packages, keyed by consumer exactly as the top-level
-[`dependencies`](./README.md#dependencies) is:
+[`dependencies`](./dependencies.md) is:
 
 ```json
 {

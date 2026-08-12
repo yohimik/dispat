@@ -1,9 +1,9 @@
 # Script environment variables
 
 Every script receives, on top of the parent environment, any
-[static `env` variables the configuration sets](./configuration/README.md#static-env), and then the variables below
+[static `env` variables the configuration sets](../configuration/env.md), and then the variables below
 (the same variables also expand in
-[record text](./configuration/records.md#variables-in-record-text), so a changelog footer and a publish script name a
+[record text](../configuration/records.md#variables-in-record-text), so a changelog footer and a publish script name a
 release the same way).
 
 The order matters when a name appears twice. The static variables are placed first, so a computed `DISPAT_*` variable
@@ -11,7 +11,7 @@ always wins, and a static value referring to one â€” `custom_$DISPAT_VERSION` â€
 table before the script starts.
 
 These variables come from the release plan, so ordinarily a release is what produces them.
-[`dispat exec --env both`](./shell-helpers.md#what-the-script-gets) computes the same plan on demand, which is how a
+[`dispat exec --env both`](../cli/exec.md#what-the-script-gets) computes the same plan on demand, which is how a
 script written against `$DISPAT_VERSION` is run on its own without releasing anything.
 
 | Variable                      | Example              | Meaning                                                                                                                                                                                 |
@@ -43,8 +43,8 @@ script written against `$DISPAT_VERSION` is run on its own without releasing any
 
 `DISPAT_STAGE` carries `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`,
 `postPublish`, `postAll`, ...) for a hook; `login` for the login; `syncLock` for an
-[`autoVersion.syncLock`](./configuration/spaces.md#autoversion) script; and `run:<name>` for
-[`dispat run <name>`](./configuration/spaces.md#scripts-and-dispat-run).
+[`autoVersion.syncLock`](../configuration/spaces.md#autoversion) script; and `run:<name>` for
+[`dispat run <name>`](../configuration/spaces.md#scripts-and-dispat-run).
 
 `DISPAT_TAG_VERSION` is the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no
 path). It equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.
@@ -130,7 +130,7 @@ DISPAT_FIXES="close a leak"
 Entries are the unit descriptions, newline-separated, in history order; a group with no entries is empty text (set, not
 unset), so a line-wise loop iterates zero times. Bodies are omitted (they are multiline prose that would destroy the
 line-per-entry contract) and stay in the changelog and the GitHub release. The groups follow the
-[release-notes windowing](./configuration/records.md#changelog): on a prerelease they carry only the release's own
+[release-notes windowing](../configuration/records.md#changelog): on a prerelease they carry only the release's own
 changeset, on a stable release (a graduation included) the whole pending window. The dependencies section travels the
 same way:
 
@@ -140,7 +140,7 @@ DISPAT_DEPENDENCIES="core: 1.2.3 -> 1.3.0"    # one "name: old -> new" line per 
 
 matching the changelog's rendering (`From` equals `To` on a catch-up, whose provider version is already out); the
 `DISPAT_UPDATED_*` listing carries the same data field by field for scripts that want it addressable. The
-[`flow.announce`](./configuration/spaces.md#flowannounce) stage is the natural consumer, but like every listing the
+[`flow.announce`](../configuration/spaces.md#flowannounce) stage is the natural consumer, but like every listing the
 variables reach every stage, keeping scripts movable.
 
 ## Script outputs
@@ -163,7 +163,7 @@ was exported) and `DISPAT_OUTPUT_SOURCE_<NAME>` naming the script each export ca
 `<package>:<stage>` (`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage
 scripts: a `beforeBuild` export reaches the build, the publish and everything after. The **login script's**
 exports are space-scoped: they reach every package of the space from its publish stage (the stage that waits for the
-login) onward. In [`dispat run`](./configuration/spaces.md#scripts-and-dispat-run) outputs additionally carry across
+login) onward. In [`dispat run`](../configuration/spaces.md#scripts-and-dispat-run) outputs additionally carry across
 packages, from a provider's script to its consumers'; in a release run they stay within the package (a consumer's
 release scripts read a provider's new version from the `DISPAT_UPDATED_*` listing, not the provider's outputs).
 Re-exporting a name overrides its earlier value and source, like a shell re-assignment.
@@ -173,7 +173,7 @@ the `DISPAT_*` environment), and a malformed line fails a release-gating sequenc
 sequence that fails still surrenders whatever it exported before failing, which is how `onFail`
 gets to see it.
 
-One export is a directive to the [GitHub recorder](./configuration/records.md#github): **`DISPAT_EXPORT_GITHUB`**. A
+One export is a directive to the [GitHub recorder](../configuration/records.md#github): **`DISPAT_EXPORT_GITHUB`**. A
 package whose scripts exported it gets a GitHub release; a package that never exported it is skipped by the recorder.
 Its value is a whitespace-separated list of absolute paths to existing files (`$PWD` inside a script resolves to the
 package folder, which makes absolute paths easy), each uploaded as an asset of the release, named after the file; an
@@ -182,13 +182,13 @@ skipped with a warning while the release and the sound entries go through. Unlik
 later scripts under its full name, so appending is
 `echo "DISPAT_EXPORT_GITHUB=$DISPAT_EXPORT_GITHUB $PWD/more.tgz" >> "$DISPAT_OUTPUT"`, and it does not appear in
 `DISPAT_OUTPUTS`. Because it reaches later scripts as a plain environment variable, the
-[`dispat github`](./cli.md#the-step-commands) step command run from one of them reads the same opt-in and the same
+[`dispat github`](../cli/github.md) step command run from one of them reads the same opt-in and the same
 asset list out of its own environment.
 
 The other export with a consumer inside dispat is **`PACKAGE_<KEY>`**, where `<KEY>` is the exporting package's own key
 under the [scheme above](#workspace-data). A release script that exports `PACKAGE_<KEY>=<commitHash>` pins the package's
 release to that commit: the tag is created there instead of at HEAD (or at the release commit in
-[commit mode](./configuration/records.md#commit)), and the package's GitHub release carries the hash as its commit and
+[commit mode](../configuration/records.md#commit)), and the package's GitHub release carries the hash as its commit and
 `target_commitish`. It is meant for packages whose release scripts produce their own commit (a subtree push, a generated
 repository) that the tag should point at. Like any output it reaches later scripts, as
 `DISPAT_OUTPUT_PACKAGE_<KEY>`:
@@ -199,7 +199,7 @@ echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"
 
 ## Run outcome data
 
-The [run-level hooks](./configuration/README.md#run-level-hooks) additionally receive the run's outcome, rendered with
+The [run-level hooks](../configuration/run-hooks.md) additionally receive the run's outcome, rendered with
 the same `<KEY>` scheme:
 
 ```sh

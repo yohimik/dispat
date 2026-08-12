@@ -5,7 +5,7 @@ terminal output of a real run. Every transcript on this page was produced by run
 repository; only timestamps and durations are normalized. Script output lines (the
 `npm`/`docker` lines) come from your own commands, so yours will differ.
 
-If a term is new, [Concepts](concepts.md) defines all of them in a few minutes of reading.
+If a term is new, [Concepts](./concepts.md) defines all of them in a few minutes of reading.
 
 - [An npm package](#an-npm-package)
 - [A single package, no monorepo](#a-single-package-no-monorepo)
@@ -70,7 +70,7 @@ logger@0.1.0
 ```
 
 The annotated tag is the record that the publish happened. Push it (or let dispat push it, see
-[release records](configuration/records.md)) and the release is done.
+[release records](./configuration/records.md)) and the release is done.
 
 One thing to know about versions: your `package.json` version field does not drive anything. dispat computes the version
 from commits and tags, and hands it to your scripts as `$DISPAT_NEW_VERSION`. A typical build script therefore stamps it
@@ -190,8 +190,8 @@ Read the manifest: the `workspace:*` range became `^0.1.0` (only ranges matching
 hand-pinned `left-pad` survived), and the `version` field advanced on its own. Only the version text changed; every
 other byte of the file is exactly as it was. To regenerate a lock file after the rewrite, name a `syncLock`
 script in the block and, if the lock file lives at the repo root, list it under `commit.include` so the release commit
-carries it. Details: [`autoVersion`](configuration/spaces.md#autoversion) and
-[the compute command](cli.md#the-compute-command).
+carries it. Details: [`autoVersion`](./configuration/spaces.md#autoversion) and
+[the compute command](./cli/compute.md).
 
 ## Adopt dispat in a repository that already ships versions
 
@@ -265,7 +265,7 @@ worth knowing while you are here:
   one package that disagree about the number (reported as `W225`). Those are decisions, and compute does not make
   decisions for you.
 
-Full rules: [the compute command](cli.md#the-compute-command) and [`initials`](configuration/versions.md#initials).
+Full rules: [the compute command](./cli/compute.md) and [`initials`](./configuration/versions.md#initials).
 
 ## A Docker image chain
 
@@ -354,7 +354,7 @@ The base's package must answer to the repository name for the two to connect —
 ["registry.example.com/base"]}}` — because an image is called `registry.example.com/base` while the folder is called
 `base`. With that in place `dispat compute` will even propose the `app -> base` edge for you, straight off the `FROM`
 line, so the `dependencies` block above need not be written by hand. The details are in
-[manifests](manifests.md#docker).
+[manifests](./editing/manifests.md#docker).
 
 **Or pass it as a build argument.** When you would rather the Dockerfile stay version-free:
 
@@ -365,7 +365,7 @@ FROM registry.example.com/base:${BASE_VERSION}
 
 dispat never rewrites an interpolated reference, so this one is left alone by design. Pass it in the build script with
 `--build-arg BASE_VERSION=$DISPAT_UPDATED_BASE_NEW_VERSION` (falling back to `$DISPAT_WORKSPACE_BASE_VERSION` when base
-is not part of this run; see [the script environment](environment.md)).
+is not part of this run; see [the script environment](./reference/environment.md)).
 
 **A worked example, in this repository.** dispat's own
 [container images](https://github.com/yohimik/dispat/tree/main/docker) are four packages set up this way, and they go
@@ -494,14 +494,14 @@ has an opinion about the state of your git tree.
   `pnpm-workspace.yaml`, so a build stage does not need `-C ../..`. Locally, `--frozen-lockfile` is worth stating even
   though CI turns it on by default: it makes the stage fail on a lock file that no longer matches the manifests instead
   of quietly resolving something new mid-release.
-- **`workspace:*` ranges stay as they are.** [`autoVersion`](configuration/spaces.md#autoversion) writes each package's
+- **`workspace:*` ranges stay as they are.** [`autoVersion`](./configuration/spaces.md#autoversion) writes each package's
   own `version` field, and `pnpm publish` substitutes that version for the `workspace:` specifier when it packs, so the
   declared ranges never need rewriting. `range: "workspace:*"` is a literal, written back verbatim, which keeps the
   protocol intact if a range is rewritten at all.
 - **`pnpm-lock.yaml` is outside every package folder.** `syncLock` regenerates it after the version stage, and
-  [`commit.include`](configuration/records.md#commit) is what puts it in the release commit — without that line the
+  [`commit.include`](./configuration/records.md#commit) is what puts it in the release commit — without that line the
   release commit carries rewritten manifests and a stale lock file. The one-at-a-time
-  [`syncLockConcurrency`](configuration/spaces.md#autoversion) default matters here for the same reason: every package in
+  [`syncLockConcurrency`](./configuration/spaces.md#autoversion) default matters here for the same reason: every package in
   the workspace regenerates the *same* file.
 - **`--no-git-checks`.** `pnpm publish` refuses to publish from a branch that is not the release branch or from a dirty
   working tree. A dispat run is exactly that situation: the version stage has just rewritten manifests, and the release
@@ -542,7 +542,7 @@ echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
 
 A login script can also pass values forward (a short-lived token, say) by appending
 `DISPAT_OUTPUT_<NAME>=value` lines to `$DISPAT_OUTPUT`; the space's publish scripts then read
-`$DISPAT_OUTPUT_<NAME>`. See [Script outputs](environment.md#script-outputs).
+`$DISPAT_OUTPUT_<NAME>`. See [Script outputs](./reference/environment.md#script-outputs).
 
 ## Keeping a space's exceptions inside its folder
 
@@ -587,7 +587,7 @@ The same entries can go in the root file instead, under the space rather than at
 ```
 
 Use whichever keeps the exception where you will look for it. When both name the same package, the nearer one wins; the
-full order is [the override ladder](configuration/packages.md#the-override-ladder).
+full order is [the override ladder](./configuration/packages.md#the-override-ladder).
 
 ## Two config files in one folder
 
@@ -697,6 +697,6 @@ core@0.2.0-beta.1
 
 The graduation releases `0.2.0`: the betas' accumulated work, minus the prerelease marker. Nothing on the train is
 counted twice. The full channel rules, including bringing consumers onto a train with `++N` and graduating a whole train
-at once, are in [Commit messages](commits.md#channels-and-prereleases) and
-[Concepts](concepts.md#prereleases-and-channels); how a channel is spelled inside a tag is
-[`tagFormat`](configuration/versions.md#tagformat)'s business.
+at once, are in [Commit messages](./reference/commits.md#channels-and-prereleases) and
+[Concepts](./concepts.md#prereleases-and-channels); how a channel is spelled inside a tag is
+[`tagFormat`](./configuration/versions.md#tagformat)'s business.

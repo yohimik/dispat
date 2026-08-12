@@ -1,8 +1,8 @@
 # Concepts
 
 How dispat decides what to release, at what version, and what happens when things fail. This is the mental model behind
-every command; the reference pages ([configuration](./configuration/README.md), [commits](./commits.md),
-[environment](./environment.md)) spell out the details.
+every command; the reference pages ([configuration](./configuration/README.md), [commits](./reference/commits.md),
+[environment](./reference/environment.md)) spell out the details.
 
 ## Versions live in tags
 
@@ -110,7 +110,7 @@ Two commits under each mode, for a space of `a` and `b`, both at `1.0.0`, where 
 | `fixedMajorSparse`      | stays `1.0.0`: a minor is not shared        | stays `1.0.0` until its own next change     |
 
 `a` releases `1.1.0` and `2.0.0` in every row. The walkthrough, with worked examples and the rules for groups that span
-spaces, is [Shared versions](./versioning.md).
+spaces, is [Shared versions](./releasing/versioning.md).
 
 ### Release control
 
@@ -179,7 +179,7 @@ Acting on the provider does nothing: its version is already public, and cancella
    success the release recorders run (changelog file, GitHub release for packages that exported
    `DISPAT_EXPORT_GITHUB`), then the annotated tag is created (pushing is left to CI by default). The publish script
    succeeding is the point of no return: from there nothing can fail the package, and a record or a tag that cannot be
-   written is [reported instead](./architecture.md#after-the-point-of-no-return).
+   written is [reported instead](./internals/architecture.md#after-the-point-of-no-return).
 4. **announce**: after the publish frame, for pushing the release out to update channels (a Slack message, a webhook, a
    docs feed). It gets the release notes as `DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` /
    `DISPAT_FIXES`, the same grouped data the changelog and GitHub release render, and the whole frame (its

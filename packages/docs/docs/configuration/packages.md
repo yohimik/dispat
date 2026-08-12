@@ -65,8 +65,8 @@ keys:
 | `manifestNames` | array of strings | The manifest names this package answers to, stated rather than read from its files. See [`manifestNames`](#manifestnames) below.                                                                                                                                                                     |
 | `src`          | string          | A folder-relative path narrowing which of the package's files count as changes to it. Also settable on a space or at the root. See [`src`](#src) below.                                                                                                                                                                                        |
 | `ignore`       | array of strings | Patterns keeping some of the package's own files from counting as changes to it. Also settable on a space or at the root, where the levels add up. See [What counts as a change](./change-scope.md).                                                                                                                                                                                        |
-| `env`          | map name → value | Fixed environment variables for this package's scripts, merged key by key over the space's map and the top-level one; see [Static env](./README.md#static-env).                                                                                                                                      |
-| `custom`       | object          | Free-form data dispat never reads; see [`custom`](./README.md#custom). Nothing merges it: an entry's object and an in-folder file's object are independent.                                                                                                                                           |
+| `env`          | map name → value | Fixed environment variables for this package's scripts, merged key by key over the space's map and the top-level one; see [Static env](./env.md).                                                                                                                                      |
+| `custom`       | object          | Free-form data dispat never reads; see [`custom`](./custom.md). Nothing merges it: an entry's object and an in-folder file's object are independent.                                                                                                                                           |
 
 For an entry overriding a space package, a field left unset **inherits** from the space; a field set overrides it. The
 per-field rules follow from what each object means:
@@ -201,7 +201,7 @@ What `src` does *not* change is worth stating, because it is most of the package
   outside `src`, and [auto-versioning](./spaces.md#autoversion) and `dispat compute` must still reach it.
 - **A scope always wins.** `fix(core): ...` addresses `core` wherever the commit's files are. `src` narrows the
   file-derived fallback, which is what runs when a commit names no scope at all. See
-  [scope sets](../commits.md#scope-sets).
+  [scope sets](../reference/commits.md#scope-sets).
 
 A `src` that could never match is refused at load: a folder that is not there, a path leaving the package, or the
 package folder itself. Each of those would narrow the package to nothing, and a package that quietly stops releasing
@@ -262,7 +262,7 @@ dependencies next to the rest of its configuration:
 }
 ```
 
-The entries are the ones a consumer lists in the top-level [`dependencies`](./README.md#dependencies) object, so an
+The entries are the ones a consumer lists in the top-level [`dependencies`](./dependencies.md) object, so an
 edge reads the same wherever it is declared and moving one between the two places is a cut and a paste. The consumer is
 the package itself. One provider needs no array: `"dependencies": "core"`.
 

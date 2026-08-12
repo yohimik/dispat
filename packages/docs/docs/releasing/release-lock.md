@@ -74,7 +74,7 @@ that the first is still in the middle of.
 
 **The lock needs a remote you can write to.** It is a push, so a repository with no remote configured cannot take one,
 and neither can a CI job with a read-only token. In GitHub Actions that means `contents: write` on the release job. This
-holds even if you never push anything else. See [dispat in CI](./ci.md).
+holds even if you never push anything else. See [dispat in CI](../reference/ci.md).
 
 **It has nothing to do with the release push.** `commit.push` decides whether the release commit and its tags go to the
 remote. The lock is taken whether that is on or off, because two runs computing the same versions collide whether or not

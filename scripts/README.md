@@ -3,7 +3,7 @@
 The shell scripts dispat runs as this repository's own release stages. They are referenced by name from `scripts` in
 [`dispat.yaml`](../dispat.yaml) and run **inside the releasing package's folder**, which is why each one reaches the
 repository root as `../../`. Everything they need arrives in the environment: the
-[`DISPAT_*` variables](https://yohimik.github.io/dispat/environment) a stage is given, plus whatever CI exports.
+[`DISPAT_*` variables](https://yohimik.github.io/dispat/reference/environment) a stage is given, plus whatever CI exports.
 
 | Script                                       | Package  | `flow` slot | Reads                                                        | Produces                                                                                     |
 |----------------------------------------------|----------|-------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------|

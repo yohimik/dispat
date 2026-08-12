@@ -6,7 +6,7 @@ server that must never disagree about which generation they belong to. For those
 part of their version in common.
 
 This page explains how much they can hold in common, what happens to a package that has not changed, and how to put
-packages into such a set. The reference tables live in [space options](./configuration/spaces.md#versioning); this page
+packages into such a set. The reference tables live in [space options](../configuration/spaces.md#versioning); this page
 is the walkthrough.
 
 ## The two questions
@@ -93,7 +93,7 @@ yet agree.
 ## The changelog entry a passenger gets
 
 Under a plain mode, a package released only because the group moved is a real release. Its version stage runs, its
-build and publish scripts run, it is tagged, and it gets a [changelog](./configuration/records.md#changelog) entry like
+build and publish scripts run, it is tagged, and it gets a [changelog](../configuration/records.md#changelog) entry like
 everybody else. What it does not get is somebody else's release notes. Commit scopes still decide which notes belong to
 which package, so the passenger's entry is a single line saying why the version moved:
 
@@ -165,7 +165,7 @@ Three things are worth knowing about joining:
   the major and minor also shares the major, and reports it as `W213`.
 
 The full reference for all of this is under
-[versioning groups](./configuration/spaces.md#versioning-groups).
+[versioning groups](../configuration/spaces.md#versioning-groups).
 
 ## Acting on a group
 
@@ -203,7 +203,7 @@ A prerelease train started by a breaking change in a `fixedMajor` group is the g
 for all of them. A prerelease train started by a *patch* in the same group belongs to the package that started it, and
 nobody else joins.
 
-An exact [`Release-As`](./commits.md) works the same way. `Release-As: 2.0.0` in a `fixedMajor` group at major 1 names
+An exact [`Release-As`](../reference/commits.md) works the same way. `Release-As: 2.0.0` in a `fixedMajor` group at major 1 names
 a different major, so it pins the whole group's version. `Release-As: 1.7.0` in the same group names the major it is
 already on, so it pins that one package and leaves the rest untouched.
 
@@ -226,7 +226,7 @@ is caught up on the next run rather than staying behind for ever.
 
 ## Where to go next
 
-* [Space options](./configuration/spaces.md#versioning) for the reference table and the exact rules.
-* [Package options](./configuration/packages.md#package-options) for overriding a single package's mode.
-* [Release records](./configuration/records.md#changelog) for what lands in a changelog and a GitHub release.
-* [Commit messages](./commits.md) for `Release-As`, channels and the rest of the directive vocabulary.
+* [Space options](../configuration/spaces.md#versioning) for the reference table and the exact rules.
+* [Package options](../configuration/packages.md#package-options) for overriding a single package's mode.
+* [Release records](../configuration/records.md#changelog) for what lands in a changelog and a GitHub release.
+* [Commit messages](../reference/commits.md) for `Release-As`, channels and the rest of the directive vocabulary.

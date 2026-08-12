@@ -41,19 +41,19 @@ commits the train's earlier prereleases have not already published, so `beta.1` 
 readers of the stable line actually see. The version is still computed over the whole train either way (a breaking
 change shipped in `beta.0` keeps the graduation at the next major); only the notes narrow. The same windowing drives
 the [GitHub release body](#github) and the
-[`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](../environment.md#release-notes-data), and
-[`dispat preview`](../cli.md) shows exactly what the next entry would contain.
+[`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](../reference/environment.md#release-notes-data), and
+[`dispat preview`](../cli/preview.md) shows exactly what the next entry would contain.
 
 A changelog write is idempotent: a file that already carries the entry for the planned tag (a line starting
 `## <tag> (`) is left untouched and the skip is reported as `W222`. That is what makes the
-[`dispat changelog`](../cli.md#the-step-commands) step command safe to run before the release: the entry it writes
+[`dispat changelog`](../cli/changelog.md) step command safe to run before the release: the entry it writes
 lands inside the release commit, and the release stage's own recorder finds it and skips.
 
 ## `github`
 
 | Key        | Default                   | Description                                                                                                                                                                                                                                                            |
 |------------|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](../environment.md#script-outputs).                                                                                                                                                |
+| `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs).                                                                                                                                                |
 | `allPackages`  | `false`                  | Create a release for every published package, even when no script exported `DISPAT_EXPORT_GITHUB`; the export then only adds assets. Default: the export is the per-package opt-in. |
 | `prerelease` | `true`                    | Create a release for a prerelease version too (flagged as a prerelease on GitHub); see [Holding prereleases back](#holding-prereleases-back).                                                                                        |
 | `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                      |
@@ -63,7 +63,7 @@ lands inside the release commit, and the release stage's own recorder finds it a
 | *format*   |                           | All entry format options above. The release body contains the sections, with `header` and `footer` around them; the `## pkg@version (date)` header line used in changelog files is omitted, since GitHub shows the release's name and its own date, so `dateFormat` has no effect here. `releaseName` sets the release's name, which otherwise is the tag. |
 
 The release is **opt-in per package and per run**: it is created exactly when one of the package's scripts exported
-[`DISPAT_EXPORT_GITHUB`](../environment.md#script-outputs); a published package without the export is skipped (with an
+[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs); a published package without the export is skipped (with an
 info-level notice), so a script decides at run time which packages get a GitHub release. The release is named after the
 tag (`pkg@1.3.0`); its body is the rendered changelog sections, under the same
 [release-notes windowing](#changelog): a prerelease's release documents only its own changeset, a graduation the whole
@@ -81,7 +81,7 @@ marks; if not, GitHub creates the tag ref at the default branch head. Per mode:
 | [`commit`](#commit) disabled (default)                       | Default branch head, until CI pushes the local tag  | The notes alone                                          |
 | `commit` enabled, `push` off                                 | Default branch head, until you push                 | Documents the release commit SHA and tag (`### Release`) |
 | `commit` enabled, `push` on                                  | Pinned to the release commit via `target_commitish` | Documents the release commit SHA and tag                 |
-| [`PACKAGE_<KEY>`](../environment.md#script-outputs) exported | Pinned to the exported hash via `target_commitish`  | Documents the exported hash                              |
+| [`PACKAGE_<KEY>`](../reference/environment.md#script-outputs) exported | Pinned to the exported hash via `target_commitish`  | Documents the exported hash                              |
 
 In the usual CI setup with `commit` disabled (a job on the default branch, tags pushed right after the run) the branch
 head and the released commit coincide; they can differ if the run released another branch or the push never happened.
@@ -96,7 +96,7 @@ file still fails the package like any other recording failure.
 
 **Creating a release twice.** A release the repository already carries for the planned tag is a skip (`W224`), not the
 API's duplicate-tag rejection, so a run repeated after a later stage failed — and the
-[`dispat github`](../cli.md#the-step-commands) step command run twice — converge instead of failing.
+[`dispat github`](../cli/github.md) step command run twice — converge instead of failing.
 
 ## Your own words around an entry
 
@@ -223,9 +223,9 @@ package and the version it belongs to:
 
 Three sources answer, in this order:
 
-1. The releasing package's own [`DISPAT_*` variables](../environment.md): its name, version, channel, tag and the rest.
+1. The releasing package's own [`DISPAT_*` variables](../reference/environment.md): its name, version, channel, tag and the rest.
    These are the same variables your scripts receive, so a footer and a publish script name the release the same way.
-2. Anything the package's scripts [exported](../environment.md#script-outputs), as `DISPAT_OUTPUT_<NAME>`. This is how
+2. Anything the package's scripts [exported](../reference/environment.md#script-outputs), as `DISPAT_OUTPUT_<NAME>`. This is how
    a footer links an artifact the run itself produced.
 3. The process environment.
 
@@ -280,7 +280,7 @@ left in the worktree, and pushing the tags is left to CI (`git push origin --tag
 When **enabled**, the run instead finishes with a *finalize phase*: all published packages' folders are staged and
 committed in a single commit (changelog files, version-script manifest changes, plus any `include` paths that exist; add
 build outputs to your `.gitignore` or they get committed too), and the release tags are created **on that commit**
-instead of during each publish. A package whose scripts exported [`PACKAGE_<KEY>`](../environment.md#script-outputs) is
+instead of during each publish. A package whose scripts exported [`PACKAGE_<KEY>`](../reference/environment.md#script-outputs) is
 the exception: its tag is excluded from the release commit and created at the exported commit hash instead. If nothing
 changed on disk (e.g. changelogs disabled), no empty commit is created but tags are still placed. GitHub releases move
 to the end of the run and document the release commit in their body; what the GitHub side does in each mode is described
@@ -293,7 +293,7 @@ access is **verified before any release work starts** (`git ls-remote`, switched
 likewise verified up front, push or not (see [
 `github`](#github)). A failure during the finalize phase itself (commit, tag, push, GitHub release) exits 1 with
 everything else in the phase still done, and already-published registry artifacts stay published; see
-[After the point of no return](../architecture.md#after-the-point-of-no-return).
+[After the point of no return](../internals/architecture.md#after-the-point-of-no-return).
 
 ### Force
 
@@ -316,7 +316,7 @@ Two things `force` deliberately does not do:
   all, because it is a record some earlier run made, and a tag moved here would then be force pushed over the copy on
   the remote, turning one local mistake into everyone's. Force means "do not fail because the ref exists", not
   "overwrite whatever is there".
-- **The [release lock](../release-lock.md) is never forced.** Its whole purpose is to fail when the name is taken, since
+- **The [release lock](../releasing/release-lock.md) is never forced.** Its whole purpose is to fail when the name is taken, since
   a run that took the lock by overwriting somebody else's would be releasing beside them.
 
 The one case force does change for release tags is a tag on a commit the current branch cannot reach: dispat's baseline

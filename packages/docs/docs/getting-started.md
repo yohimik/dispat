@@ -33,12 +33,12 @@ go install github.com/yohimik/dispat/services/dispat@latest
 or download one of the prebuilt binaries for Linux, macOS and Windows, on Intel and on ARM, attached to every
 [GitHub release](https://github.com/yohimik/dispat/releases), and put it on your `PATH` yourself.
 
-In CI you usually want neither: GitHub Actions has [a composite action](./ci.md#the-github-action), and every other
-system can use [the container images](./ci.md#the-container-images) or the install script above.
+In CI you usually want neither: GitHub Actions has [a composite action](./reference/ci.md#the-github-action), and every other
+system can use [the container images](./reference/ci.md#the-container-images) or the install script above.
 
 A downloaded binary keeps itself current: `dispat self-update` replaces it with the latest release and keeps the old
 one beside it for a week in case you want it back. Every command mentions a newer release on its way out, so you find
-out without going looking. See [Updating dispat](./self-update.md).
+out without going looking. See [Updating dispat](./reference/self-update.md).
 
 ## First configuration
 
@@ -79,20 +79,20 @@ between packages under `dependencies` so bumps propagate and ordering is enforce
 
 That is a complete, working configuration.
 
-If the repository you are pointing it at is not brand new, run [`dispat compute`](cli.md#the-compute-command) once
+If the repository you are pointing it at is not brand new, run [`dispat compute`](./cli/compute.md) once
 before anything else. It reads the packages' manifests and offers you two things the config would otherwise need by
 hand: the `dependencies` edges between them, and an `initials` entry for every package already at a version, so the
 first release continues from where the manifests are instead of starting again at `0.0.1`. Nothing is written until you
-add `--write`. The [adoption recipe](cookbook.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
+add `--write`. The [adoption recipe](./cookbook.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
 through a real one.
 
 Everything else is optional and layered on top:
 
-- concurrency budgets, tag formats, log settings: the [top-level options](configuration/README.md);
-- build/publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](configuration/spaces.md);
-- packages that must share a version, or a major: [shared versions](versioning.md);
-- changelogs, GitHub releases, the release commit: [release records](configuration/records.md);
-- commit-message policies and parser tweaks: [parsing options](configuration/parser.md).
+- concurrency budgets, tag formats, log settings: the [top-level options](./configuration/README.md);
+- build/publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](./configuration/spaces.md);
+- packages that must share a version, or a major: [shared versions](./releasing/versioning.md);
+- changelogs, GitHub releases, the release commit: [release records](./configuration/records.md);
+- commit-message policies and parser tweaks: [parsing options](./configuration/parser.md).
 
 [`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json) and [`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml) show every option in
 one annotated file.
@@ -122,7 +122,7 @@ demand more. If you are coming from a tool where propagation was automatic, this
 caret, dependants are not bumped.
 
 A few more forms worth knowing early; the full reference is in
-[Commit messages](commits.md):
+[Commit messages](./reference/commits.md):
 
 ```
 fix(core,utils): shared fix      # several packages
@@ -226,7 +226,7 @@ jobs:
       - run: git push origin --tags   # publish the tags dispat created
 ```
 
-[dispat in CI](./ci.md) covers the action's inputs, the container images for every other CI system, and what a job
+[dispat in CI](./reference/ci.md) covers the action's inputs, the container images for every other CI system, and what a job
 needs beyond this.
 
 Notes:
@@ -234,11 +234,11 @@ Notes:
 - `fetch-depth: 0` matters. The planner reads tags and commit ranges, so it needs full history. A shallow clone is
   detected and refused (error `E196`) rather than silently planned over.
 - By default dispat creates tags locally; push them after a successful run, as above. Alternatively enable the
-  [release commit](configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then creates
+  [release commit](./configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then creates
   one commit carrying the changelogs and manifest changes, places the tags on it and pushes everything
-  itself. [GitHub releases](configuration/records.md#github) are created for every published package whose scripts
+  itself. [GitHub releases](./configuration/records.md#github) are created for every published package whose scripts
   exported `DISPAT_EXPORT_GITHUB`, with the export's file paths attached as assets; see
-  [script outputs](environment.md#script-outputs) for the export mechanism.
+  [script outputs](./reference/environment.md#script-outputs) for the export mechanism.
 - Concurrent dispat runs on the same checkout are not guarded by a lock, so serialize release jobs in CI.
 - The exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
   On pull requests, run `dispat status` to review the plan before it becomes a release.

@@ -78,7 +78,7 @@ Whatever your stage scripts shell out to — `node`, `go`, `cargo`, `docker` —
 this one. dispat itself needs only `git` and a POSIX shell.
 
 `contents: write` is needed even by a job that pushes nothing: the run claims the repository with a
-[release lock](./release-lock.md) tag on the remote before it plans, so that two jobs releasing at once are refused
+[release lock](../releasing/release-lock.md) tag on the remote before it plans, so that two jobs releasing at once are refused
 rather than raced. That also makes the job safe to trigger on every merge; the second run stops immediately instead of
 publishing beside the first.
 
@@ -138,7 +138,7 @@ change the image tag instead. The images set `DISPAT_UPDATE_CHECK=0` so they do 
 
 ## The install script
 
-The same script the images use, and the one [Getting started](./getting-started.md#install) hands to a human:
+The same script the images use, and the one [Getting started](../getting-started.md#install) hands to a human:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh

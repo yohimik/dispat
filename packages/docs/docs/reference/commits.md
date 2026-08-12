@@ -11,7 +11,7 @@ Messages are parsed by [`pkg/ccme`](https://github.com/yohimik/dispat/tree/main/
 [footers]
 ```
 
-The type decides the bump (overridable via [`parser.types`](./configuration/parser.md#parser)):
+The type decides the bump (overridable via [`parser.types`](../configuration/parser.md#parser)):
 
 | Type                    | Bump  |
 |-------------------------|-------|
@@ -32,7 +32,7 @@ The type decides the bump (overridable via [`parser.types`](./configuration/pars
 | `-app`    | removes `app` from the set; exclusions always win | warning                       |
 
 With no parentheses at all the set is file-derived, by longest matching path prefix: a file under a package nested
-inside another belongs to the inner one only. A package that declares a [`src`](./configuration/packages.md#src) owns
+inside another belongs to the inner one only. A package that declares a [`src`](../configuration/packages.md#src) owns
 only what sits under that sub-folder, so a change elsewhere in its folder does not address it. A unit resolving to no
 package is inert and reported as such.
 

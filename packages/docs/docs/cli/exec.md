@@ -1,4 +1,4 @@
-# Shell helpers
+# The exec command
 
 Everything dispat runs is a shell command. Stages, hooks and `run` scripts are
 all strings handed to `/bin/sh -c`, which works well until a script needs to do
@@ -28,71 +28,6 @@ works out which packages changed and runs the script in each of them in
 dependency order. `dispat exec` does none of that. It looks up one script by
 name and runs it, which is what you want when you are already inside a stage
 script and just need to call something else.
-
-## dispat if
-
-```
-dispat if <cond> --then <script> [--elif <cond> --then <script>]... [--else <script>]
-```
-
-The leading condition takes the first `--then`. Each `--elif` takes the next
-one. `--else` runs when nothing else matched.
-
-```sh
-dispat if 'ENV=prod'      --then 'deploy prod' \
-       --elif 'ENV=stage' --then 'deploy stage' \
-       --else               'echo nothing to deploy'
-```
-
-The first condition that holds wins, and the rest are skipped without being
-looked at. So a chain of `--elif` is a switch, and `--else` is its default case.
-
-If nothing matches and you gave no `--else`, nothing runs and the command exits
-`0`. That is deliberate: a guard that finds nothing to do has done its job.
-
-The scripts are shell text, not script names. This is the shell's own
-if/elif/else, spelled so it fits on one line inside a JSON or YAML config file
-where a real `if` block would be unreadable.
-
-### Conditions
-
-| Condition       | True when                                          |
-|-----------------|-----------------------------------------------------|
-| `NAME`          | the variable is set and not empty                   |
-| `!NAME`         | the variable is unset, or set to nothing            |
-| `NAME=value`    | it is exactly that value                            |
-| `NAME!=value`   | it is anything else                                 |
-| `NAME~glob`     | it matches the pattern, where `*` matches anything  |
-| `NAME!~glob`    | it does not match the pattern                       |
-
-"Set" means set and not empty, the same thing `[ -n "$NAME" ]` means in the
-shell. CI systems export empty variables all the time, and an empty value is
-almost never a yes. If you specifically want to ask whether a variable is empty,
-`NAME=` is the way, because an unset variable expands to nothing exactly as it
-would in a shell.
-
-The value can contain anything, operators included. Only the first operator ends
-the variable name, so `URL=a~b` asks whether `URL` is the text `a~b`.
-
-Globs use the same matcher as everywhere else in dispat, where `*` matches any
-run of characters including slashes:
-
-```sh
-dispat if 'BRANCH~release/*' --then 'dispat release'
-```
-
-Conditions read the environment the command was given, and nothing else. There
-is no config file to load and no repository to be standing in, so `dispat if`
-works anywhere.
-
-### Nesting
-
-A branch is just shell text, so another dispat command is a perfectly ordinary
-thing to put in one:
-
-```sh
-dispat if CI --then 'dispat if TIER=gold --then "deploy gold" --else "deploy standard"'
-```
 
 ## dispat exec
 
@@ -234,21 +169,7 @@ cleanup still gets its chance.
 knowing if your script also exits `2`. Ending `--on-failure` with an explicit
 `exit 1` removes the ambiguity.
 
-## Every flag
-
-### dispat if
-
-| Flag                  | Effect                                                                        |
-|-----------------------|--------------------------------------------------------------------------------|
-| `--then <script>`     | The script the preceding condition runs. Repeatable, one per condition.        |
-| `--elif <cond>`       | Another condition, tried when every earlier one was false. Repeatable.         |
-| `--else <script>`     | The script to run when no condition held.                                      |
-| `--on-failure <script>` | Run this when the chosen script fails, and exit with its code instead.       |
-
-Needs no config file and no git repository. The shell is `/bin/sh -c`, since
-there is no config here to take a `shell` setting from.
-
-### dispat exec
+## Flags
 
 | Flag                    | Effect                                                                                |
 |-------------------------|-----------------------------------------------------------------------------------------|

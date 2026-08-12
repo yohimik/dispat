@@ -1,7 +1,7 @@
 # Commit parsing options
 
 How commit messages are parsed and what an error in one does to the run. The message format itself is in the
-[commit message reference](../commits.md).
+[commit message reference](../reference/commits.md).
 
 ## `commitErrors`
 
@@ -97,11 +97,11 @@ INF plan diagnostics warnings=12 errors=1 hidden=13
 ```
 
 Findings about the workspace rather than the message — an unknown scope (`E130`), a catch-up (`W193`), a blocked
-package (`W194`), a package a [selection](../partial-releases.md) could not release yet (`W230`) — are never hidden.
+package (`W194`), a package a [selection](../releasing/partial-releases.md) could not release yet (`W230`) — are never hidden.
 They explain a release outcome that a reader of the commit log alone cannot account for, which is the whole reason
 they exist.
 
-The [`--quiet-parser` flag](../cli.md#flags) overrides the config in both directions:
+The [`--quiet-parser` flag](../cli/README.md#global-flags) overrides the config in both directions:
 
 ```sh
 dispat status --quiet-parser         # hide them for this invocation

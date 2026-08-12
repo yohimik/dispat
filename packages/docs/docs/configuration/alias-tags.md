@@ -114,7 +114,7 @@ If your packages tag as `{name}@{version}` and you want bare aliases, give the a
 
 An alias is a convenience ref, not the record of a release. If one cannot be written, dispat warns (`W232`) and carries
 on: the release tag is already there, and the alias is re-pointed by hand or by the next release. That is different
-from the release tag itself, whose failure is a [critical](../architecture.md#after-the-point-of-no-return).
+from the release tag itself, whose failure is a [critical](../internals/architecture.md#after-the-point-of-no-return).
 
 ## Pushing
 

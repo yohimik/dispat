@@ -9,7 +9,7 @@ Steps 1-2 are the command-line controller (`internal/cli`, behind the thin `main
 from discovery on is the `app` package's `Status` (steps 3-6) and `Release` (all of them), so the same operations are
 callable without a command line.
 
-`Release` brackets steps 3 onward with the [release lock](./release-lock.md): an annotated `dispat-release-lock` tag
+`Release` brackets steps 3 onward with the [release lock](../releasing/release-lock.md): an annotated `dispat-release-lock` tag
 pushed, unforced, to `commit.remote` before discovery, and deleted from the remote and the clone on the way out, under
 a context detached from cancellation so an interrupt still gives it back. A rejected push means a release is already
 running against this repository, and the run stops there with exit `1`, before it has read a single tag.
@@ -30,7 +30,7 @@ as a release tag.
    applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (every
    pending package's in publish order, under the same filter), and stops. `scanner` and `writer` also
    answer before any config is loaded, and for the same reason as `init`: they are the `pkg/scanner` and `pkg/writer`
-   libraries exposed directly (see [Manifest tools](./manifests.md)), reading nothing but the paths named on the
+   libraries exposed directly (see [Manifest tools](../editing/manifests.md)), reading nothing but the paths named on the
    command line, so a monorepo root, a plan and a git history are all beside the point.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root; a folder's `.dispatexclude` chooses between the candidate names). A file declaring `spaces`
@@ -314,7 +314,7 @@ changes which releases get cancelled or contained.
 ## Failure semantics
 
 **Once the release work starts, no error aborts the run.** Everything that can refuse a release happens before any of
-it: the [release lock](./release-lock.md), a blocked plan, the branch guard, the behind-remote check, the remote and
+it: the [release lock](../releasing/release-lock.md), a blocked plan, the branch guard, the behind-remote check, the remote and
 GitHub verification, and the `beforeAll` hook. Those refuse while nothing has happened yet, which is the only moment refusing costs nothing. From the first
 build script onward the run always goes to the end: a package can fail, and its consumers can be skipped behind it, but
 every other package still releases and the finalize phase still records whatever published. The only thing that stops a
@@ -385,7 +385,7 @@ releases that document the same work. Each step runs, each failure is recorded, 
 
 `E211` is the one case that also declines to act. A tag already sitting at another commit is left exactly where it is
 rather than moved onto this release: it is a record some earlier run made, and with
-[force](./configuration/records.md#force) on, a tag moved here would be carried over the copy on the remote, turning one
+[force](../configuration/records.md#force) on, a tag moved here would be carried over the copy on the remote, turning one
 local mistake into everyone's.
 
 ## Design decisions
@@ -433,7 +433,7 @@ keeps dispat language-agnostic:
 
 | Not implemented                                             | Delegated to                                                                                                                                                                          |
 |-------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Rewriting dependency ranges in manifests                    | native for `package.json`/`go.mod` under [`autoVersion`](./configuration/spaces.md#autoversion) (W197/W203); other ecosystems: `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
+| Rewriting dependency ranges in manifests                    | native for `package.json`/`go.mod` under [`autoVersion`](../configuration/spaces.md#autoversion) (W197/W203); other ecosystems: `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
 | Manifest-vs-baseline version checks                         | native under `autoVersion` (W192); otherwise nothing                                                                                                                                  |
 | Publish targets, registries, adopting published versions    | `flow.publish`                                                                                                                                                                        |
 | `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps                                                                                                                         |
@@ -453,11 +453,11 @@ ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserve
 
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
-| `W210`-`W213`          | [Versioning groups](./versioning.md): a ride, and the three conflicts a shared version can produce |
+| `W210`-`W213`          | [Versioning groups](../releasing/versioning.md): a ride, and the three conflicts a shared version can produce |
 | `W220`, `W221`, `W225` | Manifest-derived: an ambiguous manifest name, a rewritten dependency with no configured edge, one package's manifests declaring different versions for it |
-| `W222`, `W223`, `W224` | A record that is already there: a changelog entry, a release tag, a GitHub release. What makes the [step commands](./steps.md) re-runnable |
-| `W230`, `W231`         | [Releasing part of the graph](./partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
-| `W232`                 | An [alias tag](./configuration/alias-tags.md) that could not be written |
+| `W222`, `W223`, `W224` | A record that is already there: a changelog entry, a release tag, a GitHub release. What makes the [step commands](../releasing/steps.md) re-runnable |
+| `W230`, `W231`         | [Releasing part of the graph](../releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
+| `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `E210`-`E214`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 
 All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features

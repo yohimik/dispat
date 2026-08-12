@@ -82,7 +82,7 @@ const FEATURES: Feature[] = [
         leg commits by durably recording its completion: the annotated git tag, written only after the publish
         succeeded. No state files, no registry queries, so nothing can drift from what happened. Recovery is
         deterministic replay — the plan is a pure function of history, graph and configuration.{' '}
-        <Link to="/architecture">How it works.</Link>
+        <Link to="/internals/architecture">How it works.</Link>
       </>
     ),
   },
@@ -107,7 +107,7 @@ function Hero(): React.ReactElement {
           <Link to={`${GITHUB}/actions/workflows/tests.yml`}>
             <img src={`${GITHUB}/actions/workflows/tests.yml/badge.svg`} alt="tests workflow status" height={20} />
           </Link>
-          <Link to="/coverage">
+          <Link to="/internals/coverage">
             <img
               src="https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json"
               alt="statement coverage"
@@ -325,13 +325,13 @@ function Reference(): React.ReactElement {
           <Link to="/cli">CLI</Link> and <Link to="/configuration">Configuration</Link>: every command, every option.
         </li>
         <li>
-          <Link to="/commits">Commit messages</Link>: the Conventional Commits superset that carries release intent.
+          <Link to="/reference/commits">Commit messages</Link>: the Conventional Commits superset that carries release intent.
         </li>
         <li>
-          <Link to="/environment">Script environment</Link>: the <code>DISPAT_*</code> variables a stage receives.
+          <Link to="/reference/environment">Script environment</Link>: the <code>DISPAT_*</code> variables a stage receives.
         </li>
         <li>
-          <Link to="/architecture">Architecture</Link> and <Link to="/coverage">Coverage</Link>: how it is built and how
+          <Link to="/internals/architecture">Architecture</Link> and <Link to="/internals/coverage">Coverage</Link>: how it is built and how
           it is tested.
         </li>
       </ul>

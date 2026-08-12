@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 
 Container images for every other CI system: `yohimik/dispat-alpine`, `-ubuntu`, `-debian`, `-dind`. See
-[dispat in CI](https://yohimik.github.io/dispat/ci).
+[dispat in CI](https://yohimik.github.io/dispat/reference/ci).
 
 ## Why one more monorepo tool?
 
