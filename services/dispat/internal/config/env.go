@@ -56,10 +56,14 @@ func EnvPairs(env map[string]string) []string {
 	return pairs
 }
 
-// mergeEnv overlays one env layer onto another, key by key, and returns a new
+// MergeEnv overlays one env layer onto another, key by key, and returns a new
 // map: the single merge rule every level shares. A nil overlay leaves the base
 // alone, which is what "the layer says nothing" has to mean.
-func mergeEnv(base, over map[string]string) map[string]string {
+//
+// Exported for `dispat exec`, which layers a space's declared env over the
+// file's outside the package build, and must do it the same way the build
+// does or the same configuration would mean two things.
+func MergeEnv(base, over map[string]string) map[string]string {
 	if len(over) == 0 {
 		return base
 	}

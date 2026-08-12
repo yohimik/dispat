@@ -49,6 +49,12 @@ var selectionFlags = []string{"package", "space", "group"}
 // failure does to the dependents.
 var windowFlags = append([]string{"since", "consumers", "on-error"}, selectionFlags...)
 
+// ifFlags and execFlags are the two shell helpers' own, --on-failure aside:
+// both take that one, so it is added to each entry rather than living here.
+var ifFlags = []string{"then", "elif", "else"}
+
+var execFlags = []string{"for-package", "for-space", "fallback", "script-from", "env"}
+
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
 var globalFlags = []string{"root", "config", "concurrency", "log-level", "log-format",
@@ -200,6 +206,52 @@ marked keep: true is never suggested for removal, an initials entry already
 in the config is never rewritten, and --package/--space/--group scope the
 suggestions to those packages.`,
 		flags: append([]string{"write", "interactive", "check"}, selectionFlags...),
+	},
+	{
+		name:  cmdIf,
+		args:  "<cond>",
+		short: "run one of several scripts, chosen by an environment condition",
+		long: `Run one of several shell scripts, chosen by a condition on the
+environment. The leading condition takes the first --then, each --elif takes
+the next, and --else runs when none of them held. The first condition that
+holds wins and the rest are skipped, so a chain of --elif is a switch and
+--else is its default case.
+
+A condition is NAME (set and non-empty), !NAME (unset or empty), NAME=value,
+NAME!=value, NAME~glob or NAME!~glob. The scripts are shell text, not script
+names: this is the shell's own if/elif/else, spelled to fit on one line inside
+a configured script.
+
+The chosen script's exit code becomes the command's, so it stays transparent
+in a pipeline, and --on-failure replaces that code with its own. Nothing
+matching with no --else runs nothing and exits 0. Needs no config file and no
+git repository.`,
+		flags: append(append([]string{}, ifFlags...), "on-failure"),
+	},
+	{
+		name:  cmdExec,
+		args:  "<script>",
+		short: "run one declared script here, once",
+		long: `Run one script the configuration declares, in the current folder, once.
+Unlike "dispat run" it computes no plan, sweeps nothing and consults no
+dependency graph, which is what makes it usable as a step inside another
+script.
+
+One subject decides where the script is looked up and whose environment it
+gets: --for-package, --for-space, or neither for the top level. The folder the
+command was invoked from is never consulted, so the same invocation resolves
+the same way from anywhere in the repository.
+
+Without --fallback only the named level is read, so a script defined a level
+away fails loudly instead of running text nobody asked for; with it the name
+resolves the way "dispat run" resolves it, the package over its space over the
+top level. --script-from (pkg:<name>, space:<name> or root) moves the lookup
+alone, leaving the environment with the subject.
+
+--env says what the subject adds: static, its declared env, which is the
+default; dispat, the DISPAT_* release variables; or both. The last two compute
+a plan, and nothing else here does.`,
+		flags: append(append([]string{}, execFlags...), "on-failure"),
 	},
 	{
 		name:  cmdSelfUpdate,

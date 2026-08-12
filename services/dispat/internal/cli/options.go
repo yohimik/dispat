@@ -58,6 +58,17 @@ type options struct {
 	avNoReplace, avWriteVersion, avSyncLock *bool
 	onlyUpdated                             *bool
 
+	// if
+	ifThen, ifElif *[]string
+	ifElse         *string
+
+	// exec
+	execForPackage, execForSpace, execScriptFrom, execEnv *string
+	execFallback                                          *bool
+
+	// shared by the two shell helpers
+	onFailure *string
+
 	// scanner, writer, replacer
 	scanRootOnly     *bool
 	wrSetVersion     *string
@@ -155,6 +166,24 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override autoVersion.writeVersion")
 	o.avSyncLock = fs.Bool("sync-lock", true,
 		"run the space's syncLock scripts for changed packages")
+	o.ifThen = fs.StringArray("then", nil,
+		"the script a condition runs when it holds; repeatable, paired in order with the leading condition and each --elif")
+	o.ifElif = fs.StringArray("elif", nil,
+		"another condition, tried when every earlier one was false; repeatable, each needing its own --then")
+	o.ifElse = fs.String("else", "",
+		"the script to run when no condition held; without it, nothing matching runs nothing and exits 0")
+	o.execForPackage = fs.String("for-package", "",
+		"run the script of this package, in its environment; one exact name, no globs")
+	o.execForSpace = fs.String("for-space", "",
+		"run the script of this space, in its environment; one exact name, no globs")
+	o.execFallback = fs.Bool("fallback", false,
+		"resolve the script name the way dispat run does, falling back from the package to its space to the top level, instead of the named level alone")
+	o.execScriptFrom = fs.String("script-from", "",
+		"take the script text from somewhere other than the subject: pkg:<name>, space:<name> or root; the environment still comes from the subject")
+	o.execEnv = fs.String("env", app.EnvScopeStatic,
+		"what the subject adds to the environment: static (its declared env), dispat (the DISPAT_* release variables, which computes a plan) or both")
+	o.onFailure = fs.String("on-failure", "",
+		"run this script when the chosen script fails, and exit with the failure script's code instead of the failed script's")
 	o.scanRootOnly = fs.Bool("root-only", false,
 		"read only the manifests sitting directly in the folder, without descending")
 	o.wrSetVersion = fs.String("set-version", "",

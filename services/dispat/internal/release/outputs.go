@@ -77,7 +77,7 @@ func normalizeOutputName(name string) (string, bool) {
 	case strings.HasPrefix(name, plan.ReservedEnvPrefix):
 		return "", false
 	}
-	return name, validEnvName(name)
+	return name, ValidEnvName(name)
 }
 
 // MergeOutputs folds exports onto the release: first-export order is kept, a
@@ -103,9 +103,11 @@ func MergeOutputs(rel *plan.Release, outs []plan.Output) {
 	}
 }
 
-// validEnvName reports whether s is a portable environment variable name:
-// [A-Za-z_][A-Za-z0-9_]*.
-func validEnvName(s string) bool {
+// ValidEnvName reports whether s is a portable environment variable name:
+// [A-Za-z_][A-Za-z0-9_]*. Exported because the conditions `dispat if` tests
+// name variables the same way, and one definition is what keeps a name dispat
+// accepts in an output and a name it accepts in a condition the same set.
+func ValidEnvName(s string) bool {
 	if s == "" {
 		return false
 	}

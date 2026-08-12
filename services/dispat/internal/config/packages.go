@@ -336,7 +336,7 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		}
 		sc.Scripts = merged
 	}
-	sc.Env = mergeEnv(sc.Env, po.Env)
+	sc.Env = MergeEnv(sc.Env, po.Env)
 	if po.AutoVersion != nil {
 		sc.AutoVersion = po.AutoVersion
 	}
@@ -443,6 +443,11 @@ type packageExtras struct {
 	concurrency   []int
 	manifestNames []string
 	src           string
+	// ownScripts accumulates what the package itself declares, layer by layer
+	// and without its space's or the top level's. mergePackageOverride folds
+	// the same names into the layered map a resolution reads; this keeps the
+	// narrower answer, which only the fold is in a position to know.
+	ownScripts map[string]string
 }
 
 // apply folds one layer's package-only keys in. Changelog and github overlay
@@ -450,6 +455,16 @@ type packageExtras struct {
 // global config), so a package can flip enabled and keep the global titles,
 // or point at another repository and keep the global tokenEnv.
 func (ex *packageExtras) apply(c *File, po PackageConfig) {
+	if len(po.Scripts) > 0 {
+		if ex.ownScripts == nil {
+			ex.ownScripts = make(map[string]string, len(po.Scripts))
+		}
+		// Nearer layers come later, so a plain overwrite is the same
+		// precedence mergePackageOverride gives the layered map.
+		for k, v := range po.Scripts {
+			ex.ownScripts[k] = v
+		}
+	}
 	if po.Changelog != nil {
 		base := c.Changelog
 		if base == nil {

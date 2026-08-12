@@ -1393,6 +1393,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				}
 				pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
 				pkg.ManifestNames = ex.manifestNames
+				pkg.OwnScripts = ex.ownScripts
 				pkg.Src = ex.src
 				if ex.changelog != nil {
 					pkg.Changelog = changelogSpec(ex.changelog)
@@ -1508,6 +1509,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		}
 		pkg.BuildWeight, pkg.PublishWeight = packageWeights(ex.concurrency)
 		pkg.ManifestNames = ex.manifestNames
+		pkg.OwnScripts = ex.ownScripts
 		pkg.Src = ex.src
 		if ex.changelog != nil {
 			pkg.Changelog = changelogSpec(ex.changelog)
@@ -1621,7 +1623,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 		// carrying the space plus any package override layers — the same
 		// invariant packageScope relies on — so only the top level is left to
 		// put underneath.
-		Env:                  EnvPairs(mergeEnv(c.Env, sc.Env)),
+		Env:                  EnvPairs(MergeEnv(c.Env, sc.Env)),
 		BuildWaitsPublish:    sc.IsBuildWaitingPublish,
 		RevertOnFail:         sc.RevertOnFail,
 		Versioning:           model.Versioning(mode),

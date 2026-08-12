@@ -859,6 +859,13 @@ func (c *File) Package(name string) (PackageConfig, bool) {
 	return pc, ok
 }
 
+// Space resolves a `spaces` entry by space name case-insensitively, for the
+// same viper reason as Package.
+func (c *File) Space(name string) (SpaceConfig, bool) {
+	sc, ok := c.Spaces[strings.ToLower(name)]
+	return sc, ok
+}
+
 // Package resolves one of the space file's `packages` entries by package
 // name, case-insensitively for the same viper reason as File.Package.
 func (f SpaceFile) Package(name string) (PackageConfig, bool) {

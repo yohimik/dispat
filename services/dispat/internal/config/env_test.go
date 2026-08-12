@@ -49,7 +49,7 @@ func TestEnvPairs(t *testing.T) {
 func TestMergeEnv(t *testing.T) {
 	base := map[string]string{"KEEP": "base", "OVER": "base"}
 	over := map[string]string{"OVER": "local", "NEW": "local"}
-	merged := mergeEnv(base, over)
+	merged := MergeEnv(base, over)
 	assert.Equal(t, map[string]string{"KEEP": "base", "OVER": "local", "NEW": "local"}, merged)
 	// The inputs are left alone: a space's map is shared by every package of
 	// the space, so merging one package's layer must not reach the others.
@@ -57,8 +57,8 @@ func TestMergeEnv(t *testing.T) {
 
 	// An empty overlay means "this layer says nothing", which has to leave the
 	// base as it was rather than replace it with a copy.
-	assert.Equal(t, base, mergeEnv(base, nil))
-	assert.Equal(t, over, mergeEnv(nil, over))
+	assert.Equal(t, base, MergeEnv(base, nil))
+	assert.Equal(t, over, MergeEnv(nil, over))
 }
 
 func TestValidateEnvRefusals(t *testing.T) {

@@ -33,6 +33,12 @@ const (
 	cmdPreview = "preview" // print one package's pending release notes
 	cmdCompute = "compute" // derive the graph and the baselines from manifests
 
+	// The shell helpers, which run one script rather than sweeping a
+	// selection: a condition picks the script for one, the configuration
+	// names it for the other. Both propagate the script's own exit code.
+	cmdIf   = "if"   // run one of several scripts, chosen by an env condition
+	cmdExec = "exec" // run one declared script here, for a named subject
+
 	// The standalone step commands, exposing the release pipeline's native
 	// steps to custom flows. Like every command word (and unlike --version),
 	// each permanently shadows a run script of the same name: `dispat
@@ -190,6 +196,49 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
+	if cmd == cmdIf {
+		// Before config loading, and before the update check: a condition is
+		// about the environment, not about the repository it is standing in,
+		// and this is glue that may run dozens of times in one script — a
+		// GitHub request per call and a notice on stdout would both be wrong.
+		branches, ok := parseBranches(inv.cond, o, usageForCommand, bootLog)
+		if !ok {
+			return 2
+		}
+		log := newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stdout)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		code, err := app.RunIf(ctx, app.IfOptions{
+			Branches: branches, Else: *o.ifElse, OnFailure: *o.onFailure,
+			Lookup: os.Getenv, Dir: *o.root,
+			Stdout: stdout, Stderr: stderr, Log: log,
+		})
+		if err != nil {
+			return 1
+		}
+		return code
+	}
+	var execOpts app.ExecOptions
+	if cmd == cmdExec {
+		// The flags alone, before any config is read, so a usage mistake never
+		// first costs a config error.
+		subj, ok := execSubject(o, usageForCommand, bootLog)
+		if !ok {
+			return 2
+		}
+		from, ok := execScriptFrom(o, bootLog)
+		if !ok {
+			return 2
+		}
+		if !checkExecEnv(o, subj, usageForCommand, bootLog) {
+			return 2
+		}
+		execOpts = app.ExecOptions{
+			Script: inv.script, Subject: subj, ScriptFrom: from,
+			Fallback: *o.execFallback, Env: *o.execEnv, OnFailure: *o.onFailure,
+			Dir: *o.root, Stdout: stdout, Stderr: stderr,
+		}
+	}
 	if cmd == cmdInit || manifestCommand(cmd) {
 		// The commands that read no config file have no updateCheck option to
 		// consult, so the environment variable is the whole of their opt-out.
@@ -302,6 +351,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		cfg.Parser.Quiet = *o.quietParser
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, stdout)
+	if cmd == cmdExec {
+		// Straight after the config, which is all it needs: no plan unless
+		// --env asked for one, and no update check, for the same reason as if.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		code, err := app.New(resolvedRoot, cfg, log).Exec(ctx, execOpts)
+		if err != nil {
+			return 1
+		}
+		return code
+	}
 	// Now that the configuration has spoken, the check can start: a run that
 	// switched it off must make no request at all, which means not making one
 	// before the option has been read.
@@ -413,7 +473,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // positional arguments.
 type invocation struct {
 	cmd    string
-	script string   // run: the script name
+	script string   // run and exec: the script name
+	cond   string   // if: the leading condition
 	dir    string   // scanner: the optional folder to scan
 	paths  []string // writer and replacer: the files to edit
 }
@@ -437,6 +498,20 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 	case cmdRun:
 		if len(rest) != 2 {
 			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package, --space or --group)")
+			usage(inv.cmd)
+			return inv, true
+		}
+		inv.script = rest[1]
+	case cmdIf:
+		if len(rest) != 2 {
+			log.Error().Msg("if requires exactly one argument: the condition (NAME, !NAME, NAME=value, NAME!=value, NAME~glob or NAME!~glob)")
+			usage(inv.cmd)
+			return inv, true
+		}
+		inv.cond = rest[1]
+	case cmdExec:
+		if len(rest) != 2 {
+			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for-package or --for-space)")
 			usage(inv.cmd)
 			return inv, true
 		}
