@@ -21,6 +21,9 @@ script written against `$DISPAT_VERSION` is run on its own without releasing any
 | `DISPAT_OLD_VERSION`          | `1.2.3`              | The version the package last published (`0.0.0` for a first release).                                                                                                                   |
 | `DISPAT_NEW_VERSION`          | `1.3.0-beta.4`       | Version being released: version + channel + counter, SemVer spelling.                                                                                                                   |
 | `DISPAT_VERSION`              | `1.3.0`              | The core version alone: `MAJOR.MINOR.PATCH`, channel and counter stripped.                                                                                                              |
+| `DISPAT_MAJOR`                | `1`                  | The first number of `DISPAT_VERSION`, on its own.                                                                                                                                       |
+| `DISPAT_MINOR`                | `3`                  | The second number of `DISPAT_VERSION`, on its own.                                                                                                                                      |
+| `DISPAT_PATCH`                | `0`                  | The third number of `DISPAT_VERSION`, on its own.                                                                                                                                       |
 | `DISPAT_TAG_VERSION`          | `1.3.0-beta4`        | Version + channel + counter as the space's `tagFormat` spells them; see the note below.                                                                                                 |
 | `DISPAT_STABLE_BASELINE`      | `1.2.3`              | The last release with no prerelease component: what versions are computed from.                                                                                                         |
 | `DISPAT_BASELINE`             | `1.3.0-beta.3`       | The latest baseline: the newest tag of any kind, prereleases included. **Unset** when the package has never released; see the note below.                                               |
@@ -45,6 +48,11 @@ script written against `$DISPAT_VERSION` is run on its own without releasing any
 
 `DISPAT_TAG_VERSION` is the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no
 path). It equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.
+
+`DISPAT_MAJOR`, `DISPAT_MINOR` and `DISPAT_PATCH` split `DISPAT_VERSION` so a script never has to cut a version string
+apart. They are what a moving series tag is written from, the way the container images write `image:1` and `image:1.4`
+beside `image:1.4.2`. All three are always set, including when they are `0`, and they describe the *core* version: a
+`1.3.0-beta.4` release reports `1`, `3` and `0`, the stable release the train is heading for.
 
 `DISPAT_BASELINE` is what the computed version must exceed and where the channel is read from. Because it is unset (not
 empty) for a package that has never released, `${DISPAT_BASELINE+x}` detects a first release; when set, it equals

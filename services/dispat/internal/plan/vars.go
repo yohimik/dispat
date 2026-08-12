@@ -7,7 +7,10 @@ package plan
 // They live here, next to the release, so the two readers cannot drift: a
 // variable added for a script is a variable a footer can name.
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // PackageEnvVar names the package a per-package script or hook is running
 // for. A nested dispat command reads it to know whose environment it was
@@ -61,6 +64,10 @@ func (r *Release) Vars() []string {
 		// The version decomposed, so a script never re-parses a tag:
 		//
 		//	DISPAT_VERSION      the core alone: 1.0.1
+		//	DISPAT_MAJOR        the core's three numbers on their own: 1, 0
+		//	DISPAT_MINOR        and 1. They are the core split, not the
+		//	DISPAT_PATCH        version: a prerelease decomposes to the same
+		//	                    three as the stable release it is heading for.
 		//	DISPAT_CHANNEL      the channel alone (above)
 		//	DISPAT_COUNTER      the counter alone (below; unset when stable)
 		//	DISPAT_NEW_VERSION  version+channel+counter, SemVer: 1.0.1-beta.4
@@ -69,7 +76,14 @@ func (r *Release) Vars() []string {
 		//	                    "{name}@v{version}-{channel}{counter}" — the
 		//	                    version section of DISPAT_TAG without the name
 		//	                    and its decoration
+		//
+		// The three numbers are what a script writes a moving series tag with
+		// — "image:1", "image:1.0" beside "image:1.0.1" — and they are always
+		// set: unlike a counter, every version has all three.
 		"DISPAT_VERSION=" + r.Next.Core().String(),
+		"DISPAT_MAJOR=" + strconv.FormatUint(r.Next.Major, 10),
+		"DISPAT_MINOR=" + strconv.FormatUint(r.Next.Minor, 10),
+		"DISPAT_PATCH=" + strconv.FormatUint(r.Next.Patch, 10),
 		"DISPAT_TAG_VERSION=" + r.TagFormat().RenderVersion(r.Next),
 	}
 	// The baseline — the newest tag of any kind, prereleases included — is

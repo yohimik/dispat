@@ -109,6 +109,32 @@ func TestRunReceivesTheFullPackageEnvironment(t *testing.T) {
 	assert.Contains(t, env, "DISPAT_TAG=core@0.1.0")
 	assert.Contains(t, env, "DISPAT_STAGE=run:record")
 	assert.Contains(t, env, "DISPAT_WORKSPACE_APP_VERSION=0.1.0", "the workspace listing travels too")
+	// The core version split into its three numbers, zeros included: this is
+	// what a script writes a moving series tag from.
+	assert.Contains(t, env, "DISPAT_VERSION=0.1.0")
+	assert.Contains(t, env, "DISPAT_MAJOR=0")
+	assert.Contains(t, env, "DISPAT_MINOR=1")
+	assert.Contains(t, env, "DISPAT_PATCH=0")
+}
+
+// TestRunVersionComponentsOnAPrereleaseTrain: the three numbers split
+// DISPAT_VERSION, not DISPAT_NEW_VERSION, so a package mid-train reports the
+// stable release it is heading for. A build tagging an image "1" off a release
+// candidate is exactly what this keeps deliberate rather than accidental.
+func TestRunVersionComponentsOnAPrereleaseTrain(t *testing.T) {
+	r := runRepo(t)
+	r.CommitEmpty("feat(core)%beta: start a train")
+
+	r.RunScriptOK("record")
+	data, err := os.ReadFile(r.Path("packages", "core", "run-env.txt"))
+	require.NoError(t, err)
+	env := string(data)
+	assert.Contains(t, env, "DISPAT_NEW_VERSION=0.1.0-beta.0")
+	assert.Contains(t, env, "DISPAT_VERSION=0.1.0")
+	assert.Contains(t, env, "DISPAT_MAJOR=0")
+	assert.Contains(t, env, "DISPAT_MINOR=1")
+	assert.Contains(t, env, "DISPAT_PATCH=0")
+	assert.Contains(t, env, "DISPAT_COUNTER=0", "the prerelease is reported by the counter, not by the split")
 }
 
 // TestRunUnknownScriptFails: a name nothing defines is an error — running

@@ -46,6 +46,9 @@ func TestReleaseVars(t *testing.T) {
 	assert.Equal(t, "stable", vars["DISPAT_CHANNEL"])
 	assert.Equal(t, "false", vars["DISPAT_IS_PRERELEASE"])
 	assert.Equal(t, "minor", vars["DISPAT_BUMP"])
+	assert.Equal(t, "1", vars["DISPAT_MAJOR"])
+	assert.Equal(t, "3", vars["DISPAT_MINOR"])
+	assert.Equal(t, "0", vars["DISPAT_PATCH"], "zero is a value, not an absence")
 
 	// Unset, not empty: a shell tells "never released" from "released 0.0.0"
 	// by whether the variable exists at all.
@@ -71,6 +74,11 @@ func TestReleaseVarsOnAPrereleaseTrain(t *testing.T) {
 	assert.Equal(t, "4", vars["DISPAT_COUNTER"])
 	assert.Equal(t, "3", vars["DISPAT_OLD_COUNTER"])
 	assert.Equal(t, "1.3.0", vars["DISPAT_VERSION"], "the core alone, without the prerelease")
+	// The three numbers split DISPAT_VERSION, so a prerelease decomposes to the
+	// stable release it is heading for rather than to anything of its own.
+	assert.Equal(t, "1", vars["DISPAT_MAJOR"])
+	assert.Equal(t, "3", vars["DISPAT_MINOR"])
+	assert.Equal(t, "0", vars["DISPAT_PATCH"])
 }
 
 func TestReleaseVarsAreIndependentSlices(t *testing.T) {

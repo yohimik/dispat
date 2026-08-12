@@ -7,8 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yohimik/dispat/pkg/ccme"
+
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // repoRoot is where install.sh and the image folders live, four levels up from
@@ -99,5 +105,54 @@ func TestImagesInstallThroughTheScript(t *testing.T) {
 			assert.NotContains(t, rc, ":latest",
 				"a prerelease must never move latest")
 		})
+	}
+}
+
+// composeVarRef finds compose's interpolation of a dispat variable:
+// "${DISPAT_MAJOR:?}", "${DISPAT_WORKSPACE_DISPAT_VERSION:?}".
+var composeVarRef = regexp.MustCompile(`\$\{(DISPAT_[A-Z0-9_]+)`)
+
+// TestImageComposeFilesOnlyNameVariablesDispatEmits: the compose files are
+// interpolated by docker, not by dispat, so a name dispat never sets is not a
+// build that reads an empty string — with the ":?" form it is a build that
+// stops before it starts, at the very end of a release, after the artefacts
+// are already out.
+//
+// That is not hypothetical: every stable image build failed on
+// "required variable DISPAT_MAJOR is missing a value" for as long as the
+// channel files named a variable the planner did not render. Eyeballing the
+// pair is what let that ship, so the two sides are compared here instead.
+//
+// Dockerfiles are deliberately out of scope: their "${DISPAT_VERSION}" is a
+// build ARG that compose passes in under "args:", not a stage variable.
+func TestImageComposeFilesOnlyNameVariablesDispatEmits(t *testing.T) {
+	// A release of a package named "dispat", which is what the images read
+	// their CLI version from, so DISPAT_WORKSPACE_DISPAT_* resolves for real
+	// rather than being special-cased by prefix.
+	rel := &plan.Release{
+		Pkg:     &model.Package{Name: "dispat", Space: &model.Space{Name: "services"}},
+		Next:    ccme.Version{Major: 1, Minor: 4, Patch: 2},
+		Current: ccme.Version{Major: 1, Minor: 4, Patch: 1},
+		Channel: ccme.ChannelStable,
+	}
+	pl := &plan.Plan{Order: []string{"dispat"}, Releases: map[string]*plan.Release{"dispat": rel}}
+
+	emitted := map[string]bool{"DISPAT_STAGE": true} // added per task by packageEnv
+	for _, pairs := range [][]string{rel.Vars(), rel.OutputVars(), release.WorkspaceEnv(pl, zerolog.Nop())} {
+		for _, p := range pairs {
+			name, _, ok := strings.Cut(p, "=")
+			require.True(t, ok, "not a NAME=value pair: %q", p)
+			emitted[name] = true
+		}
+	}
+
+	for _, pkg := range []string{"dispat-ubuntu", "dispat-debian", "dispat-alpine", "dispat-dind"} {
+		for _, file := range []string{"docker-compose.yml", "stable.yml", "rc.yml"} {
+			rel := filepath.Join("docker", pkg, file)
+			for _, m := range composeVarRef.FindAllStringSubmatch(readRepoFile(t, rel), -1) {
+				assert.True(t, emitted[m[1]],
+					"%s interpolates %s, which no dispat variable provides", rel, m[1])
+			}
+		}
 	}
 }

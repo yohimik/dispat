@@ -67,8 +67,10 @@ Three consequences worth knowing before editing any of them:
   spellings of `compose.yaml` / `docker-compose.yml` — and `stable.yml` is none of them. autoVersion therefore never
   rewrites what is in there, which is the only reason `latest` can stay `latest` instead of being reconciled to the
   version on every release. Rename one of these to `compose.override.yml` and the tags start rotting.
-- **`stable.yml` needs `DISPAT_MAJOR` and `DISPAT_MINOR`** in the stage environment. They do not exist yet; until they
-  do, a stable build stops with `required variable DISPAT_MAJOR is missing a value`. Prerelease builds are unaffected.
+- **`stable.yml` reads `DISPAT_MAJOR` and `DISPAT_MINOR`** from the stage environment, in the `${VAR:?}` form that
+  stops the build rather than writing an image tagged with an empty string. Every variable the compose files name is
+  checked against what the planner actually emits by a test in `internal/selfupdate`, so a new interpolation cannot
+  reach a release without the variable behind it.
 
 ## Changing an image
 
