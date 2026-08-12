@@ -667,7 +667,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		log.Info().Msg(t.kind.String() + " succeeded")
 		return
 	}
-	tc.publishTail(ctx, res, fail)
+	tc.publishTail(ctx, res)
 }
 
 // loginGate runs the space's once-per-space login before its first publish;
@@ -752,7 +752,12 @@ func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err er
 // publishTail finishes a successful publish: the release recorders (changelog
 // file, GitHub release, ...), the tag, the status flip, then the warn-only
 // postPublish hook and the announce frame.
-func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error, string)) {
+//
+// It takes no failure callback, and that is the point: past the publish there
+// is no failure left that may fail the package. Everything here records a
+// release that is already out, so each error becomes a critical and the tail
+// keeps going.
+func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	rel, space := tc.rel, tc.rel.Pkg.Space
 	// The publish succeeded, so from here to the status flip this leg of the
 	// transaction is committing: it must durably record its completion (§17).

@@ -985,6 +985,54 @@ func TestExactPinIsGuarded(t *testing.T) {
 	assert.True(t, p.HasErrors())
 }
 
+func TestExactPinMayBeAPrereleaseOfTheRequiredBump(t *testing.T) {
+	// Shipping the next minor as an rc first is the ordinary way to use a pin
+	// on a train, and E156 measures how large a release is, not how finished
+	// it is. Comparing whole versions would rank 1.1.0-rc.0 below the computed
+	// 1.1.0 by SemVer precedence, reject the pin, and fall back to releasing
+	// the stable 1.1.0 the operator was holding back: the guard misfiring into
+	// exactly the release nobody asked for.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(app): a screen"},
+		commit{sha: "c2", message: "release(app): cut an rc first\n\nRelease-As: 1.1.0-rc.0\n"},
+	).tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	assert.False(t, hasCode(p, CodePinBelowBump), "no E156, got %v", codes(p))
+	assert.False(t, p.HasErrors(), "got %v", codes(p))
+	assert.True(t, app.Pinned)
+	assertVersion(t, pre(1, 1, 0, "rc", "0"), app.Next)
+	assert.Equal(t, "rc", app.Channel, "the version states the channel (§11.1)")
+}
+
+func TestExactPinPrereleaseBelowTheRequiredBumpStillFails(t *testing.T) {
+	// The other half of the same rule: measuring on cores must not let a
+	// prerelease smuggle a breaking change out as an rc of a minor. 1.1.0-rc.0
+	// has core 1.1.0, which is below the 2.0.0 the breaking change requires.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(app)!: new api"},
+		commit{sha: "c2", message: "release(app): try to soften it\n\nRelease-As: 1.1.0-rc.0\n"},
+	).tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+	assert.True(t, hasCode(p, CodePinBelowBump), "E156, got %v", codes(p))
+	assert.False(t, p.Releases["app"].Pinned, "the rejected pin contributes nothing")
+}
+
+func TestExactPinPrereleaseStillGuardsTheBaseline(t *testing.T) {
+	// E153 keeps comparing whole versions, because "does this move forward"
+	// is exactly the question SemVer precedence answers: an rc of the version
+	// already published ranks below it and moves nothing.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(app): go backwards\n\nRelease-As: 1.0.0-rc.1\n"},
+	).tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+	assert.True(t, hasCode(p, CodePinNotGreater), "E153, got %v", codes(p))
+}
+
 // ---------------------------------------------------------------------------
 // §11 / §9.3 — channels, prereleases and graduation (Appendix B.5, B.9)
 // ---------------------------------------------------------------------------
@@ -1661,6 +1709,10 @@ func TestPropagatedTransitionStillSkipsPackagesOffTheTrain(t *testing.T) {
 // specification's registry has to appear in the architecture page's inventory
 // of them. That inventory is a claim about what this project emits, and a code
 // added without a line there is a feature nobody can look up.
+//
+// The three files it reads all sit outside this module, which Go's test cache
+// does not track: a stale "ok" survives a rename of any of them. Anything
+// moving these paths has to re-run this test with -count=1.
 func TestDiagnosticCodesAreDocumented(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
 	require.NoError(t, err)
@@ -1669,7 +1721,7 @@ func TestDiagnosticCodesAreDocumented(t *testing.T) {
 	require.NoError(t, err)
 	source, err := os.ReadFile(filepath.Join(root, "services", "dispat", "internal", "plan", "plan.go"))
 	require.NoError(t, err)
-	page, err := os.ReadFile(filepath.Join(root, "packages", "docs", "docs", "architecture.md"))
+	page, err := os.ReadFile(filepath.Join(root, "packages", "docs", "docs", "internals", "architecture.md"))
 	require.NoError(t, err)
 
 	reserved := map[string]bool{}

@@ -137,7 +137,7 @@ Nothing is written and nothing is released.`,
 		short: "write the pending changelog entry now",
 		long: `Write each covered package's pending changelog entry now, so a custom
 flow can land it inside the release commit instead of after it. An entry
-the file already carries is skipped (W222), which is also what makes the
+the file already carries is skipped (W226), which is also what makes the
 release stage skip the entries written here.`,
 		flags: append([]string{"file", "file-title", "date-format", "release-name"}, windowFlags...),
 	},

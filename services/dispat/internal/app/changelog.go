@@ -27,7 +27,7 @@ type ChangelogOptions struct {
 // Changelog writes each covered package's pending changelog entry now — the
 // same entry the release stage's recorder would write — so a flow can land
 // it inside the release commit. An entry that already exists is a skip
-// (W222), which is also what makes the release stage skip entries written
+// (W226), which is also what makes the release stage skip entries written
 // here.
 func (a *App) Changelog(ctx context.Context, opts ChangelogOptions) error {
 	pl, err := a.stepPlan(ctx)
@@ -87,7 +87,7 @@ func (w *changelogWork) resolve(_ context.Context, rel *plan.Release) (task, err
 		if err := fw.Record(ctx, rel); err != nil {
 			return fmt.Errorf("changelog write failed: %w", err)
 		}
-		if !already { // Record logged the W222 skip itself otherwise
+		if !already { // Record logged the W226 skip itself otherwise
 			w.app.log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
 				Msg("changelog written")
 		}

@@ -271,7 +271,7 @@ func TestRenderSectionsPrereleaseUsesOnlyItsChangeset(t *testing.T) {
 
 func TestFileWriterSkipsExistingEntry(t *testing.T) {
 	// The entry-exists check is the idempotence of the whole record path: a
-	// second write of the same tag changes nothing (W222), while a different
+	// second write of the same tag changes nothing (W226), while a different
 	// tag still prepends above the existing entry.
 	dir := t.TempDir()
 	rel := testRelease(dir, ccme.Version{Major: 1, Minor: 3})

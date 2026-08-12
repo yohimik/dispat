@@ -426,6 +426,81 @@ func TestFixedSparseNeverAlignsLaggards(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Joining a group: with no version at all, and with the wrong one (W233)
+// ---------------------------------------------------------------------------
+
+func TestFixedNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
+	// The ordinary way a package joins an established group: a folder with no
+	// tag of its own. It has no baseline to disagree with anybody about, so it
+	// simply rides to whatever the group computes, and W233 stays quiet —
+	// there is no spread here, only a newcomer.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(a): tweak"},
+	).tag("a", "1.2.0", "")
+
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	a, b := p.Releases["a"], p.Releases["b"]
+	require.True(t, a.Releasing())
+	require.True(t, b.Releasing(), "the newcomer joins the group's release")
+	assertVersion(t, v(1, 2, 1), a.Next)
+	assertVersion(t, v(1, 2, 1), b.Next, "at the group's version, not at 0.0.1")
+	assert.False(t, b.HasBaseline, "it really has never published")
+	assert.True(t, b.FixedRide, "W210 explains the ride")
+	assert.False(t, hasCode(p, CodeFixedMajorSpread), "no W233 for a newcomer, got %v", codes(p))
+}
+
+func TestFixedMemberOnAnotherMajorIsReported(t *testing.T) {
+	// The expensive mistake: one member tagged on a major of its own. The
+	// group versions from its newest member, so b's stray 9.0.0 takes a from
+	// 1.2.0 to 9.0.1 in one run, and §19.1 forbids moving the tags back. The
+	// plan is still the only correct one — both versions are published — so
+	// the group releases and W233 names who decided it.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(a): tweak"},
+	).tag("a", "1.2.0", "").tag("b", "9.0.0", "")
+
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	a, b := p.Releases["a"], p.Releases["b"]
+	assertVersion(t, v(9, 0, 1), a.Next, "the group versions from its newest member")
+	assertVersion(t, v(9, 0, 1), b.Next)
+	require.True(t, hasCode(p, CodeFixedMajorSpread), "W233, got %v", codes(p))
+
+	var msg string
+	for _, d := range p.Diagnostics {
+		if d.Code == CodeFixedMajorSpread {
+			msg = d.Message
+		}
+	}
+	assert.Contains(t, msg, "1.2.0", "the message names where the outlier's mates are")
+	assert.Contains(t, msg, "9.0.0", "and the version that decided the group's")
+}
+
+func TestFixedMinorSpreadIsNotReported(t *testing.T) {
+	// The negative that keeps W233 worth reading: members apart by a minor or
+	// a patch are the ordinary mid-catch-up state a failed ride leaves behind,
+	// and W210 already accounts for it. Only a major spread is warned about.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(a): tweak"},
+	).tag("a", "1.2.0", "").tag("b", "1.0.0", "")
+
+	p := computeFixed(t, model.VersioningFixed, git)
+	assert.False(t, hasCode(p, CodeFixedMajorSpread), "no W233 below the major, got %v", codes(p))
+}
+
+func TestFixedSparseMemberOnAnotherMajorIsNotReported(t *testing.T) {
+	// A sparse member is behind on purpose: it stays on its own line until it
+	// changes, so its major disagreeing with the group's is the mode working.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(a): tweak"},
+	).tag("a", "9.0.0", "").tag("b", "1.0.0", "")
+
+	p := computeFixed(t, model.VersioningFixedSparse, git)
+	assert.False(t, hasCode(p, CodeFixedMajorSpread), "no W233 under a sparse mode, got %v", codes(p))
+}
+
+// ---------------------------------------------------------------------------
 // Rejected pins fall back (§16 unit-scoped blast radius) and propagated
 // transitions graduate — the two planner properties the integration suite
 // fences with dedicated regression tests.

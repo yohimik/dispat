@@ -1,7 +1,7 @@
 # The changelog command
 
 `dispat changelog` writes each covered package's pending changelog entry, exactly what the release
-stage's recorder would write. An entry that already exists in the file is a skip (`W222`), and the same check makes
+stage's recorder would write. An entry that already exists in the file is a skip (`W226`), and the same check makes
 the release stage skip entries this command already wrote. That is the point of running it early: a changelog written
 in a `beforePublish` script, before `dispat commit`, lands inside the tagged commit.
 

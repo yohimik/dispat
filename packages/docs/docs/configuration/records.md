@@ -45,7 +45,7 @@ the [GitHub release body](#github) and the
 [`dispat preview`](../cli/preview.md) shows exactly what the next entry would contain.
 
 A changelog write is idempotent: a file that already carries the entry for the planned tag (a line starting
-`## <tag> (`) is left untouched and the skip is reported as `W222`. That is what makes the
+`## <tag> (`) is left untouched and the skip is reported as `W226`. That is what makes the
 [`dispat changelog`](../cli/changelog.md) step command safe to run before the release: the entry it writes
 lands inside the release commit, and the release stage's own recorder finds it and skips.
 

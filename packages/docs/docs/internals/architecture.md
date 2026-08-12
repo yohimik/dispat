@@ -463,10 +463,11 @@ ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserve
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
 | `W210`-`W213`          | [Versioning groups](../releasing/versioning.md): a ride, and the three conflicts a shared version can produce |
-| `W220`, `W221`, `W225` | Manifest-derived: an ambiguous manifest name, a rewritten dependency with no configured edge, one package's manifests declaring different versions for it |
-| `W222`, `W223`, `W224` | A record that is already there: a changelog entry, a release tag, a GitHub release. What makes the [step commands](../releasing/steps.md) re-runnable |
+| `W220`-`W222`, `W225` | Manifest-derived: an ambiguous manifest name, a rewritten dependency with no configured edge, a replace rule that matched nothing, one package's manifests declaring different versions for it |
+| `W223`, `W224`, `W226` | A record that is already there: a release tag, a GitHub release, a changelog entry. What makes the [step commands](../releasing/steps.md) re-runnable |
 | `W230`, `W231`         | [Releasing part of the graph](../releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
+| `W233`                 | A [versioning group](../releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
 | `E210`-`E214`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 
 All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features

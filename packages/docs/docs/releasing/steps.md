@@ -38,7 +38,7 @@ it:
 
 | Command       | Already done means                          | Reported as |
 |---------------|---------------------------------------------|-------------|
-| `changelog`   | the file already has an entry for the tag   | `W222`      |
+| `changelog`   | the file already has an entry for the tag   | `W226`      |
 | `commit`      | the tag already exists at that commit       | `W223`      |
 | `github`      | the tag already has a release               | `W224`      |
 | `autoversion` | the manifests already say the right version | nothing     |
@@ -108,7 +108,7 @@ the entry to be part of the release commit rather than left in your working tree
 The flags let you override the [`changelog`](../configuration/records.md#changelog) settings for one invocation:
 `--file`, `--title` and `--date-format`.
 
-In the log you will see one `changelog written` line per package, or a `W222` skip for a package whose entry was
+In the log you will see one `changelog written` line per package, or a `W226` skip for a package whose entry was
 already there.
 
 ### `dispat autoversion`
@@ -203,7 +203,7 @@ Read the flow from the top and it tells the story:
 4. **announce** creates the GitHub release, attaching the file the build stage exported.
 
 By the time the release's own recording phase runs, everything is already done, so it finds the changelog entry
-(`W222`), the tag (`W223`) and the release (`W224`) and skips all three. Your log will show those three codes on a
+(`W226`), the tag (`W223`) and the release (`W224`) and skips all three. Your log will show those three codes on a
 successful run. They are not warnings that something went wrong. They are the steps confirming they did not do the
 work twice.
 

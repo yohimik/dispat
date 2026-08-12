@@ -166,6 +166,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	}
 	g, channelCands := cp.fixedGroupAggregate(groupName, members)
 	depth := cp.groupDepth(g, groupName, members)
+	cp.reportMajorSpread(g, groupName, members)
 
 	groupPin, hasPin := cp.fixedGroupPin(g, groupName, members, depth)
 	if hasPin {
@@ -229,6 +230,47 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 		rel.Channel = g.Channel
 		rel.Pinned = rel.Pinned || g.Pinned
 	}
+}
+
+// reportMajorSpread warns (W233) when the group's members are published on
+// different major versions.
+//
+// The group versions from its newest member, so whoever is furthest ahead
+// decides where everybody lands. Across a patch or a minor that is ordinary:
+// a failed ride leaves a laggard behind and the next run catches it up, which
+// W210 already explains. Across a *major* it is almost always a mistake, and
+// an expensive one: a package tagged 9.0.0 by hand next to a group on 1.x
+// takes every member to 9.x, and §19.1 forbids moving the tags back.
+//
+// Nothing here is refused. Every one of those versions is legitimately
+// published, so there is no correct plan that ignores them; what the group
+// needs is for the outlier to be named rather than quietly obeyed.
+func (cp *computation) reportMajorSpread(g *Release, groupName string, members []string) {
+	if !g.HasBaseline {
+		return
+	}
+	ahead, behind := "", ""
+	for _, name := range members {
+		rel := cp.rel[name]
+		// A member with no baseline has no major to disagree with, and a
+		// sparse one is behind on purpose.
+		if !rel.HasBaseline || rel.Pkg.Space.Versioning.Sparse() {
+			continue
+		}
+		switch {
+		case rel.Baseline.Major == g.Baseline.Major && ahead == "":
+			ahead = name
+		case rel.Baseline.Major != g.Baseline.Major && behind == "":
+			behind = name
+		}
+	}
+	if behind == "" {
+		return
+	}
+	cp.warn(CodeFixedMajorSpread, g.Pkg.Name, "", fmt.Sprintf(
+		"members of versioning group %q are on different major versions: %s is at %s while %s is at %s; the group versions from the newest, so every member moves to major %d",
+		groupName, ahead, cp.rel[ahead].Baseline.String(),
+		behind, cp.rel[behind].Baseline.String(), g.Baseline.Major))
 }
 
 // fixedGroupAggregate builds the synthetic release the group computation runs

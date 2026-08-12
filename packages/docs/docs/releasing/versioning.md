@@ -167,6 +167,35 @@ Three things are worth knowing about joining:
 The full reference for all of this is under
 [versioning groups](../configuration/spaces.md#versioning-groups).
 
+### What a member brings with it
+
+A package joining a group brings its own published version, and that version has a say in where the group goes next.
+A group always versions from its **newest** member, because no member may go backwards from something it has already
+published.
+
+Two cases follow from that, and they behave differently:
+
+* **A package with no version yet.** Nothing to disagree about. It joins at whatever version the group computes next
+  and its first release is that version, not `0.0.1`. The `W210` line on it is the whole story.
+* **A package already at a version of its own.** The higher of the two decides. If the newcomer is behind, it is
+  caught up to the group on the next run (`W210` again). If it is ahead, *the group moves up to meet it*.
+
+That second half is the one to watch, because it runs in the direction you cannot undo. A package tagged `9.0.0` by
+hand, joining a group sitting on `1.x`, takes every member of that group to `9.x` on the very next release, and
+[a published tag never moves](./steps.md). dispat reports it as `W233`, naming the member whose version decided the
+group's:
+
+```console
+WRN members of versioning group "platform" are on different major versions: core is at 1.2.0 while shell is at 9.0.0;
+    the group versions from the newest, so every member moves to major 9
+```
+
+It is a warning rather than an error because every one of those versions is genuinely published, so there is no other
+correct plan. If it is not what you meant, fix it before the release: correct the newcomer's tag, or keep it out of
+the group until its version lines up. Members apart by only a minor or a patch are not reported, because that is the
+ordinary state a failed ride leaves behind and `W210` already covers it. Sparse members are not reported either:
+staying behind is what a sparse mode is for.
+
 ## Acting on a group
 
 A group is a name you can point a command at, the same way you point one at a package or a space. That is `--group`,
@@ -215,6 +244,7 @@ already on, so it pins that one package and leaves the rest untouched.
 | `W211` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
 | `W212` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
 | `W213` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
+| `W233` | Members are on different major versions, so the newest one is about to take the rest of the group to its major. |
 
 `W210` cannot be suppressed. Nothing in the commit log explains why that package is in the plan, so the warning is the
 only place a reader can find out.

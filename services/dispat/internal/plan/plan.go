@@ -40,6 +40,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -198,7 +200,11 @@ const (
 	// file already carries the entry for the planned tag: a `dispat
 	// changelog` invocation ran earlier in the flow (or the recorder is
 	// re-running), and writing again would duplicate the entry.
-	CodeChangelogEntryExists = "W222"
+	//
+	// W226 rather than a number beside the two below it: this is the third of
+	// the "already recorded, skip it" family and belongs with them, and the
+	// W22x block above it was full.
+	CodeChangelogEntryExists = "W226"
 	// CodeTagExists marks a tag creation skipped because the release tag
 	// already exists at the release's target commit: the flow tagged early
 	// (`dispat commit --tag`), and the record the tag exists to be is already
@@ -235,6 +241,19 @@ const (
 	// hand or by the next release. A warning rather than a critical for
 	// exactly that reason.
 	CodeAliasTagFailed = "W232"
+	// CodeFixedMajorSpread marks a versioning group whose members sit on
+	// different major versions. The group versions from its newest member, so
+	// the one furthest ahead decides where every other member lands, and a
+	// single mis-tagged package can carry the whole group across a major
+	// boundary that §19.1 then forbids undoing. This is E157's hazard without
+	// E157's footer to hang an error on: the versions are all legitimately
+	// published, so the group is released and the outlier is named.
+	//
+	// Members with no baseline at all are not a spread — a package joining a
+	// group has no major to disagree with, and W210 already reports its ride.
+	// Sparse members are exempt too: staying behind until they change is what
+	// a sparse mode is for.
+	CodeFixedMajorSpread = "W233"
 
 	// --- after the point of no return ---
 	//
@@ -950,11 +969,22 @@ type Options struct {
 	// exactly as ccme documents it, so a caller with no opinions passes
 	// nothing.
 	ParserConfig ccme.Config
+	// Log traces the computation's phases and what each package resolved to.
+	// The zero value discards, so a caller with nothing to say passes nothing
+	// and the planner stays silent.
+	//
+	// A wrong plan is the hardest thing to debug about a release, because the
+	// output is a plausible set of versions and the reason lives in an
+	// intermediate the plan does not carry: which tag became the baseline, how
+	// many commits the window held, what the bump was before propagation
+	// touched it. These lines are those intermediates.
+	Log zerolog.Logger
 }
 
 type computation struct {
 	ctx      context.Context
 	git      gitx.Git
+	log      zerolog.Logger
 	root     string
 	initials map[string]ccme.Version
 	// nonPackage holds Options.NonPackageScopes as a set.
@@ -1024,6 +1054,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp := &computation{
 		ctx:         ctx,
 		git:         git,
+		log:         opts.Log,
 		root:        opts.Root,
 		initials:    opts.Initials,
 		nonPackage:  make(map[string]bool, len(opts.NonPackageScopes)),
@@ -1075,6 +1106,8 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		}
 		return nil, err
 	}
+	cp.log.Debug().Int("packages", len(cp.order)).Int("commits", len(cp.commits)).
+		Msg("plan: windows loaded")
 	if err := cp.parseAndResolve(); err != nil { // §13.4
 		return nil, err
 	}
@@ -1084,6 +1117,8 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	if err := cp.ancestryFailed(); err != nil {
 		return nil, err
 	}
+	cp.log.Debug().Int("held", len(cp.held)).Int("pinned", len(cp.pinned)).
+		Msg("plan: direct bumps resolved")
 
 	// §13.7 is §9.2's three phases; §13.8 is invoked from inside it.
 	cp.propagateChannels() // phase 1
@@ -1093,6 +1128,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp.finalise()      // §13.9, §13.10
 	cp.reportCancels() // W170
 	cp.reportHeld()    // W154
+	cp.logReleases()
 	if err := cp.ancestryFailed(); err != nil {
 		return nil, err
 	}
@@ -2038,7 +2074,17 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 		rejected()
 		return
 	}
-	if rel.Bump != ccme.BumpNone && versionLess(p.version, computed) {
+	// E156 is about how *large* a release is, so it is measured on the cores
+	// alone. A prerelease ranks below its own core by SemVer precedence, and
+	// comparing the versions whole would read "Release-As: 1.1.0-rc.0" against
+	// a computed 1.1.0 as a downgrade, reject it, and fall back to shipping
+	// the stable version the operator was asking to hold back. The core is
+	// what carries the bump: 1.1.0-rc.0 is on its way to 1.1.0 and satisfies
+	// the minor the commits require, while an rc of 1.1.0 under a computed
+	// 2.0.0 still fails, which is the case the guard exists for. E153 above
+	// keeps comparing whole versions, because "does this move forward" is
+	// exactly the question precedence answers.
+	if rel.Bump != ccme.BumpNone && versionLess(p.version.Core(), computed.Core()) {
 		cp.pkgErr(rel, CodePinBelowBump,
 			fmt.Sprintf("Release-As: %s is below %s, which the pending commits require",
 				p.version.String(), computed.String()))
@@ -2061,6 +2107,38 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 	// whatever the version itself says (§11.1), so that a pinned
 	// "1.3.0-rc.0" enters the rc line and a pinned "1.3.0" graduates.
 	rel.Channel = channelOf(p.version, true)
+}
+
+// logReleases traces what each package resolved to, once the plan is final.
+//
+// These are the intermediates a wrong plan is diagnosed from and the emitted
+// plan does not otherwise carry: which tag became the baseline, how large the
+// window was, and what the bump was. Trace rather than debug because it is one
+// line per package of the workspace, releasing or not, and the packages that
+// did *not* release are half of what a reader is usually checking.
+func (cp *computation) logReleases() {
+	if !cp.log.Trace().Enabled() {
+		return
+	}
+	for _, name := range cp.order {
+		rel := cp.rel[name]
+		if rel == nil {
+			continue
+		}
+		ev := cp.log.Trace().
+			Str("package", name).
+			Str("baseline", rel.Baseline.String()).
+			Bool("hasBaseline", rel.HasBaseline).
+			Int("window", len(cp.window[name])).
+			Str("bump", rel.Bump.String()).
+			Str("channel", rel.Channel).
+			Str("next", rel.Next.String()).
+			Bool("releasing", rel.Releasing())
+		if len(rel.DueTo) > 0 {
+			ev = ev.Strs("dueTo", rel.DueTo)
+		}
+		ev.Msg("plan: package resolved")
+	}
 }
 
 // reportCatchUp emits W193: a release whose entire cause is propagation from

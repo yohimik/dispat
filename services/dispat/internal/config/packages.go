@@ -439,12 +439,11 @@ func boolValue(b *bool) bool { return b != nil && *b }
 // answer "who said this last" at every level.
 //
 // It carries only the keys whose sole path to a package is this fold.
-// `env`, `scripts`, `changelog` and `github` are deliberately absent: each
-// already reaches a package through a path that carries meaning the fold
-// would flatten — script references resolve per scope, and packageExtras
-// keeps the narrower "did the package itself say so" that the layered maps
-// cannot. Anything added to the root file belongs in one pile or the other,
-// never both.
+// `env` and `scripts` are deliberately absent: each already reaches a package
+// through a path that carries meaning the fold would flatten — script
+// references resolve per scope, and packageExtras keeps the narrower "did the
+// package itself say so" that the layered maps cannot. Anything added to the
+// root file belongs in one pile or the other, never both.
 func rootDefaults(c *File) SpaceConfig {
 	return SpaceConfig{
 		IsBuildWaitingPublish: c.IsBuildWaitingPublish,
