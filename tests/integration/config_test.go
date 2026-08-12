@@ -334,7 +334,7 @@ func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: "packages/provider", Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"fail-publish"}}},
-		"consumer": {Path: "packages/consumer", RevertOnFail: true, Flow: &models.SpaceFlowConfig{
+		"consumer": {Path: "packages/consumer", RevertOnFail: models.Bool(true), Flow: &models.SpaceFlowConfig{
 			Version: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}

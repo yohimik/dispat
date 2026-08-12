@@ -106,11 +106,20 @@ func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
 			return "", "", fmt.Errorf("versionGroup %q: space %q is itself a member of group %q; name that group directly",
 				ref, low, s.VersionGroup)
 		}
-		if !model.Versioning(s.Versioning).Shared() {
-			return "", "", fmt.Errorf("versionGroup %q: space %q does not version as a group (its versioning is %q)",
-				ref, low, s.Versioning)
+		// A space that states no mode of its own versions by the root's, so
+		// that is the mode its implicit group shares.
+		mode := s.Versioning
+		if mode == "" {
+			mode = c.Versioning
 		}
-		return low, s.Versioning, nil
+		if !model.Versioning(mode).Shared() {
+			if mode == "" {
+				mode = VersioningIndependent
+			}
+			return "", "", fmt.Errorf("versionGroup %q: space %q does not version as a group (its versioning is %q)",
+				ref, low, mode)
+		}
+		return low, mode, nil
 	}
 	return "", "", fmt.Errorf("versionGroup %q matches no versionGroups entry and no space", ref)
 }
@@ -345,10 +354,10 @@ func validateSrc(label, src string) error {
 // overlay could never express them against a non-empty base.
 func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.IsBuildWaitingPublish != nil {
-		sc.IsBuildWaitingPublish = *po.IsBuildWaitingPublish
+		sc.IsBuildWaitingPublish = po.IsBuildWaitingPublish
 	}
 	if po.RevertOnFail != nil {
-		sc.RevertOnFail = *po.RevertOnFail
+		sc.RevertOnFail = po.RevertOnFail
 	}
 	if po.TagFormat != "" {
 		sc.TagFormat = po.TagFormat
@@ -384,6 +393,74 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		sc.AutoVersion = po.AutoVersion
 	}
 	return sc
+}
+
+// boolValue reads a tri-state option that has reached the bottom of the
+// ladder with nobody having set it: nil means the default, which for both of
+// the space-shaped booleans is false.
+func boolValue(b *bool) bool { return b != nil && *b }
+
+// rootDefaults renders the root file's space-shaped keys as the base of the
+// ladder every space and every standalone package is folded through. Making
+// the root a layer rather than a special case is what lets one merge function
+// answer "who said this last" at every level.
+//
+// It carries only the keys whose sole path to a package is this fold.
+// `env`, `scripts`, `changelog` and `github` are deliberately absent: each
+// already reaches a package through a path that carries meaning the fold
+// would flatten — script references resolve per scope, and packageExtras
+// keeps the narrower "did the package itself say so" that the layered maps
+// cannot. Anything added to the root file belongs in one pile or the other,
+// never both.
+func rootDefaults(c *File) SpaceConfig {
+	return SpaceConfig{
+		IsBuildWaitingPublish: c.IsBuildWaitingPublish,
+		RevertOnFail:          c.RevertOnFail,
+		Flow:                  c.Flow,
+		TagFormat:             c.TagFormat,
+		AliasTags:             c.AliasTags,
+		Versioning:            c.Versioning,
+		AutoVersion:           c.AutoVersion,
+	}
+}
+
+// spaceAsOverride reduces a space entry to the override layer it now is, so
+// the root defaults underneath it merge through the same function every other
+// layer uses. `path` and the space's own maps are not part of the merge:
+// `path` is the space's identity rather than an overridable value, and
+// `packages` and `dependencies` are layers of their own.
+func spaceAsOverride(sc SpaceConfig) PackageConfig {
+	return PackageConfig{
+		IsBuildWaitingPublish: sc.IsBuildWaitingPublish,
+		RevertOnFail:          sc.RevertOnFail,
+		Flow:                  sc.Flow,
+		TagFormat:             sc.TagFormat,
+		AliasTags:             sc.AliasTags,
+		Versioning:            sc.Versioning,
+		VersionGroup:          sc.VersionGroup,
+		Scripts:               sc.Scripts,
+		AutoVersion:           sc.AutoVersion,
+		Env:                   sc.Env,
+		Custom:                sc.Custom,
+	}
+}
+
+// spaceBase folds the root file's defaults under one space entry, producing
+// the space configuration everything downstream reads. The entry keeps its
+// own maps, which are layers rather than merged values.
+func spaceBase(c *File, sc SpaceConfig) SpaceConfig {
+	merged := mergePackageOverride(rootDefaults(c), spaceAsOverride(sc))
+	merged.Path = sc.Path
+	merged.Packages = sc.Packages
+	merged.Dependencies = sc.Dependencies
+	// The default is applied once nobody above has stated a mode, which is
+	// the only point where "nobody" is known. A group reference is the other
+	// way to say it, and stating both is what validation refuses, so the
+	// default may not fill one in beside the other.
+	if merged.Versioning == "" && merged.VersionGroup == "" {
+		merged.Versioning = VersioningIndependent
+	}
+	return merged
 }
 
 // spaceOverride reduces a space folder's file to the space-shaped override it
@@ -446,8 +523,13 @@ func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
 
 // mergeFlow overlays flow entries one by one: a nil entry inherits, a
 // non-nil one — the explicit empty array included — replaces, which is how
-// an override clears an inherited stage. Login is not merged; validation
-// rejects it on the override layer.
+// an override clears an inherited stage.
+//
+// Login is merged like any other entry, and stays a space-level key by
+// validation rather than by omission: validatePackageLayer refuses it on a
+// package layer, so the only layers that can carry one here are the root
+// defaults, the space entry and the space folder's own file — the three that
+// speak for a whole space.
 func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 	var out SpaceFlowConfig
 	// Load fills every space's flow in, but discovery also serves callers that
@@ -464,6 +546,7 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 	pick(&out.Build, over.Build)
 	pick(&out.Publish, over.Publish)
 	pick(&out.Version, over.Version)
+	pick(&out.Login, over.Login)
 	pick(&out.Announce, over.Announce)
 	pick(&out.BeforeAll, over.BeforeAll)
 	pick(&out.BeforeVersion, over.BeforeVersion)

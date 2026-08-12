@@ -41,7 +41,7 @@ func validConfig() File {
 	return File{
 		Scripts: map[string]string{"build": "echo build", "publish": "echo publish"},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "packages/libs", IsBuildWaitingPublish: true, RevertOnFail: true,
+			"libs": {Path: "packages/libs", IsBuildWaitingPublish: models.Bool(true), RevertOnFail: models.Bool(true),
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 			"apps": {Path: "packages/apps",
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
@@ -116,9 +116,9 @@ func TestLoadValid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, cfg.BuildConcurrency, "single value applies to build")
 	assert.Equal(t, 3, cfg.PublishConcurrency, "single value applies to publish")
-	assert.True(t, cfg.Spaces["libs"].IsBuildWaitingPublish)
-	assert.True(t, cfg.Spaces["libs"].RevertOnFail)
-	assert.False(t, cfg.Spaces["apps"].RevertOnFail, "revertOnFail defaults to false")
+	assert.True(t, *cfg.Spaces["libs"].IsBuildWaitingPublish)
+	assert.True(t, *cfg.Spaces["libs"].RevertOnFail)
+	assert.Nil(t, cfg.Spaces["apps"].RevertOnFail, "unset stays unset, so a root default can still reach it")
 }
 
 // TestLoadFormats smoke-tests each supported file format once: the same
@@ -153,7 +153,7 @@ func TestLoadFormats(t *testing.T) {
 			loaded, err := Load(path, nil)
 			require.NoError(t, err)
 			assert.Equal(t, 3, loaded.BuildConcurrency)
-			assert.True(t, loaded.Spaces["libs"].IsBuildWaitingPublish)
+			assert.True(t, *loaded.Spaces["libs"].IsBuildWaitingPublish)
 			assert.Equal(t, []string{"echo build"}, loaded.Commands(loaded.Spaces["libs"].Flow.Build))
 
 			pkgs, _, err := Discover(loaded, root)
@@ -900,8 +900,14 @@ func TestLoadVersioning(t *testing.T) {
 		return loadModel(t, cfg, "pkgs/core")
 	}
 
+	// An unset versioning stays unset through the load, so the root file's
+	// own default can still reach the space; the default is applied at the
+	// bottom of the ladder, in discovery.
+	cfg, err := load(t, "")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Spaces["libs"].Versioning)
+
 	for raw, want := range map[string]string{
-		"":                      VersioningIndependent,
 		"independent":           VersioningIndependent,
 		"fixed":                 VersioningFixed,
 		"Fixed":                 VersioningFixed,
@@ -922,7 +928,7 @@ func TestLoadVersioning(t *testing.T) {
 		assert.Equal(t, want, cfg.Spaces["libs"].Versioning, "versioning %q", raw)
 	}
 
-	_, err := load(t, "locked")
+	_, err = load(t, "locked")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown versioning "locked"`)
 	for _, name := range versioningNames {

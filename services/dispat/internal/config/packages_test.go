@@ -2292,3 +2292,146 @@ func TestSpaceFileDependencies(t *testing.T) {
 	assert.True(t, declared[1].Source.IsObjectList(),
 		"a space file's object is written back keyed by consumer, unlike a package file's list")
 }
+
+// TestRootDefaultsReachEverySpace: the root file is the bottom layer of the
+// same ladder every other level folds through, so a space-shaped key stated
+// once at the top reaches every space and every standalone package.
+func TestRootDefaultsReachEverySpace(t *testing.T) {
+	cfg := validConfig()
+	cfg.Flow = &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+	cfg.IsBuildWaitingPublish = models.Bool(true)
+	cfg.RevertOnFail = models.Bool(true)
+	cfg.Versioning = "fixed"
+	cfg.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true)}
+	// The spaces say nothing at all, so everything they have comes from above.
+	cfg.Spaces = map[string]SpaceConfig{
+		"libs": {Path: "packages/libs"},
+		"apps": {Path: "packages/apps"},
+	}
+	cfg.Packages = map[string]PackageConfig{"tool": {Path: "tools/tool"}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	require.Len(t, byName, 3)
+	for _, name := range []string{"core", "app", "tool"} {
+		sp := byName[name].Space
+		assert.Equal(t, []string{"echo build"}, sp.BuildScript, name)
+		assert.True(t, sp.BuildWaitsPublish, name)
+		assert.True(t, sp.RevertOnFail, name)
+		assert.Equal(t, model.Versioning("fixed"), sp.Versioning, name)
+		assert.NotNil(t, sp.AutoVersion, name)
+	}
+	assert.Equal(t, "libs", byName["core"].Space.VersionGroup,
+		"a root versioning mode applies under each space's own implicit group")
+	assert.Equal(t, "apps", byName["app"].Space.VersionGroup)
+	assert.Equal(t, "tool", byName["tool"].Space.VersionGroup,
+		"a standalone package is its own group")
+}
+
+// TestRootDefaultsAreOverriddenAtEveryLevel: each level below the root can
+// still say otherwise, including saying "false" against a root "true" — which
+// is why the space booleans are tri-state.
+func TestRootDefaultsAreOverriddenAtEveryLevel(t *testing.T) {
+	cfg := validConfig()
+	cfg.Scripts["build-libs"] = "echo libs"
+	cfg.Scripts["build-core"] = "echo core"
+	cfg.Flow = &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+	cfg.RevertOnFail = models.Bool(true)
+	cfg.Versioning = "fixed"
+	cfg.Spaces = map[string]SpaceConfig{
+		// The space overrides one flow entry and keeps the rest.
+		"libs": {Path: "packages/libs", Flow: &SpaceFlowConfig{Build: []string{"build-libs"}}},
+		"apps": {Path: "packages/apps", Versioning: "independent", RevertOnFail: models.Bool(false)},
+	}
+	cfg.Packages = map[string]PackageConfig{
+		"core": {Flow: &SpaceFlowConfig{Build: []string{"build-core"}}, RevertOnFail: models.Bool(false)},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.Equal(t, []string{"echo core"}, byName["core"].Space.BuildScript, "the package is nearest")
+	assert.Equal(t, []string{"echo libs"}, byName["utils"].Space.BuildScript, "its space is next")
+	assert.Equal(t, []string{"echo build"}, byName["app"].Space.BuildScript, "the root is the floor")
+	assert.Equal(t, []string{"echo publish"}, byName["core"].Space.PublishScript,
+		"an override replaces one entry, not the whole flow")
+
+	assert.False(t, byName["core"].Space.RevertOnFail, "a package says false against a root true")
+	assert.False(t, byName["app"].Space.RevertOnFail, "and so does a space")
+	assert.True(t, byName["utils"].Space.RevertOnFail, "a sibling that says nothing keeps the root's")
+
+	assert.Equal(t, model.Versioning("independent"), byName["app"].Space.Versioning)
+	assert.Equal(t, model.Versioning("fixed"), byName["core"].Space.Versioning)
+}
+
+// TestRootFlowLoginRunsPerSpace: login is a space-level script, and declaring
+// it once at the root means every space runs that one — not that a package
+// may have one of its own, which is still refused.
+func TestRootFlowLoginRunsPerSpace(t *testing.T) {
+	cfg := validConfig()
+	cfg.Scripts["login"] = "npm login"
+	cfg.Flow = &SpaceFlowConfig{Login: []string{"login"}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	for _, p := range packagesByName(pkgs) {
+		assert.Equal(t, []string{"npm login"}, p.Space.LoginScript, p.Name)
+	}
+
+	cfg.Packages = map[string]PackageConfig{"core": {Flow: &SpaceFlowConfig{Login: []string{"login"}}}}
+	_, err = discoverPackages(t, writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flow.login cannot be overridden per package")
+}
+
+// TestRootAliasTagsAndTagFormatFold: the two keys that used to fall back to
+// the root inside buildSpace are ordinary layers now, so an empty list at any
+// level still means "no aliases" rather than "inherit".
+func TestRootAliasTagsAndTagFormatFold(t *testing.T) {
+	cfg := validConfig()
+	cfg.TagFormat = "root-{name}@{version}"
+	cfg.AliasTags = []AliasTagConfig{{Format: "{name}-v{major}", Moving: true}}
+	withLibs(&cfg, func(sc *SpaceConfig) { sc.TagFormat = "libs-{name}@{version}" })
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	assert.Equal(t, "libs-{name}@{version}", byName["core"].Space.TagFormat, "the space wins")
+	assert.Equal(t, "root-{name}@{version}", byName["app"].Space.TagFormat, "the root is the fallback")
+	require.Len(t, byName["core"].Space.AliasTags, 1, "inherited from the root")
+	assert.Equal(t, "{name}-v{major}", byName["core"].Space.AliasTags[0].Format)
+
+	// An explicit empty list opts a package out. omitempty drops one from a
+	// marshalled model, so this case has to be written raw.
+	raw := map[string]any{
+		"scripts":   map[string]any{"build": "echo b"},
+		"aliasTags": []any{map[string]any{"format": "{name}-v{major}", "moving": true}},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+		},
+		"packages": map[string]any{"app": map[string]any{"aliasTags": []any{}}},
+	}
+	pkgs, err = discoverPackages(t, writeRawRepo(t, raw, "pkgs/core", "pkgs/app"))
+	require.NoError(t, err)
+	byName = packagesByName(pkgs)
+	assert.Len(t, byName["core"].Space.AliasTags, 1, "the sibling still inherits")
+	assert.Empty(t, byName["app"].Space.AliasTags, "an explicit empty list is a decision, not a gap")
+}
+
+// TestRootVersioningInvalid: a typo in the root's own versioning is reported
+// against the key that holds it, even when every space overrides it and the
+// value never reaches a package.
+func TestRootVersioningInvalid(t *testing.T) {
+	cfg := validConfig()
+	cfg.Versioning = "fixxed"
+	withLibs(&cfg, func(sc *SpaceConfig) { sc.Versioning = "independent" })
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `versioning "fixxed" is invalid`)
+}

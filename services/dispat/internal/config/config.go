@@ -829,6 +829,16 @@ func validate(c *File) error {
 	if c.TagFormat == "" {
 		c.TagFormat = string(gitx.DefaultTagFormat)
 	}
+	// The root's own versioning is normalised here rather than only where it
+	// lands, so a typo is reported against the key that holds it even in a
+	// config whose every space overrides it.
+	if c.Versioning != "" {
+		mode, ok := normalizeVersioning(c.Versioning)
+		if !ok {
+			return fmt.Errorf("versioning %q is invalid (want %s)", c.Versioning, quotedNames(versioningNames))
+		}
+		c.Versioning = mode
+	}
 	if err := validateAliasTags("aliasTags", c.AliasTags); err != nil {
 		return err
 	}
@@ -849,12 +859,21 @@ func validate(c *File) error {
 		}
 	}
 	for _, name := range sortedSpaceNames(c) {
+		stated := c.Spaces[name].Versioning
 		validated, err := validateSpace(name, c.Spaces[name])
 		if err != nil {
 			return err
 		}
 		if err := validateSpacePackages(fmt.Sprintf("spaces[%q]: packages", name), validated.Packages); err != nil {
 			return err
+		}
+		// Validation normalizes, and normalizing an absent versioning yields
+		// the default. Keeping that here would turn "said nothing" into "said
+		// independent" before the root defaults are folded in, and the root
+		// could never state a mode again. The default belongs at the bottom
+		// of the ladder, which is where discovery applies it.
+		if stated == "" {
+			validated.Versioning = ""
 		}
 		c.Spaces[name] = validated
 	}
@@ -1301,7 +1320,9 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	var ignoredDirs []ignoredDir
 	spaceConfigs := make(map[string]SpaceConfig, len(spaceNames))
 	for _, sn := range spaceNames {
-		sc := c.Spaces[sn]
+		// The root file's defaults are the bottom layer, and the space entry
+		// is the first override over them.
+		sc := spaceBase(c, c.Spaces[sn])
 		dir := filepath.Join(root, sc.Path)
 		// The space folder's own config file, the layer between the root
 		// file's space entry and anything said about one package. A space
@@ -1538,8 +1559,14 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s)", label, fileSrc),
 				DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}})
 		}
-		merged, ex, autoVersioned, withDeps, err := applyLayers(c, SpaceConfig{Path: po.Path, Flow: &SpaceFlowConfig{}},
-			key, layers, declared)
+		// A standalone package is its own space, so it starts from the same
+		// root defaults every space does, with its path filled in.
+		standaloneBase := rootDefaults(c)
+		standaloneBase.Path = po.Path
+		if standaloneBase.Flow == nil {
+			standaloneBase.Flow = &SpaceFlowConfig{}
+		}
+		merged, ex, autoVersioned, withDeps, err := applyLayers(c, standaloneBase, key, layers, declared)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
@@ -1830,17 +1857,9 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
-	tagFormat := sc.TagFormat
-	if tagFormat == "" {
-		tagFormat = c.TagFormat
-	}
-	aliases := sc.AliasTags
-	if aliases == nil {
-		aliases = c.AliasTags
-	}
 	force := c.Commit.ForceEnabled()
-	resolvedAliases := make([]model.AliasTag, 0, len(aliases))
-	for _, a := range aliases {
+	resolvedAliases := make([]model.AliasTag, 0, len(sc.AliasTags))
+	for _, a := range sc.AliasTags {
 		resolvedAliases = append(resolvedAliases, model.AliasTag{
 			Format: a.Format, Moving: a.Moving, Channels: a.Channels,
 			Force: a.ForceEnabled(force),
@@ -1854,8 +1873,8 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 		// invariant packageScope relies on — so only the top level is left to
 		// put underneath.
 		Env:                  EnvPairs(MergeEnv(c.Env, sc.Env)),
-		BuildWaitsPublish:    sc.IsBuildWaitingPublish,
-		RevertOnFail:         sc.RevertOnFail,
+		BuildWaitsPublish:    boolValue(sc.IsBuildWaitingPublish),
+		RevertOnFail:         boolValue(sc.RevertOnFail),
 		Versioning:           model.Versioning(mode),
 		VersionGroup:         group,
 		Scripts:              scope.scripts,
@@ -1875,7 +1894,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 		PostAnnounceScript:   scope.commands(sc.Flow.PostAnnounce),
 		OnFailScript:         scope.commands(sc.Flow.OnFail),
 		OnSkipScript:         scope.commands(sc.Flow.OnSkip),
-		TagFormat:            tagFormat,
+		TagFormat:            sc.TagFormat,
 		AliasTags:            resolvedAliases,
 		AutoVersion:          resolveAutoVersion(scope, sc.AutoVersion),
 	}, nil

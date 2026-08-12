@@ -82,7 +82,7 @@ func providerConsumerRepo(t *testing.T, isBuildWaitingPublish bool, providerPubl
 		"consumer-publish": r.TsmarkScript("timeline.log", "consumer-publish", 0),
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"provider": {Path: "packages/provider", IsBuildWaitingPublish: isBuildWaitingPublish,
+		"provider": {Path: "packages/provider", IsBuildWaitingPublish: models.Bool(isBuildWaitingPublish),
 			Flow: &models.SpaceFlowConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
 		"consumer": {Path: "packages/consumer",
 			Flow: &models.SpaceFlowConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},

@@ -90,6 +90,29 @@ type File struct {
 	// tagFormat produces; see AliasTagConfig. Overridable per space and per
 	// package, where a list replaces the inherited one rather than adding to it.
 	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+
+	// The repository-wide defaults for the space-shaped keys. Each is the
+	// bottom of the same ladder a package's configuration is folded through —
+	// root, then the space, then the space folder's file, then the package's
+	// layers — so stating one here is stating it once for every space and
+	// every standalone package, and any level below can still say otherwise.
+	//
+	// Flow includes `login`: it still runs once per space, in the space
+	// folder, and declaring it here only saves repeating it. A package
+	// override may still not touch it.
+	Flow *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
+	// AutoVersion is the default manifest-rewriting policy. Like every other
+	// autoVersion, a level that states one replaces it wholesale rather than
+	// merging into it: its empty fields carry meaning against their siblings.
+	AutoVersion           *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	IsBuildWaitingPublish *bool              `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool              `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	// Versioning is the default versioning mode. It applies under each
+	// space's own implicit group, so `fixed` here means every space versions
+	// its own packages as one, not that all spaces share a version. Joining
+	// spaces into one group is what versionGroups is for, and versionGroup
+	// stays a space-and-package key for that reason.
+	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
 	// CommitErrors decides what an error in a commit message does to the run
 	// (§16):
 	//
@@ -483,9 +506,12 @@ type VersionGroupConfig struct {
 // SpaceConfig is the raw configuration of one space. Everything the space
 // runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
-	Path                  string           `mapstructure:"path" json:"path,omitempty"`
-	IsBuildWaitingPublish bool             `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          bool             `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	Path string `mapstructure:"path" json:"path,omitempty"`
+	// The scalar booleans are pointers for the same reason SpaceFile's and
+	// PackageConfig's are: the root file now states defaults for them, and a
+	// space that cannot say "false" could not override a root "true".
+	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
