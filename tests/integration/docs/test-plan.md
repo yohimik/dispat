@@ -146,6 +146,18 @@ The suite was designed against twenty-one goals, one test file each:
     also proven to be off unless asked for, and to sit behind `commit.verify` — the run that skips the check is carried
     all the way to its rejected push, which is the wasted release the check exists to prevent.
 
+22. **The shell helpers** (`if_test.go`, `exec_test.go`): the two commands that run one script instead of sweeping a
+    selection. `dispat if` picks a shell string from a condition on the environment, so the same invocation answers
+    three ways in three environments; every spelling of the grammar is driven through the process boundary, the chosen
+    script's exit code becomes the command's, `--on-failure` replaces it, and a branch is ordinary shell text so
+    another dispat command nests inside one. `dispat exec` runs one *declared* script, where one subject decides both
+    which level is read and whose environment the script gets: the exact mode refuses a name from a level nobody
+    asked about, `--fallback` walks the layers the way `dispat run` does with the nearer level still winning, and
+    `--script-from` crosses the text and the context without the environment following. The pair's load-bearing claim
+    is that a declared script reading `DISPAT_*` becomes runnable outside a release: `--env both` computes the plan on
+    demand, the default scope computes none at all (proven by taking the repository away), and inside a `run` script
+    the variables arrive by inheritance with no flag.
+
 Configs are authored as **typed models** from the public `pkg/models` module and marshalled to JSON by
 `harness.WriteConfigModel`. The schema lives in one place, and a test that compiles is a test whose config loads. The
 one shape the model deliberately cannot express, an unknown key, is written as `map[string]any` through
@@ -222,6 +234,8 @@ tests/integration/
   autoreplace_test.go       goal 19
   selfupdate_test.go        goal 20
   guard_test.go             goal 21
+  if_test.go                goal 22 (dispat if)
+  exec_test.go              goal 22 (dispat exec)
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -600,6 +614,26 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestGuardBehindRemote`                    | In push mode a checkout whose branch is behind the remote (another clone pushed) refuses before any release work with "behind origin/main", tagging nothing; after `git pull --rebase` the same release goes through and the tag arrives on the remote.           |
 | `TestGuardBehindRemoteHonoursCommitVerify` | The behind check is another `ls-remote`, so `commit.verify: false` turns it off with the reachability check. The same run then builds, publishes and tags before git rejects the push, which is the wasted release the guard exists to prevent.                   |
 | `TestGuardsAreUnsetByDefault`              | Neither guard applies unless configured: an ordinary repository on an arbitrarily named branch, pushing to a remote, releases exactly as before.                                                                                                                  |
+
+### Goal 22: the shell helpers (`if_test.go`, `exec_test.go`)
+
+| Test                                            | Claim proven                                                                                                                                                                                                        |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestIfChoosesABranchFromTheEnvironment`        | One chain, four environments: the matching branch runs and the later true one does not, a value that matches nothing falls to `--else`, and an absent variable reaches the same answer as a value that simply differs. |
+| `TestIfConditionGrammarEndToEnd`                | All six spellings through the process boundary, including the two the others cannot say: set-but-empty is not "set", and `NAME=` is the only way to ask for empty.                                                     |
+| `TestIfPropagatesTheExitCode`                   | The chosen script's code becomes the command's, `--on-failure` replaces it and runs only on failure, and nothing matching with no `--else` exits 0 having run nothing at all.                                          |
+| `TestIfRunsInTheInvocationFolder`               | The chosen script runs where the command was invoked, so a relative path in it means what the caller meant.                                                                                                            |
+| `TestIfNests`                                   | A branch is shell text, so another `dispat if` inside one is ordinary, which is how a chain grows past what one condition can say.                                                                                     |
+| `TestIfIsReservedAndNeedsNoRepository`          | `if` is a command word, never the run shorthand; a missing condition, an unpaired `--then` and a name no environment could carry are all usage exits taken before any config is read.                                  |
+| `TestExecResolvesTheSubjectsScript`             | The subject picks the level, and only that level: root, space and package each answer with their own text, a package declaring nothing is a reported miss, and standing in a package folder changes no answer.         |
+| `TestExecFallbackWalksTheLayers`                | `--fallback` reaches the top level from a package, the nearer level still wins, a package with none of its own gets its space's, and a name nowhere in the chain reports the whole chain.                              |
+| `TestExecEnvironmentFollowsTheSubject`          | The declared env is layered file under space under package and belongs to the subject, not to the folder the command ran in.                                                                                            |
+| `TestExecScriptFromCrossesTextAndContext`       | `--script-from` moves the text and leaves the environment with the subject, which is what keeps the crossed form sayable.                                                                                              |
+| `TestExecReachesTheReleaseVariablesOutsideARelease` | The reuse claim: `--env both` supplies `DISPAT_VERSION`, `DISPAT_PACKAGE` and `DISPAT_STAGE=exec` with the declared env, `--env dispat` drops the declared half, and the default supplies neither.                 |
+| `TestExecComputesNoPlanUnlessAsked`             | With the repository taken away a plan is impossible, so the default scope still working proves it computed none, and `--env both` failing proves that scope is what pays for one.                                      |
+| `TestExecPropagatesTheExitCode`                 | The declared script's own code becomes the command's, and `--on-failure` replaces it.                                                                                                                                  |
+| `TestExecComposesInsideARunScript`              | The in-flow case: a `run` script calling `dispat exec` hands the inner script the run's `DISPAT_*` variables through the process environment, with no flag.                                                            |
+| `TestExecIsReservedAndRefusesBadFlags`          | Every malformed invocation is decided by the flags alone and exits 2, while an unknown package is a runtime failure instead, because those flags were well formed.                                                     |
 
 ## Regression fences
 

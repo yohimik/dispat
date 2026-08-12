@@ -107,6 +107,19 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			has:    []string{"--on-error"},
 			hasNot: []string{"--set-version"},
 		},
+		"if, which would otherwise fail arity first": {
+			args: []string{"if", "--help"}, usage: "usage: dispat if <cond> [flags]",
+			has: []string{"--then", "--elif", "--else", "--on-failure"},
+			// A helper that selects no packages must not offer the selection
+			// flags, nor the other helper's subject flags.
+			hasNot: []string{"--package", "--for-package", "--env", "--tag"},
+		},
+		"exec": {
+			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [flags]",
+			has: []string{"--for-package", "--for-space", "--fallback", "--script-from",
+				"--env", "--on-failure"},
+			hasNot: []string{"--then", "--elif", "--package", "--tag", "--on-error"},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -480,4 +493,76 @@ func TestTestIsAnOrdinaryScriptWord(t *testing.T) {
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 1, Run([]string{"test", "--root", root}, &stdout, &stderr))
+}
+
+// TestShellHelperUsageErrors: everything the two helpers can be asked wrongly.
+// All of it is decided by the flags alone, so all of it exits 2 before any
+// config file is read — a usage mistake must never first cost a config error,
+// which is why these run in a bare folder with no config in sight.
+func TestShellHelperUsageErrors(t *testing.T) {
+	root := t.TempDir()
+	for name, args := range map[string][]string{
+		"if without a condition":                    {"if"},
+		"if with two conditions":                    {"if", "CI", "EXTRA"},
+		"if without a then":                         {"if", "CI"},
+		"if with more elif than then":               {"if", "CI", "--then", "a", "--elif", "ENV"},
+		"if with more then than elif":               {"if", "CI", "--then", "a", "--then", "b"},
+		"if with a malformed leading condition":     {"if", "MY-VAR", "--then", "a"},
+		"if with a malformed elif":                  {"if", "CI", "--then", "a", "--elif", "=x", "--then", "b"},
+		"exec without a script":                     {"exec"},
+		"exec with two scripts":                     {"exec", "build", "extra"},
+		"exec naming two subjects":                  {"exec", "build", "--for-package", "core", "--for-space", "libs"},
+		"exec with a malformed script-from":         {"exec", "build", "--script-from", "core"},
+		"exec with an unknown script-from kind":     {"exec", "build", "--script-from", "package:core"},
+		"exec with an unknown env scope":            {"exec", "build", "--env", "sideways"},
+		"exec asking for DISPAT_ without a package": {"exec", "build", "--env", "dispat"},
+		"exec asking for both without a package":    {"exec", "build", "--env", "both"},
+		"exec asking for DISPAT_ against a space":   {"exec", "build", "--env", "dispat", "--for-space", "libs"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(append(args, "--root", root), &stdout, &stderr)
+			assert.Equal(t, 2, code, "a usage mistake exits 2, before any config is loaded")
+			assert.NotContains(t, stderr.String(), "config file not found",
+				"the flags alone decide this, so no config lookup may happen first")
+		})
+	}
+}
+
+// TestShellHelperCommandWordsAreNotRunScripts: `if` and `exec` are reserved,
+// like every other command word, so `dispat if` never parses as `dispat run
+// if`. Each exits 2 on its own arity check; the run shorthand would instead
+// reach config loading and exit 1, so 2 is what proves the word was taken as a
+// command. The two-word `dispat run if` spelling stays available.
+func TestShellHelperCommandWordsAreNotRunScripts(t *testing.T) {
+	root := t.TempDir()
+	for _, word := range []string{"if", "exec"} {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{word, "--root", root}, &stdout, &stderr)
+		assert.Equal(t, 2, code, "%s must parse as a command, not a run script", word)
+	}
+}
+
+// TestIfNeedsNoConfigOrGit: the condition is about the environment, not about
+// the repository, so the command works in a folder that is neither a monorepo
+// nor a git repository at all.
+func TestIfNeedsNoConfigOrGit(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DISPAT_TEST_MARKER", "yes")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"if", "DISPAT_TEST_MARKER", "--then", "exit 0", "--else", "exit 9",
+		"--root", root}, &stdout, &stderr)
+	assert.Equal(t, 0, code, "stderr: %s", stderr.String())
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"if", "DISPAT_TEST_MARKER=no", "--then", "exit 9", "--else", "exit 0",
+		"--root", root}, &stdout, &stderr)
+	assert.Equal(t, 0, code, "the else branch runs and its code is the command's")
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"if", "DISPAT_ABSENT_MARKER", "--then", "exit 9", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 0, code, "nothing matched and there is no else, so nothing ran")
 }
