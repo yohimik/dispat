@@ -13,8 +13,9 @@ callable without a command line.
 pushed, unforced, to `commit.remote` before discovery, and deleted from the remote and the clone on the way out, under
 a context detached from cancellation so an interrupt still gives it back. A rejected push means a release is already
 running against this repository, and the run stops there with exit `1`, before it has read a single tag.
-`DISPAT_UNSAFE_DISABLE_LOCK=true` skips the whole bracket. The name is reserved in `internal/gitx`, so no tag format,
-however broad, can read it back as a release tag.
+`unsafeDisableLock: true` in the config, or `DISPAT_UNSAFE_DISABLE_LOCK=true` in the environment, skips the whole
+bracket; either is enough. The name is reserved in `internal/gitx`, so no tag format, however broad, can read it back
+as a release tag.
 
 1. Parse the command line (pflag); dispatch `release`, `status`, `run <script>`, `init` or `preview`. An unknown
    command word is `run`'s shorthand (`dispat lint`).

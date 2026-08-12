@@ -58,7 +58,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := a.checkGit(); err != nil {
 		return nil, err
 	}
-	if !lockDisabled() {
+	if !a.lockDisabled() {
 		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
 		if err := lock.Acquire(ctx); err != nil {
 			a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", a.pushRemote()).

@@ -57,6 +57,7 @@ Related references: the [CLI](../cli.md), the [commit message format](../commits
 | `run`              | object                                     | no       | The branch guard (`allowBranch`) and the run-level hooks (`beforeAll` ... `afterPush`), keyed by name; see [Run-level hooks](#run-level-hooks) and [The branch guard](#the-branch-guard).  |
 | `parser`           | object                                     | no       | Commit-message parser options; see [`parser`](./parser.md#parser). Everything unset keeps the specification default.                                                   |
 | `updateCheck`      | bool                                       | no       | Whether dispat looks for a newer release of itself and mentions one on a command's way out. Default `true`; never runs under `logFormat: json`, and never delays a command. See [Updating dispat](../self-update.md#being-told-there-is-an-update).  |
+| `unsafeDisableLock`| bool                                       | no       | Release without the [release lock](../release-lock.md), the tag a release pushes to the remote so that two runs at once are refused rather than raced. Default `false`. For repositories with no remote to coordinate through; `DISPAT_UNSAFE_DISABLE_LOCK=true` says the same for one invocation.  |
 
 ## dependencies
 

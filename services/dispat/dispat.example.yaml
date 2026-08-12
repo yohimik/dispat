@@ -296,6 +296,14 @@ logLevel: info
 # readable lines for CI ingestion).
 logFormat: pretty
 
+# Release without the release lock: the dispat-release-lock tag a release
+# pushes to the remote before it plans, so a second release started while one
+# is running is refused rather than raced. Default false, and named unsafe
+# because turning it off is. It is for a repository with no remote to
+# coordinate through at all; DISPAT_UNSAFE_DISABLE_LOCK=true says the same
+# thing for a single invocation.
+unsafeDisableLock: false
+
 # Per-package changelog file; enabled by default. All fields optional.
 changelog:
   enabled: true

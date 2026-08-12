@@ -117,6 +117,17 @@ type File struct {
 	// machine reading the output cannot act on the suggestion.
 	UpdateCheck *bool `mapstructure:"updateCheck" json:"updateCheck,omitempty"`
 
+	// UnsafeDisableLock turns the release lock off (default false): the tag
+	// `dispat release` pushes to the remote before it plans, so that a second
+	// release started while one is running is refused rather than raced.
+	//
+	// It is named unsafe because it is. Switching it off is for repositories
+	// with no remote to coordinate through — a scratch clone, a fixture, a
+	// local experiment — where the alternative is not an unguarded release but
+	// no release at all. DISPAT_UNSAFE_DISABLE_LOCK=true says the same thing
+	// for one invocation, and either saying it is enough.
+	UnsafeDisableLock bool `mapstructure:"unsafeDisableLock" json:"unsafeDisableLock,omitempty"`
+
 	// Run is the run-level hooks object; see RunConfig.
 	Run *RunConfig `mapstructure:"run" json:"run,omitempty"`
 

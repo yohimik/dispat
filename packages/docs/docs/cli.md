@@ -131,7 +131,8 @@ while the first is running cannot push that tag, so it is refused with exit `1` 
 anything.
 
 The lock is taken on every release, whether or not `commit.push` is enabled, so the release job needs write access to
-the remote either way. `DISPAT_UNSAFE_DISABLE_LOCK=true` switches it off, which is what a repository with no remote to
+the remote either way. [`unsafeDisableLock: true`](./configuration/README.md) in the config, or
+`DISPAT_UNSAFE_DISABLE_LOCK=true` in the environment, switches it off, which is what a repository with no remote to
 coordinate through needs. No other command takes it.
 
 The full guide, including how to clear a lock a killed run left behind, is [The release lock](./release-lock.md).

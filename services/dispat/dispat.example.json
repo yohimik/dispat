@@ -95,6 +95,7 @@
   "concurrency": [4, 2],
   "logLevel": "info",
   "logFormat": "pretty",
+  "unsafeDisableLock": false,
   "shell": ["/bin/sh", "-c"],
   "parser": {
     "propagation": { "depth": 0 }

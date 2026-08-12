@@ -293,6 +293,38 @@ func TestReleaseLockKillSwitch(t *testing.T) {
 	}
 }
 
+// TestReleaseLockConfigSwitch: `unsafeDisableLock: true` says for the
+// repository what the variable says for one invocation, so a checkout with no
+// remote releases without anyone having to remember an environment variable.
+// Neither switch overrides the other: either one is enough, and it takes both
+// staying quiet to keep the lock on.
+func TestReleaseLockConfigSwitch(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(markerBuild, 1) // deliberately no remote
+	cfg.UnsafeDisableLock = true
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+
+	// The variable is not set here, and the harness default that would set it
+	// is overridden back to "false": the config alone is doing this.
+	res := r.CommandEnv(harness.LockEnabled)
+	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, 1, r.TagCount("core@"), "the release ran unguarded, as the config asked")
+	assert.False(t, r.HasTag(lockTag), "and took no lock at all")
+
+	// Turning it back off in the config brings the lock back, remote or no
+	// remote.
+	cfg.UnsafeDisableLock = false
+	r.WriteConfigModel(cfg)
+	r.WriteFile("packages/core/more.txt", "more\n")
+	r.Commit("feat(core): more")
+	res = r.CommandEnv(harness.LockEnabled)
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "unable to create the release lock tag")
+	assert.Equal(t, 1, r.TagCount("core@"), "and the second release never happened")
+}
+
 // TestReleaseLockClearedWhateverHappens: the lock is given back on every way
 // out of a run — a package that failed, a run refused by a guard after the
 // lock was taken, and a run interrupted mid-build. A lock that survived any of

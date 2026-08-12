@@ -40,7 +40,34 @@ func TestLockKillSwitchDefaultsToLocked(t *testing.T) {
 			if tc.unset {
 				require.NoError(t, os.Unsetenv(lockDisableEnv))
 			}
-			assert.Equal(t, tc.disabled, lockDisabled())
+			assert.Equal(t, tc.disabled, lockDisabledByEnv())
+		})
+	}
+}
+
+// TestLockIsOffWhenEitherSwitchSaysSo: the config states the repository's
+// situation and the variable states this invocation's, so neither can be
+// overridden by the other being quiet. Only both saying nothing keeps the
+// lock on, which is the default a repository gets without ever mentioning it.
+func TestLockIsOffWhenEitherSwitchSaysSo(t *testing.T) {
+	for name, tc := range map[string]struct {
+		config   bool
+		env      string
+		disabled bool
+	}{
+		"neither":              {},
+		"the config alone":     {config: true, disabled: true},
+		"the variable alone":   {env: "true", disabled: true},
+		"both":                 {config: true, env: "true", disabled: true},
+		"config on, env false": {config: true, env: "false", disabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(lockDisableEnv, tc.env)
+			if tc.env == "" {
+				require.NoError(t, os.Unsetenv(lockDisableEnv))
+			}
+			a := &App{cfg: &config.File{UnsafeDisableLock: tc.config}}
+			assert.Equal(t, tc.disabled, a.lockDisabled())
 		})
 	}
 }

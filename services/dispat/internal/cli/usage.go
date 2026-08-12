@@ -79,8 +79,9 @@ and --group takes a whole group at once so it never splits one.
 
 Before anything else the run takes the release lock: a "dispat-release-lock"
 tag pushed to the remote, removed when the run ends. A second release while
-one is running is refused rather than raced. DISPAT_UNSAFE_DISABLE_LOCK=true
-switches it off for repositories with no remote to coordinate through.
+one is running is refused rather than raced. unsafeDisableLock in the config,
+or DISPAT_UNSAFE_DISABLE_LOCK=true in the environment, switches it off for
+repositories with no remote to coordinate through.
 
 This is what a bare "dispat" does.`,
 		flags: append([]string{"strict"}, selectionFlags...),

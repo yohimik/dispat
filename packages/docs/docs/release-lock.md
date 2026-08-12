@@ -93,13 +93,25 @@ package's history even under a tag format broad enough to match the name.
 
 ## Turning it off
 
+Either in the config file, for a repository that is always in this situation:
+
+```yaml
+unsafeDisableLock: true
+```
+
+or in the environment, for one invocation:
+
 ```sh
 DISPAT_UNSAFE_DISABLE_LOCK=true dispat release
 ```
 
-This exists for repositories that have no remote to coordinate through at all: a scratch clone, a fixture, a local
-experiment where the alternative is not an unguarded release but no release. It is spelled unsafe because it is. With
-the lock off, nothing stops a second release starting beside the first.
+Either one is enough, and neither overrides the other: the lock is on only while both stay quiet. That is the default,
+so a config file that never mentions the key gets the lock.
 
-Only a value that plainly reads as true switches it off (`true`, `TRUE`, `1`). Anything else, including a typo, an empty
-value and an unset variable, leaves the lock on. Releasing unguarded is not a state to end up in by accident.
+Both exist for repositories that have no remote to coordinate through at all: a scratch clone, a fixture, a local
+experiment where the alternative is not an unguarded release but no release. They are spelled unsafe because they are.
+With the lock off, nothing stops a second release starting beside the first.
+
+Only a value that plainly reads as true switches the variable on (`true`, `TRUE`, `1`). Anything else, including a typo,
+an empty value and an unset variable, leaves the lock in place. Releasing unguarded is not a state to end up in by
+accident.
