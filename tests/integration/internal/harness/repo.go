@@ -306,10 +306,12 @@ func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...stri
 	r.T.Helper()
 	full := append(append([]string{}, args...), "--root", root)
 	cmd := exec.Command(bin, full...)
-	// No test may reach api.github.com. The kill switch goes in before the
-	// caller's own pairs, and exec keeps the last value for a repeated key, so
-	// a scenario that wants the update check can still ask for it.
-	cmd.Env = append(append(os.Environ(), "DISPAT_UPDATE_CHECK=0"), env...)
+	// No test may reach api.github.com, and most fixtures have no remote to
+	// take the release lock on. Both kill switches go in before the caller's
+	// own pairs, and exec keeps the last value for a repeated key, so a
+	// scenario that wants the update check — or the lock — asks for it back by
+	// appending its own value.
+	cmd.Env = append(append(os.Environ(), defaultEnv...), env...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -331,6 +333,14 @@ func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...stri
 	return RunResult{Code: code, Stdout: stdout.String(), Stderr: stderr.String(), Events: ParseEvents(stdout.String())}
 }
 
+// defaultEnv is what every invocation starts from unless the scenario says
+// otherwise. See runBin for why each entry is here.
+var defaultEnv = []string{"DISPAT_UPDATE_CHECK=0", "DISPAT_UNSAFE_DISABLE_LOCK=true"}
+
+// LockEnabled is what a lock scenario appends to bring the release lock back
+// for one run, on top of a repository that has a remote to take it on.
+var LockEnabled = []string{"DISPAT_UNSAFE_DISABLE_LOCK=false"}
+
 // Proc is a dispat invocation started but not waited for — the fixture of the
 // interruption scenarios, which signal the process mid-run and then assert on
 // its outcome.
@@ -345,10 +355,18 @@ type Proc struct {
 // through Signal and collects the outcome with Wait.
 func (r *Repo) StartRelease(flags ...string) *Proc {
 	r.T.Helper()
+	return r.StartReleaseEnv(nil, flags...)
+}
+
+// StartReleaseEnv is StartRelease with extra environment pairs appended, for
+// the scenarios that interrupt a run the release lock is guarding.
+func (r *Repo) StartReleaseEnv(env []string, flags ...string) *Proc {
+	r.T.Helper()
 	full := append(append([]string{}, flags...), "--root", r.Root)
 	cmd := exec.Command(r.dispatBin, full...)
+	cmd.Env = append(append(os.Environ(), defaultEnv...), env...)
 	if dir := coverDir(); dir != "" {
-		cmd.Env = append(os.Environ(), "GOCOVERDIR="+dir)
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
