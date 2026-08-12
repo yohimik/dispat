@@ -309,7 +309,7 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 	try := func(dir string) (string, string, error) {
 		names, err := configCandidates(dir)
 		if err != nil {
-			return "", "", fmt.Errorf("config: %s: %s: %w", dir, DispatignoreName, err)
+			return "", "", fmt.Errorf("config: %s: %s: %w", dir, DispatexcludeName, err)
 		}
 		if len(names) == 0 {
 			return "", "", nil
@@ -1301,7 +1301,7 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 // that no longer exist — edges Discover must refuse.
 //
 // Discovery is also where a package's effective configuration settles: a
-// folder excluded by the space's .dispatignore is not a package at all, a
+// folder excluded by the space's .dispatexclude is not a package at all, a
 // package with overrides — a `packages` entry, an in-folder config file,
 // or both — gets a derived Space of its own with the merged configuration,
 // and a `packages` entry with a `path` becomes a standalone package outside
@@ -1324,7 +1324,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	var pkgs []*model.Package
 	owner := make(map[string]string)      // package name -> space name
 	consumed := make(map[string][]string) // packages key -> matching folders
-	var ignoredDirs []ignoredDir
+	var excludedDirs []excludedDir
 	spaceConfigs := make(map[string]SpaceConfig, len(spaceNames))
 	for _, sn := range spaceNames {
 		// The root file's defaults are the bottom layer, and the space entry
@@ -1386,9 +1386,9 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		// its references are the same question with the same answer: ask once,
 		// under the name of the first package that asked.
 		baseRefsChecked := false
-		ignore, err := loadIgnore(dir)
+		ignore, err := loadExclude(dir)
 		if err != nil {
-			return nil, nil, fmt.Errorf("config: space %q: %s: %w", sn, DispatignoreName, err)
+			return nil, nil, fmt.Errorf("config: space %q: %s: %w", sn, DispatexcludeName, err)
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -1396,7 +1396,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		}
 		// The space's two package-level maps account for their keys against
 		// the folders of this space alone.
-		var spaceIgnored []ignoredDir
+		var spaceExcluded []excludedDir
 		spaceConsumed := make(map[string][]string)
 		fileConsumed := make(map[string][]string)
 		for _, e := range entries {
@@ -1404,8 +1404,8 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				continue
 			}
 			name := e.Name()
-			if ignoredName(ignore, name) {
-				spaceIgnored = append(spaceIgnored, ignoredDir{sn, name})
+			if excludedName(ignore, name) {
+				spaceExcluded = append(spaceExcluded, excludedDir{sn, name})
 				continue
 			}
 			if prev, dup := owner[name]; dup {
@@ -1492,7 +1492,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			label:    fmt.Sprintf("spaces[%q]: packages", sn),
 			entries:  sc.Packages,
 			consumed: spaceConsumed,
-			ignored:  spaceIgnored,
+			ignored:  spaceExcluded,
 			missing:  fmt.Sprintf("matches no folder of space %q (a package of another space is configured by that space, or by the top-level packages map)", sn),
 		}).run(); err != nil {
 			return nil, nil, err
@@ -1501,18 +1501,18 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			label:    fmt.Sprintf("%s: packages", spaceSrc),
 			entries:  spaceFile.Packages,
 			consumed: fileConsumed,
-			ignored:  spaceIgnored,
+			ignored:  spaceExcluded,
 			missing:  fmt.Sprintf("matches no folder of space %q", sn),
 		}).run(); err != nil {
 			return nil, nil, err
 		}
-		ignoredDirs = append(ignoredDirs, spaceIgnored...)
+		excludedDirs = append(excludedDirs, spaceExcluded...)
 	}
 	if err := (keyCheck{
 		label:      "packages",
 		entries:    c.Packages,
 		consumed:   consumed,
-		ignored:    ignoredDirs,
+		ignored:    excludedDirs,
 		missing:    "matches no package folder (a standalone package needs a path)",
 		standalone: true,
 	}).run(); err != nil {

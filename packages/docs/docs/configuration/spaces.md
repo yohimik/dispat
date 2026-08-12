@@ -1,7 +1,7 @@
 # Spaces
 
 A space is a group of packages sharing build/publish behaviour. Every direct sub-folder of the space's `path` is a
-package named after the folder, unless a [`.dispatignore`](#dispatignore) file in the space folder excludes it. A single
+package named after the folder, unless a [`.dispatexclude`](#dispatexclude) file in the space folder excludes it. A single
 package can depart from its space's configuration through a top-level [`packages` entry](./packages.md), so one-off
 exceptions do not require carving the package out into a space of its own. A package living outside every space is
 declared through a [standalone entry](./packages.md#standalone-packages-path).
@@ -10,7 +10,7 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 
 | Key                     | Type                     | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 |-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped, and [`.dispatignore`](#dispatignore) excludes more). Package names must be unique across all spaces.                                                                                                                                                              |
+| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped, and [`.dispatexclude`](#dispatexclude) excludes more). Package names must be unique across all spaces.                                                                                                                                                              |
 | `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
 | `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage, or is skipped after its version stage already modified files.                                                                                                                                                   |
 | `flow`                  | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
@@ -506,7 +506,7 @@ Every entry is exactly a [package entry](./packages.md#package-options) and foll
 restrictions that follow from where it is written:
 
 - **The key must name a folder of this space.** A key matching nothing is the same class of typo as an unknown
-  dependency endpoint and fails the load; a key naming a folder this space [excluded](#dispatignore) is refused with the
+  dependency endpoint and fails the load; a key naming a folder this space [excluded](#dispatexclude) is refused with the
   exclusion spelled out. A package of another space is configured by that space, or by the top-level map.
 - **`path` is not allowed.** A space package's location is its folder. Only the top-level map declares a package
   somewhere else, through a [standalone entry](./packages.md#standalone-packages-path).
@@ -583,10 +583,10 @@ Running the CLI from inside such a space keeps working. A space file declares `p
 of standalone packages declares, so resolution asks the root above whether it claims the folder: if it does, the file
 was a space layer and the root is the config; if nothing above claims it, the folder is a root in its own right.
 
-## `.dispatignore`
+## `.dispatexclude`
 
-A plain-text file listing names in its own folder that dispat must skip. In a space folder those are the direct
-sub-folders that are not packages, such as scratch areas, fixtures or a vendored repository:
+A plain-text file listing names in its own folder that dispat must skip **when it looks around**. In a space folder
+those are the direct sub-folders that are not packages, such as scratch areas, fixtures or a vendored repository:
 
 ```
 # not packages
@@ -599,13 +599,16 @@ scope terms and `autoVersion.match` use). Each space folder carries its own file
 discovery (never released, never scanned by `compute` or `autoVersion`, its name an unknown scope in commits), and a
 [`packages` entry](./packages.md) naming one is rejected with the exclusion spelled out.
 
+This file decides **what is a package**. To keep some of a package's own files from counting as changes to it, without
+taking the folder away, use [`.dispatignore` and `ignore`](./change-scope.md) instead.
+
 ### Choosing between two config files
 
 The same patterns also hide **config file names**, which is how a folder holding more than one of them says which is
 real:
 
 ```
-# packages/core/.dispatignore
+# packages/core/.dispatexclude
 dispat.json
 ```
 
@@ -613,7 +616,7 @@ With that file in place, `packages/core/dispat.yaml` is the package's configurat
 next to it is ignored. The rule holds in every folder dispat looks for a config in, and always applies to that folder
 alone:
 
-| Folder            | What the ignore file decides                                                |
+| Folder            | What the exclude file decides                                               |
 |-------------------|-----------------------------------------------------------------------------|
 | repository root   | Which file is the root config, before the search climbs to the parents.     |
 | a space folder    | Which file is the [space configuration file](#the-space-configuration-file). |

@@ -135,7 +135,7 @@ spaces:
 # scripts name by name, autoVersion replaces wholesale, changelog/github
 # overlay the top-level objects field by field. A package folder may instead
 # carry its own dispat.json/.yaml/.toml with this same shape — the most local
-# layer. A .dispatignore file in a space folder (one name or *-glob per line)
+# layer. A .dispatexclude file in a space folder (one name or *-glob per line)
 # excludes folders that are not packages at all.
 #
 # An entry with a `path` (root-relative) declares a standalone package

@@ -595,7 +595,7 @@ Migrating from JSON to YAML, or generating one config while hand-writing another
 to choose one. Without a hint it takes the first name in its list (`dispat.json`, then `dispat.yaml`, `dispat.yml`,
 `dispat.toml`), which during a migration is usually the file you are trying to retire.
 
-Name the one to skip in a `.dispatignore` next to it:
+Name the one to skip in a `.dispatexclude` next to it:
 
 ```
 # dispat.json is generated; the checked-in config is dispat.yaml
@@ -603,7 +603,7 @@ dispat.json
 ```
 
 That works in the repository root, in a space folder and in a package folder, and always applies to that folder alone,
-so a migration can move one folder at a time. An explicit `--config dispat.json` still loads the ignored file: the flag
+so a migration can move one folder at a time. An explicit `--config dispat.json` still loads the excluded file: the flag
 is exact, which is what makes it usable for a side-by-side comparison of the two.
 
 ## Recovering from a failed run

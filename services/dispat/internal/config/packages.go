@@ -24,18 +24,18 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
-// DispatignoreName is the per-folder ignore file: one pattern per line,
+// DispatexcludeName is the per-folder ignore file: one pattern per line,
 // matched against the names in the folder it sits in. In a space folder the
 // patterns mark direct sub-folders that are not packages; in any folder they
 // also mark config file names dispat must not pick up, which is how a folder
 // holding both dispat.json and dispat.yaml says which one is real. Blank
 // lines and #-comments are skipped; "*" in a pattern matches any run of
 // characters.
-const DispatignoreName = ".dispatignore"
+const DispatexcludeName = ".dispatexclude"
 
 // configCandidates returns the config files present in dir, in the
 // defaultFileNames precedence order, minus the names the folder's own
-// .dispatignore excludes. It is the single probe ResolveFile, loadSpaceFile
+// .dispatexclude excludes. It is the single probe ResolveFile, loadSpaceFile
 // and loadPackageFile share, so the three can never disagree about which file
 // a folder offers.
 //
@@ -52,7 +52,7 @@ func configCandidates(dir string) ([]string, error) {
 	if len(present) == 0 {
 		return nil, nil
 	}
-	patterns, err := loadIgnore(dir)
+	patterns, err := loadExclude(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func configCandidates(dir string) ([]string, error) {
 	}
 	kept := present[:0:0]
 	for _, cand := range present {
-		if !ignoredName(patterns, cand) {
+		if !excludedName(patterns, cand) {
 			kept = append(kept, cand)
 		}
 	}
@@ -807,13 +807,13 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 
 // openFolderConfig probes a folder for its in-folder dispat config file — the
 // same names and formats the root config resolves through, minus what the
-// folder's .dispatignore excludes — and returns the reader positioned on it.
+// folder's .dispatexclude excludes — and returns the reader positioned on it.
 // An absent file yields an empty path and a nil reader, which every caller
 // reads as "this folder says nothing".
 func openFolderConfig(dir string) (*viper.Viper, string, error) {
 	names, err := configCandidates(dir)
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w", DispatignoreName, err)
+		return nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
 	}
 	if len(names) == 0 {
 		return nil, "", nil
@@ -867,7 +867,7 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		return pc, p, err
 	}
 	if err := refuseNestedRoot(v, p, "package",
-		"exclude the folder with "+DispatignoreName, "spaces", "packages"); err != nil {
+		"exclude the folder with "+DispatexcludeName, "spaces", "packages"); err != nil {
 		return pc, p, err
 	}
 	if err := v.UnmarshalExact(&pc, weakDecode); err != nil {
@@ -955,9 +955,9 @@ func pathRefused(where string) string {
 		where)
 }
 
-// ignoredDir is a folder a space's .dispatignore kept out of discovery, so an
+// excludedDir is a folder a space's .dispatexclude kept out of discovery, so an
 // entry naming it can be told apart from an entry naming nothing at all.
-type ignoredDir struct{ space, name string }
+type excludedDir struct{ space, name string }
 
 // keyCheck proves that every key of a `packages` map matched exactly one
 // folder. An unmatched key is the same class of typo as an unknown dependency
@@ -968,7 +968,7 @@ type keyCheck struct {
 	label      string                   // the map, as the error names it
 	entries    map[string]PackageConfig // the keys to account for
 	consumed   map[string][]string      // key -> folders it matched
-	ignored    []ignoredDir             // folders excluded by .dispatignore
+	ignored    []excludedDir            // folders excluded by .dispatexclude
 	missing    string                   // what a key matching nothing means
 	standalone bool                     // entries with a path declare one, and match no folder
 }
@@ -995,7 +995,7 @@ func (k keyCheck) run() error {
 		for _, ig := range k.ignored {
 			if strings.EqualFold(ig.name, key) {
 				return fmt.Errorf("config: %s[%q]: folder %q in space %q is excluded by %s",
-					k.label, key, ig.name, ig.space, DispatignoreName)
+					k.label, key, ig.name, ig.space, DispatexcludeName)
 			}
 		}
 		return fmt.Errorf("config: %s[%q] %s", k.label, key, k.missing)
@@ -1003,10 +1003,10 @@ func (k keyCheck) run() error {
 	return nil
 }
 
-// loadIgnore reads a folder's .dispatignore patterns; an absent file
+// loadExclude reads a folder's .dispatexclude patterns; an absent file
 // means none.
-func loadIgnore(dir string) ([]string, error) {
-	data, err := os.ReadFile(filepath.Join(dir, DispatignoreName))
+func loadExclude(dir string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, DispatexcludeName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -1039,9 +1039,9 @@ func sameDir(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-// ignoredName reports whether a folder name matches one of the space's
-// .dispatignore patterns.
-func ignoredName(patterns []string, name string) bool {
+// excludedName reports whether a folder name matches one of the space's
+// .dispatexclude patterns.
+func excludedName(patterns []string, name string) bool {
 	for _, p := range patterns {
 		if globx.Match(p, name) {
 			return true

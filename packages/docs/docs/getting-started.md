@@ -65,7 +65,7 @@ for the other formats). No flag is needed afterwards: every command finds the fi
 ```
 
 Every direct sub-folder of `packages/libs` is now a package named after its folder (a
-[`.dispatignore`](./configuration/spaces.md#dispatignore) file in the space folder can exempt some). A space can also be
+[`.dispatexclude`](./configuration/spaces.md#dispatexclude) file in the space folder can exempt some). A space can also be
 configured, and its packages adjusted, from a [config file in its own folder](./configuration/spaces.md#the-space-configuration-file). Declare relations
 between packages under `dependencies` so bumps propagate and ordering is enforced:
 

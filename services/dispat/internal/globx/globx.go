@@ -1,5 +1,5 @@
 // Package globx holds the one glob matcher the tool shares: scope terms,
-// autoVersion range globs and .dispatignore patterns must all agree on what
+// autoVersion range globs and .dispatexclude patterns must all agree on what
 // a glob means, and none of them describe filesystem paths — so
 // filepath.Match's separator rules would be the wrong semantics for all
 // three.

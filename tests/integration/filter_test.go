@@ -74,7 +74,7 @@ func filterRepo(t *testing.T) *harness.Repo {
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "web")
 	r.SeedPackage("apps", "site")
-	r.WriteFile("apps/.dispatignore", "group\n")
+	r.WriteFile("apps/.dispatexclude", "group\n")
 	r.WriteFile("apps/group/deep/main.txt", "x")
 	r.WriteFile("tools/tool/main.txt", "x")
 	r.Commit("feat(core,web,site,deep,tool): bootstrap every package")

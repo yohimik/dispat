@@ -75,7 +75,7 @@ func writeSpaceRaw(t *testing.T, root, spaceDir string, sf map[string]any) {
 }
 
 // writeFolderConfig marshals any config value into a folder's config file,
-// under the name given — the seam the format and .dispatignore tests need.
+// under the name given — the seam the format and .dispatexclude tests need.
 func writeFolderConfig(t *testing.T, root, dir, name string, value any) {
 	t.Helper()
 	data, err := json.MarshalIndent(value, "", "  ")
@@ -83,10 +83,10 @@ func writeFolderConfig(t *testing.T, root, dir, name string, value any) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, dir, name), data, 0o644))
 }
 
-// writeIgnore drops a .dispatignore into a folder.
-func writeIgnore(t *testing.T, root, dir, body string) {
+// writeExclude drops a .dispatexclude into a folder.
+func writeExclude(t *testing.T, root, dir, body string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(root, dir, DispatignoreName), []byte(body), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, dir, DispatexcludeName), []byte(body), 0o644))
 }
 
 // TestPackagePathForSpacePackageRejected: a packages entry whose key matches
@@ -252,10 +252,10 @@ func TestPackagesEntryUnmatched(t *testing.T) {
 
 	cfg.Packages = map[string]PackageConfig{"core": {TagFormat: "v{version}"}}
 	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
-	require.NoError(t, os.WriteFile(filepath.Join(root, "packages/libs", DispatignoreName), []byte("core\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages/libs", DispatexcludeName), []byte("core\n"), 0o644))
 	_, err = discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `excluded by `+DispatignoreName)
+	assert.Contains(t, err.Error(), `excluded by `+DispatexcludeName)
 }
 
 // TestInFolderConfigPrecedence: the three layers merge field by field with
@@ -319,7 +319,7 @@ func TestInFolderConfigInvalid(t *testing.T) {
 }
 
 // TestInFolderNestedRoot: an in-folder file declaring spaces is a nested
-// monorepo's root config, not an override; the error points at .dispatignore
+// monorepo's root config, not an override; the error points at .dispatexclude
 // instead of half-merging another repository's configuration.
 func TestInFolderNestedRoot(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
@@ -329,18 +329,18 @@ func TestInFolderNestedRoot(t *testing.T) {
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "monorepo root of its own")
-	assert.Contains(t, err.Error(), DispatignoreName)
+	assert.Contains(t, err.Error(), DispatexcludeName)
 }
 
-// TestDispatignore: patterns match direct sub-folder names — exact names and
+// TestDispatexclude: patterns match direct sub-folder names — exact names and
 // * globs — with blank lines and # comments skipped; other spaces are
 // untouched.
-func TestDispatignore(t *testing.T) {
+func TestDispatexclude(t *testing.T) {
 	root := writeModelRepo(t, validConfig(),
 		"packages/libs/core", "packages/libs/sandbox", "packages/libs/tmp-a", "packages/libs/tmp-b",
 		"packages/apps/app", "packages/apps/sandbox2")
 	ignore := "# scratch folders are not packages\n\nsandbox\ntmp-*\n"
-	require.NoError(t, os.WriteFile(filepath.Join(root, "packages/libs", DispatignoreName), []byte(ignore), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages/libs", DispatexcludeName), []byte(ignore), 0o644))
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	byName := packagesByName(pkgs)
@@ -731,15 +731,15 @@ func TestDiscoverUnvalidatedGroupRef(t *testing.T) {
 	assert.Contains(t, err.Error(), "matches no versionGroups entry and no space")
 }
 
-// TestDispatignoreUnreadable: a .dispatignore that cannot be read (here: a
+// TestDispatexcludeUnreadable: a .dispatexclude that cannot be read (here: a
 // directory of that name) fails the discovery with the file named, rather
 // than silently treating every folder as a package.
-func TestDispatignoreUnreadable(t *testing.T) {
+func TestDispatexcludeUnreadable(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages/libs", DispatignoreName, "x"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages/libs", DispatexcludeName, "x"), 0o755))
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), DispatignoreName)
+	assert.Contains(t, err.Error(), DispatexcludeName)
 }
 
 // TestInFolderConfigUnreadable: an in-folder config that exists but cannot
@@ -1825,7 +1825,7 @@ func TestSpaceFilePackagesKeyMustMatchAFolder(t *testing.T) {
 }
 
 // TestSpacePackagesKeyExcluded: a key naming a folder the space's
-// .dispatignore hid gets the exclusion spelled out rather than the typo
+// .dispatexclude hid gets the exclusion spelled out rather than the typo
 // message.
 func TestSpacePackagesKeyExcluded(t *testing.T) {
 	cfg := validConfig()
@@ -1833,10 +1833,10 @@ func TestSpacePackagesKeyExcluded(t *testing.T) {
 		s.Packages = map[string]PackageConfig{"sandbox": {TagFormat: "v{version}"}}
 	})
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/sandbox", "packages/apps/app")
-	writeIgnore(t, root, "packages/libs", "sandbox\n")
+	writeExclude(t, root, "packages/libs", "sandbox\n")
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "excluded by "+DispatignoreName)
+	assert.Contains(t, err.Error(), "excluded by "+DispatexcludeName)
 }
 
 // TestSpacePackagesKeyAmbiguous: one lowercased key matching two folders of
@@ -1896,12 +1896,12 @@ func TestSpaceFileAutoVersionOnlyUnknown(t *testing.T) {
 	assert.Contains(t, err.Error(), "autoVersion.only: unknown package")
 }
 
-// --- .dispatignore over config file names ---
+// --- .dispatexclude over config file names ---
 
-// TestDispatignoreHidesAPackageConfig: a folder holding two config files says
+// TestDispatexcludeHidesAPackageConfig: a folder holding two config files says
 // which one is real by ignoring the other, and the surviving name decides the
 // package's override layer.
-func TestDispatignoreHidesAPackageConfig(t *testing.T) {
+func TestDispatexcludeHidesAPackageConfig(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
 	writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "json-{version}"})
 	writeFolderConfig(t, root, "packages/libs/core", "dispat.yaml", PackageConfig{TagFormat: "yaml-{version}"})
@@ -1911,19 +1911,19 @@ func TestDispatignoreHidesAPackageConfig(t *testing.T) {
 	assert.Equal(t, "json-{version}", packagesByName(pkgs)["core"].Space.TagFormat,
 		"without an ignore file the name order decides")
 
-	writeIgnore(t, root, "packages/libs/core", "# the json file is generated\ndispat.json\n")
+	writeExclude(t, root, "packages/libs/core", "# the json file is generated\ndispat.json\n")
 	pkgs, err = discoverPackages(t, root)
 	require.NoError(t, err)
 	assert.Equal(t, "yaml-{version}", packagesByName(pkgs)["core"].Space.TagFormat)
 }
 
-// TestDispatignoreHidesASpaceConfig: the same rule in a space folder, where
+// TestDispatexcludeHidesASpaceConfig: the same rule in a space folder, where
 // the ignore file already decides which sub-folders are packages.
-func TestDispatignoreHidesASpaceConfig(t *testing.T) {
+func TestDispatexcludeHidesASpaceConfig(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/libs/sandbox", "packages/apps/app")
 	writeSpaceFile(t, root, "packages/libs", SpaceFile{TagFormat: "json-{version}"})
 	writeFolderConfig(t, root, "packages/libs", "dispat.yaml", SpaceFile{TagFormat: "yaml-{version}"})
-	writeIgnore(t, root, "packages/libs", "sandbox\ndispat.json\n")
+	writeExclude(t, root, "packages/libs", "sandbox\ndispat.json\n")
 
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
@@ -1932,25 +1932,25 @@ func TestDispatignoreHidesASpaceConfig(t *testing.T) {
 	assert.NotContains(t, byName, "sandbox", "the folder patterns still hold")
 }
 
-// TestDispatignoreHidesEveryConfig: ignoring every candidate leaves the
+// TestDispatexcludeHidesEveryConfig: ignoring every candidate leaves the
 // folder with nothing to say, which is not an error — the folder simply has
 // no override layer.
-func TestDispatignoreHidesEveryConfig(t *testing.T) {
+func TestDispatexcludeHidesEveryConfig(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
 	writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "json-{version}"})
-	writeIgnore(t, root, "packages/libs/core", "dispat.*\n")
+	writeExclude(t, root, "packages/libs/core", "dispat.*\n")
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	assert.Equal(t, "{name}@{version}", packagesByName(pkgs)["core"].Space.TagFormat)
 }
 
-// TestDispatignoreUnreadableHidingConfigs: an ignore file that cannot be read
+// TestDispatexcludeUnreadableHidingConfigs: an ignore file that cannot be read
 // leaves it unknowable which config the folder meant, so the load fails
 // instead of guessing.
-func TestDispatignoreUnreadableHidingConfigs(t *testing.T) {
+func TestDispatexcludeUnreadableHidingConfigs(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/app")
 	writePackageFile(t, root, "packages/libs/core", PackageConfig{TagFormat: "json-{version}"})
-	path := filepath.Join(root, "packages/libs/core", DispatignoreName)
+	path := filepath.Join(root, "packages/libs/core", DispatexcludeName)
 	require.NoError(t, os.WriteFile(path, []byte("dispat.json\n"), 0o644))
 	require.NoError(t, os.Chmod(path, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
@@ -1959,7 +1959,7 @@ func TestDispatignoreUnreadableHidingConfigs(t *testing.T) {
 	}
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), DispatignoreName)
+	assert.Contains(t, err.Error(), DispatexcludeName)
 }
 
 // TestPackageSrcNarrowsTheScopeFolder: src rides the override layers like

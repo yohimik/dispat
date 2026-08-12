@@ -193,5 +193,5 @@ func underDir(file, dir string) bool {
 // range matcher and scope resolution agree on what a glob means: a version
 // range is not a filesystem path, and filepath.Match's separator rules would
 // make `*` quietly miss `file:../core`. The matcher itself lives in globx,
-// where .dispatignore patterns share it.
+// where .dispatexclude patterns share it.
 func GlobMatch(pattern, s string) bool { return globx.Match(pattern, s) }

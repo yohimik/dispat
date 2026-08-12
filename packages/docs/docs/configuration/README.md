@@ -20,7 +20,7 @@ This page covers the top level; the larger objects have their own pages:
 
 | Page                                  | Covers                                                                                                                                      |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the seven `versioning` modes and versioning groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatignore`. |
+| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the seven `versioning` modes and versioning groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatexclude`. |
 | [Packages](./packages.md)             | The `packages` maps: per-package overrides and the ladder that orders them, standalone packages via `path`, package-declared dependencies, in-folder config files. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                                                                    |
 | [Alias tags](./alias-tags.md)         | `aliasTags`: the extra names a release is written under, beside its real tag.                                                               |

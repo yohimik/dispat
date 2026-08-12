@@ -1,10 +1,10 @@
 package integration
 
-// Area 12: per-package overrides, versioning groups and .dispatignore.
+// Area 12: per-package overrides, versioning groups and .dispatexclude.
 // packages.md promises that a package can override its space's configuration
 // — from a top-level `packages` entry or from a dispat config file inside
 // the package folder, most local winning — that declared versionGroups
-// version their members as one across spaces, that `.dispatignore` excludes
+// version their members as one across spaces, that `.dispatexclude` excludes
 // folders from discovery, and that the per-package record and concurrency
 // policies hold through a real release. Only the compiled binary can prove
 // the layers compose: config load, discovery, planning, scheduling and the
@@ -169,15 +169,15 @@ func TestOverridesInFolderFileWins(t *testing.T) {
 	assert.True(t, r.HasTag("extra@0.1.0"), "the sibling keeps the repository default")
 }
 
-// TestOverridesDispatignore: a folder listed in the space's .dispatignore is
+// TestOverridesDispatexclude: a folder listed in the space's .dispatexclude is
 // not a package — it is never released, and a commit scoping it draws the
 // unknown-scope diagnostic (E130) exactly as any non-package name would.
-func TestOverridesDispatignore(t *testing.T) {
+func TestOverridesDispatexclude(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(libsConfig(echoBuild, 1))
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "scratch")
-	r.WriteFile("packages/.dispatignore", "# not packages\nscratch\n")
+	r.WriteFile("packages/.dispatexclude", "# not packages\nscratch\n")
 	r.Commit("feat(core): real work")
 	r.CommitEmpty("feat(scratch): addressed at a non-package")
 

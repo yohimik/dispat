@@ -110,7 +110,7 @@ type AliasTag struct {
 type Space struct {
 	Name string
 	// Path of the space folder, relative to the monorepo root. Every direct
-	// sub-folder is a package, unless a .dispatignore file in the space
+	// sub-folder is a package, unless a .dispatexclude file in the space
 	// folder excludes it.
 	Path string
 	// Versioning is how versions relate across the space's packages; the zero

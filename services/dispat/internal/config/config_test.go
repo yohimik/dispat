@@ -1541,10 +1541,10 @@ func TestResolveFileBrokenConfigStopsTheAscent(t *testing.T) {
 	assert.Equal(t, nested, resolvedRoot)
 }
 
-// TestResolveFileHonoursDispatignore: the ignore file next to the candidates
+// TestResolveFileHonoursDispatexclude: the ignore file next to the candidates
 // decides which of them the folder meant, and hiding every candidate leaves
 // the folder invisible to resolution.
-func TestResolveFileHonoursDispatignore(t *testing.T) {
+func TestResolveFileHonoursDispatexclude(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"dispat.json", "dispat.yaml"} {
 		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(`{"spaces":{}}`), 0o644))
@@ -1553,7 +1553,7 @@ func TestResolveFileHonoursDispatignore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(root, "dispat.json"), path, "the name order decides on its own")
 
-	require.NoError(t, os.WriteFile(filepath.Join(root, DispatignoreName), []byte("dispat.json\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, DispatexcludeName), []byte("dispat.json\n"), 0o644))
 	path, _, err = ResolveFile(root, "dispat.json", false)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(root, "dispat.yaml"), path)
@@ -1565,18 +1565,18 @@ func TestResolveFileHonoursDispatignore(t *testing.T) {
 
 	// Hiding every candidate leaves nothing to resolve, and the error names
 	// what was tried.
-	require.NoError(t, os.WriteFile(filepath.Join(root, DispatignoreName), []byte("dispat.*\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, DispatexcludeName), []byte("dispat.*\n"), 0o644))
 	_, _, err = ResolveFile(root, "dispat.json", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no dispat config file found")
 }
 
-// TestResolveFileUnreadableIgnore: an ignore file that cannot be read leaves
+// TestResolveFileUnreadableExclude: an ignore file that cannot be read leaves
 // it unknowable which config the folder meant, so resolution says so.
-func TestResolveFileUnreadableIgnore(t *testing.T) {
+func TestResolveFileUnreadableExclude(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(`{"spaces":{}}`), 0o644))
-	path := filepath.Join(root, DispatignoreName)
+	path := filepath.Join(root, DispatexcludeName)
 	require.NoError(t, os.WriteFile(path, []byte("dispat.json\n"), 0o644))
 	require.NoError(t, os.Chmod(path, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
@@ -1585,7 +1585,7 @@ func TestResolveFileUnreadableIgnore(t *testing.T) {
 	}
 	_, _, err := ResolveFile(root, "dispat.json", false)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), DispatignoreName)
+	assert.Contains(t, err.Error(), DispatexcludeName)
 }
 
 // TestDepSourceLabel: every declaration site renders as the key path that

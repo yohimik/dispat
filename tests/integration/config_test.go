@@ -951,12 +951,12 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 	})
 }
 
-// TestConfigDispatignoreSelectsTheConfigFile: a folder holding two config
-// files says which one is real by naming the other in its .dispatignore, and
+// TestConfigDispatexcludeSelectsTheConfigFile: a folder holding two config
+// files says which one is real by naming the other in its .dispatexclude, and
 // the rule holds at each of the three places a config file can sit — the
 // repository root, a space folder and a package folder. Every choice is
 // proved by a tag only that file's tagFormat could produce.
-func TestConfigDispatignoreSelectsTheConfigFile(t *testing.T) {
+func TestConfigDispatexcludeSelectsTheConfigFile(t *testing.T) {
 	writeYAML := func(r *harness.Repo, path string, value any) {
 		t.Helper()
 		data, err := json.MarshalIndent(value, "", "  ")
@@ -972,7 +972,7 @@ func TestConfigDispatignoreSelectsTheConfigFile(t *testing.T) {
 		real := libsConfig(echoBuild, 1)
 		real.TagFormat = "yaml-{name}@{version}"
 		writeYAML(r, "dispat.yaml", real)
-		r.WriteFile(".dispatignore", "# the json file is generated\ndispat.json\n")
+		r.WriteFile(".dispatexclude", "# the json file is generated\ndispat.json\n")
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): first release")
 
@@ -986,7 +986,7 @@ func TestConfigDispatignoreSelectsTheConfigFile(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		spaceFile(t, r, "packages", models.SpaceFile{TagFormat: "json-{name}@{version}"})
 		writeYAML(r, "packages/dispat.yaml", models.SpaceFile{TagFormat: "yaml-{name}@{version}"})
-		r.WriteFile("packages/.dispatignore", "dispat.json\n")
+		r.WriteFile("packages/.dispatexclude", "dispat.json\n")
 		r.Commit("feat(core): first release")
 
 		r.ReleaseOK()
@@ -999,7 +999,7 @@ func TestConfigDispatignoreSelectsTheConfigFile(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		packageFile(t, r, "packages/core", models.PackageConfig{TagFormat: "json-{name}@{version}"})
 		writeYAML(r, "packages/core/dispat.yaml", models.PackageConfig{TagFormat: "yaml-{name}@{version}"})
-		r.WriteFile("packages/core/.dispatignore", "dispat.json\n")
+		r.WriteFile("packages/core/.dispatexclude", "dispat.json\n")
 		r.Commit("feat(core): first release")
 
 		r.ReleaseOK()

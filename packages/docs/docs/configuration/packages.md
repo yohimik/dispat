@@ -11,7 +11,7 @@ A top-level entry plays one of two roles:
 - **An override for a space package.** An entry *without* a `path` adjusts the configuration of the package whose folder
   name matches the entry key. Every such key must match exactly one package folder across all
   [spaces](./spaces.md). An unmatched key is the same class of typo as an unknown dependency endpoint, and a key
-  matching a [`.dispatignore`](./spaces.md#dispatignore)d folder is rejected with the exclusion spelled out. One-off
+  matching a [`.dispatexclude`](./spaces.md#dispatexclude)d folder is rejected with the exclusion spelled out. One-off
   exceptions do not require carving the package out into a space of its own.
 - **A standalone package.** An entry *with* a [`path`](#standalone-packages-path) declares a package living outside
   every space, at that root-relative folder; the entry key is the package name and the entry itself is the package's
@@ -232,7 +232,7 @@ an empty base instead of a space: the entry, then the package's own
 - There is no `flow.login`, because login is a space-level stage. A standalone package that needs authentication puts it
   in
   `flow.beforePublish`.
-- `.dispatignore` does not apply; the entry alone decides that the folder is a package.
+- `.dispatexclude` does not apply; the entry alone decides that the folder is a package.
 
 Config map keys are lowercased by the loader, so a standalone package's name (the entry key) is effectively lowercase,
 like space names.
@@ -277,7 +277,7 @@ growing a second home for the edges the next `compute` finds. Each edited file g
 
 A package folder may carry a dispat config file of its own, under the same names and formats the root config resolves
 through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins, and a
-[`.dispatignore`](./spaces.md#choosing-between-two-config-files) in the folder chooses between them). Its top-level
+[`.dispatexclude`](./spaces.md#choosing-between-two-config-files) in the folder chooses between them). Its top-level
 object is exactly the package entry object above minus `path` (a file cannot move the folder it lives in), and it is the
 **most local** layer, the last rung of [the ladder](#the-override-ladder). The same merge rules apply, unknown keys are
 rejected with the file named, and the file travels with the package: a package moved between spaces keeps its
@@ -292,7 +292,7 @@ exceptions.
 ```
 
 A package folder's file that declares `spaces` or `packages` is refused with guidance: the folder holds a monorepo root
-of its own (a vendored or nested repository) and must be excluded via [`.dispatignore`](./spaces.md#dispatignore), not
+of its own (a vendored or nested repository) and must be excluded via [`.dispatexclude`](./spaces.md#dispatexclude), not
 half-merged. A space folder's file is the one place `packages` belongs outside the root config; see
 [the space configuration file](./spaces.md#the-space-configuration-file).
 

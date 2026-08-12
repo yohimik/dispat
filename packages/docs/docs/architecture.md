@@ -33,12 +33,12 @@ as a release tag.
    libraries exposed directly (see [Manifest tools](./manifests.md)), reading nothing but the paths named on the
    command line, so a monorepo root, a plan and a git history are all beside the point.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
-   effective monorepo root; a folder's `.dispatignore` chooses between the candidate names). A file declaring `spaces`
+   effective monorepo root; a folder's `.dispatexclude` chooses between the candidate names). A file declaring `spaces`
    ends the ascent; one declaring only `packages` is a candidate that yields to a root above claiming its folder as a
    space, which is how a space folder's file is told from a monorepo of standalone packages; a file declaring neither
    (a package's in-folder override) does not end the ascent. Then load and validate it (viper; unknown keys rejected;
    flag bindings applied).
-3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatignore`, names
+3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatexclude`, names
    unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here,
    through the six-layer ladder (the space, the space folder's config file, then the top-level `packages` entry, the
    space's `packages` entry, the space file's `packages` entry and the package folder's own file), each configured package getting a derived
@@ -177,7 +177,7 @@ sections below.
 | `pkg/writer`         | Format-preserving manifest writer (own module): byte-precise range and version rewrites for **every** manifest the scanner reads, atomic writes, and a result separating applied edits from ones deliberately left alone (a Maven property, a workspace inheritance). Exposed on its own as `dispat writer`. |
 | `internal/cli`       | The command-line controller: flags, dispatch, exit-code mapping, logger construction.                                                                                                                        |
 | `internal/app`       | The application layer: `Status`, `Release`, `RunScript`, `AutoReplace`, `Preview`, `Compute`, `ScanManifests`, `WriteManifests`, the step commands, the finalize phase and run-level hooks; wires every other package together. Its package *sweep* is the shared half of every command that covers a set of packages: the selection, the task graph, the concurrency budget and the skip cascade live there once, and each command supplies only what one package's work means. |
-| `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatignore` over folder and config names, format-preserving config editing for `compute --write` (every key one run touches in a file written in a single pass, so one backup holds the file as it was). |
+| `internal/config`    | Config resolution, loading, validation, package discovery, the space and per-package override merging, `.dispatexclude` over folder and config names, format-preserving config editing for `compute --write` (every key one run touches in a file written in a single pass, so one backup holds the file as it was). |
 | `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration. Plus `Narrow`, which restricts a computed plan to part of the graph for a filtered release (publish order withholds, versioning-group splits reported).                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
 | `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs. Plus the release lock, the one-tag mutex a release takes on the remote before it plans.                                                                    |
@@ -187,7 +187,7 @@ sections below.
 | `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits.                                                                                                                               |
 | `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
 | `internal/filter`    | The one selection resolver every package-selecting command shares, `release` and `status` included: `--package` / `--space` / `--group` terms, their globs, and the invocation folder that stands in for the first two.                              |
-| `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatignore` and the selection terms share.                                                                                                        |
+| `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatexclude` and the selection terms share.                                                                                                        |
 
 ## Graph algorithms
 
