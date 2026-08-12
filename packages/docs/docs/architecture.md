@@ -59,15 +59,17 @@ callable without a command line.
 11. After each successful publish: run the release recorders (changelog file; GitHub release unless in release-commit
     mode), then create the annotated tag (deferred in release-commit mode; a `PACKAGE_<KEY>` script export pins it to
     the exported commit instead of HEAD), then the warn-only `postPublish` hook and the warn-only announce frame
-    (`beforeAnnounce`, the announce stage, `postAnnounce`).
+    (`beforeAnnounce`, the announce stage, `postAnnounce`). The publish having succeeded, none of this can fail the
+    package any more: a failure here is a [critical](#after-the-point-of-no-return).
 12. Run the warn-only `postAll` hook with the run outcome (`DISPAT_RESULT_*`).
 13. Finalize phase (when `commit` is enabled): one release commit staging all published packages, tags on that commit
     (or on a package's exported `PACKAGE_<KEY>` commit), then the push when `commit.push` is enabled: the branch first,
     then the run's tags with any tag already existing on the remote skipped (warned, not fatal), then GitHub releases
     referencing the pushed tags. The warn-only commit/push hooks bracket these operations (`beforeCommit`/`afterCommit`,
     `postCommit` after tags,
-    `beforePush`/`afterPush`).
-14. Print a per-package summary plus totals; exit `1` if anything failed.
+    `beforePush`/`afterPush`). Every package here has published, so nothing in this phase aborts it either: each step
+    runs, and each failure is a [critical](#after-the-point-of-no-return).
+14. Print a per-package summary plus totals; exit `1` if anything failed or if any critical was recorded.
 
 ## Planning
 
@@ -301,7 +303,17 @@ changes which releases get cancelled or contained.
 
 ## Failure semantics
 
-A failed script (or release recorder) marks the package failed; nothing aborts the run. `Result.FailedStage` records
+**Once the release work starts, no error aborts the run.** Everything that can refuse a release happens before any of
+it: a blocked plan, the branch guard, the behind-remote check, the remote and GitHub verification, and the `beforeAll`
+hook. Those refuse while nothing has happened yet, which is the only moment refusing costs nothing. From the first
+build script onward the run always goes to the end: a package can fail, and its consumers can be skipped behind it, but
+every other package still releases and the finalize phase still records whatever published. The only thing that stops a
+run early is an interrupt, and even then what already published is still recorded.
+
+Inside that, there is a second and stronger line: **once a package's publish succeeds, nothing can fail that package**.
+See [After the point of no return](#after-the-point-of-no-return) below.
+
+A failed script marks the package failed; nothing aborts the run. `Result.FailedStage` records
 where it failed (informational, shown in the summary). At the start of every task the package re-evaluates the skip
 rule: skip if some changed provider failed (at any stage) or was skipped AND the package has neither own commits nor a
 successfully published changed provider. A consumer's terminal outcome is deterministic in both modes: its publish
@@ -326,11 +338,44 @@ publish can never widen a commit's blast radius.
 A skipped package is recorded as *blocked* with the dependency responsible, rather than being silently absent from the
 summary: a package that was in the plan and produced nothing has to be accounted for.
 
-For spaces with `revertOnFail: true`, a failing package (any stage, including a failing release recorder) has its folder
+For spaces with `revertOnFail: true`, a failing package has its folder
 rolled back via the `Reverter` interface (`gitx.CLI`: `git checkout -- <dir>` + `git clean -fd <dir>`, so tracked files
 are restored from HEAD and untracked files removed, scoped to the package folder). The same rollback runs when a package
 is skipped after its version stage already modified files. A revert error is logged but the package keeps its original
-failure status.
+failure status. Nothing is ever reverted after a successful publish, for the reason the next section gives.
+
+### After the point of no return
+
+A package's publish script succeeding is the point of no return. The artefact is on its registry and no later step can
+take it back, so from there dispat has nothing left to decide and only things left to record: the tag, the changelog
+entry, the GitHub release, the release commit, the push.
+
+When one of those fails it is a **critical**: logged with its own code, counted in the summary, and otherwise ignored
+by the run, which carries on to everything else it owed. The command still exits `1` at the end, once, so a release
+that lost part of its record never looks green in CI.
+
+| Code | What failed |
+|-------|--------------------------------------------------|
+| `E210` | A release tag could not be created |
+| `E211` | A release tag already exists at a different commit |
+| `E212` | A release record (changelog entry, GitHub release) could not be written |
+| `E213` | The release commit could not be made |
+| `E214` | The push failed |
+
+The reason none of these fails the package is that failing it would be a lie with consequences. The package *is*
+published: marking it failed would revert its folder, throwing away the version bump of something already on a
+registry; it would run its `onFail` script; and it would skip every consumer, none of which has anything wrong with it
+and all of which have a real published provider to build against. None of that un-publishes anything. So the status
+stays `published`, the summary line for that package turns into an error carrying what went missing, and the operator
+gets told exactly what to go and repair.
+
+For the same reason nothing stops at the first failure. A changelog that could not be written must not cost the tag
+too; one package's tag failing says nothing about the next package's; a failed push must not withhold the GitHub
+releases that document the same work. Each step runs, each failure is recorded, and the exit code adds them up.
+
+`E211` is the one case that also declines to act. A tag already sitting at another commit is left exactly where it is
+rather than moved onto this release: it is a record some earlier run made, and rewriting it here would replace one
+release's history with another's.
 
 ## Design decisions
 
@@ -346,8 +391,8 @@ Interfaces decouple every side effect, keeping the planner and executor unit-tes
 
 `ReleaseRecorder` is the extension point for publishing release data anywhere: both current implementations render the
 same changelog sections (shared `changelog.Format`, zero-value fields fall back to defaults) and differ only in the
-destination, a file prepend vs. a REST call. Recorders run in order after each successful publish; a recorder error
-fails the package before tagging.
+destination, a file prepend vs. a REST call. Recorders run in order after each successful publish; a recorder error is
+a critical (`E212`) and the remaining recorders and the tag still follow.
 
 Other choices: versions in git tags only (no version files to commit); one `git tag`/`git log` pair per package rather
 than a global log walk (simple and correct for per-package tag baselines); shelling out to the git binary to match CI

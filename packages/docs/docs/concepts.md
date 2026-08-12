@@ -123,7 +123,8 @@ one. `cancel(pkg)` discards unreleased metadata for a package; it never reaches 
 
 ### When a provider fails or is skipped
 
-Failures never abort the run. A provider that failed at any stage (version,
+Failures never abort the run, and after a package publishes nothing can fail it at all. A provider that failed at any
+stage (version,
 build or publish) or was skipped taints its consumers: they are skipped unless they have a release reason of their own,
 meaning their own conventional commits or another changed provider that did publish successfully. This holds in both
 `isBuildWaitingPublish` modes; a consumer's publish always waits for its providers' publishes, so even a consumer that
@@ -176,7 +177,9 @@ Acting on the provider does nothing: its version is already public, and cancella
    `flow.login` authenticates **once per space** before its first publish (every other publish of the space waits for
    it; a login failure fails them all); the login's exports reach every package of the space from its publish onward. On
    success the release recorders run (changelog file, GitHub release for packages that exported
-   `DISPAT_EXPORT_GITHUB`), then the annotated tag is created (pushing is left to CI by default).
+   `DISPAT_EXPORT_GITHUB`), then the annotated tag is created (pushing is left to CI by default). The publish script
+   succeeding is the point of no return: from there nothing can fail the package, and a record or a tag that cannot be
+   written is [reported instead](./architecture.md#after-the-point-of-no-return).
 4. **announce**: after the publish frame, for pushing the release out to update channels (a Slack message, a webhook, a
    docs feed). It gets the release notes as `DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` /
    `DISPAT_FIXES`, the same grouped data the changelog and GitHub release render, and the whole frame (its

@@ -421,8 +421,15 @@ off. The full guide is [Updating dispat](./self-update.md).
 ## Exit codes
 
 Exit codes: `0` success (including "nothing changed"), `1` configuration/planning error, a refused release (see
-[`commitErrors`](./configuration/parser.md#commiterrors)), at least one package failed, or an interrupted run, `2` bad
-command line.
+[`commitErrors`](./configuration/parser.md#commiterrors)), at least one package failed, a step that failed after its
+release was already out, or an interrupted run, `2` bad command line.
+
+A release is refused only *before* any of it happens. Once the first build script runs, nothing aborts the run: a
+package can fail and its consumers can be skipped behind it, but every other package still releases and the finalize
+phase still records what published. And once a package's publish succeeds, nothing can fail that package at all: a tag,
+changelog entry, GitHub release, release commit or push that fails after that point is reported as a
+[critical](./architecture.md#after-the-point-of-no-return) and makes the command exit `1` at the end, with all the
+remaining work already done.
 
 Both `release` and `status` print the plan's diagnostics before the graph, and both narrow it to their
 [selection](#releasing-part-of-the-graph) between the two. `status` exits `1` only for a repository-scoped failure (an
