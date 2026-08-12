@@ -19,9 +19,9 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space whose own versioning is shared. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                        |
 | `scripts`               | map name → shell command | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
-
 | `env`                   | map name → value         | no         | Fixed environment variables for every script of the space's packages, its login script included, merged over the top-level map key by key; see [Static env](./README.md#static-env).                                                                                                                                                                                                     |
 | `custom`                | object                   | no         | Free-form data dispat never reads; see [`custom`](./README.md#custom).                                                                                                                                                                                                                                                                                                                   |
+| `dependencies`          | map consumer → providers | no         | Consumer → provider edges written next to the space they describe, in the same shape as the top-level [`dependencies`](./README.md#dependencies). Every edge must touch this space. See [the space's `dependencies`](#the-spaces-dependencies).                                                                                                                                          |
 | `packages`              | map name → entry         | no         | Per-package configuration for this space's own packages, in the same entry shape as the top-level [`packages`](./packages.md) map. See [the space's `packages` map](#the-spaces-packages-map).                                                                                                                                                                                          |
 
 A single package's departures from these options live in a `packages` map, never in the space's own keys: either this
@@ -515,6 +515,36 @@ An entry here and a top-level entry can name the same package; the space's entry
 where the two disagree and the top-level one still supplies what the space's leaves unset. The full order is in
 [the override ladder](./packages.md#the-override-ladder).
 
+## The space's `dependencies`
+
+A space declares the edges of its own packages, keyed by consumer exactly as the top-level
+[`dependencies`](./README.md#dependencies) is:
+
+```json
+{
+  "spaces": {
+    "libs": {
+      "path": "packages",
+      "dependencies": {
+        "web": ["core", { "provider": "utils", "keep": true }]
+      }
+    }
+  }
+}
+```
+
+Every edge here must **touch the space**: its consumer or its provider is one of the space's own packages. That covers
+the edges inside a space, and cross-space edges too, which belong to whichever of the two spaces you think of as
+owning the relation. An edge between two packages of neither space is refused, because a reader looking for it would
+have no space to look in. Those belong in the root object.
+
+Declarations never override each other. The root object, each space's object and each package's own list all merge
+into a single graph, so an edge is declared once, wherever it reads best.
+
+`dispat compute` edits each edge where it was written, so a correction to an edge declared here is applied here. New
+edges it discovers go to the root object instead: whether a space may hold a given edge is a rule about the graph,
+and compute leaves that decision to you.
+
 ## The space configuration file
 
 A space folder may carry a dispat config file of its own, under the same names and formats the root config resolves
@@ -545,7 +575,9 @@ Two keys are refused:
   out of the root config rather than half-merged.
 
 `packages` is the one map key the file may hold, and it is a layer of its own: nearer than the space's `packages` map
-in the root file, and still under the package's own folder file.
+in the root file, and still under the package's own folder file. `dependencies` may also be written here, and it adds
+to what the root file's space entry declares rather than replacing it, under the same rule: every edge must touch the
+space.
 
 Running the CLI from inside such a space keeps working. A space file declares `packages`, which is also what a monorepo
 of standalone packages declares, so resolution asks the root above whether it claims the folder: if it does, the file

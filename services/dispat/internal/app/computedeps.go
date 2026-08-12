@@ -59,15 +59,45 @@ func (s suggestion) render() string {
 	}
 }
 
-// pkgListEdit accumulates everything one package-level dependency list is
-// about to have done to it. The three happen together — an edge removed, one
-// corrected, one added — and the list is rewritten whole, so they are
-// collected per source rather than applied one at a time.
-type pkgListEdit struct {
+// listEdit accumulates everything one dependency list is about to have done
+// to it. The three happen together — an edge removed, one corrected, one
+// added — and the list is rewritten whole, so they are collected per source
+// rather than applied one at a time. One type serves every kind of list: the
+// root object, a space's object and a package's own providers differ in how
+// they are written, not in what happens to them.
+type listEdit struct {
 	src    config.DepSource
 	remove map[int]bool   // entry positions to drop
 	kind   map[int]string // entry positions whose kind changes, and to what
 	add    []config.DependencyConfig
+}
+
+// listEdits collects the edits by the list they are aimed at.
+type listEdits struct {
+	byKey map[string]*listEdit
+}
+
+func newListEdits() *listEdits { return &listEdits{byKey: map[string]*listEdit{}} }
+
+// at returns the edit accumulating for src's list, creating it on first
+// touch.
+func (l *listEdits) at(src config.DepSource) *listEdit {
+	k := listKey(src)
+	if l.byKey[k] == nil {
+		l.byKey[k] = &listEdit{src: src, remove: map[int]bool{}, kind: map[int]string{}}
+	}
+	return l.byKey[k]
+}
+
+// keys returns the touched lists in a fixed order, so one config always
+// produces one sequence of edits.
+func (l *listEdits) keys() []string {
+	out := make([]string, 0, len(l.byKey))
+	for k := range l.byKey {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // detectedEdge is one manifest-derived consumer -> provider relation with the
@@ -274,11 +304,11 @@ func containsKind(kinds []model.DepKind, k model.DepKind) bool {
 // collectDepEdits turns the accepted edge suggestions into edits, each aimed
 // at the file that holds the declaration: an edge is removed and corrected
 // exactly where it was written, whether that is the root config's
-// `dependencies` object, a packages entry of the root config, or a package
-// folder's own config file.
+// `dependencies` object, a space's object, a packages entry, or a config file
+// inside a space or package folder.
 //
-// An addition goes where its consumer already declares its providers, and to
-// the root object when it declares none. A config that keeps a package's
+// An addition goes where its consumer already declares its own providers, and
+// to the root object when it declares none. A config that keeps a package's
 // dependencies next to the rest of that package's configuration stays that
 // way, instead of growing a second home for edges the next compute finds.
 //
@@ -289,15 +319,16 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 	if len(apply) == 0 {
 		return
 	}
-	sourceKey := func(s config.DepSource) string {
-		return s.File + "\x00" + strings.Join(s.KeyPath, "\x00")
-	}
-	// Where each consumer already declares, so an addition can join it. The
-	// first package-level source wins: a consumer declaring in two layers has
-	// them merged anyway, and the nearest is not more correct than the first.
+	// Where each consumer already declares its own providers, so an addition
+	// can join it. The first package-level source wins: a consumer declaring
+	// in two layers has them merged anyway, and the nearest is not more
+	// correct than the first. An object keyed by consumer is not a candidate:
+	// the root object is where an addition goes when nothing else claims it,
+	// and a space's object may only hold edges that touch the space, which is
+	// not something compute is in a position to decide.
 	pkgListOf := make(map[string]config.DepSource)
 	for _, d := range declared {
-		if d.Source.IsRootList() {
+		if d.Source.IsObjectList() {
 			continue
 		}
 		if _, seen := pkgListOf[d.Consumer]; !seen {
@@ -305,101 +336,98 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 		}
 	}
 
-	rootRemove := make(map[int]bool)
-	rootKind := make(map[int]string)
-	var adds []config.DependencyConfig
-	pkgEdit := make(map[string]*pkgListEdit)
-	markPkg := func(s config.DepSource) *pkgListEdit {
-		k := sourceKey(s)
-		if pkgEdit[k] == nil {
-			pkgEdit[k] = &pkgListEdit{src: s, remove: map[int]bool{}, kind: map[int]string{}}
-		}
-		return pkgEdit[k]
-	}
+	lists := newListEdits()
+	rootSrc := config.DepSource{KeyPath: []string{"dependencies"}}
 	for _, s := range apply {
 		switch s.action {
 		case actionAdd:
 			if src, ok := pkgListOf[s.entry.Consumer]; ok {
-				markPkg(src).add = append(markPkg(src).add, s.entry)
+				lists.at(src).add = append(lists.at(src).add, s.entry)
 				continue
 			}
-			adds = append(adds, s.entry)
+			lists.at(rootSrc).add = append(lists.at(rootSrc).add, s.entry)
 		case actionRemove:
-			if s.src.IsRootList() {
-				rootRemove[s.src.Index] = true
-			} else {
-				markPkg(s.src).remove[s.src.Index] = true
-			}
+			lists.at(s.src).remove[s.src.Index] = true
 		case actionKind:
-			// A package list carries a kind as readily as the root object
-			// does, so a correction is applied where the edge already lives.
-			if s.src.IsRootList() {
-				rootKind[s.src.Index] = s.entry.Kind
-			} else {
-				markPkg(s.src).kind[s.src.Index] = s.entry.Kind
-			}
+			// Every list carries a kind as readily as the root object does,
+			// so a correction is applied where the edge already lives.
+			lists.at(s.src).kind[s.src.Index] = s.entry.Kind
 		}
 	}
 
-	if len(adds) > 0 || len(rootRemove) > 0 || len(rootKind) > 0 {
-		// Declared entries keep their file order; accepted additions append.
-		next := make(config.Dependencies, 0, len(a.cfg.Dependencies)+len(adds))
-		for i, d := range a.cfg.Dependencies {
-			if rootRemove[i] {
-				continue
-			}
-			if k, ok := rootKind[i]; ok {
-				d.Kind = k
-			}
-			next = append(next, d)
-		}
-		next = append(next, adds...)
-		// The value is written as config.Dependencies, not as a bare slice, so
-		// the file gets the canonical consumer-keyed object whichever form it
-		// was authored in.
-		edits.add(cfgPath, config.Edit{KeyPath: []string{"dependencies"}, Value: next})
-		a.cfg.Dependencies = next
-	}
-
-	// Package-level lists, in deterministic order. The surviving entries are
-	// reconstructed from the merged declaration list, which holds every entry
-	// of every source in order.
-	sources := make([]string, 0, len(pkgEdit))
-	for k := range pkgEdit {
-		sources = append(sources, k)
-	}
-	sort.Strings(sources)
-	for _, k := range sources {
-		edit := pkgEdit[k]
+	// One edit per touched list, in deterministic order. The surviving entries
+	// are reconstructed from the merged declaration list, which holds every
+	// entry of every source in order.
+	for _, k := range lists.keys() {
+		edit := lists.byKey[k]
 		src := edit.src
-		remaining := config.ProviderList{}
+		var kept []config.DependencyConfig
 		for _, d := range declared {
-			if sourceKey(d.Source) != k || edit.remove[d.Source.Index] {
+			if listKey(d.Source) != k || edit.remove[d.Source.Index] {
 				continue
 			}
 			entry := d.DependencyConfig
 			if kind, ok := edit.kind[d.Source.Index]; ok {
 				entry.Kind = kind
 			}
-			// The consumer is the package the list belongs to, so writing it
-			// into the entry would spell out what the key already says.
-			entry.Consumer = ""
-			remaining = append(remaining, entry)
+			kept = append(kept, entry)
 		}
-		for _, add := range edit.add {
-			add.Consumer = ""
-			remaining = append(remaining, add)
-		}
+		kept = append(kept, edit.add...)
+
 		target := src.File
 		if target == "" {
 			target = cfgPath
 		}
-		edits.add(target, config.Edit{KeyPath: src.KeyPath, Value: remaining})
-		if src.File == "" && len(src.KeyPath) == 3 {
-			if e, ok := a.cfg.Packages[src.KeyPath[1]]; ok {
-				e.Dependencies = remaining
-				a.cfg.Packages[src.KeyPath[1]] = e
-			}
+		edits.add(target, config.Edit{KeyPath: src.KeyPath, Value: listValue(src, kept)})
+		a.alignDeclaredList(src, kept)
+	}
+}
+
+// listKey identifies the one list a source names, so every edit aimed at it
+// lands in the same bucket. A space's object and a package folder file's list
+// share the key path ["dependencies"] in a file of their own, which is why
+// the space is part of the identity.
+func listKey(s config.DepSource) string {
+	return s.Space + "\x00" + s.File + "\x00" + strings.Join(s.KeyPath, "\x00")
+}
+
+// listValue renders the surviving entries in the shape the list is written
+// in: an object keyed by consumer for the root and space objects, a plain
+// array of providers for a package's own list, whose key already says which
+// package the entries belong to.
+func listValue(src config.DepSource, kept []config.DependencyConfig) any {
+	if src.IsObjectList() {
+		return config.Dependencies(kept)
+	}
+	list := config.ProviderList{}
+	for _, e := range kept {
+		e.Consumer = ""
+		list = append(list, e)
+	}
+	return list
+}
+
+// alignDeclaredList keeps the in-memory config in step with what an edit
+// says. The process exits right after, but a future long-lived caller must
+// not see a config that disagrees with disk. Only the root file's own lists
+// are reachable from here; a list in a folder's config file was never loaded
+// into this struct.
+func (a *App) alignDeclaredList(src config.DepSource, kept []config.DependencyConfig) {
+	if src.File != "" {
+		return
+	}
+	switch {
+	case src.IsRootList():
+		a.cfg.Dependencies = config.Dependencies(kept)
+	case src.Space != "":
+		if s, ok := a.cfg.Spaces[src.Space]; ok {
+			s.Dependencies = config.Dependencies(kept)
+			a.cfg.Spaces[src.Space] = s
+		}
+	case len(src.KeyPath) == 3 && src.KeyPath[0] == "packages":
+		if e, ok := a.cfg.Packages[src.KeyPath[1]]; ok {
+			e.Dependencies = listValue(src, kept).(config.ProviderList)
+			a.cfg.Packages[src.KeyPath[1]] = e
 		}
 	}
 }

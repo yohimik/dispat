@@ -679,3 +679,47 @@ func TestComputeWritesOneBackupPerFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, config.Providers("core"), reloaded.Packages["web"].Dependencies)
 }
+
+// TestComputeWriteEditsASpaceObjectInPlace: a space's own `dependencies` is
+// an object keyed by consumer, like the root file's, so an edge declared
+// there is corrected and removed there — written back as an object, not as
+// the bare provider array a package's own list is written as.
+//
+// Additions still go to the root object. Which edges a space may hold is a
+// rule about the graph (an edge has to touch the space), and compute is not
+// in a position to decide that for the author.
+func TestComputeWriteEditsASpaceObjectInPlace(t *testing.T) {
+	cfg := libsConfig()
+	libs := cfg.Spaces["libs"]
+	libs.Dependencies = config.Dependencies{
+		{Consumer: "web", Provider: "core", Kind: "devDependencies"}, // manifests say otherwise
+		{Consumer: "web", Provider: "ghost"},                         // no such package
+	}
+	cfg.Spaces["libs"] = libs
+	root, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())
+	seedManifest(t, root, "packages/core/package.json", `{"name": "@acme/core"}`)
+	seedManifest(t, root, "packages/utils/package.json", `{"name": "@acme/utils"}`)
+	seedManifest(t, root, "packages/web/package.json",
+		`{"name": "@acme/web", "dependencies": {"@acme/core": "^1", "@acme/utils": "^1"}}`)
+
+	var out bytes.Buffer
+	_, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Write: true, Out: &out})
+	require.NoError(t, err)
+
+	written, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), `"consumer"`, "the consumer stays the key")
+	assert.NotContains(t, string(written), "ghost", "the edge naming no package is gone")
+
+	reloaded, err := config.Load(cfgPath, nil)
+	require.NoError(t, err)
+	assert.Equal(t, config.Dependencies{{Consumer: "web", Provider: "core"}},
+		reloaded.Spaces["libs"].Dependencies, "kind corrected in place, dead edge dropped")
+	assert.Equal(t, config.Dependencies{{Consumer: "web", Provider: "utils"}},
+		reloaded.Dependencies, "the addition went to the root object")
+
+	out.Reset()
+	open, err := a.Compute(context.Background(), cfgPath, ComputeOptions{Out: &out})
+	require.NoError(t, err)
+	assert.Zero(t, open, "converged")
+}

@@ -875,13 +875,8 @@ func validate(c *File) error {
 	if err := rootScope(c).check(runHookRefs(c), ""); err != nil {
 		return err
 	}
-	for i, d := range c.Dependencies {
-		if d.Consumer == "" || d.Provider == "" {
-			return fmt.Errorf("dependencies[%d]: consumer and provider are required", i)
-		}
-		if d.Consumer == d.Provider {
-			return fmt.Errorf("dependencies[%d]: package %q cannot depend on itself", i, d.Consumer)
-		}
+	if err := validateObjectDeps("dependencies", c.Dependencies); err != nil {
+		return err
 	}
 	if len(c.Shell) > 0 && c.Shell[0] == "" {
 		return errors.New("shell: first element (the interpreter) must not be empty")
@@ -1133,10 +1128,17 @@ type DepSource struct {
 	Index int
 	// Key and KeyIndex are where the entry sits in a consumer-keyed
 	// `dependencies` object: the consumer, and the position within that one
-	// consumer's providers. Only a label uses them, and only the root object
+	// consumer's providers. Only a label uses them, and only an object list
 	// has them — a package's own list is a plain array of provider names.
 	Key      string
 	KeyIndex int
+	// Space names the space whose `dependencies` object holds the entry, and
+	// is empty for every other source. It carries the membership rule the
+	// space level is held to (see checkSpaceDependencies) and is what tells a
+	// space folder file's object apart from a package folder file's list:
+	// both are ["dependencies"] in a file of their own, and only the object
+	// may be written back keyed by consumer.
+	Space string
 }
 
 // Label renders the source for error messages and suggestion listings:
@@ -1173,7 +1175,15 @@ func (s DepSource) Label() string {
 // IsRootList reports whether the source is the root config's own top-level
 // `dependencies` list — the one place compute appends additions to.
 func (s DepSource) IsRootList() bool {
-	return s.File == "" && len(s.KeyPath) == 1
+	return s.File == "" && len(s.KeyPath) == 1 && s.Space == ""
+}
+
+// IsObjectList reports whether the source is a `dependencies` object keyed by
+// consumer — the root file's own, or a space's — rather than a package's
+// plain list of provider names. It is what an editor has to know to write the
+// key back in the shape the loader reads.
+func (s DepSource) IsObjectList() bool {
+	return s.IsRootList() || s.Space != ""
 }
 
 // DeclaredDependency is one dependency edge with its declaration source. A
@@ -1281,21 +1291,9 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	var onlyChecks []onlyCheck
 
 	// The merged declaration list: the root config's own `dependencies`
-	// first, in file order, then each package's lists in discovery order.
-	declared := make([]DeclaredDependency, 0, len(c.Dependencies))
-	perConsumer := make(map[string]int, len(c.Dependencies))
-	for i, d := range c.Dependencies {
-		declared = append(declared, DeclaredDependency{
-			DependencyConfig: d,
-			Source: DepSource{
-				KeyPath:  []string{"dependencies"},
-				Index:    i,
-				Key:      d.Consumer,
-				KeyIndex: perConsumer[d.Consumer],
-			},
-		})
-		perConsumer[d.Consumer]++
-	}
+	// first, in file order, then each space's object and each package's list
+	// in discovery order.
+	declared := collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}})
 
 	var pkgs []*model.Package
 	owner := make(map[string]string)      // package name -> space name
@@ -1330,6 +1328,22 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 			}
 		}
 		spaceConfigs[sn] = sc
+		// The space's own edges, before its packages': the root file's space
+		// entry first, then the space folder's file, each labelled with where
+		// it was written. Whether they touch this space needs the packages of
+		// every space and is checked once discovery is done.
+		if err := validateObjectDeps(fmt.Sprintf("spaces[%q]: dependencies", sn), c.Spaces[sn].Dependencies); err != nil {
+			return nil, nil, fmt.Errorf("config: %w", err)
+		}
+		declared = collectObjectDeps(declared, c.Spaces[sn].Dependencies,
+			DepSource{Space: sn, KeyPath: []string{"spaces", sn, "dependencies"}})
+		if len(spaceFile.Dependencies) > 0 {
+			if err := validateObjectDeps(spaceSrc+": dependencies", spaceFile.Dependencies); err != nil {
+				return nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
+			}
+			declared = collectObjectDeps(declared, spaceFile.Dependencies,
+				DepSource{Space: sn, File: spaceSrc, KeyPath: []string{"dependencies"}})
+		}
 		baseScope := packageScope(c, sc)
 		base, err := buildSpace(c, baseScope, fmt.Sprintf("space %q", sn), sn, sc)
 		if err != nil {
@@ -1589,10 +1603,49 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 	if err := canonicaliseEndpoints(declared, pkgs); err != nil {
 		return nil, nil, err
 	}
+	if err := checkSpaceDependencies(declared, owner); err != nil {
+		return nil, nil, err
+	}
 	if err := checkAliasTagsAreWriteOnly(pkgs); err != nil {
 		return nil, nil, err
 	}
 	return pkgs, declared, nil
+}
+
+// checkSpaceDependencies holds every edge declared in a space's own
+// `dependencies` object to the rule that makes the level worth having: the
+// edge has to touch the space it is written in, as consumer or as provider.
+//
+// A space is where the edges of its own packages belong, and a cross-space
+// edge belongs to whichever of the two spaces its author thinks of as owning
+// it. An edge between two packages of neither space is the one thing the
+// level cannot express, because a reader looking for it would have no space
+// to look in. That one goes in the root object.
+//
+// An edge naming no package at all is left alone: Discover reports the
+// unknown endpoint in its own words, and `dispat compute` loads configs
+// Discover would refuse precisely so it can suggest removing them. owner maps
+// a package name to its space, empty for a standalone package.
+func checkSpaceDependencies(declared []DeclaredDependency, owner map[string]string) error {
+	for _, d := range declared {
+		space := d.Source.Space
+		if space == "" {
+			continue
+		}
+		consumerSpace, consumerKnown := owner[d.Consumer]
+		providerSpace, providerKnown := owner[d.Provider]
+		if !consumerKnown && !providerKnown {
+			continue
+		}
+		if consumerSpace == space || providerSpace == space {
+			continue
+		}
+		return fmt.Errorf(
+			"config: %s: neither consumer %q nor provider %q is a package of space %q; "+
+				"an edge a space does not touch belongs in the root dependencies object",
+			d.Source.Label(), d.Consumer, d.Provider, space)
+	}
+	return nil
 }
 
 // aliasSamples are the versions every alias is rendered for when checking what

@@ -171,6 +171,45 @@ func collectPackageDeps(declared []DeclaredDependency, pkg string, src DepSource
 	return declared, nil
 }
 
+// validateObjectDeps checks what one `dependencies` object can get wrong on
+// its own, before any package is known: an edge missing an endpoint, and a
+// package depending on itself. label names the object, since the root file
+// and every space each have one.
+func validateObjectDeps(label string, deps Dependencies) error {
+	for i, d := range deps {
+		if d.Consumer == "" || d.Provider == "" {
+			return fmt.Errorf("%s[%d]: consumer and provider are required", label, i)
+		}
+		if strings.EqualFold(d.Consumer, d.Provider) {
+			return fmt.Errorf("%s[%d]: package %q cannot depend on itself", label, i, d.Consumer)
+		}
+	}
+	return nil
+}
+
+// collectObjectDeps appends one `dependencies` object's edges to the declared
+// list. The consumer travels with each edge already — the object is keyed by
+// it — so all this adds is where the entry sits, which is what `dispat
+// compute` needs to edit the exact key that holds it.
+//
+// src carries the File, KeyPath and Space of the object; Index, Key and
+// KeyIndex are filled in per entry. One helper serves the root object and
+// every space's, so the two can never disagree about how an entry is located.
+func collectObjectDeps(declared []DeclaredDependency, deps Dependencies, src DepSource) []DeclaredDependency {
+	if len(declared) == 0 {
+		declared = make([]DeclaredDependency, 0, len(deps))
+	}
+	perConsumer := make(map[string]int, len(deps))
+	for i, d := range deps {
+		src.Index = i
+		src.Key = d.Consumer
+		src.KeyIndex = perConsumer[d.Consumer]
+		declared = append(declared, DeclaredDependency{DependencyConfig: d, Source: src})
+		perConsumer[d.Consumer]++
+	}
+	return declared
+}
+
 // packageEntryKeys are the keys a `packages` entry may never hold. A package
 // entry configures one package, so it holds neither spaces nor packages of
 // its own; UnmarshalExact would refuse them as unknown keys, and naming them

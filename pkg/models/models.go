@@ -524,6 +524,21 @@ type SpaceConfig struct {
 	// Custom is an optional free-form object dispat itself never reads; see
 	// File.Custom.
 	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
+	// Dependencies declares consumer -> provider edges next to the space they
+	// describe, in the same object-keyed-by-consumer shape as File.Dependencies
+	// — a space is not a package, so there is no consumer to leave implicit.
+	//
+	// Every edge declared here must touch the space: its consumer or its
+	// provider is one of the space's own packages. An edge between two other
+	// spaces' packages says nothing about this one, and a config where it
+	// could be written anywhere is a config where nobody knows where to look.
+	// A cross-space edge — one endpoint here, the other elsewhere — is exactly
+	// what this level is for, and belongs to whichever of the two spaces the
+	// author thinks of as owning it.
+	//
+	// Like every other declaration, these merge into one list rather than
+	// overriding anything.
+	Dependencies Dependencies `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	// Packages holds per-package configuration for this space's packages
 	// alone, keyed by folder name — the same entry shape as the file's own
 	// `packages` map, scoped to the space that owns the folders. Every key
@@ -558,13 +573,17 @@ type SpaceFile struct {
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
-	AliasTags    []AliasTagConfig         `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
-	Versioning   string                   `mapstructure:"versioning" json:"versioning,omitempty"`
-	VersionGroup string                   `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
-	Scripts      map[string]string        `mapstructure:"scripts" json:"scripts,omitempty"`
-	AutoVersion  *AutoVersionConfig       `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
-	Env          map[string]string        `mapstructure:"env" json:"env,omitempty"`
-	Custom       map[string]any           `mapstructure:"custom" json:"custom,omitempty"`
+	AliasTags    []AliasTagConfig   `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	Versioning   string             `mapstructure:"versioning" json:"versioning,omitempty"`
+	VersionGroup string             `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
+	Scripts      map[string]string  `mapstructure:"scripts" json:"scripts,omitempty"`
+	AutoVersion  *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	Env          map[string]string  `mapstructure:"env" json:"env,omitempty"`
+	Custom       map[string]any     `mapstructure:"custom" json:"custom,omitempty"`
+	// Dependencies are this space's own edges; see SpaceConfig.Dependencies.
+	// They add to what the root file's space entry declares rather than
+	// replacing it, because dependency declarations never override.
+	Dependencies Dependencies             `mapstructure:"dependencies" json:"dependencies,omitempty"`
 	Packages     map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
 }
 

@@ -2159,3 +2159,136 @@ func TestAliasTagsTwoPackagesOneName(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "both write the alias tag")
 }
+
+// TestSpaceDependencies: a space declares the edges between its own packages
+// next to the space, in the same object keyed by consumer the root file uses,
+// and every declaration merges into one list.
+func TestSpaceDependencies(t *testing.T) {
+	cfg := validConfig()
+	cfg.Dependencies = nil
+	withLibs(&cfg, func(sc *SpaceConfig) {
+		sc.Dependencies = Dependencies{
+			{Consumer: "web", Provider: "core"},
+			{Consumer: "web", Provider: "utils", Keep: true},
+		}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils",
+		"packages/libs/web", "packages/apps/app")
+
+	_, declared, err := discoverAll(t, root)
+	require.NoError(t, err)
+	require.Len(t, declared, 2)
+	assert.Equal(t, DependencyConfig{Consumer: "web", Provider: "core"}, declared[0].DependencyConfig)
+	assert.True(t, declared[1].Keep, "an entry object carries keep here as anywhere else")
+	assert.Equal(t, `spaces["libs"]: dependencies["web"][0]`, declared[0].Source.Label(),
+		"the source names the space that holds the object")
+	assert.Equal(t, "libs", declared[0].Source.Space)
+	assert.True(t, declared[0].Source.IsObjectList(), "written back keyed by consumer")
+	assert.False(t, declared[0].Source.IsRootList(), "but it is not the root object")
+
+	cfgLoaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, deps, err := Discover(cfgLoaded, root)
+	require.NoError(t, err)
+	assert.Len(t, deps, 2, "the edges reach the graph")
+}
+
+// TestSpaceDependenciesMustTouchTheSpace: the rule the level rests on. An
+// edge with one endpoint in the space is fine wherever the other one lives;
+// an edge with neither belongs in the root object, and saying so is more
+// useful than silently accepting a declaration nobody would think to look for
+// here.
+func TestSpaceDependenciesMustTouchTheSpace(t *testing.T) {
+	dirs := []string{"packages/libs/core", "packages/libs/utils", "packages/apps/app", "packages/apps/web"}
+
+	t.Run("consumer in the space", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Dependencies = nil
+		withLibs(&cfg, func(sc *SpaceConfig) {
+			sc.Dependencies = Dependencies{{Consumer: "core", Provider: "app"}}
+		})
+		_, _, err := discoverAll(t, writeModelRepo(t, cfg, dirs...))
+		require.NoError(t, err, "a cross-space edge may be declared by either end")
+	})
+
+	t.Run("provider in the space", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Dependencies = nil
+		withLibs(&cfg, func(sc *SpaceConfig) {
+			sc.Dependencies = Dependencies{{Consumer: "app", Provider: "core"}}
+		})
+		_, _, err := discoverAll(t, writeModelRepo(t, cfg, dirs...))
+		require.NoError(t, err)
+	})
+
+	t.Run("neither endpoint in the space", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Dependencies = nil
+		withLibs(&cfg, func(sc *SpaceConfig) {
+			sc.Dependencies = Dependencies{{Consumer: "web", Provider: "app"}}
+		})
+		_, _, err := discoverAll(t, writeModelRepo(t, cfg, dirs...))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(),
+			`spaces["libs"]: dependencies["web"][0]: neither consumer "web" nor provider "app" is a package of space "libs"`)
+		assert.Contains(t, err.Error(), "belongs in the root dependencies object",
+			"the refusal says where the edge does belong")
+	})
+
+	t.Run("an unknown endpoint is left to Discover", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Dependencies = nil
+		withLibs(&cfg, func(sc *SpaceConfig) {
+			sc.Dependencies = Dependencies{{Consumer: "ghost", Provider: "phantom"}}
+		})
+		root := writeModelRepo(t, cfg, dirs...)
+		_, _, err := discoverAll(t, root)
+		require.NoError(t, err, "compute loads configs Discover refuses, to suggest removing them")
+
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = Discover(loaded, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unknown consumer package "ghost"`)
+	})
+}
+
+// TestSpaceDependenciesSelfEdge: a package depending on itself is refused in
+// a space's object with the space named, like it is everywhere else.
+func TestSpaceDependenciesSelfEdge(t *testing.T) {
+	cfg := validConfig()
+	cfg.Dependencies = nil
+	withLibs(&cfg, func(sc *SpaceConfig) {
+		sc.Dependencies = Dependencies{{Consumer: "core", Provider: "core"}}
+	})
+	_, _, err := discoverAll(t, writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `spaces["libs"]: dependencies[0]: package "core" cannot depend on itself`)
+}
+
+// TestSpaceFileDependencies: the space folder's own config file declares
+// edges too, and they add to what the root file's space entry says rather
+// than replacing it — dependency declarations never override.
+func TestSpaceFileDependencies(t *testing.T) {
+	cfg := validConfig()
+	cfg.Dependencies = nil
+	withLibs(&cfg, func(sc *SpaceConfig) {
+		sc.Dependencies = Dependencies{{Consumer: "web", Provider: "core"}}
+	})
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils",
+		"packages/libs/web", "packages/apps/app")
+	writeFolderConfig(t, root, "packages/libs", "dispat.json", map[string]any{
+		"dependencies": map[string]any{"web": []any{"utils"}},
+	})
+
+	_, declared, err := discoverAll(t, root)
+	require.NoError(t, err)
+	require.Len(t, declared, 2, "both objects count")
+	assert.Equal(t, "core", declared[0].Provider, "the root file's space entry comes first")
+	assert.Equal(t, "utils", declared[1].Provider)
+	assert.Equal(t, "libs", declared[1].Source.Space)
+	assert.Contains(t, declared[1].Source.Label(), "dispat.json: dependencies[\"web\"][0]",
+		"the source names the file that holds the object")
+	assert.True(t, declared[1].Source.IsObjectList(),
+		"a space file's object is written back keyed by consumer, unlike a package file's list")
+}
