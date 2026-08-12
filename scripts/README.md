@@ -1,7 +1,7 @@
 # Release scripts
 
 The shell scripts dispat runs as this repository's own release stages. They are referenced by name from `scripts` in
-[`dispat.json`](../dispat.json) and run **inside the releasing package's folder**, which is why each one reaches the
+[`dispat.yaml`](../dispat.yaml) and run **inside the releasing package's folder**, which is why each one reaches the
 repository root as `../../`. Everything they need arrives in the environment: the
 [`DISPAT_*` variables](https://yohimik.github.io/dispat/environment) a stage is given, plus whatever CI exports.
 
@@ -13,7 +13,7 @@ repository root as `../../`. Everything they need arrives in the environment: th
 
 The `docker` space has no scripts here at all. Its stages are
 [`docker compose build` and `docker compose push`](../docker/README.md) with a `docker login` one-liner, written
-straight into [`dispat.json`](../dispat.json), because that is all they are: the image's version lives in its
+straight into [`dispat.yaml`](../dispat.yaml), because that is all they are: the image's version lives in its
 `docker-compose.yml`, which dispat reads and rewrites as a manifest, and its moving tags live in a per-channel file the
 stage selects with `-f $DISPAT_CHANNEL.yml`. Nothing is left for a shell to decide.
 

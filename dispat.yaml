@@ -1,0 +1,132 @@
+scripts:
+  go-mod-tidy: go mod tidy
+  pnpm-install: pnpm install
+  changelog: dispat changelog
+  commit: dispat commit --tag --push
+  github: dispat github
+  build-dispat: sh ../../scripts/build-dispat.sh
+  build-docs: pnpm install --frozen-lockfile && pnpm run build
+  cut-docs-version: sh ../../scripts/cut-docs-version.sh
+  deploy-docs: sh ../../scripts/deploy-docs.sh
+  docker-login: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+  build-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml build
+  push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
+
+versionGroups:
+  manifests:
+    versioning: fixed
+  cli:
+    versioning: fixedMajorMinor
+
+spaces:
+  pkg:
+    tagFormat: pkg/{name}/v{version}
+    path: pkg
+    isBuildWaitingPublish: true
+    autoVersion:
+      enabled: true
+      syncLock: [go-mod-tidy]
+    flow:
+      beforePublish: [changelog, commit]
+    packages:
+      manifest:
+        versionGroup: manifests
+      scanner:
+        versionGroup: manifests
+        dependencies: [manifest]
+      writer:
+        versionGroup: manifests
+        dependencies: [manifest]
+      models:
+        versionGroup: cli
+        dependencies: [ccme]
+
+  packages:
+    path: packages
+    autoVersion:
+      enabled: true
+      syncLock: [pnpm-install]
+    packages:
+      docs:
+        tagFormat: packages/docs/v{version}
+        versionGroup: cli
+        dependencies:
+          - provider: dispat
+            keep: true
+        flow:
+          version: cut-docs-version
+          build: build-docs
+          publish: deploy-docs
+          beforePublish: [changelog, commit]
+
+  services:
+    tagFormat: services/{name}/v{version}
+    path: services
+    isBuildWaitingPublish: true
+    autoVersion:
+      enabled: true
+      syncLock: [go-mod-tidy]
+    flow:
+      beforePublish: [changelog, commit, github]
+    packages:
+      dispat:
+        versionGroup: cli
+        dependencies: [ccme, manifest, models, scanner, writer]
+        aliasTags:
+          - format: v{version}
+          - format: v{major}
+            moving: true
+            channels: [stable]
+        flow:
+          build: build-dispat
+
+  docker:
+    tagFormat: docker/{name}/v{version}
+    path: docker
+    autoVersion:
+      enabled: true
+    flow:
+      login: docker-login
+      build: build-image
+      publish: push-image
+      beforePublish: [changelog, commit]
+    packages:
+      dispat-ubuntu:
+        versionGroup: cli
+        dependencies:
+          - provider: dispat
+            keep: true
+        manifestNames: [docker.io/yohimik/dispat-ubuntu]
+      dispat-debian:
+        versionGroup: cli
+        dependencies:
+          - provider: dispat
+            keep: true
+        manifestNames: [docker.io/yohimik/dispat-debian]
+      dispat-alpine:
+        versionGroup: cli
+        dependencies:
+          - provider: dispat
+            keep: true
+        manifestNames: [docker.io/yohimik/dispat-alpine]
+      dispat-dind:
+        versionGroup: cli
+        dependencies:
+          - provider: dispat
+            keep: true
+        manifestNames: [docker.io/yohimik/dispat-dind]
+
+concurrency: [0, 1]
+
+changelog:
+  enabled: true
+
+commit:
+  enabled: true
+  push: true
+  name: github-actions[bot]
+  email: github-actions[bot]@users.noreply.github.com
+
+github:
+  enabled: true
+  allPackages: true

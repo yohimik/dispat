@@ -2,7 +2,7 @@
 
 The documentation site: <https://yohimik.github.io/dispat/>. A Docusaurus project, and the one Node package in this
 repository — everything else here is Go. It is also a released package (`docs` in
-[`dispat.json`](../../dispat.json)), so the site ships the same way the binaries do: through a dispat run.
+[`dispat.yaml`](../../dispat.yaml)), so the site ships the same way the binaries do: through a dispat run.
 
 The pages live in [`docs/`](./docs) as plain markdown with **no frontmatter**, so they read correctly on GitHub too.
 Ordering and labels therefore live in [`sidebars.ts`](./sidebars.ts), and each page's `<meta name="description">` falls

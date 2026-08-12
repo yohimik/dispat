@@ -83,7 +83,7 @@ jobs:
         # The checkout dir leads PATH so the nested `dispat changelog` /
         # `dispat commit` invocations inside the stage scripts resolve the
         # same freshly built binary this release ships. The committer
-        # identity comes from commit.name/commit.email in dispat.json.
+        # identity comes from commit.name/commit.email in dispat.yaml.
         run: |
           export PATH="$PWD:$PATH"
           ./dispat --log-format json

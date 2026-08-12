@@ -9,7 +9,7 @@ on:
       - docker/**
       - install.sh
       - scripts/float-tags.sh
-      - dispat.json
+      - dispat.yaml
       - .github/workflows/images.yml
 
 permissions:
