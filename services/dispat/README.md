@@ -71,7 +71,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Polyglot by construction: any language, any registry, any tooling.** Stages are shell commands fed a rich
   [`DISPAT_*` environment](https://yohimik.github.io/dispat/reference/environment), scripts pass values to each other through `$DISPAT_OUTPUT`, and
   release state lives in git tags, so every build system, CI and caching layer works from inside a script unchanged.
-  dispat reads and rewrites twelve manifest families: npm, Go, Cargo, Python, Composer, Maven, the .NET
+  dispat reads and rewrites fifteen manifest families: npm, Go, Cargo, Python, Composer, Maven, the .NET
   project/nuspec family, Dart, Ruby, Dockerfiles and compose files, and the mobile platforms (Info.plist,
   project.pbxproj, Podfile and .podspec on iOS; AndroidManifest.xml, Gradle build scripts and version catalogs on
   Android). `dispat compute` derives the dependency graph, and the baseline each package starts from, out of the

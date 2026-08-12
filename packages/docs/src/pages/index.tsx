@@ -39,7 +39,7 @@ const FEATURES: Feature[] = [
     body: (
       <>
         Packages are folders and stages are plain shell commands, so any language, build system, registry, CI or cache
-        plugs in with zero integration work. dispat reads and rewrites twelve manifest families: npm, Go, Cargo,
+        plugs in with zero integration work. dispat reads and rewrites fifteen manifest families: npm, Go, Cargo,
         Python, Composer, Maven, .NET, Dart, Ruby, Docker, and iOS and Android. Each{' '}
         <Link to="/concepts">space</Link> states through <code>isBuildWaitingPublish</code> whether a consumer&apos;s
         build needs its provider merely <em>built</em> (node) or already <em>published</em> (docker), so a four-level

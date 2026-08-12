@@ -57,7 +57,7 @@ $ dispat
 ```
 
 - **Polyglot by construction.** Packages are just folders and stages are plain shell commands, so any language, build
-  system, registry, CI or cache plugs in with zero integration work. dispat reads and rewrites twelve manifest
+  system, registry, CI or cache plugs in with zero integration work. dispat reads and rewrites fifteen manifest
   families on top of that: npm, Go, Cargo, Python, Composer, Maven, the .NET project/nuspec family, Dart, Ruby,
   Dockerfiles and compose files, and the mobile platforms (Info.plist, project.pbxproj, Podfile and .podspec on iOS;
   AndroidManifest.xml, Gradle build scripts and version catalogs on Android). Whatever a stage uses (BuildKit layers,
