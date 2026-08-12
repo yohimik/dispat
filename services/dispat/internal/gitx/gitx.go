@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/pkg/ccme"
 )
 
@@ -418,6 +420,14 @@ type CLI struct {
 	Name  string
 	Email string
 
+	// Log traces every git invocation. The zero value discards, so a CLI
+	// built without one still works; commands that have a logger set it, and
+	// what comes out is the single most useful thing in a bug report about a
+	// release: which git commands ran, in which order, and which one failed.
+	// Trace rather than debug, because one run makes hundreds of these and
+	// debug is where the release's own story is told.
+	Log zerolog.Logger
+
 	// The ancestry DAG, loaded lazily by the first IsAncestor and shared by
 	// every later one. Loaded once per CLI value: a release run creates
 	// commits after planning, but planning's ancestry questions are all
@@ -444,10 +454,19 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	// git spawns no long-lived children here, but if one ever held the output
 	// pipes past its exit, WaitDelay turns a silent hang into an error.
 	cmd.WaitDelay = 10 * time.Second
-	if err := cmd.Run(); err != nil {
+	started := time.Now()
+	err := cmd.Run()
+	// Logged whether it worked or not, and with the same fields either way, so
+	// a trace can be read as the sequence of git calls the run actually made.
+	// The arguments are the command's own, never the repository path or the
+	// identity flags, which are the same on every line and say nothing.
+	ev := c.Log.Trace().Strs("args", args).Dur("took", time.Since(started))
+	if err != nil {
+		ev.Err(err).Str("stderr", strings.TrimSpace(stderr.String())).Msg("git failed")
 		return "", fmt.Errorf("git %s: %w: %s",
 			strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
+	ev.Int("outBytes", out.Len()).Msg("git")
 	return out.String(), nil
 }
 

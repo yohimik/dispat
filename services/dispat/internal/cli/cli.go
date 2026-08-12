@@ -379,6 +379,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		cfg.Parser.Quiet = *o.quietParser
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, stdout)
+	// The first thing worth knowing about any run is which file it read and
+	// which folder it decided was the monorepo root, because both are inferred
+	// when no flag names them and "it ran with the wrong config" looks exactly
+	// like a configuration bug until you can see them. Logged here rather than
+	// at resolution because this is the first moment the configured level is
+	// known.
+	log.Debug().
+		Str("config", cfgPath).
+		Str("root", resolvedRoot).
+		Bool("explicitConfig", fs.Changed("config")).
+		Int("spaces", len(cfg.Spaces)).
+		Int("packages", len(cfg.Packages)).
+		Msg("configuration loaded")
 	if cmd == cmdExec {
 		// Straight after the config, which is all it needs: no plan unless
 		// --env asked for one, and no update check, for the same reason as if.

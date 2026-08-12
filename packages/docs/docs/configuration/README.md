@@ -47,7 +47,7 @@ Related references: the [CLI](../cli/README.md), the [commit message format](../
 | `versionGroups`    | map name → `{versioning}`                  | no       | Shared-versioning groups that cut across spaces, joined by name via a space's or package's `versionGroup` key. A group may share the whole version, the major and minor, or the major alone; see [Versioning groups](./spaces.md#versioning-groups) and the [Shared versions](../releasing/versioning.md) walkthrough. |
 | `dependencies`     | map consumer → providers                   | no       | Consumer → provider relations between packages; see [`dependencies`](./dependencies.md) below. Spaces and packages declare their own too.                                                                                |
 | `concurrency`      | int or `[int, int]`                        | no       | One value for both stages, or `[build, publish]`. `0` (or omitted) means number of CPUs. More than two values is an error.                                             |
-| `logLevel`         | string                                     | no       | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`.                                                                                              |
+| `logLevel`         | string                                     | no       | Minimum log level: `trace`, `debug`, `info` (default), `warn` or `error`. See [what each level carries](#log-levels).                                                  |
 | `logFormat`        | string                                     | no       | Logger output: `pretty` (default; colored console output) or `json` (machine-readable lines for CI ingestion).                                                         |
 | `tagFormat`        | string                                     | no       | Release tag template, overridable per space and per package. Default `{name}@{version}`; see [`tagFormat`](./versions.md#tagformat).                                   |
 | `aliasTags`        | array of objects                           | no       | Extra tags each release is written under, beside the one `tagFormat` produces. Overridable per space and per package; see [Alias tags](./alias-tags.md).               |
@@ -71,6 +71,22 @@ Related references: the [CLI](../cli/README.md), the [commit message format](../
 | `parser`           | object                                     | no       | Commit-message parser options; see [`parser`](./parser.md#parser). Everything unset keeps the specification default.                                                   |
 | `updateCheck`      | bool                                       | no       | Whether dispat looks for a newer release of itself and mentions one on a command's way out. Default `true`; never runs under `logFormat: json`, and never delays a command. See [Updating dispat](../reference/self-update.md#being-told-there-is-an-update).  |
 | `unsafeDisableLock`| bool                                       | no       | Release without the [release lock](../releasing/release-lock.md), the tag a release pushes to the remote so that two runs at once are refused rather than raced. Default `false`. For repositories with no remote to coordinate through; `DISPAT_UNSAFE_DISABLE_LOCK=true` says the same for one invocation.  |
+
+### Log levels
+
+The levels are not just volume knobs. Each one answers a different question, so the right level to reach for depends
+on what you are trying to find out:
+
+| Level | What it carries |
+|-------|-----------------|
+| `error` | Something failed. A package that could not be built or published, a record that could not be written after a release was already out. |
+| `warn` | Something happened that you would want to know about but that did not stop the run: every `W` diagnostic lives here, from a package riding a versioning group to a range caught up to a provider released in an earlier run. |
+| `info` | The default, and the story of the run: what the plan is, which package published at which tag, what the run ended with. Enough to read a CI log and know what shipped. |
+| `debug` | How the run decided. Which config file was read and which folder it treated as the monorepo root, which folder each package is scoped to, and the plan's phases as it works through them. This is the level for "why did it pick that". |
+| `trace` | Every operation, one line each. Every git command with its arguments and how long it took, every dependency edge, and every package's baseline, window size, computed bump and next version, releasing or not. Verbose on purpose: this is the level to attach to a bug report. |
+
+`--log-level` overrides the configured value for one invocation, so you can re-run a puzzling release with
+`--log-level trace` without editing anything.
 
 ## Where a setting can live
 

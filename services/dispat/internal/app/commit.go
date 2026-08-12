@@ -71,7 +71,7 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 
 	// A fresh CLI, not a struct copy: the CLI carries lazily built cache
 	// state (a sync.Once) that must not be copied.
-	git := &gitx.CLI{Dir: a.git.Dir, Name: a.git.Name, Email: a.git.Email}
+	git := &gitx.CLI{Dir: a.git.Dir, Name: a.git.Name, Email: a.git.Email, Log: a.git.Log}
 	if opts.Name != "" {
 		git.Name = opts.Name
 	}

@@ -37,7 +37,7 @@ type App struct {
 
 // New assembles an App for one monorepo.
 func New(root string, cfg *config.File, log zerolog.Logger) *App {
-	git := &gitx.CLI{Dir: root}
+	git := &gitx.CLI{Dir: root, Log: log}
 	if cfg.Commit != nil {
 		// The configured identity covers every commit and annotated tag the
 		// run creates, so CI needs no `git config` step.
@@ -149,6 +149,7 @@ func (a *App) planOptions() (plan.Options, error) {
 		Root:             a.root,
 		NonPackageScopes: a.cfg.NonPackageScopes,
 		ParserConfig:     a.cfg.ResolvedParser,
+		Log:              a.log,
 	}, nil
 }
 
