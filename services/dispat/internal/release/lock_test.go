@@ -86,6 +86,24 @@ func TestLockRejectedPushLeavesNothingBehind(t *testing.T) {
 		"releasing an unacquired lock must touch nothing")
 }
 
+// TestLockRejectedPushWithAStuckLocalTag: the double failure. The push was
+// refused and the local tag will not go either, which changes nothing the
+// caller can act on — the answer is still "somebody else is releasing" — so
+// the tidying failure is noted quietly and the rejection is what comes back.
+func TestLockRejectedPushWithAStuckLocalTag(t *testing.T) {
+	var out bytes.Buffer
+	git := &fakeLockGit{failures: map[string]error{
+		"push":   errors.New("already exists"),
+		"delete": errors.New("still there"),
+	}}
+	lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&out).Level(zerolog.DebugLevel)}
+
+	err := lock.Acquire(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists", "the rejection is still what is reported")
+	assert.Contains(t, out.String(), `"level":"debug"`, "the tidying failure is a footnote, not the news")
+}
+
 // TestLockCreateFailureIsReported: nothing was pushed, so there is nothing to
 // clean up and nothing to release.
 func TestLockCreateFailureIsReported(t *testing.T) {
