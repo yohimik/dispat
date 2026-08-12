@@ -131,11 +131,69 @@ is precisely the case these flags produce, so a derived link skips npm
 manifests and says so. An explicit `--link name=path` still writes one, because
 there you have said which dependency you mean.
 
+In Go, a link is also written for a provider you reach only through another
+module. Go honours `replace` in the **main module's** `go.mod` and ignores it
+everywhere else, so redirecting `core` at its folder is not enough if your local
+`core` needs a newer `leaf` than the version your own `go.mod` records: `leaf`
+has to be redirected from your `go.mod` too. `go.mod` marks it `// indirect`,
+which `--set-local` leaves alone — that version belongs to the toolchain — but
+`--link-local` writes the redirect and `--unlink-local` takes it away again.
+
+`--link-local` needs no repair afterwards. With the links in place your
+workspace builds, vets and tests exactly as before, and no `go.sum` changes.
+
+:::warning
+Do not run `go work sync` while the links are in place. A local folder needs no
+checksum, so the sync helpfully deletes the `go.sum` entries for every linked
+module — and they are needed again the moment you unlink. The result is a
+module that builds fine for you and fails for everyone else with
+`missing go.sum entry`. The same goes for `go mod tidy`, which is why the
+[`syncLock`](../configuration/spaces.md#autoversion) scripts are worth turning
+off with `--sync-lock=false` around a link.
+:::
+
 :::warning
 A local link must not be published. Nothing in a release removes one, so a link
 left in place ships a manifest your consumers cannot resolve. Run
 `dispat autowriter --unlink-local` before you release.
 :::
+
+### Building a release against the working tree
+
+The case the two warnings above are really about. A release stage that compiles
+a binary resolves its workspace dependencies from the versions `go.mod` pins,
+and those are only as fresh as the last release that bumped them: a provider
+changed without a version bump ships as its published copy, while every test in
+CI ran your working tree. Bracketing the build closes the gap. dispat's own
+[`build-dispat.sh`](https://github.com/yohimik/dispat/blob/main/scripts/build-dispat.sh)
+is exactly this:
+
+```sh
+link() { dispat autowriter --package dispat --since all --sync-lock=false "$@"; }
+trap 'link --unlink-local >/dev/null 2>&1 || true' EXIT INT TERM
+link --link-local
+
+# ... cross-compile, with GOWORK=off ...
+
+link --unlink-local
+grep -q '^replace github.com/acme' go.mod && exit 1
+```
+
+Three things make it safe. The `trap` closes the bracket on the paths that never
+reach the end, including an interrupt. The explicit `--unlink-local` closes it
+before the stage reports success, which is still ahead of anything being
+published. And the `grep` fails the build if a directive survived anyway, which
+costs a release run and saves a bad tag.
+
+`--package` narrows which manifest is written, not which providers are linked:
+every provider that package declares is redirected inside its own `go.mod`
+either way. Writing the *providers'* manifests as well achieves nothing for the
+build, for the main-module reason above.
+
+`GOWORK=off` is worth keeping alongside the links. Only the intra-repo modules
+are redirected, so the build still proves the module's own `go.mod` and `go.sum`
+cover its third-party requirements — which a workspace build would satisfy from
+some other module's requires.
 
 ### When to use this instead of autoversion
 

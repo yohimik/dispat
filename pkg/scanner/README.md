@@ -23,7 +23,7 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | File                | Ecosystem | Reads                                                                                             |
 |---------------------|-----------|---------------------------------------------------------------------------------------------------|
 | `package.json`      | npm       | name, version, the four dependency fields, `file:`/`link:` local paths                            |
-| `go.mod`            | gomod     | module path, direct requires, relative `replace` targets as local paths                           |
+| `go.mod`            | gomod     | module path, direct requires, indirect ones apart in `Indirect`, relative `replace` targets as local paths |
 | `Cargo.toml`        | cargo     | name, version, `[dependencies]`/`[dev-dependencies]`/`[build-dependencies]`, renames, `path` keys |
 | `pyproject.toml`    | python    | PEP 621, PEP 735 groups, Poetry, PEP 503 name normalisation                                       |
 | `requirements*.txt` | python    | PEP 508 lines, continuations, editable local installs (`-e ./pkg`)                                |
@@ -74,6 +74,13 @@ package.
 `Manifest.BuildNumber` carries the monotonic counter these formats keep beside their marketing version
 (`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`). It is not a semantic version, and no writer
 rewrites it.
+
+`Manifest.Indirect` carries the requirements a manifest records as transitive bookkeeping rather than as its own
+declarations. Only `go.mod` has the distinction and only its parser fills the field; a requirement in `Deps` never
+appears there as well, and an indirect require that a relative `replace` pins locally counts as a declaration and stays
+in `Deps`. Keeping the two apart is what lets a caller reconcile ranges without touching a version the toolchain owns,
+while still being able to redirect a module reached only transitively — which a Go build needs, since it honours
+`replace` in the main module alone.
 
 Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, stated names first, then root
 manifests, then nested ones, with a same-rank collision reported instead of guessed), `ResolveLocalDir` (declared local

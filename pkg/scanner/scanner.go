@@ -113,6 +113,18 @@ type Manifest struct {
 	// Deps are the manifest's declared dependencies, sorted by field then
 	// name for deterministic output.
 	Deps []DeclaredDep
+	// Indirect are the requirements the manifest records as transitive
+	// bookkeeping rather than as its own declarations, sorted the same way.
+	// Only go.mod has the distinction, and only its parser fills this; every
+	// other format leaves it nil.
+	//
+	// They are kept apart from Deps because they are not something the package
+	// asked for, so reconciling their ranges would rewrite a number the
+	// toolchain owns. What they are good for is redirection: only a main
+	// module's replace directives govern a Go build, so a module reached
+	// transitively still has to be pointed at a local folder from here. A
+	// requirement listed in Deps never appears here as well.
+	Indirect []DeclaredDep
 	// Root reports that the manifest sits directly in the scanned folder
 	// rather than in a sub-folder.
 	Root bool

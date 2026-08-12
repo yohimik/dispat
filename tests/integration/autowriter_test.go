@@ -387,6 +387,60 @@ func TestAutoWriterLinkLocalRoundTrips(t *testing.T) {
 		"unlinking restores the file byte for byte")
 }
 
+// TestAutoWriterLinkLocalReachesAnIndirectRequire: a Go build honours replace
+// directives from the main module alone, so a provider the consumer reaches
+// only through another module still has to be redirected from the consumer's
+// own go.mod. go.mod records that provider as an indirect require, which is
+// not a declaration and so is no business of --set-local; the link half has to
+// see it anyway, or the linked provider compiles against the published copy of
+// it and the whole redirect achieves nothing.
+func TestAutoWriterLinkLocalReachesAnIndirectRequire(t *testing.T) {
+	r := arGoRepo(t)
+	// leaf is reached only through core: api requires it, marked indirect, and
+	// imports nothing from it itself.
+	r.SeedPackage("packages", "leaf")
+	r.WriteFile("packages/leaf/go.mod", "module github.com/acme/leaf\n\ngo 1.26\n")
+	r.WriteFile("packages/core/go.mod",
+		"module github.com/acme/core\n\ngo 1.26\n\nrequire github.com/acme/leaf v0.0.0\n")
+	r.WriteFile("packages/api/go.mod",
+		"module github.com/acme/api\n\ngo 1.26\n\nrequire github.com/acme/core v0.0.0\n\n"+
+			"require github.com/acme/leaf v0.0.0 // indirect\n")
+	r.Commit("feat(core,api,leaf): a provider reached only transitively")
+	before := arRead(t, r, "packages", "api", "go.mod")
+
+	res := r.Command("autowriter", "--since", "all", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	api := arRead(t, r, "packages", "api", "go.mod")
+	assert.Contains(t, api, "replace github.com/acme/core => ../core",
+		"the direct provider is linked as before")
+	assert.Contains(t, api, "replace github.com/acme/leaf => ../leaf",
+		"and so is the one only the indirect require names")
+
+	res = r.Command("autowriter", "--since", "all", "--unlink-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, before, arRead(t, r, "packages", "api", "go.mod"),
+		"both come away again, byte for byte")
+}
+
+// TestAutoWriterSetLocalLeavesAnIndirectRequireAlone: the range half stops at
+// the declarations. An indirect require is a version the toolchain wrote, and
+// reconciling it here would be dispat editing bookkeeping it does not own.
+func TestAutoWriterSetLocalLeavesAnIndirectRequireAlone(t *testing.T) {
+	r := arGoRepo(t)
+	r.SeedPackage("packages", "leaf")
+	r.WriteFile("packages/leaf/go.mod", "module github.com/acme/leaf\n\ngo 1.26\n")
+	r.WriteFile("packages/api/go.mod",
+		"module github.com/acme/api\n\ngo 1.26\n\nrequire github.com/acme/core v0.0.0\n\n"+
+			"require github.com/acme/leaf v0.0.0 // indirect\n")
+	r.Commit("feat(api,leaf): an indirect require")
+
+	res := r.Command("autowriter", "--since", "all", "--set-local", "--range", "{version}")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	api := arRead(t, r, "packages", "api", "go.mod")
+	assert.Contains(t, api, "github.com/acme/leaf v0.0.0 // indirect",
+		"the indirect require keeps the version the toolchain gave it")
+}
+
 // TestAutoWriterLinkLocalSkipsNpm: npm refuses an override for a directly
 // declared dependency unless the specs match exactly, and a derived link is
 // aimed at exactly those. Writing one would hand the user a package.json that

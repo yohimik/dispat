@@ -42,6 +42,23 @@ jobs:
           go vet -C services/dispat ./...
           go vet -C tests/integration ./...
 
+      # The two ways a `--link-local` bracket leaks. build-dispat.sh checks
+      # both before its stage reports success; this is the same pair asked of
+      # every commit, because either one only fails for whoever consumes the
+      # published module, long after the tag exists.
+      - name: No local link survived a build
+        run: |
+          if git grep -n '^replace github.com/yohimik/dispat' -- '*/go.mod'; then
+            echo "an intra-repo link is committed; --link-local must not outlive a build"
+            exit 1
+          fi
+          for m in ccme manifest models scanner writer; do
+            if ! grep -q "^github.com/yohimik/dispat/pkg/$m " services/dispat/go.sum; then
+              echo "services/dispat/go.sum lost its entry for pkg/$m; a go work sync pruned it"
+              exit 1
+            fi
+          done
+
   unit:
     name: Unit tests
     runs-on: ubuntu-latest

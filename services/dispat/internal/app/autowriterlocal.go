@@ -34,6 +34,13 @@ func (w *writerWork) derives() bool { return w.setLocal || w.linkLocal || w.unli
 // no match globs, no `only` list, because `dispat autowriter` reads no config
 // and inventing a second policy here is how two commands start disagreeing.
 // What narrows the set is --only-updated, and nothing else.
+//
+// Both halves walk the manifest's declarations. The link half also walks what
+// the manifest records as transitive bookkeeping, because a Go build honours
+// replace directives from the main module alone: a provider reached only
+// through another module still has to be redirected from here, or the linked
+// provider compiles against the published copy of it. The range half stays out
+// of there — a version the toolchain wrote is not a declaration to reconcile.
 func (w *writerWork) derive(rel *plan.Release, m scanner.Manifest) ([]writer.Edit, []writer.Link) {
 	var (
 		edits []writer.Edit
@@ -43,14 +50,8 @@ func (w *writerWork) derive(rel *plan.Release, m scanner.Manifest) ([]writer.Edi
 	linkable := (w.linkLocal || w.unlinkLocal) && w.linkableFormat(rel.Pkg.Name, m)
 
 	for _, d := range m.Deps {
-		provider := w.providerOf(rel, m, d)
+		provider := w.provider(rel, m, d)
 		if provider == "" {
-			continue // not a package of this workspace
-		}
-		if w.onlyUpdated && !updating(w.pl, provider) {
-			w.app.log.Debug().Str("package", rel.Pkg.Name).Str("manifest", m.Path).
-				Str("dependency", d.Name).Str("provider", provider).
-				Msg("derived edit dropped: this run does not update the provider")
 			continue
 		}
 		if w.setLocal && !w.explicitSet[d.Name] {
@@ -62,7 +63,36 @@ func (w *writerWork) derive(rel *plan.Release, m scanner.Manifest) ([]writer.Edi
 			links = append(links, w.derivedLink(rel, m, d, provider))
 		}
 	}
+	if !linkable {
+		return edits, links
+	}
+	for _, d := range m.Indirect {
+		provider := w.provider(rel, m, d)
+		if provider == "" {
+			continue
+		}
+		if !w.explicitLink[d.Name] {
+			links = append(links, w.derivedLink(rel, m, d, provider))
+		}
+	}
 	return edits, links
+}
+
+// provider is providerOf plus the --only-updated gate, which every derived
+// edit and link is filtered by on the same terms. It answers "" for a
+// declaration this invocation has nothing to say about.
+func (w *writerWork) provider(rel *plan.Release, m scanner.Manifest, d scanner.DeclaredDep) string {
+	provider := w.providerOf(rel, m, d)
+	if provider == "" {
+		return "" // not a package of this workspace
+	}
+	if w.onlyUpdated && !updating(w.pl, provider) {
+		w.app.log.Debug().Str("package", rel.Pkg.Name).Str("manifest", m.Path).
+			Str("dependency", d.Name).Str("provider", provider).
+			Msg("derived edit dropped: this run does not update the provider")
+		return ""
+	}
+	return provider
 }
 
 // providerOf resolves one declaration onto the workspace package it names, the

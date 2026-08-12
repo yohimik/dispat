@@ -7,7 +7,7 @@ repository root as `../../`. Everything they need arrives in the environment: th
 
 | Script                                       | Package  | `flow` slot | Reads                                                        | Produces                                                                                     |
 |----------------------------------------------|----------|-------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| [`build-dispat.sh`](./build-dispat.sh)       | `dispat` | `build`     | `DISPAT_NEW_VERSION`, `DISPAT_OUTPUT`                        | One cross-compiled binary per platform in `services/dispat/dist`, exported as GitHub release assets through `DISPAT_EXPORT_GITHUB`. |
+| [`build-dispat.sh`](./build-dispat.sh)       | `dispat` | `build`     | `DISPAT_NEW_VERSION`, `DISPAT_OUTPUT`                        | One cross-compiled binary per platform in `services/dispat/dist`, exported as GitHub release assets through `DISPAT_EXPORT_GITHUB`. Brackets the build with `dispat autowriter --link-local` / `--unlink-local`, so the binaries carry this checkout rather than the `pkg/*` versions `go.mod` pins. |
 | [`cut-docs-version.sh`](./cut-docs-version.sh) | `docs`   | `version`   | `DISPAT_IS_PRERELEASE`, `DISPAT_VERSION`, `DISPAT_NEW_VERSION` | A `packages/docs/versioned_docs/version-<minor>` snapshot, once per stable minor. Nothing on a prerelease. |
 | [`deploy-docs.sh`](./deploy-docs.sh)         | `docs`   | `publish`   | `CI`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `DISPAT_NEW_VERSION` | A force-pushed orphan `gh-pages` branch carrying `packages/docs/build`.                       |
 
@@ -20,6 +20,19 @@ stage selects with `-f $DISPAT_CHANNEL.yml`. Nothing is left for a shell to deci
 Each script's own header comment carries the reasoning behind it: why the binaries are built with `GOWORK=off`, why a
 docs snapshot is cut per minor rather than per patch, and why the deploy pushes a branch instead of using
 `actions/deploy-pages`.
+
+`build-dispat.sh` is the one with a bracket around it. The versions `services/dispat/go.mod` pins are only as fresh as
+the last release that bumped them, so a `pkg/*` module changed without a version bump would ship as its published copy
+while every test in CI ran the working tree. `dispat autowriter --link-local` points each one at its folder for the
+duration of the build and `--unlink-local` takes the redirects back out — before `beforePublish` runs
+`dispat commit --tag --push`, which stages `services/dispat` and would otherwise publish a `go.mod` no consumer can
+resolve. A `trap` covers the failure and interrupt paths, and the script re-checks both `go.mod` and `go.sum` at the end
+rather than trusting either. `GOWORK=off` stays: only the intra-repo modules are redirected, so the build still proves
+this module's own `go.mod` and `go.sum` cover its third-party requirements.
+
+Do not run `go work sync` or `go mod tidy` while the links are in place — both delete the `go.sum` entries a local
+redirect makes redundant, and unlinking needs them back. That is what `--sync-lock=false` is for, and the `lint` job in
+[tests.yml](../.github/workflows/tests.yml) checks for both leaks on every commit.
 
 ## Running one by hand
 

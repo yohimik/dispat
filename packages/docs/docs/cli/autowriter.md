@@ -19,6 +19,12 @@ manifest declares that names another package in the workspace has its range reco
 directly declared dependency, and a local link must be removed with `--unlink-local` before publishing because no
 release removes one.
 
+In `go.mod` the link half also reaches an `// indirect` require, because Go honours `replace` in the main module's
+`go.mod` alone: a provider reached only through another module still has to be redirected from the consumer's own
+file. `--set-local` leaves those requires as it found them — the version there belongs to the toolchain. Do not run
+`go work sync` or `go mod tidy` while links are in place: both drop the `go.sum` entries a local redirect makes
+redundant, and unlinking needs them back.
+
 A covered package with no manifest anything can write is a no-op; a selection in which none of them has one is an
 error. The whole command, with worked examples, is in
 [Editing across the monorepo](../editing/autowriter.md).
@@ -39,7 +45,7 @@ Beside the [global flags](./README.md#global-flags):
 | `--set`               |             | `writer` and `autowriter`: set one dependency's declared range, `[kind:]name=range`; repeatable. For `autowriter`, `{version}` in the range is the planned version of the package the edit names. |
 | `--link`              |             | `writer` and `autowriter`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
 | `--set-local`         |             | `autowriter` only: set every declared workspace dependency to its provider's version, spelled by `--range`. |
-| `--link-local`        |             | `autowriter` only: point every declared workspace dependency at its folder. `--unlink-local` removes those redirects again; the two cannot be combined. |
+| `--link-local`        |             | `autowriter` only: point every declared workspace dependency at its folder, plus, in `go.mod`, the ones only an `// indirect` require names. `--unlink-local` removes those redirects again; the two cannot be combined. |
 | `--manifests`         | from config | `autoversion` and `autowriter`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
 | `--only-updated`      |             | `autoversion` and `autowriter`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
 | `--sync-lock`         | `true`      | `autoversion` and `autowriter`: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them. |

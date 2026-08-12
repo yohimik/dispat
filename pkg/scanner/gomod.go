@@ -8,10 +8,11 @@ import (
 
 // parseGoMod reads a go.mod: the module path is the package's name (go.mod
 // declares no own version), direct require directives are its dependencies.
-// Indirect requires are transitive bookkeeping, not declarations, and are
-// skipped, unless a replace directive points the module at a relative
-// filesystem path, which is a deliberate local wiring worth an edge either
-// way. Go declares exact versions, so Range is the required version verbatim.
+// Indirect requires are transitive bookkeeping, not declarations, so they are
+// reported apart in Manifest.Indirect — unless a replace directive points the
+// module at a relative filesystem path, which is a deliberate local wiring and
+// belongs with the declarations. Go declares exact versions, so Range is the
+// required version verbatim.
 func parseGoMod(rel string, data []byte) (Manifest, error) {
 	// Parse first for full fidelity (ParseLax drops replace directives, and
 	// relative replaces are this parser's strongest workspace signal). When
@@ -45,17 +46,20 @@ func parseGoMod(rel string, data []byte) (Manifest, error) {
 	}
 	for _, req := range f.Require {
 		path := req.Mod.Path
-		if req.Indirect && local[path] == "" {
-			continue
-		}
-		m.Deps = append(m.Deps, DeclaredDep{
+		dep := DeclaredDep{
 			Name:      path,
 			Range:     req.Mod.Version,
 			Kind:      KindDependencies,
 			LocalPath: local[path],
-		})
+		}
+		if req.Indirect && dep.LocalPath == "" {
+			m.Indirect = append(m.Indirect, dep)
+			continue
+		}
+		m.Deps = append(m.Deps, dep)
 	}
 	sortDeps(m.Deps)
+	sortDeps(m.Indirect)
 	return m, nil
 }
 

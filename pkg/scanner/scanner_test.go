@@ -96,6 +96,11 @@ replace github.com/rs/zerolog => github.com/fork/zerolog v1.0.0
 			{Name: "github.com/acme/mono/pkg/hidden", Range: "v0.1.0", Kind: KindDependencies, LocalPath: "../../pkg/hidden"},
 			{Name: "github.com/rs/zerolog", Range: "v1.35.1", Kind: KindDependencies},
 		},
+		// An indirect require with nothing wiring it locally is bookkeeping,
+		// reported apart from the declarations and never in both.
+		Indirect: []DeclaredDep{
+			{Name: "golang.org/x/sys", Range: "v0.47.0", Kind: KindDependencies},
+		},
 	}
 	if !reflect.DeepEqual(m, want) {
 		t.Errorf("manifest mismatch:\n got %+v\nwant %+v", m, want)
