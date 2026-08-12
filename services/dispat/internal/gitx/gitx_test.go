@@ -566,6 +566,75 @@ func TestPushNeverForcesTheBranch(t *testing.T) {
 	assert.Equal(t, theirs, strings.TrimSpace(string(out)), "their commit is still the remote tip")
 }
 
+// TestPushTagCarriesOneRefAndNeverForces: the ref-level primitive the release
+// lock is built on. It delivers exactly one tag, moves no branch, and a name
+// the remote already holds at another object is a rejection — which is what
+// makes it usable as a mutex.
+func TestPushTagCarriesOneRefAndNeverForces(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+
+	require.NoError(t, cli.CreateTag(ctx, "dispat-release-lock", "held by us", ""))
+	require.NoError(t, cli.PushTag(ctx, "origin", "dispat-release-lock"))
+
+	assert.Contains(t, runGit(t, bare, "tag"), "dispat-release-lock")
+	assert.Empty(t, strings.TrimSpace(runGit(t, bare, "branch", "--list")),
+		"the tag travels on its own: no branch moves with it")
+
+	// Somebody else's tag of the same name, at a different object. A second
+	// push of ours has to bounce off it rather than replace it.
+	theirs := t.TempDir()
+	runGit(t, theirs, "clone", "-q", bare, ".")
+	runGit(t, theirs, "config", "user.email", "other@example.com")
+	runGit(t, theirs, "config", "user.name", "Other")
+	runGit(t, theirs, "tag", "-f", "-a", "dispat-release-lock", "-m", "held by them",
+		"dispat-release-lock^{commit}") // the clone has the tag but no branch: name the commit
+
+	runGit(t, theirs, "push", "--force", "origin", "refs/tags/dispat-release-lock")
+	held := remoteTagObject(t, bare, "dispat-release-lock")
+
+	require.NoError(t, cli.CreateTagForce(ctx, "dispat-release-lock", "held by us, again", ""))
+	require.Error(t, cli.PushTag(ctx, "origin", "dispat-release-lock"),
+		"a name the remote already holds is a rejection, not an overwrite")
+	assert.Equal(t, held, remoteTagObject(t, bare, "dispat-release-lock"),
+		"their tag is untouched")
+}
+
+// TestDeleteTagLocalAndRemote: both halves of the cleanup, including what
+// happens when there is nothing to delete — the case a caller tidying up after
+// a half-finished run walks into.
+func TestDeleteTagLocalAndRemote(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+
+	require.NoError(t, cli.CreateTag(ctx, "dispat-release-lock", "held", ""))
+	require.NoError(t, cli.PushTag(ctx, "origin", "dispat-release-lock"))
+
+	require.NoError(t, cli.DeleteRemoteTag(ctx, "origin", "dispat-release-lock"))
+	assert.NotContains(t, runGit(t, bare, "tag"), "dispat-release-lock")
+	require.NoError(t, cli.DeleteTag(ctx, "dispat-release-lock"))
+	assert.NotContains(t, runGit(t, root, "tag"), "dispat-release-lock")
+
+	// The two halves differ on the second attempt, and callers cleaning up
+	// after a half-finished run depend on knowing which: the local delete
+	// fails on a tag that is not there, the remote one does not.
+	assert.Error(t, cli.DeleteTag(ctx, "dispat-release-lock"))
+	assert.NoError(t, cli.DeleteRemoteTag(ctx, "origin", "dispat-release-lock"),
+		"a fully qualified refspec makes the remote delete idempotent")
+}
+
+// remoteTagObject reads the tag object a name resolves to in a bare
+// repository, which is what distinguishes two annotated tags of the same name
+// at the same commit.
+func remoteTagObject(t *testing.T, bare, tag string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", bare, "rev-parse", "refs/tags/"+tag).Output()
+	require.NoError(t, err)
+	return strings.TrimSpace(string(out))
+}
+
 // remoteTagCommit reads what a tag points at in a bare repository.
 func remoteTagCommit(t *testing.T, bare, tag string) string {
 	t.Helper()

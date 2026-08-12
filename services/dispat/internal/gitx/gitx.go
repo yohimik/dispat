@@ -698,6 +698,35 @@ func (c *CLI) createTag(ctx context.Context, name, message, target string, force
 	return err
 }
 
+// DeleteTag removes a tag from this repository. It fails when the tag is not
+// there, which callers that are cleaning up are free to ignore.
+func (c *CLI) DeleteTag(ctx context.Context, name string) error {
+	_, err := c.run(ctx, "tag", "-d", name)
+	return err
+}
+
+// PushTag pushes one tag ref and nothing else: no branch moves, and no other
+// tag travels with it.
+//
+// **It never forces, and must never learn to.** Unlike Push, whose tags are
+// this run's own records and may be rewritten under commit.force, the caller
+// here is contending for a name someone else may already hold. A rejection is
+// the answer the caller asked for, not an obstacle to push through: forcing it
+// would overwrite the holder's ref and tell both of them they won.
+func (c *CLI) PushTag(ctx context.Context, remote, name string) error {
+	_, err := c.run(ctx, "push", remote, "refs/tags/"+name)
+	return err
+}
+
+// DeleteRemoteTag removes a tag from the remote. Deleting a ref the remote
+// does not have succeeds: git warns and reports the deletion, because the
+// fully qualified refspec leaves nothing to guess about. Cleanup is therefore
+// idempotent on this side, unlike DeleteTag.
+func (c *CLI) DeleteRemoteTag(ctx context.Context, remote, name string) error {
+	_, err := c.run(ctx, "push", remote, "--delete", "refs/tags/"+name)
+	return err
+}
+
 // pathspec renders dir relative to the repo root, avoiding symlinked-tempdir
 // mismatches in git pathspecs.
 func (c *CLI) pathspec(dir string) string {
