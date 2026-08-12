@@ -147,16 +147,16 @@ func TestAutoReplaceOnlyUpdatedCanEmptyTheInvocation(t *testing.T) {
 	assert.True(t, work.nothingToWrite(), "a run updating none of the named packages writes nothing")
 }
 
-// TestAutoReplaceRemovesAndAddsARedirect: --replace is the writer's, applied
+// TestAutoReplaceRemovesAndAddsARedirect: --link is the writer's, applied
 // across the selection.
 func TestAutoReplaceRedirects(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{
-		Replacements: []writer.Replacement{{Name: "@acme/core", Path: "../core"}}}))
+		Links: []writer.Link{{Name: "@acme/core", Path: "../core"}}}))
 	assert.Contains(t, arRead(t, a, "packages/web/package.json"), "file:../core")
 
 	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{
-		Replacements: []writer.Replacement{{Name: "@acme/core"}}}))
+		Links: []writer.Link{{Name: "@acme/core"}}}))
 	assert.NotContains(t, arRead(t, a, "packages/web/package.json"), "file:../core",
 		"an empty path removes the redirect again")
 }

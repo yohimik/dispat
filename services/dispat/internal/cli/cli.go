@@ -321,7 +321,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		if app.WriteManifests(ctx, app.WriteOptions{
 			Root: *o.root, Paths: inv.paths, Version: write.version,
-			Edits: write.edits, Replacements: write.replacements, Strict: *o.strict,
+			Edits: write.edits, Links: write.links, Strict: *o.strict,
 			JSON: *o.logFormat == "json", Out: stdout, Log: log,
 		}) != nil {
 			return 1
@@ -426,7 +426,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case cmdAutoreplace:
 		if a.AutoReplace(ctx, app.AutoReplaceOptions{
 			Window: window, OnError: *o.onError, Version: write.version,
-			Edits: write.edits, Replacements: write.replacements, Manifests: *o.avManifests,
+			Edits: write.edits, Links: write.links, Manifests: *o.avManifests,
 			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, Strict: *o.strict,
 			JSON: cfg.LogFormat == "json", Out: stdout,
 		}) != nil {
@@ -598,30 +598,30 @@ func manifestScopeHint(allowNone bool) string {
 	return "unknown --manifests value (want root or all)"
 }
 
-// writeRequest is the parsed --set-version/--set/--replace trio, which
+// writeRequest is the parsed --set-version/--set/--link trio, which
 // `dispat writer` and `dispat autoreplace` spell the same way and differ over
 // only in which files they apply it to.
 type writeRequest struct {
-	version      string
-	edits        []writer.Edit
-	replacements []writer.Replacement
+	version string
+	edits   []writer.Edit
+	links   []writer.Link
 }
 
 // parseWriteRequest reads the three flags into one request. A malformed spec
 // and a request with nothing in it are both usage mistakes, reported here and
 // answered with false.
 func parseWriteRequest(cmd string, o *options, usage func(string), log zerolog.Logger) (writeRequest, bool) {
-	edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrReplace)
+	edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrLink)
 	if err != nil {
 		log.Error().Err(err).Msg("invalid edit")
 		return writeRequest{}, false
 	}
 	if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
-		log.Error().Msgf("%s needs something to write: --set-version, --set or --replace", cmd)
+		log.Error().Msgf("%s needs something to write: --set-version, --set or --link", cmd)
 		usage(cmd)
 		return writeRequest{}, false
 	}
-	return writeRequest{version: *o.wrSetVersion, edits: edits, replacements: repls}, true
+	return writeRequest{version: *o.wrSetVersion, edits: edits, links: repls}, true
 }
 
 // orDefault answers with fallback when the flag was left at its empty

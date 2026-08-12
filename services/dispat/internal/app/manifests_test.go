@@ -381,7 +381,7 @@ func TestWriteManifestsReportsSkippedWithoutFailing(t *testing.T) {
 }
 
 func TestWriteManifestsAddsAndRemovesARedirect(t *testing.T) {
-	// The Replace half: point a dependency at a local folder, then let the
+	// The Relink half: point a dependency at a local folder, then let the
 	// declaration resolve normally again, which is what a release has to do
 	// before publishing.
 	root := manifestRepo(t, map[string]string{
@@ -392,24 +392,24 @@ func TestWriteManifestsAddsAndRemovesARedirect(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, WriteManifests(context.Background(), WriteOptions{
 		Root: root, Paths: []string{"go.mod"},
-		Replacements: []writer.Replacement{{Name: "github.com/acme/core", Path: "../core"}},
-		Out:          &out, Log: zerolog.Nop(),
+		Links: []writer.Link{{Name: "github.com/acme/core", Path: "../core"}},
+		Out:   &out, Log: zerolog.Nop(),
 	}))
 	data, err := os.ReadFile(gomod)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "replace github.com/acme/core => ../core")
-	assert.Contains(t, out.String(), "applied  replace  github.com/acme/core  ../core")
+	assert.Contains(t, out.String(), "applied  link     github.com/acme/core  ../core")
 
 	out.Reset()
 	require.NoError(t, WriteManifests(context.Background(), WriteOptions{
 		Root: root, Paths: []string{"go.mod"},
-		Replacements: []writer.Replacement{{Name: "github.com/acme/core"}},
-		Out:          &out, Log: zerolog.Nop(),
+		Links: []writer.Link{{Name: "github.com/acme/core"}},
+		Out:   &out, Log: zerolog.Nop(),
 	}))
 	data, err = os.ReadFile(gomod)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "replace", "an empty path removes the directive")
-	assert.Contains(t, out.String(), "applied  replace  github.com/acme/core  (removed)")
+	assert.Contains(t, out.String(), "applied  link     github.com/acme/core  (removed)")
 }
 
 func TestWriteManifestsAttemptsEveryManifestAndJoinsTheFailures(t *testing.T) {
@@ -440,8 +440,8 @@ func TestWriteManifestsAttemptsEveryManifestAndJoinsTheFailures(t *testing.T) {
 	out.Reset()
 	err = WriteManifests(context.Background(), WriteOptions{
 		Root: root, Paths: []string{"notes.txt"},
-		Replacements: []writer.Replacement{{Name: "acme", Path: "../acme"}},
-		Out:          &out, Log: zerolog.New(&logs),
+		Links: []writer.Link{{Name: "acme", Path: "../acme"}},
+		Out:   &out, Log: zerolog.New(&logs),
 	})
 	assert.ErrorIs(t, err, writer.ErrUnsupportedManifest)
 }
@@ -483,7 +483,7 @@ func TestWriteManifestsJSONEvents(t *testing.T) {
 	assert.Equal(t, float64(1), evs[1]["missing"])
 }
 
-func TestWriteManifestsJSONCarriesTheReplacements(t *testing.T) {
+func TestWriteManifestsJSONCarriesTheLinks(t *testing.T) {
 	// Redirects travel in their own half of the event, split the same three
 	// ways the edits are, so one manifest is still one line of output.
 	root := manifestRepo(t, map[string]string{
@@ -492,7 +492,7 @@ func TestWriteManifestsJSONCarriesTheReplacements(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, WriteManifests(context.Background(), WriteOptions{
 		Root: root, Paths: []string{"go.mod"},
-		Replacements: []writer.Replacement{
+		Links: []writer.Link{
 			{Name: "github.com/acme/core", Path: "../core"},
 			{Name: "github.com/acme/gone"}, // a removal with nothing to remove
 		},
@@ -501,7 +501,7 @@ func TestWriteManifestsJSONCarriesTheReplacements(t *testing.T) {
 
 	evs := events(t, out.String())
 	require.Len(t, evs, 2)
-	repls := evs[0]["replacements"].(map[string]any)
+	repls := evs[0]["links"].(map[string]any)
 	applied := repls["applied"].([]any)
 	require.Len(t, applied, 1)
 	assert.Equal(t, "github.com/acme/core", applied[0].(map[string]any)["name"])

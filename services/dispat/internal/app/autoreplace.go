@@ -43,9 +43,9 @@ type AutoReplaceOptions struct {
 	// VersionPlaceholder, which resolves to the planned version of the package
 	// the edit names.
 	Edits []writer.Edit
-	// Replacements point dependencies at local folders, or remove the redirect
+	// Links point dependencies at local folders, or remove the redirect
 	// when their Path is empty.
-	Replacements []writer.Replacement
+	Links []writer.Link
 	// Manifests is which of a package's manifests are edited: model.ScopeRoot
 	// (the default when empty) or model.ScopeAll.
 	Manifests string
@@ -235,14 +235,14 @@ func (a *App) newReplaceWork(ctx context.Context, pl *plan.Plan, opts AutoReplac
 		w.edits.Edits = append(w.edits.Edits, e)
 		w.requested = append(w.requested, editKey(e))
 	}
-	for _, r := range opts.Replacements {
+	for _, r := range opts.Links {
 		if opts.OnlyUpdated && !updating(pl, names[r.Name]) {
 			a.log.Debug().Str("dependency", r.Name).
 				Msg("replacement dropped: it does not name a package this run updates")
 			continue
 		}
-		w.edits.Replacements = append(w.edits.Replacements, r)
-		w.requested = append(w.requested, replaceKey(r))
+		w.edits.Links = append(w.edits.Links, r)
+		w.requested = append(w.requested, linkKey(r))
 	}
 	return w, nil
 }
@@ -382,20 +382,20 @@ func (w *replaceWork) write(ctx context.Context, rel *plan.Release, mans []scann
 			continue
 		}
 		path := filepath.Join(rel.Pkg.Dir, filepath.FromSlash(m.Path))
-		res, replRes, err := one.apply(path)
+		res, linkRes, err := one.apply(path)
 		if err != nil {
 			w.app.log.Error().Err(err).Str("package", rel.Pkg.Name).Str("manifest", m.Path).
 				Msg("manifest edit failed")
 			errs = append(errs, err)
 			continue
 		}
-		w.record(rel.Pkg.Name, one, res, replRes)
+		w.record(rel.Pkg.Name, one, res, linkRes)
 		shown := w.relative(path)
 		if w.json {
-			logWrite(w.app.log.With().Str("package", rel.Pkg.Name).Logger(), shown, res, replRes)
+			logWrite(w.app.log.With().Str("package", rel.Pkg.Name).Logger(), shown, res, linkRes)
 			continue
 		}
-		printWrite(listing(w.out), shown, res, replRes)
+		printWrite(listing(w.out), shown, res, linkRes)
 	}
 	// Each failure was already reported against the manifest it belongs to.
 	return errors.Join(errs...)
@@ -419,30 +419,30 @@ func (w *replaceWork) relative(path string) string {
 // exactly as asked — and a second, converged run must not then call that edit
 // stale. So every edit this manifest was asked for landed here unless the
 // manifest came back saying it declares no such thing.
-func (w *replaceWork) record(pkg string, tried manifestEdit, res writer.Result, replRes writer.ReplaceResult) {
+func (w *replaceWork) record(pkg string, tried manifestEdit, res writer.Result, linkRes writer.LinkResult) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.counts.applied += len(res.Applied) + len(replRes.Applied)
-	w.counts.skipped += len(res.Skipped) + len(replRes.Skipped)
-	w.counts.missing += len(res.Missing) + len(replRes.Missing)
-	if res.VersionWritten || len(res.Applied) > 0 || len(replRes.Applied) > 0 {
+	w.counts.applied += len(res.Applied) + len(linkRes.Applied)
+	w.counts.skipped += len(res.Skipped) + len(linkRes.Skipped)
+	w.counts.missing += len(res.Missing) + len(linkRes.Missing)
+	if res.VersionWritten || len(res.Applied) > 0 || len(linkRes.Applied) > 0 {
 		w.changed[pkg] = true
 	}
 
-	missing := make(map[string]bool, len(res.Missing)+len(replRes.Missing))
+	missing := make(map[string]bool, len(res.Missing)+len(linkRes.Missing))
 	for _, e := range res.Missing {
 		missing[editKey(e)] = true
 	}
-	for _, r := range replRes.Missing {
-		missing[replaceKey(r)] = true
+	for _, r := range linkRes.Missing {
+		missing[linkKey(r)] = true
 	}
 	for _, e := range tried.Edits {
 		if key := editKey(e); !missing[key] {
 			w.landed[key] = true
 		}
 	}
-	for _, r := range tried.Replacements {
-		if key := replaceKey(r); !missing[key] {
+	for _, r := range tried.Links {
+		if key := linkKey(r); !missing[key] {
 			w.landed[key] = true
 		}
 	}
@@ -491,8 +491,8 @@ func (w *replaceWork) stale() error {
 	return err
 }
 
-// editKey and replaceKey identify one requested edit across the manifests it
+// editKey and linkKey identify one requested edit across the manifests it
 // was tried against, so "did this ever land" has an answer that does not depend
 // on which file answered it.
-func editKey(e writer.Edit) string           { return "set:" + e.Kind.String() + ":" + e.Name }
-func replaceKey(r writer.Replacement) string { return "replace:" + r.Name }
+func editKey(e writer.Edit) string { return "set:" + e.Kind.String() + ":" + e.Name }
+func linkKey(l writer.Link) string { return "link:" + l.Name }

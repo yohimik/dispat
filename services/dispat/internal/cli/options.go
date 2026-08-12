@@ -70,11 +70,11 @@ type options struct {
 	onFailure *string
 
 	// scanner, writer, replacer
-	scanRootOnly     *bool
-	wrSetVersion     *string
-	wrSet, wrReplace *[]string
-	rpSub            *[]string
-	strict           *bool
+	scanRootOnly  *bool
+	wrSetVersion  *string
+	wrSet, wrLink *[]string
+	rpSub         *[]string
+	strict        *bool
 }
 
 // declareFlags declares every flag on fs and records the pointers. It is
@@ -192,7 +192,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"rewrite each manifest's own version field to this version")
 	o.wrSet = fs.StringArray("set", nil,
 		"set one dependency's declared range, [kind:]name=range (repeatable)")
-	o.wrReplace = fs.StringArray("replace", nil,
+	o.wrLink = fs.StringArray("link", nil,
 		"point a dependency at a local folder, name=path; an empty path removes the redirect (repeatable)")
 	o.rpSub = fs.StringArray("sub", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")

@@ -57,9 +57,9 @@ type WriteOptions struct {
 	Version string
 	// Edits set declared dependency ranges.
 	Edits []writer.Edit
-	// Replacements point dependencies at local folders, or remove the
-	// redirect when their Path is empty.
-	Replacements []writer.Replacement
+	// Links point dependencies at local folders, or remove the redirect when
+	// their Path is empty.
+	Links []writer.Link
 	// Strict turns an edit the manifest does not declare into a failed
 	// command. Skipped edits never do: they are the normal state of a
 	// healthy manifest.
@@ -113,8 +113,8 @@ type subView struct {
 	Write string `json:"write"`
 }
 
-// replaceView is one requested replacement as the JSON output spells it.
-type replaceView struct {
+// linkView is one requested link as the JSON output spells it.
+type linkView struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	Path    string `json:"path,omitempty"`
@@ -257,26 +257,26 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 		applied, skipped, missing int
 	)
 	out := listing(opts.Out)
-	edit := manifestEdit{Version: opts.Version, Edits: opts.Edits, Replacements: opts.Replacements}
+	edit := manifestEdit{Version: opts.Version, Edits: opts.Edits, Links: opts.Links}
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
-		res, replRes, err := edit.apply(path)
+		res, linkRes, err := edit.apply(path)
 		if err != nil {
 			opts.Log.Error().Err(err).Str("manifest", rel).Msg("manifest edit failed")
 			errs = append(errs, err)
 			continue
 		}
-		applied += len(res.Applied) + len(replRes.Applied)
-		skipped += len(res.Skipped) + len(replRes.Skipped)
-		missing += len(res.Missing) + len(replRes.Missing)
+		applied += len(res.Applied) + len(linkRes.Applied)
+		skipped += len(res.Skipped) + len(linkRes.Skipped)
+		missing += len(res.Missing) + len(linkRes.Missing)
 		if opts.JSON {
-			logWrite(opts.Log, rel, res, replRes)
+			logWrite(opts.Log, rel, res, linkRes)
 			continue
 		}
-		printWrite(out, rel, res, replRes)
+		printWrite(out, rel, res, linkRes)
 	}
 
 	if opts.JSON {
@@ -309,38 +309,38 @@ type manifestEdit struct {
 	Version string
 	// Edits set declared dependency ranges.
 	Edits []writer.Edit
-	// Replacements point dependencies at local folders, or remove the redirect
+	// Links point dependencies at local folders, or remove the redirect
 	// when their Path is empty.
-	Replacements []writer.Replacement
+	Links []writer.Link
 }
 
 // empty reports an edit set with nothing in it, which is what makes a manifest
 // not worth opening at all.
 func (e manifestEdit) empty() bool {
-	return e.Version == "" && len(e.Edits) == 0 && len(e.Replacements) == 0
+	return e.Version == "" && len(e.Edits) == 0 && len(e.Links) == 0
 }
 
 // apply writes one manifest's share of the invocation. The rewrite runs before
 // the redirects so a range and the redirect for the same dependency end up in
 // one consistent file, and each step is skipped entirely when nothing asked
 // for it.
-func (e manifestEdit) apply(path string) (writer.Result, writer.ReplaceResult, error) {
+func (e manifestEdit) apply(path string) (writer.Result, writer.LinkResult, error) {
 	var (
 		res     writer.Result
-		replRes writer.ReplaceResult
+		linkRes writer.LinkResult
 		err     error
 	)
 	if e.Version != "" || len(e.Edits) > 0 {
 		if res, err = writer.Rewrite(path, e.Version, e.Edits); err != nil {
-			return res, replRes, err
+			return res, linkRes, err
 		}
 	}
-	if len(e.Replacements) > 0 {
-		if replRes, err = writer.Replace(path, e.Replacements); err != nil {
-			return res, replRes, err
+	if len(e.Links) > 0 {
+		if linkRes, err = writer.Relink(path, e.Links); err != nil {
+			return res, linkRes, err
 		}
 	}
-	return res, replRes, nil
+	return res, linkRes, nil
 }
 
 // SubstituteFiles applies the literal substitutions to each named file. Every
@@ -466,8 +466,8 @@ func subViews(subs []writer.Substitution) []subView {
 }
 
 // printWrite writes one manifest's listing entry: what the version field did,
-// then one line per edit and replacement with its outcome.
-func printWrite(out io.Writer, rel string, res writer.Result, replRes writer.ReplaceResult) {
+// then one line per edit and link with its outcome.
+func printWrite(out io.Writer, rel string, res writer.Result, linkRes writer.LinkResult) {
 	fmt.Fprintln(out, rel)
 	if res.VersionWritten {
 		fmt.Fprintf(out, "  version written\n")
@@ -484,23 +484,23 @@ func printWrite(out io.Writer, rel string, res writer.Result, replRes writer.Rep
 	}
 	for _, group := range []struct {
 		outcome string
-		repls   []writer.Replacement
+		links   []writer.Link
 	}{
-		{"applied", replRes.Applied}, {"skipped", replRes.Skipped}, {"missing", replRes.Missing},
+		{"applied", linkRes.Applied}, {"skipped", linkRes.Skipped}, {"missing", linkRes.Missing},
 	} {
-		for _, r := range group.repls {
-			target := r.Path
+		for _, l := range group.links {
+			target := l.Path
 			if target == "" {
 				target = "(removed)"
 			}
-			fmt.Fprintf(out, "  %-7s  replace  %s  %s\n", group.outcome, r.Name, target)
+			fmt.Fprintf(out, "  %-7s  link     %s  %s\n", group.outcome, l.Name, target)
 		}
 	}
 }
 
 // logWrite emits one manifest's result as a structured event.
-func logWrite(log zerolog.Logger, rel string, res writer.Result, replRes writer.ReplaceResult) {
-	changed := res.VersionWritten || len(res.Applied) > 0 || len(replRes.Applied) > 0
+func logWrite(log zerolog.Logger, rel string, res writer.Result, linkRes writer.LinkResult) {
+	changed := res.VersionWritten || len(res.Applied) > 0 || len(linkRes.Applied) > 0
 	msg := "manifest unchanged"
 	if changed {
 		msg = "manifest updated"
@@ -513,10 +513,10 @@ func logWrite(log zerolog.Logger, rel string, res writer.Result, replRes writer.
 			Skipped: editViews(res.Skipped),
 			Missing: editViews(res.Missing),
 		}).
-		Interface("replacements", outcomeView[replaceView]{
-			Applied: replaceViews(replRes.Applied),
-			Skipped: replaceViews(replRes.Skipped),
-			Missing: replaceViews(replRes.Missing),
+		Interface("links", outcomeView[linkView]{
+			Applied: linkViews(linkRes.Applied),
+			Skipped: linkViews(linkRes.Skipped),
+			Missing: linkViews(linkRes.Missing),
 		}).
 		Msg(msg)
 }
@@ -532,13 +532,13 @@ func editViews(edits []writer.Edit) []editView {
 	return out
 }
 
-func replaceViews(repls []writer.Replacement) []replaceView {
-	if len(repls) == 0 {
+func linkViews(links []writer.Link) []linkView {
+	if len(links) == 0 {
 		return nil
 	}
-	out := make([]replaceView, 0, len(repls))
-	for _, r := range repls {
-		out = append(out, replaceView{Name: r.Name, Version: r.Version, Path: r.Path})
+	out := make([]linkView, 0, len(links))
+	for _, l := range links {
+		out = append(out, linkView{Name: l.Name, Version: l.Version, Path: l.Path})
 	}
 	return out
 }

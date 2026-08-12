@@ -157,7 +157,7 @@ outside this run alone, so only the run's own updates are written.`,
 		name:  cmdAutoreplace,
 		short: "apply the writer's edits to every covered package",
 		long: `Apply one set of manifest edits to every covered package: --set-version,
---set and --replace mean exactly what they mean for "dispat writer", but the
+--set and --link mean exactly what they mean for "dispat writer", but the
 manifests are found by scanning each package folder instead of being named on
 the command line, and the packages are the ones the plan selects.
 
@@ -167,7 +167,7 @@ planned version of the package the edit names, and --set-version {version} to
 the covered package's own. --only-updated drops every edit naming a package
 this run does not update, and --strict fails when an edit matched no manifest
 anywhere.`,
-		flags: append([]string{"set-version", "set", "replace", "manifests", "only-updated",
+		flags: append([]string{"set-version", "set", "link", "manifests", "only-updated",
 			"sync-lock", "strict"}, windowFlags...),
 	},
 	{
@@ -298,9 +298,9 @@ scanned. Needs no config file and no git repository.`,
 		short: "edit manifests in place, preserving their formatting",
 		long: `Edit the named manifests in place, preserving their formatting:
 --set-version rewrites the manifest's own version, --set sets a
-dependency's declared range, --replace points one at a local folder.
+dependency's declared range, --link points one at a local folder.
 Needs no config file and no git repository.`,
-		flags: []string{"set-version", "set", "replace", "strict"},
+		flags: []string{"set-version", "set", "link", "strict"},
 	},
 	{
 		name:  cmdReplacer,

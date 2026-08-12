@@ -47,22 +47,22 @@ func parseEditSpec(spec string) (writer.Edit, error) {
 		return writer.Edit{}, fmt.Errorf("--set %q: no dependency name", spec)
 	}
 	if rng == "" {
-		return writer.Edit{}, fmt.Errorf("--set %q: no version range (to remove a redirect use --replace)", spec)
+		return writer.Edit{}, fmt.Errorf("--set %q: no version range (to remove a redirect use --link)", spec)
 	}
 	return writer.Edit{Name: name, Kind: kind, Range: rng}, nil
 }
 
-// parseReplaceSpec reads one `--replace` value: `name=path`, where an empty
+// parseLinkSpec reads one `--link` value: `name=path`, where an empty
 // path removes the redirect and lets the declaration resolve normally again.
-func parseReplaceSpec(spec string) (writer.Replacement, error) {
+func parseLinkSpec(spec string) (writer.Link, error) {
 	name, path, ok := strings.Cut(spec, "=")
 	if !ok {
-		return writer.Replacement{}, fmt.Errorf("--replace %q: want name=path (an empty path removes the redirect)", spec)
+		return writer.Link{}, fmt.Errorf("--link %q: want name=path (an empty path removes the redirect)", spec)
 	}
 	if name == "" {
-		return writer.Replacement{}, fmt.Errorf("--replace %q: no dependency name", spec)
+		return writer.Link{}, fmt.Errorf("--link %q: no dependency name", spec)
 	}
-	return writer.Replacement{Name: name, Path: path}, nil
+	return writer.Link{Name: name, Path: path}, nil
 }
 
 // subSeparator joins the two halves of a `--sub` value. It is two characters
@@ -101,9 +101,9 @@ func parseSubSpecs(specs []string) ([]writer.Substitution, error) {
 	return subs, nil
 }
 
-// parseEditSpecs reads every `--set` and `--replace` value of one invocation,
+// parseEditSpecs reads every `--set` and `--link` value of one invocation,
 // reporting the first malformed one.
-func parseEditSpecs(sets, replaces []string) (edits []writer.Edit, repls []writer.Replacement, err error) {
+func parseEditSpecs(sets, links []string) (edits []writer.Edit, out []writer.Link, err error) {
 	for _, spec := range sets {
 		edit, err := parseEditSpec(spec)
 		if err != nil {
@@ -111,12 +111,12 @@ func parseEditSpecs(sets, replaces []string) (edits []writer.Edit, repls []write
 		}
 		edits = append(edits, edit)
 	}
-	for _, spec := range replaces {
-		repl, err := parseReplaceSpec(spec)
+	for _, spec := range links {
+		link, err := parseLinkSpec(spec)
 		if err != nil {
 			return nil, nil, err
 		}
-		repls = append(repls, repl)
+		out = append(out, link)
 	}
-	return edits, repls, nil
+	return edits, out, nil
 }

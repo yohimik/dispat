@@ -93,13 +93,13 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		},
 		"autoreplace": {
 			args: []string{"autoreplace", "--help"}, usage: "usage: dispat autoreplace [flags]",
-			has: []string{"--set-version", "--set", "--replace", "--manifests",
+			has: []string{"--set-version", "--set", "--link", "--manifests",
 				"--only-updated", "--strict", "--since", "--package"},
 			hasNot: []string{"--tag", "--range", "--interactive"},
 		},
 		"writer, which would otherwise fail arity first": {
 			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",
-			has:    []string{"--set-version", "--set", "--replace", "--strict"},
+			has:    []string{"--set-version", "--set", "--link", "--strict"},
 			hasNot: []string{"--package", "--tag"},
 		},
 		"the run shorthand": {
@@ -203,12 +203,12 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"autoreplace", "--set-version", "1.0.0", "--manifests", "sideways"},
 		{"autoreplace", "--set-version", "1.0.0", "--manifests", "none"}, // not a scope it has
 		{"autoversion", "--manifests", "sideways"},
-		{"changelog", "--on-error", "explode"},    // every sweeping command validates it
-		{"scanner", "a", "b"},                     // scanner takes at most one folder
-		{"writer"},                                // writer needs at least one manifest
-		{"writer", "go.mod"},                      // ...and something to write
-		{"writer", "go.mod", "--set", "nope"},     // a malformed edit spec
-		{"writer", "go.mod", "--replace", "nope"}, // ...and a malformed replacement
+		{"changelog", "--on-error", "explode"}, // every sweeping command validates it
+		{"scanner", "a", "b"},                  // scanner takes at most one folder
+		{"writer"},                             // writer needs at least one manifest
+		{"writer", "go.mod"},                   // ...and something to write
+		{"writer", "go.mod", "--set", "nope"},  // a malformed edit spec
+		{"writer", "go.mod", "--link", "nope"}, // ...and a malformed link
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
@@ -248,7 +248,7 @@ func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
 		{"compute", "-g", "libs"},
 		{"autoreplace", "--set", "core=1.0.0", "-p", "core"},
 		{"autoreplace", "--set-version", "{version}", "-g", "libs", "--since", "all"},
-		{"autoreplace", "--replace", "core=../core", "-s", "libs", "--consumers"},
+		{"autoreplace", "--link", "core=../core", "-s", "libs", "--consumers"},
 		{"autoreplace", "--set", "core=1.0.0", "--manifests", "all", "--only-updated"},
 		{"changelog", "--since", "HEAD~1", "--consumers"},
 		{"commit", "--on-error", "continue"},
@@ -469,19 +469,19 @@ func TestParseEditSpec(t *testing.T) {
 	}
 }
 
-func TestParseReplaceSpec(t *testing.T) {
+func TestParseLinkSpec(t *testing.T) {
 	// An empty path is the documented removal, so it is the one "empty" half
-	// a replacement spec accepts.
-	got, err := parseReplaceSpec("github.com/acme/core=../core")
+	// a link spec accepts.
+	got, err := parseLinkSpec("github.com/acme/core=../core")
 	require.NoError(t, err)
-	assert.Equal(t, writer.Replacement{Name: "github.com/acme/core", Path: "../core"}, got)
+	assert.Equal(t, writer.Link{Name: "github.com/acme/core", Path: "../core"}, got)
 
-	got, err = parseReplaceSpec("github.com/acme/core=")
+	got, err = parseLinkSpec("github.com/acme/core=")
 	require.NoError(t, err)
-	assert.Equal(t, writer.Replacement{Name: "github.com/acme/core"}, got)
+	assert.Equal(t, writer.Link{Name: "github.com/acme/core"}, got)
 
 	for _, spec := range []string{"github.com/acme/core", "=../core", ""} {
-		_, err := parseReplaceSpec(spec)
+		_, err := parseLinkSpec(spec)
 		assert.Error(t, err, "spec %q must be rejected", spec)
 	}
 }
