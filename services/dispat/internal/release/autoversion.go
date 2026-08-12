@@ -196,7 +196,7 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 			// catch-up below never has to explain itself.
 			continue
 		}
-		next := rangeText(av.Range, version, m.Ecosystem)
+		next := RangeText(av.Range, version, m.Ecosystem)
 		if next == d.Range {
 			continue
 		}
@@ -323,13 +323,13 @@ func lastNameSegment(name string) string {
 	return name
 }
 
-// rangeText renders the policy against the provider's version. Ecosystems
+// RangeText renders the policy against the provider's version. Ecosystems
 // with their own version spelling override the keyword policies: go.mod
 // declares exact canonical versions (vX.Y.Z), Python specifiers have no
 // caret/tilde so the keywords all pin (==X.Y.Z), and a Docker tag is a plain
 // label with no range syntax at all, so the keywords all write the bare
 // version; a {version} template or a verbatim literal always passes through.
-func rangeText(policy, version, ecosystem string) string {
+func RangeText(policy, version, ecosystem string) string {
 	switch ecosystem {
 	case scanner.EcosystemGoMod:
 		return "v" + version

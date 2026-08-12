@@ -93,9 +93,12 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		},
 		"autowriter": {
 			args: []string{"autowriter", "--help"}, usage: "usage: dispat autowriter [flags]",
+			// --range is shared with autoversion: it spells what --set-local
+			// writes, through the same renderer, so the two agree.
 			has: []string{"--set-version", "--set", "--link", "--manifests",
+				"--set-local", "--link-local", "--unlink-local", "--range",
 				"--only-updated", "--strict", "--since", "--package"},
-			hasNot: []string{"--tag", "--range", "--interactive"},
+			hasNot: []string{"--tag", "--interactive"},
 		},
 		"writer, which would otherwise fail arity first": {
 			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",

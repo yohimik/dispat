@@ -70,11 +70,12 @@ type options struct {
 	onFailure *string
 
 	// scanner, writer, replacer
-	scanRootOnly  *bool
-	wrSetVersion  *string
-	wrSet, wrLink *[]string
-	rpSub         *[]string
-	strict        *bool
+	scanRootOnly                           *bool
+	wrSetVersion                           *string
+	wrSet, wrLink                          *[]string
+	wrSetLocal, wrLinkLocal, wrUnlinkLocal *bool
+	rpSub                                  *[]string
+	strict                                 *bool
 }
 
 // declareFlags declares every flag on fs and records the pointers. It is
@@ -194,6 +195,12 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"set one dependency's declared range, [kind:]name=range (repeatable)")
 	o.wrLink = fs.StringArray("link", nil,
 		"point a dependency at a local folder, name=path; an empty path removes the redirect (repeatable)")
+	o.wrSetLocal = fs.Bool("set-local", false,
+		"set every declared workspace dependency to its provider's version, spelled by --range; no name has to be typed")
+	o.wrLinkLocal = fs.Bool("link-local", false,
+		"point every declared workspace dependency at the provider's folder; remove them again with --unlink-local before publishing")
+	o.wrUnlinkLocal = fs.Bool("unlink-local", false,
+		"remove the local folder redirect from every declared workspace dependency")
 	o.rpSub = fs.StringArray("sub", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")
 	o.strict = fs.Bool("strict", false,

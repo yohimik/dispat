@@ -46,11 +46,25 @@ type AutoWriterOptions struct {
 	// Links point dependencies at local folders, or remove the redirect
 	// when their Path is empty.
 	Links []writer.Link
+	// SetLocal reconciles every declared workspace dependency to its
+	// provider's end-of-run version, so the ranges need not be typed out.
+	SetLocal bool
+	// Range spells what SetLocal writes: the autoVersion.range vocabulary
+	// (caret, tilde, exact, or a {version} template), rendered by
+	// release.RangeText. Empty means a caret, which is what that renderer
+	// means by an empty policy, so --range reads the same here as it does on
+	// `dispat autoversion` and there is no second default to keep in step.
+	Range string
+	// LinkLocal points every declared workspace dependency at the provider's
+	// folder; UnlinkLocal removes those same directives. They are mutually
+	// exclusive.
+	LinkLocal   bool
+	UnlinkLocal bool
 	// Manifests is which of a package's manifests are edited: model.ScopeRoot
 	// (the default when empty) or model.ScopeAll.
 	Manifests string
-	// OnlyUpdated drops every edit and replacement whose dependency does not
-	// name a package this run releases.
+	// OnlyUpdated drops every edit and link, named or derived, whose
+	// dependency does not name a package this run releases.
 	OnlyUpdated bool
 	// SyncLock runs each covered space's syncLock scripts where a manifest
 	// actually changed, so the lock files do not fall behind the ranges.
@@ -80,6 +94,11 @@ func (o AutoWriterOptions) scope() model.ManifestScope {
 // manifests, so it is worth asking before paying for it.
 func (o AutoWriterOptions) needsWorkspace() bool {
 	if o.OnlyUpdated || strings.Contains(o.Version, VersionPlaceholder) {
+		return true
+	}
+	// The local flags are nothing *but* workspace resolution: every edit they
+	// produce comes from asking which declarations name a package here.
+	if o.SetLocal || o.LinkLocal || o.UnlinkLocal {
 		return true
 	}
 	for _, e := range o.Edits {
@@ -177,15 +196,28 @@ type writerWork struct {
 	app     *App
 	pl      *plan.Plan
 	scope   model.ManifestScope
+	names   map[string]string // manifest name -> package name
 	dirs    map[string]string // cleaned package folder -> package name
 	edits   manifestEdit      // resolved, minus the per-package own version
 	version string            // the --set-version text, before placeholders
+
+	// The derived half: what --set-local, --link-local and --unlink-local ask
+	// for. These cannot be resolved once because the answer is per manifest,
+	// so they are carried here and read by derive during the sweep.
+	setLocal     bool
+	rangePolicy  string
+	linkLocal    bool
+	unlinkLocal  bool
+	onlyUpdated  bool
+	explicitSet  map[string]bool // dependency named by --set: it wins
+	explicitLink map[string]bool // dependency named by --link: it wins
 
 	mu        sync.Mutex
 	counts    writeTally
 	landed    map[string]bool // edit key -> matched at least one manifest
 	changed   map[string]bool // package -> a manifest of its actually changed
 	requested []string        // edit keys, in the order they were given
+	npmWarned map[string]bool // package -> the npm link warning was said once
 
 	json bool
 	out  io.Writer
@@ -193,8 +225,11 @@ type writerWork struct {
 
 // nothingToWrite reports an invocation left with no edit at all, which is what
 // --only-updated does on a run that updates none of the packages the edits
-// name.
-func (w *writerWork) nothingToWrite() bool { return w.version == "" && w.edits.empty() }
+// name. An invocation deriving its edits always has something to try, because
+// what it will write is not known until the manifests have been read.
+func (w *writerWork) nothingToWrite() bool {
+	return w.version == "" && w.edits.empty() && !w.derives()
+}
 
 // writeTally is the three outcomes summed over a whole sweep.
 type writeTally struct{ applied, skipped, missing int }
@@ -217,11 +252,22 @@ func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, opts AutoWriterO
 	}
 
 	w := &writerWork{
-		app: a, pl: pl, scope: opts.scope(), dirs: dirs, version: opts.Version,
-		landed: map[string]bool{}, changed: map[string]bool{},
-		json: opts.JSON, out: opts.Out,
+		app: a, pl: pl, scope: opts.scope(), names: names, dirs: dirs, version: opts.Version,
+		setLocal: opts.SetLocal, rangePolicy: opts.Range,
+		linkLocal: opts.LinkLocal, unlinkLocal: opts.UnlinkLocal,
+		onlyUpdated:  opts.OnlyUpdated,
+		explicitSet:  map[string]bool{},
+		explicitLink: map[string]bool{},
+		landed:       map[string]bool{},
+		changed:      map[string]bool{},
+		npmWarned:    map[string]bool{},
+		json:         opts.JSON, out: opts.Out,
 	}
 	for _, e := range opts.Edits {
+		// Recorded before the --only-updated filter: a dependency the command
+		// line named is one the operator has spoken for, so a derived edit must
+		// not write it even when the filter drops the named one.
+		w.explicitSet[e.Name] = true
 		if opts.OnlyUpdated && !updating(pl, names[e.Name]) {
 			a.log.Debug().Str("dependency", e.Name).
 				Msg("edit dropped: it does not name a package this run updates")
@@ -235,14 +281,22 @@ func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, opts AutoWriterO
 		w.edits.Edits = append(w.edits.Edits, e)
 		w.requested = append(w.requested, editKey(e))
 	}
-	for _, r := range opts.Links {
-		if opts.OnlyUpdated && !updating(pl, names[r.Name]) {
-			a.log.Debug().Str("dependency", r.Name).
-				Msg("replacement dropped: it does not name a package this run updates")
+	for _, l := range opts.Links {
+		w.explicitLink[l.Name] = true
+		if opts.OnlyUpdated && !updating(pl, names[l.Name]) {
+			a.log.Debug().Str("dependency", l.Name).
+				Msg("link dropped: it does not name a package this run updates")
 			continue
 		}
-		w.edits.Links = append(w.edits.Links, r)
-		w.requested = append(w.requested, linkKey(r))
+		w.edits.Links = append(w.edits.Links, l)
+		w.requested = append(w.requested, linkKey(l))
+	}
+	if opts.LinkLocal {
+		// Worth saying out loud rather than burying in the docs: nothing in the
+		// release path removes these, so a link still in place at publish time
+		// ships a manifest consumers cannot resolve.
+		a.log.Warn().
+			Msg("local links must be removed before publishing; run autowriter --unlink-local first")
 	}
 	return w, nil
 }
@@ -377,6 +431,14 @@ func (w *writerWork) write(ctx context.Context, rel *plan.Release, mans []scanne
 			// the release version into it would be wrong however the sweep
 			// scans. Same rule the version stage follows.
 			one.Version = ""
+		}
+		if w.derives() {
+			// Fresh slices, never an append onto the shared ones: every package
+			// in the sweep holds the same edits value, and appending in place
+			// would let two goroutines write one backing array.
+			derivedEdits, derivedLinks := w.derive(rel, m)
+			one.Edits = concat(one.Edits, derivedEdits)
+			one.Links = concat(one.Links, derivedLinks)
 		}
 		if one.empty() {
 			continue

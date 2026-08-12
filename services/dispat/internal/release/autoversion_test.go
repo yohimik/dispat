@@ -143,13 +143,13 @@ func TestAutoVersionLiteralRangeAndTemplate(t *testing.T) {
 	assert.Contains(t, fileText(t, root, "web/package.json"), `"@acme/core": "workspace:*"`,
 		"the opposite direction: normalising ranges TO a literal")
 
-	assert.Equal(t, ">=2.0.0", rangeText(">={version}", "2.0.0", "npm"))
-	assert.Equal(t, "~2.0.0", rangeText("tilde", "2.0.0", "npm"))
-	assert.Equal(t, "v2.0.0", rangeText("caret", "2.0.0", "gomod"), "go.mod always gets exact canonical versions")
-	assert.Equal(t, "==2.0.0", rangeText("caret", "2.0.0", "python"), "Python specifiers have no caret")
-	assert.Equal(t, "2.0.0", rangeText("caret", "2.0.0", "docker"), "a Docker tag is a plain label, never a range")
-	assert.Equal(t, "2.0.0", rangeText("exact", "2.0.0", "docker"))
-	assert.Equal(t, "2.0.0-alpine", rangeText("{version}-alpine", "2.0.0", "docker"),
+	assert.Equal(t, ">=2.0.0", RangeText(">={version}", "2.0.0", "npm"))
+	assert.Equal(t, "~2.0.0", RangeText("tilde", "2.0.0", "npm"))
+	assert.Equal(t, "v2.0.0", RangeText("caret", "2.0.0", "gomod"), "go.mod always gets exact canonical versions")
+	assert.Equal(t, "==2.0.0", RangeText("caret", "2.0.0", "python"), "Python specifiers have no caret")
+	assert.Equal(t, "2.0.0", RangeText("caret", "2.0.0", "docker"), "a Docker tag is a plain label, never a range")
+	assert.Equal(t, "2.0.0", RangeText("exact", "2.0.0", "docker"))
+	assert.Equal(t, "2.0.0-alpine", RangeText("{version}-alpine", "2.0.0", "docker"),
 		"a template still passes through, which is how a variant tag is spelled")
 }
 

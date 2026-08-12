@@ -179,8 +179,9 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 		"autowriter": {
 			args: []string{"autowriter", "--help"}, usage: "usage: dispat autowriter [flags]",
 			has: []string{"--set-version", "--set", "--link", "--manifests",
+				"--set-local", "--link-local", "--unlink-local", "--range",
 				"--only-updated", "--since", "--consumers"},
-			hasNot: []string{"--tag", "--owner", "--range"},
+			hasNot: []string{"--tag", "--owner"},
 		},
 		"writer": {
 			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",

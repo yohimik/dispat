@@ -178,6 +178,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
+	if cmd == cmdAutowriter && *o.wrLinkLocal && *o.wrUnlinkLocal {
+		// One walk cannot both write and remove the same directive, and
+		// guessing which was meant is worse than saying so.
+		bootLog.Error().Msg("--link-local and --unlink-local ask for opposite things; pick one")
+		usageForCommand(cmd)
+		return 2
+	}
 	if cmd == cmdSelfUpdate && *o.suRollback {
 		// A rollback downloads nothing, so every flag that chooses something
 		// to download contradicts it.
@@ -427,6 +434,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if a.AutoWriter(ctx, app.AutoWriterOptions{
 			Window: window, OnError: *o.onError, Version: write.version,
 			Edits: write.edits, Links: write.links, Manifests: *o.avManifests,
+			SetLocal: *o.wrSetLocal, Range: *o.avRange,
+			LinkLocal: *o.wrLinkLocal, UnlinkLocal: *o.wrUnlinkLocal,
 			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, Strict: *o.strict,
 			JSON: cfg.LogFormat == "json", Out: stdout,
 		}) != nil {
@@ -610,18 +619,23 @@ type writeRequest struct {
 // parseWriteRequest reads the three flags into one request. A malformed spec
 // and a request with nothing in it are both usage mistakes, reported here and
 // answered with false.
+//
+// `dispat autowriter` can also derive its edits from the manifests, and an
+// invocation asking for that has plenty to write without naming a single
+// dependency, so the empty check lets those through.
 func parseWriteRequest(cmd string, o *options, usage func(string), log zerolog.Logger) (writeRequest, bool) {
-	edits, repls, err := parseEditSpecs(*o.wrSet, *o.wrLink)
+	edits, links, err := parseEditSpecs(*o.wrSet, *o.wrLink)
 	if err != nil {
 		log.Error().Err(err).Msg("invalid edit")
 		return writeRequest{}, false
 	}
-	if *o.wrSetVersion == "" && len(edits) == 0 && len(repls) == 0 {
+	derived := cmd == cmdAutowriter && (*o.wrSetLocal || *o.wrLinkLocal || *o.wrUnlinkLocal)
+	if *o.wrSetVersion == "" && len(edits) == 0 && len(links) == 0 && !derived {
 		log.Error().Msgf("%s needs something to write: --set-version, --set or --link", cmd)
 		usage(cmd)
 		return writeRequest{}, false
 	}
-	return writeRequest{version: *o.wrSetVersion, edits: edits, links: repls}, true
+	return writeRequest{version: *o.wrSetVersion, edits: edits, links: links}, true
 }
 
 // orDefault answers with fallback when the flag was left at its empty

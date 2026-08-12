@@ -304,3 +304,132 @@ func TestAutoWriterCommandWordKeepsItsScript(t *testing.T) {
 	// The bare word is the command, which needs something to write.
 	assert.Equal(t, 2, r.Command("autowriter").Code)
 }
+
+// arGoRepo is the derived-link fixture. Links only exist in five manifest
+// formats, and npm is deliberately not one this command writes, so the local
+// flags need a go.mod workspace to show anything at all: api requires core, and
+// core sits in a sibling folder so the derived path has a real "../" to find.
+func arGoRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 2)
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "api", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "api")
+	r.WriteFile("packages/core/go.mod", "module github.com/acme/core\n\ngo 1.26\n")
+	r.WriteFile("packages/api/go.mod",
+		"module github.com/acme/api\n\ngo 1.26\n\nrequire github.com/acme/core v0.0.0\n")
+	r.Commit("feat(core,api): bootstrap")
+	return r
+}
+
+// TestAutoWriterSetLocalDerivesEveryWorkspaceRange: --set-local writes the
+// provider's planned version into every declaration that names a package here,
+// with no dependency typed on the command line. --range spells it.
+func TestAutoWriterSetLocalDerivesEveryWorkspaceRange(t *testing.T) {
+	r := arRepo(t)
+
+	res := r.Command("autowriter", "--since", "all", "--set-local", "--range", "^{version}")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	web := arRead(t, r, "packages", "web", "package.json")
+	assert.Contains(t, web, `"@acme/core": "^0.1.0"`, "the workspace dependency followed its provider")
+	assert.Contains(t, web, `"left-pad": "^1.0.0"`, "a third-party dependency is not this command's business")
+}
+
+// TestAutoWriterSetLocalConverges: a second pass computes the same ranges, so
+// it writes nothing and reports nothing applied. A derived edit that reported
+// itself applied every run would re-trigger the syncLock scripts forever.
+func TestAutoWriterSetLocalConverges(t *testing.T) {
+	r := arRepo(t)
+
+	res := r.Command("autowriter", "--since", "all", "--set-local", "--range", "^{version}")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	first := arRead(t, r, "packages", "web", "package.json")
+
+	res = r.Command("autowriter", "--since", "all", "--set-local", "--range", "^{version}")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, first, arRead(t, r, "packages", "web", "package.json"),
+		"the second pass is a byte-for-byte no-op")
+	assert.Contains(t, res.Stdout, `"applied":0`, "and it reports nothing applied")
+}
+
+// TestAutoWriterSetLocalYieldsToTheCommandLine: a dependency named by --set
+// keeps what the operator asked for, because naming it is the more specific
+// instruction.
+func TestAutoWriterSetLocalYieldsToTheCommandLine(t *testing.T) {
+	r := arRepo(t)
+
+	res := r.Command("autowriter", "--since", "all", "--set-local", "--range", "^{version}",
+		"--set", "@acme/core=workspace:*")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, arRead(t, r, "packages", "web", "package.json"), `"@acme/core": "workspace:*"`,
+		"the explicit --set wins over the derived range")
+}
+
+// TestAutoWriterLinkLocalRoundTrips: --link-local points every workspace
+// dependency at its folder and --unlink-local takes every one of them away
+// again, leaving the manifest exactly as it started. That round trip is the
+// whole contract: the derived paths and their removal have to agree.
+func TestAutoWriterLinkLocalRoundTrips(t *testing.T) {
+	r := arGoRepo(t)
+	before := arRead(t, r, "packages", "api", "go.mod")
+
+	res := r.Command("autowriter", "--since", "all", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	linked := arRead(t, r, "packages", "api", "go.mod")
+	assert.Contains(t, linked, "replace github.com/acme/core => ../core",
+		"the path is relative to the manifest's own folder")
+
+	res = r.Command("autowriter", "--since", "all", "--unlink-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, before, arRead(t, r, "packages", "api", "go.mod"),
+		"unlinking restores the file byte for byte")
+}
+
+// TestAutoWriterLinkLocalSkipsNpm: npm refuses an override for a directly
+// declared dependency unless the specs match exactly, and a derived link is
+// aimed at exactly those. Writing one would hand the user a package.json that
+// npm errors on, so the manifest is left alone and the reason is logged.
+func TestAutoWriterLinkLocalSkipsNpm(t *testing.T) {
+	r := arRepo(t)
+	before := arRead(t, r, "packages", "web", "package.json")
+
+	res := r.Command("autowriter", "--since", "all", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, before, arRead(t, r, "packages", "web", "package.json"),
+		"package.json is untouched by a derived link")
+	assert.Contains(t, res.Stdout+res.Stderr, "npm refuses an override",
+		"and the operator is told why")
+}
+
+// TestAutoWriterLinkLocalWarnsAboutPublishing: nothing in the release path
+// removes a local link, so leaving one in place ships a manifest consumers
+// cannot resolve. That is worth saying every time, not only in the docs.
+func TestAutoWriterLinkLocalWarnsAboutPublishing(t *testing.T) {
+	r := arGoRepo(t)
+
+	res := r.Command("autowriter", "--since", "all", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "must be removed before publishing")
+}
+
+// TestAutoWriterLocalFlagsReachTheExitCode: the usage mistakes and the
+// narrowing, over the process boundary.
+func TestAutoWriterLocalFlagsReachTheExitCode(t *testing.T) {
+	r := arGoRepo(t)
+
+	assert.Equal(t, 2, r.Command("autowriter", "--link-local", "--unlink-local").Code,
+		"opposite instructions in one invocation")
+
+	// A bare local flag is a complete request: there is nothing to type.
+	res := r.Command("autowriter", "--since", "all", "--set-local")
+	assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	res = r.Command("autowriter", "--since", "all", "--link-local")
+	assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	// --strict asks whether a *requested* edit found a target. A derived one
+	// comes from a declaration that exists, so it can never be stale.
+	res = r.Command("autowriter", "--since", "all", "--strict", "--link-local")
+	assert.Equal(t, 0, res.Code, "derived edits do not trip the stale gate; stdout:\n%s", res.Stdout)
+}

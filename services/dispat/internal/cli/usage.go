@@ -161,13 +161,22 @@ outside this run alone, so only the run's own updates are written.`,
 manifests are found by scanning each package folder instead of being named on
 the command line, and the packages are the ones the plan selects.
 
+--set-local, --link-local and --unlink-local derive the edits instead of
+taking them: every dependency a manifest declares that names another package
+here gets its range reconciled to that package's version (spelled by --range),
+its folder redirect written, or that redirect removed. Nothing has to be typed
+out, and a dependency named by --set or --link keeps what the command line
+said. Local links are never removed by a release, so run --unlink-local before
+publishing.
+
 --manifests root edits the manifests in each package folder, all every
 manifest under it. A range may be written as {version}, which resolves to the
 planned version of the package the edit names, and --set-version {version} to
 the covered package's own. --only-updated drops every edit naming a package
 this run does not update, and --strict fails when an edit matched no manifest
 anywhere.`,
-		flags: append([]string{"set-version", "set", "link", "manifests", "only-updated",
+		flags: append([]string{"set-version", "set", "link", "set-local", "link-local",
+			"unlink-local", "range", "manifests", "only-updated",
 			"sync-lock", "strict"}, windowFlags...),
 	},
 	{
