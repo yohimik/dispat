@@ -91,8 +91,8 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			has:    []string{"--owner", "--repo", "--api-url", "--token-env", "--target"},
 			hasNot: []string{"--tag", "--file"},
 		},
-		"autoreplace": {
-			args: []string{"autoreplace", "--help"}, usage: "usage: dispat autoreplace [flags]",
+		"autowriter": {
+			args: []string{"autowriter", "--help"}, usage: "usage: dispat autowriter [flags]",
 			has: []string{"--set-version", "--set", "--link", "--manifests",
 				"--only-updated", "--strict", "--since", "--package"},
 			hasNot: []string{"--tag", "--range", "--interactive"},
@@ -195,13 +195,13 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"run", "x", "--on-error", "explode"}, // unknown --on-error value
 		{"changelog", "a"},                    // nor do the step commands
 		{"autoversion", "a"},
-		{"autoreplace", "a"},
+		{"autowriter", "a"},
 		{"commit", "a"},
 		{"github", "a"},
-		{"autoreplace"},                  // autoreplace needs something to write
-		{"autoreplace", "--set", "nope"}, // a malformed edit spec
-		{"autoreplace", "--set-version", "1.0.0", "--manifests", "sideways"},
-		{"autoreplace", "--set-version", "1.0.0", "--manifests", "none"}, // not a scope it has
+		{"autowriter"},                  // autowriter needs something to write
+		{"autowriter", "--set", "nope"}, // a malformed edit spec
+		{"autowriter", "--set-version", "1.0.0", "--manifests", "sideways"},
+		{"autowriter", "--set-version", "1.0.0", "--manifests", "none"}, // not a scope it has
 		{"autoversion", "--manifests", "sideways"},
 		{"changelog", "--on-error", "explode"}, // every sweeping command validates it
 		{"scanner", "a", "b"},                  // scanner takes at most one folder
@@ -246,10 +246,10 @@ func TestFilterFlagsReachEveryPackageCommand(t *testing.T) {
 		{"commit", "-g", "libs"},
 		{"github", "-g", "libs"},
 		{"compute", "-g", "libs"},
-		{"autoreplace", "--set", "core=1.0.0", "-p", "core"},
-		{"autoreplace", "--set-version", "{version}", "-g", "libs", "--since", "all"},
-		{"autoreplace", "--link", "core=../core", "-s", "libs", "--consumers"},
-		{"autoreplace", "--set", "core=1.0.0", "--manifests", "all", "--only-updated"},
+		{"autowriter", "--set", "core=1.0.0", "-p", "core"},
+		{"autowriter", "--set-version", "{version}", "-g", "libs", "--since", "all"},
+		{"autowriter", "--link", "core=../core", "-s", "libs", "--consumers"},
+		{"autowriter", "--set", "core=1.0.0", "--manifests", "all", "--only-updated"},
 		{"changelog", "--since", "HEAD~1", "--consumers"},
 		{"commit", "--on-error", "continue"},
 		{"autoversion", "--only-updated", "--since", "all"},

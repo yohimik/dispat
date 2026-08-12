@@ -302,7 +302,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 
 // manifestEdit is one invocation's whole edit set, ready to be applied to a
 // file. It is the unit `dispat writer` builds once from its flags and `dispat
-// autoreplace` builds once per covered package, so both spell "what a write
+// autowriter` builds once per covered package, so both spell "what a write
 // does to a manifest" the same way.
 type manifestEdit struct {
 	// Version, when set, rewrites the manifest's own version field.

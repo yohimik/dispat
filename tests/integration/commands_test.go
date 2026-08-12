@@ -153,7 +153,7 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 	require.Equal(t, 0, program.Code, "stderr:\n%s", program.Stderr)
 	assert.Contains(t, program.Stderr, "usage: dispat [command] [flags]")
 	for _, word := range []string{"release", "status", "run", "init", "preview", "changelog",
-		"autoversion", "autoreplace", "commit", "github", "compute", "scanner", "writer", "replacer"} {
+		"autoversion", "autowriter", "commit", "github", "compute", "scanner", "writer", "replacer"} {
 		assert.Contains(t, program.Stderr, word, "the command list names every command")
 	}
 	assert.Contains(t, program.Stderr, "global flags:")
@@ -176,15 +176,15 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 			has:    []string{"--owner", "--repo", "--token-env", "--target", "--on-error", "--since"},
 			hasNot: []string{"--set-version", "--file"},
 		},
-		"autoreplace": {
-			args: []string{"autoreplace", "--help"}, usage: "usage: dispat autoreplace [flags]",
-			has: []string{"--set-version", "--set", "--replace", "--manifests",
+		"autowriter": {
+			args: []string{"autowriter", "--help"}, usage: "usage: dispat autowriter [flags]",
+			has: []string{"--set-version", "--set", "--link", "--manifests",
 				"--only-updated", "--since", "--consumers"},
 			hasNot: []string{"--tag", "--owner", "--range"},
 		},
 		"writer": {
 			args: []string{"writer", "--help"}, usage: "usage: dispat writer <manifest>... [flags]",
-			has:    []string{"--set-version", "--set", "--replace"},
+			has:    []string{"--set-version", "--set", "--link"},
 			hasNot: []string{"--on-error", "--tag"},
 		},
 	} {

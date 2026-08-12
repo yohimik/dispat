@@ -154,7 +154,7 @@ outside this run alone, so only the run's own updates are written.`,
 			"no-replace", "write-version", "sync-lock"}, windowFlags...),
 	},
 	{
-		name:  cmdAutoreplace,
+		name:  cmdAutowriter,
 		short: "apply the writer's edits to every covered package",
 		long: `Apply one set of manifest edits to every covered package: --set-version,
 --set and --link mean exactly what they mean for "dispat writer", but the

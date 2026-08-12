@@ -9,7 +9,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
-// The standalone step commands — changelog, autoversion, autoreplace, commit,
+// The standalone step commands — changelog, autoversion, autowriter, commit,
 // github — expose the release pipeline's native steps to custom flows, so a
 // stage script can run a step at the moment the flow needs it (a changelog
 // written before the release commit lands inside the tagged tree) and the

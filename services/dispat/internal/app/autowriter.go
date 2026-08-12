@@ -17,7 +17,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
-// `dispat autoreplace` is `dispat writer` pointed at a selection instead of at
+// `dispat autowriter` is `dispat writer` pointed at a selection instead of at
 // a list of files: the same edits, applied to every package the plan picks,
 // with the manifest paths resolved by scanning each package folder rather than
 // typed out by hand. It plans first — so it knows which packages are on the
@@ -29,8 +29,8 @@ import (
 // the autoVersion.range policy uses, so one idea has one syntax.
 const VersionPlaceholder = "{version}"
 
-// AutoReplaceOptions is one `dispat autoreplace` invocation.
-type AutoReplaceOptions struct {
+// AutoWriterOptions is one `dispat autowriter` invocation.
+type AutoWriterOptions struct {
 	// Window is which packages the command covers: the release window or
 	// --since, narrowed by the filter, expanded by --consumers.
 	Window WindowOptions
@@ -68,7 +68,7 @@ type AutoReplaceOptions struct {
 // accepts are the parsing strategy's own; model.ScopeNone is deliberately not
 // one of them, since a command whose whole job is to write manifests has
 // nothing to do with the scope that reads none.
-func (o AutoReplaceOptions) scope() model.ManifestScope {
+func (o AutoWriterOptions) scope() model.ManifestScope {
 	if o.Manifests == "" {
 		return model.ScopeRoot
 	}
@@ -78,7 +78,7 @@ func (o AutoReplaceOptions) scope() model.ManifestScope {
 // needsWorkspace reports whether this invocation has to know which manifest
 // name belongs to which package. Building that index scans every package's root
 // manifests, so it is worth asking before paying for it.
-func (o AutoReplaceOptions) needsWorkspace() bool {
+func (o AutoWriterOptions) needsWorkspace() bool {
 	if o.OnlyUpdated || strings.Contains(o.Version, VersionPlaceholder) {
 		return true
 	}
@@ -90,7 +90,7 @@ func (o AutoReplaceOptions) needsWorkspace() bool {
 	return false
 }
 
-// AutoReplace applies the invocation's edits to every covered package's
+// AutoWriter applies the invocation's edits to every covered package's
 // manifests. Every package is swept in dependency order, exactly as `dispat
 // run` sweeps scripts, and each one's manifests are rewritten in place,
 // format-preserving, through pkg/writer.
@@ -101,7 +101,7 @@ func (o AutoReplaceOptions) needsWorkspace() bool {
 // is a manifest something can write; a package with none is a no-op, and a
 // selection where none of them has one is an error, because writing nothing
 // silently is how a typo hides.
-func (a *App) AutoReplace(ctx context.Context, opts AutoReplaceOptions) error {
+func (a *App) AutoWriter(ctx context.Context, opts AutoWriterOptions) error {
 	pl, err := a.stepPlan(ctx)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (a *App) AutoReplace(ctx context.Context, opts AutoReplaceOptions) error {
 		return err
 	}
 
-	work, err := a.newReplaceWork(ctx, pl, opts)
+	work, err := a.newWriterWork(ctx, pl, opts)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot rewrite the manifests")
 		return err
@@ -130,13 +130,13 @@ func (a *App) AutoReplace(ctx context.Context, opts AutoReplaceOptions) error {
 	if opts.JSON {
 		a.log.Info().Int("packages", rep.Resolved).
 			Int("applied", tally.applied).Int("skipped", tally.skipped).Int("missing", tally.missing).
-			Msg("autoreplace complete")
+			Msg("autowriter complete")
 	} else {
 		fmt.Fprintf(listing(opts.Out), "%d package(s): %d applied, %d skipped, %d missing\n",
 			rep.Resolved, tally.applied, tally.skipped, tally.missing)
 	}
 	if drainErr != nil {
-		a.log.Warn().Err(drainErr).Msg("autoreplace interrupted")
+		a.log.Warn().Err(drainErr).Msg("autowriter interrupted")
 		return drainErr
 	}
 	if len(covered) > 0 && rep.Resolved == 0 {
@@ -163,17 +163,17 @@ func (a *App) AutoReplace(ctx context.Context, opts AutoReplaceOptions) error {
 	return a.syncLock(ctx, pl, work.changedPackages())
 }
 
-// replaceWork is `dispat autoreplace`'s share of a sweep: one package's
+// writerWork is `dispat autowriter`'s share of a sweep: one package's
 // manifests scanned, then rewritten.
 //
 // Everything it needs to decide *what* to write is computed once, in
-// newReplaceWork, because the answer is the same for every package: the edits
+// newWriterWork, because the answer is the same for every package: the edits
 // are named on the command line and the plan does not change under it. Only the
 // own-version write is per package, since that is the one value that differs.
 // What it collects back — the counts, which edits landed somewhere, whose
 // manifests changed — is guarded by mu, and is the whole of the shared mutable
 // state a sweep of this work carries.
-type replaceWork struct {
+type writerWork struct {
 	app     *App
 	pl      *plan.Plan
 	scope   model.ManifestScope
@@ -194,16 +194,16 @@ type replaceWork struct {
 // nothingToWrite reports an invocation left with no edit at all, which is what
 // --only-updated does on a run that updates none of the packages the edits
 // name.
-func (w *replaceWork) nothingToWrite() bool { return w.version == "" && w.edits.empty() }
+func (w *writerWork) nothingToWrite() bool { return w.version == "" && w.edits.empty() }
 
 // writeTally is the three outcomes summed over a whole sweep.
 type writeTally struct{ applied, skipped, missing int }
 
-// newReplaceWork resolves the invocation into the work a sweep can run: the
+// newWriterWork resolves the invocation into the work a sweep can run: the
 // workspace index when one is needed, the placeholders expanded, and the edits
 // the --only-updated filter kept. Everything that can fail the whole command
 // rather than one package fails here, before a single file is opened.
-func (a *App) newReplaceWork(ctx context.Context, pl *plan.Plan, opts AutoReplaceOptions) (*replaceWork, error) {
+func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, opts AutoWriterOptions) (*writerWork, error) {
 	if s := opts.scope(); s != model.ScopeRoot && s != model.ScopeAll {
 		return nil, fmt.Errorf("unknown manifest scope %q (want %q or %q)", s, model.ScopeRoot, model.ScopeAll)
 	}
@@ -216,7 +216,7 @@ func (a *App) newReplaceWork(ctx context.Context, pl *plan.Plan, opts AutoReplac
 		names, dirs = release.WorkspaceNames(ctx, a.scan, pl, a.log)
 	}
 
-	w := &replaceWork{
+	w := &writerWork{
 		app: a, pl: pl, scope: opts.scope(), dirs: dirs, version: opts.Version,
 		landed: map[string]bool{}, changed: map[string]bool{},
 		json: opts.JSON, out: opts.Out,
@@ -251,7 +251,7 @@ func (a *App) newReplaceWork(ctx context.Context, pl *plan.Plan, opts AutoReplac
 // package the edit names. An edit whose name belongs to no package in the
 // workspace cannot be templated, and saying so beats writing "{version}" into
 // a manifest for someone to find later.
-func (w *replaceWork) expand(names map[string]string, dep, text string) (string, error) {
+func (w *writerWork) expand(names map[string]string, dep, text string) (string, error) {
 	if !strings.Contains(text, VersionPlaceholder) {
 		return text, nil
 	}
@@ -284,12 +284,12 @@ func updating(pl *plan.Plan, pkg string) bool {
 	return rel != nil && rel.Releasing()
 }
 
-func (w *replaceWork) stage() string { return "autoreplace" }
+func (w *writerWork) stage() string { return "autowriter" }
 
 // resolve finds the package's writable manifests and hands back the write. A
 // package with nothing writable is a no-op; a scan that cannot be read at all
 // fails that package alone.
-func (w *replaceWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
+func (w *writerWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
 	mans, err := w.manifests(ctx, rel)
 	if err != nil {
 		return nil, err
@@ -314,7 +314,7 @@ func (w *replaceWork) resolve(ctx context.Context, rel *plan.Release) (task, err
 // would then edit the same file from two goroutines. The nested ones are left
 // to their owner, which is also the only reading under which "every manifest of
 // this package" means what it says.
-func (w *replaceWork) manifests(ctx context.Context, rel *plan.Release) ([]scanner.Manifest, error) {
+func (w *writerWork) manifests(ctx context.Context, rel *plan.Release) ([]scanner.Manifest, error) {
 	var (
 		mans []scanner.Manifest
 		err  error
@@ -349,7 +349,7 @@ func (w *replaceWork) manifests(ctx context.Context, rel *plan.Release) ([]scann
 
 // ownedElsewhere reports that the manifest belongs to a different package,
 // whose own turn in the sweep will reach it.
-func (w *replaceWork) ownedElsewhere(pkg, dir, manifest string) bool {
+func (w *writerWork) ownedElsewhere(pkg, dir, manifest string) bool {
 	folder := filepath.Dir(filepath.Join(dir, filepath.FromSlash(manifest)))
 	for {
 		if owner, ok := w.dirs[filepath.Clean(folder)]; ok {
@@ -364,7 +364,7 @@ func (w *replaceWork) ownedElsewhere(pkg, dir, manifest string) bool {
 }
 
 // write applies the edits to one package's manifests and records what they did.
-func (w *replaceWork) write(ctx context.Context, rel *plan.Release, mans []scanner.Manifest, edits manifestEdit) error {
+func (w *writerWork) write(ctx context.Context, rel *plan.Release, mans []scanner.Manifest, edits manifestEdit) error {
 	var errs []error
 	for _, m := range mans {
 		if err := ctx.Err(); err != nil {
@@ -404,7 +404,7 @@ func (w *replaceWork) write(ctx context.Context, rel *plan.Release, mans []scann
 // relative renders a manifest path the way the operator typed the repository:
 // relative to the monorepo root, with slashes, so it can be pasted straight
 // into `dispat writer`.
-func (w *replaceWork) relative(path string) string {
+func (w *writerWork) relative(path string) string {
 	rel, err := filepath.Rel(w.app.root, path)
 	if err != nil {
 		return filepath.ToSlash(path)
@@ -419,7 +419,7 @@ func (w *replaceWork) relative(path string) string {
 // exactly as asked — and a second, converged run must not then call that edit
 // stale. So every edit this manifest was asked for landed here unless the
 // manifest came back saying it declares no such thing.
-func (w *replaceWork) record(pkg string, tried manifestEdit, res writer.Result, linkRes writer.LinkResult) {
+func (w *writerWork) record(pkg string, tried manifestEdit, res writer.Result, linkRes writer.LinkResult) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.counts.applied += len(res.Applied) + len(linkRes.Applied)
@@ -448,7 +448,7 @@ func (w *replaceWork) record(pkg string, tried manifestEdit, res writer.Result, 
 	}
 }
 
-func (w *replaceWork) tally() writeTally {
+func (w *writerWork) tally() writeTally {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.counts
@@ -456,7 +456,7 @@ func (w *replaceWork) tally() writeTally {
 
 // changedPackages lists, in plan order, the packages whose manifests this run
 // actually changed — what a syncLock pass keys off, exactly as a release does.
-func (w *replaceWork) changedPackages() []string {
+func (w *writerWork) changedPackages() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var out []string
@@ -473,7 +473,7 @@ func (w *replaceWork) changedPackages() []string {
 // the ordinary case when one invocation covers twenty of them, while an edit no
 // manifest anywhere declares is a pattern that has gone stale. It is the same
 // rule `dispat replacer` applies to its substitutions.
-func (w *replaceWork) stale() error {
+func (w *writerWork) stale() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var stale int

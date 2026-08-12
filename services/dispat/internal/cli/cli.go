@@ -45,7 +45,7 @@ const (
 	// changelog` is never `dispat run changelog`.
 	cmdChangelog   = "changelog"   // write pending changelog entries now
 	cmdAutoversion = "autoversion" // native manifest reconciliation, plus syncLock
-	cmdAutoreplace = "autoreplace" // the writer's edits, over the whole selection
+	cmdAutowriter  = "autowriter"  // the writer's edits, over the whole selection
 	cmdCommit      = "commit"      // per-package release commit (--tag, --push)
 	cmdGithub      = "github"      // per-package GitHub release, published now
 
@@ -73,7 +73,7 @@ func manifestCommand(cmd string) bool {
 // and --consumers.
 func sweepCommand(cmd string) bool {
 	switch cmd {
-	case cmdRun, cmdAutoreplace, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
+	case cmdRun, cmdAutowriter, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
 		return true
 	}
 	return false
@@ -171,7 +171,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	// The rest of what the flags alone decide, also before any config is
 	// loaded: a usage mistake should not first cost the user a config error.
-	if cmd == cmdAutoversion || cmd == cmdAutoreplace {
+	if cmd == cmdAutoversion || cmd == cmdAutowriter {
 		if !validManifestScope(*o.avManifests, cmd == cmdAutoversion) {
 			bootLog.Error().Str("manifests", *o.avManifests).
 				Msg(manifestScopeHint(cmd == cmdAutoversion))
@@ -190,7 +190,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	var write writeRequest
-	if cmd == cmdWriter || cmd == cmdAutoreplace {
+	if cmd == cmdWriter || cmd == cmdAutowriter {
 		var ok bool
 		if write, ok = parseWriteRequest(cmd, o, usageForCommand, bootLog); !ok {
 			return 2
@@ -423,8 +423,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		if a.AutoVersion(ctx, opts) != nil {
 			return 1
 		}
-	case cmdAutoreplace:
-		if a.AutoReplace(ctx, app.AutoReplaceOptions{
+	case cmdAutowriter:
+		if a.AutoWriter(ctx, app.AutoWriterOptions{
 			Window: window, OnError: *o.onError, Version: write.version,
 			Edits: write.edits, Links: write.links, Manifests: *o.avManifests,
 			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, Strict: *o.strict,
@@ -517,7 +517,7 @@ func parseInvocation(rest []string, usage func(string), log zerolog.Logger) (inv
 			return inv, true
 		}
 		inv.script = rest[1]
-	case cmdPreview, cmdChangelog, cmdAutoversion, cmdAutoreplace, cmdCommit, cmdGithub:
+	case cmdPreview, cmdChangelog, cmdAutoversion, cmdAutowriter, cmdCommit, cmdGithub:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).
 				Msgf("%s takes no arguments (select packages with --package, --space or --group)", inv.cmd)
@@ -599,7 +599,7 @@ func manifestScopeHint(allowNone bool) string {
 }
 
 // writeRequest is the parsed --set-version/--set/--link trio, which
-// `dispat writer` and `dispat autoreplace` spell the same way and differ over
+// `dispat writer` and `dispat autowriter` spell the same way and differ over
 // only in which files they apply it to.
 type writeRequest struct {
 	version string

@@ -182,7 +182,7 @@ func TestManifestsWriterEditsInPlace(t *testing.T) {
 	assert.Equal(t, float64(0), findEvent(t, res.Events, "write complete")["applied"])
 }
 
-// TestManifestsWriterRedirects: --replace manages the directive that points a
+// TestManifestsWriterRedirects: --link manages the directive that points a
 // dependency at a local folder, and an empty path removes it — the round trip
 // a release does around publishing.
 func TestManifestsWriterRedirects(t *testing.T) {
@@ -190,12 +190,12 @@ func TestManifestsWriterRedirects(t *testing.T) {
 	r.WriteFile("packages/api/go.mod", "module github.com/acme/api\n\ngo 1.26\n\nrequire github.com/acme/core v1.2.0\n")
 	gomod := r.Path("packages", "api", "go.mod")
 
-	res := r.Command("writer", "packages/api/go.mod", "--replace", "github.com/acme/core=../core")
+	res := r.Command("writer", "packages/api/go.mod", "--link", "github.com/acme/core=../core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	data, err := os.ReadFile(gomod)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "replace github.com/acme/core => ../core")
-	assert.Contains(t, res.Stdout, "applied  replace  github.com/acme/core  ../core")
+	assert.Contains(t, res.Stdout, "applied  link     github.com/acme/core  ../core")
 
 	// The scanner reads back what the writer just wrote: the two halves agree
 	// on the same file, which is the pair's whole contract.
@@ -205,7 +205,7 @@ func TestManifestsWriterRedirects(t *testing.T) {
 	require.Len(t, deps, 1)
 	assert.Equal(t, "../core", deps[0].(map[string]any)["localPath"])
 
-	res = r.Command("writer", "packages/api/go.mod", "--replace", "github.com/acme/core=")
+	res = r.Command("writer", "packages/api/go.mod", "--link", "github.com/acme/core=")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	data, err = os.ReadFile(gomod)
 	require.NoError(t, err)

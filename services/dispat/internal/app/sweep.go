@@ -15,7 +15,7 @@ import (
 //
 // `dispat run` was the first of these and is still the shape of it — a script
 // per package, providers first, independent packages together — but nothing in
-// here knows about scripts. That is what lets `dispat autoreplace` and the step
+// here knows about scripts. That is what lets `dispat autowriter` and the step
 // commands ride the same rails, and what makes the next such command one small
 // file rather than a copy of this one.
 
@@ -31,7 +31,7 @@ type task func(ctx context.Context) error
 // its own words — while the task it returns is the work itself.
 type packageWork interface {
 	// stage is the value of the `stage` field on every event the sweep logs
-	// about this work: "run:lint", "changelog", "autoreplace".
+	// about this work: "run:lint", "changelog", "autowriter".
 	stage() string
 	// resolve prepares one package's work. A nil task means the package has
 	// nothing to do; an error fails that package alone, exactly as a failing

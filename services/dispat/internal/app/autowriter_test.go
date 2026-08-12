@@ -71,10 +71,10 @@ func arSet(name, rng string) writer.Edit {
 
 // arRun sweeps the whole workspace, which is what --since all does, so a test
 // does not need a git history to reach both packages.
-func arRun(t *testing.T, a *App, pl *plan.Plan, opts AutoReplaceOptions) error {
+func arRun(t *testing.T, a *App, pl *plan.Plan, opts AutoWriterOptions) error {
 	t.Helper()
 	opts.Window.Since = SinceAll
-	work, err := a.newReplaceWork(context.Background(), pl, opts)
+	work, err := a.newWriterWork(context.Background(), pl, opts)
 	if err != nil {
 		return err
 	}
@@ -88,11 +88,11 @@ func arRun(t *testing.T, a *App, pl *plan.Plan, opts AutoReplaceOptions) error {
 	return nil
 }
 
-// TestAutoReplaceEditsEveryCoveredPackage: one --set reaches every package that
+// TestAutoWriterEditsEveryCoveredPackage: one --set reaches every package that
 // declares the dependency, and leaves the ones that do not alone.
-func TestAutoReplaceEditsEveryCoveredPackage(t *testing.T) {
+func TestAutoWriterEditsEveryCoveredPackage(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}}))
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}}))
 	assert.Contains(t, arRead(t, a, "packages/web/package.json"), `"@acme/core": "^2.0.0"`)
 	assert.Contains(t, arRead(t, a, "packages/web/package.json"), `"left-pad": "^1.0.0"`,
 		"an untouched dependency keeps its range")
@@ -100,11 +100,11 @@ func TestAutoReplaceEditsEveryCoveredPackage(t *testing.T) {
 		"a package that declares nothing is left byte for byte alone")
 }
 
-// TestAutoReplaceVersionPlaceholder: {version} in a range is the named
+// TestAutoWriterVersionPlaceholder: {version} in a range is the named
 // package's planned version, and in --set-version the covered package's own.
-func TestAutoReplaceVersionPlaceholder(t *testing.T) {
+func TestAutoWriterVersionPlaceholder(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{
 		Version: VersionPlaceholder,
 		Edits:   []writer.Edit{arSet("@acme/core", "^"+VersionPlaceholder)},
 	}))
@@ -116,22 +116,22 @@ func TestAutoReplaceVersionPlaceholder(t *testing.T) {
 		"a package with nothing pending keeps the version it has")
 }
 
-// TestAutoReplaceRejectsAnUnresolvablePlaceholder: writing "{version}" into a
+// TestAutoWriterRejectsAnUnresolvablePlaceholder: writing "{version}" into a
 // manifest for someone to find later is worse than refusing.
-func TestAutoReplaceRejectsAnUnresolvablePlaceholder(t *testing.T) {
+func TestAutoWriterRejectsAnUnresolvablePlaceholder(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	err := arRun(t, a, pl, AutoReplaceOptions{Edits: []writer.Edit{arSet("left-pad", "^"+VersionPlaceholder)}})
+	err := arRun(t, a, pl, AutoWriterOptions{Edits: []writer.Edit{arSet("left-pad", "^"+VersionPlaceholder)}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "names no package in this workspace")
 	assert.Contains(t, arRead(t, a, "packages/web/package.json"), `"left-pad": "^1.0.0"`,
 		"nothing was written before the refusal")
 }
 
-// TestAutoReplaceOnlyUpdated: an edit naming a package this run does not
+// TestAutoWriterOnlyUpdated: an edit naming a package this run does not
 // release is dropped, and one naming a releasing package is kept.
-func TestAutoReplaceOnlyUpdated(t *testing.T) {
+func TestAutoWriterOnlyUpdated(t *testing.T) {
 	a, pl, buf := arRepo(t)
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{OnlyUpdated: true,
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{OnlyUpdated: true,
 		Edits: []writer.Edit{arSet("@acme/core", "^2.0.0"), arSet("left-pad", "^9.9.9")}}))
 	web := arRead(t, a, "packages/web/package.json")
 	assert.Contains(t, web, `"@acme/core": "^2.0.0"`, "core is releasing, so its edit stands")
@@ -139,83 +139,83 @@ func TestAutoReplaceOnlyUpdated(t *testing.T) {
 	assert.Contains(t, buf.String(), "does not name a package this run updates")
 }
 
-func TestAutoReplaceOnlyUpdatedCanEmptyTheInvocation(t *testing.T) {
+func TestAutoWriterOnlyUpdatedCanEmptyTheInvocation(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	work, err := a.newReplaceWork(context.Background(), pl,
-		AutoReplaceOptions{OnlyUpdated: true, Edits: []writer.Edit{arSet("left-pad", "^9.9.9")}})
+	work, err := a.newWriterWork(context.Background(), pl,
+		AutoWriterOptions{OnlyUpdated: true, Edits: []writer.Edit{arSet("left-pad", "^9.9.9")}})
 	require.NoError(t, err)
 	assert.True(t, work.nothingToWrite(), "a run updating none of the named packages writes nothing")
 }
 
-// TestAutoReplaceRemovesAndAddsARedirect: --link is the writer's, applied
+// TestAutoWriterRemovesAndAddsARedirect: --link is the writer's, applied
 // across the selection.
-func TestAutoReplaceRedirects(t *testing.T) {
+func TestAutoWriterRedirects(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{
 		Links: []writer.Link{{Name: "@acme/core", Path: "../core"}}}))
 	assert.Contains(t, arRead(t, a, "packages/web/package.json"), "file:../core")
 
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{
 		Links: []writer.Link{{Name: "@acme/core"}}}))
 	assert.NotContains(t, arRead(t, a, "packages/web/package.json"), "file:../core",
 		"an empty path removes the redirect again")
 }
 
-// TestAutoReplaceStrictIsAskedAcrossTheSweep: an edit missing from one
+// TestAutoWriterStrictIsAskedAcrossTheSweep: an edit missing from one
 // package's manifest is the ordinary case; an edit no manifest anywhere
 // declares is the stale one.
-func TestAutoReplaceStrictIsAskedAcrossTheSweep(t *testing.T) {
+func TestAutoWriterStrictIsAskedAcrossTheSweep(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	assert.NoError(t, arRun(t, a, pl, AutoReplaceOptions{Strict: true,
+	assert.NoError(t, arRun(t, a, pl, AutoWriterOptions{Strict: true,
 		Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}}),
 		"core does not declare it, web does: the edit landed")
 
-	err := arRun(t, a, pl, AutoReplaceOptions{Strict: true,
+	err := arRun(t, a, pl, AutoWriterOptions{Strict: true,
 		Edits: []writer.Edit{arSet("nowhere", "^2.0.0")}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "1 edit(s) matched no manifest")
 }
 
-// TestAutoReplaceStrictAcceptsAnAlreadyCorrectRange: a re-run writes nothing
+// TestAutoWriterStrictAcceptsAnAlreadyCorrectRange: a re-run writes nothing
 // and must not then report the edit as stale.
-func TestAutoReplaceStrictAcceptsAnAlreadyCorrectRange(t *testing.T) {
+func TestAutoWriterStrictAcceptsAnAlreadyCorrectRange(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	edits := []writer.Edit{arSet("@acme/core", "^2.0.0")}
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{Edits: edits}))
-	assert.NoError(t, arRun(t, a, pl, AutoReplaceOptions{Edits: edits, Strict: true}),
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{Edits: edits}))
+	assert.NoError(t, arRun(t, a, pl, AutoWriterOptions{Edits: edits, Strict: true}),
 		"the second pass changes nothing and is still clean")
 }
 
-// TestAutoReplaceScopeAll reaches a nested manifest the root scope does not.
-func TestAutoReplaceScopeAll(t *testing.T) {
+// TestAutoWriterScopeAll reaches a nested manifest the root scope does not.
+func TestAutoWriterScopeAll(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	arSeed(t, a, "packages/web/example/package.json",
 		`{"name": "example", "version": "0.0.1", "dependencies": {"@acme/core": "^1.0.0"}}`)
 	edits := []writer.Edit{arSet("@acme/core", "^2.0.0")}
 
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{Edits: edits}))
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{Edits: edits}))
 	assert.Contains(t, arRead(t, a, "packages/web/example/package.json"), `"@acme/core": "^1.0.0"`,
 		"the root scope stops at the package folder")
 
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{Edits: edits, Manifests: string(model.ScopeAll)}))
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{Edits: edits, Manifests: string(model.ScopeAll)}))
 	assert.Contains(t, arRead(t, a, "packages/web/example/package.json"), `"@acme/core": "^2.0.0"`)
 }
 
-// TestAutoReplaceOwnVersionStaysOnTheRootManifests: a nested example has its
+// TestAutoWriterOwnVersionStaysOnTheRootManifests: a nested example has its
 // own version story, whatever the scope.
-func TestAutoReplaceOwnVersionStaysOnTheRootManifests(t *testing.T) {
+func TestAutoWriterOwnVersionStaysOnTheRootManifests(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	arSeed(t, a, "packages/core/example/package.json", `{"name": "example", "version": "0.0.1"}`)
-	require.NoError(t, arRun(t, a, pl, AutoReplaceOptions{
+	require.NoError(t, arRun(t, a, pl, AutoWriterOptions{
 		Version: VersionPlaceholder, Manifests: string(model.ScopeAll)}))
 	assert.Contains(t, arRead(t, a, "packages/core/package.json"), `"version": "2.0.0"`)
 	assert.Contains(t, arRead(t, a, "packages/core/example/package.json"), `"version": "0.0.1"`)
 }
 
-// TestAutoReplaceLeavesANestedPackageToItsOwner: under the all scope two
+// TestAutoWriterLeavesANestedPackageToItsOwner: under the all scope two
 // packages whose folders nest would otherwise edit one file from two
 // goroutines at once.
-func TestAutoReplaceLeavesANestedPackageToItsOwner(t *testing.T) {
+func TestAutoWriterLeavesANestedPackageToItsOwner(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	// web now lives inside core's folder, and declares core.
 	nested := filepath.Join(a.root, "packages", "core", "web")
@@ -223,7 +223,7 @@ func TestAutoReplaceLeavesANestedPackageToItsOwner(t *testing.T) {
 	arSeed(t, a, "packages/core/web/package.json",
 		`{"name": "@acme/web", "version": "1.0.0", "dependencies": {"@acme/core": "^1.0.0"}}`)
 
-	work, err := a.newReplaceWork(context.Background(), pl, AutoReplaceOptions{
+	work, err := a.newWriterWork(context.Background(), pl, AutoWriterOptions{
 		Manifests: string(model.ScopeAll), Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	mans, err := work.manifests(context.Background(), pl.Releases["core"])
@@ -232,14 +232,14 @@ func TestAutoReplaceLeavesANestedPackageToItsOwner(t *testing.T) {
 	assert.Equal(t, "package.json", mans[0].Path, "web's manifest is left to web")
 }
 
-func TestAutoReplaceSkipsAPackageWithNothingWritable(t *testing.T) {
+func TestAutoWriterSkipsAPackageWithNothingWritable(t *testing.T) {
 	a, pl, buf := arRepo(t)
 	// A folder with no manifest any writer covers.
 	require.NoError(t, os.RemoveAll(filepath.Join(a.root, "packages", "core", "package.json")))
 	arSeed(t, a, "packages/core/notes.txt", "nothing to parse")
 
-	work, err := a.newReplaceWork(context.Background(), pl,
-		AutoReplaceOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
+	work, err := a.newWriterWork(context.Background(), pl,
+		AutoWriterOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	task, err := work.resolve(context.Background(), pl.Releases["core"])
 	require.NoError(t, err)
@@ -247,16 +247,16 @@ func TestAutoReplaceSkipsAPackageWithNothingWritable(t *testing.T) {
 	assert.Contains(t, buf.String(), "no manifest here that this command can write")
 }
 
-func TestAutoReplaceRejectsAnUnknownScope(t *testing.T) {
+func TestAutoWriterRejectsAnUnknownScope(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	_, err := a.newReplaceWork(context.Background(), pl, AutoReplaceOptions{Manifests: "none"})
+	_, err := a.newWriterWork(context.Background(), pl, AutoWriterOptions{Manifests: "none"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown manifest scope "none"`)
 }
 
-func TestAutoReplaceReportsAPathRelativeToTheRoot(t *testing.T) {
+func TestAutoWriterReportsAPathRelativeToTheRoot(t *testing.T) {
 	a, _, _ := arRepo(t)
-	w := &replaceWork{app: a}
+	w := &writerWork{app: a}
 	assert.Equal(t, "packages/web/package.json",
 		w.relative(filepath.Join(a.root, "packages", "web", "package.json")))
 }
@@ -268,10 +268,10 @@ func TestPlannedVersionIsWhatThePackageEndsUpAt(t *testing.T) {
 }
 
 func TestNeedsWorkspaceOnlyWhenSomethingAsksForIt(t *testing.T) {
-	assert.False(t, AutoReplaceOptions{Edits: []writer.Edit{arSet("a", "1.0.0")}}.needsWorkspace())
-	assert.True(t, AutoReplaceOptions{OnlyUpdated: true}.needsWorkspace())
-	assert.True(t, AutoReplaceOptions{Version: VersionPlaceholder}.needsWorkspace())
-	assert.True(t, AutoReplaceOptions{Edits: []writer.Edit{arSet("a", "^"+VersionPlaceholder)}}.needsWorkspace())
+	assert.False(t, AutoWriterOptions{Edits: []writer.Edit{arSet("a", "1.0.0")}}.needsWorkspace())
+	assert.True(t, AutoWriterOptions{OnlyUpdated: true}.needsWorkspace())
+	assert.True(t, AutoWriterOptions{Version: VersionPlaceholder}.needsWorkspace())
+	assert.True(t, AutoWriterOptions{Edits: []writer.Edit{arSet("a", "^"+VersionPlaceholder)}}.needsWorkspace())
 }
 
 func TestPlannedVersionPrefersTheBaseline(t *testing.T) {
@@ -283,15 +283,15 @@ func TestPlannedVersionPrefersTheBaseline(t *testing.T) {
 		"an unreleasing package is at the version its last release left it at")
 }
 
-// TestAutoReplaceKeepsGoingPastAManifestItCannotRead: a folder holding one
+// TestAutoWriterKeepsGoingPastAManifestItCannotRead: a folder holding one
 // broken manifest and one healthy manifest still gets the healthy one written,
 // which is the partial-result contract every reader here follows.
-func TestAutoReplaceKeepsGoingPastAManifestItCannotRead(t *testing.T) {
+func TestAutoWriterKeepsGoingPastAManifestItCannotRead(t *testing.T) {
 	a, pl, buf := arRepo(t)
 	arSeed(t, a, "packages/web/nested/package.json", "{ this is not json")
 
-	work, err := a.newReplaceWork(context.Background(), pl,
-		AutoReplaceOptions{Manifests: string(model.ScopeAll), Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
+	work, err := a.newWriterWork(context.Background(), pl,
+		AutoWriterOptions{Manifests: string(model.ScopeAll), Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	mans, err := work.manifests(context.Background(), pl.Releases["web"])
 	require.NoError(t, err)
@@ -300,12 +300,12 @@ func TestAutoReplaceKeepsGoingPastAManifestItCannotRead(t *testing.T) {
 	assert.Contains(t, buf.String(), "some manifests failed to parse")
 }
 
-func TestAutoReplaceStopsWhenTheContextIsDone(t *testing.T) {
+func TestAutoWriterStopsWhenTheContextIsDone(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	work, err := a.newReplaceWork(context.Background(), pl,
-		AutoReplaceOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
+	work, err := a.newWriterWork(context.Background(), pl,
+		AutoWriterOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	_, err = work.manifests(ctx, pl.Releases["web"])
 	require.ErrorIs(t, err, context.Canceled, "an interrupted scan is an interruption, not a partial parse")

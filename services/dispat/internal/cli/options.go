@@ -52,7 +52,7 @@ type options struct {
 	// shared by the changelog and github step commands
 	releaseName *string
 
-	// autoversion and autoreplace
+	// autoversion and autowriter
 	avRange, avManifests                    *string
 	avMatch                                 *[]string
 	avNoReplace, avWriteVersion, avSyncLock *bool
@@ -197,7 +197,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.rpSub = fs.StringArray("sub", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")
 	o.strict = fs.Bool("strict", false,
-		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a substitution that matched nothing; for autoreplace, an edit that matched no manifest anywhere")
+		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a substitution that matched nothing; for autowriter, an edit that matched no manifest anywhere")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has

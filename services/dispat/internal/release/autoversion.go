@@ -29,7 +29,7 @@ import (
 // refuses as ambiguous (W220) is never quietly rewritten here either.
 //
 // It is exported because it is the one place the workspace's manifest identity
-// is decided: `dispat autoreplace` resolves a dependency name onto a package
+// is decided: `dispat autowriter` resolves a dependency name onto a package
 // through this index too, and a second answer to "whose manifest name is this"
 // is exactly the kind of drift the index exists to prevent.
 func WorkspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
