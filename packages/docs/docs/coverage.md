@@ -1,7 +1,7 @@
 # Test coverage
 
-The whole test suite currently covers **95.5%** of the workspace's statements (unit layer alone: 89.7%; the integration
-layer's instrumented binary: 85.1%).
+The whole test suite currently covers **95.6%** of the workspace's statements (unit layer alone: 89.6%; the integration
+layer's instrumented binary: 85.3%).
 
 The number is measured the way CI computes the badge on the repository README. Each module's own tests produce one
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
@@ -12,7 +12,8 @@ the overlapping blocks, and the total becomes the badge, always for the latest `
 appear in CI's job summary.
 
 The badge is the authoritative, always-current number. The table below is a hand-run local snapshot, regenerated on
-**2026-08-12** (after the static `env` and `custom` config objects, the `run.allowBranch` and
+**2026-08-12** (after the consumer-keyed `dependencies`, the version component variables, the post-publish critical
+model, `commit.force` and alias tags, on top of the static `env` and `custom` config objects, the `run.allowBranch` and
 behind-remote release guards and `dispat commit --tag-name`, on top of `dispat self-update` and the update notice, on top of `dispat autoreplace` and the package sweep
 every covering command now shares, the `--group` selection, the narrowed `release` and `status`, the manifest-derived
 baselines in `dispat compute`, the github step command, the prerelease record opt-out, per-command help,
@@ -20,24 +21,25 @@ baselines in `dispat compute`, the github step command, the prerelease record op
 
 | Module / package                        | Statement coverage                                                                       |
 |-----------------------------------------|------------------------------------------------------------------------------------------|
-| **workspace total**                     | **95.5%**                                                                                |
+| **workspace total**                     | **95.6%**                                                                                |
 | `pkg/ccme` (commit parser)              | **97.0%**, plus fuzz tests, allocation tests and the specification's conformance vectors |
-| `pkg/models` (public config)            | 100%                                                                                     |
+| `pkg/models` (public config)            | **97.0%**                                                                                |
 | `pkg/manifest` (shared vocabulary)      | 100%                                                                                     |
 | `pkg/scanner` (manifest reader)         | **96.3%**, plus two fuzz targets over every registered parser                            |
 | `pkg/writer` (manifest writer)          | **93.7%**, plus fuzz targets proving rewrites never corrupt valid JSON and that the replacer's arithmetic holds |
 | `services/dispat` (all packages)        | **95.6%** aggregate, `main.go` included (the integration suite runs the real binary)     |
-| - `main.go`, `globx`, `model`, `cli`    | 100%                                                                                     |
+| - `main.go`, `globx`, `model`           | 100%                                                                                     |
+| - `cli` (flags and dispatch)            | 99.8%                                                                                    |
 | - `filter` (the selection resolver)     | 99.4%                                                                                    |
 | - `graph` (scheduler)                   | 98.2%                                                                                    |
-| - `plan` (planner)                      | 96.7%                                                                                    |
+| - `plan` (planner)                      | 96.6%                                                                                    |
 | - `changelog`                           | 98.1%                                                                                    |
 | - `release` (executor)                  | 95.9%                                                                                    |
-| - `config`                              | 96.1%                                                                                    |
-| - `app`                                 | 93.9%                                                                                    |
+| - `config`                              | 95.9%                                                                                    |
+| - `app`                                 | 94.4%                                                                                    |
 | - `github`                              | 94.1%                                                                                    |
 | - `selfupdate`                          | 93.0%                                                                                    |
-| - `gitx`                                | 92.8%                                                                                    |
+| - `gitx`                                | 92.5%                                                                                    |
 | - `script`                              | 92.0%                                                                                    |
 
 The statements still uncovered are almost entirely single-line defensive branches: a `write`/`fsync`/`chmod` failing

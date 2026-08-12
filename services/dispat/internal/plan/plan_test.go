@@ -2,6 +2,10 @@ package plan
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1651,4 +1655,57 @@ func TestPropagatedTransitionStillSkipsPackagesOffTheTrain(t *testing.T) {
 	app := p.Releases["app"]
 	assert.False(t, app.Releasing(), "a stable dependant is not on the train and must not move")
 	assert.Equal(t, ccme.ChannelStable, app.Channel)
+}
+
+// TestDiagnosticCodesAreDocumented: every code dispat defines outside the
+// specification's registry has to appear in the architecture page's inventory
+// of them. That inventory is a claim about what this project emits, and a code
+// added without a line there is a feature nobody can look up.
+func TestDiagnosticCodesAreDocumented(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
+	require.NoError(t, err)
+
+	spec, err := os.ReadFile(filepath.Join(root, "pkg", "ccme", "SPEC.md"))
+	require.NoError(t, err)
+	source, err := os.ReadFile(filepath.Join(root, "services", "dispat", "internal", "plan", "plan.go"))
+	require.NoError(t, err)
+	page, err := os.ReadFile(filepath.Join(root, "packages", "docs", "docs", "architecture.md"))
+	require.NoError(t, err)
+
+	reserved := map[string]bool{}
+	for _, c := range regexp.MustCompile(`\b[EW][0-9]{3}\b`).FindAllString(string(spec), -1) {
+		reserved[c] = true
+	}
+
+	seen := map[string]bool{}
+	for _, m := range regexp.MustCompile(`"([EW][0-9]{3})"`).FindAllStringSubmatch(string(source), -1) {
+		code := m[1]
+		if reserved[code] || seen[code] {
+			continue
+		}
+		seen[code] = true
+		// Either named outright or covered by a range like "`W210`-`W213`".
+		if strings.Contains(string(page), code) || coveredByDocRange(string(page), code) {
+			continue
+		}
+		t.Errorf("%s is dispat's own but the architecture page does not list it", code)
+	}
+	require.NotEmpty(t, seen, "the scan must find dispat's own codes at all")
+}
+
+// coveredByDocRange reports whether the page lists a range "`W210`-`W213`"
+// that contains the code.
+func coveredByDocRange(page, code string) bool {
+	for _, m := range regexp.MustCompile("`([EW])([0-9]{3})`-`([EW])([0-9]{3})`").FindAllStringSubmatch(page, -1) {
+		if m[1] != code[:1] || m[3] != code[:1] {
+			continue
+		}
+		lo, _ := strconv.Atoi(m[2])
+		hi, _ := strconv.Atoi(m[4])
+		n, _ := strconv.Atoi(code[1:])
+		if n >= lo && n <= hi {
+			return true
+		}
+	}
+	return false
 }

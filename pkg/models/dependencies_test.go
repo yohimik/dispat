@@ -155,3 +155,143 @@ func TestDependenciesGrouped(t *testing.T) {
 		t.Errorf("Grouped() = %+v, want %+v", got, want)
 	}
 }
+
+func TestDependenciesMarshalYAML(t *testing.T) {
+	// The YAML writer goes through MarshalYAML rather than MarshalJSON, and
+	// the two have to produce the same shape or a YAML config and a JSON one
+	// would come back from `compute --write` spelled differently.
+	got, err := Dependencies{
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "web", Provider: "utils", Keep: true},
+	}.MarshalYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]any{"web": {"core", map[string]any{"provider": "utils", "keep": true}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MarshalYAML() = %+v, want %+v", got, want)
+	}
+}
+
+func TestProviderList(t *testing.T) {
+	// A package's own list holds the same entries a consumer's does, and is
+	// written back without the consumer, which the key already says.
+	var p ProviderList
+	if err := json.Unmarshal([]byte(`["core", {"provider": "utils", "keep": true}]`), &p); err != nil {
+		t.Fatal(err)
+	}
+	want := ProviderList{{Provider: "core"}, {Provider: "utils", Keep: true}}
+	if !reflect.DeepEqual(p, want) {
+		t.Fatalf("decoded %+v, want %+v", p, want)
+	}
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantJSON = `["core",{"keep":true,"provider":"utils"}]`
+	if string(data) != wantJSON {
+		t.Errorf("marshalled %s, want %s", data, wantJSON)
+	}
+	y, err := p.MarshalYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(y, []any{"core", map[string]any{"provider": "utils", "keep": true}}) {
+		t.Errorf("MarshalYAML() = %+v", y)
+	}
+
+	// One provider needs no array.
+	var single ProviderList
+	if err := json.Unmarshal([]byte(`"core"`), &single); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(single, Providers("core")) {
+		t.Errorf("scalar form decoded %+v", single)
+	}
+}
+
+func TestProviderListErrors(t *testing.T) {
+	if _, err := NormalizeProviders(nil, "dependencies"); err != nil {
+		t.Errorf("an absent list is not an error: %v", err)
+	}
+	for _, tc := range []struct{ name, src, want string }{
+		{"not a list", `7`, "wants a provider name, or an array"},
+		{"bad item", `[7]`, "dependencies[0]: wants a provider name or an object"},
+		{"bad json", `{`, "unexpected end"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var p ProviderList
+			err := json.Unmarshal([]byte(tc.src), &p)
+			if err == nil {
+				t.Fatalf("want an error, got %+v", p)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDependenciesUnmarshalBadJSON(t *testing.T) {
+	var d Dependencies
+	if err := json.Unmarshal([]byte(`{`), &d); err == nil {
+		t.Error("malformed JSON must be an error")
+	}
+}
+
+func TestStringKeyedShapes(t *testing.T) {
+	// Some YAML readers produce map[any]any; a key that is not a string is
+	// not an object dispat can read.
+	if _, ok := stringKeyed(map[any]any{"a": 1}); !ok {
+		t.Error("map[any]any with string keys is an object")
+	}
+	if _, ok := stringKeyed(map[any]any{1: "x"}); ok {
+		t.Error("a non-string key is not an object")
+	}
+	if _, ok := stringKeyed([]any{"nope"}); ok {
+		t.Error("a list is not an object")
+	}
+}
+
+func TestAliasTagConfigBehaviour(t *testing.T) {
+	// Force defaults to the run's setting and overrides it when set.
+	if !(AliasTagConfig{}).ForceEnabled(true) {
+		t.Error("an alias with no opinion follows the run")
+	}
+	if (AliasTagConfig{}).ForceEnabled(false) {
+		t.Error("and follows it when it is off too")
+	}
+	if !(AliasTagConfig{Force: Bool(true)}).ForceEnabled(false) {
+		t.Error("an explicit true wins")
+	}
+	if (AliasTagConfig{Force: Bool(false)}).ForceEnabled(true) {
+		t.Error("an explicit false wins")
+	}
+
+	// No channels means every channel; naming them is case-insensitive,
+	// because a channel is a name a commit message writes by hand.
+	if !(AliasTagConfig{}).AppliesTo("anything") {
+		t.Error("an alias with no channel list applies everywhere")
+	}
+	a := AliasTagConfig{Channels: []string{"stable"}}
+	if !a.AppliesTo("stable") || !a.AppliesTo("STABLE") {
+		t.Error("the named channel matches, case-insensitively")
+	}
+	if a.AppliesTo("rc") {
+		t.Error("an unnamed channel does not")
+	}
+}
+
+func TestCommitForceEnabled(t *testing.T) {
+	var nilCfg *CommitConfig
+	if !nilCfg.ForceEnabled() {
+		t.Error("force defaults to on, nil-safe")
+	}
+	if !(&CommitConfig{}).ForceEnabled() {
+		t.Error("and on an empty object")
+	}
+	if (&CommitConfig{Force: Bool(false)}).ForceEnabled() {
+		t.Error("and off when it says so")
+	}
+}

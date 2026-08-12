@@ -437,15 +437,21 @@ audit) and `W196` (published version adopted from the registry) belong to the sa
 registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`), is implemented and
 emitted.
 
-In the other direction, five codes are dispat's own, outside the specification's registry, attached to features the
-specification predates or does not have. Three are manifest-derived: `W220` (ambiguous manifest name), `W221`
-(rewritten dependency with no configured `dependencies` edge) and `W225` (one package's manifests declaring different
-versions for it). Two belong to [releasing part of the graph](./partial-releases.md): `W230` (a selected package the
-publish order cannot reach yet) and `W231` (a selection releasing part of a versioning group). They are numbered
-clear of `W195`/`W196` on purpose, since the specification reserves those for the audit features above. All five
-follow the registry's numbering conventions and blast-radius rules, and are documented where their features are
-([`compute`](./cli.md), [`autoVersion`](./configuration/spaces.md#autoversion)). `W192`, `W197` and `W203`, the auto-versioning narrations, are
-the specification's own §9.4/§12.4 codes.
+In the other direction, eighteen codes are dispat's own, outside the specification's registry, attached to features the
+specification predates or does not have. They are numbered from `W210` and `E210` upward, clear of the registry (which
+ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserves for the audit features above.
+
+| Codes | Feature |
+|------------------------|--------------------------------------------------|
+| `W210`-`W213`          | [Versioning groups](./versioning.md): a ride, and the three conflicts a shared version can produce |
+| `W220`, `W221`, `W225` | Manifest-derived: an ambiguous manifest name, a rewritten dependency with no configured edge, one package's manifests declaring different versions for it |
+| `W222`, `W223`, `W224` | A record that is already there: a changelog entry, a release tag, a GitHub release. What makes the [step commands](./steps.md) re-runnable |
+| `W230`, `W231`         | [Releasing part of the graph](./partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
+| `W232`                 | An [alias tag](./configuration/alias-tags.md) that could not be written |
+| `E210`-`E214`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
+
+All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features
+are. `W192`, `W197` and `W203`, the auto-versioning narrations, are the specification's own §9.4/§12.4 codes.
 
 ## Testing
 
