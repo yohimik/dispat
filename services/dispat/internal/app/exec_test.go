@@ -162,6 +162,27 @@ func TestExecRefusesAnUnknownSubject(t *testing.T) {
 	}
 }
 
+func TestExecRefusesAnUnknownSubjectEvenWhenTheTextResolved(t *testing.T) {
+	// --script-from can make the lookup succeed while the subject is still
+	// nonsense, which is the one way the environment gets to fail on its own.
+	// It must fail rather than quietly hand the script an empty environment.
+	a := execRepo(t, layeredConfig())
+	from := ExecSubjectRoot()
+	for name, subj := range map[string]ExecSubject{
+		"package": ExecSubjectPackage("ghost"),
+		"space":   ExecSubjectSpace("ghost"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, code, err := runExec(t, a, ExecOptions{
+				Script: "only-root", Subject: subj, ScriptFrom: &from,
+			})
+			require.Error(t, err)
+			assert.Equal(t, 1, code)
+			assert.Contains(t, err.Error(), "ghost")
+		})
+	}
+}
+
 func TestExecScriptFromMovesTheTextAndNotTheEnvironment(t *testing.T) {
 	// The crossed case: core's text, api's context. If --script-from ever
 	// touched the environment the two subjects would collapse back into one,

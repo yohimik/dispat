@@ -120,6 +120,15 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	if _, ok := sf.Package("app"); ok {
 		t.Error("packages without an entry do not resolve")
 	}
+
+	// Spaces resolve by name the same way, for the same viper reason.
+	sfile := File{Spaces: map[string]SpaceConfig{"libs": {Path: "packages"}}}
+	if s, ok := sfile.Space("LIBS"); !ok || s.Path != "packages" {
+		t.Errorf("Space(LIBS) = %+v, %v", s, ok)
+	}
+	if _, ok := sfile.Space("apps"); ok {
+		t.Error("spaces without an entry do not resolve")
+	}
 }
 
 func TestCommandsPreservesOrder(t *testing.T) {
