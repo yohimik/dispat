@@ -121,6 +121,85 @@ func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 		"the tag peels to the released commit")
 }
 
+// TestRecordsTagFailureDoesNotUnpublishTheRelease: the whole post-publish
+// failure model, end to end through the real binary.
+//
+// A tag sitting at a foreign commit is the one tagging failure that is easy
+// to construct and the most dangerous to mishandle. The run must publish, say
+// so, refuse to move the tag, keep going through the packages after the
+// failing one, and still exit non-zero. What it must not do is call the
+// package failed: the artefact is out, and reporting otherwise would skip
+// every consumer and revert a folder for nothing.
+func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Dependencies = models.Dependencies{{Consumer: "consumer", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "consumer")
+	r.Commit("feat(core,consumer): first release")
+
+	// A tag carrying core's planned name, parked on a commit this branch does
+	// not reach — a tag made on someone else's branch. dispat's baseline query
+	// cannot see it, so nothing plans around it and git refuses the write.
+	r.WriteFile("decoy.txt", "not the release commit\n")
+	r.Commit("chore: elsewhere")
+	r.Git("tag", "-a", "core@0.1.0", "-m", "someone else's tag")
+	r.Git("reset", "--hard", "HEAD~1")
+
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "a release missing its tag must not exit green")
+
+	// Published, and the log says both halves of the truth. E210 is
+	// CodeTagFailed; this module cannot import the CLI's internals, so the code
+	// travels as the literal CI would match on.
+	assert.True(t, harness.HasCode(res.Events, "E210"),
+		"the failure is reported under its own code, events:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, `"status":"published"`)
+	assert.NotContains(t, res.Stdout, `"status":"failed"`,
+		"a published package is not a failed one")
+	assert.Contains(t, res.Stdout, `"critical":1`, "and the totals account for it")
+
+	// The consumer had a published provider to build against and released.
+	assert.True(t, r.HasTag("consumer@0.1.0"), "tags: %v", r.TagList())
+
+	// The foreign tag was left exactly where it was: moving it would rewrite a
+	// record this run did not make.
+	assert.Equal(t, "someone else's tag",
+		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@0.1.0"))
+}
+
+// TestRecordsTagAtAnotherCommitIsLeftAlone: the sharper half of the same
+// rule. Here dispat can see the existing tag and can tell it is at the wrong
+// commit, which is reported under its own code (E211) — and the tag is left
+// where it is rather than moved, because a tag that moved here would be
+// force-pushed over the copy on the remote, turning one local mistake into
+// everyone's.
+//
+// It goes through `dispat commit --tag-name` because that is the path that
+// can actually reach the case: a release run plans its version *from* the
+// tags, so it never picks a version whose tag already exists.
+func TestRecordsTagAtAnotherCommitIsLeftAlone(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): first release")
+	// A tag under the package's own format, so the baseline query finds it and
+	// dispat can compare where it points. Its commit is this one.
+	r.Git("tag", "-a", "core@9.9.9", "-m", "someone else's tag")
+	at := r.Git("rev-parse", "HEAD")
+
+	r.WriteFile("packages/core/next.txt", "more work\n")
+	r.Commit("feat(core): more work")
+
+	res := r.Command("commit", "--tag", "--tag-name", "core@9.9.9", "--package", "core")
+	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.HasCode(res.Events, "E211"), "events:\n%s", res.Stdout)
+
+	assert.Equal(t, "someone else's tag",
+		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@9.9.9"),
+		"the existing tag keeps its message")
+	assert.Equal(t, at, r.Git("rev-list", "-n1", "core@9.9.9"), "and its commit")
+}
+
 // TestRecordsReleaseCommitTagsAndPush: commit mode end to end through the
 // real binary against a real (bare) remote — one release commit carrying
 // every published package's changelog, the tags placed on that commit, the

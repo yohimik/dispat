@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -92,25 +94,28 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 	}
 
 	work := &commitWork{app: a, git: git, tag: opts.Tag, tagName: opts.TagName,
-		format: format, include: include}
+		format: format, include: include, crit: &criticals{}}
 	rep, err := a.sweepStep(ctx, pl, covered, work, opts.OnError, "commit")
 	if err != nil {
 		return err
 	}
 	if !opts.Push || rep.Ran == 0 {
-		return nil
+		return work.crit.err()
 	}
-	skipped, err := git.Push(ctx, remote, work.tags)
-	if err != nil {
-		a.log.Error().Err(err).Str("remote", remote).Msg("push failed")
-		return err
-	}
+	skipped, pushErr := git.Push(ctx, remote, work.tags)
 	for _, tag := range skipped {
 		a.log.Warn().Str("tag", tag).Str("remote", remote).
 			Msg("tag already exists on the remote, skipped")
 	}
-	a.log.Info().Str("remote", remote).Strs("tags", work.tags).Msg("pushed")
-	return nil
+	if pushErr != nil {
+		// The commits and tags this run made are already in the repository,
+		// so the push is the copy that is missing, not the work.
+		work.crit.record(a.log, plan.CodePushFailed, pushErr, "push failed",
+			func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", remote) })
+	} else {
+		a.log.Info().Str("remote", remote).Strs("tags", work.tags).Msg("pushed")
+	}
+	return work.crit.err()
 }
 
 // commitWork is `dispat commit`'s share of a sweep: one package's release
@@ -130,6 +135,11 @@ type commitWork struct {
 	format  string
 	include []string
 	tags    []string
+	// crit collects the failures that happen once this package's commit
+	// exists: the tag, and the push at the end. They do not fail the package —
+	// the commit is made, and failing it would cascade a skip onto consumers
+	// whose own commits are fine — and the command reports them on its way out.
+	crit *criticals
 }
 
 // tagFor is the tag this run gives a release: the name the caller supplied, or
@@ -167,10 +177,15 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 			log.Debug().Msg("nothing to commit")
 		}
 		if w.tag {
+			// The commit above is made and cannot be taken back, so a tag that
+			// cannot be written is reported rather than thrown: failing the
+			// package here would skip consumers whose commits are fine.
 			if err := release.CreateReleaseTagAs(ctx, w.git, rel, w.tagName, log); err != nil {
-				return fmt.Errorf("tagging failed: %w", err)
+				w.crit.record(log, release.TagFailureCode(err), err, "tagging failed",
+					func(e *zerolog.Event) *zerolog.Event { return e.Str("tag", tag) })
+			} else {
+				w.tags = append(w.tags, tag)
 			}
-			w.tags = append(w.tags, tag)
 		}
 		if out := os.Getenv(release.OutputEnvVar); out != "" {
 			if err := exportPackageCommit(ctx, w.git, out, name); err != nil {

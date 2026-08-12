@@ -140,19 +140,33 @@ func (a *App) printGraph(pl *plan.Plan) {
 }
 
 // summarize prints one line per processed package plus totals, and returns
-// how many packages failed.
-func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took time.Duration) int {
-	published, failed, skipped, cancelled := 0, 0, 0, 0
+// how many packages failed and how many post-publish steps went wrong.
+//
+// The two counts are separate because they mean different things. A failed
+// package did not release and the next run owes it one. A package with
+// criticals *did* release: what is missing is part of its record, which no
+// re-run will go back and write.
+func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took time.Duration) (failed, critical int) {
+	published, skipped, cancelled := 0, 0, 0
 	for _, name := range pl.Order {
 		res, ok := results[name]
 		if !ok {
 			continue
 		}
+		critical += len(res.Critical)
 		var ev *zerolog.Event
 		switch res.Status {
 		case release.StatusPublished:
 			published++
-			ev = a.log.Info().Str("tag", pl.Releases[name].TagName())
+			// Published, but with something missing from its record: an error
+			// line, because a released package nobody tagged is not news to
+			// bury in the middle of a green summary.
+			if len(res.Critical) > 0 {
+				ev = a.log.Error().Errs("critical", res.Critical)
+			} else {
+				ev = a.log.Info()
+			}
+			ev = ev.Str("tag", pl.Releases[name].TagName())
 		case release.StatusFailed:
 			failed++
 			ev = a.log.Error().Err(res.Err).Str("failedStage", res.FailedStage)
@@ -186,11 +200,16 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 		Int("skipped", skipped).
 		Int("cancelled", cancelled).
 		Int("held", len(pl.Held()))
+	if critical > 0 {
+		// Only when there are any: a "critical: 0" on every healthy run trains
+		// the eye to skip the field on the one run that carries it.
+		ev = ev.Int("critical", critical)
+	}
 	if len(left) > 0 {
 		ev = ev.Int("deselected", len(left))
 	}
 	ev.Int("unchanged", len(pl.Order)-len(results)-len(pl.Held())-len(left)).
 		Dur("took", took).
 		Msg("done")
-	return failed
+	return failed, critical
 }

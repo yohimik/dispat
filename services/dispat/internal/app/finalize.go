@@ -65,6 +65,9 @@ type finalizer struct {
 	gh     *ghDispatch
 	remote string
 	hooks  *runHooks
+	// crit collects what fails in here. Nothing in the finalize phase may
+	// abort it: every package it covers has already published.
+	crit *criticals
 	// skipHooks silences the bracket hooks: an interrupted run still records
 	// what published (the commit, the tags, the push) but runs no more of the
 	// operator's scripts.
@@ -91,9 +94,11 @@ func (f finalizer) run(ctx context.Context, name string, refs []string) {
 // disabled or nothing published, and the "after" hooks only run when the
 // bracketed operation succeeded: a hook observing a commit or push that never
 // happened would be reporting a lie.
-func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, results map[string]*release.Result) error {
+// It returns nothing: every failure it meets is a critical, collected in
+// fin.crit and reported by the caller once the whole run is finished.
+func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, results map[string]*release.Result) {
 	if !a.cfg.Commit.IsEnabled() {
-		return nil
+		return
 	}
 
 	var pkgs, tags, dirs []string
@@ -108,43 +113,60 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		}
 	}
 	if len(pkgs) == 0 {
-		return nil
+		return
 	}
 	dirs = a.appendIncludeDirs(dirs, a.cfg.Commit.Include)
 
+	// Every package in this list has published. From here nothing may abort:
+	// a failure is recorded and the phase carries on to the rest of what it
+	// owes, because the alternative is a released package with no tag, no
+	// changelog entry and no GitHub release, none of which the next run knows
+	// to go back for. See critical.go.
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
 	fin.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
 	committed, err := a.git.CommitDirs(ctx, dirs, msg)
-	if err != nil {
-		a.log.Error().Err(err).Msg("release commit failed")
-		return err
-	}
-	if committed {
+	switch {
+	case err != nil:
+		// Tagging still follows: the tags then point at each package's
+		// exported commit or at HEAD, which is where they would have pointed
+		// had there been no release commit to make.
+		fin.crit.record(a.log, plan.CodeCommitFailed, err, "release commit failed", nil)
+	case committed:
 		a.log.Info().Str("message", msg).Msg("created release commit")
+		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
+	default:
+		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
 	}
-	fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
 	for _, rel := range rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
 		if err := release.CreateReleaseTag(ctx, a.git, rel, a.log); err != nil {
-			a.log.Error().Err(err).Str("tag", rel.TagName()).Msg("tagging failed")
-			return err
+			// One package's tag failing says nothing about the next one's.
+			fin.crit.record(a.log, release.TagFailureCode(err), err, "tagging failed",
+				func(e *zerolog.Event) *zerolog.Event {
+					return e.Str("package", rel.Pkg.Name).Str("tag", rel.TagName())
+				})
 		}
 	}
 	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)
 	if a.cfg.Commit.PushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
 		skipped, err := a.git.Push(ctx, fin.remote, tags)
-		if err != nil {
-			a.log.Error().Err(err).Str("remote", fin.remote).Msg("push failed")
-			return err
-		}
 		for _, tag := range skipped {
 			a.log.Warn().Str("tag", tag).Str("remote", fin.remote).
 				Msg("tag already exists on the remote, skipped")
 		}
-		a.log.Info().Str("remote", fin.remote).Strs("tags", tags).Msg("pushed release commit and tags")
-		fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
+		if err != nil {
+			// The commit and the tags are local records already; the remote
+			// copy is what is missing, and a later push sends it. The GitHub
+			// releases below still go out — they document the release, and
+			// withholding them would lose the second record too.
+			fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
+				func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", fin.remote) })
+		} else {
+			a.log.Info().Str("remote", fin.remote).Strs("tags", tags).Msg("pushed release commit and tags")
+			fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
+		}
 	}
 	if fin.gh != nil && !fin.gh.empty() {
 		// The releases document the exact release commit and tag in their
@@ -164,12 +186,11 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		}
 		for _, rel := range rels {
 			if err := fin.gh.Record(ctx, rel); err != nil {
-				a.log.Error().Err(err).Str("package", rel.Pkg.Name).Msg("github release failed")
-				return err
+				fin.crit.record(a.log, plan.CodeRecordFailed, err, "github release failed",
+					func(e *zerolog.Event) *zerolog.Event { return e.Str("package", rel.Pkg.Name) })
 			}
 		}
 	}
-	return nil
 }
 
 // appendIncludeDirs appends the commit.include paths onto the staging list:

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -95,8 +96,9 @@ func TestSummarize(t *testing.T) {
 			FailedStage: "build", Err: assert.AnError,
 			From: ccme.Version{Major: 1}, To: ccme.Version{Major: 1, Minor: 1}},
 	}
-	failed := a.summarize(pl, results, 3*time.Second)
+	failed, critical := a.summarize(pl, results, 3*time.Second)
 	assert.Equal(t, 1, failed)
+	assert.Zero(t, critical)
 	out := buf.String()
 	assert.Contains(t, out, `"status":"failed"`)
 	assert.Contains(t, out, `"failedStage":"build"`)
@@ -108,12 +110,40 @@ func TestSummarize(t *testing.T) {
 	results["quiet"] = &release.Result{Name: "quiet", Status: release.StatusSkipped,
 		Blocked: true, BlockedBy: "changed"}
 	results["held"] = &release.Result{Name: "held", Status: release.StatusCancelled}
-	assert.Equal(t, 0, a.summarize(pl, results, time.Second))
+	failed, critical = a.summarize(pl, results, time.Second)
+	assert.Zero(t, failed)
+	assert.Zero(t, critical)
+	assert.NotContains(t, buf.String(), `"critical"`,
+		"a healthy run does not carry the field, so the eye does not learn to skip it")
 	out = buf.String()
 	assert.Contains(t, out, `"published":1`)
 	assert.Contains(t, out, `"skipped":1`)
 	assert.Contains(t, out, `"cancelled":1`)
 	assert.Contains(t, out, `"blockedBy":"changed"`)
+}
+
+// TestSummarizeReportsCriticals: a package that published but could not be
+// tagged is still published, and the summary has to say both things. The line
+// is an error rather than the usual info, because "released, and nothing
+// recorded it" is not something to find later by reading carefully.
+func TestSummarizeReportsCriticals(t *testing.T) {
+	a, buf := loggedApp(t)
+	pl := reportPlan()
+	results := map[string]*release.Result{
+		"changed": {Name: "changed", Status: release.StatusPublished,
+			Critical: []error{errors.New("E210: tagging failed: tag refused")},
+			From:     ccme.Version{Major: 1}, To: ccme.Version{Major: 1, Minor: 1}},
+	}
+
+	failed, critical := a.summarize(pl, results, time.Second)
+	assert.Zero(t, failed, "a released package is not a failed one")
+	assert.Equal(t, 1, critical)
+
+	out := buf.String()
+	assert.Contains(t, out, `"status":"published"`)
+	assert.Contains(t, out, `"level":"error"`, "the package's own line is an error")
+	assert.Contains(t, out, "tag refused")
+	assert.Contains(t, out, `"critical":1`, "and the totals carry the count")
 }
 
 func TestPreviewOne(t *testing.T) {

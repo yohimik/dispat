@@ -853,7 +853,10 @@ func TestRunRevertDisabledByDefault(t *testing.T) {
 	assert.Empty(t, rv.dirs, "no revert without revertOnFail")
 }
 
-func TestRunRevertOnRecorderFailure(t *testing.T) {
+// TestRunNoRevertOnRecorderFailure: the package published before the recorder
+// ran, and reverting its folder now would throw away the version bump of
+// something already on its registry — while un-publishing nothing.
+func TestRunNoRevertOnRecorderFailure(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.RevertOnFail = true
 	rv := &fakeReverter{}
@@ -861,8 +864,11 @@ func TestRunRevertOnRecorderFailure(t *testing.T) {
 	ex.Reverter = rv
 	res := ex.Run(context.Background(), p)
 
-	require.Equal(t, StatusFailed, res["a"].Status)
-	assert.Contains(t, rv.dirs, "a", "recorder failure is a publish-stage failure and must revert")
+	assert.Equal(t, StatusPublished, res["a"].Status, "the artefact is out; the status says so")
+	assert.Empty(t, rv.dirs, "nothing is reverted after a publish succeeded")
+	require.Len(t, res["a"].Critical, 1)
+	assert.ErrorContains(t, res["a"].Critical[0], "recorder boom")
+	assert.ErrorContains(t, res["a"].Critical[0], plan.CodeRecordFailed)
 }
 
 func TestRunRevertErrorKeepsFailedStatus(t *testing.T) {
@@ -891,14 +897,19 @@ func TestRunNoRevertOnPlainSkip(t *testing.T) {
 	assert.Equal(t, []string{"a"}, rv.dirs, "only the failed package reverts, not the untouched skipped one")
 }
 
-func TestRunRecorderFailureFailsPackage(t *testing.T) {
+// TestRunRecorderFailureStillTags: one missing record is no reason to lose the
+// others. The tag is what the next run reads the package's version from, so a
+// changelog that could not be written must not cost it.
+func TestRunRecorderFailureStillTags(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	tg := &fakeTagger{}
 	res := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: tg, Changelog: &fakeChangelog{fail: true}, Build: 1, Publish: 1}).Run(context.Background(), p)
 
-	require.Equal(t, StatusFailed, res["a"].Status)
-	assert.ErrorContains(t, res["a"].Err, "recorder boom")
-	assert.Empty(t, tg.tags, "a failed recorder must prevent tagging")
+	assert.Equal(t, StatusPublished, res["a"].Status)
+	assert.Nil(t, res["a"].Err, "a published package carries no failure")
+	assert.Equal(t, []string{"a@1.0.1"}, tg.tags, "the tag is still written")
+	require.Len(t, res["a"].Critical, 1)
+	assert.ErrorContains(t, res["a"].Critical[0], "recorder boom")
 }
 
 func TestRunMultipleRecorders(t *testing.T) {
@@ -1491,18 +1502,26 @@ func (errTagger) CreateTag(context.Context, string, string, string) error {
 	return errors.New("tag refused")
 }
 
-func TestTaggingFailureFailsThePackage(t *testing.T) {
-	// The tag is the durable record of the release (§17): failing to write it
-	// fails the package even though the publish script succeeded, so the next
-	// run replays the leg instead of losing it.
-	p := mkPlan(planSpec{Names: []string{"a"}})
-	r := &fakeRunner{}
-	e := newExecutor(execSpec{Runner: r, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+// TestTaggingFailureIsCriticalNotAFailure: the tag is the durable record of a
+// release (§17), and losing it is serious — the next run reads the package as
+// never released and would publish the same version again. What it is not is a
+// reason to call the package failed: the publish succeeded, and saying
+// otherwise would revert the folder, fire onFail and skip every consumer,
+// none of which takes the release back off its registry.
+func TestTaggingFailureIsCriticalNotAFailure(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a", "b"}, Deps: map[string][]string{"b": {"a"}}})
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
 	e.Tagger = errTagger{}
 	res := e.Run(context.Background(), p)
-	require.Equal(t, StatusFailed, res["a"].Status)
-	assert.Equal(t, "publish", res["a"].FailedStage)
-	assert.Contains(t, res["a"].Err.Error(), "tag refused")
+
+	assert.Equal(t, StatusPublished, res["a"].Status)
+	assert.Empty(t, res["a"].FailedStage)
+	assert.Nil(t, res["a"].Err)
+	require.Len(t, res["a"].Critical, 1)
+	assert.Contains(t, res["a"].Critical[0].Error(), "tag refused")
+	assert.Contains(t, res["a"].Critical[0].Error(), plan.CodeTagFailed)
+	assert.Equal(t, StatusPublished, res["b"].Status,
+		"the consumer has a published provider to build against and must not be skipped")
 }
 
 // inspectingTagger is a Tagger with the tagInspector extension: it reports a

@@ -5,6 +5,7 @@ package release
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -72,6 +73,13 @@ type Result struct {
 	Blocked bool
 	// BlockedBy names the dependency responsible.
 	BlockedBy string
+	// Critical holds what failed after the package published: a release record
+	// that could not be written, a tag that could not be created. The package
+	// is published — Status says so — and these are the parts of the record
+	// that are missing, which is a thing to go and fix rather than a thing to
+	// re-run. They never change Status, and the command they belong to reports
+	// them on its way out.
+	Critical []error
 }
 
 // Tagger creates release tags; *gitx.CLI satisfies it. A nil Tagger on the
@@ -464,6 +472,17 @@ func (tc *taskCtx) sequence(stage string, commands []string, failFast bool) Sequ
 		Commands: commands, Env: tc.env(stage), Log: tc.log, FailFast: failFast}
 }
 
+// critical records a failure that happened after this package published: it
+// is logged with its diagnostic code and kept on the result, and it changes
+// nothing else. The package stays published, its consumers still run, and the
+// command reports the collected criticals on its way out.
+func (tc *taskCtx) critical(res *Result, code string, err error, msg string) {
+	tc.log.Error().Err(err).Str("code", code).Msg(msg)
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	res.Critical = append(res.Critical, fmt.Errorf("%s: %s: %w", code, msg, err))
+}
+
 // hook runs one per-package hook sequence with the package's full environment
 // and DISPAT_STAGE naming the hook. extra entries ("KEY=value") are appended
 // on top — the outcome scripts use them for the failure and skip specifics.
@@ -737,16 +756,21 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error
 	// that loses the tag *after* the publish re-releases a released version on
 	// the next run, which is the one thing the model forbids.
 	recCtx := context.WithoutCancel(ctx)
+	// Neither the recorders nor the tag may fail the package now. The artefact
+	// is on its registry: reporting the package as failed would revert its
+	// folder, run its onFail script and skip every consumer, none of which
+	// un-publishes anything. Each failure is recorded as a critical instead,
+	// the rest of the tail still runs, and the run exits non-zero at the end.
 	for _, rec := range tc.Recorders {
 		if err := rec.Record(recCtx, rel); err != nil {
-			fail(err, "release recording failed")
-			return
+			// The next recorder still runs: a changelog that could not be
+			// written is no reason to skip the GitHub release as well.
+			tc.critical(res, plan.CodeRecordFailed, err, "release recording failed")
 		}
 	}
 	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
 		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.log); err != nil {
-			fail(err, "tagging failed")
-			return
+			tc.critical(res, TagFailureCode(err), err, "tagging failed")
 		}
 	}
 	tc.mu.Lock()
@@ -776,6 +800,27 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result, fail func(error
 		_ = tc.sequence("announce", space.AnnounceScript, false).RunMergingOutputs(ctx, rel)
 	}
 	_ = tc.hook(ctx, "postAnnounce", space.PostAnnounceScript, false)
+}
+
+// ErrTagAtOtherCommit reports a release tag that already exists somewhere
+// other than this release's target commit.
+//
+// The tag is left exactly where it is. Moving it would rewrite a record some
+// earlier run made, and with force-pushing on, the moved tag would carry that
+// over the copy on the remote too — so a local mistake would become everyone's.
+// Leaving it alone keeps the damage where it started and leaves the operator a
+// repository to reason about.
+var ErrTagAtOtherCommit = errors.New("tag already exists at another commit")
+
+// TagFailureCode is the diagnostic code a tagging failure is reported under:
+// the pre-existing-tag case is worth telling apart from every other reason
+// writing a tag can fail, because it is the one an operator resolves by
+// deciding which commit the version really is.
+func TagFailureCode(err error) string {
+	if errors.Is(err, ErrTagAtOtherCommit) {
+		return plan.CodeTagAtOtherCommit
+	}
+	return plan.CodeTagFailed
 }
 
 // tagInspector is the optional Tagger extension the same-commit tag skip
@@ -833,7 +878,8 @@ func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, n
 						Msg("tag already exists at the release commit, skipped")
 					return nil
 				}
-				return fmt.Errorf("tag %s already exists at %s, not at the release commit %s", tag, t.Commit, sha)
+				return fmt.Errorf("%w: %s is at %s, not at the release commit %s",
+					ErrTagAtOtherCommit, tag, t.Commit, sha)
 			}
 		}
 	}

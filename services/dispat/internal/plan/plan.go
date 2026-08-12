@@ -230,6 +230,46 @@ const (
 	// briefly untrue — deliberate, and worth saying out loud.
 	CodeSelectionSplit = "W231"
 
+	// --- after the point of no return ---
+	//
+	// E21x, above the E1xx/E200 range §16's registry defines, for the same
+	// reason the W2xx codes sit where they do: these are dispat's own, and the
+	// specification has nothing to say about them.
+	//
+	// Every one of these marks work that failed *after* something irreversible
+	// already happened — a package published to its registry, a release commit
+	// created. None of them fails a package or stops the run. A release that
+	// is already out cannot be un-published by reporting it as failed, and a
+	// run that gave up here would leave the rest of what it owed undone: the
+	// remaining tags, the push, the GitHub releases. So each is recorded,
+	// logged, and the run carries on to the end, where the collected failures
+	// make the command exit non-zero.
+
+	// CodeTagFailed marks a release tag that could not be created after its
+	// package published. The package stays published — it is — but nothing
+	// records the version, so the next run reads the package as never released
+	// and would release the same version again. Worth fixing by hand before
+	// the next run.
+	CodeTagFailed = "E210"
+	// CodeTagAtOtherCommit marks a release tag that already exists at a commit
+	// that is not this release's. The tag is left exactly where it is: moving
+	// it would rewrite a record another run made, and force-pushing the moved
+	// tag would spread the mistake to the remote.
+	CodeTagAtOtherCommit = "E211"
+	// CodeRecordFailed marks a release record — a changelog entry, a GitHub
+	// release — that could not be written after its package published. The
+	// other recorders still run: a changelog failure is no reason to skip the
+	// GitHub release too.
+	CodeRecordFailed = "E212"
+	// CodeCommitFailed marks a failed release commit. Tagging still follows:
+	// the tags then point where the packages' exported commits or HEAD say,
+	// which is where they would have pointed anyway.
+	CodeCommitFailed = "E213"
+	// CodePushFailed marks a failed push. The commit and the tags exist
+	// locally, so the release is recorded; what is missing is the copy on the
+	// remote, and a later push sends it.
+	CodePushFailed = "E214"
+
 	// --- release outcomes, repository-scoped (§16) ---
 
 	// CodeBadPrereleaseTag rejects an existing prerelease tag whose counter is

@@ -151,18 +151,21 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		// too.
 		hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
 	}
-	finErr := a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, skipHooks: interrupted}, pl, results)
-	failed := a.summarize(pl, results, time.Since(start))
-	if finErr != nil {
-		return results, finErr
-	}
+	crit := &criticals{}
+	a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, crit: crit, skipHooks: interrupted}, pl, results)
+	failed, _ := a.summarize(pl, results, time.Since(start))
+	// Everything the run owed has now been attempted. What is left to decide
+	// is only what to report, in order of what the operator has to do about
+	// it: re-run an interrupted or failed run, or go and repair a release that
+	// is out but under-recorded.
+	crit.adopt(results)
 	if interrupted {
 		return results, ctx.Err()
 	}
 	if failed > 0 {
 		return results, fmt.Errorf("%d package(s) failed", failed)
 	}
-	return results, nil
+	return results, crit.err()
 }
 
 // checkBranchAllowed enforces run.allowBranch: when the guard is set, the
