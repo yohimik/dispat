@@ -433,3 +433,87 @@ func TestAutoWriterLocalFlagsReachTheExitCode(t *testing.T) {
 	res = r.Command("autowriter", "--since", "all", "--strict", "--link-local")
 	assert.Equal(t, 0, res.Code, "derived edits do not trip the stale gate; stdout:\n%s", res.Stdout)
 }
+
+// TestAutoWriterLinkLocalResolvesFromTheManifestFolder: a link path is
+// relative to the manifest that holds it, not to the package folder. A go.mod
+// two levels down resolves "../../" against its own directory, so getting this
+// wrong writes a path that does not exist.
+func TestAutoWriterLinkLocalResolvesFromTheManifestFolder(t *testing.T) {
+	r := arGoRepo(t)
+	r.WriteFile("packages/api/sub/go.mod",
+		"module github.com/acme/api/sub\n\ngo 1.26\n\nrequire github.com/acme/core v0.0.0\n")
+	r.Commit("feat(api): a nested module")
+
+	res := r.Command("autowriter", "--since", "all", "--manifests", "all", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, arRead(t, r, "packages", "api", "go.mod"),
+		"replace github.com/acme/core => ../core")
+	assert.Contains(t, arRead(t, r, "packages", "api", "sub", "go.mod"),
+		"replace github.com/acme/core => ../../core",
+		"the nested module resolves from its own folder, one level deeper")
+}
+
+// TestAutoWriterSetLocalAndLinkLocalInOnePass: the two derive from one walk of
+// the same declarations, so asking for both writes both.
+func TestAutoWriterSetLocalAndLinkLocalInOnePass(t *testing.T) {
+	r := arGoRepo(t)
+
+	res := r.Command("autowriter", "--since", "all", "--set-local", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	api := arRead(t, r, "packages", "api", "go.mod")
+	assert.Contains(t, api, "github.com/acme/core v0.1.0", "the range followed the provider")
+	assert.Contains(t, api, "replace github.com/acme/core => ../core", "and the link was written")
+}
+
+// TestAutoWriterSetLocalSpellsEachEcosystemItsOwnWay: --range goes through the
+// same renderer auto-versioning uses, so one keyword covers a workspace whose
+// packages are not all one ecosystem. go.mod keeps its canonical "v" and a
+// Docker tag stays a bare label, because a caret in a FROM line is not
+// something a registry can resolve.
+func TestAutoWriterSetLocalSpellsEachEcosystemItsOwnWay(t *testing.T) {
+	r := arGoRepo(t)
+	r.WriteFile("packages/api/Dockerfile", "FROM github.com/acme/core:0.0.0\n")
+	r.Commit("feat(api): a base image from the workspace")
+
+	res := r.Command("autowriter", "--since", "all", "--manifests", "all",
+		"--set-local", "--range", "caret")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, arRead(t, r, "packages", "api", "go.mod"), "github.com/acme/core v0.1.0",
+		"go.mod declares exact canonical versions")
+	assert.Contains(t, arRead(t, r, "packages", "api", "Dockerfile"), "FROM github.com/acme/core:0.1.0",
+		"a tag is a label, so the caret is dropped rather than written")
+}
+
+// TestAutoWriterSetLocalTemplateRangeIsVerbatim: a --range template is the
+// operator spelling the range themselves, so it passes through untouched and
+// the ecosystem rules do not soften it. Over a mixed workspace that can hand a
+// Docker manifest something no registry accepts, and the writer refuses it
+// rather than write it. Keyword policies are what cross ecosystems.
+func TestAutoWriterSetLocalTemplateRangeIsVerbatim(t *testing.T) {
+	r := arGoRepo(t)
+	r.WriteFile("packages/api/Dockerfile", "FROM github.com/acme/core:0.0.0\n")
+	r.Commit("feat(api): a base image from the workspace")
+
+	res := r.Command("autowriter", "--since", "all", "--manifests", "all",
+		"--set-local", "--range", "^{version}")
+	assert.Equal(t, 1, res.Code, "the package carrying the Dockerfile fails")
+	assert.Contains(t, res.Stdout, "refusing to write", "and says exactly what it refused")
+	assert.Contains(t, arRead(t, r, "packages", "api", "Dockerfile"), "core:0.0.0",
+		"the file it refused is left as it was")
+}
+
+// TestAutoWriterLinkLocalLeavesTheComputedGraphAlone: a link is a declaration
+// compute already reads, so writing one adds no edge the config did not have.
+// Worth pinning: the graph changing under a local checkout would be a nasty
+// surprise on the next release.
+func TestAutoWriterLinkLocalLeavesTheComputedGraphAlone(t *testing.T) {
+	r := arGoRepo(t)
+
+	before := r.Command("compute", "--check")
+	res := r.Command("autowriter", "--since", "all", "--link-local")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	after := r.Command("compute", "--check")
+	assert.Equal(t, before.Code, after.Code,
+		"linking locally suggests no config change that was not already suggested")
+}
