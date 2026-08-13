@@ -371,6 +371,31 @@ function Reference(): React.ReactElement {
   );
 }
 
+// Community is last on purpose: a reader who got this far has the shape of the
+// tool and is deciding whether to adopt it, which is the moment an invitation
+// is worth anything.
+function Community(): React.ReactElement {
+  return (
+    <section className="container margin-bottom--xl text--center">
+      <Heading as="h2" className={styles.sectionTitle}>
+        Have questions or issues?
+      </Heading>
+      <p className={styles.sectionLead}>
+        Want to share a project you release with dispat? Come and say hello on Discord. Bugs and feature requests are
+        welcome as GitHub issues too, whichever suits you better.
+      </p>
+      <div className={styles.buttons}>
+        <Link className="button button--primary button--lg" href="https://discord.gg/83PwVSCCmk">
+          Join the Discord
+        </Link>
+        <Link className="button button--secondary button--lg" href="https://github.com/yohimik/dispat/issues">
+          Open an issue
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 export default function Home(): React.ReactElement {
   return (
     <Layout
@@ -381,6 +406,7 @@ export default function Home(): React.ReactElement {
         <Features />
         <Libraries />
         <Reference />
+        <Community />
       </main>
     </Layout>
   );

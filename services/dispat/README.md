@@ -155,3 +155,11 @@ disposable git repositories, asserting on git state, JSON logs and nanosecond-re
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
 Together they hold **95.6%** workspace statement coverage
 ([per-package table](https://yohimik.github.io/dispat/internals/coverage), [test inventory](https://yohimik.github.io/dispat/internals/architecture#testing)).
+
+## Community
+
+Have questions or issues? Want to share a project you release with dispat?
+Come and say hello: **[discord.gg/83PwVSCCmk](https://discord.gg/83PwVSCCmk)**.
+
+Bugs and feature requests are welcome as [GitHub issues](https://github.com/yohimik/dispat/issues) too, whichever suits
+you better.

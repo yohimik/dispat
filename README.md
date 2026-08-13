@@ -144,6 +144,14 @@ dispat stands on the shoulders of two things:
   "docker depending on docker depending on npm" provider chain, four levels deep, with parallel builds from the engine
   package to the modded server image.
 
+## Community
+
+Have questions or issues? Want to share a project you release with dispat?
+Come and say hello: **[discord.gg/83PwVSCCmk](https://discord.gg/83PwVSCCmk)**.
+
+Bugs and feature requests are welcome as [GitHub issues](https://github.com/yohimik/dispat/issues) too, whichever suits
+you better.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE.md) file for more information.

@@ -3,6 +3,7 @@ import type {Config} from '@docusaurus/types';
 import {themes as prismThemes} from 'prism-react-renderer';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
+const DISCORD = 'https://discord.gg/83PwVSCCmk';
 
 const config: Config = {
   title: 'dispat',
@@ -180,6 +181,7 @@ const config: Config = {
           title: 'Project',
           items: [
             {label: 'GitHub', href: GITHUB},
+            {label: 'Discord', href: DISCORD},
             {label: 'Releases', href: `${GITHUB}/releases`},
             // The Go modules are listed on the landing page, beside the
             // manifest reader and writer, rather than one of them here.
