@@ -423,19 +423,15 @@ function Install(): React.ReactElement {
         published, and puts it on your <code>PATH</code>.
       </p>
       <div className={styles.install}>
-        <div className={styles.installColumn}>
-          <CodeBlock language="sh" title="Linux and macOS">
-            {INSTALL_CURL}
-          </CodeBlock>
-          <CodeBlock language="sh" title="Linux and macOS, with wget">
-            {INSTALL_WGET}
-          </CodeBlock>
-        </div>
-        <div className={styles.installColumn}>
-          <CodeBlock language="powershell" title="Windows">
-            {INSTALL_WINDOWS}
-          </CodeBlock>
-        </div>
+        <CodeBlock language="sh" title="Linux and macOS">
+          {INSTALL_CURL}
+        </CodeBlock>
+        <CodeBlock language="sh" title="Linux and macOS, with wget">
+          {INSTALL_WGET}
+        </CodeBlock>
+        <CodeBlock language="powershell" title="Windows">
+          {INSTALL_WINDOWS}
+        </CodeBlock>
       </div>
       <p className={styles.sectionLead}>
         After that the binary keeps itself current:{' '}
