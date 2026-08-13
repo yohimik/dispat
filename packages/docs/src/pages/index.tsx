@@ -27,13 +27,30 @@ const INSTALL_CURL = 'curl -fsSL https://raw.githubusercontent.com/yohimik/dispa
 const INSTALL_WGET = 'wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
 const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex';
 
-const TRANSCRIPT = `$ dispat
-12:04:05 INF ● changed bump=minor package=core version="1.2.3 -> 1.3.0"
-12:04:05 INF ● changed bump=patch package=app dueToProviders=[core] version="0.8.1 -> 0.8.2"
-12:04:05 INF release plan ready packages=3 releasing=2
-12:04:05 INF published package=core tag=core@1.3.0
-12:04:05 INF published package=app tag=app@0.8.2
-12:04:05 INF done published=2 failed=0 skipped=0`;
+// The same terminal tour the CLI README opens with, so a reader arriving from
+// either door sees the same thing. Output abridged.
+const TRANSCRIPT = `$ go install github.com/yohimik/dispat/services/dispat@latest
+$ dispat init                       # starter dispat.json (--format yaml/toml)
+
+$ git log --oneline -2
+9f3c2a1 feat(core)^: add streaming api      # ^ = also bump core's direct consumers
+b82d47e fix(utils): close file handle leak
+
+$ dispat status                     # dry run: the full plan, nothing touched
+● changed   package=core   bump=minor  version=1.4.2 -> 1.5.0
+● changed   package=api    bump=patch  version=0.8.2 -> 0.8.3   dueToProviders=[core]
+● changed   package=utils  bump=patch  version=2.0.3 -> 2.0.4
+  unchanged package=docs   version=1.1.0
+release plan ready  packages=4  releasing=3
+
+$ dispat                            # release: build + publish in graph order, in parallel
+published  package=utils  tag=utils@2.0.4
+published  package=core   tag=core@1.5.0
+published  package=api    tag=api@0.8.3    # waited for core's publish
+done  published=3
+
+$ dispat                            # re-running is always safe
+done  published=0  unchanged=4`;
 
 type Feature = {
   title: string;
@@ -169,6 +186,12 @@ function Hero(): React.ReactElement {
         <CodeBlock language="console" className={styles.transcript}>
           {TRANSCRIPT}
         </CodeBlock>
+        <p className={styles.transcriptNote}>
+          (Output abridged.) If <code>api</code>&apos;s build had failed, <code>core</code> and <code>utils</code> would
+          still have shipped, the run would exit non-zero, and the next run would release <code>api</code> at the exact
+          version it was owed. Runs are self-healing, and that failure model is the point of the tool;{' '}
+          <Link to="/concepts">Concepts</Link> explains it.
+        </p>
       </div>
     </header>
   );
@@ -425,6 +448,38 @@ function Reference(): React.ReactElement {
 // Community is last on purpose: a reader who got this far has the shape of the
 // tool and is deciding whether to adopt it, which is the moment an invitation
 // is worth anything.
+// The repository README's Inspiration section, kept in step with it: a reader
+// deciding whether to adopt this wants to know what it descends from.
+function Inspiration(): React.ReactElement {
+  return (
+    <section className="container margin-bottom--xl">
+      <Heading as="h2" className={styles.sectionTitle}>
+        Inspiration
+      </Heading>
+      <p className={styles.sectionLead}>dispat stands on the shoulders of two things.</p>
+      <ul className={styles.reference}>
+        <li>
+          <Link to="https://lerna.js.org/">Lerna</Link>, and the workspaces of{' '}
+          <Link to="https://docs.npmjs.com/cli/using-npm/workspaces">npm</Link> and{' '}
+          <Link to="https://pnpm.io/workspaces">pnpm</Link> it grew up beside. Between them they proved that many
+          packages in one repository can share a dependency graph, and that versioning and publishing all of them can be
+          a single command. dispat takes that idea beyond JavaScript and rebuilds it around an explicit dependency graph
+          and an explicit error model.
+        </li>
+        <li>
+          <Link to="https://www.conventionalcommits.org/">Conventional Commits</Link>: commit messages as
+          machine-readable release intent. dispat&apos;s parser,{' '}
+          <Link to={`${GITHUB}/tree/main/pkg/ccme`}>
+            <code>pkg/ccme</code>
+          </Link>
+          , implements a strict superset of Conventional Commits 1.0.0 that adds the monorepo dimension: scopes as
+          packages, propagation depth, prerelease channels.
+        </li>
+      </ul>
+    </section>
+  );
+}
+
 function Community(): React.ReactElement {
   return (
     <section className="container margin-bottom--xl text--center">
@@ -458,6 +513,7 @@ export default function Home(): React.ReactElement {
         <Libraries />
         <Install />
         <Reference />
+        <Inspiration />
         <Community />
       </main>
     </Layout>

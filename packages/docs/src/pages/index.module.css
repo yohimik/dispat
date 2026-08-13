@@ -196,3 +196,13 @@
 .installColumn > * {
   margin-bottom: 0;
 }
+
+/* The line under the hero transcript: the same caveat the CLI README carries
+   after the same block, sized down so the transcript stays the focus. */
+.transcriptNote {
+  margin: 0 auto;
+  max-width: 46rem;
+  font-size: 0.9rem;
+  text-align: left;
+  color: var(--ifm-color-emphasis-700);
+}
