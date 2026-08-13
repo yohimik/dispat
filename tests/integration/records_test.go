@@ -992,6 +992,15 @@ func TestRecordsAliasTags(t *testing.T) {
 	assert.Contains(t, remote, "refs/tags/v0.1.0")
 	assert.Contains(t, remote, "refs/tags/v0")
 
+	// ...and they stay out of the release commit's subject. `{tags}` names
+	// what this run released, and an alias is not a release: it is a moving
+	// pointer at one. Listing them would make a release of a single package
+	// read as three, and would change the subject's shape the day somebody
+	// added an alias to the config. Asserted whole rather than by absence,
+	// because the alias `v0.1.0` is a substring of the release tag.
+	assert.Equal(t, "chore(release): packages/core/v0.1.0",
+		r.Git("log", "-1", "--format=%s"), "the aliases are pushed, not announced")
+
 	// Release 2: a prerelease writes its own exact ref and must not move the
 	// major onto a release candidate.
 	r.CommitEmpty("feat(core)%rc: a release candidate")

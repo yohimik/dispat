@@ -102,17 +102,27 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		return
 	}
 
-	var pkgs, tags, dirs []string
+	// Two lists, because the two consumers want different things. tags is what
+	// this run released, one per package, and it is what the commit message
+	// names. pushTags additionally carries the aliases, because a "v1" that
+	// exists locally and not on the remote is not the pointer it is for.
+	//
+	// An alias has no business in the message: it is a moving ref rather than
+	// a release, so listing it would make `chore(release): core@1.0.0, v1`
+	// out of a release of exactly one thing, and the subject would change
+	// shape the day somebody adds an alias to the config. `dispat commit`
+	// renders its own message from the release tag alone; this keeps the two
+	// spellings of the same placeholder in agreement.
+	var pkgs, tags, pushTags, dirs []string
 	var rels []*plan.Release
 	for _, name := range pl.Order {
 		if r, ok := results[name]; ok && r.Status == release.StatusPublished {
 			rel := pl.Releases[name]
 			pkgs = append(pkgs, name)
 			tags = append(tags, rel.TagName())
-			// The aliases travel with the release tag: a "v1" that exists
-			// locally and not on the remote is not the pointer it is for.
+			pushTags = append(pushTags, rel.TagName())
 			for _, alias := range rel.AliasTags() {
-				tags = append(tags, alias.Name)
+				pushTags = append(pushTags, alias.Name)
 			}
 			dirs = append(dirs, rel.Pkg.Dir)
 			rels = append(rels, rel)
@@ -157,7 +167,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)
 	if a.cfg.Commit.PushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
-		report, err := a.git.Push(ctx, fin.remote, tags, a.cfg.Commit.ForceEnabled())
+		report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
 		a.reportPush(report, fin.remote)
 		if err != nil {
 			// The commit and the tags are local records already; the remote
@@ -167,7 +177,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
 				func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", fin.remote) })
 		} else {
-			a.log.Info().Str("remote", fin.remote).Strs("tags", tags).Msg("pushed release commit and tags")
+			a.log.Info().Str("remote", fin.remote).Strs("tags", pushTags).Msg("pushed release commit and tags")
 			fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
 		}
 	}
