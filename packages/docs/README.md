@@ -49,6 +49,60 @@ doc, and `/` is the parent of everything, so the landing page is classified as a
 `robots.txt` and `sitemap.xml` are covered in [`static/robots.txt`](./static/robots.txt), which explains why a project
 Pages site can only really rely on the sitemap.
 
+## Installable, and offline for those who ask
+
+[`@docusaurus/plugin-pwa`](https://docusaurus.io/docs/api/plugins/@docusaurus/plugin-pwa) makes the site installable and
+lets the search index above serve without a network. It is pinned to the same exact version as `@docusaurus/core`, like
+every other Docusaurus package here.
+
+**Offline caching is opt-in.** `offlineModeActivationStrategies` is left at the plugin's default trio — `appInstalled`,
+`standalone`, `queryString` — so someone who follows a link to one page never downloads the ~6 MB precache, a third of
+which is `search-index.json`. Installing the app, or opening it standalone, turns it on. `always` would spend that
+bandwidth on everyone. Note that a service worker is registered either way, with a fetch handler that simply does
+nothing when offline mode is off: that is what keeps the site installable for everybody.
+
+Two path rules that look alike and are not:
+
+- **`pwaHead` entries are `baseUrl`-aware.** The plugin prefixes any `href`/`content` whose value has a file extension,
+  so `/manifest.json` ships as `/dispat/manifest.json` while `#1b1b1d` and `yes` pass through untouched. The top-level
+  `headTags` array is *not* — it is emitted verbatim, and the same paths there would 404.
+- **[`static/manifest.json`](./static/manifest.json) is a plain static file.** Nothing rewrites its contents, so every
+  URL inside it spells `/dispat/` out in full.
+
+`scope` and `start_url` are `/dispat/`, never `/`. `yohimik.github.io` is a shared origin hosting every one of these
+project sites, and a `/` scope would make links to unrelated projects open inside the dispat app window. `/dispat/` also
+matches the worker's own scope exactly: the plugin emits `build/sw.js`, served at `/dispat/sw.js`, and a worker's scope
+defaults to the directory it sits in.
+
+The icons in [`static/img/`](./static/img) are derived from the repository's `imgs/logo.png` (295×295, dark art on
+transparency). They are flattened onto white first, because iOS composites `apple-touch-icon` alpha onto black and the
+Android splash draws the icon over `background_color` — a dark mark on transparency disappears in both:
+
+```sh
+sips -s format jpeg -s formatOptions best imgs/logo.png --out /tmp/logo-flat.jpg   # JPEG has no alpha
+sips -s format png /tmp/logo-flat.jpg --out /tmp/logo-flat.png
+
+sips -z 192 192 /tmp/logo-flat.png --out packages/docs/static/img/icon-192.png
+sips -z 512 512 /tmp/logo-flat.png --out packages/docs/static/img/icon-512.png
+sips -z 288 288 /tmp/logo-flat.png -p 512 512 --padColor FFFFFF --out packages/docs/static/img/icon-maskable-512.png
+sips -z 160 160 /tmp/logo-flat.png -p 180 180 --padColor FFFFFF --out packages/docs/static/img/apple-touch-icon.png
+```
+
+The 512 is an upscale from 295 and softens the edges slightly; regenerate from a vector source if one ever lands in
+`imgs/`. Chrome requires a 512 for installability, so it cannot simply be dropped. The maskable art is 288 px because
+the safe zone is the centred circle at 80% of the canvas, and the largest square inside a 409.6 px circle has side
+409.6/√2.
+
+To test any of this: the plugin returns early unless `NODE_ENV=production`, so **nothing appears in `pnpm docs:start`**.
+Build, then `pnpm --filter dispat-docs serve` and open `http://localhost:3000/dispat/?offlineMode=true` — service
+workers need a secure context, which `localhost` is and a LAN IP is not. Cache Storage staying empty *without* that
+query string is the feature working, not a bug. DevTools → Application → Manifest is the check that matters; Lighthouse
+dropped its PWA category in Chrome 129.
+
+One thing to know before ever removing this: a registered service worker outlives the plugin that installed it. Backing
+PWA support out means shipping one release whose `swCustom` calls `self.registration.unregister()` and purges the
+caches, and only then deleting the plugin.
+
 ## Release
 
 The `docs` package is released by dispat like any other, with a `keep: true` dependency on `dispat` so the site is

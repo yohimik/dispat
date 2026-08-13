@@ -1,3 +1,4 @@
+import type {Options as PwaOptions} from '@docusaurus/plugin-pwa';
 import type * as Preset from '@docusaurus/preset-classic';
 import type {Config} from '@docusaurus/types';
 import {themes as prismThemes} from 'prism-react-renderer';
@@ -29,6 +30,61 @@ const config: Config = {
   // imgs/ lives at the repository root and is shared with the READMEs, so it
   // is mounted rather than copied. Anything added there is published too.
   staticDirectories: ['static', '../../imgs'],
+
+  plugins: [
+    [
+      // Installable, and readable offline once installed. The plugin emits
+      // build/sw.js, served at /dispat/sw.js, so the worker's scope is the
+      // directory it sits in: it cannot touch the other projects sharing the
+      // yohimik.github.io origin. None of this exists in `docusaurus start` --
+      // the plugin returns null outside NODE_ENV=production, so a service
+      // worker only appears in a real build.
+      '@docusaurus/plugin-pwa',
+      {
+        debug: false,
+        // The plugin's own default set, spelled out. Offline mode is what
+        // decides whether the worker precaches the whole site (~6 MB, a third
+        // of it the search index) and starts answering fetches from the cache;
+        // without it the worker installs and does nothing. 'always' would push
+        // that download onto every drive-by reader, so offline stays opt-in:
+        // installed, running standalone, or ?offlineMode=true for debugging.
+        offlineModeActivationStrategies: ['appInstalled', 'queryString', 'standalone'],
+        // The cast is the plugin's type being wrong, not this config: it types
+        // this field as a full workbox InjectManifestOptions, which demands a
+        // swSrc -- while the plugin sets swSrc, swDest and globDirectory itself
+        // *after* spreading this object, under the comment "not overrideable".
+        injectManifestConfig: {
+          // search-index.json is 1.8 MB, 86% of workbox's 2 MiB default, and
+          // anything over that default is dropped from the precache silently:
+          // offline search would switch itself off, without a word, once the
+          // docs grow another 16%.
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        } as PwaOptions['injectManifestConfig'],
+        // href/content values carrying a file extension are baseUrl-prefixed by
+        // the plugin itself, so '/manifest.json' ships as
+        // '/dispat/manifest.json'. Colours and 'yes' have no extension and pass
+        // through untouched. These cannot move to the headTags array below:
+        // that one is emitted verbatim, and the paths would 404.
+        pwaHead: [
+          {tagName: 'link', rel: 'manifest', href: '/manifest.json'},
+          {tagName: 'meta', name: 'theme-color', content: '#1b1b1d'},
+          {tagName: 'meta', name: 'mobile-web-app-capable', content: 'yes'},
+          {tagName: 'meta', name: 'apple-mobile-web-app-capable', content: 'yes'},
+          {tagName: 'meta', name: 'apple-mobile-web-app-title', content: 'dispat'},
+          // Safari accepts default | black | black-translucent here and nothing
+          // else; a hex colour silently degrades to 'default'.
+          {tagName: 'meta', name: 'apple-mobile-web-app-status-bar-style', content: 'black'},
+          {tagName: 'link', rel: 'apple-touch-icon', href: '/img/apple-touch-icon.png'},
+          {tagName: 'meta', name: 'msapplication-TileImage', content: '/img/icon-192.png'},
+          {tagName: 'meta', name: 'msapplication-TileColor', content: '#1b1b1d'},
+        ],
+        // swRegister is left at its default: that file is what implements the
+        // strategies above. reloadPopup is not an option at all in v3 -- it is
+        // Joi.forbidden() and fails the build; the reload prompt is
+        // @theme/PwaReloadPopup, customised by swizzling if it ever needs to be.
+      } satisfies PwaOptions,
+    ],
+  ],
 
   presets: [
     [

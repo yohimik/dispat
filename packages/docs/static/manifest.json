@@ -1,0 +1,40 @@
+{
+  "id": "/dispat/",
+  "name": "dispat — release orchestration for polyglot monorepos",
+  "short_name": "dispat",
+  "description": "Release orchestration for polyglot monorepos: conventional commits in, ordered parallel publishes out.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/dispat/",
+  "scope": "/dispat/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1b1b1d",
+  "theme_color": "#1b1b1d",
+  "categories": ["developer", "productivity"],
+  "icons": [
+    {
+      "src": "/dispat/img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/dispat/img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/dispat/img/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {"name": "Getting started", "url": "/dispat/getting-started"},
+    {"name": "CLI reference", "url": "/dispat/cli"},
+    {"name": "Configuration", "url": "/dispat/configuration"}
+  ]
+}
