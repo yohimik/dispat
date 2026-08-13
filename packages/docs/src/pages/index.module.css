@@ -38,6 +38,7 @@
 
 .badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: center;
   align-items: center;
@@ -51,6 +52,7 @@
 
 .buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   justify-content: center;
   margin-bottom: 2rem;
@@ -191,10 +193,18 @@
   flex: 1 1 24rem;
   flex-direction: column;
   gap: 1rem;
+  /* A flex item's automatic minimum size is its content's, and an install
+     command is one unbreakable ~90-character URL, so without this the column
+     refuses to shrink below that URL and takes the whole document with it: on
+     a phone the page ends up twice the viewport wide and every section is
+     clipped. Allowing it to shrink is what lets the code block's own
+     overflow-x do its job and scroll the URL inside the block instead. */
+  min-width: 0;
 }
 
 .installColumn > * {
   margin-bottom: 0;
+  min-width: 0;
 }
 
 /* The line under the hero transcript: the same caveat the CLI README carries
