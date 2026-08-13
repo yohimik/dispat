@@ -20,12 +20,12 @@ import styles from './index.module.css';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 
-const INSTALL_UNIX = `# Linux and macOS, with curl or wget
-curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
-wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh`;
-
-const INSTALL_WINDOWS = `# Windows, in PowerShell
-irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex`;
+// One command per block, and the platform in the block's title rather than in
+// a leading comment: the copy button then hands over exactly what you run, and
+// a reader copying the Linux block never carries the wget alternative with it.
+const INSTALL_CURL = 'curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
+const INSTALL_WGET = 'wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
+const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex';
 
 const TRANSCRIPT = `$ dispat
 12:04:05 INF ● changed bump=minor package=core version="1.2.3 -> 1.3.0"
@@ -355,8 +355,19 @@ function Install(): React.ReactElement {
         published, and puts it on your <code>PATH</code>.
       </p>
       <div className={styles.install}>
-        <CodeBlock language="sh">{INSTALL_UNIX}</CodeBlock>
-        <CodeBlock language="powershell">{INSTALL_WINDOWS}</CodeBlock>
+        <div className={styles.installColumn}>
+          <CodeBlock language="sh" title="Linux and macOS">
+            {INSTALL_CURL}
+          </CodeBlock>
+          <CodeBlock language="sh" title="Linux and macOS, with wget">
+            {INSTALL_WGET}
+          </CodeBlock>
+        </div>
+        <div className={styles.installColumn}>
+          <CodeBlock language="powershell" title="Windows">
+            {INSTALL_WINDOWS}
+          </CodeBlock>
+        </div>
       </div>
       <p className={styles.sectionLead}>
         After that the binary keeps itself current:{' '}
