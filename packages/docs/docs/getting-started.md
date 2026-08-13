@@ -264,6 +264,10 @@ Notes:
   itself. [GitHub releases](./configuration/records.md#github) are created for every published package whose scripts
   exported `DISPAT_EXPORT_GITHUB`, with the export's file paths attached as assets; see
   [script outputs](./reference/environment.md#script-outputs) for the export mechanism.
-- Concurrent dispat runs on the same checkout are not guarded by a lock, so serialize release jobs in CI.
+- Two releases at once are refused rather than raced. Before it plans anything, a run claims the repository by pushing
+  a `dispat-release-lock` tag to your remote; if the name is already taken the push is rejected and the run stops
+  having done nothing. The tag is given back on every way out, a failed package and a Ctrl-C included. So a second job
+  triggered while the first is still going is told to come back later instead of publishing the same versions twice.
+  See [The release lock](./reference/releasing/release-lock.md).
 - The exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.
   On pull requests, run `dispat status` to review the plan before it becomes a release.
