@@ -345,7 +345,7 @@ Failed or skipped consumers are not lost across runs, and nothing about that dep
 not stable under merges, rebases or equal timestamps, and are used for reporting only. A commit propagates to a
 dependant while the *dependant's* window still contains it, so a consumer that missed a run is simply still owed its
 release (`DueTo` then contains an *unchanged* provider: it gets no task nodes, and the version stage passes its released
-version — the case that makes `Updates` a union of `DueTo` and this run's releasing providers rather than either
+version, the case that makes `Updates` a union of `DueTo` and this run's releasing providers rather than either
 alone). A consumer that was never released while a provider has been is the same case, with the whole history as its
 window. Such a release is labelled a catch-up and reported with the origin's published version.
 
@@ -461,7 +461,7 @@ registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`,
 emitted. What each of those six means for somebody looking at one, and what to do about it, is in
 [When there is no plan](../reference/plan-errors.md).
 
-In the other direction, eighteen codes are dispat's own, outside the specification's registry, attached to features the
+In the other direction, twenty codes are dispat's own, outside the specification's registry, attached to features the
 specification predates or does not have. They are numbered from `W210` and `E210` upward, clear of the registry (which
 ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserves for the audit features above.
 
