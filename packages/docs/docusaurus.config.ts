@@ -175,6 +175,8 @@ const config: Config = {
             {label: 'Cookbook', to: '/cookbook'},
             {label: 'CLI', to: '/cli'},
             {label: 'Configuration', to: '/configuration'},
+            {label: 'Reference', to: '/reference/commits'},
+            {label: 'Internals', to: '/internals/architecture'},
           ],
         },
         {

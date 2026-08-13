@@ -29,15 +29,12 @@ configuration you can paste and adapt.
 
 ## Releasing
 
-How a release behaves once it is more than one package, and the controls for the cases that are not a plain
-everything-at-once run.
-
-| Page | Covers |
-|------|--------|
-| [Shared versions](./releasing/versioning.md) | Packages that must move together: the seven versioning modes, groups that cross spaces, and what a "ride" is. |
-| [Release steps](./releasing/steps.md) | Running the pipeline's own steps yourself, at the moment your flow needs them, and how the release then knows to skip them. |
-| [Partial releases](./releasing/partial-releases.md) | Releasing part of the graph on purpose, and what publish order withholds when you do. |
-| [The release lock](./releasing/release-lock.md) | One tag on the remote deciding who releases, so two runs are refused rather than raced. |
+How a release behaves once it is more than one package lives in
+[Reference → Releasing](../reference/releasing/versioning.md): the [shared versioning
+modes](../reference/releasing/versioning.md), [running the pipeline's own steps
+yourself](../reference/releasing/steps.md), [releasing part of the
+graph](../reference/releasing/partial-releases.md), and [the release
+lock](../reference/releasing/release-lock.md).
 
 ## Editing the monorepo
 

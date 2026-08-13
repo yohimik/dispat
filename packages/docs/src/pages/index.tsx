@@ -138,7 +138,7 @@ const FEATURES: Feature[] = [
         thing the release normally does, at the moment your own flow needs it, and the release stage then finds the
         work done and skips it. <code>dispat if</code> branches on an environment variable and <code>dispat exec</code>{' '}
         runs one declared script once.{' '}
-        <Link to="/cookbook/releasing/steps">Release steps.</Link>
+        <Link to="/reference/releasing/steps">Release steps.</Link>
       </>
     ),
   },

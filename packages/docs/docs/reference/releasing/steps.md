@@ -18,7 +18,7 @@ There are four:
 | `dispat commit`     | Makes each package's release commit, and can tag and push it        |
 | `dispat github`     | Creates each package's GitHub release                               |
 
-[`dispat autowriter`](../editing/autowriter.md) is not one of them, since it does something a release never does on its own, but
+[`dispat autowriter`](../../cookbook/editing/autowriter.md) is not one of them, since it does something a release never does on its own, but
 it covers packages by the same rules, so everything on this page about choosing what a command covers applies to it
 too.
 
@@ -153,7 +153,7 @@ Creates the GitHub release for each covered package: named after the tag, with t
 A package is only released if it opted in, the same way it opts in during a normal run. There are two ways to opt in:
 
 1. A script exported `DISPAT_EXPORT_GITHUB`. Its value lists the files to attach, and an empty value means "release me,
-   no attachments". See [script outputs](../../reference/environment.md#script-outputs).
+   no attachments". See [script outputs](../environment.md#script-outputs).
 2. [`github.allPackages`](../../configuration/records.md#github) is on, which opts every published package in.
 
 If neither applies, the command creates nothing and exits `0`. It is not an error to have nothing to publish.
@@ -223,4 +223,4 @@ registry expects.
 - [CLI reference](../../cli/README.md) for every flag each command takes.
 - [Stages and hooks](../../configuration/spaces.md#stages-and-hooks) for where in a flow you can put a script.
 - [Release records](../../configuration/records.md) for what the changelog, GitHub and commit settings control.
-- [Script environment](../../reference/environment.md) for the variables a stage script receives.
+- [Script environment](../environment.md) for the variables a stage script receives.

@@ -128,7 +128,7 @@ Neither runs for a package that published (that is `flow.postPublish` and the an
 
 How the versions of a space's packages relate to each other. Two axes decide it: how much of the version the group
 holds in common, and what happens to a member that has nothing of its own to release when the shared part moves. The
-walkthrough with worked examples is [Shared versions](../cookbook/releasing/versioning.md); this is the reference.
+walkthrough with worked examples is [Shared versions](../reference/releasing/versioning.md); this is the reference.
 
 | Value                     | Shares          | Effect                                                                                                                                                                                                                             |
 |---------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

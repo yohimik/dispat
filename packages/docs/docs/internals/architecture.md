@@ -9,7 +9,7 @@ Steps 1-2 are the command-line controller (`internal/cli`, behind the thin `main
 from discovery on is the `app` package's `Status` (steps 3-6) and `Release` (all of them), so the same operations are
 callable without a command line.
 
-`Release` brackets steps 3 onward with the [release lock](../cookbook/releasing/release-lock.md): an annotated `dispat-release-lock` tag
+`Release` brackets steps 3 onward with the [release lock](../reference/releasing/release-lock.md): an annotated `dispat-release-lock` tag
 pushed, unforced, to `commit.remote` before discovery, and deleted from the remote and the clone on the way out, under
 a context detached from cancellation so an interrupt still gives it back. A rejected push means a release is already
 running against this repository, and the run stops there with exit `1`, before it has read a single tag.
@@ -322,7 +322,7 @@ changes which releases get cancelled or contained.
 ## Failure semantics
 
 **Once the release work starts, no error aborts the run.** Everything that can refuse a release happens before any of
-it: the [release lock](../cookbook/releasing/release-lock.md), a blocked plan, the branch guard, the behind-remote check, the remote and
+it: the [release lock](../reference/releasing/release-lock.md), a blocked plan, the branch guard, the behind-remote check, the remote and
 GitHub verification, and the `beforeAll` hook. Those refuse while nothing has happened yet, which is the only moment refusing costs nothing. From the first
 build script onward the run always goes to the end: a package can fail, and its consumers can be skipped behind it, but
 every other package still releases and the finalize phase still records whatever published. The only thing that stops a
@@ -466,12 +466,12 @@ ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserve
 
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
-| `W210`-`W213`          | [Versioning groups](../cookbook/releasing/versioning.md): a ride, and the three conflicts a shared version can produce |
+| `W210`-`W213`          | [Versioning groups](../reference/releasing/versioning.md): a ride, and the three conflicts a shared version can produce |
 | `W220`-`W222`, `W225` | Manifest-derived: an ambiguous manifest name, a rewritten dependency with no configured edge, a replace rule that matched nothing, one package's manifests declaring different versions for it |
-| `W223`, `W224`, `W226` | A record that is already there: a release tag, a GitHub release, a changelog entry. What makes the [step commands](../cookbook/releasing/steps.md) re-runnable |
-| `W230`, `W231`         | [Releasing part of the graph](../cookbook/releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
+| `W223`, `W224`, `W226` | A record that is already there: a release tag, a GitHub release, a changelog entry. What makes the [step commands](../reference/releasing/steps.md) re-runnable |
+| `W230`, `W231`         | [Releasing part of the graph](../reference/releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
-| `W233`                 | A [versioning group](../cookbook/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
+| `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
 | `E210`-`E214`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 
 All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features

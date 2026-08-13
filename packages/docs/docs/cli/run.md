@@ -35,7 +35,7 @@ narrow to the same folders.
 ## Choosing the packages
 
 Three flags name the same thing three ways. `--package` (`-p`) names packages. `--space` (`-s`) names spaces, and
-selects every package of one. `--group` (`-g`) names [versioning groups](../cookbook/releasing/versioning.md), and selects every package
+selects every package of one. `--group` (`-g`) names [versioning groups](../reference/releasing/versioning.md), and selects every package
 that versions with the rest of the group. All three are repeatable and comma-separated (`-p core,web`,
 `-p core -p web`), matched case-insensitively, and all three accept `*` globs: `-p '@acme/*'` for a prefix, `-p '*'`
 for every package, `-s '*'` for every space, `-g '*'` for every group. Quote a glob, or the shell expands it first. No
@@ -118,7 +118,7 @@ Beside the [global flags](./README.md#global-flags):
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autosubstitute`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
 | `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../cookbook/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
+| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
 | `--since`             |             | The same seven commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
 | `--consumers`         |             | The same seven commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
 | `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autosubstitute`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |

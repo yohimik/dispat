@@ -21,17 +21,6 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'cookbook/recipes', label: 'Recipes'},
         {
           type: 'category',
-          label: 'Releasing',
-          collapsed: true,
-          items: [
-            {type: 'doc', id: 'cookbook/releasing/versioning', label: 'Shared versions'},
-            {type: 'doc', id: 'cookbook/releasing/steps', label: 'Release steps'},
-            {type: 'doc', id: 'cookbook/releasing/partial-releases', label: 'Partial releases'},
-            {type: 'doc', id: 'cookbook/releasing/release-lock', label: 'The release lock'},
-          ],
-        },
-        {
-          type: 'category',
           label: 'Editing the monorepo',
           collapsed: true,
           items: [
@@ -96,6 +85,17 @@ const sidebars: SidebarsConfig = {
       items: [
         {type: 'doc', id: 'reference/commits', label: 'Commit messages'},
         {type: 'doc', id: 'reference/environment', label: 'Script environment'},
+        {
+          type: 'category',
+          label: 'Releasing',
+          collapsed: true,
+          items: [
+            {type: 'doc', id: 'reference/releasing/versioning', label: 'Shared versions'},
+            {type: 'doc', id: 'reference/releasing/steps', label: 'Release steps'},
+            {type: 'doc', id: 'reference/releasing/partial-releases', label: 'Partial releases'},
+            {type: 'doc', id: 'reference/releasing/release-lock', label: 'The release lock'},
+          ],
+        },
         {type: 'doc', id: 'reference/ci', label: 'dispat in CI'},
         {type: 'doc', id: 'reference/self-update', label: 'Updating dispat'},
       ],

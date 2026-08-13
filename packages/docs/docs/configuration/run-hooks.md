@@ -48,7 +48,7 @@ A `*` matches any run of characters, separators included, so `release/*` reaches
 has no branch name, so it matches nothing, including a pattern as broad as `*`.
 
 The guard is about releasing, not about looking. Read-only commands (`status`, `preview`, `compute`) work on any branch,
-which is what you want on a pull request. The [step commands](../cookbook/releasing/steps.md) are not guarded either: they are built to run
+which is what you want on a pull request. The [step commands](../reference/releasing/steps.md) are not guarded either: they are built to run
 inside a release stage that this guard has already cleared.
 
 Leave the list unset to release from any branch. That suits single-branch repositories and disposable clones, and it is

@@ -291,7 +291,7 @@ anyway. Either way the command fails at the end.
 - One file, one change, no config and no repository needed: [`dispat writer`](./manifests.md#changing-a-manifest).
 - One change, every package the plan picks: this command.
 - Reconcile every workspace dependency to the versions a release computed, without listing them:
-  [`dispat autoversion`](../releasing/steps.md#dispat-autoversion). It reads the graph and works out the edits itself; autowriter
+  [`dispat autoversion`](../../reference/releasing/steps.md#dispat-autoversion). It reads the graph and works out the edits itself; autowriter
   applies the edits you name.
 - Text no manifest parser understands: [the replacer](./replacer.md).
 

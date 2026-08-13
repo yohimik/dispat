@@ -316,7 +316,7 @@ Two things `force` deliberately does not do:
   all, because it is a record some earlier run made, and a tag moved here would then be force pushed over the copy on
   the remote, turning one local mistake into everyone's. Force means "do not fail because the ref exists", not
   "overwrite whatever is there".
-- **The [release lock](../cookbook/releasing/release-lock.md) is never forced.** Its whole purpose is to fail when the name is taken, since
+- **The [release lock](../reference/releasing/release-lock.md) is never forced.** Its whole purpose is to fail when the name is taken, since
   a run that took the lock by overwriting somebody else's would be releasing beside them.
 
 The one case force does change for release tags is a tag on a commit the current branch cannot reach: dispat's baseline

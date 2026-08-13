@@ -16,7 +16,7 @@ version that does not exist yet (§19.2). It is reported as `W230` with the prov
 selection still releases, and the next run releases it. The rule is transitive, and a provider that is unchanged or
 held is nothing to wait for.
 
-A [versioning group](../cookbook/releasing/versioning.md) is the softer case: a selection that takes only part of one releases and warns
+A [versioning group](../reference/releasing/versioning.md) is the softer case: a selection that takes only part of one releases and warns
 (`W231`). Nothing goes out of order, and the members left behind are ridden up to the group's version by the next run
 (`W210`), so the split is temporary and needs no operator. Naming the group itself, `dispat release -g platform`,
 takes every member at once and so can never split it.
@@ -25,7 +25,7 @@ takes every member at once and so can never split it.
 nothing does. On `status` it exits `1` for the same selections, which makes it a gate to put in front of a release
 job. The graph is printed either way, so a refusal always comes with the plan that explains it.
 
-The full guide, with worked output, is [Partial releases](../cookbook/releasing/partial-releases.md).
+The full guide, with worked output, is [Partial releases](../reference/releasing/partial-releases.md).
 
 ## The release lock
 
@@ -39,7 +39,7 @@ the remote either way. [`unsafeDisableLock: true`](../configuration/README.md) i
 `DISPAT_UNSAFE_DISABLE_LOCK=true` in the environment, switches it off, which is what a repository with no remote to
 coordinate through needs. No other command takes it.
 
-The full guide, including how to clear a lock a killed run left behind, is [The release lock](../cookbook/releasing/release-lock.md).
+The full guide, including how to clear a lock a killed run left behind, is [The release lock](../reference/releasing/release-lock.md).
 
 ## Flags
 
@@ -49,5 +49,5 @@ Beside the [global flags](./README.md#global-flags):
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autosubstitute`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
 | `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../cookbook/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
+| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
 | `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](./release.md). |

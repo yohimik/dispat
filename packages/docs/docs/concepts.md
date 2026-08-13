@@ -109,7 +109,7 @@ Two commits under each mode, for a space of `a` and `b`, both at `1.0.0`, where 
 | `fixedMajorSparse`      | stays `1.0.0`: a minor is not shared        | stays `1.0.0` until its own next change     |
 
 `a` releases `1.1.0` and `2.0.0` in every row. The walkthrough, with worked examples and the rules for groups that span
-spaces, is [Shared versions](./cookbook/releasing/versioning.md).
+spaces, is [Shared versions](./reference/releasing/versioning.md).
 
 ### Release control
 
