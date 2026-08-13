@@ -157,6 +157,22 @@ disposable git repositories, asserting on git state, JSON logs and nanosecond-re
 Together they hold **95.6%** workspace statement coverage
 ([per-package table](https://yohimik.github.io/dispat/internals/coverage), [test inventory](https://yohimik.github.io/dispat/internals/architecture#testing)).
 
+## Next: 1.1.0
+
+**Not in 1.0.0.** This is what the next release is being built around, written down so the shape of it is not a
+surprise. Nothing described here exists yet, and nothing in 1.0.0 depends on it.
+
+**Managing the tools a release needs.** Today every stage script assumes its tools are already on the machine, so
+getting them there is somebody else's problem: a CI setup step, a Dockerfile layer, a package manager, or a `curl`
+line at the top of a script. That is the one part of a release pipeline dispat currently has no opinion about, and it
+is where "works on my machine" tends to survive.
+
+1.1.0 will let a repository declare the CLI tools its stages need and have dispat fetch them, from a **GitHub
+release** or from a **URL you provide**, pinned to the version the config names. The machinery already exists: this is
+what [`dispat self-update`](https://yohimik.github.io/dispat/cli/self-update) does for dispat's own binary today,
+including resolving a release, checking the download against the published checksum, and putting the result somewhere
+the next command can find it. Pointing that at other tools is the feature.
+
 ## Community
 
 Have questions or issues? Want to share a project you release with dispat?
