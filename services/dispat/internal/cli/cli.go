@@ -7,10 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -18,9 +15,6 @@ import (
 
 	"github.com/yohimik/dispat/pkg/writer"
 
-	"github.com/yohimik/dispat/services/dispat/internal/app"
-	"github.com/yohimik/dispat/services/dispat/internal/config"
-	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
 )
 
@@ -106,12 +100,17 @@ func versionLine() string {
 }
 
 // Run is the program entry point; it returns the process exit code.
+//
+// What it does itself is the housekeeping that belongs to the process rather
+// than to any command: parse the flags, prune a stale self-update backup,
+// bracket the background update check so its notice prints last. The command
+// line's phases are runner's, in dispatch.go, each one running only once
+// everything before it has agreed there is a command to run.
 func Run(args []string, stdout, stderr io.Writer) int {
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	o := declareFlags(fs)
 	fs.Usage = func() { printUsage(stderr, fs) }
-	usageForCommand := func(cmd string) { printCommandUsage(stderr, fs, cmd) }
 	if err := fs.Parse(args); err != nil {
 		// pflag's ContinueOnError mode returns the error without printing it,
 		// so an unrecognized flag would otherwise exit 2 in total silence.
@@ -135,391 +134,38 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	var update notice
 	defer func() { update.print(stdout) }()
 
-	if *o.showVersion {
-		// Before anything else: the version must print without a config file.
-		update = startUpdateCheck(checkCtx, o, fs, orDefault(*o.logFormat, "pretty"), true)
-		update.status = true
-		fmt.Fprintln(stdout, logo)
-		fmt.Fprintln(stdout, "\n"+versionLine())
-		return 0
-	}
-	if *o.showHelp {
-		// Also before anything else, and before the arity checks: `dispat
-		// writer --help` should help rather than complain that it was given
-		// no manifests. With no command word at all, the program help.
-		if word := commandWord(fs.Args()); word != "" {
-			usageForCommand(word)
-		} else {
-			fs.Usage()
-		}
-		return 0
+	r := &runner{
+		fs: fs, o: o, stdout: stdout, stderr: stderr,
+		checkCtx: checkCtx, update: &update,
+		// Config errors are reported with a bootstrap logger since the
+		// configured log level is not known yet.
+		boot: zerolog.New(zerolog.ConsoleWriter{Out: stderr, TimeFormat: "15:04:05"}).
+			With().Timestamp().Logger(),
 	}
 
-	// Config errors are reported with a bootstrap logger since the configured
-	// log level is not known yet.
-	bootLog := zerolog.New(zerolog.ConsoleWriter{Out: stderr, TimeFormat: "15:04:05"}).
-		With().Timestamp().Logger()
+	// Before anything else: the version and the help must both answer without
+	// a config file, and the help before the arity checks.
+	if code, done := r.versionOrHelp(); done {
+		return code
+	}
 
-	inv, badArgs := parseInvocation(fs.Args(), fs.ArgsLenAtDash(), usageForCommand, bootLog)
+	inv, badArgs := parseInvocation(fs.Args(), fs.ArgsLenAtDash(), r.usage, r.boot)
 	if badArgs {
 		return 2
 	}
-	cmd, runScript := inv.cmd, inv.script
-	if sweepCommand(cmd) && !app.ValidOnError(*o.onError) {
-		bootLog.Error().Str("on-error", *o.onError).Msgf("unknown --on-error value (want %q or %q)",
-			app.OnErrorSkip, app.OnErrorContinue)
-		return 2
-	}
-	// The rest of what the flags alone decide, also before any config is
-	// loaded: a usage mistake should not first cost the user a config error.
-	if cmd == cmdAutoversion || cmd == cmdAutowriter {
-		if !validManifestScope(*o.avManifests, cmd == cmdAutoversion) {
-			bootLog.Error().Str("manifests", *o.avManifests).
-				Msg(manifestScopeHint(cmd == cmdAutoversion))
-			return 2
-		}
-	}
-	if cmd == cmdAutowriter && *o.wrLinkLocal && *o.wrUnlinkLocal {
-		// One walk cannot both write and remove the same directive, and
-		// guessing which was meant is worse than saying so.
-		bootLog.Error().Msg("--link-local and --unlink-local ask for opposite things; pick one")
-		usageForCommand(cmd)
-		return 2
-	}
-	if cmd == cmdSelfUpdate && *o.suRollback {
-		// A rollback downloads nothing, so every flag that chooses something
-		// to download contradicts it.
-		for _, name := range []string{"release", "prerelease", "force"} {
-			if fs.Changed(name) {
-				bootLog.Error().Msgf("--rollback restores the kept binary and downloads nothing, so --%s means nothing beside it", name)
-				usageForCommand(cmd)
-				return 2
-			}
-		}
-	}
-	var write writeRequest
-	if cmd == cmdWriter || cmd == cmdAutowriter {
-		var ok bool
-		if write, ok = parseWriteRequest(cmd, o, usageForCommand, bootLog); !ok {
-			return 2
-		}
-	}
-	var subs []writer.Substitution
-	if cmd == cmdAutoreplacer {
-		var err error
-		if subs, err = parseSubSpecs(*o.rpSub); err != nil {
-			bootLog.Error().Err(err).Msg("invalid substitution")
-			return 2
-		}
-		if len(subs) == 0 {
-			bootLog.Error().Msg("autoreplacer needs something to write: --sub 'find=>write'")
-			usageForCommand(cmd)
-			return 2
-		}
-		if len(*o.rpFiles) == 0 {
-			// A rule with no globs selects nothing, and writing nothing
-			// silently is how a typo hides.
-			bootLog.Error().Msg("autoreplacer needs files to look in: --files '**/*.gradle'")
-			usageForCommand(cmd)
-			return 2
-		}
-	}
-	if cmd == cmdIf {
-		// Before config loading, and before the update check: a condition is
-		// about the environment, not about the repository it is standing in,
-		// and this is glue that may run dozens of times in one script — a
-		// GitHub request per call and a notice on stdout would both be wrong.
-		branches, ok := parseBranches(inv.cond, o, usageForCommand, bootLog)
-		if !ok {
-			return 2
-		}
-		log := newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stdout)
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		code, err := app.RunIf(ctx, app.IfOptions{
-			Branches: branches, Else: *o.ifElse, OnFailure: *o.onFailure,
-			Lookup: os.Getenv, Dir: *o.root,
-			Stdout: stdout, Stderr: stderr, Log: log,
-		})
-		if err != nil {
-			return 1
-		}
-		return code
-	}
-	var execOpts app.ExecOptions
-	if cmd == cmdExec {
-		// The flags alone, before any config is read, so a usage mistake never
-		// first costs a config error.
-		subj, ok := execSubject(o, usageForCommand, bootLog)
-		if !ok {
-			return 2
-		}
-		from, ok := execScriptFrom(o, bootLog)
-		if !ok {
-			return 2
-		}
-		if !checkExecEnv(o, subj, usageForCommand, bootLog) {
-			return 2
-		}
-		execOpts = app.ExecOptions{
-			Script: inv.script, Subject: subj, ScriptFrom: from,
-			Fallback: *o.execFallback, Env: *o.execEnv, OnFailure: *o.onFailure,
-			Args: inv.args, Dir: *o.root, Stdout: stdout, Stderr: stderr,
-		}
-	}
-	if cmd == cmdInit || manifestCommand(cmd) {
-		// The commands that read no config file have no updateCheck option to
-		// consult, so the environment variable is the whole of their opt-out.
-		// self-update is left out on purpose: it reports the answer itself.
-		update = startUpdateCheck(checkCtx, o, fs, orDefault(*o.logFormat, "pretty"), true)
-	}
-	if cmd == cmdInit {
-		// Before config loading: init is what creates the config, so there is
-		// nothing to load yet (and no git repository is needed either).
-		name, err := app.InitConfig(*o.root, *o.initFormat)
-		if err != nil {
-			bootLog.Error().Err(err).Msg("init failed")
-			return 1
-		}
-		fmt.Fprintf(stdout, "created %s\n", name)
-		return 0
-	}
-	if cmd == cmdSelfUpdate {
-		// Before config loading too, and for the same reason as init: this
-		// command is about the binary, not about any repository it might be
-		// standing in.
-		format := orDefault(*o.logFormat, "pretty")
-		log := newLogger(orDefault(*o.logLevel, "info"), format, stdout)
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		src := updateSource(o, fs)
-		src.Prerelease = *o.suPrerelease
-		src.Log = log
-		pending, err := app.SelfUpdate(ctx, app.SelfUpdateOptions{
-			Build: selfupdate.Describe(Version), Source: src, Release: *o.suRelease,
-			Check: *o.check, Force: *o.suForce, Rollback: *o.suRollback,
-			GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
-			JSON: format == "json", Out: stdout, Log: log,
-		})
-		if err != nil {
-			return 1
-		}
-		// --check exits 1 when the same invocation without it would change
-		// the binary, which is the gate a CI job puts in front of an update.
-		if *o.check && pending {
-			return 1
-		}
-		return 0
-	}
-	if manifestCommand(cmd) {
-		// Also before config loading: these three are the manifest libraries
-		// themselves, and they read nothing but the files named on the
-		// command line. Their logger comes from the flags alone, since there
-		// is no config file behind them to take a level or a format from.
-		log := newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stdout)
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		if cmd == cmdScanner {
-			if app.ScanManifests(ctx, app.ScanOptions{
-				Root: *o.root, Dir: inv.dir, RootOnly: *o.scanRootOnly, Strict: *o.strict,
-				JSON: *o.logFormat == "json", Out: stdout, Log: log,
-			}) != nil {
-				return 1
-			}
-			return 0
-		}
-		if cmd == cmdReplacer {
-			subs, err := parseSubSpecs(*o.rpSub)
-			if err != nil {
-				bootLog.Error().Err(err).Msg("invalid substitution")
-				return 2
-			}
-			if len(subs) == 0 {
-				bootLog.Error().Msg("replacer needs something to write: --sub 'find=>write'")
-				usageForCommand(cmd)
-				return 2
-			}
-			if app.SubstituteFiles(ctx, app.SubstituteOptions{
-				Root: *o.root, Paths: inv.paths, Subs: subs, Strict: *o.strict,
-				JSON: *o.logFormat == "json", Out: stdout, Log: log,
-			}) != nil {
-				return 1
-			}
-			return 0
-		}
-		if app.WriteManifests(ctx, app.WriteOptions{
-			Root: *o.root, Paths: inv.paths, Version: write.version,
-			Edits: write.edits, Links: write.links, Strict: *o.strict,
-			JSON: *o.logFormat == "json", Out: stdout, Log: log,
-		}) != nil {
-			return 1
-		}
-		return 0
-	}
+	r.inv = inv
 
-	// An explicit --config is used as-is; the default falls back through the
-	// known config file names — in --root first, then ascending its parents,
-	// so the CLI works from inside a package folder with the config's own
-	// directory as the effective monorepo root. `dispat init --format yaml`
-	// and a plain `dispat status` compose without flags either way.
-	cfgPath, resolvedRoot, err := config.ResolveFile(*o.root, *o.cfgName, fs.Changed("config"))
-	if err != nil {
-		bootLog.Error().Err(err).Msg("config file not found")
-		return 1
-	}
-	cfg, err := config.Load(cfgPath, fs)
-	if err != nil {
-		bootLog.Error().Err(err).Msg("invalid configuration")
-		return 1
-	}
-	if fs.Changed("quiet-parser") {
-		// The config states the repository's habit; the flag states this
-		// invocation's, in both directions — --quiet-parser=false brings the
-		// parser's findings back for one run without editing the config.
-		cfg.Parser.Quiet = *o.quietParser
-	}
-	log := newLogger(cfg.LogLevel, cfg.LogFormat, stdout)
-	// The first thing worth knowing about any run is which file it read and
-	// which folder it decided was the monorepo root, because both are inferred
-	// when no flag names them and "it ran with the wrong config" looks exactly
-	// like a configuration bug until you can see them. Logged here rather than
-	// at resolution because this is the first moment the configured level is
-	// known.
-	log.Debug().
-		Str("config", cfgPath).
-		Str("root", resolvedRoot).
-		Bool("explicitConfig", fs.Changed("config")).
-		Int("spaces", len(cfg.Spaces)).
-		Int("packages", len(cfg.Packages)).
-		Msg("configuration loaded")
-	if cmd == cmdExec {
-		// Straight after the config, which is all it needs: no plan unless
-		// --env asked for one, and no update check, for the same reason as if.
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		code, err := app.New(resolvedRoot, cfg, log).Exec(ctx, execOpts)
-		if err != nil {
-			return 1
-		}
-		return code
-	}
-	// Now that the configuration has spoken, the check can start: a run that
-	// switched it off must make no request at all, which means not making one
-	// before the option has been read.
-	update = startUpdateCheck(checkCtx, o, fs, cfg.LogFormat, cfg.UpdateCheckEnabled())
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// The one selection every package-selecting command shares. Dir is --root
-	// as the user spelled it — where they stood — and not the resolved
-	// monorepo root the ascent just found: the difference between the two is
-	// exactly what narrows a command to the folder it was invoked from.
-	sel := filter.Filter{Packages: *o.pkgFilter, Spaces: *o.spaceFilter, Groups: *o.groupFilter, Dir: *o.root}
-	// The one window every sweeping command shares: that selection, the
-	// revision the run counts changes from, and the downstream expansion.
-	window := app.WindowOptions{Filter: sel, Since: *o.since, Consumers: *o.consumers}
-
-	// The application does the work and logs its own findings; the controller
-	// only maps the outcome onto an exit code.
-	a := app.New(resolvedRoot, cfg, log)
-	// The release's own options, shared by the command that performs it and
-	// the command that shows it in advance.
-	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict, RequireRelease: *o.requireRelease}
-	switch cmd {
-	case cmdStatus:
-		if a.Status(ctx, relOpts) != nil {
-			return 1
-		}
-	case cmdRun:
-		if a.RunScript(ctx, runScript, app.RunOptions{OnError: *o.onError, Window: window, Args: inv.args}) != nil {
-			return 1
-		}
-	case cmdPreview:
-		res, err := a.Preview(ctx, sel)
-		if err != nil {
-			return 1
-		}
-		switch {
-		case res.Notes != "":
-			fmt.Fprint(stdout, res.Notes)
-		case res.Scope == "":
-			fmt.Fprintln(stdout, "no pending changes")
-		default:
-			fmt.Fprintf(stdout, "no pending changes for %s\n", res.Scope)
-		}
-	case cmdChangelog:
-		if a.Changelog(ctx, app.ChangelogOptions{Window: window, OnError: *o.onError,
-			File: *o.clFile, FileTitle: *o.clFileTitle, DateFormat: *o.clDateFormat,
-			ReleaseName: *o.releaseName}) != nil {
-			return 1
-		}
-	case cmdAutoversion:
-		opts := app.AutoVersionOptions{Window: window, OnError: *o.onError,
-			Range: *o.avRange, Match: *o.avMatch, Manifests: *o.avManifests,
-			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, NoReplace: *o.avNoReplace}
-		if fs.Changed("write-version") {
-			opts.WriteVersion = o.avWriteVersion
-		}
-		if a.AutoVersion(ctx, opts) != nil {
-			return 1
-		}
-	case cmdAutowriter:
-		if a.AutoWriter(ctx, app.AutoWriterOptions{
-			Window: window, OnError: *o.onError, Version: write.version,
-			Edits: write.edits, Links: write.links, Manifests: *o.avManifests,
-			SetLocal: *o.wrSetLocal, Range: *o.avRange,
-			LinkLocal: *o.wrLinkLocal, UnlinkLocal: *o.wrUnlinkLocal,
-			OnlyUpdated: *o.onlyUpdated, SyncLock: *o.avSyncLock, Strict: *o.strict,
-			JSON: cfg.LogFormat == "json", Out: stdout,
-		}) != nil {
-			return 1
-		}
-	case cmdAutoreplacer:
-		if a.AutoReplacer(ctx, app.AutoReplacerOptions{
-			Window: window, OnError: *o.onError,
-			Subs: subs, Files: *o.rpFiles,
-			OnlyUpdated: *o.onlyUpdated, Strict: *o.strict,
-			JSON: cfg.LogFormat == "json", Out: stdout,
-		}) != nil {
-			return 1
-		}
-	case cmdCommit:
-		if a.Commit(ctx, app.CommitOptions{Window: window, OnError: *o.onError,
-			Tag: *o.commitTag, Push: *o.commitPush, Name: *o.commitName, Email: *o.commitEmail,
-			Remote: *o.commitRemote, Message: *o.commitMessage, TagName: *o.commitTagName,
-			NoForce: *o.commitNoForce,
-			Include: *o.commitInclude}) != nil {
-			return 1
-		}
-	case cmdGithub:
-		if a.GitHub(ctx, app.GitHubOptions{Window: window, OnError: *o.onError,
-			Owner: *o.ghOwner, Repo: *o.ghRepo,
-			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget,
-			ReleaseName: *o.releaseName}) != nil {
-			return 1
-		}
-	case cmdCompute:
-		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
-			Write:       *o.computeWrite,
-			Interactive: *o.computeInteractive,
-			Check:       *o.check,
-			Filter:      sel,
-			In:          os.Stdin,
-			Out:         stdout,
-		})
-		if err != nil {
-			return 1
-		}
-		if *o.check && open > 0 {
-			return 1
-		}
-	default:
-		if _, err := a.Release(ctx, relOpts); err != nil {
-			return 1
+	for _, phase := range []func() (int, bool){
+		r.validateFlags, // what the flags alone decide
+		r.runIf,         // the environment, without a repository
+		r.prepareExec,   // exec's usage checks, before its config
+		r.runPreConfig,  // init, self-update and the manifest commands
+	} {
+		if code, done := phase(); done {
+			return code
 		}
 	}
-	return 0
+	return r.runConfigured()
 }
 
 // invocation is the parsed command line: which command runs and its
