@@ -163,11 +163,12 @@ func (a *App) planOptions() (plan.Options, error) {
 	}, nil
 }
 
-// logWorkspace records what discovery resolved, for the two questions a
-// layered configuration makes hard to answer from the file alone: which
-// folder each package is scoped to, and where its dependency edges came from.
+// logWorkspace records what discovery resolved, for the questions a layered
+// configuration makes hard to answer from the file alone: which space each
+// package landed in and how it versions there, which folder it is scoped to,
+// and where its dependency edges came from.
 //
-// Neither is an event the user asked about, so nothing here is louder than
+// None of it is an event the user asked about, so nothing here is louder than
 // debug. The per-edge lines are trace, because a large workspace has many
 // more edges than packages and the interesting one is usually a single edge
 // somebody is looking for.
@@ -177,6 +178,15 @@ func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency) {
 	}
 	for _, p := range pkgs {
 		ev := a.log.Debug().Str("package", p.Name).Str("scope", p.ScopeDir())
+		if s := p.Space; s != nil {
+			// The versioning group rather than the space name: they are the
+			// same thing until configuration joins spaces together, and when
+			// they differ the group is the one that decides the version.
+			ev = ev.Str("space", s.Name).Str("versioning", string(s.Versioning))
+			if g := p.VersionGroupName(); g != "" && g != s.Name {
+				ev = ev.Str("versionGroup", g)
+			}
+		}
 		if len(p.Ignore) > 0 {
 			ev = ev.Int("ignoreLevels", len(p.Ignore))
 		}

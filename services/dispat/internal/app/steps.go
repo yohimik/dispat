@@ -68,7 +68,7 @@ func (a *App) syncLock(ctx context.Context, pl *plan.Plan, pkgs []string) error 
 		return nil
 	}
 	wsVars := release.WorkspaceEnv(pl, a.log)
-	runner := &script.ShellRunner{Shell: a.cfg.Shell}
+	runner := &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
 	for _, name := range pkgs {
 		if err := ctx.Err(); err != nil {
 			return err

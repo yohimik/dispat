@@ -147,7 +147,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		tagger = nil
 	}
 
-	runner := &script.ShellRunner{Shell: a.cfg.Shell}
+	runner := &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
 	// The run-level hooks share one environment: the workspace listing before
 	// the run, widened to the run outcome once the task graph finishes.
 	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,

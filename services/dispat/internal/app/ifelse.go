@@ -82,7 +82,7 @@ func RunIf(ctx context.Context, opts IfOptions) (int, error) {
 
 	runner := opts.Runner
 	if runner == nil {
-		runner = &script.ShellRunner{}
+		runner = &script.ShellRunner{Log: opts.Log}
 	}
 	return shellCall{
 		Runner: runner, Dir: opts.Dir, Scripts: []string{chosen}, OnFailure: opts.OnFailure,

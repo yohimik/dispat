@@ -92,7 +92,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		// The workspace listing depends only on the plan, so it is built once
 		// here and shared by every package's environment.
 		wsVars:  release.WorkspaceEnv(pl, a.log),
-		runner:  &script.ShellRunner{Shell: a.cfg.Shell},
+		runner:  &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log},
 		covered: coveredReleases(pl, covered),
 	}
 	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: opts.OnError})

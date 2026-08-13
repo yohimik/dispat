@@ -155,7 +155,7 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 	}
 	runner := opts.Runner
 	if runner == nil {
-		runner = &script.ShellRunner{Shell: a.cfg.Shell}
+		runner = &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
 	}
 	log := a.log.With().Str("script", opts.Script).Logger()
 	log.Debug().Str("subject", opts.Subject.label()).Str("from", from.label()).Msg("running script")
