@@ -36,7 +36,7 @@ dependency edges as the flat `[]DependencyConfig` list; the consumer-keyed short
 by the CLI's loader, not expressed here.
 
 A `Scripts` value is a `Script`: the commands one name binds, in the order they run. It decodes from either shape the
-config file accepts — a bare string or an array of them — and marshals back as the shortest one that carries what the
+config file accepts (a bare string or an array of them) and marshals back as the shortest one that carries what the
 script says, so a single-command script written as a string is written back as a string.
 
 This module contains models only. Loading, validation, defaulting and package discovery live in the CLI's internal

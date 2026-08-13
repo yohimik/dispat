@@ -52,7 +52,7 @@ are listed because you cannot reason about the ordering without knowing where th
 |---|-----|------|------|
 | 1 | `beforeAll` | hook | Before the package's first stage, whichever that is: its version stage when it has one, its build otherwise. Fails the package's release. |
 | 2 | `beforeVersion` | hook | Before the version stage. Fails the release. |
-| 3 | *(native reconciliation)* | — | Not a script: when the space sets [`autoVersion`](./autoversion.md), dispat rewrites the manifests itself here, before any `version` script. |
+| 3 | *(native reconciliation)* | - | Not a script: when the space sets [`autoVersion`](./autoversion.md), dispat rewrites the manifests itself here, before any `version` script. |
 | 4 | `version` | stage | Manifest-sync stage command(s), for every package that picks a version up from a provider moving in this run (and for every releasing package when the space has [`autoVersion`](./autoversion.md)). |
 | 5 | `postVersion` | hook | After the version stage. Fails the release. |
 | 6 | `autoVersion.syncLock` | stage | Lock-file regeneration (`npm install`), between the version and the build. Lives on [`autoVersion`](./autoversion.md), not on `flow`, and runs only where a manifest actually changed. |
@@ -62,13 +62,13 @@ are listed because you cannot reason about the ordering without knowing where th
 | 10 | `login` | stage | Authentication command(s). Once **per space**, before that space's first publish; every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
 | 11 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
 | 12 | `publish` | stage | Publish stage command(s). Still gating: a publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
-| 13 | *(records and tag)* | — | Not a script: the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return: from here nothing can fail the package. |
+| 13 | *(records and tag)* | - | Not a script: the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return: from here nothing can fail the package. |
 | 14 | `postPublish` | hook | After a successful publish. Only **warns**. |
 | 15 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
 | 16 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
 | 17 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
-| — | `onFail` | outcome | Instead of the rest: once, when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only; see below. |
-| — | `onSkip` | outcome | Instead of the rest: once, when the package is **skipped** because a provider failed. Warn-only; see below. |
+| - | `onFail` | outcome | Instead of the rest: once, when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only; see below. |
+| - | `onSkip` | outcome | Instead of the rest: once, when the package is **skipped** because a provider failed. Warn-only; see below. |
 
 Steps 1 to 12 are the **gating** half: a failure anywhere in them fails the package, nothing is tagged or recorded,
 `revertOnFail` applies, and `onFail` runs instead of the rest. The publish stage itself is part of that half, which is
@@ -234,7 +234,7 @@ the synthetic package they are raised against is `group:<name>`.
 
 ## `scripts` and `dispat run`
 
-A script is a name bound to a shell command — or to several, run in order. You can write that binding at three levels,
+A script is a name bound to a shell command, or to several run in order. You can write that binding at three levels,
 and all three use the same `scripts` key: the config file itself, a space, and a single package.
 
 ```yaml
@@ -269,7 +269,7 @@ order:
 3. the file's `scripts`.
 
 The first hit wins, and the lookup happens one name at a time. Redefining `lint` for `core` therefore leaves `audit`
-and `preview` exactly as they were — and a name is replaced whole, so restating `verify` somewhere is a new sequence
+and `preview` exactly as they were. A name is replaced whole, so restating `verify` somewhere is a new sequence
 rather than an addition to this one. This is the only resolution rule in dispat, and everything that names a script
 uses it: the `flow` stages and hooks, `autoVersion.syncLock`, and `dispat run`. See
 [One name, several commands](./scripts.md#one-name-several-commands) for what an array binding means when it runs.

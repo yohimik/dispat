@@ -84,7 +84,7 @@ publishing beside the first.
 
 ## Gating a pipeline on the plan
 
-A repository with nothing pending releases nothing and exits `0`. That is the right answer — there was nothing to do,
+A repository with nothing pending releases nothing and exits `0`. That is the right answer, because there was nothing to do,
 and a job triggered on every merge must not go red because this particular merge was a `docs:` commit. But a stage
 whose *point* is that something shipped needs the opposite: a deploy that runs after the release, an announcement, a
 downstream trigger. Passing quietly on an empty plan is how a pipeline ends up deploying nothing.
@@ -133,7 +133,7 @@ your scripts.
 
 Note the shell here: `if dispat status --require-release` rather than a bare `run:` step, because `set -e` would
 otherwise end the job on the `1` that is the whole point. A step that *should* fail the pipeline when nothing
-released — a manually dispatched release, say — wants the bare form instead.
+released (a manually dispatched release, say) wants the bare form instead.
 
 ## The container images
 

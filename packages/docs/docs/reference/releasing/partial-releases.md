@@ -131,7 +131,7 @@ a release job.
 
 `--require-release` is the neighbouring gate, and the two answer different questions. `--strict` asks whether the
 selection can go out *as written*; `--require-release` asks whether it goes out *at all*, exiting 1 when the narrowed
-plan releases nothing. Only `● changed` counts as releasing — `⊝ not selected`, `⊘ withheld`, `‖ held` and
+plan releases nothing. Only `● changed` counts as releasing: `⊝ not selected`, `⊘ withheld`, `‖ held` and
 `unchanged` are all packages this run will not publish. Both flags work on `release` as well as
 `status`, and both refuse before anything is built; see
 [Gating a pipeline on the plan](../ci.md#gating-a-pipeline-on-the-plan).

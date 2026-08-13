@@ -31,26 +31,26 @@ warns and the release goes ahead without that package. If you would rather any b
 
 These fail before any history is read, and none of them are about your commits.
 
-**`no dispat config file found in <dir> or any parent directory`** — dispat looked for `dispat.json`, `dispat.yaml`,
+**`no dispat config file found in <dir> or any parent directory`**. dispat looked for `dispat.json`, `dispat.yaml`,
 `dispat.yml` and `dispat.toml` in `--root` and then in every parent, and the error names each one it tried. Either
 you are in the wrong directory, or you want [`dispat init`](../cli/init.md). An explicit `--config` never ascends, so
 a typo there fails instead of silently loading a different file.
 
-**`<dir> is not a git repository root (no .git)`** — the config belongs at the repository root. dispat plans from
+**`<dir> is not a git repository root (no .git)`**. The config belongs at the repository root. dispat plans from
 tags and history, so a folder that is not a repository has nothing to plan from.
 
 **A config that does not load.** Unknown keys are rejected rather than ignored, because a typo'd key is otherwise
 invisible until a script that should have run never does. The error names the key. Anything dispat should not
 validate goes under [`custom`](../configuration/custom.md).
 
-**`branch "x" is not allowed to release (run.allowBranch: ...)`** — the [branch guard](../configuration/run-hooks.md#the-branch-guard)
+**`branch "x" is not allowed to release (run.allowBranch: ...)`**. The [branch guard](../configuration/run-hooks.md#the-branch-guard)
 is doing its job. A detached HEAD matches no pattern, `*` included, so CI that checks out a commit rather than a
 branch hits this too. `dispat status` still works anywhere.
 
-**`the checkout is behind <remote>/<branch>; pull before releasing`** — another clone has pushed since you fetched,
+**`the checkout is behind <remote>/<branch>; pull before releasing`**. Another clone has pushed since you fetched,
 so your tags are stale and the plan would be computed from an outdated view. `git pull --rebase` and run again.
 
-**`unable to create the release lock tag`** — another release is running against this repository, or one died without
+**`unable to create the release lock tag`**. Another release is running against this repository, or one died without
 giving [the lock](./releasing/release-lock.md) back. The message carries the remedy: if you are sure nothing else is
 releasing, `git push <remote> --delete dispat-release-lock`.
 
@@ -111,14 +111,14 @@ common. The include is the one that changes what ships.
 
 Not an error, and worth naming because it reads like one.
 
-- **`no pending changes`** — nothing since the last tag addressed any package. `dispat status` shows every package as
+- **`no pending changes`**. Nothing since the last tag addressed any package. `dispat status` shows every package as
   `unchanged`.
 - **A commit that touched only ignored files** reports `W131` and releases nothing; see
   [what counts as a change](../configuration/change-scope.md).
 - **A selection that reaches nothing.** `dispat release -p core` when core has no pending work releases nothing and
   exits `0`. The filter narrows the window, it does not replace it; `--since all` is what reaches an unchanged
   package.
-- **`W230` / `W231`** — the selection is releasable but incomplete: a consumer is withheld because its provider was
+- **`W230` / `W231`**. The selection is releasable but incomplete: a consumer is withheld because its provider was
   left out, or a versioning group is being split. Both release what they can and warn. `--strict` turns either into a
   refusal before anything is built; see [Partial releases](./releasing/partial-releases.md).
 
