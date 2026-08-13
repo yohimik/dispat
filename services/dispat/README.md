@@ -79,6 +79,13 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   packages' own manifests, so adopting dispat in a repository that already ships versions takes one command. An
   `autoVersion` space has dispat rewrite its manifests natively at the version stage; native rewriting of *dependency
   ranges* covers `package.json` and `go.mod`, and other ecosystems reconcile theirs from a `flow.version` script.
+- **No task cache, because there is nothing to cache.** Tools that cache task results have to run the task, hash its
+  inputs, decide whether the hit is valid, and give you a way to clear the cache when it is not. dispat skips a
+  different way: it works out which packages changed from git history and tags, and an unchanged package is not in the
+  plan at all, so its scripts never start. There is no cache directory, no state file, no daemon and no cache to go
+  stale. The upside is that dispat composes with the caching you already have instead of replacing it: BuildKit layers,
+  an Nx, Turborepo or Bazel cache, ccache, the Gradle build cache all keep working inside the stage, and none of them
+  can change which versions are computed, what publishes in which order, or what gets tagged.
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
   verified before any work, and nothing is ever published against an unpublished dependency. Two releases of one

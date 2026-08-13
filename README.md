@@ -64,12 +64,18 @@ $ dispat
   system, registry, CI or cache plugs in with zero integration work. dispat reads and rewrites fifteen manifest
   families on top of that: npm, Go, Cargo, Python, Composer, Maven, the .NET project/nuspec family, Dart, Ruby,
   Dockerfiles and compose files, and the mobile platforms (Info.plist, project.pbxproj, Podfile and .podspec on iOS;
-  AndroidManifest.xml, Gradle build scripts and version catalogs on Android). Whatever a stage uses (BuildKit layers,
-  an Nx or Bazel cache, a compiler cache) is the stage's business, and none of it can confuse the release
-  computation. The
+  AndroidManifest.xml, Gradle build scripts and version catalogs on Android). The
   per-[space](https://yohimik.github.io/dispat/concepts) `isBuildWaitingPublish` option states whether a consumer's build needs
   the provider merely *built* (node) or already *published* (docker), so a four-level npm-to-docker chain schedules
   correctly out of the box.
+- **No task cache, because there is nothing to cache.** Most monorepo tools make unchanged work cheap by running it and
+  then short-circuiting on a cache hit, which buys you cache keys, a remote cache to operate, invalidation rules, and a
+  "clear the cache" command for when it gets one wrong. dispat computes which packages changed from git history and
+  tags, and the ones that did not are simply not in the plan: their scripts never start. Skipping work you never
+  scheduled needs no cache, no state file and no daemon, and it cannot go stale. What it leaves behind is composability:
+  because dispat caches nothing itself, whatever you already cache keeps working untouched inside the stage, whether
+  that is BuildKit layers, an Nx, Turborepo or Bazel cache, ccache or the Gradle build cache. None of it can affect
+  which versions get computed, in what order things publish, or what gets tagged.
 - **Built around an error model, not a happy path.** A failure never aborts the run: the broken package's consumers are
   skipped (unless they have changes of their own) and every unaffected subgraph keeps releasing. Failed or skipped
   consumers are never lost. The next run catches them up automatically, at the exact version they were originally owed,

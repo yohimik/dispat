@@ -73,6 +73,21 @@ const FEATURES: Feature[] = [
     ),
   },
   {
+    title: 'No task cache, because there is nothing to cache',
+    body: (
+      <>
+        Most monorepo tools make unchanged work cheap by running it and short-circuiting on a cache hit, which buys you
+        cache keys, a remote cache to operate, invalidation rules, and a command to clear it when one of them is wrong.
+        dispat works out which packages changed from git history and tags, and an unchanged package is not in the plan
+        at all, so its scripts never start. Nothing to cache, nothing to invalidate, no state file and no daemon. So it
+        composes with the caching you already have rather than replacing it: BuildKit layers, an Nx, Turborepo or Bazel
+        cache, ccache and the Gradle build cache all keep working inside the stage, and none of them can change which
+        versions are computed, what publishes in which order, or what gets tagged.{' '}
+        <Link to="/concepts">How the plan is computed.</Link>
+      </>
+    ),
+  },
+  {
     title: 'Blast radius written in the commit',
     body: (
       <>

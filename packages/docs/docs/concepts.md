@@ -22,6 +22,23 @@ When the newest tag exists but cannot be parsed (e.g. a stray `core@0.0.1.0`), o
 either: the baseline comes from the optional top-level `initials` config map (package name to version), defaulting to
 `0.0.0`, while commits are still scanned from the unparseable tag.
 
+### Which is also why there is no cache
+
+Everything dispat needs to decide what to do is already in the repository: the tags say what was published, the commits
+since them say what changed. The plan is a pure function of those two things plus your config, so it is recomputed from
+scratch on every run, in milliseconds, and two runs on the same repository always agree.
+
+That is what removes the need for a task cache. A tool that caches task results has to run the task, hash its inputs,
+decide whether the hit is still valid, and offer you a way to clear the cache when it decides wrong. dispat skips a
+different way: a package with nothing in its window is not in the plan, so its scripts never start. There is nothing to
+cache because there is nothing to skip, and nothing to go stale because nothing was stored. No cache directory, no
+state file, no daemon.
+
+The practical consequence is that dispat composes with whatever you already cache rather than replacing it. BuildKit
+layers, an Nx, Turborepo or Bazel cache, ccache, the Gradle build cache: all of them live *inside* a stage script,
+where they make a build that dispat did schedule faster. None of them can affect which versions get computed, what
+publishes in which order, or what gets tagged, because none of that is downstream of a build.
+
 ## Commits carry the intent
 
 Commit messages are parsed by [`pkg/ccme`](https://github.com/yohimik/dispat/tree/main/pkg/ccme): Conventional Commits with a monorepo extension,
