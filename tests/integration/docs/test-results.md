@@ -6,7 +6,7 @@ the [test plan](./test-plan.md)).
 ## Status
 
 - The whole suite passes: `go test ./...` in [`tests/integration`](..).
-- **Race-clean**: `go test ./... -race` passes.
+- **Race-clean**: `go test . -race` passes. The tests all live in the root package, so CI names it directly.
 - **Stable**: ordering assertions are structural (flake-free), overlap assertions use sleeps one to two orders of
   magnitude above process-launch jitter, and every concurrency claim is verified three independent ways before it is
   believed. Repeated runs (`go test ./... -count 5`) are the manual stability check; CI runs the suite twice per build

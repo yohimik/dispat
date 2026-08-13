@@ -28,13 +28,13 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// TestConfigLoginOncePerSpaceAcrossSpaces: two spaces referencing the exact
+// TestHooksLoginOncePerSpaceAcrossSpaces: two spaces referencing the exact
 // same login script text still log in once *each* — configuration.md is
 // explicit that credentials belong to the space, not the script. The cli
 // package's own end-to-end test covers only the single-space case (two
 // packages, one login); this is the shape that would catch a login gate
 // accidentally keyed by script text instead of by space.
-func TestConfigLoginOncePerSpaceAcrossSpaces(t *testing.T) {
+func TestHooksLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
@@ -80,7 +80,7 @@ func assertRanIn(t *testing.T, want, cwdFile string) {
 	assert.Equal(t, resolved, strings.TrimSpace(string(got)))
 }
 
-// TestConfigLoginRunsInTheSpaceFolder: the login is the one script that
+// TestHooksLoginRunsInTheSpaceFolder: the login is the one script that
 // belongs to the space rather than to a package, so the folder it runs in has
 // to be the space's own — not the folder of whichever member's publish
 // happened to reach the gate first. A login script reading a local file (a
@@ -89,7 +89,7 @@ func assertRanIn(t *testing.T, want, cwdFile string) {
 //
 // The script writes its working directory into a file *in* that directory,
 // so where the file lands is the assertion.
-func TestConfigLoginRunsInTheSpaceFolder(t *testing.T) {
+func TestHooksLoginRunsInTheSpaceFolder(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
@@ -117,7 +117,7 @@ func TestConfigLoginRunsInTheSpaceFolder(t *testing.T) {
 	assert.NoFileExists(t, r.Path("packages", "libs", "b", "login-cwd.txt"))
 }
 
-// TestConfigLoginOfAStandalonePackageRunsInItsOwnFolder: a standalone package
+// TestHooksLoginOfAStandalonePackageRunsInItsOwnFolder: a standalone package
 // is its own space, so the space folder the login runs in is the package's
 // own folder. The parent it happens to sit in belongs to nobody — it may hold
 // unrelated packages, or nothing at all — and a login running there would
@@ -125,7 +125,7 @@ func TestConfigLoginRunsInTheSpaceFolder(t *testing.T) {
 //
 // The login reaches the package through the root `flow`, which is the only
 // route it has: flow.login cannot be written on a package entry.
-func TestConfigLoginOfAStandalonePackageRunsInItsOwnFolder(t *testing.T) {
+func TestHooksLoginOfAStandalonePackageRunsInItsOwnFolder(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
@@ -148,10 +148,10 @@ func TestConfigLoginOfAStandalonePackageRunsInItsOwnFolder(t *testing.T) {
 		"the package's parent is not a space folder and the login has no business in it")
 }
 
-// TestConfigLoginFailureIsolatedToItsSpace: a failing login fails every
+// TestHooksLoginFailureIsolatedToItsSpace: a failing login fails every
 // publish in *its* space — none of them could have succeeded without it —
 // but must not touch an unrelated space's publishes.
-func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
+func TestHooksLoginFailureIsolatedToItsSpace(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
@@ -179,7 +179,7 @@ func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
 	assert.True(t, r.HasTag("f1@0.1.0"), "the unrelated space must still publish; tags: %v", r.TagList())
 }
 
-// TestConfigOnFailAndOnSkipOutcomeScripts covers the outcome scripts end to
+// TestHooksOnFailAndOnSkipOutcomeScripts covers the outcome scripts end to
 // end in one failing run over three packages: provider fails its publish,
 // consumer is skipped because of it, bystander publishes. onFail must run
 // once for provider with the failure specifics (DISPAT_FAILED_STAGE,
@@ -188,7 +188,7 @@ func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
 // is wired as a two-command sequence whose first command fails, proving the
 // warn-only rule the docs state: the rest of the sequence still runs, and
 // the failing outcome script changes nothing about the run's outcome.
-func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
+func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
@@ -244,7 +244,7 @@ func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 	assert.NoFileExists(t, r.Path("onskip-bystander.env"))
 }
 
-// TestConfigRevertOnFailAppliesAfterVersionStageOnSkip covers the
+// TestHooksRevertOnFailAppliesAfterVersionStageOnSkip covers the
 // documented but easy-to-miss half of revertOnFail: "the same rollback runs
 // when a package is skipped after its version stage already modified
 // files." The consumer's version script dirties its folder; the provider's
@@ -252,7 +252,7 @@ func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 // at its default the consumer's version and build stages have already run);
 // the consumer is skipped at its own publish — after real damage — and
 // revertOnFail must still clean its folder up.
-func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
+func TestHooksRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
@@ -286,13 +286,13 @@ func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "extra.txt"), "the version script's untracked file must be removed")
 }
 
-// TestConfigScriptOutputsCarryAcrossStagesAndHooks pins the whole
+// TestHooksScriptOutputsCarryAcrossStagesAndHooks pins the whole
 // DISPAT_OUTPUT accumulation contract through the real binary, hooks
 // included: a beforeBuild *hook* export reaches the build and publish, the
 // build's export reaches the publish, and on the failing package the onFail
 // outcome script receives both the hook's export and what the failing build
 // exported right before dying.
-func TestConfigScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
+func TestHooksScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
@@ -337,11 +337,11 @@ func TestConfigScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 		"a failed script still surrenders what it exported before failing")
 }
 
-// TestConfigRunLevelHooks: the run-level hook frame end to end against a
+// TestHooksRunLevelHooks: the run-level hook frame end to end against a
 // real remote — every hook fires in phase order in the monorepo root, postAll
 // sees the run outcome and the workspace listing, and a quiet second run
 // keeps the commit and push hooks off because their phases never happen.
-func TestConfigRunLevelHooks(t *testing.T) {
+func TestHooksRunLevelHooks(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["hook"] = models.Script{"echo $DISPAT_STAGE >> hooks.log"}
@@ -392,11 +392,11 @@ func TestConfigRunLevelHooks(t *testing.T) {
 		"a package with nothing to release is reported as unplanned")
 }
 
-// TestConfigRunLevelHookFailureSemantics: one flowing scenario for the two
+// TestHooksRunLevelHookFailureSemantics: one flowing scenario for the two
 // failure modes of the run-level hooks. A failing warn-only hook (postAll)
 // does not fail the run and the rest of its sequence still executes; the
 // gating beforeAll, by contrast, aborts the run before any release work.
-func TestConfigRunLevelHookFailureSemantics(t *testing.T) {
+func TestHooksRunLevelHookFailureSemantics(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["boom"] = models.Script{"exit 1"}
@@ -468,14 +468,14 @@ func hookSequence(t *testing.T, r *harness.Repo, pkg string) []string {
 	return out
 }
 
-// TestConfigAllStageHooksFireInOrder exercises the full per-package hook
+// TestHooksAllStageHooksFireInOrder exercises the full per-package hook
 // frame — every one of the nine hooks plus the announce stage — on a
 // provider/consumer pair. The provider runs the plain frame; the consumer,
 // bumped because of the provider, additionally runs the version stage with
 // its two hooks. Order is asserted per package: the frame's shape is a
 // per-package promise, interleaving across packages is the scheduler's
 // business.
-func TestConfigAllStageHooksFireInOrder(t *testing.T) {
+func TestHooksAllStageHooksFireInOrder(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = hookLog()
@@ -500,11 +500,11 @@ func TestConfigAllStageHooksFireInOrder(t *testing.T) {
 	}, hookSequence(t, r, "app"), "the consumer adds the version stage inside the same frame")
 }
 
-// TestConfigStageHookAuthoritySplit pins the documented split: hooks up to
+// TestHooksStageHookAuthoritySplit pins the documented split: hooks up to
 // beforePublish gate the release (their failure fails the package), while
 // postPublish and the whole announce frame observe a release that is already
 // out and may only warn.
-func TestConfigStageHookAuthoritySplit(t *testing.T) {
+func TestHooksStageHookAuthoritySplit(t *testing.T) {
 	t.Run("post_publish_and_announce_only_warn", func(t *testing.T) {
 		r := harness.New(t)
 		cfg := harness.BaseFile(1)
@@ -551,7 +551,7 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 	})
 }
 
-// TestConfigRunLevelHooksAreTheReleasesOwn pins the boundary the run-level
+// TestHooksRunLevelHooksAreTheReleasesOwn pins the boundary the run-level
 // hooks live on: they belong to `dispat release`'s phases, and the step
 // commands do not fire them.
 //
@@ -567,7 +567,7 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 // release of N packages would fire each commit hook N times from inside
 // itself and once more from its own finalize, with no way for the script to
 // tell which firing it was looking at.
-func TestConfigRunLevelHooksAreTheReleasesOwn(t *testing.T) {
+func TestHooksRunLevelHooksAreTheReleasesOwn(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["hook"] = models.Script{"echo $DISPAT_STAGE >> hooks.log"}

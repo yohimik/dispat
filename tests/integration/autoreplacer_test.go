@@ -205,20 +205,3 @@ func TestAutoReplacerLeavesANestedPackageToItsOwner(t *testing.T) {
 	assert.Contains(t, arpRead(t, r, "packages", "outer", "inner", "note.md"), "written by inner",
 		"the nested package's own turn reached its file, and outer left it alone")
 }
-
-// TestAutoReplacerCommandWordKeepsItsScript: like every command word,
-// "autoreplacer" shadows a run script of the same name.
-func TestAutoReplacerCommandWordKeepsItsScript(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["autoreplacer"] = models.Script{"echo the script ran"}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): first")
-
-	res := r.Command("run", "autoreplacer")
-	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	assert.Contains(t, res.Stdout, "the script ran")
-
-	assert.Equal(t, 2, r.Command("autoreplacer").Code)
-}

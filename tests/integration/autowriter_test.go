@@ -286,25 +286,6 @@ func TestAutoWriterSyncLock(t *testing.T) {
 		"--sync-lock=false leaves the lock files to the caller")
 }
 
-// TestAutoWriterCommandWordKeepsItsScript: like every command word,
-// "autowriter" shadows a run script of the same name — the two-word spelling
-// is how a repository that defines one still reaches it.
-func TestAutoWriterCommandWordKeepsItsScript(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["autowriter"] = models.Script{"echo the script ran"}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): first")
-
-	res := r.Command("run", "autowriter")
-	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	assert.Contains(t, res.Stdout, "the script ran")
-
-	// The bare word is the command, which needs something to write.
-	assert.Equal(t, 2, r.Command("autowriter").Code)
-}
-
 // arGoRepo is the derived-link fixture. Links only exist in five manifest
 // formats, and npm is deliberately not one this command writes, so the local
 // flags need a go.mod workspace to show anything at all: api requires core, and

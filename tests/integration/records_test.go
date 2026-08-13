@@ -1049,11 +1049,11 @@ func githubConfig(apiURL string) models.File {
 	return cfg
 }
 
-// TestConfigGithubReleasePrereleaseFlagFollowsChannel exercises the GitHub
+// TestRecordsGithubReleasePrereleaseFlagFollowsChannel exercises the GitHub
 // release recorder through a real train and its graduation, end to end
 // rather than in isolation: the same package's releases must flip
 // `prerelease` true then false as its channel actually changes.
-func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
+func TestRecordsGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 	type ghRelease struct {
 		TagName    string `json:"tag_name"`
 		Prerelease bool   `json:"prerelease"`
@@ -1078,7 +1078,7 @@ func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 	assert.False(t, releases[1].Prerelease, "the graduated release must not be")
 }
 
-// TestConfigGithubReleaseAttachments exercises the whole script-output and
+// TestRecordsGithubReleaseAttachments exercises the whole script-output and
 // attachment path through the real binary: the build script exports
 // DISPAT_EXPORT_GITHUB (two files) — opting the package into a GitHub
 // release — plus an ordinary output into $DISPAT_OUTPUT, the publish and
@@ -1086,7 +1086,7 @@ func TestConfigGithubReleasePrereleaseFlagFollowsChannel(t *testing.T) {
 // output as DISPAT_OUTPUT_*), and the created GitHub release must receive
 // both files as assets at the endpoint the release itself advertised
 // (upload_url).
-func TestConfigGithubReleaseAttachments(t *testing.T) {
+func TestRecordsGithubReleaseAttachments(t *testing.T) {
 	type upload struct {
 		name, body string
 	}

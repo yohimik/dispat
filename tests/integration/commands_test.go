@@ -212,3 +212,34 @@ func TestCommandsVersionNamesThePlatform(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Regexp(t, `dispat \S+ \(`+runtime.GOOS+`_`+runtime.GOARCH+`\)`, res.Stdout)
 }
+
+// TestCommandsReservedWordsShadowTheirScripts: a command word always wins
+// over a run script of the same name, and the two-word `dispat run <word>`
+// is how the script is reached instead. Both halves matter: the first is why
+// adding a command word is a breaking change for anyone whose config already
+// uses it, and the second is why doing so does not take their script away.
+//
+// The words gathered here are the ones whose bare form needs arguments, so
+// the command winning shows up as the usage exit rather than as output. The
+// words whose bare form does something observable prove the same rule inside
+// their own areas, where the thing it does is the interesting part.
+func TestCommandsReservedWordsShadowTheirScripts(t *testing.T) {
+	for _, word := range []string{"autowriter", "autoreplacer"} {
+		t.Run(word, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			cfg.Scripts[word] = models.Script{"echo the script ran"}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+
+			res := r.Command("run", word)
+			require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+			assert.Contains(t, res.Stdout, "the script ran",
+				"the two-word spelling still reaches the script")
+
+			assert.Equal(t, 2, r.Command(word).Code,
+				"the bare word is the command, which needs something to write")
+		})
+	}
+}

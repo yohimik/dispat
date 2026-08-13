@@ -541,3 +541,41 @@ func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 	assert.NoFileExists(t, r.Path("packages/cleaner/leftover.txt"),
 		"the package that said nothing inherits the root's true")
 }
+
+// TestEdgeRevertOnFailNeverReachesAFailedCommit: the far side of the same
+// boundary. The other two tests fail a package *before* it published, where
+// reverting is the whole point; this one fails the release commit, which
+// happens only once every package is already on its registry.
+//
+// Nothing may be rolled back there, and the reason is not that reverting
+// would be untidy: the folder holds the versions the published artefacts were
+// built from, and restoring it would leave the working tree describing
+// versions that are already out under different numbers, with no run able to
+// tell afterwards. So E213 is recorded, the tag is still written, and the
+// folder is left exactly as the release made it, revertOnFail or not.
+func TestEdgeRevertOnFailNeverReachesAFailedCommit(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig("echo dirty > leftover.txt", 1)
+	// The publish takes git's index lock, which is what a concurrent git
+	// process in the same checkout would do, so the release commit that
+	// follows cannot be made.
+	cfg.Scripts["publish"] = models.Script{"touch ../../.git/index.lock"}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	cfg.RevertOnFail = models.Bool(true)
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): published, then the commit cannot be made")
+
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "a release missing its commit must not exit green\nstdout:\n%s", res.Stdout)
+	require.True(t, harness.HasCode(res.Events, "E213"),
+		"the commit failure is reported under its own code, events:\n%s", res.Stdout)
+
+	assert.Contains(t, res.Stdout, `"status":"published"`,
+		"the artefact is out, so the package is published and not failed")
+	assert.NotContains(t, res.Stdout, `"status":"failed"`)
+	assert.True(t, r.HasTag("core@0.1.0"),
+		"the tag survives the commit failure; tags: %v", r.TagList())
+	assert.FileExists(t, r.Path("packages/core/leftover.txt"),
+		"revertOnFail is on, and still nothing is rolled back once a package has published")
+}
