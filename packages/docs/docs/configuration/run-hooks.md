@@ -30,6 +30,34 @@ All seven receive `DISPAT_STAGE` naming the hook and the [workspace listing](../
 [run outcome listing](../reference/environment.md#run-outcome-data) reporting which packages published, failed, were skipped or
 were never planned to release (`run.beforeAll` fires before any outcome exists).
 
+## They belong to `dispat release`
+
+These seven fire for `dispat release` and for nothing else. The [step commands](../reference/releasing/steps.md) do
+not fire them, not even the ones bracketing the phase they perform: `dispat commit --tag --push` makes the release
+commit, writes the tags and pushes without `run.beforeCommit` or `run.afterPush` ever running.
+
+That is deliberate, for two reasons.
+
+A run hook exists to give you a seam into a moment **dispat** chooses. Inside a release, dispat decides when the commit
+happens, so it offers you `beforeCommit`. A flow that calls `dispat commit` itself already owns that moment, and
+brackets it by writing the line before and the line after:
+
+```yaml
+scripts:
+  notify-before: ./notify.sh starting
+  commit: dispat commit --tag --push
+  notify-after: ./notify.sh done
+spaces:
+  libs:
+    flow:
+      beforePublish: [notify-before, commit, notify-after]
+```
+
+The second reason is that `run` means *once per run*. `flow.beforePublish` executes **per package**, and nesting the
+step commands there is the [recommended pattern](../reference/releasing/steps.md), so a release of ten packages would
+fire each commit hook ten times from inside itself and once more from its own finalize, with nothing in the
+environment to tell one firing from another. A hook you cannot count is worse than a hook that does not fire.
+
 ## The branch guard
 
 `run.allowBranch` is not a hook but a guard. When you set it, a release run refuses to start unless the branch you have

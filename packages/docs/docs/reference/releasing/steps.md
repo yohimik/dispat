@@ -46,6 +46,12 @@ it:
 This matters more than it sounds. It is what lets the release stage run after you and find the work done, instead of
 writing a second copy of the entry or failing on a duplicate tag. It is also what makes a re-run after a failure safe.
 
+**They fire no [run-level hooks](../../configuration/run-hooks.md).** `dispat commit --tag --push` makes the release
+commit, writes the tags and pushes without `run.beforeCommit` or `run.afterPush` running. Those hooks belong to
+`dispat release`, which is where dispat rather than you decides when the phase happens. Here you decide, so you
+bracket it yourself: `beforePublish: [notify-before, commit, notify-after]`. The
+[reasoning](../../configuration/run-hooks.md#they-belong-to-dispat-release) is on the hooks page.
+
 ## Choosing what a step covers
 
 With no arguments, a step covers every package the plan is releasing, in dependency order. To narrow it, use the same

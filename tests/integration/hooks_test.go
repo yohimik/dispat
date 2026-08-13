@@ -468,3 +468,63 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 			"onFail observes the failure with the stage that carried it")
 	})
 }
+
+// TestConfigRunLevelHooksAreTheReleasesOwn pins the boundary the run-level
+// hooks live on: they belong to `dispat release`'s phases, and the step
+// commands do not fire them.
+//
+// The distinction is not arbitrary. A run hook exists to give an operator a
+// seam into a moment dispat chooses: inside a release, dispat decides when the
+// commit happens, so it offers `beforeCommit`. A flow that calls
+// `dispat commit` itself already owns that moment and brackets it by writing
+// the line before and the line after.
+//
+// Firing them from the step command would also break the "once per run"
+// promise the whole `run` object rests on. `beforePublish` runs per package,
+// and the documented flow nests `dispat commit --tag --push` there, so a
+// release of N packages would fire each commit hook N times from inside
+// itself and once more from its own finalize, with no way for the script to
+// tell which firing it was looking at.
+func TestConfigRunLevelHooksAreTheReleasesOwn(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Run = &models.RunConfig{
+		BeforeAll:    []string{"hook"},
+		PostAll:      []string{"hook"},
+		BeforeCommit: []string{"hook"},
+		AfterCommit:  []string{"hook"},
+		PostCommit:   []string{"hook"},
+		BeforePush:   []string{"hook"},
+		AfterPush:    []string{"hook"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.AddBareRemote()
+	r.Commit("feat(core): first release")
+	// Something for the commit to stage, so the phase runs in full rather
+	// than taking the clean-folder no-op.
+	r.WriteFile("packages/core/generated.txt", "written by a version stage\n")
+
+	// The step command does the whole commit phase: the release commit, the
+	// annotated tag and the push.
+	res := r.Command("commit", "--tag", "--push")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.True(t, r.HasTag("core@0.1.0"), "the work really happened; tags: %v", r.TagList())
+	assert.Contains(t, r.Git("log", "-1", "--format=%s"), "chore(release): core@0.1.0")
+
+	assert.NoFileExists(t, r.Path("hooks.log"),
+		"a step command fires no run-level hook, not even the ones bracketing what it just did")
+
+	// The same configuration, through the command the hooks belong to: every
+	// one of them fires, so the silence above is about the invocation and not
+	// about the config being wrong.
+	r.CommitEmpty("feat(core): more work")
+	r.ReleaseOK()
+
+	data, err := os.ReadFile(r.Path("hooks.log"))
+	require.NoError(t, err, "the release fires them")
+	assert.Equal(t, "beforeAll\npostAll\nbeforeCommit\nafterCommit\npostCommit\nbeforePush\nafterPush\n",
+		string(data), "each exactly once, bracketing its own phase")
+}
