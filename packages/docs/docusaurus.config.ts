@@ -197,7 +197,10 @@ const config: Config = {
       // sh/json/go/yaml ship with prism-react-renderer. `console` is neither a
       // Prism language nor an alias, so it is aliased onto shell-session in
       // src/theme/prism-include-languages.js instead of listed here.
-      additionalLanguages: ['docker', 'regex', 'abnf', 'shell-session', 'ini', 'diff'],
+      // powershell is here for the Windows install command, which the landing
+      // page and Getting started both show; without it those blocks render
+      // with no highlighting at all beside their highlighted sh counterpart.
+      additionalLanguages: ['docker', 'regex', 'abnf', 'shell-session', 'ini', 'diff', 'powershell'],
     },
   } satisfies Preset.ThemeConfig,
 };

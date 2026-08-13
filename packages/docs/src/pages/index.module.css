@@ -174,3 +174,19 @@
   list-style-position: inside;
   padding-left: 0;
 }
+
+/* The two install blocks sit side by side where there is room and stack on a
+   phone. They keep their own widths rather than a 50/50 split, because the
+   Windows one is a single short line and a half-empty box beside a full one
+   reads as a mistake. */
+.install {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.install > * {
+  flex: 1 1 22rem;
+  margin-bottom: 0;
+}

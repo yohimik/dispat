@@ -20,6 +20,13 @@ import styles from './index.module.css';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 
+const INSTALL_UNIX = `# Linux and macOS, with curl or wget
+curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh`;
+
+const INSTALL_WINDOWS = `# Windows, in PowerShell
+irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex`;
+
 const TRANSCRIPT = `$ dispat
 12:04:05 INF ● changed bump=minor package=core version="1.2.3 -> 1.3.0"
 12:04:05 INF ● changed bump=patch package=app dueToProviders=[core] version="0.8.1 -> 0.8.2"
@@ -334,6 +341,41 @@ function Libraries(): React.ReactElement {
   );
 }
 
+// Install sits after the manifests table on purpose: by here a reader knows
+// whether dispat reads their ecosystem, which is the question that decides
+// whether the command is worth running.
+function Install(): React.ReactElement {
+  return (
+    <section className="container margin-bottom--xl">
+      <Heading as="h2" className={styles.sectionTitle}>
+        Install
+      </Heading>
+      <p className={styles.sectionLead}>
+        One command. The script downloads the binary for your platform, checks it against the checksum GitHub
+        published, and puts it on your <code>PATH</code>.
+      </p>
+      <div className={styles.install}>
+        <CodeBlock language="sh">{INSTALL_UNIX}</CodeBlock>
+        <CodeBlock language="powershell">{INSTALL_WINDOWS}</CodeBlock>
+      </div>
+      <p className={styles.sectionLead}>
+        After that the binary keeps itself current:{' '}
+        <Link to="/cli/self-update">
+          <code>dispat self-update</code>
+        </Link>{' '}
+        replaces it with the latest release and keeps the old one beside it for a week in case you want it back. Every
+        command mentions a newer release on its way out, so you find out without going looking.
+      </p>
+      <p className={styles.sectionLead}>
+        Prefer something else? <code>go install github.com/yohimik/dispat/services/dispat@latest</code>, a prebuilt
+        binary from any <Link to={`${GITHUB}/releases`}>release</Link>, or, in CI, the{' '}
+        <Link to="/reference/ci">GitHub Action and container images</Link>. Pinning a version and choosing a directory
+        are covered in <Link to="/getting-started">Getting started</Link>.
+      </p>
+    </section>
+  );
+}
+
 function Reference(): React.ReactElement {
   return (
     <section className="container margin-bottom--xl">
@@ -405,6 +447,7 @@ export default function Home(): React.ReactElement {
       <main>
         <Features />
         <Libraries />
+        <Install />
         <Reference />
         <Community />
       </main>
