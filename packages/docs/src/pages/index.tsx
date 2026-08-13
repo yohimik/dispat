@@ -31,6 +31,7 @@ const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/ma
 // either door sees the same thing. Output abridged.
 const TRANSCRIPT = `$ go install github.com/yohimik/dispat/services/dispat@latest
 $ dispat init                       # starter dispat.json (--format yaml/toml)
+$ dispat compute --write            # derive the graph and starting versions from the manifests
 
 $ git log --oneline -2
 9f3c2a1 feat(core)^: add streaming api      # ^ = also bump core's direct consumers
@@ -187,10 +188,11 @@ function Hero(): React.ReactElement {
           {TRANSCRIPT}
         </CodeBlock>
         <p className={styles.transcriptNote}>
-          (Output abridged.) If <code>api</code>&apos;s build had failed, <code>core</code> and <code>utils</code> would
-          still have shipped, the run would exit non-zero, and the next run would release <code>api</code> at the exact
-          version it was owed. Runs are self-healing, and that failure model is the point of the tool;{' '}
-          <Link to="/concepts">Concepts</Link> explains it.
+          (Output abridged. The starter config still needs two things from you: which folders hold your packages, and
+          the build and publish commands to run in them.) If <code>api</code>&apos;s build had failed, <code>core</code>{' '}
+          and <code>utils</code> would still have shipped, the run would exit non-zero, and the next run would release{' '}
+          <code>api</code> at the exact version it was owed. Runs are self-healing, and that failure model is the point
+          of the tool; <Link to="/concepts">Concepts</Link> explains it.
         </p>
       </div>
     </header>

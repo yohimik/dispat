@@ -10,6 +10,7 @@ Point one config file at your packages, write commits as usual, and dispat works
 ```sh
 $ go install github.com/yohimik/dispat/services/dispat@latest
 $ dispat init                       # starter dispat.json (--format yaml/toml)
+$ dispat compute --write            # derive the graph and starting versions from the manifests
 
 $ git log --oneline -2
 9f3c2a1 feat(core)^: add streaming api      # ^ = also bump core's direct consumers
@@ -32,14 +33,14 @@ $ dispat                            # re-running is always safe
 done  published=0  unchanged=4
 ```
 
-(Output abridged.) If `api`'s build had failed, `core` and `utils` would still have shipped, the run would exit
-non-zero, and the next run would release `api` at the exact version it was owed. Runs are self-healing, and that failure
-model is the point of the tool; [Concepts](https://yohimik.github.io/dispat/concepts) explains it.
+(Output abridged. The starter config still needs two things from you: which folders hold your packages, and the build
+and publish commands to run in them.) If `api`'s build had failed, `core` and `utils` would still have shipped, the run
+would exit non-zero, and the next run would release `api` at the exact version it was owed. Runs are self-healing, and
+that failure model is the point of the tool; [Concepts](https://yohimik.github.io/dispat/concepts) explains it.
 
 A few more moves:
 
 ```sh
-$ dispat compute                    # derive the dependency graph and the starting versions from the manifests; --write applies
 $ dispat preview                    # pending release notes, all packages (-p core: just one)
 $ dispat scanner packages/core      # what that folder's manifests declare; no config or git needed
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
