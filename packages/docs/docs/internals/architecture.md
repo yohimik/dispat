@@ -458,7 +458,8 @@ features are never emitted by dispat. `E197` (publish-order violation), `E198` (
 `E199` (convergence check failed) assume an engine that queries registries and audits its own runs; `W195` (staleness
 audit) and `W196` (published version adopted from the registry) belong to the same features. Every other code of the
 registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`), is implemented and
-emitted.
+emitted. What each of those six means for somebody looking at one, and what to do about it, is in
+[When there is no plan](../reference/plan-errors.md).
 
 In the other direction, eighteen codes are dispat's own, outside the specification's registry, attached to features the
 specification predates or does not have. They are numbered from `W210` and `E210` upward, clear of the registry (which

@@ -96,6 +96,7 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'reference/releasing/release-lock', label: 'The release lock'},
           ],
         },
+        {type: 'doc', id: 'reference/plan-errors', label: 'When there is no plan'},
         {type: 'doc', id: 'reference/ci', label: 'dispat in CI'},
         {type: 'doc', id: 'reference/self-update', label: 'Updating dispat'},
       ],

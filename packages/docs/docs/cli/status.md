@@ -8,6 +8,10 @@ what `dispat release` with the same flags is about to do; see
 [Releasing part of the graph](./release.md#releasing-part-of-the-graph) for the selection rules and what `--strict`
 refuses. What `status` exits with is in [Exit codes](./README.md#exit-codes).
 
+Because it computes the same plan a release does and touches nothing, it is also the first thing to reach for when a
+release refuses to start: every diagnostic a release would raise appears here first, as many times as you care to run
+it. [When there is no plan](../reference/plan-errors.md) walks through what each of them means.
+
 ## Flags
 
 Beside the [global flags](./README.md#global-flags):
