@@ -73,6 +73,20 @@ const FEATURES: Feature[] = [
     ),
   },
   {
+    title: 'Blast radius written in the commit',
+    body: (
+      <>
+        <code>feat(core):</code> releases <code>core</code> alone. A caret says how far the change reaches:{' '}
+        <code>^</code> its direct consumers, <code>^^</code> the transitive closure, <code>+2</code> exactly two edges
+        out. Nothing is released on a guess. Channels and release control are written the same way:{' '}
+        <code>%beta</code> starts a prerelease train and <code>%beta&gt;stable</code> graduates it,{' '}
+        <code>Release-As: none</code> holds a package and <code>Release-As: 2.0.0</code> pins a version. Release
+        decisions are reviewed and versioned like code.{' '}
+        <Link to="/reference/commits#release-control">Commit messages.</Link>
+      </>
+    ),
+  },
+  {
     title: 'Built around an error model, not a happy path',
     body: (
       <>
@@ -80,6 +94,20 @@ const FEATURES: Feature[] = [
         own, and every unaffected subgraph keeps releasing. Failed and skipped consumers are never lost. The next run
         catches them up at the exact version they were owed, with no state file and no double release.{' '}
         <Link to="/concepts">Recovery is just re-running.</Link>
+      </>
+    ),
+  },
+  {
+    title: 'Release part of it, and never race another run',
+    body: (
+      <>
+        <code>dispat release --package core</code> (or <code>--space</code>, <code>--group</code>, or just the folder
+        you are standing in) releases a subset at exactly the versions a full release would have given it. Publish
+        order still rules: a package whose provider is unselected waits for the next run rather than shipping ahead of
+        it, and <code>--strict</code> refuses a selection that cannot go out cleanly before anything is built. Two
+        releases of one repository at once are refused rather than raced, by a lock a run claims before it plans.{' '}
+        <Link to="/reference/releasing/partial-releases">Partial releases</Link> and{' '}
+        <Link to="/reference/releasing/release-lock">the release lock</Link>.
       </>
     ),
   },
