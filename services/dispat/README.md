@@ -153,8 +153,8 @@ one annotated file.
 
 ## Testing
 
-The failure semantics above are the tool's main promise, so they are tested at two independent layers (over 500 test
-functions plus fuzzing, run by [CI](../../.github/workflows/tests.yml) on every push): unit tests against in-memory
+The failure semantics above are the tool's main promise, so they are tested at two independent layers (over 1,700 test
+functions and 29 fuzz targets, run by [CI](../../.github/workflows/tests.yml) on every push): unit tests against in-memory
 fakes, and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
 disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
 ([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
