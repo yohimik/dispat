@@ -51,8 +51,8 @@ Braces mean something to most shells.
 
 ## Reaching the packages that need it
 
-Here is the thing that surprises people. The package holding a stale coordinate
-is usually the package where nothing changed. Core moved, and web's Gradle file
+The surprise is which package needs the edit. The package holding a stale
+coordinate is usually the one where nothing changed. Core moved, and web's Gradle file
 is the one now out of date. But the release window covers what the commits
 touched, which is core, so a plain run never visits web at all.
 

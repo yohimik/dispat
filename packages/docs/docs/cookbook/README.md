@@ -1,7 +1,7 @@
 # Cookbook
 
 Worked examples rather than reference. Each page here takes one thing you actually want to do and walks it end to end,
-with the config, the scripts people write, and the output of a real run. The [CLI](../cli/README.md) and
+with the config, the shell scripts its stages run, and the output of a real run. The [CLI](../cli/README.md) and
 [Configuration](../configuration/README.md) pages are the other half: they say what every flag and key means, and this
 half says which ones you reach for.
 

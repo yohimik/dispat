@@ -1,6 +1,6 @@
 # Cookbook
 
-Complete, copy-ready setups for the most common stacks, each with the config, the scripts people actually write, and the
+Complete, copy-ready setups for the most common stacks, each with the config, the shell scripts its stages run, and the
 terminal output of a real run. Every transcript on this page was produced by running dispat against a throwaway
 repository; only timestamps and durations are normalized. Script output lines (the
 `npm`/`docker` lines) come from your own commands, so yours will differ.

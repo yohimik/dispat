@@ -23,7 +23,7 @@ They fail at different moments, and knowing which one you are looking at narrows
 | **A repository-scoped error** | The plan was computed and is *wrong*: no correct plan exists. | `1` |
 | **A unit-scoped error** | One commit or one package is broken; the rest of the plan is fine. | `0` by default |
 
-The third is the one people trip over, in both directions: by default those are **tolerated**, so a typo'd scope
+The third is the one to know about, and it catches you out in both directions: by default those are **tolerated**, so a typo'd scope
 warns and the release goes ahead without that package. If you would rather any bad commit message stop the run, set
 [`commitErrors: "error"`](../configuration/parser.md).
 

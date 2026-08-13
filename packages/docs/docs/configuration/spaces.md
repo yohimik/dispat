@@ -72,8 +72,8 @@ are listed because you cannot reason about the ordering without knowing where th
 
 Steps 1 to 12 are the **gating** half: a failure anywhere in them fails the package, nothing is tagged or recorded,
 `revertOnFail` applies, and `onFail` runs instead of the rest. The publish stage itself is part of that half, which is
-the point people most often get wrong: a publish script that exits non-zero has *not* released the package, so the run
-treats it exactly like a failed build.
+the easy thing to misread: a publish script that exits non-zero has *not* released the package, so the run treats it
+exactly like a failed build.
 
 The line falls between 12 and 13. Once the publish script has **succeeded**, the artefact is on its registry and no
 later failure can take it back, so 14 to 17 only warn, and every one of them runs even after an earlier one failed.
