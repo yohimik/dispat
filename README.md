@@ -11,8 +11,12 @@ Polyglot is the point. A package is just a folder and a stage is just a shell co
 Python, Ruby, Dart, Docker, iOS and Android sit in one dependency graph and release together.
 
 ```sh
-# Linux and macOS, with curl or wget
+# Linux and macOS
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+```
+
+```sh
+# ...or with wget
 wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 

@@ -140,8 +140,11 @@ change the image tag instead. The images set `DISPAT_UPDATE_CHECK=0` so they do 
 
 The same script the images use, and the one [Getting started](../getting-started.md#install) hands to a human:
 
-```sh
+```sh title="With curl"
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+```
+
+```sh title="With wget"
 wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 

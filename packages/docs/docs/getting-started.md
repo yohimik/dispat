@@ -14,21 +14,27 @@ and puts it on your `PATH`.
 
 On Linux and macOS, with either curl or wget:
 
-```sh
+```sh title="Linux and macOS"
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+```
+
+```sh title="Linux and macOS, with wget"
 wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
-```powershell
+```powershell title="Windows"
 irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 ```
 
 It takes options if you want them: a version to pin, somewhere else to install.
 
-```sh
+```sh title="Pin a version"
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --version 1.2.3
+```
+
+```sh title="Install somewhere else"
 wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --bin-dir ~/.local/bin
 ```
 
