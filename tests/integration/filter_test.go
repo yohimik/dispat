@@ -54,14 +54,14 @@ func filterRepo(t *testing.T) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":   echoBuild,
-		"publish": "echo publishing",
-		"stamp":   `echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/stamp.log"`,
+	cfg.Scripts = map[string]models.Script{
+		"build":   {echoBuild},
+		"publish": {"echo publishing"},
+		"stamp":   {`echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/stamp.log"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
-			"lint": `echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/lint.log"`,
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+			"lint": {`echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/lint.log"`},
 		}},
 		"apps": {Path: "apps", Flow: buildPublish()},
 	}
@@ -97,10 +97,10 @@ func groupRepo(t *testing.T) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":   echoBuild,
-		"publish": "echo publishing",
-		"stamp":   `echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/stamp.log"`,
+	cfg.Scripts = map[string]models.Script{
+		"build":   {echoBuild},
+		"publish": {"echo publishing"},
+		"stamp":   {`echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/stamp.log"`},
 	}
 	cfg.VersionGroups = map[string]models.VersionGroupConfig{
 		"shared": {Versioning: "fixed"},
@@ -582,6 +582,28 @@ func TestFilterStatusSelects(t *testing.T) {
 	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "web").Str("message"))
 
 	assert.Equal(t, 1, r.Status("-p", "ghost").Code, "an unmatched term is an error here too")
+}
+
+// TestFilterRequireReleaseCountsOnlyWhatShips: --require-release asks whether
+// this run publishes anything, so it reads the plan *after* the selection has
+// narrowed it. A package the dependency order withheld has a version waiting
+// and is on nobody's release list, which is exactly the case a filtered CI
+// stage must not mistake for a release.
+func TestFilterRequireReleaseCountsOnlyWhatShips(t *testing.T) {
+	r := filterRepo(t)
+
+	assert.Equal(t, 0, r.Status("-p", "core", "--require-release").Code,
+		"the selection releases core, so the gate is open")
+
+	res := r.Status("-p", "web", "--require-release")
+	assert.Equal(t, 1, res.Code, "web waits for core, so this run would ship nothing")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
+		"the refusal still explains itself")
+	assert.Equal(t, "⊘ withheld until its providers release",
+		harness.GraphLine(res.Events, "web").Str("message"))
+
+	assert.Equal(t, 0, r.Status("-p", "web").Code,
+		"and without the flag the same selection is a warning, as before")
 }
 
 // TestFilterSelectsAVersioningGroup: --group names the packages that version

@@ -12,8 +12,9 @@
 //
 // `scripts` is one shape at three levels — the file, a space and a package —
 // and a package resolves a name through its own map first, then its space's,
-// then the file's. Every level's values are shell commands; `flow` entries and
-// `dispat run <name>` both name them.
+// then the file's. Every level's values are shell commands, one per entry or a
+// sequence of them (see Script); `flow` entries and `dispat run <name>` both
+// name them.
 package models
 
 import (
@@ -25,7 +26,7 @@ import (
 // File mirrors the configuration at the monorepo root. Viper infers the
 // format from the file extension (yaml, json, toml, ...).
 type File struct {
-	Scripts map[string]string      `mapstructure:"scripts" json:"scripts,omitempty"`
+	Scripts map[string]Script      `mapstructure:"scripts" json:"scripts,omitempty"`
 	Spaces  map[string]SpaceConfig `mapstructure:"spaces" json:"spaces,omitempty"`
 	// Packages holds per-package configuration, keyed by package name. An
 	// entry without `path` adjusts the configuration of a package discovered
@@ -544,7 +545,7 @@ type SpaceConfig struct {
 	// `flow` entries name them, and `dispat run <name>` executes the one it
 	// resolves inside each changed package of the space, in topological order,
 	// with the package's full DISPAT_* environment.
-	Scripts map[string]string `mapstructure:"scripts" json:"scripts,omitempty"`
+	Scripts map[string]Script `mapstructure:"scripts" json:"scripts,omitempty"`
 	// AutoVersion enables native manifest rewriting at the version stage:
 	// dispat itself updates the declared ranges of workspace dependencies
 	// (and the package's own version field) in package.json and go.mod,
@@ -627,7 +628,7 @@ type SpaceFile struct {
 	AliasTags    []AliasTagConfig   `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
 	Versioning   string             `mapstructure:"versioning" json:"versioning,omitempty"`
 	VersionGroup string             `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
-	Scripts      map[string]string  `mapstructure:"scripts" json:"scripts,omitempty"`
+	Scripts      map[string]Script  `mapstructure:"scripts" json:"scripts,omitempty"`
 	AutoVersion  *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
 	Env          map[string]string  `mapstructure:"env" json:"env,omitempty"`
 	Custom       map[string]any     `mapstructure:"custom" json:"custom,omitempty"`
@@ -741,7 +742,7 @@ type PackageConfig struct {
 	// wins over the space's, which wins over the file's. A name only this
 	// package defines is the package's alone: `dispat run <name>` reaches no
 	// other package with it.
-	Scripts     map[string]string  `mapstructure:"scripts" json:"scripts,omitempty"`
+	Scripts     map[string]Script  `mapstructure:"scripts" json:"scripts,omitempty"`
 	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
 	// ManifestNames are the manifest names this package is known by, stated
 	// here rather than read from its files. They exist for the packages whose
@@ -1033,7 +1034,7 @@ func (c *File) UpdateCheckEnabled() bool {
 
 // Script resolves a script reference case-insensitively, because viper
 // lowercases the keys of the scripts map.
-func (c *File) Script(ref string) (string, bool) {
+func (c *File) Script(ref string) (Script, bool) {
 	s, ok := c.Scripts[strings.ToLower(ref)]
 	return s, ok
 }
@@ -1041,7 +1042,7 @@ func (c *File) Script(ref string) (string, bool) {
 // Script resolves one of the space's own scripts case-insensitively, for the
 // same viper reason as File.Script. It looks no further than this level: the
 // fallback to the file's scripts belongs to the layer that knows the package.
-func (s SpaceConfig) Script(name string) (string, bool) {
+func (s SpaceConfig) Script(name string) (Script, bool) {
 	cmd, ok := s.Scripts[strings.ToLower(name)]
 	return cmd, ok
 }
@@ -1079,6 +1080,11 @@ func (s SpaceConfig) Package(name string) (PackageConfig, bool) {
 // Commands resolves a sequence of script references into the shell commands
 // they name, preserving order. Unknown references were rejected by validation,
 // so resolution cannot silently drop one.
+//
+// A reference contributes every command its script binds, so a name bound to
+// two commands lengthens the sequence by two: the two levels of ordering — the
+// references, and the commands inside each — flatten into the one order they
+// run in.
 func (c *File) Commands(refs []string) []string {
 	if len(refs) == 0 {
 		return nil
@@ -1086,7 +1092,7 @@ func (c *File) Commands(refs []string) []string {
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		if s, ok := c.Script(ref); ok {
-			out = append(out, s)
+			out = append(out, s...)
 		}
 	}
 	return out

@@ -50,7 +50,7 @@ func TestStaticEnvReachesScripts(t *testing.T) {
 	}
 	// The top-level layer also reaches the run-level hooks, which run in the
 	// monorepo root outside any space or package.
-	cfg.Scripts["hook-probe"] = `printf '%s|%s' "$ROOT_V" "$SHARED" > hook_env.txt`
+	cfg.Scripts["hook-probe"] = models.Script{`printf '%s|%s' "$ROOT_V" "$SHARED" > hook_env.txt`}
 	cfg.Run = &models.RunConfig{PostAll: []string{"hook-probe"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -145,7 +145,7 @@ func TestStaticEnvFromFolderConfigFiles(t *testing.T) {
 func TestStaticEnvReachesTheLoginScript(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["login"] = `printf '%s|%s' "$REGISTRY" "$DISPAT_SPACE" > ../login_env.txt`
+	cfg.Scripts["login"] = models.Script{`printf '%s|%s' "$REGISTRY" "$DISPAT_SPACE" > ../login_env.txt`}
 	libs := cfg.Spaces["libs"]
 	libs.Flow.Login = []string{"login"}
 	libs.Env = map[string]string{"REGISTRY": "https://npm.corp.example"}

@@ -253,7 +253,7 @@ func TestAutoWriterJSONEvents(t *testing.T) {
 func TestAutoWriterSyncLock(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 2)
-	cfg.Scripts["locksync"] = "cp package.json lock-snapshot.json"
+	cfg.Scripts["locksync"] = models.Script{"cp package.json lock-snapshot.json"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path:        "packages",
 		Flow:        buildPublish(),
@@ -292,7 +292,7 @@ func TestAutoWriterSyncLock(t *testing.T) {
 func TestAutoWriterCommandWordKeepsItsScript(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["autowriter"] = "echo the script ran"
+	cfg.Scripts["autowriter"] = models.Script{"echo the script ran"}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")

@@ -11,21 +11,24 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
-// The one execution path the two shell helpers share. Both pick a shell string
-// some other way — `dispat if` from a condition, `dispat exec` from the
-// config — and from there the work is identical: run it, let its output
-// through untouched, turn its exit status into the command's, and give
+// The one execution path the two shell helpers share. Both pick their shell
+// strings some other way — `dispat if` from a condition, `dispat exec` from the
+// config — and from there the work is identical: run them, let their output
+// through untouched, turn the exit status into the command's, and give
 // --on-failure the last word. Keeping that here is what stops the two
 // commands' notions of "failed" from drifting apart.
 
 // shellCall is one script and everything needed to run it.
 type shellCall struct {
 	Runner script.Runner
-	Dir    string   // the working directory: --root, as the user spelled it
-	Script string   // the shell string itself
-	Env    []string // KEY=value pairs added on top of the process environment
-	// OnFailure runs when Script fails and decides the exit code in its place.
-	// Empty means the failure propagates as it stands.
+	Dir    string // the working directory: --root, as the user spelled it
+	// Scripts is what the script binds: one shell string, or several run in
+	// order. `dispat if` always has exactly one, since a condition picks a
+	// branch rather than a sequence.
+	Scripts []string
+	Env     []string // KEY=value pairs added on top of the process environment
+	// OnFailure runs when the script fails and decides the exit code in its
+	// place. Empty means the failure propagates as it stands.
 	OnFailure string
 	Stdout    io.Writer
 	Stderr    io.Writer
@@ -42,10 +45,20 @@ type shellCall struct {
 // a failure that is not the script's — no shell, a cancelled context — becomes
 // dispat's own 1, because those are dispat failing rather than the script
 // saying something.
+//
+// A script bound to several commands stops at the first one that fails, and
+// that command's code is the script's: a sequence run here is gating its own
+// remainder, the same fail-fast a release-gating stage gives one.
 func (c shellCall) run(ctx context.Context) (int, error) {
-	code, err := c.exec(ctx, c.Script)
-	if err != nil {
-		return 1, err
+	code := 0
+	for _, command := range c.Scripts {
+		var err error
+		if code, err = c.exec(ctx, command); err != nil {
+			return 1, err
+		}
+		if code != 0 {
+			break
+		}
 	}
 	if code == 0 || c.OnFailure == "" {
 		return code, nil

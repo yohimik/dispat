@@ -42,7 +42,7 @@ func buildPublish() *models.SpaceFlowConfig {
 // publish, on top of harness.BaseFile(concurrency...).
 func libsConfig(buildScript string, concurrency ...int) models.File {
 	f := harness.BaseFile(concurrency...)
-	f.Scripts = map[string]string{"build": buildScript, "publish": "echo publishing"}
+	f.Scripts = map[string]models.Script{"build": {buildScript}, "publish": {"echo publishing"}}
 	f.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
 	}

@@ -166,7 +166,10 @@ They reach the script and nothing else: `--on-failure` never receives them,
 because that script is about the failure rather than about the work. And as
 with [`dispat run`](./run.md#passing-arguments-to-the-script), they land at the
 *end* of the command text, so a script that ends in something other than the
-program you meant should wrap it: `sh -c './deploy.sh "$@"' _`.
+program you meant should wrap it: `sh -c './deploy.sh "$@"' _`. On a
+[multi-command script](../configuration/scripts.md#one-name-several-commands)
+that end is the *last* command; the setup commands before it run as the config
+wrote them.
 
 `dispat if` forwards nothing. Its branches are already shell text you write in
 full, so there is nothing a forwarded argument would reach that the branch
@@ -177,6 +180,10 @@ cannot say itself.
 Both commands hand back the exit code of the script they ran. `dispat if CI
 --then 'exit 7'` exits `7`. That keeps them transparent in a pipeline: whatever
 you were gating on still works with a helper in the middle.
+
+A script bound to [several commands](../configuration/scripts.md#one-name-several-commands)
+stops at the first one that fails, and that command's code is the script's; the
+commands after it do not run.
 
 `--on-failure` changes that. It runs when the chosen script fails, and its own
 exit code becomes the command's:

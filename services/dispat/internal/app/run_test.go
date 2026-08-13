@@ -20,7 +20,7 @@ import (
 // given order, providers as declared. Enough structure for the selection
 // helpers, which never execute anything.
 func runPlan(root string, names []string, providers map[string][]string) *plan.Plan {
-	libs := &model.Space{Name: "libs", Scripts: map[string]string{"lint": "run lint"}}
+	libs := &model.Space{Name: "libs", Scripts: map[string]config.Script{"lint": {"run lint"}}}
 	pl := &plan.Plan{Releases: map[string]*plan.Release{}, Providers: providers}
 	for _, n := range names {
 		pl.Releases[n] = &plan.Release{
@@ -49,7 +49,7 @@ func TestScriptWorkResolve(t *testing.T) {
 	root := t.TempDir()
 	pl := runPlan(root, []string{"a", "b"}, map[string][]string{"b": {"a"}})
 	// Only b's space defines "build"; a's does not.
-	pl.Releases["b"].Pkg.Space = &model.Space{Name: "apps", Scripts: map[string]string{"build": "go build"}}
+	pl.Releases["b"].Pkg.Space = &model.Space{Name: "apps", Scripts: map[string]config.Script{"build": {"go build"}}}
 	a := runApp(root)
 
 	w := &scriptWork{app: a, pl: pl, name: "build", covered: coveredReleases(pl, []string{"a", "b"})}
@@ -60,6 +60,28 @@ func TestScriptWorkResolve(t *testing.T) {
 	task, err = w.resolve(context.Background(), pl.Releases["a"])
 	require.NoError(t, err)
 	assert.Nil(t, task, "a package that does not define the script is a no-op, not a failure")
+}
+
+// TestScriptWorkRunsEveryCommand: a run script bound to several commands runs
+// all of them in the package's folder, in order, and the arguments typed after
+// `--` land on the last one — the script's work, rather than its setup.
+func TestScriptWorkRunsEveryCommand(t *testing.T) {
+	root := t.TempDir()
+	pl := runPlan(root, []string{"a"}, nil)
+	pl.Releases["a"].Pkg.Space = &model.Space{Name: "libs",
+		Scripts: map[string]config.Script{"test": {"npm ci", "npm run test"}}}
+	f := &fakeRunner{}
+	w := &scriptWork{app: runApp(root), pl: pl, name: "test", args: []string{"--watch"},
+		runner: f, covered: coveredReleases(pl, []string{"a"})}
+
+	task, err := w.resolve(context.Background(), pl.Releases["a"])
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.NoError(t, task(context.Background()))
+
+	assert.Equal(t, []string{"npm ci", "npm run test --watch"}, f.ran)
+	assert.Equal(t, []string{pl.Releases["a"].Pkg.Dir, pl.Releases["a"].Pkg.Dir}, f.dirs,
+		"every command runs in the package folder, none of them where a previous one left off")
 }
 
 // TestScriptWorkCarriesProviderOutputs proves the run-command counterpart of

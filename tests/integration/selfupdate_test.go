@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
@@ -454,7 +455,7 @@ func boolPtr(b bool) *bool { return &b }
 func TestSelfUpdateCommandWordKeepsItsScript(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["self-update"] = "echo the script ran"
+	cfg.Scripts["self-update"] = models.Script{"echo the script ran"}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first release")

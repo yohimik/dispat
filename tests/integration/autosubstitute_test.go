@@ -211,7 +211,7 @@ func TestAutoSubstituteLeavesANestedPackageToItsOwner(t *testing.T) {
 func TestAutoSubstituteCommandWordKeepsItsScript(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["autosubstitute"] = "echo the script ran"
+	cfg.Scripts["autosubstitute"] = models.Script{"echo the script ran"}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")

@@ -53,9 +53,10 @@ func New(root string, cfg *config.File, log zerolog.Logger) *App {
 // the graph shows is what `dispat release` with those flags would do.
 //
 // It returns an error only when no correct plan exists (a repository-scoped
-// failure) or when --strict refuses the selection. A unit-scoped finding is
-// reported and tolerated: seeing the plan is the point of the operation, and
-// the plan it printed is the one a release would use.
+// failure), when --strict refuses the selection, or when --require-release
+// finds nothing to release. A unit-scoped finding is reported and tolerated:
+// seeing the plan is the point of the operation, and the plan it printed is the
+// one a release would use.
 func (a *App) Status(ctx context.Context, opts ReleaseOptions) error {
 	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
@@ -111,6 +112,15 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 	a.printGraph(pl)
 	if opts.Strict && !narrowing.Clean() {
 		err := errors.New("the selection cannot be released as it stands and --strict is set")
+		a.log.Error().Err(err).Msg("refusing to release")
+		return nil, err
+	}
+	// The same placement, for the same reason: --require-release is a refusal
+	// about the plan, and it belongs after the plan that explains it. A fatal
+	// plan is left alone so releaseBlocked keeps the truer message — "no correct
+	// plan exists" outranks "nothing to release", and both exit 1 anyway.
+	if opts.RequireRelease && !pl.Fatal() && len(pl.Releasing()) == 0 {
+		err := errors.New("the plan releases nothing and --require-release is set")
 		a.log.Error().Err(err).Msg("refusing to release")
 		return nil, err
 	}

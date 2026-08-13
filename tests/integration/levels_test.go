@@ -26,14 +26,14 @@ import (
 // they have comes from the root file.
 func levelsConfig() models.File {
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":       "echo root >> ../../build.log",
-		"build-libs":  "echo libs >> ../../build.log",
-		"build-core":  "echo core >> ../../build.log",
-		"publish":     "echo publishing",
-		"login":       "echo login >> ../../login.log",
-		"build-apps":  "echo apps >> ../../build.log",
-		"publish-app": "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":       {"echo root >> ../../build.log"},
+		"build-libs":  {"echo libs >> ../../build.log"},
+		"build-core":  {"echo core >> ../../build.log"},
+		"publish":     {"echo publishing"},
+		"login":       {"echo login >> ../../login.log"},
+		"build-apps":  {"echo apps >> ../../build.log"},
+		"publish-app": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages"},
@@ -75,8 +75,8 @@ func TestLevelsRootFlowReachesEverySpace(t *testing.T) {
 func TestLevelsRootBooleansAreThreeState(t *testing.T) {
 	r := harness.New(t)
 	cfg := levelsConfig()
-	cfg.Scripts["mutate"] = "echo dirty > mutated.txt"
-	cfg.Scripts["fail"] = "exit 1"
+	cfg.Scripts["mutate"] = models.Script{"echo dirty > mutated.txt"}
+	cfg.Scripts["fail"] = models.Script{"exit 1"}
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Flow = &models.SpaceFlowConfig{Build: []string{"mutate"}, Publish: []string{"fail"}}
 	cfg.Spaces["apps"] = models.SpaceConfig{Path: "services", RevertOnFail: models.Bool(false)}

@@ -66,8 +66,8 @@ func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
 	// find the work done: W226 and W223, zero errors.
 	r := singlePackageRepo(t, echoBuild)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["step-changelog"] = r.DispatCommand("changelog")
-	cfg.Scripts["step-commit"] = r.DispatCommand("commit", "--tag")
+	cfg.Scripts["step-changelog"] = models.Script{r.DispatCommand("changelog")}
+	cfg.Scripts["step-commit"] = models.Script{r.DispatCommand("commit", "--tag")}
 	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"},
 		BeforePublish: []string{"step-changelog", "step-commit"},
@@ -154,7 +154,7 @@ func TestStandaloneCommitFolderNarrowing(t *testing.T) {
 func TestStandaloneAutoversionReconcilesAndSyncLocks(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["mark-lock"] = "echo locked >> ../../lock.log"
+	cfg.Scripts["mark-lock"] = models.Script{"echo locked >> ../../lock.log"}
 	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"mark-lock"}}}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
@@ -339,11 +339,11 @@ func TestStandaloneGithubPublishesFromAStageScript(t *testing.T) {
 
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build": `echo binary-bytes > app.bin` +
-			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin" >> "$DISPAT_OUTPUT"`,
-		"publish":  "echo publishing",
-		"announce": "dispat github",
+	cfg.Scripts = map[string]models.Script{
+		"build": {`echo binary-bytes > app.bin` +
+			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin" >> "$DISPAT_OUTPUT"`},
+		"publish":  {"echo publishing"},
+		"announce": {"dispat github"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}

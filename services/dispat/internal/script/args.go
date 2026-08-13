@@ -28,6 +28,27 @@ func AppendArgs(command string, args []string) string {
 	return b.String()
 }
 
+// AppendArgsToLast appends the arguments to the last command of a script's
+// sequence, which is where a script bound to several commands wants them.
+//
+// The last command is the script's work; the ones before it are what had to
+// happen first. `["npm ci", "npm run test"] -- --watch` means watching the
+// tests, not installing in watch mode — putting the arguments on every command
+// would break the setup steps, and putting them on the first would put them on
+// the one command that never wants them.
+//
+// With no arguments, or no commands, the sequence is returned as it stands, so
+// the ordinary invocation neither copies nor changes anything.
+func AppendArgsToLast(commands []string, args []string) []string {
+	if len(args) == 0 || len(commands) == 0 {
+		return commands
+	}
+	out := make([]string, len(commands))
+	copy(out, commands)
+	out[len(out)-1] = AppendArgs(out[len(out)-1], args)
+	return out
+}
+
 // QuoteArg renders one argument for a shell command line, quoting it only when
 // leaving it alone would change what the shell reads.
 //

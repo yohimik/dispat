@@ -34,9 +34,9 @@ import (
 func TestOrderChainRunsInTopologicalOrder(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(3)
-	cfg.Scripts = map[string]string{
-		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
-		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
+	cfg.Scripts = map[string]models.Script{
+		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 20*time.Millisecond)},
+		"publish": {r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -75,11 +75,11 @@ func providerConsumerRepo(t *testing.T, isBuildWaitingPublish bool, providerPubl
 	t.Helper()
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"provider-build":   r.TsmarkScript("timeline.log", "provider-build", 0),
-		"provider-publish": r.TsmarkScript("timeline.log", "provider-publish", providerPublishSleep),
-		"consumer-build":   r.TsmarkScript("timeline.log", "consumer-build", 0),
-		"consumer-publish": r.TsmarkScript("timeline.log", "consumer-publish", 0),
+	cfg.Scripts = map[string]models.Script{
+		"provider-build":   {r.TsmarkScript("timeline.log", "provider-build", 0)},
+		"provider-publish": {r.TsmarkScript("timeline.log", "provider-publish", providerPublishSleep)},
+		"consumer-build":   {r.TsmarkScript("timeline.log", "consumer-build", 0)},
+		"consumer-publish": {r.TsmarkScript("timeline.log", "consumer-publish", 0)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: "packages/provider", IsBuildWaitingPublish: models.Bool(isBuildWaitingPublish),
@@ -147,9 +147,9 @@ func TestOrderBuildDoesNotWaitForPublishByDefault(t *testing.T) {
 func TestOrderDiamondDependencyConverges(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 100*time.Millisecond),
-		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond),
+	cfg.Scripts = map[string]models.Script{
+		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 100*time.Millisecond)},
+		"publish": {r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -198,10 +198,10 @@ func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 	const envFile = "version-env.txt"
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"build":   "echo building",
-		"publish": "echo publishing",
-		"sync":    "env | grep '^DISPAT_' | sort > " + envFile,
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"publish": {"echo publishing"},
+		"sync":    {"env | grep '^DISPAT_' | sort > " + envFile},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{

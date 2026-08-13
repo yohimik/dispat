@@ -61,10 +61,10 @@ func dueTo(res harness.RunResult, pkg string) string {
 func TestPackagesStandalonePath(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":     "echo space >> ../../build.log",
-		"cli-build": "echo cli-built >> ../../cli.log",
-		"publish":   "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":     {"echo space >> ../../build.log"},
+		"cli-build": {"echo cli-built >> ../../cli.log"},
+		"publish":   {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},

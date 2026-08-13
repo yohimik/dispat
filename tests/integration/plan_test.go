@@ -59,6 +59,54 @@ func TestPlanCancelSemantics(t *testing.T) {
 	assert.Equal(t, 1, buildRuns(r), "and no scripts either")
 }
 
+// TestPlanRequireRelease: --require-release is the CI/CD gate over the empty
+// plan. Releasing nothing is an ordinary no-op that exits 0 — right for a
+// person at a terminal, wrong for a pipeline stage whose whole point is that
+// this run publishes something, which would otherwise pass quietly and let
+// the pipeline carry on to deploy nothing. What counts is what will actually
+// be published: a package the plan holds back is not it.
+func TestPlanRequireRelease(t *testing.T) {
+	r := singlePackageRepo(t, markerBuild)
+	r.Commit("chore(core): nothing a release cares about")
+
+	// Nothing pending. The graph is printed either way — the refusal comes
+	// after the plan that explains it, never instead of it.
+	res := r.StatusOK()
+	require.Equal(t, "unchanged", harness.GraphLine(res.Events, "core").Str("message"))
+
+	res = r.Status("--require-release")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, "unchanged", harness.GraphLine(res.Events, "core").Str("message"),
+		"the plan is still printed before the refusal")
+
+	r.ReleaseOK() // the no-op contract, unchanged without the flag
+	assert.Equal(t, 1, r.Release("--require-release").Code)
+	assert.Empty(t, r.TagList(), "a refused run releases nothing")
+	assert.Zero(t, buildRuns(r), "and executes nothing")
+
+	// Something to release: the gate opens, and the release is the release it
+	// always was.
+	r.WriteFile("packages/core/work.txt", "x")
+	r.Commit("feat(core): something to release")
+	res = r.StatusOK("--require-release")
+	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "core").Str("message"))
+	r.ReleaseOK("--require-release")
+	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Equal(t, 1, buildRuns(r))
+
+	// Held is not releasing. The package has a version waiting for a later
+	// run, but this one publishes nothing, so the gate stays shut.
+	r.WriteFile("packages/core/held.txt", "x")
+	r.Commit("feat(core): work held back\n---\nrelease(core): hold it\n\nRelease-As: none\n")
+	res = r.Status("--require-release")
+	assert.Equal(t, 1, res.Code, "a held package is not something this run releases")
+	assert.Equal(t, "‖ held (Release-As: none)",
+		harness.GraphLine(res.Events, "core").Str("message"))
+	assert.Equal(t, 1, r.Release("--require-release").Code)
+	assert.Equal(t, 1, r.TagCount("core@"), "still just the one release")
+	assert.Equal(t, 1, buildRuns(r), "and still just the one build")
+}
+
 // TestPlanHoldResumeAndReleaseAsAuto walks release control end to end:
 // hold, held-version reporting (W154), resume at the accumulated max(), a
 // redundant resume with nothing left to lift (W158) — and, throughout, that

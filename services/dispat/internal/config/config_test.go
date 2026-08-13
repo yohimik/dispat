@@ -39,7 +39,7 @@ func resolvedTitleLine(s string) []model.EntryLine {
 // from: two spaces, a dependency edge, one shared concurrency value.
 func validConfig() File {
 	return File{
-		Scripts: map[string]string{"build": "echo build", "publish": "echo publish"},
+		Scripts: map[string]Script{"build": {"echo build"}, "publish": {"echo publish"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "packages/libs", IsBuildWaitingPublish: models.Bool(true), RevertOnFail: models.Bool(true),
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
@@ -58,7 +58,7 @@ func validConfig() File {
 // loads the same as an absent one.
 func minimalConfig() File {
 	return File{
-		Scripts: map[string]string{"build": "echo b"},
+		Scripts: map[string]Script{"build": {"echo b"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
@@ -130,6 +130,9 @@ func TestLoadValid(t *testing.T) {
 // are viper's concern, not this package's.
 func TestLoadFormats(t *testing.T) {
 	cfg := validConfig()
+	// One multi-command script, so each format is shown carrying both value
+	// shapes: a scalar for "build" and a real array here.
+	cfg.Scripts["publish"] = Script{"echo publish", "echo published"}
 	base, err := json.Marshal(cfg)
 	require.NoError(t, err)
 	var tree map[string]any
@@ -155,6 +158,9 @@ func TestLoadFormats(t *testing.T) {
 			assert.Equal(t, 3, loaded.BuildConcurrency)
 			assert.True(t, *loaded.Spaces["libs"].IsBuildWaitingPublish)
 			assert.Equal(t, []string{"echo build"}, loaded.Commands(loaded.Spaces["libs"].Flow.Build))
+			assert.Equal(t, []string{"echo publish", "echo published"},
+				loaded.Commands(loaded.Spaces["libs"].Flow.Publish),
+				"an array value survives every format the CLI reads")
 
 			pkgs, _, err := Discover(loaded, root)
 			require.NoError(t, err)
@@ -240,7 +246,7 @@ func TestLoadNonPackageScopes(t *testing.T) {
 
 func TestLoadTagFormatPerSpace(t *testing.T) {
 	cfg := File{
-		Scripts:   map[string]string{"build": "echo b"},
+		Scripts:   map[string]Script{"build": {"echo b"}},
 		TagFormat: "{name}@v{version}",
 		Spaces: map[string]SpaceConfig{
 			"libs":     {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
@@ -327,7 +333,7 @@ func TestLoadFlagDefaultsDoNotOverride(t *testing.T) {
 func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 	// Viper lowercases map keys; mixed-case references must still resolve.
 	cfg := File{
-		Scripts: map[string]string{"buildAll": "echo b", "publishAll": "echo p"},
+		Scripts: map[string]Script{"buildAll": {"echo b"}, "publishAll": {"echo p"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{
 				Build: []string{"buildAll"}, Publish: []string{"publishAll"}}},
@@ -346,7 +352,7 @@ func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 func TestLoadOptionalScripts(t *testing.T) {
 	// Scripts are optional; a space may configure none, some or all of them.
 	cfg := File{
-		Scripts: map[string]string{"sync": "npm install"},
+		Scripts: map[string]Script{"sync": {"npm install"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Version: []string{"sync"}}},
 		},
@@ -728,7 +734,7 @@ func TestLoadScriptArraysAndScalars(t *testing.T) {
 
 func TestLoadLoginAndHookScripts(t *testing.T) {
 	cfg := File{
-		Scripts: map[string]string{"auth": "npm login", "hook": "echo hook", "build": "echo build"},
+		Scripts: map[string]Script{"auth": {"npm login"}, "hook": {"echo hook"}, "build": {"echo build"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{
 				Build:          []string{"build"},
@@ -772,7 +778,7 @@ func TestLoadLoginAndHookScripts(t *testing.T) {
 
 func TestLoadRunHooks(t *testing.T) {
 	cfg := File{
-		Scripts: map[string]string{"build": "echo b", "notify": "echo notify", "lint": "echo lint"},
+		Scripts: map[string]Script{"build": {"echo b"}, "notify": {"echo notify"}, "lint": {"echo lint"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
@@ -966,20 +972,20 @@ func TestLoadSpaceScripts(t *testing.T) {
 	// command is rejected.
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Scripts = map[string]string{"Lint": "echo linting", "test": "go test ./..."}
+		s.Scripts = map[string]Script{"Lint": {"echo linting"}, "test": {"go test ./..."}}
 	})
 	loaded, err := loadModel(t, cfg, "pkgs/core")
 	require.NoError(t, err)
 
 	cmd, ok := loaded.Spaces["libs"].Script("LINT")
 	require.True(t, ok, "script names resolve case-insensitively")
-	assert.Equal(t, "echo linting", cmd)
+	assert.Equal(t, Script{"echo linting"}, cmd)
 	_, ok = loaded.Spaces["libs"].Script("format")
 	assert.False(t, ok)
 
 	bad := minimalConfig()
 	withLibs(&bad, func(s *SpaceConfig) {
-		s.Scripts = map[string]string{"lint": "  "}
+		s.Scripts = map[string]Script{"lint": {"  "}}
 	})
 	_, err = loadModel(t, bad, "pkgs/core")
 	require.Error(t, err)
@@ -992,7 +998,7 @@ func TestDiscoverCarriesVersioningAndScripts(t *testing.T) {
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
 		s.Versioning = "fixed"
-		s.Scripts = map[string]string{"lint": "echo linting"}
+		s.Scripts = map[string]Script{"lint": {"echo linting"}}
 	})
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -1001,8 +1007,55 @@ func TestDiscoverCarriesVersioningAndScripts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fixed", string(pkgs[0].Space.Versioning))
-	assert.Equal(t, map[string]string{"build": "echo b", "lint": "echo linting"},
+	assert.Equal(t, map[string]Script{"build": {"echo b"}, "lint": {"echo linting"}},
 		pkgs[0].Space.Scripts)
+}
+
+// TestMultiCommandScripts: a name may bind to several commands, at every level
+// that holds a scripts map, and naming it contributes all of them to the
+// sequence it was named in — the two levels of ordering flatten into one.
+func TestMultiCommandScripts(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Scripts["build"] = Script{"echo b1", "echo b2"}
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Scripts = map[string]Script{"lint": {"echo l1", "echo l2"}}
+		s.Flow.Publish = []string{"lint", "build"}
+	})
+	cfg.Packages = map[string]PackageConfig{
+		"core": {Scripts: map[string]Script{"own": {"echo o1", "echo o2"}}},
+	}
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+
+	space := pkgs[0].Space
+	assert.Equal(t, []string{"echo b1", "echo b2"}, space.BuildScript,
+		"one reference to a two-command script is two commands in the stage")
+	assert.Equal(t, []string{"echo l1", "echo l2", "echo b1", "echo b2"}, space.PublishScript,
+		"references and the commands inside them flatten into the one run order")
+	assert.Equal(t, Script{"echo o1", "echo o2"}, pkgs[0].OwnScripts["own"],
+		"a package's own map keeps the sequence too")
+}
+
+// TestSingleCommandScriptsStayScalar: a scalar is a one-element sequence, which
+// is what viper's weak decoding makes of it. This is the shape almost every
+// script in almost every config has, so it is worth stating that the array
+// support did not change what it decodes to.
+func TestSingleCommandScriptsStayScalar(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b", "check": []string{"echo c"}},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+		},
+	}, "pkgs/core")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, Script{"echo b"}, loaded.Scripts["build"])
+	assert.Equal(t, Script{"echo c"}, loaded.Scripts["check"],
+		"an array of one is the same script the scalar is")
 }
 
 // TestScriptValuesAreCheckedAtEveryLevel: one map, one set of rules. A
@@ -1014,19 +1067,33 @@ func TestScriptValuesAreCheckedAtEveryLevel(t *testing.T) {
 		mutate  func(*File)
 		wantErr string
 	}{
-		{"top-level empty name", func(c *File) { c.Scripts[""] = "echo nameless" },
+		{"top-level empty name", func(c *File) { c.Scripts[""] = Script{"echo nameless"} },
 			"empty script name"},
-		{"top-level empty command", func(c *File) { c.Scripts["blank"] = "  " },
+		{"top-level empty command", func(c *File) { c.Scripts["blank"] = Script{"  "} },
 			`scripts["blank"] is empty`},
 		{"space empty name", func(c *File) {
-			withLibs(c, func(s *SpaceConfig) { s.Scripts = map[string]string{"": "echo nameless"} })
+			withLibs(c, func(s *SpaceConfig) { s.Scripts = map[string]Script{"": {"echo nameless"}} })
 		}, "empty script name"},
 		{"space empty command", func(c *File) {
-			withLibs(c, func(s *SpaceConfig) { s.Scripts = map[string]string{"blank": "  "} })
+			withLibs(c, func(s *SpaceConfig) { s.Scripts = map[string]Script{"blank": {"  "}} })
 		}, `scripts["blank"] is empty`},
 		{"package empty command", func(c *File) {
-			c.Packages = map[string]PackageConfig{"core": {Scripts: map[string]string{"blank": "  "}}}
+			c.Packages = map[string]PackageConfig{"core": {Scripts: map[string]Script{"blank": {"  "}}}}
 		}, `scripts["blank"] is empty`},
+		// An empty array binds no command, which is the same mistake as "" and
+		// gets the same message rather than quietly clearing an inherited name.
+		{"top-level no commands", func(c *File) { c.Scripts["none"] = Script{} },
+			`scripts["none"] is empty`},
+		// Among several, the blank one is located: "scripts[\"half\"] is empty"
+		// would be false of the entry the reader then goes and looks at.
+		{"blank command among several", func(c *File) {
+			c.Scripts["half"] = Script{"echo one", "  "}
+		}, `scripts["half"][1] is empty`},
+		{"space blank command among several", func(c *File) {
+			withLibs(c, func(s *SpaceConfig) {
+				s.Scripts = map[string]Script{"half": {"echo one", "", "echo three"}}
+			})
+		}, `scripts["half"][1] is empty`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1050,13 +1117,13 @@ func TestScriptValuesAreCheckedAtEveryLevel(t *testing.T) {
 // the most local command.
 func TestFlowResolvesThroughEveryLevel(t *testing.T) {
 	cfg := minimalConfig()
-	cfg.Scripts["deploy"] = "echo top"
+	cfg.Scripts["deploy"] = Script{"echo top"}
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Scripts = map[string]string{"build": "echo space-build"}
+		s.Scripts = map[string]Script{"build": {"echo space-build"}}
 		s.Flow.Publish = []string{"deploy"}
 	})
 	cfg.Packages = map[string]PackageConfig{
-		"core": {Scripts: map[string]string{"build": "echo core-build"}},
+		"core": {Scripts: map[string]Script{"build": {"echo core-build"}}},
 	}
 	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -1085,7 +1152,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 		cfg := minimalConfig()
 		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
 		cfg.Spaces["apps"] = SpaceConfig{Path: "apps", Flow: &SpaceFlowConfig{},
-			Scripts: map[string]string{"ship": "echo shipping"}}
+			Scripts: map[string]Script{"ship": {"echo shipping"}}}
 		root := writeModelRepo(t, cfg, "pkgs/core", "apps/web")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
@@ -1100,7 +1167,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 		cfg := minimalConfig()
 		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
 		cfg.Packages = map[string]PackageConfig{
-			"core": {Scripts: map[string]string{"ship": "echo shipping"}},
+			"core": {Scripts: map[string]Script{"ship": {"echo shipping"}}},
 		}
 		root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -1117,8 +1184,8 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 		cfg := minimalConfig()
 		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
 		cfg.Packages = map[string]PackageConfig{
-			"core": {Scripts: map[string]string{"ship": "echo core-ship"}},
-			"app":  {Scripts: map[string]string{"ship": "echo app-ship"}},
+			"core": {Scripts: map[string]Script{"ship": {"echo core-ship"}}},
+			"app":  {Scripts: map[string]Script{"ship": {"echo app-ship"}}},
 		}
 		root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -1138,7 +1205,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 func TestSyncLockResolvesThroughThePackageScope(t *testing.T) {
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Scripts = map[string]string{"tidy": "go mod tidy"}
+		s.Scripts = map[string]Script{"tidy": {"go mod tidy"}}
 		s.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"tidy"}}
 	})
 	root := writeModelRepo(t, cfg, "pkgs/core")
@@ -1325,7 +1392,7 @@ func TestAutoVersionResolution(t *testing.T) {
 
 	t.Run("customised", func(t *testing.T) {
 		cfg := minimalConfig()
-		cfg.Scripts["lock"] = "npm install --package-lock-only"
+		cfg.Scripts["lock"] = Script{"npm install --package-lock-only"}
 		libs := cfg.Spaces["libs"]
 		libs.AutoVersion = &AutoVersionConfig{
 			Manifests:           "all",
@@ -1426,7 +1493,7 @@ func TestAutoVersionStrategies(t *testing.T) {
 	resolve := func(t *testing.T, av *AutoVersionConfig) *model.AutoVersion {
 		t.Helper()
 		cfg := minimalConfig()
-		cfg.Scripts["lock"] = "go mod tidy"
+		cfg.Scripts["lock"] = Script{"go mod tidy"}
 		libs := cfg.Spaces["libs"]
 		libs.AutoVersion = av
 		cfg.Spaces["libs"] = libs

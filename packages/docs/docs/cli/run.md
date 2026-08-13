@@ -78,7 +78,7 @@ With `"test": "vitest run"` in your config, both of those run `vitest run --watc
 the command text**, which is the same thing `npm run test -- --watch` does, so nothing in your config has to be
 rewritten to accept them.
 
-Two things follow from that, and both are worth knowing before you rely on it.
+Three things follow from that, and all of them are worth knowing before you rely on it.
 
 **Every covered package gets them.** A run is one intent about a selection, so `dispat run test -- --watch` puts
 `--watch` on the test script of every package the run covers, not just the first. Narrow it with `--package` if that
@@ -98,6 +98,20 @@ in something else does not:
 
 The second still works, but only because the argument happened to land on the command it was meant for. If a script
 ends in something that should not receive them, wrap the part that should: `sh -c 'vitest run "$@"' _`.
+
+**On a [multi-command script](../configuration/scripts.md#one-name-several-commands), only the last command takes
+them.** The last command is the script's work; the ones before it are what had to happen first, and would break if they
+took the arguments too:
+
+```json
+{
+  "scripts": {
+    "test": ["npm ci", "vitest run"]   // dispat run test -- --watch
+  }                                    //   →  npm ci
+}                                      //   →  vitest run --watch
+```
+
+If the command that should receive them is not the last one, reorder the script or split it in two.
 
 A `--` is required. A bare word after the script name is still an error, because packages are chosen with flags:
 

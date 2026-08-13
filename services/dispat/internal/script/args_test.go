@@ -26,6 +26,34 @@ func TestAppendArgsLeavesOrdinaryFlagsAlone(t *testing.T) {
 		AppendArgs("go build", []string{"./cmd/...", "-o", "bin/app"}))
 }
 
+func TestAppendArgsToLastPutsThemOnTheWork(t *testing.T) {
+	// The last command is the script's work; the ones before it are what had
+	// to happen first, and would break if they took the arguments too.
+	assert.Equal(t, []string{"npm ci", "npm run test --watch"},
+		AppendArgsToLast([]string{"npm ci", "npm run test"}, []string{"--watch"}))
+	assert.Equal(t, []string{"vitest run --watch"},
+		AppendArgsToLast([]string{"vitest run"}, []string{"--watch"}),
+		"one command behaves exactly as AppendArgs")
+}
+
+func TestAppendArgsToLastWithNoneIsTheIdentity(t *testing.T) {
+	commands := []string{"npm ci", "npm run test"}
+	assert.Equal(t, commands, AppendArgsToLast(commands, nil))
+	assert.Equal(t, commands, AppendArgsToLast(commands, []string{}))
+	assert.Nil(t, AppendArgsToLast(nil, []string{"--watch"}),
+		"nothing to append to is not a command to invent")
+}
+
+func TestAppendArgsToLastDoesNotMutateTheScript(t *testing.T) {
+	// The sequence handed in is the configuration's own map value, shared by
+	// every package a run covers: appending for one must not rewrite it for
+	// the next.
+	commands := []string{"npm ci", "npm run test"}
+	got := AppendArgsToLast(commands, []string{"--watch"})
+	assert.Equal(t, []string{"npm ci", "npm run test"}, commands)
+	assert.NotEqual(t, commands[1], got[1])
+}
+
 func TestQuoteArgOnlyWhatNeedsIt(t *testing.T) {
 	for name, tc := range map[string]struct{ in, want string }{
 		"plain flag":      {"--watch", "--watch"},

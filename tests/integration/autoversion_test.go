@@ -30,7 +30,7 @@ import (
 func TestAutoVersionReleaseRewritesManifests(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["locksync"] = "cp package.json lock-snapshot.json"
+	cfg.Scripts["locksync"] = models.Script{"cp package.json lock-snapshot.json"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path: "packages",
 		Flow: buildPublish(),
@@ -79,7 +79,7 @@ func TestAutoVersionReleaseRewritesManifests(t *testing.T) {
 func TestAutoVersionSyncLockSerialised(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 4)
-	cfg.Scripts["locksync"] = r.TsmarkScript("synclock.log", "$DISPAT_PACKAGE", 120*time.Millisecond)
+	cfg.Scripts["locksync"] = models.Script{r.TsmarkScript("synclock.log", "$DISPAT_PACKAGE", 120*time.Millisecond)}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path: "packages",
 		Flow: buildPublish(),
@@ -113,7 +113,7 @@ func TestAutoVersionSyncLockSerialised(t *testing.T) {
 func TestAutoVersionDiagnosticsAndCommitInclude(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["locksync"] = `echo "lock for $DISPAT_PACKAGE@$DISPAT_NEW_VERSION" >> ../../package-lock.json`
+	cfg.Scripts["locksync"] = models.Script{`echo "lock for $DISPAT_PACKAGE@$DISPAT_NEW_VERSION" >> ../../package-lock.json`}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path: "packages",
 		Flow: buildPublish(),
@@ -303,7 +303,7 @@ func TestAutoVersionManifestNamesMakeAnEdgeVisible(t *testing.T) {
 func TestAutoVersionSyncLockOnly(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 4)
-	cfg.Scripts["locksync"] = r.TsmarkScript("synclock.log", "$DISPAT_PACKAGE", 120*time.Millisecond)
+	cfg.Scripts["locksync"] = models.Script{r.TsmarkScript("synclock.log", "$DISPAT_PACKAGE", 120*time.Millisecond)}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path: "packages",
 		Flow: buildPublish(),
@@ -336,7 +336,7 @@ func TestAutoVersionSyncLockOnly(t *testing.T) {
 func TestAutoVersionSyncLockOnlyStandalone(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["mark-lock"] = "echo locked >> ../../lock.log"
+	cfg.Scripts["mark-lock"] = models.Script{"echo locked >> ../../lock.log"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path: "packages", Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{Manifests: "none", SyncLock: []string{"mark-lock"}},
@@ -362,7 +362,7 @@ func TestAutoVersionSyncLockOnlyStandalone(t *testing.T) {
 func TestAutoVersionPolicyFlagsStillRunSyncLock(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["mark-lock"] = "echo locked >> ../../lock.log"
+	cfg.Scripts["mark-lock"] = models.Script{"echo locked >> ../../lock.log"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
 		Path: "packages", Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"mark-lock"}},

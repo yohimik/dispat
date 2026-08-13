@@ -55,7 +55,7 @@ func seedManifest(t *testing.T, root, rel, content string) {
 // declared dependencies.
 func libsConfig(deps ...config.DependencyConfig) config.File {
 	return config.File{
-		Scripts: map[string]string{"build": "true"},
+		Scripts: map[string]config.Script{"build": {"true"}},
 		Spaces: map[string]config.SpaceConfig{
 			"libs": {Path: "packages", Flow: &config.SpaceFlowConfig{Build: []string{"build"}}},
 		},

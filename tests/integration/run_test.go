@@ -35,12 +35,12 @@ import (
 // them. The level tests rewrite it to move a name between the three levels.
 func runConfig() models.File {
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
-			"lint":   "echo $DISPAT_PACKAGE >> ../../run.log",
-			"record": `env | grep '^DISPAT_' | sort > run-env.txt`,
-			"fail":   `[ "$DISPAT_PACKAGE" != "core" ] && echo $DISPAT_PACKAGE >> ../../run.log`,
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+			"lint":   {"echo $DISPAT_PACKAGE >> ../../run.log"},
+			"record": {`env | grep '^DISPAT_' | sort > run-env.txt`},
+			"fail":   {`[ "$DISPAT_PACKAGE" != "core" ] && echo $DISPAT_PACKAGE >> ../../run.log`},
 		}},
 		"tools": {Path: "tools", Flow: buildPublish()},
 	}
@@ -175,7 +175,7 @@ func TestRunWhenDiscoveryItselfFails(t *testing.T) {
 func TestRunTopLevelScriptReachesEveryPackage(t *testing.T) {
 	r := runRepo(t)
 	cfg := runConfig()
-	cfg.Scripts["stamp"] = "echo $DISPAT_PACKAGE >> ../../run.log"
+	cfg.Scripts["stamp"] = models.Script{"echo $DISPAT_PACKAGE >> ../../run.log"}
 	r.WriteConfigModel(cfg)
 	r.Commit("chore(core,app,tool): add a top-level script")
 
@@ -190,7 +190,7 @@ func TestRunSpaceScriptStaysInItsSpace(t *testing.T) {
 	r := runRepo(t)
 	cfg := runConfig()
 	tools := cfg.Spaces["tools"]
-	tools.Scripts = map[string]string{"stamp": "echo $DISPAT_PACKAGE >> ../../run.log"}
+	tools.Scripts = map[string]models.Script{"stamp": {"echo $DISPAT_PACKAGE >> ../../run.log"}}
 	cfg.Spaces["tools"] = tools
 	r.WriteConfigModel(cfg)
 	r.Commit("chore(core,app,tool): add a space script")
@@ -207,7 +207,7 @@ func TestRunPackageScriptRunsInThatPackageAlone(t *testing.T) {
 	r := runRepo(t)
 	cfg := runConfig()
 	cfg.Packages = map[string]models.PackageConfig{
-		"app": {Scripts: map[string]string{"stamp": "echo $DISPAT_PACKAGE >> ../../run.log"}},
+		"app": {Scripts: map[string]models.Script{"stamp": {"echo $DISPAT_PACKAGE >> ../../run.log"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.Commit("chore(core,app,tool): add a package script")
@@ -225,12 +225,12 @@ func TestRunResolvesTheMostLocalScript(t *testing.T) {
 	stamp := func(level string) string {
 		return "echo " + level + "-$DISPAT_PACKAGE >> ../../run.log"
 	}
-	cfg.Scripts["stamp"] = stamp("top")
+	cfg.Scripts["stamp"] = models.Script{stamp("top")}
 	libs := cfg.Spaces["libs"]
-	libs.Scripts["stamp"] = stamp("space")
+	libs.Scripts["stamp"] = models.Script{stamp("space")}
 	cfg.Spaces["libs"] = libs
 	cfg.Packages = map[string]models.PackageConfig{
-		"app": {Scripts: map[string]string{"stamp": stamp("package")}},
+		"app": {Scripts: map[string]models.Script{"stamp": {stamp("package")}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.Commit("chore(core,app,tool): define stamp at every level")
@@ -248,7 +248,7 @@ func TestRunNoSelectedPackageDefinesIt(t *testing.T) {
 	r := runRepo(t)
 	cfg := runConfig()
 	cfg.Packages = map[string]models.PackageConfig{
-		"tool": {Scripts: map[string]string{"stamp": "echo $DISPAT_PACKAGE >> ../../run.log"}},
+		"tool": {Scripts: map[string]models.Script{"stamp": {"echo $DISPAT_PACKAGE >> ../../run.log"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.Commit("chore(core,app,tool): give tool a script of its own")
@@ -270,8 +270,8 @@ func TestRunNoSelectedPackageDefinesIt(t *testing.T) {
 func TestRunFilterRunsATopLevelScriptInOnePackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["probe"] = `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`
-	cfg.Scripts["boom"] = "exit 7"
+	cfg.Scripts["probe"] = models.Script{`echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION $DISPAT_STAGE" > probe.txt`}
+	cfg.Scripts["boom"] = models.Script{"exit 7"}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
@@ -322,10 +322,10 @@ func TestRunConcurrencyBudget(t *testing.T) {
 		t.Helper()
 		r := harness.New(t)
 		cfg := harness.BaseFile(1)
-		cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+		cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 		cfg.Spaces = map[string]models.SpaceConfig{
-			"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
-				"mark": r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 200*time.Millisecond),
+			"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+				"mark": {r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 200*time.Millisecond)},
 			}},
 		}
 		r.WriteConfigModel(cfg)
@@ -373,10 +373,10 @@ func TestRunSkipsUnchangedPackages(t *testing.T) {
 func TestRunInFixedSpaceIncludesRides(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish(),
-			Scripts: map[string]string{"lint": "echo $DISPAT_PACKAGE >> ../../run.log"}},
+			Scripts: map[string]models.Script{"lint": {"echo $DISPAT_PACKAGE >> ../../run.log"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -397,10 +397,10 @@ func TestRunInFixedSpaceIncludesRides(t *testing.T) {
 func TestRunGraphOrderingUnderConcurrency(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(3)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{
-			"mark": r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 150*time.Millisecond),
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+			"mark": {r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 150*time.Millisecond)},
 		}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
@@ -438,12 +438,12 @@ func TestRunGraphOrderingUnderConcurrency(t *testing.T) {
 func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	carry := `if [ "$DISPAT_PACKAGE" = "base" ]; then` +
 		` echo "DISPAT_OUTPUT_FROM_BASE=hello-from-base" >> "$DISPAT_OUTPUT";` +
 		` else echo "$DISPAT_PACKAGE sees $DISPAT_OUTPUT_FROM_BASE from $DISPAT_OUTPUT_SOURCE_FROM_BASE" >> ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"outer":  {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{"carry": carry}},
+		"outer":  {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{"carry": {carry}}},
 		"middle": {Path: "middle", Flow: buildPublish()}, // no run scripts: a silent carrier
 	}
 	cfg.Dependencies = []models.DependencyConfig{
@@ -470,12 +470,12 @@ func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	failCarry := `if [ "$DISPAT_PACKAGE" = "core" ]; then` +
 		` echo "MARK=exported-before-failing" >> "$DISPAT_OUTPUT"; exit 1;` +
 		` else echo "app sees $DISPAT_OUTPUT_MARK" > ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]string{"failcarry": failCarry}},
+		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{"failcarry": {failCarry}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -498,10 +498,10 @@ func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 func TestRunFilterNarrowsToANamedPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish(),
-			Scripts: map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}},
+			Scripts: map[string]models.Script{"lint": {`echo "$DISPAT_PACKAGE" >> ../../lint.log`}}},
 		"apps": {Path: "apps", Flow: buildPublish()}, // defines no lint
 	}
 	r.WriteConfigModel(cfg)
@@ -545,7 +545,7 @@ func TestRunNarrowsToTheInvokedPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	withRunScript := cfg.Spaces["libs"]
-	withRunScript.Scripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
+	withRunScript.Scripts = map[string]models.Script{"lint": {`echo "$DISPAT_PACKAGE" >> ../../lint.log`}}
 	cfg.Spaces["libs"] = withRunScript
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -599,9 +599,9 @@ func consumersRepo(t *testing.T) *harness.Repo {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	spc := cfg.Spaces["libs"]
-	spc.Scripts = map[string]string{
-		"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`,
-		"fail": `[ "$DISPAT_PACKAGE" != "core" ] && echo "$DISPAT_PACKAGE" >> ../../lint.log`,
+	spc.Scripts = map[string]models.Script{
+		"lint": {`echo "$DISPAT_PACKAGE" >> ../../lint.log`},
+		"fail": {`[ "$DISPAT_PACKAGE" != "core" ] && echo "$DISPAT_PACKAGE" >> ../../lint.log`},
 	}
 	cfg.Spaces["libs"] = spc
 	cfg.Dependencies = []models.DependencyConfig{
@@ -721,7 +721,7 @@ func TestRunSinceSelectsByCommitScopes(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	withRunScript := cfg.Spaces["libs"]
-	withRunScript.Scripts = map[string]string{"lint": `echo "$DISPAT_PACKAGE" >> ../../lint.log`}
+	withRunScript.Scripts = map[string]models.Script{"lint": {`echo "$DISPAT_PACKAGE" >> ../../lint.log`}}
 	cfg.Spaces["libs"] = withRunScript
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -795,7 +795,7 @@ const argsScript = `pkg=$1; shift; for a in "$@"; do printf '%s|%s\n' "$pkg" "$a
 // seedArgsFixture writes the helper and returns a reader for what it recorded.
 func seedArgsFixture(r *harness.Repo, cfg *models.File, names []string) func() []string {
 	r.WriteFile("args.sh", argsScript+"\n")
-	cfg.Scripts["show"] = `LOG=../../args.log sh ../../args.sh "$DISPAT_PACKAGE"`
+	cfg.Scripts["show"] = models.Script{`LOG=../../args.log sh ../../args.sh "$DISPAT_PACKAGE"`}
 	r.WriteConfigModel(*cfg)
 	seedIndependentPackages(r, names)
 	return func() []string {
@@ -862,4 +862,72 @@ func TestRunShorthandForwardsArgumentsToo(t *testing.T) {
 	res := r.Command("show", "--", "--fix")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, []string{"a|--fix"}, lines())
+}
+
+// TestRunMultiCommandScript: a name bound to several commands runs all of
+// them, in order, as separate shell invocations in the package folder.
+//
+// Two claims only the real binary can make. The commands are separate
+// processes rather than one string dispat joined together, which the `cd`
+// proves: it moves the first command's shell and nothing else, so the second
+// still writes where the script started. And the order is the written one, per
+// package, which is what makes a sequence worth writing as one.
+func TestRunMultiCommandScript(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["steps"] = models.Script{
+		"echo one-$DISPAT_PACKAGE >> ../../steps.log",
+		"cd /",
+		"echo two-$DISPAT_PACKAGE >> ../../steps.log",
+	}
+	r.WriteConfigModel(cfg)
+	seedIndependentPackages(r, []string{"a"})
+
+	r.RunScriptOK("steps")
+	data, err := os.ReadFile(r.Path("steps.log"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"one-a", "two-a"}, strings.Fields(string(data)),
+		"both commands ran, in order, and the cd did not move the second")
+}
+
+// TestRunMultiCommandScriptStopsAtAFailure: the sequence gates its own
+// remainder, so the command after a failing one never runs and the run fails.
+func TestRunMultiCommandScriptStopsAtAFailure(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["steps"] = models.Script{
+		"echo one >> ../../steps.log",
+		"exit 3",
+		"echo three >> ../../steps.log",
+	}
+	r.WriteConfigModel(cfg)
+	seedIndependentPackages(r, []string{"a"})
+
+	assert.Equal(t, 1, r.RunScript("steps").Code, "a failed script fails the run")
+	data, err := os.ReadFile(r.Path("steps.log"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"one"}, strings.Fields(string(data)),
+		"the command after the failure never ran")
+}
+
+// TestRunMultiCommandScriptArgumentsLandOnTheLast: `--` arguments go to the
+// script's work, which is its last command; the setup steps before it are left
+// as the config wrote them.
+func TestRunMultiCommandScriptArgumentsLandOnTheLast(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	r.WriteFile("args.sh", argsScript+"\n")
+	cfg.Scripts["show"] = models.Script{
+		`echo setup >> ../../args.log`,
+		`LOG=../../args.log sh ../../args.sh "$DISPAT_PACKAGE"`,
+	}
+	r.WriteConfigModel(cfg)
+	seedIndependentPackages(r, []string{"a"})
+
+	r.RunScriptOK("show", "--", "--watch")
+	data, err := os.ReadFile(r.Path("args.log"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"setup", "a|--watch"},
+		strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"),
+		"the setup step ran untouched; the last command took the argument")
 }

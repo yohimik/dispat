@@ -62,7 +62,7 @@ func TestSpaceDependenciesOrderTheRelease(t *testing.T) {
 func TestSpaceDependenciesCrossSpaceEdge(t *testing.T) {
 	r := harness.New(t)
 	cfg := twoSpaceConfig()
-	cfg.Scripts["build"] = echoBuild
+	cfg.Scripts["build"] = models.Script{echoBuild}
 	// The app consumes the library, declared by the library's space.
 	libs := cfg.Spaces["libs"]
 	libs.Dependencies = models.Dependencies{{Consumer: "app", Provider: "core"}}

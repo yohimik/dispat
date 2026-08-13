@@ -368,7 +368,7 @@ func TestRecordsPushForceReplacesExistingRemoteTags(t *testing.T) {
 func TestRecordsExportedPackageCommitPinsTheTag(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["publish"] = `echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"`
+	cfg.Scripts["publish"] = models.Script{`echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"`}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -392,8 +392,8 @@ func TestRecordsExportedPackageCommitPinsTheTag(t *testing.T) {
 func TestRecordsExportedCommitExcludesTagFromReleaseCommitAndPushes(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["publish"] = `if [ "$DISPAT_PACKAGE" = "a" ]; then` +
-		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`
+	cfg.Scripts["publish"] = models.Script{`if [ "$DISPAT_PACKAGE" = "a" ]; then` +
+		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -428,7 +428,7 @@ func TestRecordsExportedCommitExcludesTagFromReleaseCommitAndPushes(t *testing.T
 func TestRecordsExportedCommitPinsTagOutsideCommitMode(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["publish"] = `echo "PACKAGE_CORE=$(git rev-parse HEAD~1)" >> "$DISPAT_OUTPUT"`
+	cfg.Scripts["publish"] = models.Script{`echo "PACKAGE_CORE=$(git rev-parse HEAD~1)" >> "$DISPAT_OUTPUT"`}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first change")
@@ -515,9 +515,9 @@ func TestRecordsCommitModeGithubFinalize(t *testing.T) {
 	// Only a opts into a GitHub release; it also pins its record to the
 	// commit its publish ran at (the source commit — the release commit does
 	// not exist yet at publish time).
-	cfg.Scripts["publish"] = `if [ "$DISPAT_PACKAGE" = "a" ]; then` +
+	cfg.Scripts["publish"] = models.Script{`if [ "$DISPAT_PACKAGE" = "a" ]; then` +
 		` echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT";` +
-		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`
+		` echo "PACKAGE_A=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"; fi`}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
 		MessageFormat: "chore(release): publish {packages} as {tags}"}
 	cfg.GitHub = &models.GitHubConfig{
@@ -558,7 +558,7 @@ func TestRecordsGitHubAllPackages(t *testing.T) {
 
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": "echo building", "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: buildPublish()}}
 	cfg.GitHub = &models.GitHubConfig{
 		Enabled: models.Bool(true), AllPackages: models.Bool(true),
@@ -749,7 +749,7 @@ func TestRecordsReleaseNameSubHeader(t *testing.T) {
 func TestRecordsLineFiltersSelectPackages(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages/libs", Flow: buildPublish(), Versioning: "fixed"},
 		"apps": {Path: "packages/apps", Flow: buildPublish()},
@@ -1034,9 +1034,9 @@ func TestRecordsAliasTags(t *testing.T) {
 // packages that opted in.
 func githubConfig(apiURL string) models.File {
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":   "echo building",
-		"publish": `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`,
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"publish": {`echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}}}}
@@ -1114,12 +1114,12 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 
 	r := harness.New(t)
 	cfg := githubConfig(srv.URL)
-	cfg.Scripts = map[string]string{
-		"build": `echo binary-bytes > app.bin && echo docs-bytes > docs.txt` +
+	cfg.Scripts = map[string]models.Script{
+		"build": {`echo binary-bytes > app.bin && echo docs-bytes > docs.txt` +
 			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin $PWD/docs.txt" >> "$DISPAT_OUTPUT"` +
-			` && echo "BUILD_FLAVOUR=release" >> "$DISPAT_OUTPUT"`,
-		"publish":  `echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`,
-		"announce": `echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`,
+			` && echo "BUILD_FLAVOUR=release" >> "$DISPAT_OUTPUT"`},
+		"publish":  {`echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`},
+		"announce": {`echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}

@@ -40,9 +40,9 @@ func budgetRepo(t *testing.T, b budgets) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
 	cfg := harness.BaseFile(b.Build, b.Publish)
-	cfg.Scripts = map[string]string{
-		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", b.BuildSleep),
-		"publish": r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", b.PublishSleep),
+	cfg.Scripts = map[string]models.Script{
+		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", b.BuildSleep)},
+		"publish": {r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", b.PublishSleep)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -110,9 +110,9 @@ func TestConcurrencyPublishBudgetIsIndependentOfBuild(t *testing.T) {
 func TestConcurrencyIndependentPickedUpConcurrentlyDependantAwaited(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(3, 3)
-	cfg.Scripts = map[string]string{
-		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 150*time.Millisecond),
-		"publish": "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 150*time.Millisecond)},
+		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},

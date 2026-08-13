@@ -8,7 +8,7 @@
     "npm-login": "npm whoami || npm login",
     "smoke-test": "npm run smoke",
     "announce": "./scripts/announce.sh",
-    "build-go": "go build ./...",
+    "build-go": ["go vet ./...", "go build ./..."],
     "publish-go": "./scripts/release.sh",
     "notify": "./scripts/notify.sh"
   },

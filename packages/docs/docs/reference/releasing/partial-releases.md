@@ -129,6 +129,13 @@ Without `--strict`, `status` keeps its usual promise of exiting 0 even when it h
 `--strict`, a selection that could not be released cleanly exits 1, which makes it a useful gate to put in front of
 a release job.
 
+`--require-release` is the neighbouring gate, and the two answer different questions. `--strict` asks whether the
+selection can go out *as written*; `--require-release` asks whether it goes out *at all*, exiting 1 when the narrowed
+plan releases nothing. Only `● changed` counts as releasing — `⊝ not selected`, `⊘ withheld`, `‖ held` and
+`unchanged` are all packages this run will not publish. Both flags work on `release` as well as
+`status`, and both refuse before anything is built; see
+[Gating a pipeline on the plan](../ci.md#gating-a-pipeline-on-the-plan).
+
 ## What a narrowed release writes
 
 Everything a release records follows the packages that actually went out, and nothing else:
@@ -179,6 +186,7 @@ steps.
 | Release the package folder you are in        | `dispat release` (from inside the folder) |
 | See it first                                 | `dispat status -p core`                   |
 | Fail instead of releasing part of it         | add `--strict`                            |
+| Fail when it would release nothing           | add `--require-release`                   |
 
 Related reading: [CLI reference](../../cli/README.md), [Release steps](./steps.md) for running one stage of a release by hand,
 and [Shared versions](./versioning.md) for what a version group promises.

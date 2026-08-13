@@ -28,7 +28,7 @@ This page covers the top level; the larger objects have their own pages:
 | [Release records](./records.md)       | `changelog`, `github`, `commit`, the shared entry format options.                                                                           |
 | [Commit parsing options](./parser.md) | `commitErrors`, `nonPackageScopes`, `parser`.                                                                                               |
 | [`dependencies`](./dependencies.md)   | Consumer → provider relations between packages.                                                                                             |
-| [Script sequences](./scripts.md)      | `scripts`, and what a failure inside a sequence does to the rest of it.                                                                     |
+| [Script sequences](./scripts.md)      | `scripts`, binding a name to one command or to several, and what a failure inside a sequence does to the rest of it.                        |
 | [Run-level hooks](./run-hooks.md)     | The top-level `run` object: the hooks that observe the run as a whole, the branch guard, the stale-checkout guard.                          |
 | [Static env](./env.md)                | `env`: fixed environment variables added to every script the run executes.                                                                  |
 | [custom](./custom.md)                 | `custom`: free-form data dispat never reads.                                                                                                |
@@ -41,7 +41,7 @@ Related references: the [CLI](../cli/README.md), the [commit message format](../
 
 | Key                | Type                                       | Required | Description                                                                                                                                                            |
 |--------------------|--------------------------------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `scripts`          | map name → shell command                   | no       | Named shell commands, like package.json scripts. The same key also exists on a space and on a package, and a package looks up a name in the closest level first. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run). |
+| `scripts`          | map name → command or `[command, ...]`     | no       | Named shell commands, like package.json scripts. A name binds one command, or an array of commands run in order; see [One name, several commands](./scripts.md#one-name-several-commands). The same key also exists on a space and on a package, and a package looks up a name in the closest level first. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run). |
 | `spaces`           | map name → space                           | see note | Package groups sharing build/publish behaviour; see [Spaces](./spaces.md). At least one space **or** one `packages` entry is required.                                 |
 | `packages`         | map name → package                         | no       | Per-package configuration: overrides for space packages (key = folder name), and standalone packages outside every space via `path`; see [Packages](./packages.md).    |
 | `versionGroups`    | map name → `{versioning}`                  | no       | Shared-versioning groups that cut across spaces, joined by name via a space's or package's `versionGroup` key. A group may share the whole version, the major and minor, or the major alone; see [Versioning groups](./spaces.md#versioning-groups) and the [Shared versions](../reference/releasing/versioning.md) walkthrough. |
@@ -123,8 +123,10 @@ How a level combines with the one below it depends on the setting:
 
 - **Replaced.** Single values such as `tagFormat`, `versioning` and `src`. The nearest statement is the answer.
 - **Merged entry by entry.** `flow`, `scripts`, `env`. A level replaces the entries it names and keeps the rest, so
-  `flow: {build: build-libs}` in a space changes the build and leaves publish alone. An explicit empty array clears an
-  inherited entry.
+  `flow: {build: build-libs}` in a space changes the build and leaves publish alone. In `flow`, an explicit empty array
+  clears an inherited entry; in `scripts` it is an error, since a name bound to no command is a name that resolves to
+  nothing. An entry is replaced whole however many commands it binds, so restating a multi-command script is a new
+  sequence rather than an addition to the inherited one.
 - **Replaced whole.** `autoVersion`, `aliasTags`, `manifestNames`. Their empty fields carry meaning against their
   siblings, so a partial overlay could not express what they mean. An empty `aliasTags: []` is how a package opts out.
 - **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.

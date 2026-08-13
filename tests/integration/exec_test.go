@@ -23,20 +23,20 @@ import (
 // so the layering is visible.
 func execConfig() models.File {
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"which":  "echo level=root",
-		"shared": "echo shared MSG=$MSG",
-		"vars":   `echo "MSG=$MSG V=$DISPAT_VERSION P=$DISPAT_PACKAGE S=$DISPAT_STAGE"`,
+	cfg.Scripts = map[string]models.Script{
+		"which":  {"echo level=root"},
+		"shared": {"echo shared MSG=$MSG"},
+		"vars":   {`echo "MSG=$MSG V=$DISPAT_VERSION P=$DISPAT_PACKAGE S=$DISPAT_STAGE"`},
 	}
 	cfg.Env = map[string]string{"MSG": "from-root", "ROOT_ONLY": "root"}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
 			Path:    "packages",
-			Scripts: map[string]string{"which": "echo level=space"},
+			Scripts: map[string]models.Script{"which": {"echo level=space"}},
 			Env:     map[string]string{"MSG": "from-space"},
 			Packages: map[string]models.PackageConfig{
 				"core": {
-					Scripts: map[string]string{"which": "echo level=core"},
+					Scripts: map[string]models.Script{"which": {"echo level=core"}},
 					Env:     map[string]string{"MSG": "from-core"},
 				},
 			},
@@ -206,7 +206,7 @@ func TestExecComputesNoPlanUnlessAsked(t *testing.T) {
 func TestExecPropagatesTheExitCode(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{"boom": "exit 7"}
+	cfg.Scripts = map[string]models.Script{"boom": {"exit 7"}}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -226,9 +226,9 @@ func TestExecComposesInsideARunScript(t *testing.T) {
 	// is what makes a helper usable as a step inside a flow.
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"announce": `echo announcing $DISPAT_PACKAGE at $DISPAT_VERSION`,
-		"ci":       r.DispatCommand("exec", "announce"),
+	cfg.Scripts = map[string]models.Script{
+		"announce": {`echo announcing $DISPAT_PACKAGE at $DISPAT_VERSION`},
+		"ci":       {r.DispatCommand("exec", "announce")},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
 	r.WriteConfigModel(cfg)
@@ -278,10 +278,10 @@ func TestExecIsReservedAndRefusesBadFlags(t *testing.T) {
 func TestExecForwardsArgumentsAfterTheDash(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"show": `printf 'ARGS[%s]\n'`,
+	cfg.Scripts = map[string]models.Script{
+		"show": {`printf 'ARGS[%s]\n'`},
 		// Ends in one program, which is what the appended arguments reach.
-		"boom": `sh -c 'printf "RAN[%s]\n" "$@"; exit 7' _`,
+		"boom": {`sh -c 'printf "RAN[%s]\n" "$@"; exit 7' _`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
 	r.WriteConfigModel(cfg)

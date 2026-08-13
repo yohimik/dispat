@@ -150,7 +150,7 @@ func TestPackageOverrideSharedSpacePointer(t *testing.T) {
 // explicit empty array (raw: omitempty cannot marshal it) clears a stage.
 func TestPackageOverrideFlowEntryMerge(t *testing.T) {
 	cfg := validConfig()
-	cfg.Scripts["alt"] = "echo alt"
+	cfg.Scripts["alt"] = Script{"echo alt"}
 	cfg.Packages = map[string]PackageConfig{
 		"core": {Flow: &SpaceFlowConfig{Build: []string{"alt"}}},
 	}
@@ -800,27 +800,52 @@ func TestOverlayRecordFields(t *testing.T) {
 func TestPackageOverrideScriptsUnion(t *testing.T) {
 	cfg := validConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Scripts = map[string]string{"lint": "space lint", "fmt": "space fmt", "build": "space build"}
+		s.Scripts = map[string]Script{"lint": {"space lint"}, "fmt": {"space fmt"}, "build": {"space build"}}
 	})
 	cfg.Packages = map[string]PackageConfig{
-		"core": {Scripts: map[string]string{"lint": "core lint", "extra": "core extra"}},
+		"core": {Scripts: map[string]Script{"lint": {"core lint"}, "extra": {"core extra"}}},
 	}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	byName := packagesByName(pkgs)
 
-	assert.Equal(t, map[string]string{"lint": "core lint", "fmt": "space fmt", "extra": "core extra",
-		"build": "space build", "publish": "echo publish"}, byName["core"].Space.Scripts)
-	assert.Equal(t, map[string]string{"lint": "space lint", "fmt": "space fmt",
-		"build": "space build", "publish": "echo publish"},
+	assert.Equal(t, map[string]Script{"lint": {"core lint"}, "fmt": {"space fmt"}, "extra": {"core extra"},
+		"build": {"space build"}, "publish": {"echo publish"}}, byName["core"].Space.Scripts)
+	assert.Equal(t, map[string]Script{"lint": {"space lint"}, "fmt": {"space fmt"},
+		"build": {"space build"}, "publish": {"echo publish"}},
 		byName["utils"].Space.Scripts, "the space's own map is not mutated by the merge")
-	assert.Equal(t, map[string]string{"build": "echo build", "publish": "echo publish"},
+	assert.Equal(t, map[string]Script{"build": {"echo build"}, "publish": {"echo publish"}},
 		byName["app"].Space.Scripts, "another space sees the file's scripts alone")
 
 	// The precedence is the one the flow resolution uses, not a separate rule.
 	assert.Equal(t, []string{"space build"}, byName["core"].Space.BuildScript)
 	assert.Equal(t, []string{"echo build"}, byName["app"].Space.BuildScript)
+}
+
+// TestPackageOverrideReplacesTheWholeScript: a name is one entry however many
+// commands it binds, so a level restating it replaces the sequence rather than
+// adding to it. Merging the two would make a package unable to say "not that,
+// this" about a name it inherited.
+func TestPackageOverrideReplacesTheWholeScript(t *testing.T) {
+	cfg := validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Scripts = map[string]Script{"lint": {"space lint"}, "fmt": {"space fmt a", "space fmt b"}}
+	})
+	cfg.Packages = map[string]PackageConfig{
+		"core": {Scripts: map[string]Script{"lint": {"core lint a", "core lint b"}, "fmt": {"core fmt"}}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.Equal(t, Script{"core lint a", "core lint b"}, byName["core"].Space.Scripts["lint"],
+		"an array replaces the string it shadows")
+	assert.Equal(t, Script{"core fmt"}, byName["core"].Space.Scripts["fmt"],
+		"and a string replaces the array, whole")
+	assert.Equal(t, Script{"space fmt a", "space fmt b"}, byName["utils"].Space.Scripts["fmt"],
+		"the package next door keeps what the space said")
 }
 
 // TestStandalonePackage: a packages entry with a path is a package outside
@@ -898,7 +923,7 @@ func TestStandaloneEntryCarriesThePackageOnlyKeys(t *testing.T) {
 	cfg.Packages = map[string]PackageConfig{
 		"cli": {
 			Path:        "tools/cli",
-			Scripts:     map[string]string{"tidy": "go mod tidy"},
+			Scripts:     map[string]Script{"tidy": {"go mod tidy"}},
 			AutoVersion: &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"tidy"}},
 			Changelog:   &ChangelogConfig{File: "CLI.md"},
 			GitHub:      &GitHubConfig{Enabled: models.Bool(true), Owner: "acme", Repo: "cli"},
@@ -935,7 +960,7 @@ func TestStandaloneEntryIsHeldToSpaceRules(t *testing.T) {
 			PackageConfig{Path: "tools/cli", Flow: &SpaceFlowConfig{Login: []string{"build"}}},
 			"flow.login cannot be overridden per package"},
 		{"an empty script command is rejected",
-			PackageConfig{Path: "tools/cli", Scripts: map[string]string{"lint": "  "}},
+			PackageConfig{Path: "tools/cli", Scripts: map[string]Script{"lint": {"  "}}},
 			`scripts["lint"] is empty`},
 		{"a flow reference must resolve in the package's own scope",
 			PackageConfig{Path: "tools/cli", Flow: &SpaceFlowConfig{Build: []string{"ghost"}}},
@@ -964,7 +989,7 @@ func TestStandaloneEntryIsHeldToSpaceRules(t *testing.T) {
 	cfg.Packages = map[string]PackageConfig{"cli": {
 		Path:    "tools/cli",
 		Flow:    &SpaceFlowConfig{Build: []string{"ghost"}},
-		Scripts: map[string]string{"ghost": "echo boo"},
+		Scripts: map[string]Script{"ghost": {"echo boo"}},
 	}}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/cli")
 	pkgs, err := discoverPackages(t, root)
@@ -1007,7 +1032,7 @@ func TestStandalonePathValidation(t *testing.T) {
 // alone — no spaces at all.
 func TestStandaloneOnlyConfig(t *testing.T) {
 	cfg := File{
-		Scripts: map[string]string{"build": "echo b"},
+		Scripts: map[string]Script{"build": {"echo b"}},
 		Packages: map[string]PackageConfig{
 			"cli": {Path: "tools/cli", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
@@ -1018,7 +1043,7 @@ func TestStandaloneOnlyConfig(t *testing.T) {
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "cli", pkgs[0].Name)
 
-	empty := File{Scripts: map[string]string{"build": "echo b"}}
+	empty := File{Scripts: map[string]Script{"build": {"echo b"}}}
 	_, err = loadModel(t, empty)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one space or package")
@@ -1447,7 +1472,7 @@ func TestSpacePackagesEntryBeatsRootEntry(t *testing.T) {
 // rest, for every package of the space.
 func TestSpaceFileOverridesRootSpace(t *testing.T) {
 	cfg := validConfig()
-	cfg.Scripts["space-build"] = "echo space-file build"
+	cfg.Scripts["space-build"] = Script{"echo space-file build"}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	writeSpaceFile(t, root, "packages/libs", SpaceFile{
 		TagFormat:    "file-{name}@{version}",
@@ -1475,7 +1500,7 @@ func TestSpaceFileScriptsAndAutoVersion(t *testing.T) {
 	cfg := validConfig()
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 	writeSpaceFile(t, root, "packages/libs", SpaceFile{
-		Scripts:     map[string]string{"build": "echo file build", "sync": "echo sync"},
+		Scripts:     map[string]Script{"build": {"echo file build"}, "sync": {"echo sync"}},
 		AutoVersion: &AutoVersionConfig{Enabled: models.Bool(true), SyncLock: []string{"sync"}},
 	})
 	pkgs, err := discoverPackages(t, root)
@@ -1493,28 +1518,28 @@ func TestSpaceFileScriptsAndAutoVersion(t *testing.T) {
 // sets, proving every one of them was applied rather than skipped.
 func TestOverrideLadder(t *testing.T) {
 	cfg := validConfig()
-	cfg.Scripts["s1"] = "echo s1"
+	cfg.Scripts["s1"] = Script{"echo s1"}
 	withLibs(&cfg, func(s *SpaceConfig) {
 		s.TagFormat = "s1-{name}@{version}"
-		s.Scripts = map[string]string{"space": "echo space"}
+		s.Scripts = map[string]Script{"space": {"echo space"}}
 		s.Packages = map[string]PackageConfig{
-			"core": {TagFormat: "p2-{name}@{version}", Scripts: map[string]string{"p2": "echo p2"}},
+			"core": {TagFormat: "p2-{name}@{version}", Scripts: map[string]Script{"p2": {"echo p2"}}},
 		}
 	})
 	cfg.Packages = map[string]PackageConfig{
-		"core": {TagFormat: "p1-{name}@{version}", Scripts: map[string]string{"p1": "echo p1"}},
+		"core": {TagFormat: "p1-{name}@{version}", Scripts: map[string]Script{"p1": {"echo p1"}}},
 	}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 	writeSpaceFile(t, root, "packages/libs", SpaceFile{
 		TagFormat: "s2-{name}@{version}",
-		Scripts:   map[string]string{"s2": "echo s2"},
+		Scripts:   map[string]Script{"s2": {"echo s2"}},
 		Packages: map[string]PackageConfig{
-			"core": {TagFormat: "p3-{name}@{version}", Scripts: map[string]string{"p3": "echo p3"}},
+			"core": {TagFormat: "p3-{name}@{version}", Scripts: map[string]Script{"p3": {"echo p3"}}},
 		},
 	})
 	writePackageFile(t, root, "packages/libs/core", PackageConfig{
 		TagFormat: "p4-{name}@{version}",
-		Scripts:   map[string]string{"p4": "echo p4"},
+		Scripts:   map[string]Script{"p4": {"echo p4"}},
 	})
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
@@ -2335,8 +2360,8 @@ func TestRootDefaultsReachEverySpace(t *testing.T) {
 // is why the space booleans are tri-state.
 func TestRootDefaultsAreOverriddenAtEveryLevel(t *testing.T) {
 	cfg := validConfig()
-	cfg.Scripts["build-libs"] = "echo libs"
-	cfg.Scripts["build-core"] = "echo core"
+	cfg.Scripts["build-libs"] = Script{"echo libs"}
+	cfg.Scripts["build-core"] = Script{"echo core"}
 	cfg.Flow = &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Versioning = "fixed"
@@ -2373,7 +2398,7 @@ func TestRootDefaultsAreOverriddenAtEveryLevel(t *testing.T) {
 // may have one of its own, which is still refused.
 func TestRootFlowLoginRunsPerSpace(t *testing.T) {
 	cfg := validConfig()
-	cfg.Scripts["login"] = "npm login"
+	cfg.Scripts["login"] = Script{"npm login"}
 	cfg.Flow = &SpaceFlowConfig{Login: []string{"login"}}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 

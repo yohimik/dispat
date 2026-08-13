@@ -82,6 +82,59 @@ this one. dispat itself needs only `git` and a POSIX shell.
 rather than raced. That also makes the job safe to trigger on every merge; the second run stops immediately instead of
 publishing beside the first.
 
+## Gating a pipeline on the plan
+
+A repository with nothing pending releases nothing and exits `0`. That is the right answer — there was nothing to do,
+and a job triggered on every merge must not go red because this particular merge was a `docs:` commit. But a stage
+whose *point* is that something shipped needs the opposite: a deploy that runs after the release, an announcement, a
+downstream trigger. Passing quietly on an empty plan is how a pipeline ends up deploying nothing.
+
+`--require-release` is that gate. On `release` and `status` alike, it exits `1` when the plan releases nothing:
+
+```sh
+dispat status --require-release    # 0 if this run would publish something, 1 if not
+```
+
+Only packages the run will actually publish count. A package held by `Release-As: none`, one
+[withheld until its providers release](./releasing/partial-releases.md), and one your `--package`/`--space`/`--group`
+selection left out are all "not releasing", because none of them gets a version this run.
+
+The plain shape is one job that decides and one that acts:
+
+```yaml
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      releasing: ${{ steps.plan.outputs.releasing }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: yohimik/dispat@v1
+      - id: plan
+        run: |
+          if dispat status --require-release --log-format json; then
+            echo "releasing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "releasing=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: plan
+    if: needs.plan.outputs.releasing == 'true'
+    runs-on: ubuntu-latest
+    # ... the release job above
+```
+
+`status` takes no lock and writes nothing, so the gate is free to run as often as you like. On `release` the flag is
+answered before the [release lock](./releasing/release-lock.md) is taken and before `beforeAll` runs, so
+`dispat --require-release` in a single-job pipeline refuses without ever claiming the repository or executing one of
+your scripts.
+
+Note the shell here: `if dispat status --require-release` rather than a bare `run:` step, because `set -e` would
+otherwise end the job on the `1` that is the whole point. A step that *should* fail the pipeline when nothing
+released — a manually dispatched release, say — wants the bare form instead.
+
 ## The container images
 
 Four images, one per base, on `linux/amd64` and `linux/arm64`:

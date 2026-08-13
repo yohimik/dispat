@@ -80,8 +80,10 @@ per-field rules follow from what each object means:
   set per package: login runs [once per space, in the space folder](./spaces.md#flowlogin), gating every publish of the
   space, and a per-package login would contradict all three.
 - `scripts` merges **name by name**: a name set here wins, the space's other names survive, and the file's names stay
-  under both. A name only this package defines belongs to this package alone, so `dispat run <name>` reaches no other
-  package with it. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run).
+  under both. What a name binds is replaced whole, however many commands that is, so restating a
+  [multi-command script](./scripts.md#one-name-several-commands) here is a new sequence rather than an addition to the
+  inherited one. A name only this package defines belongs to this package alone, so `dispat run <name>` reaches no
+  other package with it. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run).
 - `versioning`/`versionGroup` are one axis: a layer setting either supersedes both inherited values (so a package sets
   `versioning: independent` to opt out of its space's group, or `versionGroup: <name>` to join another). Setting both in
   one layer is a contradiction and is rejected. Note that setting `versioning` to another *shared* mode does not leave

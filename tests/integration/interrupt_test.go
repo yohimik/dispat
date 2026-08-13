@@ -38,7 +38,7 @@ func TestInterruptGracefulShutdown(t *testing.T) {
 	cfg := libsConfig("", 1)
 	// The build marks its package into the tsmark log and dwells long enough
 	// for the test to interrupt it mid-flight; b waits behind a.
-	cfg.Scripts["build"] = r.TsmarkScript("build.tsmark", "$DISPAT_PACKAGE", 1500*time.Millisecond)
+	cfg.Scripts["build"] = models.Script{r.TsmarkScript("build.tsmark", "$DISPAT_PACKAGE", 1500*time.Millisecond)}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "b", Provider: "a"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -85,7 +85,7 @@ func TestInterruptStopsARunCommand(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
-		Scripts: map[string]string{"mark": r.TsmarkScript("run.tsmark", "$DISPAT_PACKAGE", 1500*time.Millisecond)}}
+		Scripts: map[string]models.Script{"mark": {r.TsmarkScript("run.tsmark", "$DISPAT_PACKAGE", 1500*time.Millisecond)}}}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "b", Provider: "a"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")

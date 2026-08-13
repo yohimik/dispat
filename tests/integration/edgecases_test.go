@@ -239,12 +239,12 @@ func TestEdgeAutoReplaceSyncsWithoutPropagation(t *testing.T) {
 func TestEdgeVersionScriptSeesEveryUpdatedProvider(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":   echoBuild,
-		"publish": "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":   {echoBuild},
+		"publish": {"echo publishing"},
 		// Records which providers the stage was handed, so the assertion is
 		// about the environment rather than about a file the writer touched.
-		"stamp": `echo "$DISPAT_PACKAGE:$DISPAT_UPDATED_PACKAGES" >> ../../version.log`,
+		"stamp": {`echo "$DISPAT_PACKAGE:$DISPAT_UPDATED_PACKAGES" >> ../../version.log`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"scripted": {Path: "scripted", Flow: &models.SpaceFlowConfig{
@@ -443,10 +443,10 @@ func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
 func TestEdgeRevertOnFailStopsAtThePublish(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"mutate-then-fail": "echo dirty > leftover.txt && exit 1",
-		"mutate":           "echo dirty > leftover.txt",
-		"publish":          "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"mutate-then-fail": {"echo dirty > leftover.txt && exit 1"},
+		"mutate":           {"echo dirty > leftover.txt"},
+		"publish":          {"echo publishing"},
 	}
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Spaces = map[string]models.SpaceConfig{
@@ -481,9 +481,9 @@ func TestEdgeRevertOnFailStopsAtThePublish(t *testing.T) {
 func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"mutate": "echo dirty > leftover.txt",
-		"fail":   "exit 1",
+	cfg.Scripts = map[string]models.Script{
+		"mutate": {"echo dirty > leftover.txt"},
+		"fail":   {"exit 1"},
 	}
 	// The root says yes; the space stays silent and inherits it.
 	cfg.RevertOnFail = models.Bool(true)

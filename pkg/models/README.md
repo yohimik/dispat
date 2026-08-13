@@ -7,7 +7,10 @@ strings.
 
 ```go
 cfg := models.File{
-Scripts: map[string]string{"build": "npm run build", "publish": "npm publish"},
+Scripts: map[string]models.Script{
+"build":   {"npm run build"},             // one command
+"release": {"npm ci", "npm publish"},     // or a sequence, run in order
+},
 Spaces: map[string]models.SpaceConfig{
 "libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 Build: []string{"build"}, Publish: []string{"publish"},
@@ -31,6 +34,10 @@ A `Packages` entry plays one of two roles: without `Path` it overrides the space
 folder name matches the key; with `Path` it declares a standalone package outside every space. The model always holds
 dependency edges as the flat `[]DependencyConfig` list; the consumer-keyed shorthand the config file accepts is expanded
 by the CLI's loader, not expressed here.
+
+A `Scripts` value is a `Script`: the commands one name binds, in the order they run. It decodes from either shape the
+config file accepts — a bare string or an array of them — and marshals back as the shortest one that carries what the
+script says, so a single-command script written as a string is written back as a string.
 
 This module contains models only. Loading, validation, defaulting and package discovery live in the CLI's internal
 config package: an invalid model marshals fine and fails with a clear error when the CLI loads it.

@@ -17,7 +17,7 @@ declared through a [standalone entry](./packages.md#standalone-packages-path).
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How much of the version the space's packages hold in common: `independent` (default), `fixed`, `fixedSparse`, `fixedMajorMinor`, `fixedMajorMinorSparse`, `fixedMajor` or `fixedMajorSparse`; see [`versioning`](#versioning). Mutually exclusive with `versionGroup`.                                                                                                                  |
 | `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name: a top-level [`versionGroups`](#versioning-groups) entry, or another space whose own versioning is shared. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                        |
-| `scripts`               | map name → shell command | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
+| `scripts`               | map name → command or `[command, ...]` | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). A name binds one command or an array of them run in order. `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage: dispat itself reconciles declared workspace ranges and the package's own version in `package.json` and `go.mod`, before any `flow.version` script. Absent means off; see [`autoVersion`](#autoversion).                                                                                                                                 |
 | `env`                   | map name → value         | no         | Fixed environment variables for every script of the space's packages, its login script included, merged over the top-level map key by key; see [Static env](./env.md).                                                                                                                                                                                                     |
 | `custom`                | object                   | no         | Free-form data dispat never reads; see [`custom`](./custom.md).                                                                                                                                                                                                                                                                                                                   |
@@ -367,14 +367,17 @@ deciding the rule is stale.
 
 ## `scripts` and `dispat run`
 
-A script is a name bound to a shell command. You can write that binding at three levels, and all three use the same
-`scripts` key: the config file itself, a space, and a single package.
+A script is a name bound to a shell command — or to several, run in order. You can write that binding at three levels,
+and all three use the same `scripts` key: the config file itself, a space, and a single package.
 
 ```yaml
 scripts:
   build: "npm run build"
   publish: "npm publish --access public"
   audit: "npm audit --omit=dev"          # every package has this one
+  verify:                                # several commands, run in order
+    - npm run lint
+    - npm run test
 
 spaces:
   libs:
@@ -391,7 +394,7 @@ packages:
       bench: "npm run bench"             # only core has it
 ```
 
-When dispat needs the command behind a name, it asks the package that is about to run it, and looks in three places in
+When dispat needs the commands behind a name, it asks the package that is about to run it, and looks in three places in
 order:
 
 1. the package's own `scripts`,
@@ -399,8 +402,10 @@ order:
 3. the file's `scripts`.
 
 The first hit wins, and the lookup happens one name at a time. Redefining `lint` for `core` therefore leaves `audit`
-and `preview` exactly as they were. This is the only resolution rule in dispat, and everything that names a script uses
-it: the `flow` stages and hooks, `autoVersion.syncLock`, and `dispat run`.
+and `preview` exactly as they were — and a name is replaced whole, so restating `verify` somewhere is a new sequence
+rather than an addition to this one. This is the only resolution rule in dispat, and everything that names a script
+uses it: the `flow` stages and hooks, `autoVersion.syncLock`, and `dispat run`. See
+[One name, several commands](./scripts.md#one-name-several-commands) for what an array binding means when it runs.
 
 ### What a run covers
 

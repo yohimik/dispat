@@ -192,7 +192,7 @@ func (w *scriptWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 	// The one resolution: the package's own scripts over its space's over the
 	// top level's, already merged into the effective map when the package's
 	// space was built.
-	cmd, ok := rel.Pkg.Space.Scripts[strings.ToLower(w.name)]
+	cmds, ok := rel.Pkg.Space.Scripts[strings.ToLower(w.name)]
 	if !ok {
 		w.app.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
 			Msgf("package does not define script %q, skipping", w.name)
@@ -202,7 +202,7 @@ func (w *scriptWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 		log := w.app.log.With().Str("package", pkg).Str("stage", w.stage()).Logger()
 		log.Info().Msg("run script started")
 		seq := release.Sequence{Runner: w.runner, Dir: rel.Pkg.Dir, Stage: w.stage(),
-			Commands: []string{script.AppendArgs(cmd, w.args)},
+			Commands: script.AppendArgsToLast(cmds, w.args),
 			Env:      release.CommandEnv(w.pl, pkg, w.stage(), w.wsVars),
 			Log:      log, FailFast: true}
 		return seq.RunMergingOutputs(ctx, rel)

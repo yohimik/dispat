@@ -96,8 +96,11 @@ one is running is refused rather than raced. unsafeDisableLock in the config,
 or DISPAT_UNSAFE_DISABLE_LOCK=true in the environment, switches it off for
 repositories with no remote to coordinate through.
 
+--require-release refuses a run that would publish nothing, before the lock is
+taken, for the CI stage whose point is that this run releases something.
+
 This is what a bare "dispat" does.`,
-		flags: append([]string{"strict"}, selectionFlags...),
+		flags: append([]string{"strict", "require-release"}, selectionFlags...),
 	},
 	{
 		name:  cmdStatus,
@@ -111,9 +114,10 @@ a release would, so the graph shows what "dispat release" with the same
 flags is about to do.
 
 Exits 0 even when a release would refuse, because showing the plan is the
-job; only a repository that cannot produce a correct plan at all, or a
---strict selection the plan cannot release, exits 1.`,
-		flags: append([]string{"strict"}, selectionFlags...),
+job; only a repository that cannot produce a correct plan at all, a --strict
+selection the plan cannot release, or --require-release with nothing to
+release, exits 1.`,
+		flags: append([]string{"strict", "require-release"}, selectionFlags...),
 	},
 	{
 		name:     cmdRun,

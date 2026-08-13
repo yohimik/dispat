@@ -28,7 +28,7 @@ import (
 // pair, with the given build script text.
 func spacesConfig(buildScript string, spaces map[string]models.SpaceConfig) models.File {
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": buildScript, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {buildScript}, "publish": {"echo publishing"}}
 	cfg.Spaces = spaces
 	return cfg
 }
@@ -246,10 +246,10 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 	const envFile = "version-env.txt"
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":   "echo building",
-		"publish": "echo publishing",
-		"sync":    "env | grep '^DISPAT_' | sort > " + envFile,
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"publish": {"echo publishing"},
+		"sync":    {"env | grep '^DISPAT_' | sort > " + envFile},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"core": {Path: "core", Flow: buildPublish()},

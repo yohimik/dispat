@@ -253,10 +253,10 @@ func TestManifestsWriterOutcomesReachTheExitCode(t *testing.T) {
 func TestManifestsCommandWordsKeepTheirScripts(t *testing.T) {
 	r := harness.New(t)
 	f := harness.BaseFile()
-	f.Scripts = map[string]string{
-		"scanner": "echo the script ran",
-		"build":   "echo building",
-		"publish": "echo publishing",
+	f.Scripts = map[string]models.Script{
+		"scanner": {"echo the script ran"},
+		"build":   {"echo building"},
+		"publish": {"echo publishing"},
 	}
 	f.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -358,10 +358,10 @@ func TestManifestsReplacerJSONEvents(t *testing.T) {
 func TestManifestsReplacerWordKeepsItsScript(t *testing.T) {
 	r := harness.New(t)
 	f := harness.BaseFile()
-	f.Scripts = map[string]string{
-		"replacer": "echo the script ran",
-		"build":    "echo building",
-		"publish":  "echo publishing",
+	f.Scripts = map[string]models.Script{
+		"replacer": {"echo the script ran"},
+		"build":    {"echo building"},
+		"publish":  {"echo publishing"},
 	}
 	f.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},

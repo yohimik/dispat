@@ -36,6 +36,13 @@ type ReleaseOptions struct {
 	// selection releases; with it nothing is released at all, which is what
 	// makes a filtered release safe to run unattended.
 	Strict bool
+	// RequireRelease refuses the run when the plan would publish nothing, which
+	// is otherwise a legitimate no-op that exits 0. It exists for the CI stage
+	// whose whole point is that this run releases something: without it such a
+	// job passes quietly on an empty plan and the pipeline carries on to deploy
+	// nothing. A held, withheld or unselected package does not count — this run
+	// will not publish it either.
+	RequireRelease bool
 }
 
 // Release computes the plan and executes it end to end: verification, the
@@ -58,6 +65,17 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := a.checkGit(); err != nil {
 		return nil, err
 	}
+	// --require-release is the exception to that order: there the plan decides
+	// whether the run happens at all, so it is computed first. A run that will
+	// publish nothing must not take the remote lock tag — and must not make a
+	// concurrent release wait on one — to discover that it had nothing to do.
+	var pl *plan.Plan
+	if opts.RequireRelease {
+		var err error
+		if pl, err = a.selectedPlan(ctx, opts); err != nil {
+			return nil, err
+		}
+	}
 	if !a.lockDisabled() {
 		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
 		if err := lock.Acquire(ctx); err != nil {
@@ -73,9 +91,11 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		defer lock.Release(context.WithoutCancel(ctx))
 	}
 
-	pl, err := a.selectedPlan(ctx, opts)
-	if err != nil {
-		return nil, err
+	if pl == nil {
+		var err error
+		if pl, err = a.selectedPlan(ctx, opts); err != nil {
+			return nil, err
+		}
 	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
 		a.log.Error().Str("reason", blocked).Msg("refusing to release")

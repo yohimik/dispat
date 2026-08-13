@@ -14,7 +14,11 @@ scripts:
   npm-login: "npm whoami || npm login"
   smoke-test: "npm run smoke"
   announce: "./scripts/announce.sh"
-  build-go: "go build ./..."
+  # A name may bind several commands, run in order as separate shell
+  # invocations; the first that fails stops the rest.
+  build-go:
+    - "go vet ./..."
+    - "go build ./..."
   publish-go: "./scripts/release.sh"
   notify: "./scripts/notify.sh"
 

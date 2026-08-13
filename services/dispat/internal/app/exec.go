@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -143,7 +144,7 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 	if opts.ScriptFrom != nil {
 		from = *opts.ScriptFrom
 	}
-	command, err := a.lookupScript(opts.Script, from, opts.Fallback)
+	commands, err := a.lookupScript(opts.Script, from, opts.Fallback)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot run the script")
 		return 1, err
@@ -159,44 +160,45 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 	log := a.log.With().Str("script", opts.Script).Logger()
 	log.Debug().Str("subject", opts.Subject.label()).Str("from", from.label()).Msg("running script")
 	return shellCall{
-		Runner: runner, Dir: opts.Dir, Script: script.AppendArgs(command, opts.Args), Env: env,
+		Runner: runner, Dir: opts.Dir, Scripts: script.AppendArgsToLast(commands, opts.Args), Env: env,
 		OnFailure: opts.OnFailure, Stdout: opts.Stdout, Stderr: opts.Stderr, Log: log,
 	}.run(ctx)
 }
 
-// lookupScript finds the shell text for a name at the given level.
+// lookupScript finds the shell text for a name at the given level: the one
+// command it binds, or the sequence of them.
 //
 // Exact by default: the level named is the only one read, so a script defined
 // at the wrong level fails loudly instead of running text from a level nobody
 // asked about. --fallback is `dispat run`'s own resolution, the package over
 // its space over the top level, and the two report their failure differently
 // because "not in that map" and "nowhere in this chain" are different problems.
-func (a *App) lookupScript(name string, from ExecSubject, fallback bool) (string, error) {
+func (a *App) lookupScript(name string, from ExecSubject, fallback bool) (public.Script, error) {
 	levels, err := a.scriptLevels(from, fallback)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	key := strings.ToLower(name) // viper lowercases the config's map keys
 	for _, l := range levels {
-		if cmd, ok := l.scripts[key]; ok {
-			return cmd, nil
+		if cmds, ok := l.scripts[key]; ok {
+			return cmds, nil
 		}
 	}
 	if len(levels) == 1 {
-		return "", fmt.Errorf("no script %q in %s", name, levels[0].label)
+		return nil, fmt.Errorf("no script %q in %s", name, levels[0].label)
 	}
 	tried := make([]string, 0, len(levels))
 	for _, l := range levels {
 		tried = append(tried, l.label)
 	}
-	return "", fmt.Errorf("no script %q in %s", name, strings.Join(tried, ", nor in "))
+	return nil, fmt.Errorf("no script %q in %s", name, strings.Join(tried, ", nor in "))
 }
 
 // scriptLevel is one map a lookup may read, with the phrase an error uses for
 // it. Keeping the two together is what stops a resolution site and its message
 // from describing different places, the same reasoning as config.scriptScope.
 type scriptLevel struct {
-	scripts map[string]string
+	scripts map[string]public.Script
 	label   string
 }
 

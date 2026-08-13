@@ -37,10 +37,10 @@ import (
 func TestConfigLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"build":   "echo building",
-		"publish": "echo publishing",
-		"login":   r.TsmarkScript("login.log", "$DISPAT_SPACE", 0),
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"publish": {"echo publishing"},
+		"login":   {r.TsmarkScript("login.log", "$DISPAT_SPACE", 0)},
 	}
 	withLogin := &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
@@ -72,11 +72,11 @@ func TestConfigLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
-	cfg.Scripts = map[string]string{
-		"build":      "echo building",
-		"publish":    "echo publishing",
-		"bad-login":  "exit 1",
-		"good-login": "echo ok",
+	cfg.Scripts = map[string]models.Script{
+		"build":      {"echo building"},
+		"publish":    {"echo publishing"},
+		"bad-login":  {"exit 1"},
+		"good-login": {"echo ok"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"broken": {Path: "packages/broken", Flow: &models.SpaceFlowConfig{
@@ -109,12 +109,12 @@ func TestConfigLoginFailureIsolatedToItsSpace(t *testing.T) {
 func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":       "echo building",
-		"publish":     `[ "$DISPAT_PACKAGE" != "provider" ]`,
-		"boom":        "exit 1",
-		"record-fail": `env | grep '^DISPAT_' > "../../onfail-$DISPAT_PACKAGE.env"`,
-		"record-skip": `env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`,
+	cfg.Scripts = map[string]models.Script{
+		"build":       {"echo building"},
+		"publish":     {`[ "$DISPAT_PACKAGE" != "provider" ]`},
+		"boom":        {"exit 1"},
+		"record-fail": {`env | grep '^DISPAT_' > "../../onfail-$DISPAT_PACKAGE.env"`},
+		"record-skip": {`env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
@@ -173,11 +173,11 @@ func TestConfigOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":        "echo building",
-		"fail-publish": "exit 1",
-		"mutate":       "echo dirty >> main.txt && echo extra > extra.txt",
-		"publish":      "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":        {"echo building"},
+		"fail-publish": {"exit 1"},
+		"mutate":       {"echo dirty >> main.txt && echo extra > extra.txt"},
+		"publish":      {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: "packages/provider", Flow: &models.SpaceFlowConfig{
@@ -213,13 +213,13 @@ func TestConfigRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 func TestConfigScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"hook-export": `echo "HOOK_MARK=hook-$DISPAT_PACKAGE" >> "$DISPAT_OUTPUT"`,
-		"build": `if [ "$DISPAT_PACKAGE" = "bad" ]; then` +
+	cfg.Scripts = map[string]models.Script{
+		"hook-export": {`echo "HOOK_MARK=hook-$DISPAT_PACKAGE" >> "$DISPAT_OUTPUT"`},
+		"build": {`if [ "$DISPAT_PACKAGE" = "bad" ]; then` +
 			` echo "BUILD_MARK=pre-fail" >> "$DISPAT_OUTPUT"; exit 1; fi;` +
-			` echo "BUILD_MARK=built" >> "$DISPAT_OUTPUT"`,
-		"publish":     `env | grep '^DISPAT_OUTPUT' | sort > "../../publish-$DISPAT_PACKAGE.env"`,
-		"record-fail": `env | grep '^DISPAT_OUTPUT' | sort > "../../onfail-$DISPAT_PACKAGE.env"`,
+			` echo "BUILD_MARK=built" >> "$DISPAT_OUTPUT"`},
+		"publish":     {`env | grep '^DISPAT_OUTPUT' | sort > "../../publish-$DISPAT_PACKAGE.env"`},
+		"record-fail": {`env | grep '^DISPAT_OUTPUT' | sort > "../../onfail-$DISPAT_PACKAGE.env"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
@@ -262,8 +262,8 @@ func TestConfigScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 func TestConfigRunLevelHooks(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
-	cfg.Scripts["dump"] = "env | grep '^DISPAT_' > postall.env"
+	cfg.Scripts["hook"] = models.Script{"echo $DISPAT_STAGE >> hooks.log"}
+	cfg.Scripts["dump"] = models.Script{"env | grep '^DISPAT_' > postall.env"}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	cfg.Run = &models.RunConfig{
 		BeforeAll:    []string{"hook"},
@@ -317,8 +317,8 @@ func TestConfigRunLevelHooks(t *testing.T) {
 func TestConfigRunLevelHookFailureSemantics(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["boom"] = "exit 1"
-	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Scripts["boom"] = models.Script{"exit 1"}
+	cfg.Scripts["hook"] = models.Script{"echo $DISPAT_STAGE >> hooks.log"}
 	cfg.Run = &models.RunConfig{PostAll: []string{"boom", "hook"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -346,15 +346,15 @@ func TestConfigRunLevelHookFailureSemantics(t *testing.T) {
 // hookLog builds the scripts map wiring every per-package stage hook (all
 // nine), the three stages and announce to one appending log line each, so a
 // scenario can read back exactly what fired and in which order.
-func hookLog() map[string]string {
+func hookLog() map[string]models.Script {
 	names := []string{
 		"beforeAll", "beforeVersion", "postVersion", "beforeBuild", "postBuild",
 		"beforePublish", "postPublish", "beforeAnnounce", "postAnnounce",
 		"build", "publish", "version", "announce",
 	}
-	scripts := make(map[string]string, len(names))
+	scripts := make(map[string]models.Script, len(names))
 	for _, n := range names {
-		scripts[n] = "echo " + n + ":$DISPAT_PACKAGE >> ../../hooks.log"
+		scripts[n] = models.Script{"echo " + n + ":$DISPAT_PACKAGE >> ../../hooks.log"}
 	}
 	return scripts
 }
@@ -426,9 +426,9 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 	t.Run("post_publish_and_announce_only_warn", func(t *testing.T) {
 		r := harness.New(t)
 		cfg := harness.BaseFile(1)
-		cfg.Scripts = map[string]string{
-			"build": echoBuild, "publish": "echo publishing",
-			"boom": "exit 1",
+		cfg.Scripts = map[string]models.Script{
+			"build": {echoBuild}, "publish": {"echo publishing"},
+			"boom": {"exit 1"},
 		}
 		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"},
@@ -447,9 +447,9 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 	t.Run("gating_hooks_fail_the_package", func(t *testing.T) {
 		r := harness.New(t)
 		cfg := harness.BaseFile(1)
-		cfg.Scripts = map[string]string{
-			"build": echoBuild, "publish": "echo publishing",
-			"boom": "exit 1", "onfail": "echo onFail:$DISPAT_FAILED_STAGE >> ../../hooks.log",
+		cfg.Scripts = map[string]models.Script{
+			"build": {echoBuild}, "publish": {"echo publishing"},
+			"boom": {"exit 1"}, "onfail": {"echo onFail:$DISPAT_FAILED_STAGE >> ../../hooks.log"},
 		}
 		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"},
@@ -488,7 +488,7 @@ func TestConfigStageHookAuthoritySplit(t *testing.T) {
 func TestConfigRunLevelHooksAreTheReleasesOwn(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["hook"] = "echo $DISPAT_STAGE >> hooks.log"
+	cfg.Scripts["hook"] = models.Script{"echo $DISPAT_STAGE >> hooks.log"}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	cfg.Run = &models.RunConfig{
 		BeforeAll:    []string{"hook"},

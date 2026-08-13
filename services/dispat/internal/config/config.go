@@ -33,6 +33,7 @@ import (
 // CLI keeps importing internal/config alone.
 type (
 	File                     = public.File
+	Script                   = public.Script
 	RunConfig                = public.RunConfig
 	EntryFormatConfig        = public.EntryFormatConfig
 	EntryLine                = public.EntryLine
@@ -166,7 +167,7 @@ var validLevels = map[string]bool{
 // Keeping the two together is what stops a resolution site and its error
 // message from describing different sets of names.
 type scriptScope struct {
-	scripts map[string]string
+	scripts map[string]Script
 	hint    string
 }
 
@@ -175,7 +176,7 @@ type scriptScope struct {
 // merged, so its own map carries both of the lower two levels and this only
 // has to add the top one underneath.
 func packageScope(c *File, sc SpaceConfig) scriptScope {
-	scripts := make(map[string]string, len(c.Scripts)+len(sc.Scripts))
+	scripts := make(map[string]Script, len(c.Scripts)+len(sc.Scripts))
 	for k, v := range c.Scripts {
 		scripts[k] = v
 	}
@@ -194,14 +195,18 @@ func rootScope(c *File) scriptScope {
 // commands resolves a sequence of script references into the shell commands
 // they name, preserving order. Unknown references were rejected by check, so
 // resolution cannot silently drop one.
+//
+// A reference contributes every command its script binds, so the two levels of
+// ordering — the references, and the commands inside each — flatten into the
+// one order the sequence runs in.
 func (s scriptScope) commands(refs []string) []string {
 	if len(refs) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		if cmd, ok := s.scripts[strings.ToLower(ref)]; ok {
-			out = append(out, cmd)
+		if cmds, ok := s.scripts[strings.ToLower(ref)]; ok {
+			out = append(out, cmds...)
 		}
 	}
 	return out
@@ -245,16 +250,32 @@ func (s scriptScope) checkSpaceRefs(label string, sc SpaceConfig) error {
 	return s.check(map[string][]string{"autoVersion.syncLock": sc.AutoVersion.SyncLock}, label+": ")
 }
 
-// checkScriptValues rejects the two ways a scripts map itself can be unusable,
-// at whichever level holds it: a nameless entry, and a name bound to no
-// command at all.
-func checkScriptValues(label string, scripts map[string]string) error {
-	for name, cmd := range scripts {
+// checkScriptValues rejects the ways a scripts map itself can be unusable, at
+// whichever level holds it: a nameless entry, a name bound to no command at
+// all, and a blank command inside a sequence.
+//
+// An empty array is the "no command at all" case rather than a way of clearing
+// an inherited name — a name that resolves to nothing is what a missing name
+// already is, said less clearly — so it reads as the same mistake as `""` and
+// gets the same message. A blank command among several is reported by index,
+// because "scripts[\"build\"] is empty" would be false of the entry the reader
+// then goes and looks at.
+func checkScriptValues(label string, scripts map[string]Script) error {
+	for name, cmds := range scripts {
 		if name == "" {
 			return fmt.Errorf("%s: scripts contains an empty script name", label)
 		}
-		if strings.TrimSpace(cmd) == "" {
+		if len(cmds) == 0 {
 			return fmt.Errorf("%s: scripts[%q] is empty", label, name)
+		}
+		for i, cmd := range cmds {
+			if strings.TrimSpace(cmd) != "" {
+				continue
+			}
+			if len(cmds) == 1 {
+				return fmt.Errorf("%s: scripts[%q] is empty", label, name)
+			}
+			return fmt.Errorf("%s: scripts[%q][%d] is empty", label, name, i)
 		}
 	}
 	return nil

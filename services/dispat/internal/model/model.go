@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/ignore"
 )
 
@@ -126,12 +127,13 @@ type Space struct {
 	VersionGroup string
 	// Scripts is the effective script map of the package this Space was
 	// derived for: the file's scripts, overlaid with the space's, overlaid
-	// with the package's, keyed by lowercased name and holding shell commands.
+	// with the package's, keyed by lowercased name and holding the commands
+	// each name binds — one, or a sequence run in order.
 	// It is what every script name resolves through — the flow entries below
 	// were resolved from it, and `dispat run <name>` looks the name up here,
-	// executing the command inside each changed package that has one, in
+	// executing its commands inside each changed package that has one, in
 	// topological order, with the package's full DISPAT_* environment.
-	Scripts map[string]string
+	Scripts map[string]public.Script
 	// Env is the static environment of this package's scripts: the
 	// configuration's env layers (top level, space, space folder file, package
 	// overrides) merged key by key and flattened to sorted KEY=value pairs,
@@ -318,7 +320,7 @@ type Package struct {
 	// what `dispat exec --for-package` answers without --fallback. Kept here
 	// because the layer fold already computes it and nothing else can: two of
 	// the four layers live in files only discovery reads.
-	OwnScripts    map[string]string
+	OwnScripts    map[string]public.Script
 	ManifestNames []string
 	// Ignore keeps some of the package's own files from counting as changes
 	// to it: the compiled patterns of every level that declared any, weakest

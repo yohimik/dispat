@@ -82,7 +82,7 @@ func assertLockCleared(t *testing.T, r *harness.Repo, bare string) {
 // while the run holds the lock. Reading the file afterwards is how a test
 // asserts on a ref that only exists mid-run.
 func probeConfig(cfg *models.File) {
-	cfg.Scripts["probe"] = "git ls-remote --tags origin > lock.probe"
+	cfg.Scripts["probe"] = models.Script{"git ls-remote --tags origin > lock.probe"}
 	cfg.Run = &models.RunConfig{BeforeAll: []string{"probe"}}
 }
 
@@ -186,7 +186,7 @@ func TestReleaseLockBlocksConcurrentRuns(t *testing.T) {
 	first := harness.New(t)
 	cfg := libsConfig(markerBuild, 1)
 	// The hook holds the run open until the test creates the gate file.
-	cfg.Scripts["gate"] = "while [ ! -f release.gate ]; do sleep 0.05; done"
+	cfg.Scripts["gate"] = models.Script{"while [ ! -f release.gate ]; do sleep 0.05; done"}
 	cfg.Run = &models.RunConfig{BeforeAll: []string{"gate"}}
 	first.WriteConfigModel(cfg)
 	first.SeedPackage("packages", "core")
@@ -422,7 +422,7 @@ func TestReleaseLockCleanupFailureIsNotFatal(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(markerBuild, 1)
 	// postAll runs after the task graph and before the lock is given back.
-	cfg.Scripts["break"] = "git remote set-url origin " + r.Path("gone.git")
+	cfg.Scripts["break"] = models.Script{"git remote set-url origin " + r.Path("gone.git")}
 	cfg.Run = &models.RunConfig{PostAll: []string{"break"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -464,6 +464,36 @@ func TestReleaseLockAppliesOnlyToRelease(t *testing.T) {
 			assert.False(t, r.HasTag(lockTag), "%s took the release lock", name)
 		})
 	}
+}
+
+// TestReleaseLockNotTakenWhenNothingToRelease: --require-release is the one
+// case where the plan decides whether the run happens at all, so it is
+// answered before the lock rather than after it. A run that will publish
+// nothing must not put the tag on the remote — and must not make a real
+// release queue behind it — only to discover it had nothing to do.
+func TestReleaseLockNotTakenWhenNothingToRelease(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(markerBuild, 1)
+	probeConfig(&cfg)
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("chore(core): nothing to release")
+	bare := r.AddBareRemote()
+
+	res := releaseLocked(r, "--require-release")
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.NoFileExists(t, r.Path("lock.probe"),
+		"the run stopped before beforeAll, which only runs once the lock is held")
+	assertLockCleared(t, r, bare)
+
+	// The control: the same flag on a run that does have something to release
+	// takes the lock exactly as before.
+	r.WriteFile("packages/core/work.txt", "x")
+	r.Commit("feat(core): something to release")
+	res = releaseLocked(r, "--require-release")
+	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.True(t, heldDuringRun(t, r), "a releasing run still holds the lock while it works")
+	assertLockCleared(t, r, bare)
 }
 
 // TestReleaseLockIsNotAReleaseTag: the lock is on the remote *while* the plan

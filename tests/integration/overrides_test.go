@@ -42,10 +42,10 @@ func packageFile(t *testing.T, r *harness.Repo, pkgDir string, po models.Package
 func TestOverridesFlowBuildPerPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":     "echo space-build >> ../../build.log",
-		"alt-build": "echo override-build >> ../../override.log",
-		"publish":   "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":     {"echo space-build >> ../../build.log"},
+		"alt-build": {"echo override-build >> ../../override.log"},
+		"publish":   {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -85,14 +85,14 @@ func TestOverridesFlowScriptResolvesPerPackage(t *testing.T) {
 	stamp := func(level string) string {
 		return "echo $DISPAT_PACKAGE:" + level + " >> ../../build.log"
 	}
-	cfg.Scripts = map[string]string{"build": stamp("file"), "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {stamp("file")}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish(),
-			Scripts: map[string]string{"build": stamp("space")}},
+			Scripts: map[string]models.Script{"build": {stamp("space")}}},
 		"apps": {Path: "apps", Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
-		"core": {Scripts: map[string]string{"build": stamp("package")}},
+		"core": {Scripts: map[string]models.Script{"build": {stamp("package")}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -117,13 +117,13 @@ func TestOverridesFlowScriptResolvesPerPackage(t *testing.T) {
 func TestOverridesFlowScriptSuppliedByEveryPackage(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
-		"core":  {Scripts: map[string]string{"build": "echo core-build >> ../../build.log"}},
-		"utils": {Scripts: map[string]string{"build": "echo utils-build >> ../../build.log"}},
+		"core":  {Scripts: map[string]models.Script{"build": {"echo core-build >> ../../build.log"}}},
+		"utils": {Scripts: map[string]models.Script{"build": {"echo utils-build >> ../../build.log"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -195,7 +195,7 @@ func TestOverridesDispatexclude(t *testing.T) {
 func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.VersionGroups = map[string]models.VersionGroupConfig{
 		"platform": {Versioning: models.VersioningFixed},
 	}
@@ -227,7 +227,7 @@ func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
 func TestOverridesVersionGroupSharesOnlyTheMajor(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.VersionGroups = map[string]models.VersionGroupConfig{
 		"platform": {Versioning: models.VersioningFixedMajor},
 	}
@@ -271,9 +271,9 @@ func TestOverridesPerPackageRecords(t *testing.T) {
 
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":   echoBuild,
-		"publish": `echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`,
+	cfg.Scripts = map[string]models.Script{
+		"build":   {echoBuild},
+		"publish": {`echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`},
 	}
 	cfg.GitHub = &models.GitHubConfig{
 		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
@@ -311,9 +311,9 @@ func TestOverridesPerPackageRecords(t *testing.T) {
 func TestOverridesPackageConcurrencyWeight(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2, 3)
-	cfg.Scripts = map[string]string{
-		"build":   r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 150*time.Millisecond),
-		"publish": "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 150*time.Millisecond)},
+		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -353,7 +353,7 @@ func TestOverridesRunShorthandFromPackageFolder(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	spc := cfg.Spaces["libs"]
-	spc.Scripts = map[string]string{"greet": "echo greeted > greeted.txt"}
+	spc.Scripts = map[string]models.Script{"greet": {"echo greeted > greeted.txt"}}
 	cfg.Spaces["libs"] = spc
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -375,18 +375,18 @@ func TestOverridesRunShorthandFromPackageFolder(t *testing.T) {
 func TestOverridesScriptsAcrossTheLayers(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Scripts["stamp"] = "echo stamped > stamped.txt"
+	cfg.Scripts["stamp"] = models.Script{"echo stamped > stamped.txt"}
 	spc := cfg.Spaces["libs"]
-	spc.Scripts = map[string]string{"sweep": "echo swept > swept.txt"}
+	spc.Scripts = map[string]models.Script{"sweep": {"echo swept > swept.txt"}}
 	cfg.Spaces["libs"] = spc
 	cfg.Packages = map[string]models.PackageConfig{
-		"extra": {Scripts: map[string]string{"buff": "echo buffed > buffed.txt"}},
+		"extra": {Scripts: map[string]models.Script{"buff": {"echo buffed > buffed.txt"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "extra")
 	packageFile(t, r, "packages/core", models.PackageConfig{
-		Scripts: map[string]string{"polish": "echo polished > polished.txt"},
+		Scripts: map[string]models.Script{"polish": {"echo polished > polished.txt"}},
 	})
 	r.Commit("feat(core,extra): bootstrap both")
 
@@ -430,7 +430,7 @@ func spaceFile(t *testing.T, r *harness.Repo, spaceDir string, sf models.SpaceFi
 func TestOverridesSpacePackagesEntry(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
 			"core": {TagFormat: "space-entry-{name}@{version}"},
@@ -454,10 +454,10 @@ func TestOverridesSpacePackagesEntry(t *testing.T) {
 func TestOverridesSpaceFile(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{
-		"build":      "echo root-build >> ../../root.log",
-		"file-build": "echo file-build >> ../../file.log",
-		"publish":    "echo publishing",
+	cfg.Scripts = map[string]models.Script{
+		"build":      {"echo root-build >> ../../root.log"},
+		"file-build": {"echo file-build >> ../../file.log"},
+		"publish":    {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: "packages", Flow: buildPublish()},
@@ -488,7 +488,7 @@ func TestOverridesSpaceFile(t *testing.T) {
 func TestOverridesLadderNearestWins(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
 			Path:      "packages",
@@ -531,7 +531,7 @@ func TestOverridesLadderNearestWins(t *testing.T) {
 func TestOverridesSpaceLayerDependencies(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]string{"build": echoBuild, "publish": "echo publishing"}
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	// A default propagation depth, so a provider's bump reaches its consumers
 	// with no directive in the message: what the declared edges are for here.
 	cfg.Parser = &models.ParserConfig{

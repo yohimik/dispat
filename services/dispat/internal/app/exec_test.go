@@ -37,7 +37,7 @@ func execRepo(t *testing.T, cfg *config.File) *App {
 // every level, so which level answered is visible in the output.
 func layeredConfig() *config.File {
 	return &config.File{
-		Scripts: map[string]string{"build": "root-build", "only-root": "root-only"},
+		Scripts: map[string]config.Script{"build": {"root-build"}, "only-root": {"root-only"}},
 		Env:     map[string]string{"MSG": "from-root", "ROOT_ONLY": "yes"},
 		Spaces: map[string]config.SpaceConfig{
 			"libs": {
@@ -45,18 +45,18 @@ func layeredConfig() *config.File {
 				// Flow is what config.Load fills in; a config built by hand
 				// states it, as every other discovery test here does.
 				Flow:    &config.SpaceFlowConfig{},
-				Scripts: map[string]string{"build": "space-build", "only-space": "space-only"},
+				Scripts: map[string]config.Script{"build": {"space-build"}, "only-space": {"space-only"}},
 				Env:     map[string]string{"MSG": "from-space"},
 				Packages: map[string]config.PackageConfig{
 					"core": {
-						Scripts: map[string]string{"build": "core-build"},
+						Scripts: map[string]config.Script{"build": {"core-build"}},
 						Env:     map[string]string{"MSG": "from-core"},
 					},
 				},
 			},
 		},
 		Packages: map[string]config.PackageConfig{
-			"standalone": {Path: "standalone", Scripts: map[string]string{"build": "alone-build"}},
+			"standalone": {Path: "standalone", Scripts: map[string]config.Script{"build": {"alone-build"}}},
 		},
 	}
 }
@@ -95,7 +95,7 @@ func TestExecResolvesTheSubjectsScript(t *testing.T) {
 func TestExecScriptLookupIsCaseInsensitive(t *testing.T) {
 	// Viper lowercases the config's map keys, so a name spelled with capitals
 	// on the command line has to find the entry anyway.
-	a := execRepo(t, &config.File{Scripts: map[string]string{"build": "root-build"}})
+	a := execRepo(t, &config.File{Scripts: map[string]config.Script{"build": {"root-build"}}})
 	f, _, err := runExec(t, a, ExecOptions{Script: "BUILD"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"root-build"}, f.ran)
@@ -236,7 +236,7 @@ func TestExecExpandsReferencesInDeclaredValues(t *testing.T) {
 	// which is what keeps a script movable between exec and a stage.
 	t.Setenv("OUTER", "expanded")
 	a := execRepo(t, &config.File{
-		Scripts: map[string]string{"build": "root-build"},
+		Scripts: map[string]config.Script{"build": {"root-build"}},
 		Env:     map[string]string{"DERIVED": "v-$OUTER"},
 	})
 	f, _, err := runExec(t, a, ExecOptions{Script: "build"})
@@ -248,7 +248,7 @@ func TestExecAddsNothingBeyondTheDeclaredEnv(t *testing.T) {
 	// The default scope computes no plan, so no DISPAT_* variable is invented.
 	// A repository with no tags at all must still work, which is what proves
 	// git was never consulted.
-	a := execRepo(t, &config.File{Scripts: map[string]string{"build": "root-build"}})
+	a := execRepo(t, &config.File{Scripts: map[string]config.Script{"build": {"root-build"}}})
 	f, code, err := runExec(t, a, ExecOptions{Script: "build", Env: EnvScopeStatic})
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
@@ -256,7 +256,7 @@ func TestExecAddsNothingBeyondTheDeclaredEnv(t *testing.T) {
 }
 
 func TestExecPropagatesTheScriptsExitCode(t *testing.T) {
-	a := execRepo(t, &config.File{Scripts: map[string]string{"build": "boom"}})
+	a := execRepo(t, &config.File{Scripts: map[string]config.Script{"build": {"boom"}}})
 	f := &fakeRunner{outcomes: map[string]error{"boom": exitErr(t, 7)}}
 	code, err := a.Exec(context.Background(), ExecOptions{Script: "build", Runner: f})
 	require.NoError(t, err)
@@ -264,7 +264,7 @@ func TestExecPropagatesTheScriptsExitCode(t *testing.T) {
 }
 
 func TestExecOnFailureDecidesTheCode(t *testing.T) {
-	a := execRepo(t, &config.File{Scripts: map[string]string{"build": "boom"}})
+	a := execRepo(t, &config.File{Scripts: map[string]config.Script{"build": {"boom"}}})
 	f := &fakeRunner{outcomes: map[string]error{"boom": exitErr(t, 7), "notify": exitErr(t, 3)}}
 	code, err := a.Exec(context.Background(), ExecOptions{Script: "build", OnFailure: "notify", Runner: f})
 	require.NoError(t, err)
@@ -272,8 +272,59 @@ func TestExecOnFailureDecidesTheCode(t *testing.T) {
 	assert.Equal(t, []string{"boom", "notify"}, f.ran)
 }
 
+// TestExecRunsEveryCommandOfTheScript: a script bound to several commands runs
+// all of them, in order, as separate invocations — each reaching the shell as
+// it was written, rather than joined into one string dispat composed.
+func TestExecRunsEveryCommandOfTheScript(t *testing.T) {
+	a := execRepo(t, &config.File{
+		Scripts: map[string]config.Script{"build": {"npm ci", "npm run build"}},
+	})
+	f, code, err := runExec(t, a, ExecOptions{Script: "build"})
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, []string{"npm ci", "npm run build"}, f.ran)
+}
+
+// TestExecStopsAtTheFirstFailingCommand: a sequence run here gates its own
+// remainder, so the command after a failure never runs and the failure's code
+// is the script's.
+func TestExecStopsAtTheFirstFailingCommand(t *testing.T) {
+	a := execRepo(t, &config.File{
+		Scripts: map[string]config.Script{"build": {"npm ci", "boom", "never"}},
+	})
+	f := &fakeRunner{outcomes: map[string]error{"boom": exitErr(t, 7)}}
+	code, err := a.Exec(context.Background(), ExecOptions{Script: "build", Runner: f})
+	require.NoError(t, err)
+	assert.Equal(t, 7, code)
+	assert.Equal(t, []string{"npm ci", "boom"}, f.ran)
+}
+
+// TestExecFailureScriptStillRunsAfterASequence: --on-failure reacts to the
+// script, whichever of its commands was the one that failed.
+func TestExecFailureScriptStillRunsAfterASequence(t *testing.T) {
+	a := execRepo(t, &config.File{
+		Scripts: map[string]config.Script{"build": {"npm ci", "boom"}},
+	})
+	f := &fakeRunner{outcomes: map[string]error{"boom": exitErr(t, 7), "notify": exitErr(t, 3)}}
+	code, err := a.Exec(context.Background(), ExecOptions{Script: "build", OnFailure: "notify", Runner: f})
+	require.NoError(t, err)
+	assert.Equal(t, 3, code)
+	assert.Equal(t, []string{"npm ci", "boom", "notify"}, f.ran)
+}
+
+// TestExecArgsLandOnTheLastCommand: the last command is the script's work, so
+// `-- --watch` watches the tests rather than installing in watch mode.
+func TestExecArgsLandOnTheLastCommand(t *testing.T) {
+	a := execRepo(t, &config.File{
+		Scripts: map[string]config.Script{"test": {"npm ci", "npm run test"}},
+	})
+	f, _, err := runExec(t, a, ExecOptions{Script: "test", Args: []string{"--watch"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"npm ci", "npm run test --watch"}, f.ran)
+}
+
 func TestExecRunsInTheGivenDirectory(t *testing.T) {
-	a := execRepo(t, &config.File{Scripts: map[string]string{"build": "pwd"}})
+	a := execRepo(t, &config.File{Scripts: map[string]config.Script{"build": {"pwd"}}})
 	f, _, err := runExec(t, a, ExecOptions{Script: "build", Dir: "/tmp/elsewhere"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/tmp/elsewhere"}, f.dirs,

@@ -79,16 +79,16 @@ func TestEnabledDefaults(t *testing.T) {
 func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	// Viper lowercases map keys when a file is loaded, so lookups match
 	// case-insensitively against lowercased keys.
-	f := File{Scripts: map[string]string{"build": "make"}}
-	if s, ok := f.Script("BUILD"); !ok || s != "make" {
+	f := File{Scripts: map[string]Script{"build": {"make"}}}
+	if s, ok := f.Script("BUILD"); !ok || len(s) != 1 || s[0] != "make" {
 		t.Errorf("Script(BUILD) = %q, %v", s, ok)
 	}
 	if _, ok := f.Script("missing"); ok {
 		t.Error("unknown scripts do not resolve")
 	}
 
-	sc := SpaceConfig{Scripts: map[string]string{"lint": "npm run lint"}}
-	if s, ok := sc.Script("LINT"); !ok || s != "npm run lint" {
+	sc := SpaceConfig{Scripts: map[string]Script{"lint": {"npm run lint"}}}
+	if s, ok := sc.Script("LINT"); !ok || len(s) != 1 || s[0] != "npm run lint" {
 		t.Errorf("SpaceConfig.Script(LINT) = %q, %v", s, ok)
 	}
 	if _, ok := sc.Script("format"); ok {
@@ -132,7 +132,7 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 }
 
 func TestCommandsPreservesOrder(t *testing.T) {
-	f := File{Scripts: map[string]string{"a": "cmd-a", "b": "cmd-b"}}
+	f := File{Scripts: map[string]Script{"a": {"cmd-a"}, "b": {"cmd-b"}}}
 	got := f.Commands([]string{"b", "a"})
 	if len(got) != 2 || got[0] != "cmd-b" || got[1] != "cmd-a" {
 		t.Errorf("Commands = %v", got)
@@ -153,11 +153,11 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	// The json tags mirror the mapstructure keys, so a marshalled model is a
 	// loadable dispat.json; resolved fields never leak into the file.
 	f := File{
-		Scripts: map[string]string{"build": "make"},
+		Scripts: map[string]Script{"build": {"make"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {Path: "packages", Versioning: VersioningFixed,
 				Flow:    &SpaceFlowConfig{Build: []string{"build"}},
-				Scripts: map[string]string{"lint": "make lint"}},
+				Scripts: map[string]Script{"lint": {"make lint"}}},
 		},
 		Dependencies:     []DependencyConfig{{Consumer: "app", Provider: "core"}},
 		BuildConcurrency: 99, // resolved: must not marshal
@@ -297,7 +297,7 @@ func TestSpaceFileRoundTrip(t *testing.T) {
 	sf := SpaceFile{
 		RevertOnFail: Bool(false),
 		TagFormat:    "libs/{name}@{version}",
-		Scripts:      map[string]string{"build": "make"},
+		Scripts:      map[string]Script{"build": {"make"}},
 		Flow:         &SpaceFlowConfig{Build: []string{"build"}},
 		Packages: map[string]PackageConfig{
 			"core": {IsBuildWaitingPublish: Bool(true), Dependencies: Providers("utils")},

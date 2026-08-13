@@ -77,6 +77,9 @@ type options struct {
 	rpSub                                  *[]string
 	rpFiles                                *[]string
 	strict                                 *bool
+
+	// release and status: the CI gate that turns an empty plan into a failure.
+	requireRelease *bool
 }
 
 // declareFlags declares every flag on fs and records the pointers. It is
@@ -208,6 +211,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"autosubstitute: which files of each covered package to rewrite, as globs relative to its folder (repeatable)")
 	o.strict = fs.Bool("strict", false,
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a substitution that matched nothing; for autowriter, an edit that matched no manifest anywhere")
+	o.requireRelease = fs.Bool("require-release", false,
+		"release and status: exit 1 when the plan releases nothing, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has

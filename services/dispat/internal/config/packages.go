@@ -389,7 +389,7 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		sc.Flow = mergeFlow(sc.Flow, po.Flow)
 	}
 	if len(po.Scripts) > 0 {
-		merged := make(map[string]string, len(sc.Scripts)+len(po.Scripts))
+		merged := make(map[string]Script, len(sc.Scripts)+len(po.Scripts))
 		for k, v := range sc.Scripts {
 			merged[k] = v
 		}
@@ -632,14 +632,14 @@ type packageExtras struct {
 	// and without its space's or the top level's. mergePackageOverride folds
 	// the same names into the layered map a resolution reads; this keeps the
 	// narrower answer, which only the fold is in a position to know.
-	ownScripts map[string]string
+	ownScripts map[string]Script
 }
 
 // apply folds one layer's package-only keys in.
 func (ex *packageExtras) apply(po PackageConfig) {
 	if len(po.Scripts) > 0 {
 		if ex.ownScripts == nil {
-			ex.ownScripts = make(map[string]string, len(po.Scripts))
+			ex.ownScripts = make(map[string]Script, len(po.Scripts))
 		}
 		// Nearer layers come later, so a plain overwrite is the same
 		// precedence mergePackageOverride gives the layered map.

@@ -425,7 +425,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	a := app.New(resolvedRoot, cfg, log)
 	// The release's own options, shared by the command that performs it and
 	// the command that shows it in advance.
-	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict}
+	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict, RequireRelease: *o.requireRelease}
 	switch cmd {
 	case cmdStatus:
 		if a.Status(ctx, relOpts) != nil {

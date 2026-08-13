@@ -75,11 +75,18 @@ remaining work already done.
 Both `release` and `status` print the plan's diagnostics before the graph, and both narrow it to their
 [selection](./release.md) between the two.
 
-`status` exits `1` in only two cases: a repository-scoped failure (an unreadable tag, a version that would go
-backwards, a dependency cycle, a shallow clone), or a `--strict` selection the plan cannot release. For anything else
-the plan it just printed is the plan a release would use, so there is nothing to fail over. When a release *would*
-refuse, for example under `commitErrors: error`, `status` says so in a warning and still exits `0`. A
-withheld package or a split versioning group is a warning on both commands and exits `0` without `--strict`.
+`status` exits `1` in only three cases: a repository-scoped failure (an unreadable tag, a version that would go
+backwards, a dependency cycle, a shallow clone), a `--strict` selection the plan cannot release, or
+`--require-release` with nothing to release. For anything else the plan it just printed is the plan a release would
+use, so there is nothing to fail over. When a release *would* refuse, for example under `commitErrors: error`,
+`status` says so in a warning and still exits `0`. A withheld package or a split versioning group is a warning on
+both commands and exits `0` without `--strict`.
+
+An empty plan is a success on both commands: releasing nothing is what a repository with nothing pending should do.
+`--require-release` opts out of that, on `release` and `status` alike, for the CI stage whose point is that this run
+publishes something; see [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan). On
+`release` it is answered before the [release lock](./release.md#the-release-lock) is taken, so a run that would
+publish nothing never makes a real release queue behind it.
 
 The two [shell helpers](./if.md#exit-codes) are the exception: `if` and `exec` hand back the exit code of the
 script they ran, so `dispat if CI --then 'exit 7'` exits `7` and a pipeline gating on a specific code still works with a
