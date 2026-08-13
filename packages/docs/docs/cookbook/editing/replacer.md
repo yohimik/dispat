@@ -14,7 +14,7 @@ matches somewhere you did not mean. The fix is always the same: give it enough c
 `com.acme:core:1.2.0`, not for `1.2.0`.
 
 You can reach the replacer two ways: as the `dispat replacer` command, for one-off edits and scripts, and as the
-`replace` block of [`autoVersion`](../../configuration/spaces.md#autoversion), which is where a release uses it.
+`replace` block of [`autoVersion`](../../configuration/autoversion.md), which is where a release uses it.
 
 ## The command
 
@@ -159,7 +159,7 @@ rule. Name the provider in the pattern, as every example here does, and the two 
 ### Which files a rule reaches
 
 `files` is a list of globs relative to the package folder. `*` matches any run of characters, **separators included**,
-which is the same rule [`autoVersion.match`](../../configuration/spaces.md#autoversion) and space scopes already follow. So
+which is the same rule [`autoVersion.match`](../../configuration/autoversion.md) and space scopes already follow. So
 `*.gradle` reaches a build script three folders down, and no `**` spelling is needed.
 
 The folders a workspace walk never enters stay out of reach whatever the glob says: `node_modules`, `vendor`, `target`,
@@ -205,5 +205,5 @@ The last row is worth spelling out. An `autoVersion` block carrying nothing but 
 `go mod tidy` between version and build, one package at a time". Nothing is reconciled, so there is no change to key
 the scripts off, and dispat runs them every release rather than never.
 
-For everything the parsing strategy does, see [`autoVersion`](../../configuration/spaces.md#autoversion). For the two
+For everything the parsing strategy does, see [`autoVersion`](../../configuration/autoversion.md). For the two
 commands that read and write manifests directly, see [Manifest tools](./manifests.md).

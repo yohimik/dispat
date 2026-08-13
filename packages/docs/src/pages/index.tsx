@@ -92,7 +92,7 @@ const FEATURES: Feature[] = [
         </Link>{' '}
         reads package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj and pubspec.yaml and
         derives the consumer/provider graph from them; <code>--check</code> gates CI on a drifted graph. A space with an{' '}
-        <Link to="/configuration/spaces#autoversion">
+        <Link to="/configuration/autoversion">
           <code>autoVersion</code>
         </Link>{' '}
         block goes further: dispat rewrites the manifests at the version stage, reconciling declared ranges to
@@ -356,7 +356,7 @@ function Libraries(): React.ReactElement {
             <code>dispat compute</code>
           </Link>{' '}
           derives a monorepo&apos;s dependency graph from these files, and{' '}
-          <Link to="/configuration/spaces#autoversion">
+          <Link to="/configuration/autoversion">
             <code>autoVersion</code>
           </Link>{' '}
           rewrites them at the version stage.

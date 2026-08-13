@@ -178,7 +178,7 @@ command are still written, and the command exits `1` at the end.
 - Making the same change in every package the plan picks, instead of in the files you name, is
   [`dispat autowriter`](./autowriter.md). Same three flags, same outcomes; it finds the manifests itself.
 - Reconciling manifests to the versions a release just computed is
-  [auto-versioning](../../configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
+  [auto-versioning](../../configuration/autoversion.md), or `dispat autoversion` on its own. It uses the writer
   underneath and knows what the new versions are; the writer alone only writes what you tell it.
 - Replacing a version in a file no parser understands is [the replacer](./replacer.md), which does exactly what it is
   told and nothing more.

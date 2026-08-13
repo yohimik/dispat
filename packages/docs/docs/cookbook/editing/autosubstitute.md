@@ -147,7 +147,7 @@ fails at the end.
 - A dependency a manifest declares: [`dispat autowriter`](./autowriter.md),
   which understands the manifest instead of guessing at its bytes.
 - The same substitutions on every release, without running a command:
-  [`autoVersion.replace`](../../configuration/spaces.md#autoversion), which is this
+  [`autoVersion.replace`](../../configuration/autoversion.md), which is this
   command's rules written into the configuration.
 
 ## Exit codes

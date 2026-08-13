@@ -446,7 +446,7 @@ keeps dispat language-agnostic:
 
 | Not implemented                                             | Delegated to                                                                                                                                                                          |
 |-------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Rewriting dependency ranges in manifests                    | native for `package.json`/`go.mod` under [`autoVersion`](../configuration/spaces.md#autoversion) (W197/W203); other ecosystems: `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
+| Rewriting dependency ranges in manifests                    | native for `package.json`/`go.mod` under [`autoVersion`](../configuration/autoversion.md) (W197/W203); other ecosystems: `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
 | Manifest-vs-baseline version checks                         | native under `autoVersion` (W192); otherwise nothing                                                                                                                                  |
 | Publish targets, registries, adopting published versions    | `flow.publish`                                                                                                                                                                        |
 | `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps                                                                                                                         |

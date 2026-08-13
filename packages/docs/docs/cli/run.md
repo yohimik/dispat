@@ -60,10 +60,10 @@ nothing, so the command covers its usual set. The deepest match wins, so a stand
 package's folder still selects itself. A term on the command line always beats the folder it was typed in. A group is
 never inferred this way, because no folder is a group; `--group` is the only way to name one.
 
-Nine commands read the same selection: `release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `commit`,
-`github` and `compute`. What each of them *does* with it differs (a release additionally has to respect publish
-order, described in [Releasing part of the graph](./release.md)), but which packages a term picks out
-never does.
+Eleven commands read the same selection: `release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
+`autowriter`, `autosubstitute`, `commit`, `github` and `compute`. What each of them *does* with it differs (a release
+additionally has to respect publish order, described in [Releasing part of the graph](./release.md)), but which
+packages a term picks out never does.
 
 ## Passing arguments to the script
 

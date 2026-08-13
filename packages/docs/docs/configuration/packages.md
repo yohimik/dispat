@@ -167,7 +167,7 @@ packages:
 ```
 
 From then on a dependency spelled `com.acme:core` anywhere in the workspace resolves to the `core` package, for
-`dispat compute` and for [auto-versioning](./spaces.md#autoversion) alike. The two share one index, so they cannot
+`dispat compute` and for [auto-versioning](./autoversion.md) alike. The two share one index, so they cannot
 disagree about what a name means.
 
 Two rules keep it honest. A stated name **outranks** one a manifest declares, because it is you saying so rather than
@@ -200,7 +200,7 @@ What `src` does *not* change is worth stating, because it is most of the package
 - **The package folder is still the package.** Scripts run there, the changelog is written there, and the release
   commit stages all of it, `src` or not.
 - **Manifests are still found in the whole folder.** A `package.json` or `go.mod` usually sits at the package root,
-  outside `src`, and [auto-versioning](./spaces.md#autoversion) and `dispat compute` must still reach it.
+  outside `src`, and [auto-versioning](./autoversion.md) and `dispat compute` must still reach it.
 - **A scope always wins.** `fix(core): ...` addresses `core` wherever the commit's files are. `src` narrows the
   file-derived fallback, which is what runs when a commit names no scope at all. See
   [scope sets](../reference/commits.md#scope-sets).

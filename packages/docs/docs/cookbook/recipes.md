@@ -190,7 +190,7 @@ Read the manifest: the `workspace:*` range became `^0.1.0` (only ranges matching
 hand-pinned `left-pad` survived), and the `version` field advanced on its own. Only the version text changed; every
 other byte of the file is exactly as it was. To regenerate a lock file after the rewrite, name a `syncLock`
 script in the block and, if the lock file lives at the repo root, list it under `commit.include` so the release commit
-carries it. Details: [`autoVersion`](../configuration/spaces.md#autoversion) and
+carries it. Details: [`autoVersion`](../configuration/autoversion.md) and
 [the compute command](../cli/compute.md).
 
 ## Adopt dispat in a repository that already ships versions
@@ -495,14 +495,14 @@ has an opinion about the state of your git tree.
   `pnpm-workspace.yaml`, so a build stage does not need `-C ../..`. Locally, `--frozen-lockfile` is worth stating even
   though CI turns it on by default: it makes the stage fail on a lock file that no longer matches the manifests instead
   of quietly resolving something new mid-release.
-- **`workspace:*` ranges stay as they are.** [`autoVersion`](../configuration/spaces.md#autoversion) writes each package's
+- **`workspace:*` ranges stay as they are.** [`autoVersion`](../configuration/autoversion.md) writes each package's
   own `version` field, and `pnpm publish` substitutes that version for the `workspace:` specifier when it packs, so the
   declared ranges never need rewriting. `range: "workspace:*"` is a literal, written back verbatim, which keeps the
   protocol intact if a range is rewritten at all.
 - **`pnpm-lock.yaml` is outside every package folder.** `syncLock` regenerates it after the version stage, and
   [`commit.include`](../configuration/records.md#commit) is what puts it in the release commit. Without that line the
   release commit carries rewritten manifests and a stale lock file. The one-at-a-time
-  [`syncLockConcurrency`](../configuration/spaces.md#autoversion) default matters here for the same reason: every package in
+  [`syncLockConcurrency`](../configuration/autoversion.md) default matters here for the same reason: every package in
   the workspace regenerates the *same* file.
 - **`--no-git-checks`.** `pnpm publish` refuses to publish from a branch that is not the release branch or from a dirty
   working tree. A dispat run is exactly that situation: the version stage has just rewritten manifests, and the release

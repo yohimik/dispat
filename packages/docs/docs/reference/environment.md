@@ -43,7 +43,7 @@ script written against `$DISPAT_VERSION` is run on its own without releasing any
 
 `DISPAT_STAGE` carries `version`, `build`, `publish` or `announce` for a stage script; the hook's name (`beforeBuild`,
 `postPublish`, `postAll`, ...) for a hook; `login` for the login; `syncLock` for an
-[`autoVersion.syncLock`](../configuration/spaces.md#autoversion) script; and `run:<name>` for
+[`autoVersion.syncLock`](../configuration/autoversion.md) script; and `run:<name>` for
 [`dispat run <name>`](../configuration/spaces.md#scripts-and-dispat-run).
 
 `DISPAT_TAG_VERSION` is the version section of `DISPAT_TAG` without the name and its decoration (no `v` prefix, no

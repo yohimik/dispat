@@ -163,7 +163,7 @@ Acting on the provider does nothing: its version is already public, and cancella
 **Per released package**, up to four stages, each optional to script:
 
 1. **version**: when any provider of the package moved in this run, and for every releasing package of a space with
-   [`autoVersion`](./configuration/spaces.md#autoversion) (native reconciliation checks the baselines too); runs right
+   [`autoVersion`](./configuration/autoversion.md) (native reconciliation checks the baselines too); runs right
    before the build. With
    `isBuildWaitingPublish: true` on the provider's space it waits for that provider's build *and publish*; with
    `false` it waits for the provider's *build* only.
@@ -215,7 +215,7 @@ just executes no shell command.
 
 Outside the release pipeline, `dispat run <name>` (or just `dispat <name>`) runs the
 [script](./configuration/spaces.md#scripts-and-dispat-run) of that name inside each changed package that has one. The
-[`--package` / `--space` / `--group`](./configuration/spaces.md#choosing-the-packages) flags pick a different set
+[`--package` / `--space` / `--group`](./cli/run.md#choosing-the-packages) flags pick a different set
 instead, and the folder you stand in counts as one of those terms.
 
 The run honours the dependency graph and stays inside the build concurrency budget, which is the configured value or
