@@ -172,6 +172,7 @@ const config: Config = {
           title: 'Docs',
           items: [
             {label: 'Getting started', to: '/getting-started'},
+            {label: 'Concepts', to: '/concepts'},
             {label: 'Cookbook', to: '/cookbook'},
             {label: 'CLI', to: '/cli'},
             {label: 'Configuration', to: '/configuration'},

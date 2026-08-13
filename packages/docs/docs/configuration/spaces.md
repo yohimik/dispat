@@ -49,7 +49,7 @@ shared command, or a different command per package, depending on where you write
 |------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `build`          | stage   | Build stage command(s).                                                                                                                                                                      |
 | `publish`        | stage   | Publish stage command(s).                                                                                                                                                                    |
-| `version`        | stage   | Manifest-sync stage command(s); runs right before the build, for packages bumped due to provider updates (and for every releasing package when the space has [`autoVersion`](#autoversion)). |
+| `version`        | stage   | Manifest-sync stage command(s); runs right before the build, for every package that picks a version up from a provider moving in this run (and for every releasing package when the space has [`autoVersion`](#autoversion)). |
 | `login`          | stage   | Authentication command(s), run once per space before the space's first publish; see below.                                                                                                   |
 | `announce`       | stage   | Fourth stage, run after a successful publish: pushing the release out to update channels, with the release-notes variables. The whole frame only **warns**; see below.                       |
 | `beforeAll`      | hook    | Before the package's first stage (its version stage when it has one, its build otherwise). Failure fails the package's release.                                                              |
@@ -267,8 +267,8 @@ spacing and comments survive). The other ecosystems (Cargo, pyproject, Composer,
 
 Two consequences worth knowing before turning it on. First, the reconciliation rule (§9.4 of the
 [commit specification](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md)) covers *every* workspace dependency, including providers released
-by earlier runs, so an auto-versioning space runs a version task for **every** releasing package, not only those bumped
-by provider updates. Second, a rewriting failure fails the version stage, and
+by earlier runs, so an auto-versioning space runs a version task for **every** releasing package, even one whose
+providers are all quiet this run. Second, a rewriting failure fails the version stage, and
 `revertOnFail` rolls the half-edited folder back.
 
 | Key                   | Type             | Default  | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |

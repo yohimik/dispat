@@ -422,18 +422,23 @@ function Reference(): React.ReactElement {
           release into CI.
         </li>
         <li>
-          <Link to="/cookbook">Cookbook</Link>: real setups: npm, Docker, Go, Python, mobile, and the pnpm workspace
-          case.
-        </li>
-        <li>
           <Link to="/concepts">Concepts</Link>: packages and spaces, propagation, the plan, the failure and recovery
           model.
+        </li>
+        <li>
+          <Link to="/cookbook">Cookbook</Link>: worked examples.{' '}
+          <Link to="/cookbook/recipes">Recipes</Link> for npm, Docker, Go, Python, mobile and pnpm workspaces, and{' '}
+          <Link to="/cookbook/editing/autowriter">editing every package at once</Link>.
         </li>
         <li>
           <Link to="/cli">CLI</Link> and <Link to="/configuration">Configuration</Link>: every command, every option.
         </li>
         <li>
           <Link to="/reference/commits">Commit messages</Link>: the Conventional Commits superset that carries release intent.
+        </li>
+        <li>
+          <Link to="/reference/releasing/versioning">Releasing</Link>: shared versions, running the release&apos;s own
+          steps yourself, releasing part of the graph, and the release lock.
         </li>
         <li>
           <Link to="/reference/environment">Script environment</Link>: the <code>DISPAT_*</code> variables a stage receives.
