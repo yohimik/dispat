@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -694,11 +693,14 @@ func (tc *taskCtx) loginGate(ctx context.Context) error {
 		// the login (it is a gating sequence), and what it did export becomes
 		// part of every space package's outputs.
 		//
-		// It runs in the *space* folder — the parent of every member package —
-		// not in whichever package's publish happened to win the race to the
-		// gate: a login script reading a local file must see the same folder
-		// on every run.
-		seq := Sequence{Runner: tc.Runner, Dir: filepath.Dir(tc.rel.Pkg.Dir), Stage: "login",
+		// It runs in the space's own folder, not in whichever package's
+		// publish happened to win the race to the gate: a login script
+		// reading a local file must see the same folder on every run. That is
+		// why the folder is the space's rather than a member's parent — the
+		// two coincide for a space package, but a standalone package is its
+		// own space, and its parent is one level above the only folder the
+		// login has any business in.
+		seq := Sequence{Runner: tc.Runner, Dir: space.Dir, Stage: "login",
 			Commands: space.LoginScript, Env: loginEnv(space.Name, space.Env, tc.wsVars),
 			Log: lg, FailFast: true}
 		outs, seqErr, parseErr := seq.capture(ctx, space.Name+":login")

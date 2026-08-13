@@ -1113,9 +1113,9 @@ func TestRunLoginEnvIsSpaceScoped(t *testing.T) {
 func TestRunLoginFailureFailsEverySpacePublish(t *testing.T) {
 	// libs' login fails: both its packages fail at the publish stage (their
 	// builds already ran). The other space is unaffected.
-	libs := &model.Space{Name: "libs", BuildScript: []string{"build"},
+	libs := &model.Space{Name: "libs", Dir: ".", BuildScript: []string{"build"},
 		PublishScript: []string{"publish"}, LoginScript: []string{"login"}}
-	other := &model.Space{Name: "other", BuildScript: []string{"build"},
+	other := &model.Space{Name: "other", Dir: ".", BuildScript: []string{"build"},
 		PublishScript: []string{"publish"}}
 	p := &plan.Plan{
 		Releases:  map[string]*plan.Release{},
@@ -1131,9 +1131,9 @@ func TestRunLoginFailureFailsEverySpacePublish(t *testing.T) {
 		}
 		p.Order = append(p.Order, name)
 	}
-	// The login runs in the space folder — the parent of every member package
-	// (the packages' dirs here are bare names, so their shared parent is ".").
-	// Which publish reaches the gate first no longer decides the cwd.
+	// The login runs in the space's own folder, which the space states rather
+	// than any member implying it. Which publish reaches the gate first
+	// therefore cannot decide the cwd.
 	r := &fakeRunner{fail: map[string]bool{"login .": true}}
 	tg := &fakeTagger{}
 	res := newExecutor(execSpec{Runner: r, Tagger: tg, Changelog: &fakeChangelog{}, Build: 2, Publish: 2}).Run(context.Background(), p)

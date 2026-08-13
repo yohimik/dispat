@@ -116,6 +116,16 @@ type Space struct {
 	// sub-folder is a package, unless a .dispatexclude file in the space
 	// folder excludes it.
 	Path string
+	// Dir is the same folder resolved against the monorepo root: where the
+	// space's own scripts run. The login is the one script that belongs to
+	// the space rather than to a package, so it needs a folder no member's
+	// location can decide — see the login gate in internal/release.
+	//
+	// A standalone package is its own space, so its Dir is its package
+	// folder. That is what makes this field worth carrying: the parent of a
+	// member is the space folder for a space package and one level too high
+	// for a standalone one, so it cannot be derived from a package.
+	Dir string
 	// Versioning is how versions relate across the space's packages; the zero
 	// value means VersioningIndependent.
 	Versioning Versioning

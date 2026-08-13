@@ -66,6 +66,88 @@ func TestConfigLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 	assert.True(t, names["spacea"] && names["spaceb"], "each space logs in under its own name: %v", tl)
 }
 
+// assertRanIn checks that a script recording its working directory with `pwd`
+// ran in want. Both sides go through EvalSymlinks first: a shell's `pwd`
+// reports the resolved path, and macOS puts the test's temporary directory
+// behind the /var -> /private/var symlink, so the two spellings of one folder
+// would otherwise differ.
+func assertRanIn(t *testing.T, want, cwdFile string) {
+	t.Helper()
+	got, err := os.ReadFile(cwdFile)
+	require.NoError(t, err, "the script left no record of its working directory")
+	resolved, err := filepath.EvalSymlinks(want)
+	require.NoError(t, err)
+	assert.Equal(t, resolved, strings.TrimSpace(string(got)))
+}
+
+// TestConfigLoginRunsInTheSpaceFolder: the login is the one script that
+// belongs to the space rather than to a package, so the folder it runs in has
+// to be the space's own — not the folder of whichever member's publish
+// happened to reach the gate first. A login script reading a local file (a
+// netrc, a credentials JSON, a certificate) sees the same folder on every
+// run only if that is true.
+//
+// The script writes its working directory into a file *in* that directory,
+// so where the file lands is the assertion.
+func TestConfigLoginRunsInTheSpaceFolder(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"publish": {"echo publishing"},
+		"login":   {"pwd > login-cwd.txt"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: "packages/libs", Flow: &models.SpaceFlowConfig{
+			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}},
+	}
+	r.WriteConfigModel(cfg)
+	// Two members, so the gate is genuinely raced: with the folder taken from
+	// a member, either one could have supplied it.
+	r.SeedPackage("packages/libs", "a")
+	r.SeedPackage("packages/libs", "b")
+	r.Commit("feat(a,b): two members racing one login")
+
+	r.ReleaseOK()
+
+	assertRanIn(t, r.Path("packages", "libs"), r.Path("packages", "libs", "login-cwd.txt"))
+	// Neither member's folder may hold one: that is the failure mode where the
+	// winner of the race decided the directory.
+	assert.NoFileExists(t, r.Path("packages", "libs", "a", "login-cwd.txt"))
+	assert.NoFileExists(t, r.Path("packages", "libs", "b", "login-cwd.txt"))
+}
+
+// TestConfigLoginOfAStandalonePackageRunsInItsOwnFolder: a standalone package
+// is its own space, so the space folder the login runs in is the package's
+// own folder. The parent it happens to sit in belongs to nobody — it may hold
+// unrelated packages, or nothing at all — and a login running there would
+// read the wrong credentials file or none.
+//
+// The login reaches the package through the root `flow`, which is the only
+// route it has: flow.login cannot be written on a package entry.
+func TestConfigLoginOfAStandalonePackageRunsInItsOwnFolder(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"publish": {"echo publishing"},
+		"login":   {"pwd > login-cwd.txt"},
+	}
+	cfg.Flow = &models.SpaceFlowConfig{
+		Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
+	cfg.Packages = map[string]models.PackageConfig{"cli": {Path: "tools/cli"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("tools", "cli")
+	r.Commit("feat(cli): a standalone package with a login")
+
+	r.ReleaseOK()
+	require.True(t, r.HasTag("cli@0.1.0"), "tags: %v", r.TagList())
+
+	assertRanIn(t, r.Path("tools", "cli"), r.Path("tools", "cli", "login-cwd.txt"))
+	assert.NoFileExists(t, r.Path("tools", "login-cwd.txt"),
+		"the package's parent is not a space folder and the login has no business in it")
+}
+
 // TestConfigLoginFailureIsolatedToItsSpace: a failing login fails every
 // publish in *its* space — none of them could have succeeded without it —
 // but must not touch an unrelated space's publishes.

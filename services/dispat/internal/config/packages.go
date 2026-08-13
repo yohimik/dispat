@@ -307,7 +307,7 @@ func validateSpacePackages(label string, entries map[string]PackageConfig) error
 // its own, before it is merged.
 func validatePackageLayer(label string, po PackageConfig) error {
 	if po.Flow != nil && po.Flow.Login != nil {
-		return fmt.Errorf("%s: flow.login cannot be overridden per package: login runs once per space, in the space folder, gating every publish of the space", label)
+		return fmt.Errorf("%s: flow.login cannot be overridden per package: login runs once per space, in the space's own folder, gating every publish of the space", label)
 	}
 	if po.Versioning != "" && po.VersionGroup != "" {
 		return fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)

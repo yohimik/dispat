@@ -1415,7 +1415,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		spaceGitHub := githubSpec(sc.GitHub)
 		spaceBuildWeight, spacePublishWeight := packageWeights(sc.Concurrency)
 		baseScope := packageScope(c, sc)
-		base, err := buildSpace(c, baseScope, fmt.Sprintf("space %q", sn), sn, sc)
+		base, err := buildSpace(c, baseScope, fmt.Sprintf("space %q", sn), sn, dir, sc)
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
@@ -1506,7 +1506,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 				if err := scope.checkSpaceRefs(label, merged); err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
-				if pkg.Space, err = buildSpace(c, scope, label, sn, merged); err != nil {
+				if pkg.Space, err = buildSpace(c, scope, label, sn, dir, merged); err != nil {
 					return nil, nil, fmt.Errorf("config: %w", err)
 				}
 				if autoVersioned {
@@ -1628,7 +1628,7 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		if err := scope.checkSpaceRefs(label, merged); err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
-		if pkg.Space, err = buildSpace(c, scope, label, key, merged); err != nil {
+		if pkg.Space, err = buildSpace(c, scope, label, key, dir, merged); err != nil {
 			return nil, nil, fmt.Errorf("config: %w", err)
 		}
 		if autoVersioned {
@@ -1896,7 +1896,12 @@ func checkManifestNames(pkgs []*model.Package) error {
 // owner in errors: the space itself, or the package whose merged override
 // this is. The caller checked the same scope with checkSpaceRefs, so nothing
 // here can silently resolve to nothing.
-func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceConfig) (*model.Space, error) {
+//
+// dir is the space folder already resolved against the monorepo root: the
+// space's own folder for a space, the package's folder for the standalone
+// package that is its own space. Both callers have it; neither the config
+// nor a member package can be asked for it afterwards.
+func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc SpaceConfig) (*model.Space, error) {
 	mode, group, err := resolveSpaceVersioning(c, spaceName, sc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
@@ -1912,6 +1917,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName string, sc SpaceCon
 	return &model.Space{
 		Name: spaceName,
 		Path: sc.Path,
+		Dir:  dir,
 		// The env layers merge key by key, most local last. sc arrives already
 		// carrying the space plus any package override layers — the same
 		// invariant packageScope relies on — so only the top level is left to
