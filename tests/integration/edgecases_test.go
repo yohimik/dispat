@@ -422,6 +422,39 @@ func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
 		"below the major this is ordinary catch-up; stdout:\n%s", res.Stdout)
 }
 
+// TestEdgeGroupSparseMemberDecidingTheMajorIsReported: the same expensive join,
+// except the stray version belongs to a sparse space. A group may be assembled
+// out of spaces in different modes, and the version it lands on comes from
+// every member's tag regardless of mode, so a sparse member can be the one
+// that takes everybody to a new major. A sparse member trailing the group is
+// the mode working and stays quiet, but one deciding the group's version is
+// the case W233 exists for, and the group is where the two rules meet.
+func TestEdgeGroupSparseMemberDecidingTheMajorIsReported(t *testing.T) {
+	r := harness.New(t)
+	cfg := spacesConfig(echoBuild, map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+	})
+	// A package overriding its space's versioning stays in the space's group,
+	// which is the route a group ends up holding members in different modes.
+	cfg.Packages = map[string]models.PackageConfig{
+		"stray": {Versioning: models.VersioningFixedSparse},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "stray")
+	r.Commit("chore: seed both")
+	tagAt(r, "a@1.2.0", "HEAD")
+	tagAt(r, "stray@9.0.0", "HEAD")
+
+	r.CommitEmpty("fix(a): an ordinary fix")
+	res := r.ReleaseOK()
+
+	assert.True(t, r.HasTag("a@9.0.1"),
+		"the group versions from its newest member whatever mode it is in; tags: %v", r.TagList())
+	assert.True(t, harness.HasCode(res.Events, "W233"),
+		"the sparse member decided the major, so it is named; stdout:\n%s", res.Stdout)
+}
+
 // ---------------------------------------------------------------------------
 // Where revertOnFail stops
 // ---------------------------------------------------------------------------

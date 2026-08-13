@@ -245,6 +245,11 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 // Nothing here is refused. Every one of those versions is legitimately
 // published, so there is no correct plan that ignores them; what the group
 // needs is for the outlier to be named rather than quietly obeyed.
+//
+// Sparseness cuts one way only. A sparse member behind the group's major is
+// the mode doing its job and is never reported, but a sparse member *holding*
+// the group's major decided everybody else's version, and a group can mix
+// modes, so it is named like any other.
 func (cp *computation) reportMajorSpread(g *Release, groupName string, members []string) {
 	if !g.HasBaseline {
 		return
@@ -252,19 +257,31 @@ func (cp *computation) reportMajorSpread(g *Release, groupName string, members [
 	ahead, behind := "", ""
 	for _, name := range members {
 		rel := cp.rel[name]
-		// A member with no baseline has no major to disagree with, and a
-		// sparse one is behind on purpose.
-		if !rel.HasBaseline || rel.Pkg.Space.Versioning.Sparse() {
+		// A member with no baseline has no major to disagree with.
+		if !rel.HasBaseline {
 			continue
 		}
-		switch {
-		case rel.Baseline.Major == g.Baseline.Major && ahead == "":
-			ahead = name
-		case rel.Baseline.Major != g.Baseline.Major && behind == "":
+		if rel.Baseline.Major == g.Baseline.Major {
+			// Whoever sits on the group's major is the one that decided where
+			// everybody lands, sparse or not: the aggregate reads every
+			// member's baseline, so a sparse member can be the outlier this
+			// warning exists to name.
+			if ahead == "" {
+				ahead = name
+			}
+			continue
+		}
+		// Falling behind, on the other hand, is a sparse mode working as
+		// promised, so a sparse member is never what the warning reports on.
+		if behind == "" && !rel.Pkg.Space.Versioning.Sparse() {
 			behind = name
 		}
 	}
-	if behind == "" {
+	// A group with a baseline always has a member holding it, so ahead is set
+	// whenever behind is. The guard is here because the member that decides
+	// the aggregate and the member this loop is willing to name are chosen by
+	// two separate pieces of code, and they have drifted apart before.
+	if ahead == "" || behind == "" {
 		return
 	}
 	cp.warn(CodeFixedMajorSpread, g.Pkg.Name, "", fmt.Sprintf(

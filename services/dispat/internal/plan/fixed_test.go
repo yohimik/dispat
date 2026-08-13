@@ -500,6 +500,36 @@ func TestFixedSparseMemberOnAnotherMajorIsNotReported(t *testing.T) {
 	assert.False(t, hasCode(p, CodeFixedMajorSpread), "no W233 under a sparse mode, got %v", codes(p))
 }
 
+func TestFixedSparseMemberDecidingTheGroupMajorIsReported(t *testing.T) {
+	// A group can mix modes, and the aggregate takes the newest baseline from
+	// every member, sparse ones included. So a sparse member can be the one
+	// that decides the group's major while the non-sparse members sit a major
+	// below it — the outlier is the sparse package, and it is exactly the one
+	// W233 has to name for the warning to be actionable.
+	fixed := &model.Space{Name: "left", Versioning: model.VersioningFixed, VersionGroup: "core"}
+	sparse := &model.Space{Name: "right", Versioning: model.VersioningFixedSparse, VersionGroup: "core"}
+	pkgs := []*model.Package{
+		{Name: "a", Dir: "/r/l/a", Space: fixed},
+		{Name: "s", Dir: "/r/r/s", Space: sparse},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(a): tweak"},
+	).tag("a", "1.2.0", "").tag("s", "9.0.0", "")
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	require.True(t, hasCode(p, CodeFixedMajorSpread), "W233, got %v", codes(p))
+
+	var msg string
+	for _, d := range p.Diagnostics {
+		if d.Code == CodeFixedMajorSpread {
+			msg = d.Message
+		}
+	}
+	assert.Contains(t, msg, "9.0.0", "the sparse member decided the group's major")
+	assert.Contains(t, msg, "1.2.0", "and the message names where its mates are")
+}
+
 // ---------------------------------------------------------------------------
 // Rejected pins fall back (§16 unit-scoped blast radius) and propagated
 // transitions graduate — the two planner properties the integration suite
