@@ -60,9 +60,9 @@ are listed because you cannot reason about the ordering without knowing where th
 | 8 | `build` | stage | Build stage command(s). |
 | 9 | `postBuild` | hook | After the build stage. Fails the release. |
 | 10 | `login` | stage | Authentication command(s). Once **per space**, before that space's first publish; every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
-| 11 | `beforePublish` | hook | Before the publish stage, after the login. The last hook that can still stop a release. Fails the release. |
-| 12 | `publish` | stage | Publish stage command(s). |
-| 13 | *(records and tag)* | — | Not a script: the changelog entry, the GitHub release and the annotated tag. Past here the release is out, and nothing below can fail the package. |
+| 11 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
+| 12 | `publish` | stage | Publish stage command(s). Still gating: a publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
+| 13 | *(records and tag)* | — | Not a script: the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return: from here nothing can fail the package. |
 | 14 | `postPublish` | hook | After a successful publish. Only **warns**. |
 | 15 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
 | 16 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
@@ -70,9 +70,16 @@ are listed because you cannot reason about the ordering without knowing where th
 | — | `onFail` | outcome | Instead of the rest: once, when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only; see below. |
 | — | `onSkip` | outcome | Instead of the rest: once, when the package is **skipped** because a provider failed. Warn-only; see below. |
 
-Steps 1 to 11 are the **gating** half: a failure there fails the package, nothing is published or tagged, and
-`revertOnFail` applies. From step 13 the release is already out, so 14 to 17 only warn, and every one of them runs even
-when an earlier one failed. That split is the whole reason there are two kinds of hook.
+Steps 1 to 12 are the **gating** half: a failure anywhere in them fails the package, nothing is tagged or recorded,
+`revertOnFail` applies, and `onFail` runs instead of the rest. The publish stage itself is part of that half, which is
+the point people most often get wrong: a publish script that exits non-zero has *not* released the package, so the run
+treats it exactly like a failed build.
+
+The line falls between 12 and 13. Once the publish script has **succeeded**, the artefact is on its registry and no
+later failure can take it back, so 14 to 17 only warn, and every one of them runs even after an earlier one failed.
+Step 13 is where that becomes irreversible: a tag or a record that cannot be written there is reported as a
+[critical](../internals/architecture.md#after-the-point-of-no-return) and the package stays published. That split is
+the whole reason there are two kinds of hook.
 
 All script references are optional. A stage without a script still runs (ordering, skip semantics, statuses, tags and
 release records are fully preserved); it just executes no shell command. An unconfigured hook is a no-op. Scripts run
