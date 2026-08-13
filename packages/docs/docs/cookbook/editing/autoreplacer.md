@@ -1,16 +1,16 @@
-# Substituting text across the monorepo
+# Replacing text across the monorepo
 
 Some versions do not live in a manifest. A Gradle script builds a coordinate by
 hand, a Helm chart names a base image, a README shows an install line. No
 manifest parser can reach any of them, so no manifest writer can either.
 
 [The replacer](./replacer.md) handles that for files you name. `dispat
-autosubstitute` does the same thing for a whole monorepo: it works out which
+autoreplacer` does the same thing for a whole monorepo: it works out which
 packages the run covers, looks in the files you point it at inside each one,
 and replaces the text you asked for.
 
 ```console
-$ dispat autosubstitute --files '**/*.gradle' --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' --since all
+$ dispat autoreplacer --files '**/*.gradle' --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' --since all
 packages/web
   1 file(s) rewritten
 2 package(s): 1 file(s), 1 occurrence(s)
@@ -26,7 +26,7 @@ Typing the versions in means editing the command every release. Placeholders
 let you write the pattern once:
 
 ```sh
-dispat autosubstitute --files README.md --sub '{name} {previous}=>{name} {version}'
+dispat autoreplacer --files README.md --sub '{name} {previous}=>{name} {version}'
 ```
 
 `{name}`, `{version}` and `{previous}` are the covered package: what it is
@@ -35,7 +35,7 @@ called, the version it ends the run on, and the version it is moving from.
 Three more placeholders talk about the packages it depends on:
 
 ```sh
-dispat autosubstitute --files '**/*.gradle' \
+dispat autoreplacer --files '**/*.gradle' \
   --sub 'com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}'
 ```
 
@@ -60,7 +60,7 @@ touched, which is core, so a plain run never visits web at all.
 selected one, all the way down the graph:
 
 ```sh
-dispat autosubstitute --consumers --files '**/*.gradle' \
+dispat autoreplacer --consumers --files '**/*.gradle' \
   --sub 'com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}'
 ```
 
@@ -116,7 +116,7 @@ safe. A bare `1.2.0` will find things you did not intend.
 package:
 
 ```console
-$ dispat autosubstitute --files '*.gradle' --sub 'com.acme:core:9.9.9=>x' --strict --since all
+$ dispat autoreplacer --files '*.gradle' --sub 'com.acme:core:9.9.9=>x' --strict --since all
 ERR substitution matched nothing  find=com.acme:core:9.9.9
 ERR substitutions are not clean  error="1 substitution(s) matched nothing"
 ```

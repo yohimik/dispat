@@ -19,5 +19,5 @@ Beside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--sub`               |             | `replacer` and `autosubstitute`: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](../cookbook/editing/replacer.md). |
+| `--sub`               |             | `replacer` and `autoreplacer`: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](../cookbook/editing/replacer.md). |
 | `--strict`            |             | Turns a tolerated finding into a failure. `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. |

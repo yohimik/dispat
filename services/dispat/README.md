@@ -100,7 +100,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   half, for CI: it exits `1` when the selection would publish nothing, so a deploy stage cannot pass on an empty plan.
 - **Edit every package at once.** `dispat autowriter` applies one manifest edit across every package the plan selects,
   finding each package's manifests itself: bump a shared dependency everywhere, or derive the edits from the workspace
-  with `--set-local` and `--link-local`. `dispat autosubstitute` does the same for literal text, so hand-written
+  with `--set-local` and `--link-local`. `dispat autoreplacer` does the same for literal text, so hand-written
   coordinates in READMEs, badges and install snippets follow a release too. Both take the same selection flags as
   `dispat run`, and `dispat scanner`, `dispat writer` and `dispat replacer` expose the same libraries for one folder or
   one file, needing no config and no git repository.
@@ -123,7 +123,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Recipes](https://yohimik.github.io/dispat/cookbook/recipes)                                         | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels.                                                                                        |
 | [Manifest tools](https://yohimik.github.io/dispat/cookbook/editing/manifests)                        | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                                                                                                          |
 | [Editing across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autowriter)          | `dispat autowriter`: one manifest edit applied to every package the plan selects, or edits derived from the workspace.                                                                     |
-| [Substituting across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autosubstitute) | `dispat autosubstitute`: literal text replaced in every package the plan selects.                                                                                                          |
+| [Replacing across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autoreplacer) | `dispat autoreplacer`: literal text replaced in every package the plan selects.                                                                                                          |
 | [The replacer](https://yohimik.github.io/dispat/cookbook/editing/replacer)                           | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.                                                                                              |
 | [CLI](https://yohimik.github.io/dispat/cli)                                                          | Every command, flag and exit code.                                                                                                                                                         |
 | [dispat if](https://yohimik.github.io/dispat/cli/if)                                                 | Branching on a variable inside a configured script.                                                                                                                                        |

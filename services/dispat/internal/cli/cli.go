@@ -43,12 +43,12 @@ const (
 	// steps to custom flows. Like every command word (and unlike --version),
 	// each permanently shadows a run script of the same name: `dispat
 	// changelog` is never `dispat run changelog`.
-	cmdChangelog      = "changelog"      // write pending changelog entries now
-	cmdAutoversion    = "autoversion"    // native manifest reconciliation, plus syncLock
-	cmdAutowriter     = "autowriter"     // the writer's edits, over the whole selection
-	cmdAutosubstitute = "autosubstitute" // literal substitutions, over the whole selection
-	cmdCommit         = "commit"         // per-package release commit (--tag, --push)
-	cmdGithub         = "github"         // per-package GitHub release, published now
+	cmdChangelog    = "changelog"    // write pending changelog entries now
+	cmdAutoversion  = "autoversion"  // native manifest reconciliation, plus syncLock
+	cmdAutowriter   = "autowriter"   // the writer's edits, over the whole selection
+	cmdAutoreplacer = "autoreplacer" // literal substitutions, over the whole selection
+	cmdCommit       = "commit"       // per-package release commit (--tag, --push)
+	cmdGithub       = "github"       // per-package GitHub release, published now
 
 	// The manifest commands, exposing the pkg/scanner and pkg/writer
 	// libraries directly. Like init, they need no config file and no git
@@ -74,7 +74,7 @@ func manifestCommand(cmd string) bool {
 // and --consumers.
 func sweepCommand(cmd string) bool {
 	switch cmd {
-	case cmdRun, cmdAutowriter, cmdAutosubstitute, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
+	case cmdRun, cmdAutowriter, cmdAutoreplacer, cmdChangelog, cmdAutoversion, cmdCommit, cmdGithub:
 		return true
 	}
 	return false
@@ -205,21 +205,21 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	var subs []writer.Substitution
-	if cmd == cmdAutosubstitute {
+	if cmd == cmdAutoreplacer {
 		var err error
 		if subs, err = parseSubSpecs(*o.rpSub); err != nil {
 			bootLog.Error().Err(err).Msg("invalid substitution")
 			return 2
 		}
 		if len(subs) == 0 {
-			bootLog.Error().Msg("autosubstitute needs something to write: --sub 'find=>write'")
+			bootLog.Error().Msg("autoreplacer needs something to write: --sub 'find=>write'")
 			usageForCommand(cmd)
 			return 2
 		}
 		if len(*o.rpFiles) == 0 {
 			// A rule with no globs selects nothing, and writing nothing
 			// silently is how a typo hides.
-			bootLog.Error().Msg("autosubstitute needs files to look in: --files '**/*.gradle'")
+			bootLog.Error().Msg("autoreplacer needs files to look in: --files '**/*.gradle'")
 			usageForCommand(cmd)
 			return 2
 		}
@@ -475,8 +475,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}) != nil {
 			return 1
 		}
-	case cmdAutosubstitute:
-		if a.AutoSubstitute(ctx, app.AutoSubstituteOptions{
+	case cmdAutoreplacer:
+		if a.AutoReplacer(ctx, app.AutoReplacerOptions{
 			Window: window, OnError: *o.onError,
 			Subs: subs, Files: *o.rpFiles,
 			OnlyUpdated: *o.onlyUpdated, Strict: *o.strict,
@@ -598,7 +598,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 			return inv, true
 		}
 		inv.script = rest[1]
-	case cmdPreview, cmdChangelog, cmdAutoversion, cmdAutowriter, cmdAutosubstitute, cmdCommit, cmdGithub:
+	case cmdPreview, cmdChangelog, cmdAutoversion, cmdAutowriter, cmdAutoreplacer, cmdCommit, cmdGithub:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).
 				Msgf("%s takes no arguments (select packages with --package, --space or --group)", inv.cmd)

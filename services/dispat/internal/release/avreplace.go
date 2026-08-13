@@ -2,7 +2,7 @@ package release
 
 // The release stage's use of the replacing strategy (§9.4): the rules come
 // from the space's autoVersion.replace, the facts from the run in flight, and
-// the work itself from Substituter, which `dispat autosubstitute` drives too.
+// the work itself from Substituter, which `dispat autoreplacer` drives too.
 //
 // Where the parsing strategy learns a package's providers from its manifests,
 // this one takes them from the configured `dependencies` graph. With no

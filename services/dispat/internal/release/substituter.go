@@ -4,7 +4,7 @@ package release
 // rules, and the facts their placeholders render against.
 //
 // It was a method on the release executor's per-task context, which was fine
-// while the release stage was the only caller. `dispat autosubstitute` is the
+// while the release stage was the only caller. `dispat autoreplacer` is the
 // second, and it has no task, no plan and no stage frame, so what the engine
 // actually needs is passed in rather than reached for. The release path builds
 // one of these from its task context; the command builds one from its flags.

@@ -164,8 +164,8 @@ const FEATURES: Feature[] = [
         </Link>{' '}
         applies one manifest edit across every package the plan selects, finding each package&apos;s manifests itself,
         and{' '}
-        <Link to="/cli/autosubstitute">
-          <code>dispat autosubstitute</code>
+        <Link to="/cli/autoreplacer">
+          <code>dispat autoreplacer</code>
         </Link>{' '}
         does the same for literal text, so hand-written coordinates in READMEs and install snippets follow a release
         too. Both take the same selection flags as <code>dispat run</code>.{' '}
@@ -273,8 +273,8 @@ function Features(): React.ReactElement {
         <Link to="/concepts">Concepts</Link> works both situations through end to end.
       </p>
       <div className={styles.features}>
-        {FEATURES.map((feature) => (
-          <div className={styles.feature} key={feature.title}>
+        {FEATURES.map((feature, i) => (
+          <div className={[styles.feature, i === FEATURES.length - 1 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
             <Heading as="h3" className={styles.featureTitle}>
               {feature.title}
             </Heading>

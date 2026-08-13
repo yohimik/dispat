@@ -203,7 +203,7 @@ anywhere.`,
 			"sync-lock", "strict"}, windowFlags...),
 	},
 	{
-		name:  cmdAutosubstitute,
+		name:  cmdAutoreplacer,
 		short: "replace literal text across every covered package",
 		long: `Replace literal text in every covered package, the way "dispat replacer"
 does it in named files: --sub takes find=>write, --files says which of each

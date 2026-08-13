@@ -16,7 +16,7 @@ dispat [command] [flags]
 | `changelog`               | Write the pending changelog entry now; see [The changelog command](./changelog.md).                               |
 | `autoversion`             | Reconcile manifests to the planned versions; see [The autoversion command](./autoversion.md).                         |
 | `autowriter`             | Apply one set of manifest edits to every covered package; see [The autowriter command](./autowriter.md). |
-| `autosubstitute`         | Replace literal text across every covered package; see [The autosubstitute command](./autosubstitute.md). |
+| `autoreplacer`         | Replace literal text across every covered package; see [The autoreplacer command](./autoreplacer.md). |
 | `commit`                  | Create the per-package release commit; see [The commit command](./commit.md).                               |
 | `github`                  | Create the per-package GitHub release now; see [The github command](./github.md).                           |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |

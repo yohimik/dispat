@@ -105,6 +105,10 @@
   .title {
     font-size: 2.25rem;
   }
+
+  .lastFeature {
+    grid-column: 1;
+  }
 }
 
 /* The commit parser stands alone on the first row, full width; the manifest pair
@@ -131,6 +135,10 @@
   border-radius: var(--ifm-global-radius);
   background: var(--ifm-background-surface-color);
   text-align: center;
+}
+
+.lastFeature {
+  grid-column: 1 / -1;
 }
 
 .featureTitle {

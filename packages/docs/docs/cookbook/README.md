@@ -45,5 +45,5 @@ release-shaped repository needs between releases.
 |------|--------|
 | [Manifest tools](./editing/manifests.md) | `dispat scanner` and `dispat writer`: read and edit one folder's manifests, with no config and no git. |
 | [Editing across the monorepo](./editing/autowriter.md) | `dispat autowriter`: one manifest edit applied to every package a selection covers. |
-| [Substituting across the monorepo](./editing/autosubstitute.md) | `dispat autosubstitute`: the same idea for literal text, so hand-written coordinates follow a release. |
+| [Replacing across the monorepo](./editing/autoreplacer.md) | `dispat autoreplacer`: the same idea for literal text, so hand-written coordinates follow a release. |
 | [The replacer](./editing/replacer.md) | `dispat replacer`: literal find-and-write over any file, parsing nothing. |

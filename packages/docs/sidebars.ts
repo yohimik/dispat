@@ -26,7 +26,7 @@ const sidebars: SidebarsConfig = {
           items: [
             {type: 'doc', id: 'cookbook/editing/manifests', label: 'Manifest tools'},
             {type: 'doc', id: 'cookbook/editing/autowriter', label: 'Editing across the monorepo'},
-            {type: 'doc', id: 'cookbook/editing/autosubstitute', label: 'Substituting across the monorepo'},
+            {type: 'doc', id: 'cookbook/editing/autoreplacer', label: 'Replacing across the monorepo'},
             {type: 'doc', id: 'cookbook/editing/replacer', label: 'The replacer'},
           ],
         },
@@ -46,7 +46,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'cli/changelog', label: 'changelog'},
         {type: 'doc', id: 'cli/autoversion', label: 'autoversion'},
         {type: 'doc', id: 'cli/autowriter', label: 'autowriter'},
-        {type: 'doc', id: 'cli/autosubstitute', label: 'autosubstitute'},
+        {type: 'doc', id: 'cli/autoreplacer', label: 'autoreplacer'},
         {type: 'doc', id: 'cli/commit', label: 'commit'},
         {type: 'doc', id: 'cli/github', label: 'github'},
         {type: 'doc', id: 'cli/compute', label: 'compute'},

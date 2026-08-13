@@ -1,6 +1,6 @@
 package app
 
-// `dispat autosubstitute` is `dispat replacer` pointed at a selection instead
+// `dispat autoreplacer` is `dispat replacer` pointed at a selection instead
 // of a list of files: the same literal find/write pairs, applied to every
 // package the plan picks, over the files each package's globs select.
 //
@@ -26,8 +26,8 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
-// AutoSubstituteOptions is one `dispat autosubstitute` invocation.
-type AutoSubstituteOptions struct {
+// AutoReplacerOptions is one `dispat autoreplacer` invocation.
+type AutoReplacerOptions struct {
 	// Window is which packages the command covers: the release window or
 	// --since, narrowed by the filter, expanded by --consumers. A package that
 	// only consumes an updated provider is outside the window by definition,
@@ -52,14 +52,14 @@ type AutoSubstituteOptions struct {
 	Out io.Writer
 }
 
-// AutoSubstitute applies the invocation's substitutions to every covered
+// AutoReplacer applies the invocation's substitutions to every covered
 // package's files. Every package is swept in dependency order, exactly as
 // `dispat run` sweeps scripts.
 //
 // Nothing here depends on a package releasing: rewriting the files of a package
 // with no pending change is a perfectly good thing to ask for, which is why
 // --since all reaches the whole monorepo.
-func (a *App) AutoSubstitute(ctx context.Context, opts AutoSubstituteOptions) error {
+func (a *App) AutoReplacer(ctx context.Context, opts AutoReplacerOptions) error {
 	pl, err := a.stepPlan(ctx)
 	if err != nil {
 		return err
@@ -70,20 +70,20 @@ func (a *App) AutoSubstitute(ctx context.Context, opts AutoSubstituteOptions) er
 		return err
 	}
 
-	work := a.newSubstituteWork(ctx, pl, opts)
+	work := a.newReplacerWork(ctx, pl, opts)
 	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: opts.OnError})
 
 	files, occurrences := work.tally()
 	if opts.JSON {
 		a.log.Info().Int("packages", rep.Resolved).
 			Int("files", files).Int("occurrences", occurrences).
-			Msg("autosubstitute complete")
+			Msg("autoreplacer complete")
 	} else {
 		fmt.Fprintf(listing(opts.Out), "%d package(s): %d file(s), %d occurrence(s)\n",
 			rep.Resolved, files, occurrences)
 	}
 	if drainErr != nil {
-		a.log.Warn().Err(drainErr).Msg("autosubstitute interrupted")
+		a.log.Warn().Err(drainErr).Msg("autoreplacer interrupted")
 		return drainErr
 	}
 	if rep.Failed > 0 {
@@ -99,14 +99,14 @@ func (a *App) AutoSubstitute(ctx context.Context, opts AutoSubstituteOptions) er
 	return nil
 }
 
-// substituteWork is `dispat autosubstitute`'s share of a sweep: one package's
+// replacerWork is `dispat autoreplacer`'s share of a sweep: one package's
 // providers resolved, then its files rewritten.
 //
 // The rules are the same for every package, so they are built once. What
 // differs per package is the facts the placeholders render against and the
 // providers the fan-out covers, which is what resolve computes. The counts and
 // which substitutions ever matched are guarded by mu.
-type substituteWork struct {
+type replacerWork struct {
 	app   *App
 	pl    *plan.Plan
 	rules []model.ReplaceRule
@@ -124,10 +124,10 @@ type substituteWork struct {
 	out  io.Writer
 }
 
-// newSubstituteWork resolves the invocation into the work a sweep can run. The
+// newReplacerWork resolves the invocation into the work a sweep can run. The
 // workspace index is always needed: the fan-out is nothing but the question of
 // which declarations name a package here.
-func (a *App) newSubstituteWork(ctx context.Context, pl *plan.Plan, opts AutoSubstituteOptions) *substituteWork {
+func (a *App) newReplacerWork(ctx context.Context, pl *plan.Plan, opts AutoReplacerOptions) *replacerWork {
 	names, dirs := release.WorkspaceNames(ctx, a.scan, pl, a.log)
 
 	// One rule per --sub, all sharing the --files globs: the config form pairs
@@ -136,7 +136,7 @@ func (a *App) newSubstituteWork(ctx context.Context, pl *plan.Plan, opts AutoSub
 	for _, s := range opts.Subs {
 		rules = append(rules, model.ReplaceRule{Files: opts.Files, Find: s.Find, Write: s.Write})
 	}
-	return &substituteWork{
+	return &replacerWork{
 		app: a, pl: pl, rules: rules, names: names, dirs: dirs,
 		onlyUpdated: opts.OnlyUpdated,
 		matched:     map[int]bool{},
@@ -144,12 +144,12 @@ func (a *App) newSubstituteWork(ctx context.Context, pl *plan.Plan, opts AutoSub
 	}
 }
 
-func (w *substituteWork) stage() string { return "autosubstitute" }
+func (w *replacerWork) stage() string { return "autoreplacer" }
 
 // resolve prepares one package's substitution. Every covered package has files
 // to offer, so unlike the writer's sweep this one never resolves to nothing:
 // whether the globs select anything is the walk's answer, not this one's.
-func (w *substituteWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
+func (w *replacerWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
 	sub := release.Substituter{
 		Dir:   rel.Pkg.Dir,
 		Rules: w.rules,
@@ -181,7 +181,7 @@ func (w *substituteWork) resolve(ctx context.Context, rel *plan.Release) (task, 
 // commands never disagree about which declarations are internal. Nothing is
 // published on the strength of it, so an edge the config does not declare is
 // not the warning here that it is during a release.
-func (w *substituteWork) providers(ctx context.Context, rel *plan.Release) []release.ProviderFacts {
+func (w *replacerWork) providers(ctx context.Context, rel *plan.Release) []release.ProviderFacts {
 	mans, err := w.app.scan.ScanRoot(ctx, rel.Pkg.Dir)
 	if err != nil {
 		w.app.log.Debug().Err(err).Str("package", rel.Pkg.Name).
@@ -224,7 +224,7 @@ func (w *substituteWork) providers(ctx context.Context, rel *plan.Release) []rel
 // package's folder must not rewrite that package's files, because its owner's
 // own turn in the sweep will, and the two would otherwise write one file from
 // two goroutines.
-func (w *substituteWork) ownedBy(rel *plan.Release) func(string) bool {
+func (w *replacerWork) ownedBy(rel *plan.Release) func(string) bool {
 	return func(relPath string) bool {
 		folder := filepath.Dir(filepath.Join(rel.Pkg.Dir, filepath.FromSlash(relPath)))
 		for {
@@ -241,7 +241,7 @@ func (w *substituteWork) ownedBy(rel *plan.Release) func(string) bool {
 }
 
 // record folds one package's outcome into the run-wide tally.
-func (w *substituteWork) record(pkg string, rep release.SubstituteReport) {
+func (w *replacerWork) record(pkg string, rep release.SubstituteReport) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.files += rep.Files
@@ -259,7 +259,7 @@ func (w *substituteWork) record(pkg string, rep release.SubstituteReport) {
 	fmt.Fprintf(listing(w.out), "%s\n  %d file(s) rewritten\n", pkg, rep.Files)
 }
 
-func (w *substituteWork) tally() (files, occurrences int) {
+func (w *replacerWork) tally() (files, occurrences int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.files, w.occurrences
@@ -275,7 +275,7 @@ func (w *substituteWork) tally() (files, occurrences int) {
 // template is what the operator wrote: a fan-out pattern matching for any one
 // provider has done its job, and a converged re-run is answered by the probe
 // the engine pairs with every substitution.
-func (w *substituteWork) stale() error {
+func (w *replacerWork) stale() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var stale int

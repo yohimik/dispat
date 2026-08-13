@@ -134,7 +134,7 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     with no config file, no commit and no plan at all, and that their outcomes reach the process exit code.
 26. **The `autowriter` command** (`autowriter_test.go`): `dispat writer`'s edits applied to the packages the plan
     selects, including the edits derived from the workspace itself (`--set-local`, `--link-local`).
-27. **The `autosubstitute` command** (`autosubstitute_test.go`): a substitution fanned out across the packages the
+27. **The `autoreplacer` command** (`autoreplacer_test.go`): a substitution fanned out across the packages the
     plan selects, rendered once per workspace provider a covered package declares.
 28. **Docker through the binary** (`docker_test.go`): the ecosystem dispat was built around and the last one it could
     read: an image-to-image edge derived from a `FROM` line nobody wrote into the config, and a release reconciling
@@ -254,7 +254,7 @@ tests/integration/
   autoversion_test.go       goal 24
   manifests_test.go         goal 25
   autowriter_test.go        goal 26
-  autosubstitute_test.go    goal 27
+  autoreplacer_test.go    goal 27
   docker_test.go            goal 28
 
   the guards
@@ -764,19 +764,19 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestAutoWriterLinkLocalReachesAnIndirectRequire` | A Go build honours replace directives from the main module alone, so a provider reached only through another module is still redirected from the consumer's own go.mod. The link half reads the indirect requires for exactly that reason. |
 | `TestAutoWriterSetLocalLeavesAnIndirectRequireAlone` | The range half stops at the declarations: an indirect require is a version the toolchain wrote, and reconciling it would be dispat editing bookkeeping it does not own. |
 
-### Goal 27: the `autosubstitute` command (`autosubstitute_test.go`)
+### Goal 27: the `autoreplacer` command (`autoreplacer_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                          |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `TestAutoSubstituteFansOutAcrossWorkspaceProviders` | A `{provider}` pattern is rendered once per workspace package the covered package declares, so a coordinate follows its provider with no dependency named on the command line.                                                     |
-| `TestAutoSubstitutePackageScopedPatternRunsOnce` | A `--sub` naming no provider is about the covered package itself and writes its own version.                                                                                                                                         |
-| `TestAutoSubstituteGlobsSelectWithinThePackage` | A glob reaches only what it names, inside the package folder the sweep handed over; a file no glob selected is untouched.                                                                                                             |
-| `TestAutoSubstituteOnlyUpdatedNarrowsTheFanOut` | `--only-updated` drops a provider released outside this run, so its coordinate is left as it is.                                                                                                                                      |
-| `TestAutoSubstituteConsumersReachesThePackagesTheWindowLeftOut` | The package carrying a stale coordinate is the one nothing changed in, so the window excludes it; `--consumers` is what pulls it in and closes the gap.                                                                |
-| `TestAutoSubstituteConvergesUnderStrict`        | The probe tells "already reconciled" apart from "never matched", so a converged re-run of a `{previous}=>{version}` pattern is clean rather than stale.                                                                               |
-| `TestAutoSubstituteLeavesANestedPackageToItsOwner` | A package nested inside another declines that package's files, which its owner's own turn writes, so one file is never written from two goroutines.                                                                                |
-| `TestAutoSubstituteOutcomesReachTheExitCode`    | `--strict` is asked across the sweep; no `--sub`, no `--files`, a malformed spec and a positional argument are usage errors (2).                                                                                                      |
-| `TestAutoSubstituteCommandWordKeepsItsScript`   | `autosubstitute` is reserved like every other command word, and `dispat run autosubstitute` still reaches a script of that name.                                                                                                      |
+| `TestAutoReplacerFansOutAcrossWorkspaceProviders` | A `{provider}` pattern is rendered once per workspace package the covered package declares, so a coordinate follows its provider with no dependency named on the command line.                                                     |
+| `TestAutoReplacerPackageScopedPatternRunsOnce` | A `--sub` naming no provider is about the covered package itself and writes its own version.                                                                                                                                         |
+| `TestAutoReplacerGlobsSelectWithinThePackage` | A glob reaches only what it names, inside the package folder the sweep handed over; a file no glob selected is untouched.                                                                                                             |
+| `TestAutoReplacerOnlyUpdatedNarrowsTheFanOut` | `--only-updated` drops a provider released outside this run, so its coordinate is left as it is.                                                                                                                                      |
+| `TestAutoReplacerConsumersReachesThePackagesTheWindowLeftOut` | The package carrying a stale coordinate is the one nothing changed in, so the window excludes it; `--consumers` is what pulls it in and closes the gap.                                                                |
+| `TestAutoReplacerConvergesUnderStrict`        | The probe tells "already reconciled" apart from "never matched", so a converged re-run of a `{previous}=>{version}` pattern is clean rather than stale.                                                                               |
+| `TestAutoReplacerLeavesANestedPackageToItsOwner` | A package nested inside another declines that package's files, which its owner's own turn writes, so one file is never written from two goroutines.                                                                                |
+| `TestAutoReplacerOutcomesReachTheExitCode`    | `--strict` is asked across the sweep; no `--sub`, no `--files`, a malformed spec and a positional argument are usage errors (2).                                                                                                      |
+| `TestAutoReplacerCommandWordKeepsItsScript`   | `autoreplacer` is reserved like every other command word, and `dispat run autoreplacer` still reaches a script of that name.                                                                                                      |
 
 ### Goal 28: Docker through the binary (`docker_test.go`)
 
