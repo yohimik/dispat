@@ -367,10 +367,8 @@ function Install(): React.ReactElement {
         command mentions a newer release on its way out, so you find out without going looking.
       </p>
       <p className={styles.sectionLead}>
-        Prefer something else? <code>go install github.com/yohimik/dispat/services/dispat@latest</code>, a prebuilt
-        binary from any <Link to={`${GITHUB}/releases`}>release</Link>, or, in CI, the{' '}
-        <Link to="/reference/ci">GitHub Action and container images</Link>. Pinning a version and choosing a directory
-        are covered in <Link to="/getting-started">Getting started</Link>.
+        More ways to install (<code>go install</code>, the GitHub Action, the container images) and how to pin a
+        version are in <Link to="/getting-started">Getting started</Link>.
       </p>
     </section>
   );
