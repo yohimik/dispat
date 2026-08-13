@@ -163,6 +163,7 @@ const config: Config = {
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
         {type: 'docsVersionDropdown', position: 'right'},
         {href: GITHUB, label: 'GitHub', position: 'right'},
+        {href: DISCORD, label: 'Discord', position: 'right'},
       ],
     },
     footer: {
