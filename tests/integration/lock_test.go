@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -359,23 +360,41 @@ func TestReleaseLockClearedWhateverHappens(t *testing.T) {
 		assertLockCleared(t, r, bare)
 	})
 
-	t.Run("an interrupted run", func(t *testing.T) {
-		r := harness.New(t)
-		cfg := libsConfig("echo ran >> ../../build.log; sleep 30", 1)
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.Commit("feat(core): first")
-		bare := r.AddBareRemote()
+	// Both signals the binary handles, because both strand the lock if the
+	// release path gets them wrong, and they arrive from different places: a
+	// Ctrl-C at a terminal, and a SIGTERM from whatever runs the job. The
+	// second is the one that matters most in practice — a cancelled CI job,
+	// a `docker stop`, a pod eviction — and it is the case nobody types by
+	// hand, so nobody would notice it regressing.
+	for name, sig := range map[string]os.Signal{
+		"an interrupted run": os.Interrupt,
+		"a terminated run":   syscall.SIGTERM,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig("echo ran >> ../../build.log; sleep 30", 1)
+			probeConfig(&cfg)
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+			bare := r.AddBareRemote()
 
-		proc := r.StartReleaseEnv(harness.LockEnabled)
-		require.Eventually(t, func() bool { return buildRuns(r) > 0 },
-			20*time.Second, 20*time.Millisecond, "the build never started")
-		proc.Signal(os.Interrupt)
-		res := proc.Wait()
+			proc := r.StartReleaseEnv(harness.LockEnabled)
+			require.Eventually(t, func() bool { return buildRuns(r) > 0 },
+				20*time.Second, 20*time.Millisecond, "the build never started")
+			proc.Signal(sig)
+			res := proc.Wait()
 
-		assert.NotEqual(t, 0, res.Code, "an interrupted run does not exit 0")
-		assertLockCleared(t, r, bare)
-	})
+			assert.NotEqual(t, 0, res.Code, "a signalled run does not exit 0")
+			// Both halves, or the claim is vacuous: a run that never took the
+			// lock would also end with the remote clean.
+			assert.True(t, heldDuringRun(t, r), "the run really held the lock when the signal arrived")
+			// It is given back under a context detached from cancellation, so
+			// the signal that stopped the run cannot also stop the push that
+			// releases it.
+			assertLockCleared(t, r, bare)
+		})
+	}
 }
 
 // TestReleaseLockStaleLocalTag: a run killed hard leaves the tag in its own
