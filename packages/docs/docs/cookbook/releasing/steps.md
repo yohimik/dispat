@@ -59,7 +59,7 @@ dispat changelog --group platform   # every package of the platform version grou
 ```
 
 If you run the command from inside a package folder and pass no flags, it narrows to that package. That is the same
-rule [`dispat run`](../cli/run.md#choosing-the-packages) follows.
+rule [`dispat run`](../../cli/run.md#choosing-the-packages) follows.
 
 A name that matches no package at all is an error, because a typo that quietly does nothing is worse than one that
 stops you.
@@ -105,7 +105,7 @@ rest before the tag, or reach for `--since all` afterwards.
 Writes the changelog entry each covered package is due, the same entry the release would write. Use it when you want
 the entry to be part of the release commit rather than left in your working tree afterwards.
 
-The flags let you override the [`changelog`](../configuration/records.md#changelog) settings for one invocation:
+The flags let you override the [`changelog`](../../configuration/records.md#changelog) settings for one invocation:
 `--file`, `--title` and `--date-format`.
 
 In the log you will see one `changelog written` line per package, or a `W226` skip for a package whose entry was
@@ -121,7 +121,7 @@ Running it again after it has done its work rewrites nothing, because the manife
 ### `dispat commit`
 
 Makes one commit per covered package, staging that package's folder plus anything
-[`commit.include`](../configuration/records.md#commit) lists. Two flags extend it:
+[`commit.include`](../../configuration/records.md#commit) lists. Two flags extend it:
 
 ```sh
 dispat commit --tag          # also create the annotated release tag
@@ -139,7 +139,7 @@ dispat commit --tag --push --tag-name "$DISPAT_TAG"
 
 You need it in one situation, and it follows from the rule above that a step command plans afresh. Inside a release
 stage the command is planning a second time, and if the package belongs to a
-[fixed versioning group](../configuration/spaces.md#versioning-groups), the group's shared version has already moved by
+[fixed versioning group](../../configuration/spaces.md#versioning-groups), the group's shared version has already moved by
 then, because an earlier member of the same run has tagged. The second plan would compute a different version than the
 run is reporting, and tag that. Passing the outer run's `$DISPAT_TAG` keeps the two in agreement.
 
@@ -153,8 +153,8 @@ Creates the GitHub release for each covered package: named after the tag, with t
 A package is only released if it opted in, the same way it opts in during a normal run. There are two ways to opt in:
 
 1. A script exported `DISPAT_EXPORT_GITHUB`. Its value lists the files to attach, and an empty value means "release me,
-   no attachments". See [script outputs](../reference/environment.md#script-outputs).
-2. [`github.allPackages`](../configuration/records.md#github) is on, which opts every published package in.
+   no attachments". See [script outputs](../../reference/environment.md#script-outputs).
+2. [`github.allPackages`](../../configuration/records.md#github) is on, which opts every published package in.
 
 If neither applies, the command creates nothing and exits `0`. It is not an error to have nothing to publish.
 
@@ -163,7 +163,7 @@ that exported it put it there. The command picks it up from there, along with `D
 export it is. You do not have to pass anything.
 
 The flags `--owner`, `--repo`, `--api-url` and `--token-env` override the matching
-[`github`](../configuration/records.md#github) settings, and `--target` pins the tag to a specific commit or branch.
+[`github`](../../configuration/records.md#github) settings, and `--target` pins the tag to a specific commit or branch.
 
 ## A worked example
 
@@ -220,7 +220,7 @@ registry expects.
 
 ## Where to look next
 
-- [CLI reference](../cli/README.md) for every flag each command takes.
-- [Stages and hooks](../configuration/spaces.md#stages-and-hooks) for where in a flow you can put a script.
-- [Release records](../configuration/records.md) for what the changelog, GitHub and commit settings control.
-- [Script environment](../reference/environment.md) for the variables a stage script receives.
+- [CLI reference](../../cli/README.md) for every flag each command takes.
+- [Stages and hooks](../../configuration/spaces.md#stages-and-hooks) for where in a flow you can put a script.
+- [Release records](../../configuration/records.md) for what the changelog, GitHub and commit settings control.
+- [Script environment](../../reference/environment.md) for the variables a stage script receives.

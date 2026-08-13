@@ -34,7 +34,7 @@ dispat autowriter --set left-pad=^2.0.0 --since all         # every package in t
 ```
 
 Running it from inside a package folder with no flags narrows it to that package. The full rule, including how the
-window and the filter compose, is in [Choosing the packages](../cli/run.md#choosing-the-packages).
+window and the filter compose, is in [Choosing the packages](../../cli/run.md#choosing-the-packages).
 
 `--since all` is the one you will reach for most, because "bump this dependency everywhere" usually has nothing to do
 with what is releasing today.
@@ -98,7 +98,7 @@ dispat autowriter --unlink-local              # and back again
 ```
 
 `--range` says how to spell what `--set-local` writes. It takes the same words
-[`autoVersion.range`](../configuration/spaces.md#autoversion) takes: `caret`,
+[`autoVersion.range`](../../configuration/spaces.md#autoversion) takes: `caret`,
 `tilde`, `exact`, or a template like `>={version}`. Leave it out and you get a
 caret.
 
@@ -148,7 +148,7 @@ checksum, so the sync helpfully deletes the `go.sum` entries for every linked
 module, and they are needed again the moment you unlink. The result is a
 module that builds fine for you and fails for everyone else with
 `missing go.sum entry`. The same goes for `go mod tidy`, which is why the
-[`syncLock`](../configuration/spaces.md#autoversion) scripts are worth turning
+[`syncLock`](../../configuration/spaces.md#autoversion) scripts are worth turning
 off with `--sync-lock=false` around a link.
 :::
 
@@ -255,7 +255,7 @@ already exists, so there is nothing for it to be stale about.
 ## Lock files
 
 Rewriting a range leaves the lock file next to it out of date. If the space configures
-[`syncLock`](../configuration/spaces.md#autoversion) scripts, they run afterwards, in the packages whose manifests
+[`syncLock`](../../configuration/spaces.md#autoversion) scripts, they run afterwards, in the packages whose manifests
 actually changed, one package at a time. Pass `--sync-lock=false` to leave the lock files to you.
 
 ## The pitfall worth knowing

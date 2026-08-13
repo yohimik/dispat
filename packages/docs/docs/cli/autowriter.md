@@ -27,7 +27,7 @@ redundant, and unlinking needs them back.
 
 A covered package with no manifest anything can write is a no-op; a selection in which none of them has one is an
 error. The whole command, with worked examples, is in
-[Editing across the monorepo](../editing/autowriter.md).
+[Editing across the monorepo](../cookbook/editing/autowriter.md).
 
 ## Flags
 
@@ -37,7 +37,7 @@ Beside the [global flags](./README.md#global-flags):
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autosubstitute`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
 | `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
+| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../cookbook/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
 | `--since`             |             | The same seven commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
 | `--consumers`         |             | The same seven commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
 | `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autosubstitute`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
@@ -51,4 +51,4 @@ Beside the [global flags](./README.md#global-flags):
 | `--manifests`         | from config | `autoversion` and `autowriter`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
 | `--only-updated`      |             | `autoversion` and `autowriter`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
 | `--sync-lock`         | `true`      | `autoversion` and `autowriter`: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them. |
-| `--strict`            |             | Turns a tolerated finding into a failure. `autowriter`: an edit that matched no manifest anywhere; see [Editing across the monorepo](../editing/autowriter.md#applied-skipped-and-missing-across-many-packages). |
+| `--strict`            |             | Turns a tolerated finding into a failure. `autowriter`: an edit that matched no manifest anywhere; see [Editing across the monorepo](../cookbook/editing/autowriter.md#applied-skipped-and-missing-across-many-packages). |

@@ -126,7 +126,7 @@ const FEATURES: Feature[] = [
         </Link>{' '}
         does the same for literal text, so hand-written coordinates in READMEs and install snippets follow a release
         too. Both take the same selection flags as <code>dispat run</code>.{' '}
-        <Link to="/editing/autowriter">Editing across the monorepo.</Link>
+        <Link to="/cookbook/editing/autowriter">Editing across the monorepo.</Link>
       </>
     ),
   },
@@ -138,7 +138,7 @@ const FEATURES: Feature[] = [
         thing the release normally does, at the moment your own flow needs it, and the release stage then finds the
         work done and skips it. <code>dispat if</code> branches on an environment variable and <code>dispat exec</code>{' '}
         runs one declared script once.{' '}
-        <Link to="/releasing/steps">Release steps.</Link>
+        <Link to="/cookbook/releasing/steps">Release steps.</Link>
       </>
     ),
   },

@@ -11,17 +11,36 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docs: [
     'getting-started',
-    'cookbook',
     'concepts',
     {
       type: 'category',
-      label: 'Releasing',
+      label: 'Cookbook',
       collapsed: true,
+      link: {type: 'doc', id: 'cookbook/README'},
       items: [
-        {type: 'doc', id: 'releasing/versioning', label: 'Shared versions'},
-        {type: 'doc', id: 'releasing/steps', label: 'Release steps'},
-        {type: 'doc', id: 'releasing/partial-releases', label: 'Partial releases'},
-        {type: 'doc', id: 'releasing/release-lock', label: 'The release lock'},
+        {type: 'doc', id: 'cookbook/recipes', label: 'Recipes'},
+        {
+          type: 'category',
+          label: 'Releasing',
+          collapsed: true,
+          items: [
+            {type: 'doc', id: 'cookbook/releasing/versioning', label: 'Shared versions'},
+            {type: 'doc', id: 'cookbook/releasing/steps', label: 'Release steps'},
+            {type: 'doc', id: 'cookbook/releasing/partial-releases', label: 'Partial releases'},
+            {type: 'doc', id: 'cookbook/releasing/release-lock', label: 'The release lock'},
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Editing the monorepo',
+          collapsed: true,
+          items: [
+            {type: 'doc', id: 'cookbook/editing/manifests', label: 'Manifest tools'},
+            {type: 'doc', id: 'cookbook/editing/autowriter', label: 'Editing across the monorepo'},
+            {type: 'doc', id: 'cookbook/editing/autosubstitute', label: 'Substituting across the monorepo'},
+            {type: 'doc', id: 'cookbook/editing/replacer', label: 'The replacer'},
+          ],
+        },
       ],
     },
     {
@@ -68,17 +87,6 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'configuration/run-hooks', label: 'Run-level hooks'},
         {type: 'doc', id: 'configuration/env', label: 'Static env'},
         {type: 'doc', id: 'configuration/custom', label: 'custom'},
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Editing the monorepo',
-      collapsed: true,
-      items: [
-        {type: 'doc', id: 'editing/manifests', label: 'Manifest tools'},
-        {type: 'doc', id: 'editing/autowriter', label: 'Editing across the monorepo'},
-        {type: 'doc', id: 'editing/autosubstitute', label: 'Substituting across the monorepo'},
-        {type: 'doc', id: 'editing/replacer', label: 'The replacer'},
       ],
     },
     {

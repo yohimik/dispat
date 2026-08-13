@@ -173,12 +173,12 @@ command are still written, and the command exits `1` at the end.
 ## Which tool for which job
 
 - Deriving a monorepo's dependency graph, and the baselines its packages start from, into the config file is
-  [`dispat compute`](../cli/compute.md). It uses the scanner underneath and understands your packages; the
+  [`dispat compute`](../../cli/compute.md). It uses the scanner underneath and understands your packages; the
   scanner alone only reports files.
 - Making the same change in every package the plan picks, instead of in the files you name, is
   [`dispat autowriter`](./autowriter.md). Same three flags, same outcomes; it finds the manifests itself.
 - Reconciling manifests to the versions a release just computed is
-  [auto-versioning](../configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
+  [auto-versioning](../../configuration/spaces.md#autoversion), or `dispat autoversion` on its own. It uses the writer
   underneath and knows what the new versions are; the writer alone only writes what you tell it.
 - Replacing a version in a file no parser understands is [the replacer](./replacer.md), which does exactly what it is
   told and nothing more.
@@ -273,7 +273,7 @@ None of these is an error. They are how a careful Dockerfile is written, and a r
 
 The name a Docker manifest declares is an image repository (`ghcr.io/acme/api`), and your package is almost certainly
 a folder called `api`. Two ways to connect them: state the repository under
-[`manifestNames`](../configuration/packages.md), or set `autoVersion.nameMatch` to `substring`, whose last-segment rule
+[`manifestNames`](../../configuration/packages.md), or set `autoVersion.nameMatch` to `substring`, whose last-segment rule
 maps `ghcr.io/acme/api` onto `api` on its own. The first is explicit and worth preferring when the repository name and
 the folder name really do differ.
 

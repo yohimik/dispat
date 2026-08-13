@@ -83,25 +83,25 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
   verified before any work, and nothing is ever published against an unpublished dependency. Two releases of one
   repository at once are refused rather than raced: a run claims the repository with a
-  [release lock](https://yohimik.github.io/dispat/releasing/release-lock) before it plans anything.
+  [release lock](https://yohimik.github.io/dispat/cookbook/releasing/release-lock) before it plans anything.
 - **Release part of the monorepo when you need to.** `dispat release --package core` (or `--space libs`, or
   `--group platform` for a whole version group, or just the folder you are standing in) releases a subset at exactly
   the versions a full release would have given it. Publish
   order still rules: a package whose provider is releasing and unselected waits for the next run instead of shipping
   ahead of it, and `--strict` refuses a selection that cannot go out cleanly before anything is built.
-  [Details](https://yohimik.github.io/dispat/releasing/partial-releases).
+  [Details](https://yohimik.github.io/dispat/cookbook/releasing/partial-releases).
 - **Edit every package at once.** `dispat autowriter` applies one manifest edit across every package the plan selects,
   finding each package's manifests itself: bump a shared dependency everywhere, or derive the edits from the workspace
   with `--set-local` and `--link-local`. `dispat autosubstitute` does the same for literal text, so hand-written
   coordinates in READMEs, badges and install snippets follow a release too. Both take the same selection flags as
   `dispat run`, and `dispat scanner`, `dispat writer` and `dispat replacer` expose the same libraries for one folder or
   one file, needing no config and no git repository.
-  [Details](https://yohimik.github.io/dispat/editing/autowriter).
+  [Details](https://yohimik.github.io/dispat/cookbook/editing/autowriter).
 - **Every release step is also a command.** `dispat changelog`, `autoversion`, `commit` and `github` run one thing the
   release normally does, at the moment your own flow needs it, and the release stage then finds the work done and skips
   it. `dispat if` branches on an environment variable and `dispat exec` runs one declared script once, so a custom
   pipeline can be assembled from the same pieces without giving up the ordering.
-  [Details](https://yohimik.github.io/dispat/releasing/steps).
+  [Details](https://yohimik.github.io/dispat/cookbook/releasing/steps).
 
 ## Documentation
 
@@ -112,10 +112,10 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Getting started](https://yohimik.github.io/dispat/getting-started)             | Install, first config, commit convention, commands, CI setup.                                       |
 | [Cookbook](https://yohimik.github.io/dispat/cookbook)                           | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels. |
 | [Concepts](https://yohimik.github.io/dispat/concepts)                           | The mental model: baselines, propagation, trains, catch-up, the pipeline.                           |
-| [Shared versions](https://yohimik.github.io/dispat/releasing/versioning)                  | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups. |
-| [Release steps](https://yohimik.github.io/dispat/releasing/steps)                         | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.  |
-| [Partial releases](https://yohimik.github.io/dispat/releasing/partial-releases)           | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`. |
-| [The release lock](https://yohimik.github.io/dispat/releasing/release-lock)               | Why two releases at once are refused rather than raced, and how to clear a lock a killed run left behind. |
+| [Shared versions](https://yohimik.github.io/dispat/cookbook/releasing/versioning)                  | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups. |
+| [Release steps](https://yohimik.github.io/dispat/cookbook/releasing/steps)                         | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.  |
+| [Partial releases](https://yohimik.github.io/dispat/cookbook/releasing/partial-releases)           | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`. |
+| [The release lock](https://yohimik.github.io/dispat/cookbook/releasing/release-lock)               | Why two releases at once are refused rather than raced, and how to clear a lock a killed run left behind. |
 | [CLI](https://yohimik.github.io/dispat/cli)                                     | Every command, flag and exit code.                                                                  |
 | [dispat if](https://yohimik.github.io/dispat/cli/if)                             | Branching on a variable inside a configured script.                                                 |
 | [dispat exec](https://yohimik.github.io/dispat/cli/exec)                        | Running one declared script on its own.                                                             |
@@ -132,10 +132,10 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Run-level hooks](https://yohimik.github.io/dispat/configuration/run-hooks)     | The seven hooks that observe the whole run rather than one package, and where they execute.         |
 | [Static env](https://yohimik.github.io/dispat/configuration/env)                | The `env` objects that add fixed variables to every script, and how the levels layer.               |
 | [custom](https://yohimik.github.io/dispat/configuration/custom)                 | The free-form object dispat carries without ever reading it, for your own tooling.                  |
-| [Manifest tools](https://yohimik.github.io/dispat/editing/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
-| [Editing across the monorepo](https://yohimik.github.io/dispat/editing/autowriter)      | `dispat autowriter`: one manifest edit applied to every package the plan selects, or edits derived from the workspace. |
-| [Substituting across the monorepo](https://yohimik.github.io/dispat/editing/autosubstitute) | `dispat autosubstitute`: literal text replaced in every package the plan selects.               |
-| [The replacer](https://yohimik.github.io/dispat/editing/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
+| [Manifest tools](https://yohimik.github.io/dispat/cookbook/editing/manifests)                    | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                   |
+| [Editing across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autowriter)      | `dispat autowriter`: one manifest edit applied to every package the plan selects, or edits derived from the workspace. |
+| [Substituting across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autosubstitute) | `dispat autosubstitute`: literal text replaced in every package the plan selects.               |
+| [The replacer](https://yohimik.github.io/dispat/cookbook/editing/replacer)                       | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.       |
 | [Commit messages](https://yohimik.github.io/dispat/reference/commits)                     | Scope sets, directives, footers, channels, release control.                                         |
 | [Script environment](https://yohimik.github.io/dispat/reference/environment)              | Every `DISPAT_*` variable, the listings, script outputs.                                            |
 | [dispat in CI](https://yohimik.github.io/dispat/reference/ci)                             | The GitHub Action, the container images, the install script: getting dispat onto a runner.          |

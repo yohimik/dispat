@@ -108,14 +108,14 @@ If the repository you are pointing it at is not brand new, run [`dispat compute`
 before anything else. It reads the packages' manifests and offers you two things the config would otherwise need by
 hand: the `dependencies` edges between them, and an `initials` entry for every package already at a version, so the
 first release continues from where the manifests are instead of starting again at `0.0.1`. Nothing is written until you
-add `--write`. The [adoption recipe](./cookbook.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
+add `--write`. The [adoption recipe](./cookbook/recipes.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
 through a real one.
 
 Everything else is optional and layered on top:
 
 - concurrency budgets, tag formats, log settings: the [top-level options](./configuration/README.md);
 - build/publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](./configuration/spaces.md);
-- packages that must share a version, or a major: [shared versions](./releasing/versioning.md);
+- packages that must share a version, or a major: [shared versions](./cookbook/releasing/versioning.md);
 - changelogs, GitHub releases, the release commit: [release records](./configuration/records.md);
 - commit-message policies and parser tweaks: [parsing options](./configuration/parser.md).
 

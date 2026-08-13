@@ -97,7 +97,7 @@ INF plan diagnostics warnings=12 errors=1 hidden=13
 ```
 
 Findings about the workspace rather than the message are never hidden: an unknown scope (`E130`), a catch-up
-(`W193`), a blocked package (`W194`), a package a [selection](../releasing/partial-releases.md) could not release yet
+(`W193`), a blocked package (`W194`), a package a [selection](../cookbook/releasing/partial-releases.md) could not release yet
 (`W230`).
 They explain a release outcome that a reader of the commit log alone cannot account for, which is the whole reason
 they exist.
