@@ -458,6 +458,8 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the push itself still fails\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "E214"),
+		"the push failure is reported under its own code, events:\n%s", res.Stdout)
 	assert.True(t, r.HasTag("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
 	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
 		"the release commit exists")
@@ -1152,4 +1154,125 @@ func TestConfigGithubReleaseAttachments(t *testing.T) {
 	}
 	assert.Equal(t, "binary-bytes\n", byName["app.bin"])
 	assert.Equal(t, "docs-bytes\n", byName["docs.txt"])
+}
+
+// The failures after the point of no return.
+//
+// Each of these happens when a package is already published to its registry:
+// the artefact is out and nothing dispat does afterwards can take it back. So
+// none of them fails a package or stops the run. Each is recorded under its
+// own code, the run finishes what else it owed, and the exit code says
+// something went wrong. E210 and E211, the two tagging failures, are covered
+// above; these are the remaining three, plus the alias-tag warning that
+// deliberately is *not* one of them.
+
+// TestRecordsCommitFailureStillTags: the release commit fails after every
+// package published. Tagging still follows, because the tags then point where
+// they would have pointed had there been no release commit to make, and a
+// released package with no tag is the one outcome the next run cannot
+// recover from — it would read the package as never released and publish the
+// same version again.
+//
+// The publish script takes git's index lock, which is exactly what a
+// concurrent git process in the same checkout would do.
+func TestRecordsCommitFailureStillTags(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["publish"] = models.Script{"touch ../../.git/index.lock"}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): published, then the commit cannot be made")
+
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "a release missing its commit must not exit green\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "E213"),
+		"the commit failure is reported under its own code, events:\n%s", res.Stdout)
+
+	// Published, not failed: the artefact is out.
+	assert.Contains(t, res.Stdout, `"status":"published"`)
+	assert.NotContains(t, res.Stdout, `"status":"failed"`)
+
+	// And the tag was still written, which is the whole reason tagging follows
+	// a failed commit instead of being abandoned with it.
+	assert.True(t, r.HasTag("core@0.1.0"),
+		"the tag must survive the commit failure; tags: %v", r.TagList())
+}
+
+// TestRecordsChangelogFailureIsCriticalNotFailure: a release record that
+// cannot be written after the package published. The changelog path is a
+// directory, so the write fails for a reason no retry inside the run could
+// fix.
+//
+// What this pins is the split: the package stays published, the run carries
+// on, the failure is reported as E212, and the exit code is non-zero. The
+// release tag — the record that actually decides what the next run sees —
+// is written regardless, because a missing changelog entry is a thing to go
+// and add, not a reason to re-publish.
+func TestRecordsChangelogFailureIsCriticalNotFailure(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core,app): both release, core cannot record")
+	// A directory where the changelog file belongs: the recorder's read and
+	// write both fail on it, and neither is a missing file.
+	require.NoError(t, os.Mkdir(r.Path("packages", "core", "CHANGELOG.md"), 0o755))
+
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "a release missing a record must not exit green\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "E212"),
+		"the record failure is reported under its own code, events:\n%s", res.Stdout)
+
+	assert.Contains(t, res.Stdout, `"status":"published"`)
+	assert.NotContains(t, res.Stdout, `"status":"failed"`,
+		"a package whose changelog failed is still published")
+	assert.True(t, r.HasTag("core@0.1.0"),
+		"the tag is written whatever the changelog did; tags: %v", r.TagList())
+
+	// The consumer is untouched by its provider's recording failure: the
+	// provider published, so there was nothing to hold app back.
+	assert.True(t, r.HasTag("app@0.1.0"), "tags: %v", r.TagList())
+	assert.FileExists(t, r.Path("packages", "app", "CHANGELOG.md"),
+		"one package's failed record does not skip the next one's")
+}
+
+// TestRecordsAliasTagFailureIsOnlyAWarning: an alias that cannot be written
+// is a warning (W232), not a critical. The distinction is the point: an alias
+// is a convenience ref rather than the record of a release, so losing one is
+// something to re-point by hand or on the next release, and the run exits
+// green.
+//
+// Constructed with force off — so the alias may not overwrite anything — and
+// a ref already sitting on the alias name.
+func TestRecordsAliasTagFailureIsOnlyAWarning(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Force: models.Bool(false)}
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path:      "packages",
+		Flow:      buildPublish(),
+		AliasTags: []models.AliasTagConfig{{Format: "v{version}"}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): the alias name is already taken")
+	// Somebody's tag already holds the name the alias wants. With force off
+	// the write is refused rather than overwriting it.
+	r.Git("tag", "-a", "v0.1.0", "-m", "not dispat's")
+
+	res := r.ReleaseOK()
+
+	assert.True(t, harness.HasCode(res.Events, "W232"),
+		"the alias failure is reported under its own code, events:\n%s", res.Stdout)
+	// Green: the release itself is complete.
+	assert.True(t, r.HasTag("core@0.1.0"),
+		"the release tag is unaffected by the alias; tags: %v", r.TagList())
+	assert.Equal(t, "not dispat's",
+		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/v0.1.0"),
+		"the existing ref is left exactly where it was")
+	assert.NotContains(t, res.Stdout, `"critical":1`,
+		"an alias is not a record, so its loss is not a critical")
 }
