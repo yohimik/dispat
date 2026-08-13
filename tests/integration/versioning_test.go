@@ -128,50 +128,6 @@ func TestVersioningFixedSparseLifecycle(t *testing.T) {
 	assert.Equal(t, 4, len(r.TagList()), "converged")
 }
 
-// TestVersioningThreeModesSideBySide runs one commit through three spaces of
-// different modes at once: the fixed space moves as a whole, the sparse
-// space moves only its changed member, and the independent space versions
-// each package from its own history alone.
-func TestVersioningThreeModesSideBySide(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"fixed":  {Path: "fixed", Versioning: models.VersioningFixed, Flow: buildPublish()},
-		"sparse": {Path: "sparse", Versioning: models.VersioningFixedSparse, Flow: buildPublish()},
-		"indep":  {Path: "indep", Flow: buildPublish()},
-	}))
-	for _, p := range []struct{ space, name string }{
-		{"fixed", "f1"}, {"fixed", "f2"},
-		{"sparse", "s1"}, {"sparse", "s2"},
-		{"indep", "i1"}, {"indep", "i2"},
-	} {
-		r.SeedPackage(p.space, p.name)
-	}
-
-	// Run 1: one member of each space changes.
-	r.Commit("feat(f1,s1,i1): one change per space")
-	r.ReleaseOK()
-	for _, tag := range []string{"f1@0.1.0", "f2@0.1.0", "s1@0.1.0", "i1@0.1.0"} {
-		assert.True(t, r.HasTag(tag), "expected %s; tags: %v", tag, r.TagList())
-	}
-	assert.Zero(t, r.TagCount("s2@"), "sparse: the unchanged member stays")
-	assert.Zero(t, r.TagCount("i2@"), "independent: the unchanged package stays")
-
-	// Run 2: the other members change. The fixed space moves as one, the
-	// sparse newcomer aligns to its space version, and the independent
-	// package versions from its own empty history (0.0.1, not 0.1.1).
-	r.CommitEmpty("fix(f2,s2,i2): the other members move")
-	r.ReleaseOK()
-	for _, tag := range []string{"f1@0.1.1", "f2@0.1.1", "s2@0.1.1", "i2@0.0.1"} {
-		assert.True(t, r.HasTag(tag), "expected %s; tags: %v", tag, r.TagList())
-	}
-	assert.Equal(t, 1, r.TagCount("s1@"), "sparse: s1 has no changes and must not move")
-	assert.Equal(t, 1, r.TagCount("i1@"), "independent: i1 must not move either")
-
-	// Run 3: converged across all three modes at once.
-	r.ReleaseOK()
-	assert.Equal(t, 8, len(r.TagList()), "no mode may re-release on a quiet run; tags: %v", r.TagList())
-}
-
 // TestVersioningFixedSharedPrereleaseTrain: a fixed space runs a single
 // prerelease train. One member's channel directive takes the whole space
 // onto beta; later work continues the one train (beta.1 for both); one
@@ -234,6 +190,65 @@ func TestVersioningFixedRideFailureThenAlignmentCatchUp(t *testing.T) {
 
 	r.ReleaseOK()
 	assert.Equal(t, 2, len(r.TagList()), "aligned: nothing further to do")
+}
+
+// TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain: the same catch-up
+// while the group is on a prerelease train, which is where the three features
+// this suite covers separately actually meet — a shared version, a train, and
+// a leg that failed and has to heal.
+//
+// The claim is what the laggard catches up *to*. The group's baseline while
+// it is mid-train is a prerelease, and a prerelease ranks below its own core,
+// so the member that missed a beta must join the train rather than jump past
+// it to a stable version the group has never published. Jumping would put a
+// package on 0.1.0 while its group mates are on 0.1.0-beta.1, and §19.1
+// forbids moving tags back.
+//
+// The train is then graduated with the healed member in it, which is what
+// proves the catch-up put it on the train rather than merely near it.
+func TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(spacesConfig(failIfMarker, map[string]models.SpaceConfig{
+		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+	}))
+	r.SeedPackage("packages", "a")
+	r.SeedPackage("packages", "b")
+
+	// Run 1: the whole group boards the train together.
+	r.Commit("feat(a)%beta: start the train")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("a@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("b@0.1.0-beta.0"), "tags: %v", r.TagList())
+
+	// Run 2: the train moves on and b's ride fails, leaving it a beta behind.
+	r.WriteFile("packages/b/FAIL", "x")
+	r.CommitEmpty("fix(a): more work on the train")
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "the failed ride must fail the run\nstdout:\n%s", res.Stdout)
+	assert.True(t, r.HasTag("a@0.1.0-beta.1"), "the changed member continues; tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("b@"), "the failed ride is not tagged; tags: %v", r.TagList())
+
+	// Run 3: b heals. It must land on the train's current position, not on the
+	// stable core the group has not reached.
+	r.Remove("packages/b/FAIL")
+	res = r.ReleaseOK()
+	assert.True(t, r.HasTag("b@0.1.0-beta.1"),
+		"the laggard joins the train rather than jumping past it; tags: %v", r.TagList())
+	assert.False(t, r.HasTag("b@0.1.0"), "and must not land on a stable version nobody published")
+	assert.Equal(t, 2, r.TagCount("a@"), "a must not be re-released by the catch-up")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"),
+		"the ride is explained, events:\n%s", res.Stdout)
+
+	// Run 4: graduation takes both members off the train together, which only
+	// holds if run 3 really put b on it.
+	r.CommitEmpty("release(a)%beta>stable: graduate the group")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("b@0.1.0"), "the healed member graduates with the group; tags: %v", r.TagList())
+
+	before := len(r.TagList())
+	r.ReleaseOK()
+	assert.Equal(t, before, len(r.TagList()), "the graduated group converges")
 }
 
 // TestVersioningCrossSpaceDependencyIntoFixedSpace: an independent provider
@@ -633,7 +648,19 @@ func TestVersioningAllModesSideBySide(t *testing.T) {
 		assert.Zerof(t, r.TagCount(pkg), "%s is sparse or independent and never rides; tags: %v", pkg, r.TagList())
 	}
 
-	// Run 3: every mode converges on a quiet run.
+	// Run 3: the independent space's second package finally changes. It has
+	// never been released, and independence means exactly that its version
+	// comes from its own history: 0.0.1, the first release of a package with
+	// nothing behind it, rather than a step off ind1's 1.0.0. This is the
+	// claim that separates "independent" from every shared mode above, where
+	// a newcomer's first release adopts the group's position instead.
+	r.CommitEmpty("fix(ind2): the independent newcomer's first change")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("ind2@0.0.1"),
+		"an independent newcomer versions from its own empty history; tags: %v", r.TagList())
+	assert.Equal(t, 2, r.TagCount("ind1@"), "and takes its space mate nowhere; tags: %v", r.TagList())
+
+	// Run 4: every mode converges on a quiet run.
 	before := len(r.TagList())
 	r.ReleaseOK()
 	assert.Equal(t, before, len(r.TagList()), "no mode may re-release; tags: %v", r.TagList())
