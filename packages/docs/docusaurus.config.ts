@@ -147,7 +147,7 @@ const config: Config = {
         content:
           'monorepo, polyglot monorepo, release, release orchestration, conventional commits, semantic versioning, ' +
           'changelog, git tags, github releases, npm, docker, go modules, cargo, maven, nuget, pypi, rubygems, ' +
-          'pub, ios, android, lerna alternative',
+          'pub, ios, android, lerna alternative, npm workspaces, pnpm workspaces',
       },
       // og:title/og:image/og:description come from the page title, themeConfig
       // image and each page's description. A 1200x630 social card would render

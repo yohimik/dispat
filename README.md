@@ -98,9 +98,10 @@ supplies the orchestration, ordering and failure semantics.
 
 dispat stands on the shoulders of two things:
 
-- **[Lerna](https://lerna.js.org/)**, the original monorepo release manager, which proved that versioning and publishing
-  many packages from one repository can be a single command. dispat takes that idea beyond JavaScript and rebuilds it
-  around an explicit dependency graph and an explicit error model.
+- **[Lerna](https://lerna.js.org/)**, and the workspaces of [npm](https://docs.npmjs.com/cli/using-npm/workspaces) and
+  [pnpm](https://pnpm.io/workspaces) it grew up beside. Between them they proved that many packages in one repository
+  can share a dependency graph, and that versioning and publishing all of them can be a single command. dispat takes
+  that idea beyond JavaScript and rebuilds it around an explicit dependency graph and an explicit error model.
 - **[Conventional Commits](https://www.conventionalcommits.org/)**: commit messages as machine-readable release intent.
   dispat's parser, [`pkg/ccme`](./pkg/ccme), implements a strict superset of Conventional Commits 1.0.0 that adds the
   monorepo dimension: scopes as packages, propagation depth, prerelease channels.
