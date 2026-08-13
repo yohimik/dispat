@@ -43,26 +43,36 @@ The space's `flow` object, keyed by stage or hook name (every entry a script nam
 [sequence rules](./scripts.md)). Each name is looked up against the package the stage is running for,
 first in that package's `scripts`, then the space's, then the file's. So one `flow.build: build` can mean a single
 shared command, or a different command per package, depending on where you write `build`. See
-[`scripts` and `dispat run`](#scripts-and-dispat-run):
+[`scripts` and `dispat run`](#scripts-and-dispat-run).
 
-| Key              | Kind    | Description                                                                                                                                                                                  |
-|------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `build`          | stage   | Build stage command(s).                                                                                                                                                                      |
-| `publish`        | stage   | Publish stage command(s).                                                                                                                                                                    |
-| `version`        | stage   | Manifest-sync stage command(s); runs right before the build, for every package that picks a version up from a provider moving in this run (and for every releasing package when the space has [`autoVersion`](#autoversion)). |
-| `login`          | stage   | Authentication command(s), run once per space before the space's first publish; see below.                                                                                                   |
-| `announce`       | stage   | Fourth stage, run after a successful publish: pushing the release out to update channels, with the release-notes variables. The whole frame only **warns**; see below.                       |
-| `beforeAll`      | hook    | Before the package's first stage (its version stage when it has one, its build otherwise). Failure fails the package's release.                                                              |
-| `beforeVersion`  | hook    | Before the version stage. Failure fails the release.                                                                                                                                         |
-| `postVersion`    | hook    | After the version stage. Failure fails the release.                                                                                                                                          |
-| `beforeBuild`    | hook    | Before the build stage. Failure fails the release.                                                                                                                                           |
-| `postBuild`      | hook    | After the build stage. Failure fails the release.                                                                                                                                            |
-| `beforePublish`  | hook    | Before the publish stage (after the login). Failure fails the release.                                                                                                                       |
-| `postPublish`    | hook    | After a successful publish. Failure only **warns**; the release is already out.                                                                                                              |
-| `beforeAnnounce` | hook    | Before the announce stage. Failure only **warns** and does not stop the announce.                                                                                                            |
-| `postAnnounce`   | hook    | After the announce stage. Failure only **warns**.                                                                                                                                            |
-| `onFail`         | outcome | Runs once when the package **fails** at any stage. Warn-only; see below.                                                                                                                     |
-| `onSkip`         | outcome | Runs once when the package is **skipped** because a provider failed. Warn-only; see below.                                                                                                   |
+The rows below are in the order a releasing package runs them, top to bottom. Two of them are not scripts at all, and
+are listed because you cannot reason about the ordering without knowing where they fall.
+
+| # | Key | Kind | Runs |
+|---|-----|------|------|
+| 1 | `beforeAll` | hook | Before the package's first stage, whichever that is: its version stage when it has one, its build otherwise. Fails the package's release. |
+| 2 | `beforeVersion` | hook | Before the version stage. Fails the release. |
+| 3 | *(native reconciliation)* | — | Not a script: when the space sets [`autoVersion`](#autoversion), dispat rewrites the manifests itself here, before any `version` script. |
+| 4 | `version` | stage | Manifest-sync stage command(s), for every package that picks a version up from a provider moving in this run (and for every releasing package when the space has [`autoVersion`](#autoversion)). |
+| 5 | `postVersion` | hook | After the version stage. Fails the release. |
+| 6 | `autoVersion.syncLock` | stage | Lock-file regeneration (`npm install`), between the version and the build. Lives on [`autoVersion`](#autoversion), not on `flow`, and runs only where a manifest actually changed. |
+| 7 | `beforeBuild` | hook | Before the build stage. Fails the release. |
+| 8 | `build` | stage | Build stage command(s). |
+| 9 | `postBuild` | hook | After the build stage. Fails the release. |
+| 10 | `login` | stage | Authentication command(s). Once **per space**, before that space's first publish; every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
+| 11 | `beforePublish` | hook | Before the publish stage, after the login. The last hook that can still stop a release. Fails the release. |
+| 12 | `publish` | stage | Publish stage command(s). |
+| 13 | *(records and tag)* | — | Not a script: the changelog entry, the GitHub release and the annotated tag. Past here the release is out, and nothing below can fail the package. |
+| 14 | `postPublish` | hook | After a successful publish. Only **warns**. |
+| 15 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
+| 16 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
+| 17 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
+| — | `onFail` | outcome | Instead of the rest: once, when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only; see below. |
+| — | `onSkip` | outcome | Instead of the rest: once, when the package is **skipped** because a provider failed. Warn-only; see below. |
+
+Steps 1 to 11 are the **gating** half: a failure there fails the package, nothing is published or tagged, and
+`revertOnFail` applies. From step 13 the release is already out, so 14 to 17 only warn, and every one of them runs even
+when an earlier one failed. That split is the whole reason there are two kinds of hook.
 
 All script references are optional. A stage without a script still runs (ordering, skip semantics, statuses, tags and
 release records are fully preserved); it just executes no shell command. An unconfigured hook is a no-op. Scripts run
