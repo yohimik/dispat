@@ -555,7 +555,7 @@ func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
 // explanation rather than a bare "invalid value": it was legal in earlier
 // drafts and reads plausible, so the diagnostic has to say why it is gone.
 var errReleaseAsBump = errors.New(
-	"Release-As has no bump form: how large a change is, is declared by the type — " +
+	"Release-As has no bump form: how large a change is, is declared by the type; " +
 		"change the type, or map it in the types configuration")
 
 // parseReleaseAs parses a Release-As value: an exact semver, a hold, or a

@@ -1,4 +1,4 @@
-# Cookbook
+# Recipes
 
 Complete, copy-ready setups for the most common stacks, each with the config, the shell scripts its stages run, and the
 terminal output of a real run. Every transcript on this page was produced by running dispat against a throwaway

@@ -128,7 +128,7 @@ func RenderSections(rel *plan.Release, f Format) string {
 	// in common, so a reader of a fixedMajor changelog is not told that the
 	// whole version is shared when only the major is.
 	if rel.NoChanges() {
-		return "No changes — version bump to keep the versioning group on " + plan.SharedPartName(rel.SharedDepth()) + ".\n"
+		return "No changes: a version bump to keep the versioning group on " + plan.SharedPartName(rel.SharedDepth()) + ".\n"
 	}
 	var parts []string
 	// NotesUnits, not Units: a prerelease's entry contains only its own

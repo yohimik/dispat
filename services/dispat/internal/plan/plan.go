@@ -1703,7 +1703,7 @@ func (cp *computation) reportCancels() {
 			continue
 		}
 		cp.warn(CodeEmptyCancel, c.pkgLabel, c.key,
-			"cancel discarded nothing; already released work cannot be retracted (§10.3) — to stop a pending catch-up, cancel the consumer (§13.7d)")
+			"cancel discarded nothing; already released work cannot be retracted (§10.3); to stop a pending catch-up, cancel the consumer (§13.7d)")
 	}
 }
 

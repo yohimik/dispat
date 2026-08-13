@@ -97,7 +97,7 @@ func TestStepCoverageRejectsAnUnmatchedTerm(t *testing.T) {
 
 	_, err = a.coveredPackages(ctx, pl, WindowOptions{Filter: filter.Filter{Spaces: []string{"a"}}})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "a is a package — select it with --package")
+	assert.Contains(t, err.Error(), "a is a package, select it with --package")
 }
 
 // TestReadExportReadsTheStageEnvironment: a step invocation has no run

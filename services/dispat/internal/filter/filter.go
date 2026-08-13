@@ -305,7 +305,7 @@ func unknownSpace(term string, ws Workspace) error {
 	spaces := sortedKeys(ws.Spaces)
 	if len(spaces) == 0 {
 		return fmt.Errorf("--space %q matches no configured space "+
-			"(this repository configures none; every package is standalone — select it with --package)", term)
+			"(this repository configures none; every package is standalone, so select it with --package)", term)
 	}
 	msg := fmt.Sprintf("--space %q matches no configured space (configured: %s)", term, join(spaces))
 	msg += hint(term, packageNames(ws), "package", "--package")
@@ -320,7 +320,7 @@ func unknownGroup(term string, ws Workspace) error {
 	groups := knownGroups(ws)
 	if len(groups) == 0 {
 		return fmt.Errorf("--group %q matches no versioning group "+
-			"(this repository configures none; every package versions on its own — select it with --package or --space)", term)
+			"(this repository configures none; every package versions on its own, so select it with --package or --space)", term)
 	}
 	msg := fmt.Sprintf("--group %q matches no versioning group (configured: %s)", term, join(groups))
 	msg += hint(term, sortedKeys(ws.Spaces), "space", "--space")
@@ -335,7 +335,7 @@ func hint(term string, candidates []string, noun, flag string) string {
 	if len(found) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("; %s is a %s — select it with %s", join(found), noun, flag)
+	return fmt.Sprintf("; %s is a %s, select it with %s", join(found), noun, flag)
 }
 
 // packageNames lists the workspace's packages, in resolution order.

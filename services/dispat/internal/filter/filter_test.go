@@ -193,12 +193,12 @@ func TestResolveUnknownPackageIsAnError(t *testing.T) {
 
 	_, err = Resolve(Filter{Packages: []string{"libs"}}, ws)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `libs is a space — select it with --space`,
+	assert.Contains(t, err.Error(), `libs is a space, select it with --space`,
 		"the miss looks across the other flags")
 
 	_, err = Resolve(Filter{Packages: []string{"shared"}}, ws)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `shared is a versioning group — select it with --group`)
+	assert.Contains(t, err.Error(), `shared is a versioning group, select it with --group`)
 }
 
 func TestResolveUnknownSpaceIsAnError(t *testing.T) {
@@ -210,12 +210,12 @@ func TestResolveUnknownSpaceIsAnError(t *testing.T) {
 
 	_, err = Resolve(Filter{Spaces: []string{"tool"}}, ws)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `tool is a package — select it with --package`,
+	assert.Contains(t, err.Error(), `tool is a package, select it with --package`,
 		"a standalone package belongs to no space, so its name lands here")
 
 	_, err = Resolve(Filter{Spaces: []string{"shared"}}, ws)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `shared is a versioning group — select it with --group`,
+	assert.Contains(t, err.Error(), `shared is a versioning group, select it with --group`,
 		"a group spans spaces, so its name is not one")
 
 	bare := Workspace{Root: ws.Root, Packages: ws.Packages}
@@ -236,12 +236,12 @@ func TestResolveUnknownGroupIsAnError(t *testing.T) {
 
 	_, err = Resolve(Filter{Groups: []string{"apps"}}, ws)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `apps is a space — select it with --space`,
+	assert.Contains(t, err.Error(), `apps is a space, select it with --space`,
 		"a space whose packages version on their own has no group to name")
 
 	_, err = Resolve(Filter{Groups: []string{"core"}}, ws)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `core is a package — select it with --package`)
+	assert.Contains(t, err.Error(), `core is a package, select it with --package`)
 
 	bare := Workspace{Root: ws.Root, Packages: []*model.Package{{Name: "solo"}}}
 	_, err = Resolve(Filter{Groups: []string{"libs"}}, bare)

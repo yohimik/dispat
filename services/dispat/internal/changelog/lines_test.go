@@ -249,7 +249,7 @@ func TestRenderBodyAroundASharedVersioningRide(t *testing.T) {
 	require.True(t, rel.NoChanges(), "fixture must be a shared-versioning ride")
 
 	out := RenderBody(rel, Format{Header: titleLines("header"), Footer: titleLines("footer")}, nil)
-	assert.Equal(t, "header\n\nNo changes — version bump to keep the versioning group on one version.\n\nfooter\n", out)
+	assert.Equal(t, "header\n\nNo changes: a version bump to keep the versioning group on one version.\n\nfooter\n", out)
 }
 
 // TestRenderBodyExpandsEveryBlock: the release name, the header and the footer

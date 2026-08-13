@@ -55,17 +55,17 @@ Pages site can only really rely on the sitemap.
 lets the search index above serve without a network. It is pinned to the same exact version as `@docusaurus/core`, like
 every other Docusaurus package here.
 
-**Offline caching is opt-in.** `offlineModeActivationStrategies` is left at the plugin's default trio — `appInstalled`,
-`standalone`, `queryString` — so someone who follows a link to one page never downloads the ~6 MB precache, a third of
+**Offline caching is opt-in.** `offlineModeActivationStrategies` is left at the plugin's default trio (`appInstalled`,
+`standalone`, `queryString`), so someone who follows a link to one page never downloads the ~6 MB precache, a third of
 which is `search-index.json`. Installing the app, or opening it standalone, turns it on. `always` would spend that
-bandwidth on everyone. Note that a service worker is registered either way, with a fetch handler that simply does
+bandwidth on everyone. A service worker is registered either way, with a fetch handler that simply does
 nothing when offline mode is off: that is what keeps the site installable for everybody.
 
 Two path rules that look alike and are not:
 
 - **`pwaHead` entries are `baseUrl`-aware.** The plugin prefixes any `href`/`content` whose value has a file extension,
   so `/manifest.json` ships as `/dispat/manifest.json` while `#1b1b1d` and `yes` pass through untouched. The top-level
-  `headTags` array is *not* — it is emitted verbatim, and the same paths there would 404.
+  `headTags` array is *not*: it is emitted verbatim, and the same paths there would 404.
 - **[`static/manifest.json`](./static/manifest.json) is a plain static file.** Nothing rewrites its contents, so every
   URL inside it spells `/dispat/` out in full.
 
@@ -76,7 +76,7 @@ defaults to the directory it sits in.
 
 The icons in [`static/img/`](./static/img) are derived from the repository's `imgs/logo.png` (295×295, dark art on
 transparency). They are flattened onto white first, because iOS composites `apple-touch-icon` alpha onto black and the
-Android splash draws the icon over `background_color` — a dark mark on transparency disappears in both:
+Android splash draws the icon over `background_color`, and a dark mark on transparency disappears in both:
 
 ```sh
 sips -s format jpeg -s formatOptions best imgs/logo.png --out /tmp/logo-flat.jpg   # JPEG has no alpha
@@ -94,7 +94,7 @@ the safe zone is the centred circle at 80% of the canvas, and the largest square
 409.6/√2.
 
 To test any of this: the plugin returns early unless `NODE_ENV=production`, so **nothing appears in `pnpm docs:start`**.
-Build, then `pnpm --filter dispat-docs serve` and open `http://localhost:3000/dispat/?offlineMode=true` — service
+Build, then `pnpm --filter dispat-docs serve` and open `http://localhost:3000/dispat/?offlineMode=true`. Service
 workers need a secure context, which `localhost` is and a LAN IP is not. Cache Storage staying empty *without* that
 query string is the feature working, not a bug. DevTools → Application → Manifest is the check that matters; Lighthouse
 dropped its PWA category in Chrome 129.

@@ -207,17 +207,19 @@ const config: Config = {
           'pub, ios, android, lerna alternative, npm workspaces, pnpm workspaces',
       },
       // og:title/og:image/og:description come from the page title, themeConfig
-      // image and each page's description. A 1200x630 social card would render
-      // better than the square logo; imgs/ has only the logo today.
+      // image and each page's description. The card type is `summary` because
+      // the image is the square logo, and that is what `summary` is for:
+      // `summary_large_image` reserves a 1.91:1 banner and crops or letterboxes
+      // anything that is not one. Drawing a 1200x630 card and pointing
+      // themeConfig.image at it is what would earn the larger type.
       {property: 'og:type', content: 'website'},
-      {name: 'twitter:card', content: 'summary_large_image'},
+      {name: 'twitter:card', content: 'summary'},
     ],
     navbar: {
       title: 'dispat',
       logo: {alt: 'dispat logo', src: 'logo.png'},
       items: [
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
-        {type: 'docsVersionDropdown', position: 'right'},
         {href: GITHUB, label: 'GitHub', position: 'right'},
         {href: DISCORD, label: 'Discord', position: 'right'},
       ],

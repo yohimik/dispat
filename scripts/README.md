@@ -53,7 +53,7 @@ refuses unless `CI=true`, for the reason spelled out next.
 `deploy-docs.sh` force-pushes the live site,
 and the tag dispat writes afterwards is the only record that the leg completed, so a deploy outside a release run
 publishes a working tree to production and leaves nothing behind saying so. The script refuses unless `CI=true` for
-exactly that reason. Note that these are top-level `scripts`, so every changed package resolves them: without a
+exactly that reason. These are top-level `scripts`, so every changed package resolves them: without a
 `--package` filter (`dispat run deploy-docs`) the run would reach all of them at once.
 
 The scripts are POSIX `sh` with `set -eu`, and they are the release path itself: a change here is only really exercised

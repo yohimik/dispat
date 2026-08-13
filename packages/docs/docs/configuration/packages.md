@@ -86,7 +86,7 @@ per-field rules follow from what each object means:
   other package with it. See [`scripts` and `dispat run`](./spaces.md#scripts-and-dispat-run).
 - `versioning`/`versionGroup` are one axis: a layer setting either supersedes both inherited values (so a package sets
   `versioning: independent` to opt out of its space's group, or `versionGroup: <name>` to join another). Setting both in
-  one layer is a contradiction and is rejected. Note that setting `versioning` to another *shared* mode does not leave
+  one layer is a contradiction and is rejected. Setting `versioning` to another *shared* mode does not leave
   the space's group: the package keeps its membership and asks to share a different amount, which the group resolves to
   the deepest any member asked for (`W213`).
 - `autoVersion` replaces **wholesale**: its empty fields already carry meaning relative to their siblings (no `kinds`

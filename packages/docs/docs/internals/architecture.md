@@ -17,8 +17,16 @@ running against this repository, and the run stops there with exit `1`, before i
 bracket; either is enough. The name is reserved in `internal/gitx`, so no tag format, however broad, can read it back
 as a release tag.
 
-1. Parse the command line (pflag); dispatch `release`, `status`, `run <script>`, `init` or `preview`. An unknown
+1. Parse the command line (pflag) and dispatch one of the commands in the [CLI reference](../cli/README.md). An unknown
    command word is `run`'s shorthand (`dispat lint`).
+
+   The controller runs its work in phases ordered by how much each needs to know, and the order is the point: what the
+   flags alone can refuse is refused first, so a usage mistake never costs the reader a configuration error on the way
+   to it. Then the commands that read no config file at all, then the config, then everything that needs it. The
+   commands that answer before any config is loaded are `init`, `self-update`, and the three manifest commands
+   (`scanner`, `writer`, `replacer`); `if` joins them because a condition is about the environment rather than the
+   repository it is standing in.
+
    `init` writes a starter config and exits before anything else (there is no config to load yet), refusing a `--root`
    that is not a git repository root. The run command computes the plan, then runs the script inside each changed
    package that has one (looked up in the package's `scripts`, then its space's, then the file's) over the dependency
@@ -190,7 +198,8 @@ sections below.
 | `internal/changelog` | Changelog rendering and the per-package record dispatcher.                                                                                                                                                   |
 | `internal/github`    | The GitHub release recorder: REST calls, asset uploads, up-front verification, and the already-published probe that makes recording repeatable.                                                              |
 | `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
-| `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits.                                                                                                                               |
+| `internal/script`    | Shell script execution with process-group cancellation and bounded pipe waits. Traces the resolved shell, folder and command of everything it runs, which is the answer to "what did that stage actually execute". |
+| `internal/selfupdate` | Replacing the running binary with one downloaded from a release: version resolution, checksum verification against the published sums, the kept backup and its expiry, and the background check that prints the notice on the way out. |
 | `internal/model`     | Resolved domain types (`Space`, `Package`, `AutoVersion`, record specs) shared by config, plan and release.                                                                                                  |
 | `internal/filter`    | The one selection resolver every package-selecting command shares, `release` and `status` included: `--package` / `--space` / `--group` terms, their globs, and the invocation folder that stands in for the first two.                              |
 | `internal/globx`     | The one glob matcher scope terms, `autoVersion.match`, `.dispatexclude` and the selection terms share.                                                                                                        |
@@ -480,11 +489,16 @@ are. `W192`, `W197` and `W203`, the auto-versioning narrations, are the specific
 
 ## Testing
 
-`go test ./...` runs testify-based unit tests with in-memory fakes; every internal package and every `pkg/` module has
-its own suite. What each suite asserts, claim by claim, is catalogued in the
-[integration test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md) and summarised per area in
-[test results](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-results.md); the statement-coverage snapshot per package is in
-[coverage](./coverage.md).
+The workspace is a set of modules under `go.work` with no module at the root, so tests are run per module:
+`go test -C services/dispat ./...`, and the same for each `pkg/` module. Those are testify-based unit tests against
+in-memory fakes, and every internal package and every `pkg/` module has its own suite.
+
+The integration suite is catalogued claim by claim in the
+[test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md), whose coverage matrix maps
+each of its thirty goals onto the tests that prove it, and summarised per area in
+[test results](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-results.md). The unit suites have
+no equivalent catalogue: what they assert is stated in each test's own name and doc comment. The statement-coverage
+snapshot per package is in [coverage](./coverage.md).
 
 The composition claims (the compiled binary, real git over a process boundary, exit codes, scheduling under real
 concurrency, signal handling) live exclusively in the black-box

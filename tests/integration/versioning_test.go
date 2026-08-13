@@ -63,7 +63,7 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	assert.Contains(t, string(aLog), "### Features", "the changed member gets its scoped entries")
 	bLog, err := os.ReadFile(r.Path("packages", "b", "CHANGELOG.md"))
 	require.NoError(t, err)
-	assert.Contains(t, string(bLog), "No changes — version bump", "the ride gets the bump-only entry")
+	assert.Contains(t, string(bLog), "No changes: a version bump", "the ride gets the bump-only entry")
 	assert.NotContains(t, string(bLog), "### Features", "a's feature must not leak into b's changelog")
 
 	// Run 2: converged — the ride must not re-release the space.
@@ -79,7 +79,7 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "a"))
 	aLog, err = os.ReadFile(r.Path("packages", "a", "CHANGELOG.md"))
 	require.NoError(t, err)
-	assert.Contains(t, string(aLog), "No changes — version bump", "this time a carries the bump-only entry")
+	assert.Contains(t, string(aLog), "No changes: a version bump", "this time a carries the bump-only entry")
 
 	// Run 4: the independent space still versions alone.
 	r.CommitEmpty("feat(app): the app moves by itself")
@@ -450,7 +450,7 @@ func TestVersioningFixedMajorLifecycle(t *testing.T) {
 
 	bLog, err := os.ReadFile(r.Path("packages", "b", "CHANGELOG.md"))
 	require.NoError(t, err)
-	assert.Contains(t, string(bLog), "No changes — version bump to keep the versioning group on one major version.",
+	assert.Contains(t, string(bLog), "No changes: a version bump to keep the versioning group on one major version.",
 		"the ride's entry names the part that is shared")
 	assert.NotContains(t, string(bLog), "### Breaking", "a's breaking change must not leak into b's changelog")
 
@@ -535,7 +535,7 @@ func TestVersioningFixedMajorMinorLifecycle(t *testing.T) {
 
 	bLog, err := os.ReadFile(r.Path("packages", "b", "CHANGELOG.md"))
 	require.NoError(t, err)
-	assert.Contains(t, string(bLog), "No changes — version bump to keep the versioning group on one major and minor version.")
+	assert.Contains(t, string(bLog), "No changes: a version bump to keep the versioning group on one major and minor version.")
 
 	// Run 4: a breaking change moves everyone too.
 	r.CommitEmpty("feat(b)!: b breaks compatibility")

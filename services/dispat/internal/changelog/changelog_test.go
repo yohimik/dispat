@@ -233,7 +233,7 @@ func TestRenderFixedRideNoChangesEntry(t *testing.T) {
 				Next:      ccme.Version{Major: 1, Minor: 1},
 				FixedRide: true,
 			}
-			line := "No changes — version bump to keep the versioning group on " + c.want + ".\n"
+			line := "No changes: a version bump to keep the versioning group on " + c.want + ".\n"
 			assert.Equal(t, line, RenderSections(rel, Format{}))
 			assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\n"+line, RenderEntry(rel, testDate, Format{}))
 		})
