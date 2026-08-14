@@ -491,3 +491,113 @@ func TestStringMapAt(t *testing.T) {
 		assert.ErrorIs(t, err, fs.ErrNotExist)
 	})
 }
+
+// TestResolveEditFollowsARef: a key written in a referenced file is edited
+// there, with the rest of the path, so the reference survives the write.
+func TestResolveEditFollowsARef(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "packages.json", `{"core": {"dependencies": ["util"]}}`)
+	path := writeFile(t, dir, "dispat.json", `{"packages": {"$ref": "./packages.json"}}`)
+
+	file, inner, err := ResolveEdit(path, []string{"packages", "core", "dependencies"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "packages.json"), file)
+	assert.Equal(t, []string{"core", "dependencies"}, inner)
+}
+
+// TestResolveEditFollowsARefChain: a fragment referencing a fragment is
+// followed to the file that holds the key, however many hops that takes.
+func TestResolveEditFollowsARefChain(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "deps.json", `{"web": ["core"]}`)
+	writeFile(t, dir, "packages.json", `{"core": {"dependencies": {"$ref": "./deps.json"}}}`)
+	path := writeFile(t, dir, "dispat.json", `{"packages": {"$ref": "./packages.json"}}`)
+
+	file, inner, err := ResolveEdit(path, []string{"packages", "core", "dependencies"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "deps.json"), file)
+	assert.Empty(t, inner, "the key is the reference, so the file holds the value alone")
+}
+
+// TestResolveEditPrefersTheKeyBesideTheRef: a key written beside a reference
+// overrides what the reference brought in, so that is where the edit lands.
+func TestResolveEditPrefersTheKeyBesideTheRef(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "packages.json", `{"core": {"dependencies": ["util"]}}`)
+	path := writeFile(t, dir, "dispat.json",
+		`{"packages": {"$ref": "./packages.json", "core": {"dependencies": ["local"]}}}`)
+
+	file, inner, err := ResolveEdit(path, []string{"packages", "core", "dependencies"})
+	require.NoError(t, err)
+	assert.Equal(t, path, file, "the nearer layer holds the key")
+	assert.Equal(t, []string{"packages", "core", "dependencies"}, inner)
+}
+
+// TestResolveEditRefusesAComposedKey: a key whose value is a reference *and*
+// the keys beside it comes from two files at once, so there is nowhere to
+// write it and the error says what to change.
+func TestResolveEditRefusesAComposedKey(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "deps.json", `{"web": ["core"]}`)
+	path := writeFile(t, dir, "dispat.json",
+		`{"dependencies": {"$ref": "./deps.json", "api": ["core"]}}`)
+
+	_, _, err := ResolveEdit(path, []string{"dependencies"})
+	require.ErrorIs(t, err, ErrRefEdit)
+	assert.Contains(t, err.Error(), "write dependencies beside the $ref")
+}
+
+// TestResolveEditLeavesAPlainKeyAlone: a config with no reference in the way,
+// and a key no file holds, come back exactly as they were asked for.
+func TestResolveEditLeavesAPlainKeyAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "dispat.json", `{"dependencies": {"web": ["core"]}}`)
+
+	file, inner, err := ResolveEdit(path, []string{"dependencies"})
+	require.NoError(t, err)
+	assert.Equal(t, path, file)
+	assert.Equal(t, []string{"dependencies"}, inner)
+
+	file, inner, err = ResolveEdit(path, []string{"initials"})
+	require.NoError(t, err)
+	assert.Equal(t, path, file)
+	assert.Equal(t, []string{"initials"}, inner)
+}
+
+// TestReplaceKeysWritesAWholeDocument: the file a reference names holds the
+// value and nothing else, so it is rewritten rather than spliced — in its own
+// format, with its own indentation, and with the previous bytes backed up.
+func TestReplaceKeysWritesAWholeDocument(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
+		dir := t.TempDir()
+		fragment := writeFile(t, dir, "deps.json", "{\n    \"web\": [\n        \"old\"\n    ]\n}\n")
+
+		require.NoError(t, ReplaceKeys(fragment, []Edit{{
+			Value: Dependencies{{Consumer: "web", Provider: "core"}},
+		}}))
+
+		assert.Equal(t, "{\n    \"web\": [\n        \"core\"\n    ]\n}\n", readFile(t, fragment),
+			"the file's own four-space indent")
+		assert.Contains(t, readFile(t, fragment+BackupSuffix), "old")
+	})
+
+	t.Run("yaml", func(t *testing.T) {
+		dir := t.TempDir()
+		fragment := writeFile(t, dir, "deps.yaml", "web:\n  - old\n")
+
+		require.NoError(t, ReplaceKeys(fragment, []Edit{{
+			Value: Dependencies{{Consumer: "web", Provider: "core"}},
+		}}))
+
+		assert.Equal(t, "web:\n  - core\n", readFile(t, fragment))
+	})
+
+	t.Run("toml is refused", func(t *testing.T) {
+		dir := t.TempDir()
+		fragment := writeFile(t, dir, "deps.toml", "web = ['old']\n")
+
+		err := ReplaceKeys(fragment, []Edit{{Value: Dependencies{{Consumer: "web", Provider: "core"}}}})
+		assert.ErrorIs(t, err, ErrTOMLEdit)
+		assert.Equal(t, "web = ['old']\n", readFile(t, fragment), "nothing written")
+	})
+}

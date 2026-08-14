@@ -491,7 +491,7 @@ func TestComputeUnknownConfigFormat(t *testing.T) {
 	var out bytes.Buffer
 	_, err = a.Compute(context.Background(), odd, ComputeOptions{Write: true, Out: &out})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown config format")
+	assert.Contains(t, err.Error(), "dispat reads json, yaml and toml config files")
 	after, err := os.ReadFile(odd)
 	require.NoError(t, err)
 	assert.Equal(t, data, after, "a failed write must leave the file untouched")

@@ -261,15 +261,24 @@ type fileEdits struct {
 	byFile map[string][]config.Edit
 }
 
-// add records one edit of one file.
-func (f *fileEdits) add(path string, e config.Edit) {
+// add records one edit, at the file that actually holds the key: a `$ref`
+// crossed on the way down moves it into the file that reference names. The
+// retargeting happens here rather than at the writer, so that two edits landing
+// in one referenced file are still one read, one backup and one write.
+func (f *fileEdits) add(path string, e config.Edit) error {
+	target, inner, err := config.ResolveEdit(path, e.KeyPath)
+	if err != nil {
+		return err
+	}
+	e.KeyPath = inner
 	if f.byFile == nil {
 		f.byFile = make(map[string][]config.Edit)
 	}
-	if _, seen := f.byFile[path]; !seen {
-		f.order = append(f.order, path)
+	if _, seen := f.byFile[target]; !seen {
+		f.order = append(f.order, target)
 	}
-	f.byFile[path] = append(f.byFile[path], e)
+	f.byFile[target] = append(f.byFile[target], e)
+	return nil
 }
 
 // applySuggestions writes the accepted changes, one pass per affected file. A
@@ -277,10 +286,19 @@ func (f *fileEdits) add(path string, e config.Edit) {
 // to paste and an error.
 func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []config.DeclaredDependency, out io.Writer) error {
 	var edits fileEdits
-	a.collectDepEdits(&edits, cfgPath, apply.deps, declared)
-	if err := a.collectInitialEdits(&edits, cfgPath, apply.initials); err != nil {
-		a.log.Error().Err(err).Msg("reading the config failed")
-		return err
+	for _, collect := range []func() error{
+		func() error { return a.collectDepEdits(&edits, cfgPath, apply.deps, declared) },
+		func() error { return a.collectInitialEdits(&edits, cfgPath, apply.initials) },
+	} {
+		err := collect()
+		if errors.Is(err, config.ErrRefEdit) {
+			a.log.Error().Err(err).Msg("cannot rewrite a key a $ref composes")
+			return err
+		}
+		if err != nil {
+			a.log.Error().Err(err).Msg("reading the config failed")
+			return err
+		}
 	}
 
 	edited := make([]string, 0, len(edits.order))
@@ -292,6 +310,13 @@ func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []confi
 		err := config.ReplaceKeys(target, edits.byFile[target])
 		if errors.Is(err, config.ErrTOMLEdit) {
 			for _, e := range edits.byFile[target] {
+				if len(e.KeyPath) == 0 {
+					// The file is a fragment a `$ref` names, so it holds the
+					// value and nothing else: there is no key to paste over,
+					// and TOML cannot be rewritten around one.
+					fmt.Fprintf(out, "\n# %s is TOML and holds this value alone; write it there by hand\n", display)
+					continue
+				}
 				what, snippet, renderErr := tomlFallback(e)
 				if renderErr != nil {
 					return renderErr

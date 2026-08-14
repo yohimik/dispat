@@ -315,9 +315,9 @@ func containsKind(kinds []model.DepKind, k model.DepKind) bool {
 // The in-memory config is aligned with what the edits say. The process exits
 // right after, but a future long-lived caller must not see a config that
 // disagrees with disk.
-func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggestion, declared []config.DeclaredDependency) {
+func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggestion, declared []config.DeclaredDependency) error {
 	if len(apply) == 0 {
-		return
+		return nil
 	}
 	// Where each consumer already declares its own providers, so an addition
 	// can join it. The first package-level source wins: a consumer declaring
@@ -378,9 +378,12 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 		if target == "" {
 			target = cfgPath
 		}
-		edits.add(target, config.Edit{KeyPath: src.KeyPath, Value: listValue(src, kept)})
+		if err := edits.add(target, config.Edit{KeyPath: src.KeyPath, Value: listValue(src, kept)}); err != nil {
+			return err
+		}
 		a.alignDeclaredList(src, kept)
 	}
+	return nil
 }
 
 // listKey identifies the one list a source names, so every edit aimed at it

@@ -264,6 +264,5 @@ func (a *App) collectInitialEdits(edits *fileEdits, cfgPath string, apply []init
 		a.cfg.Initials[strings.ToLower(s.pkg)] = s.version.String()
 		a.cfg.InitialVersions[strings.ToLower(s.pkg)] = s.version
 	}
-	edits.add(cfgPath, config.Edit{KeyPath: []string{"initials"}, Value: next})
-	return nil
+	return edits.add(cfgPath, config.Edit{KeyPath: []string{"initials"}, Value: next})
 }

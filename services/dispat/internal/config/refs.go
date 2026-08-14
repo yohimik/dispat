@@ -179,12 +179,7 @@ func (r *refResolver) object(node map[string]any, file, label string) (any, erro
 // follow reads the file a reference names, with the reference on the chain so
 // that a file reaching back to itself is refused instead of followed forever.
 func (r *refResolver) follow(target, file, label string) (any, error) {
-	path := target
-	if !filepath.IsAbs(path) {
-		// A relative reference is relative to the file that wrote it, which is
-		// the only base that lets a fragment be moved with the file naming it.
-		path = filepath.Join(filepath.Dir(file), filepath.FromSlash(target))
-	}
+	path := refPath(target, file)
 	r.chain = append(r.chain, refFrame{file: file, id: identity(file), key: labelOr(label)})
 	defer func() { r.chain = r.chain[:len(r.chain)-1] }()
 	if err := r.checkChain(path); err != nil {
@@ -254,6 +249,16 @@ func refTarget(node map[string]any) (string, bool, error) {
 		return "", true, errors.New("$ref must name another config file")
 	}
 	return target, true, nil
+}
+
+// refPath is where a reference points: relative to the file that wrote it,
+// which is the only base that lets a folder of fragments be moved as a folder,
+// and taken as written when it is absolute.
+func refPath(target, file string) string {
+	if filepath.IsAbs(target) {
+		return target
+	}
+	return filepath.Join(filepath.Dir(file), filepath.FromSlash(target))
 }
 
 // identity is the name two paths to one file agree on.

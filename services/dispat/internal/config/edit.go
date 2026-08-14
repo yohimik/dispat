@@ -68,6 +68,10 @@ func ReplaceStringList(path string, keyPath []string, items []string) error {
 // keeps every byte outside the spliced spans, YAML keeps its comments but is
 // re-encoded, TOML returns ErrTOMLEdit. An edit set that changes nothing
 // writes nothing.
+//
+// An edit with no key path replaces the file's whole document, which is what
+// a key whose value is a `$ref` resolves to: the referenced file holds nothing
+// but that value, so there is no span to preserve around it.
 func ReplaceKeys(path string, edits []Edit) error {
 	if len(edits) == 0 {
 		return nil
@@ -79,13 +83,15 @@ func ReplaceKeys(path string, edits []Edit) error {
 	format := strings.ToLower(filepath.Ext(path))
 	out := data
 	for _, e := range edits {
-		switch format {
-		case ".json":
-			out, err = replaceValueJSON(out, e.KeyPath, e.Value)
-		case ".yaml", ".yml":
-			out, err = replaceValueYAML(out, e.KeyPath, e.Value)
-		case ".toml":
+		switch {
+		case format == ".toml":
 			return ErrTOMLEdit
+		case len(e.KeyPath) == 0:
+			out, err = renderDocument(format, out, e.Value)
+		case format == ".json":
+			out, err = replaceValueJSON(out, e.KeyPath, e.Value)
+		case format == ".yaml" || format == ".yml":
+			out, err = replaceValueYAML(out, e.KeyPath, e.Value)
 		default:
 			return fmt.Errorf("%s: unknown config format", path)
 		}
@@ -183,6 +189,103 @@ func RenderKeyTOML(keyPath []string, value any) (string, error) {
 	}
 	out, err := toml.Marshal(wrapped)
 	return string(out), err
+}
+
+// ErrRefEdit reports a key whose value is composed from a referenced file and
+// the keys written beside the reference. There is no single file the new value
+// could be written to, so the caller explains the two ways out rather than
+// picking one.
+var ErrRefEdit = errors.New("a key composed from a $ref and the keys beside it cannot be rewritten in place")
+
+// ResolveEdit reports which file holds a key, and under which key path there.
+//
+// A `$ref` crossed on the way down moves the edit into the file it names, with
+// the rest of the path: a configuration split across files is written where
+// each key is written, and the reference itself survives the write. A key
+// written beside a reference keeps the edit in the file that wrote it, which
+// is the same rule the loader reads those keys by.
+//
+// The returned key path is empty when the key *is* the reference: the whole
+// referenced document is the value, so that file is rewritten rather than
+// spliced. A key no file holds comes back unchanged, for the writers to
+// create or refuse as they already do.
+func ResolveEdit(path string, keyPath []string) (string, []string, error) {
+	return resolveEdit(path, keyPath, 0)
+}
+
+func resolveEdit(path string, keyPath []string, depth int) (string, []string, error) {
+	if depth > maxRefDepth {
+		return "", nil, fmt.Errorf("$ref nesting is more than %d files deep at %s", maxRefDepth, path)
+	}
+	doc, err := decodeFile(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	node, ok := doc.(map[string]any)
+	if !ok {
+		return path, keyPath, nil
+	}
+	for depth, key := range keyPath {
+		value, found := lookupFold(node, key)
+		if !found {
+			return path, keyPath, nil
+		}
+		child, ok := value.(map[string]any)
+		if !ok {
+			return path, keyPath, nil
+		}
+		target, isRef, err := refTarget(child)
+		if err != nil {
+			return "", nil, fmt.Errorf("%s: %s: %w", path, strings.Join(keyPath[:depth+1], "."), err)
+		}
+		if !isRef {
+			node = child
+			continue
+		}
+		rest := keyPath[depth+1:]
+		if len(child) > 1 {
+			// The keys beside the reference are the nearer layer, so one of
+			// them holding what comes next settles it here.
+			if len(rest) == 0 {
+				return "", nil, fmt.Errorf("%s: %s: %w; write %s beside the $ref, or leave the $ref as the whole value",
+					path, strings.Join(keyPath[:depth+1], "."), ErrRefEdit, keyPath[len(keyPath)-1])
+			}
+			if _, beside := lookupFold(child, rest[0]); beside {
+				return path, keyPath, nil
+			}
+		}
+		return resolveEdit(refPath(target, path), rest, depth+1)
+	}
+	return path, keyPath, nil
+}
+
+// renderDocument rewrites a file whose whole content is one value.
+func renderDocument(format string, data []byte, value any) ([]byte, error) {
+	switch format {
+	case ".json":
+		indent := detectJSONIndent(data)
+		rendered, err := json.MarshalIndent(value, "", indent)
+		if err != nil {
+			return nil, err
+		}
+		if nullRendering(rendered) {
+			rendered = []byte("[]")
+		}
+		return append(rendered, '\n'), nil
+	case ".yaml", ".yml":
+		var buf bytes.Buffer
+		enc := yaml.NewEncoder(&buf)
+		enc.SetIndent(2)
+		if err := enc.Encode(value); err != nil {
+			return nil, err
+		}
+		if err := enc.Close(); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	default:
+		return nil, fmt.Errorf("unknown config format")
+	}
 }
 
 // StringMapAt reads the string map at keyPath of the config file at path,
