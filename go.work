@@ -8,4 +8,5 @@ use (
 	pkg/writer
 	services/dispat
 	tests/integration
+	tools
 )

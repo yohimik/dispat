@@ -47,6 +47,15 @@ jobs:
           go vet -C pkg/writer ./...
           go vet -C services/dispat ./...
           go vet -C tests/integration ./...
+          go vet -C tools ./...
+
+      # `tools` is repository tooling rather than a dispat package: it sits in
+      # no space, so `dispat run tests` never selects it and it would otherwise
+      # be the one module in the workspace nothing gates. Its own suite is
+      # seconds long and belongs here, beside the other checks that are about
+      # the repository rather than about what it ships.
+      - name: Repository tooling
+        run: go test -C tools ./... -count=1
 
       # The two ways a `--link-local` bracket leaks. The dispat package's
       # verify-unlinked script checks both before its build reports success;
