@@ -195,25 +195,11 @@ func RenderKeyTOML(keyPath []string, value any) (string, error) {
 // Unlike the writers this reads TOML too: a TOML config still needs its
 // current entries to render the paste-ready block.
 func StringMapAt(path string, keyPath []string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
+	t, err := readTree(path)
 	if err != nil {
 		return nil, err
 	}
-	var doc map[string]any
-	switch ext := strings.ToLower(filepath.Ext(path)); ext {
-	case ".json":
-		err = json.Unmarshal(data, &doc)
-	case ".yaml", ".yml":
-		err = yaml.Unmarshal(data, &doc)
-	case ".toml":
-		err = toml.Unmarshal(data, &doc)
-	default:
-		return nil, fmt.Errorf("%s: unknown config format", path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	node := doc
+	node := t.root
 	for depth, key := range keyPath {
 		value, ok := lookupFold(node, key)
 		if !ok {

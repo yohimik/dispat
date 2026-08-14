@@ -244,51 +244,9 @@ func TestEnvRefusedAtEveryLayer(t *testing.T) {
 	})
 }
 
-// TestEnvNotReReadWithoutEnv: the second parse is a cost only the feature's
-// users pay. A config configuring no env anywhere is never re-read at all,
-// which restoreEnvCase must decide without touching the file — here proven by
-// handing it a path that does not exist.
-func TestEnvNotReReadWithoutEnv(t *testing.T) {
-	cfg := minimalConfig()
-	require.NoError(t, restoreEnvCase(filepath.Join(t.TempDir(), "absent.json"), &cfg),
-		"a config without env must not be re-read")
-
-	// The same decision at the in-folder layers: loadSpaceFile and
-	// loadPackageFile only call the restorer when their layer has env.
-	cfg.Env = map[string]string{"A": "1"}
-	require.Error(t, restoreEnvCase(filepath.Join(t.TempDir(), "absent.json"), &cfg),
-		"a config with env is re-read, so a missing file is an error")
-}
-
-// TestEnvInUnreadableFormatIsRefused: viper reads more formats than the three
-// that can be re-read case-exactly (an explicit --config dispat.ini is
-// accepted by viper and by nothing here), so the moment such a file configures
-// env the case cannot be recovered. Saying so beats exporting silently
-// lowercased keys.
-func TestEnvInUnreadableFormatIsRefused(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dispat.ini")
-	require.NoError(t, os.WriteFile(path, []byte("[env]\nMiXed = v\n"), 0o644))
-
-	_, err := envCaseFromFile(path)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "env requires a json, yaml or toml config file")
-}
-
-// TestEnvMalformedFileIsReported: the second parse reads the same bytes viper
-// just accepted, so it should never disagree — but if it does, the error names
-// the file and what it was doing rather than surfacing a bare parser message.
-func TestEnvMalformedFileIsReported(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dispat.json")
-	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o644))
-
-	_, err := envCaseFromFile(path)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "for env key case")
-}
-
-// TestEnvRestorerParsesOnce: a config carrying env at four levels is read and
-// parsed once, not once per level.
-func TestEnvRestorerParsesOnce(t *testing.T) {
+// TestEnvRestorerReadsEveryLevel: a config carrying env at four levels is read
+// and parsed once, and each level is a lookup in the tree that parse produced.
+func TestEnvRestorerReadsEveryLevel(t *testing.T) {
 	cfg := minimalConfig()
 	cfg.Env = map[string]string{"A": "1"}
 	withLibs(&cfg, func(s *SpaceConfig) {
@@ -298,8 +256,9 @@ func TestEnvRestorerParsesOnce(t *testing.T) {
 	cfg.Packages = map[string]PackageConfig{"core": {Env: map[string]string{"D": "4"}}}
 	root := writeModelRepo(t, cfg, "pkgs/core")
 
-	r, err := newEnvRestorer(filepath.Join(root, "dispat.json"))
+	tree, err := readTree(filepath.Join(root, "dispat.json"))
 	require.NoError(t, err)
+	r := envRestorerOf(tree)
 	assert.Equal(t, map[string]string{"A": "1"}, r.envAt("env"))
 	assert.Equal(t, map[string]string{"B": "2"}, r.envAt("spaces", "libs", "env"))
 	assert.Equal(t, map[string]string{"C": "3"}, r.envAt("spaces", "libs", "packages", "core", "env"))

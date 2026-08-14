@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -484,9 +485,9 @@ func TestStringMapAt(t *testing.T) {
 		assert.Error(t, err)
 
 		_, err = StringMapAt(writeConfigFile(t, "dispat.ini", "x=1\n"), []string{"initials"})
-		assert.ErrorContains(t, err, "unknown config format")
+		assert.ErrorContains(t, err, "dispat reads json, yaml and toml config files")
 
 		_, err = StringMapAt(filepath.Join(t.TempDir(), "absent.json"), []string{"initials"})
-		assert.True(t, os.IsNotExist(err))
+		assert.ErrorIs(t, err, fs.ErrNotExist)
 	})
 }

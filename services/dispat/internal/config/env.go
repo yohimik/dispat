@@ -1,13 +1,12 @@
 package config
 
 // The static `env` objects and their one complication: viper lowercases every
-// map key when it reads a config file. That is harmless — useful, even — for
+// map key when it decodes a config file. That is harmless — useful, even — for
 // every other map in the model, because script names, spaces, packages and
 // initials all match case-insensitively. Environment variable names do not:
-// PATH and Path are two variables. So the env objects alone are decoded a
-// second time with the file format's own parser, which keeps the spelling,
-// and the exact-case maps replace the lowercased ones at every level that can
-// hold one.
+// PATH and Path are two variables. So the env objects are read from the tree
+// the file was parsed into, where the keys are still spelled as written, and
+// those maps replace the lowercased ones at every level that can hold one.
 //
 // There are five such levels, and they merge key by key with the most local
 // winning:
@@ -18,21 +17,15 @@ package config
 //	      the root file's `packages.<pkg>.env` and `spaces.<s>.packages.<p>.env`
 //	        the package folder's own config file `env`
 //
-// The root file's four paths are restored in one pass by restoreEnvCase,
-// which parses the file once; the two in-folder files are restored by
-// envCaseFromFile as they are loaded.
+// The root file's four paths are restored in one pass by restoreEnvCase; the
+// two in-folder files are restored by their loaders. Each file is parsed once,
+// whether or not it configures env at all.
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-
-	toml "github.com/pelletier/go-toml/v2"
-	yaml "gopkg.in/yaml.v3"
 )
 
 // reservedEnvPrefix is the namespace the computed variables own. A static key
@@ -108,22 +101,17 @@ func validateEnv(label string, env map[string]string) error {
 	return nil
 }
 
-// envRestorer re-reads one config file with the format's own parser and hands
-// back the env objects it holds with their keys spelled as written. The parsed
-// tree is kept, so a file carrying env at four levels is read and parsed once
-// rather than four times.
+// envRestorer hands back the env objects a parsed config file holds, with
+// their keys spelled as written. It reads the tree the file was already parsed
+// into, so a file carrying env at four levels costs four lookups and no
+// further parsing.
 type envRestorer struct {
-	path string
 	tree map[string]any
 }
 
-// newEnvRestorer parses path into a generic tree.
-func newEnvRestorer(path string) (*envRestorer, error) {
-	tree, err := decodeFileTree(path)
-	if err != nil {
-		return nil, err
-	}
-	return &envRestorer{path: path, tree: tree}, nil
+// envRestorerOf reads the env objects of an already parsed file.
+func envRestorerOf(t *tree) *envRestorer {
+	return &envRestorer{tree: t.root}
 }
 
 // envAt returns the exact-case env object at a key path ("env" — or "spaces",
@@ -150,17 +138,9 @@ func (r *envRestorer) envAt(path ...string) map[string]string {
 }
 
 // restoreEnvCase replaces the root config's viper-lowercased env maps with
-// exact-case ones read straight from the file, at all four levels the root
-// file can hold one. A file that configures no env at all is never re-read,
-// so the second parse is a cost only the feature's users pay.
-func restoreEnvCase(path string, cfg *File) error {
-	if !hasAnyEnv(cfg) {
-		return nil
-	}
-	r, err := newEnvRestorer(path)
-	if err != nil {
-		return err
-	}
+// exact-case ones taken from the file's own tree, at all four levels the root
+// file can hold one.
+func restoreEnvCase(r *envRestorer, cfg *File) {
 	cfg.Env = r.envAt("env")
 	for name, sc := range cfg.Spaces {
 		sc.Env = r.envAt("spaces", name, "env")
@@ -174,69 +154,6 @@ func restoreEnvCase(path string, cfg *File) error {
 		pc.Env = r.envAt("packages", name, "env")
 		cfg.Packages[name] = pc
 	}
-	return nil
-}
-
-// hasAnyEnv reports whether the decoded config configures env anywhere the
-// root file could hold it. It reads the lowercased maps, which is fine: it
-// only decides whether the exact-case pass is worth running.
-func hasAnyEnv(cfg *File) bool {
-	if len(cfg.Env) > 0 {
-		return true
-	}
-	for _, s := range cfg.Spaces {
-		if len(s.Env) > 0 {
-			return true
-		}
-		for _, p := range s.Packages {
-			if len(p.Env) > 0 {
-				return true
-			}
-		}
-	}
-	for _, p := range cfg.Packages {
-		if len(p.Env) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// envCaseFromFile reads an in-folder config file and returns its top-level env
-// object with exact key case — the space-folder and package-folder
-// counterpart of restoreEnvCase.
-func envCaseFromFile(path string) (map[string]string, error) {
-	r, err := newEnvRestorer(path)
-	if err != nil {
-		return nil, err
-	}
-	return r.envAt("env"), nil
-}
-
-// decodeFileTree parses a config file into a generic tree with the format's
-// own parser, preserving key case.
-func decodeFileTree(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	tree := map[string]any{}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".json":
-		err = json.Unmarshal(data, &tree)
-	case ".yaml", ".yml":
-		err = yaml.Unmarshal(data, &tree)
-	case ".toml":
-		err = toml.Unmarshal(data, &tree)
-	default:
-		return nil, fmt.Errorf(
-			"%s: env requires a json, yaml or toml config file (environment variable names are case-sensitive, and only these formats can be re-read case-exactly)",
-			path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("re-reading %s for env key case: %w", path, err)
-	}
-	return tree, nil
 }
 
 // envFromTree converts a raw env object to map[string]string with the same

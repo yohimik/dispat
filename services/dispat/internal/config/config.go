@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	public "github.com/yohimik/dispat/pkg/models"
@@ -336,15 +335,22 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 			return "", "", nil
 		}
 		p := filepath.Join(dir, names[0])
-		switch classifyConfig(p) {
+		// One parse answers both questions this file is asked, so a candidate
+		// on the way up is read once however far the ascent goes.
+		t, readErr := readTree(p)
+		if readErr != nil {
+			// A file dispat cannot read is broken rather than skippable: Load
+			// is where a broken config fails loudly, and stepping over it to
+			// use a parent's file would hide the breakage.
+			return p, dir, nil
+		}
+		switch classifyTree(t.root) {
 		case configRoot:
 			// A candidate below is a space folder's file when this root claims
 			// its folder, and a monorepo of its own when it does not.
-			if candidate != "" && !ownsSpaceFolder(p, dir, candidateRoot) {
+			if candidate != "" && !ownsSpaceFolder(t.root, dir, candidateRoot) {
 				return candidate, candidateRoot, nil
 			}
-			return p, dir, nil
-		case configBroken:
 			return p, dir, nil
 		case configPackages:
 			if candidate == "" {
@@ -400,46 +406,42 @@ const (
 	configPackages
 	// configRoot declares spaces, so it is a monorepo root.
 	configRoot
-	// configBroken cannot be read at all.
-	configBroken
 )
 
-// classifyConfig reads just enough of a file to place it. A file viper cannot
-// read is broken rather than skippable: Load is where a broken config fails
-// loudly, and stepping over it to use a parent's file would hide the
-// breakage.
-func classifyConfig(path string) configClass {
-	v := viper.New()
-	v.SetConfigFile(path)
-	if err := v.ReadInConfig(); err != nil {
-		return configBroken
-	}
+// classifyTree places a parsed file. A key holding null is not a declaration,
+// which is the rule the rest of the configuration follows too: a space map
+// spelled out as empty says no more than an absent one.
+func classifyTree(root map[string]any) configClass {
 	switch {
-	case v.IsSet("spaces"):
+	case declares(root, "spaces"):
 		return configRoot
-	case v.IsSet("packages"):
+	case declares(root, "packages"):
 		return configPackages
 	default:
 		return configLoose
 	}
 }
 
-// ownsSpaceFolder reports whether the root config at path, loaded with rootDir
-// as the monorepo root, declares a space whose folder is dir — which is what
-// tells a space folder's config file apart from a monorepo of standalone
-// packages. Folders are compared by identity, so a symlinked or
-// case-insensitive path still matches itself.
-func ownsSpaceFolder(path, rootDir, dir string) bool {
+// declares reports that a file states a key and gives it a value. Keys are
+// matched case-insensitively, because the tree is spelled as the file wrote it
+// while everything reading it thinks in lowercase.
+func declares(root map[string]any, key string) bool {
+	v, ok := lookupFold(root, key)
+	return ok && v != nil
+}
+
+// ownsSpaceFolder reports whether the root config parsed into root, sitting in
+// rootDir, declares a space whose folder is dir — which is what tells a space
+// folder's config file apart from a monorepo of standalone packages. Folders
+// are compared by identity, so a symlinked or case-insensitive path still
+// matches itself.
+func ownsSpaceFolder(root map[string]any, rootDir, dir string) bool {
 	target, err := os.Stat(dir)
 	if err != nil {
 		return false
 	}
-	v := viper.New()
-	v.SetConfigFile(path)
-	if err := v.ReadInConfig(); err != nil {
-		return false
-	}
-	spaces, ok := v.Get("spaces").(map[string]any)
+	raw, _ := lookupFold(root, "spaces")
+	spaces, ok := raw.(map[string]any)
 	if !ok {
 		return false
 	}
@@ -448,7 +450,7 @@ func ownsSpaceFolder(path, rootDir, dir string) bool {
 		if !ok {
 			continue
 		}
-		p, ok := fields["path"].(string)
+		p, ok := lookupString(fields, "path")
 		if !ok || p == "" {
 			continue
 		}
@@ -461,23 +463,13 @@ func ownsSpaceFolder(path, rootDir, dir string) bool {
 }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("config: cannot read %s: %w", path, err)
+	t, err := readTree(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
-	if flags != nil {
-		for key, flagName := range map[string]string{
-			"concurrency": "concurrency",
-			"logLevel":    "log-level",
-			"logFormat":   "log-format",
-		} {
-			if f := flags.Lookup(flagName); f != nil {
-				if err := v.BindPFlag(key, f); err != nil {
-					return nil, fmt.Errorf("config: binding flag %s: %w", flagName, err)
-				}
-			}
-		}
+	v, err := viperFromTree(t, flags)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
 
 	// The keys a package entry may never hold are refused by name, at every
@@ -504,9 +496,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	// Env keys must keep their exact case; viper lowercased them along with
 	// every other map key. This runs before validation so the keys it reports
 	// on are the ones the file actually wrote.
-	if err := restoreEnvCase(path, &cfg); err != nil {
-		return nil, fmt.Errorf("config: %w", err)
-	}
+	restoreEnvCase(envRestorerOf(t), &cfg)
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}

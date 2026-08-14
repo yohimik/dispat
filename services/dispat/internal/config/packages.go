@@ -812,24 +812,28 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 
 // openFolderConfig probes a folder for its in-folder dispat config file — the
 // same names and formats the root config resolves through, minus what the
-// folder's .dispatexclude excludes — and returns the reader positioned on it.
-// An absent file yields an empty path and a nil reader, which every caller
-// reads as "this folder says nothing".
-func openFolderConfig(dir string) (*viper.Viper, string, error) {
+// folder's .dispatexclude excludes — and returns both views of it: the tree it
+// parsed into, keys spelled as written, and the viper that decodes the model
+// from it. An absent file yields an empty path and a nil reader, which every
+// caller reads as "this folder says nothing".
+func openFolderConfig(dir string) (*viper.Viper, *tree, string, error) {
 	names, err := configCandidates(dir)
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
+		return nil, nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
 	}
 	if len(names) == 0 {
-		return nil, "", nil
+		return nil, nil, "", nil
 	}
 	p := filepath.Join(dir, names[0])
-	v := viper.New()
-	v.SetConfigFile(p)
-	if err := v.ReadInConfig(); err != nil {
-		return nil, p, fmt.Errorf("cannot read %s: %w", p, err)
+	t, err := readTree(p)
+	if err != nil {
+		return nil, nil, p, err
 	}
-	return v, p, nil
+	v, err := viperFromTree(t, nil)
+	if err != nil {
+		return nil, nil, p, err
+	}
+	return v, t, p, nil
 }
 
 // weakDecode is the decoding stance every in-folder file shares with the root
@@ -867,7 +871,7 @@ func refuseNestedRoot(v *viper.Viper, path, role, remedy string, keys ...string)
 // file and decodes it as a PackageConfig, the file's top-level object.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
 	var pc PackageConfig
-	v, p, err := openFolderConfig(dir)
+	v, t, p, err := openFolderConfig(dir)
 	if err != nil || v == nil {
 		return pc, p, err
 	}
@@ -882,15 +886,8 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		return pc, p, fmt.Errorf(
 			"%s: %s", p, pathRefused("a package folder's config file"))
 	}
-	// Env keys must keep their exact case; viper lowercased them. Only a file
-	// that actually configures env pays the second parse.
-	if len(pc.Env) > 0 {
-		env, err := envCaseFromFile(p)
-		if err != nil {
-			return pc, p, err
-		}
-		pc.Env = env
-	}
+	// Env keys must keep their exact case; viper lowercased them.
+	pc.Env = envRestorerOf(t).envAt("env")
 	return pc, p, nil
 }
 
@@ -901,7 +898,7 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 // name rather than as a bare unknown key.
 func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	var sf SpaceFile
-	v, p, err := openFolderConfig(dir)
+	v, t, p, err := openFolderConfig(dir)
 	if err != nil || v == nil {
 		return sf, p, err
 	}
@@ -919,36 +916,20 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
 	// The space folder's own env layer and those of the packages entries next
-	// to it, with their keys spelled as written. One restorer parses the file
-	// once however many of its levels carry env; a file with none is not
-	// re-read at all.
-	if err := restoreSpaceFileEnvCase(p, &sf); err != nil {
-		return sf, p, err
-	}
+	// to it, with their keys spelled as written.
+	restoreSpaceFileEnvCase(envRestorerOf(t), &sf)
 	return sf, p, nil
 }
 
 // restoreSpaceFileEnvCase replaces a space folder file's viper-lowercased env
 // maps — the space's own and each of its packages entries' — with exact-case
-// ones read straight from the file.
-func restoreSpaceFileEnvCase(path string, sf *SpaceFile) error {
-	hasEnv := len(sf.Env) > 0
-	for _, pc := range sf.Packages {
-		hasEnv = hasEnv || len(pc.Env) > 0
-	}
-	if !hasEnv {
-		return nil
-	}
-	r, err := newEnvRestorer(path)
-	if err != nil {
-		return err
-	}
+// ones taken from the file's own tree.
+func restoreSpaceFileEnvCase(r *envRestorer, sf *SpaceFile) {
 	sf.Env = r.envAt("env")
 	for name, pc := range sf.Packages {
 		pc.Env = r.envAt("packages", name, "env")
 		sf.Packages[name] = pc
 	}
-	return nil
 }
 
 // pathRefused is the one sentence every layer that may not set `path` gives,
