@@ -3,6 +3,9 @@ import type * as Preset from '@docusaurus/preset-classic';
 import type {Config} from '@docusaurus/types';
 import {themes as prismThemes} from 'prism-react-renderer';
 
+import readmeFeatures from './plugins/readme-features';
+import testReport from './plugins/test-report';
+
 const GITHUB = 'https://github.com/yohimik/dispat';
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
 
@@ -32,6 +35,12 @@ const config: Config = {
   staticDirectories: ['static', '../../imgs'],
 
   plugins: [
+    // The two places this site states something measured rather than written.
+    // Both are imported as functions rather than named by path: the config is
+    // TypeScript, and importing them means they are compiled by the same
+    // loader and type-checked by `pnpm typecheck` along with everything else.
+    readmeFeatures,
+    testReport,
     [
       // Installable, and readable offline once installed. The plugin emits
       // build/sw.js, served at /dispat/sw.js, so the worker's scope is the

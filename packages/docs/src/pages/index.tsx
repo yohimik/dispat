@@ -1,6 +1,10 @@
 import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+import {usePluginData} from '@docusaurus/useGlobalData';
+import {README_FEATURES_PLUGIN} from '@site/plugins/readme-features/name';
+import type {ReadmeData} from '@site/plugins/readme-features/types';
+import Inlines from '@site/src/components/Inline';
 import CodeBlock from '@theme/CodeBlock';
 import Heading from '@theme/Heading';
 import Layout from '@theme/Layout';
@@ -10,8 +14,14 @@ import styles from './index.module.css';
 
 // The docs own the root (docs.routeBasePath === '/'), so this page is the site
 // entry point: yohimik.github.io/dispat/, the URL every README and every search
-// result points at. It carries the same claims as the repository README, in
-// prose, because a redirect gave crawlers and readers nothing to land on.
+// result points at. It carries the same claims as the repository README,
+// because a redirect gave crawlers and readers nothing to land on.
+//
+// The terminal tour and the feature cards are *read* from the CLI README at
+// build time rather than restated here: they used to be a second copy under a
+// comment promising to keep them in step, which is not a promise a comment can
+// keep. See plugins/readme-features. Everything below them still mirrors the
+// repository README by hand.
 //
 // Every internal link goes through <Link> (or useBaseUrl for assets), never a
 // raw path: Docusaurus mounts its router without a `basename` and registers
@@ -20,6 +30,11 @@ import styles from './index.module.css';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 
+/** The terminal tour and key features, as the CLI README states them. */
+function useReadme(): ReadmeData {
+  return usePluginData(README_FEATURES_PLUGIN) as ReadmeData;
+}
+
 // One command per block, and the platform in the block's title rather than in
 // a leading comment: the copy button then hands over exactly what you run, and
 // a reader copying the Linux block never carries the wget alternative with it.
@@ -27,168 +42,9 @@ const INSTALL_CURL = 'curl -fsSL https://raw.githubusercontent.com/yohimik/dispa
 const INSTALL_WGET = 'wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
 const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex';
 
-// The same terminal tour the CLI README opens with, so a reader arriving from
-// either door sees the same thing. Output abridged.
-const TRANSCRIPT = `$ go install github.com/yohimik/dispat/services/dispat@latest
-$ dispat init                       # starter dispat.json (--format yaml/toml)
-$ dispat compute --write            # derive the graph and starting versions from the manifests
-
-$ git log --oneline -2
-9f3c2a1 feat(core)^: add streaming api      # ^ = also bump core's direct consumers
-b82d47e fix(utils): close file handle leak
-
-$ dispat status                     # dry run: the full plan, nothing touched
-● changed   package=core   bump=minor  version=1.4.2 -> 1.5.0
-● changed   package=api    bump=patch  version=0.8.2 -> 0.8.3   dueToProviders=[core]
-● changed   package=utils  bump=patch  version=2.0.3 -> 2.0.4
-  unchanged package=docs   version=1.1.0
-release plan ready  packages=4  releasing=3
-
-$ dispat                            # release: build + publish in graph order, in parallel
-published  package=utils  tag=utils@2.0.4
-published  package=core   tag=core@1.5.0
-published  package=api    tag=api@0.8.3    # waited for core's publish
-done  published=3
-
-$ dispat                            # re-running is always safe
-done  published=0  unchanged=4`;
-
-type Feature = {
-  title: string;
-  body: React.ReactElement;
-};
-
-const FEATURES: Feature[] = [
-  {
-    title: 'Polyglot by construction',
-    body: (
-      <>
-        Packages are folders and stages are plain shell commands, so any language, build system, registry, CI or cache
-        plugs in with zero integration work. dispat reads and rewrites fifteen manifest families: npm, Go, Cargo,
-        Python, Composer, Maven, .NET, Dart, Ruby, Docker, and iOS and Android. Each{' '}
-        <Link to="/concepts">space</Link> states through <code>isBuildWaitingPublish</code> whether a consumer&apos;s
-        build needs its provider merely <em>built</em> (node) or already <em>published</em> (docker), so a four-level
-        npm-to-docker chain schedules correctly out of the box.
-      </>
-    ),
-  },
-  {
-    title: 'No task cache, because there is nothing to cache',
-    body: (
-      <>
-        Most monorepo tools make unchanged work cheap by running it and short-circuiting on a cache hit, which buys you
-        cache keys, a remote cache to operate, invalidation rules, and a command to clear it when one of them is wrong.
-        dispat works out which packages changed from git history and tags, and an unchanged package is not in the plan
-        at all, so its scripts never start. Nothing to cache, nothing to invalidate, no state file and no daemon. So it
-        composes with the caching you already have rather than replacing it: BuildKit layers, an Nx, Turborepo or Bazel
-        cache, ccache and the Gradle build cache all keep working inside the stage, and none of them can change which
-        versions are computed, what publishes in which order, or what gets tagged.{' '}
-        <Link to="/concepts">How the plan is computed.</Link>
-      </>
-    ),
-  },
-  {
-    title: 'Blast radius written in the commit',
-    body: (
-      <>
-        <code>feat(core):</code> releases <code>core</code> alone. A caret says how far the change reaches:{' '}
-        <code>^</code> its direct consumers, <code>^^</code> the transitive closure, <code>+2</code> exactly two edges
-        out. Nothing is released on a guess. Channels and release control are written the same way:{' '}
-        <code>%beta</code> starts a prerelease train and <code>%beta&gt;stable</code> graduates it,{' '}
-        <code>Release-As: none</code> holds a package and <code>Release-As: 2.0.0</code> pins a version. Release
-        decisions are reviewed and versioned like code.{' '}
-        <Link to="/reference/commits#release-control">Commit messages.</Link>
-      </>
-    ),
-  },
-  {
-    title: 'Built around an error model, not a happy path',
-    body: (
-      <>
-        A failure never aborts the run: the broken package&apos;s consumers are skipped unless they have changes of their
-        own, and every unaffected subgraph keeps releasing. Failed and skipped consumers are never lost. The next run
-        catches them up at the exact version they were owed, with no state file and no double release.{' '}
-        <Link to="/concepts">Recovery is just re-running.</Link>
-      </>
-    ),
-  },
-  {
-    title: 'Release part of it, and never race another run',
-    body: (
-      <>
-        <code>dispat release --package core</code> (or <code>--space</code>, <code>--group</code>, or just the folder
-        you are standing in) releases a subset at exactly the versions a full release would have given it. Publish
-        order still rules: a package whose provider is unselected waits for the next run rather than shipping ahead of
-        it, and <code>--strict</code> refuses a selection that cannot go out cleanly before anything is built. Two
-        releases of one repository at once are refused rather than raced, by a lock a run claims before it plans.{' '}
-        <Link to="/reference/releasing/partial-releases">Partial releases</Link> and{' '}
-        <Link to="/reference/releasing/release-lock">the release lock</Link>.
-      </>
-    ),
-  },
-  {
-    title: 'The graph can come from the manifests themselves',
-    body: (
-      <>
-        <Link to="/cli">
-          <code>dispat compute</code>
-        </Link>{' '}
-        reads package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj and pubspec.yaml and
-        derives the consumer/provider graph from them; <code>--check</code> gates CI on a drifted graph. A space with an{' '}
-        <Link to="/configuration/autoversion">
-          <code>autoVersion</code>
-        </Link>{' '}
-        block goes further: dispat rewrites the manifests at the version stage, reconciling declared ranges to
-        end-of-run versions format-preservingly.
-      </>
-    ),
-  },
-  {
-    title: 'A release is a distributed transaction',
-    body: (
-      <>
-        Publishing a graph means irreversible writes across independent services with no rollback. Each package&apos;s
-        leg commits by durably recording its completion: the annotated git tag, written only after the publish
-        succeeded. No state files, no registry queries, so nothing can drift from what happened. Recovery is
-        deterministic replay: the plan is a pure function of history, graph and configuration.{' '}
-        <Link to="/internals/architecture">How it works.</Link>
-      </>
-    ),
-  },
-  {
-    title: 'Edit every package at once',
-    body: (
-      <>
-        <Link to="/cli/autowriter">
-          <code>dispat autowriter</code>
-        </Link>{' '}
-        applies one manifest edit across every package the plan selects, finding each package&apos;s manifests itself,
-        and{' '}
-        <Link to="/cli/autoreplacer">
-          <code>dispat autoreplacer</code>
-        </Link>{' '}
-        does the same for literal text, so hand-written coordinates in READMEs and install snippets follow a release
-        too. Both take the same selection flags as <code>dispat run</code>.{' '}
-        <Link to="/cookbook/editing/autowriter">Editing across the monorepo.</Link>
-      </>
-    ),
-  },
-  {
-    title: 'Every release step is also a command',
-    body: (
-      <>
-        <code>dispat changelog</code>, <code>autoversion</code>, <code>commit</code> and <code>github</code> run one
-        thing the release normally does, at the moment your own flow needs it, and the release stage then finds the
-        work done and skips it. <code>dispat if</code> branches on an environment variable and <code>dispat exec</code>{' '}
-        runs one declared script once.{' '}
-        <Link to="/reference/releasing/steps">Release steps.</Link>
-      </>
-    ),
-  },
-];
-
 function Hero(): React.ReactElement {
   const {siteConfig} = useDocusaurusContext();
+  const {transcript, transcriptNote} = useReadme();
 
   return (
     <header className={styles.hero}>
@@ -227,15 +83,14 @@ function Hero(): React.ReactElement {
             Cookbook
           </Link>
         </div>
+        {/* `console` rather than the README's `sh`: this is a transcript, and
+            shell-session highlighting is what tells the commands from their
+            output. The README fence has to stay `sh` for GitHub. */}
         <CodeBlock language="console" className={styles.transcript}>
-          {TRANSCRIPT}
+          {transcript}
         </CodeBlock>
         <p className={styles.transcriptNote}>
-          (Output abridged. The starter config still needs two things from you: which folders hold your packages, and
-          the build and publish commands to run in them.) If <code>api</code>&apos;s build had failed, <code>core</code>{' '}
-          and <code>utils</code> would still have shipped, the run would exit non-zero, and the next run would release{' '}
-          <code>api</code> at the exact version it was owed. Runs are self-healing, and that failure model is the point
-          of the tool; <Link to="/concepts">Concepts</Link> explains it.
+          <Inlines tokens={transcriptNote} />
         </p>
       </div>
     </header>
@@ -243,6 +98,8 @@ function Hero(): React.ReactElement {
 }
 
 function Features(): React.ReactElement {
+  const {features} = useReadme();
+
   return (
     <section className="container margin-vert--xl">
       <Heading as="h2" className={styles.sectionTitle}>
@@ -272,13 +129,17 @@ function Features(): React.ReactElement {
         wired into one dependency graph. dispat is built for that case, and{' '}
         <Link to="/concepts">Concepts</Link> works both situations through end to end.
       </p>
+      {/* The cards are the CLI README's `## Key features` bullets, one card
+          each, read at build time. Adding a bullet there adds a card here. */}
       <div className={styles.features}>
-        {FEATURES.map((feature, i) => (
-          <div className={[styles.feature, i === FEATURES.length - 1 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
+        {features.map((feature, i) => (
+          <div className={[styles.feature, i === features.length - 1 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
             <Heading as="h3" className={styles.featureTitle}>
               {feature.title}
             </Heading>
-            <p>{feature.body}</p>
+            <p>
+              <Inlines tokens={feature.body} />
+            </p>
           </div>
         ))}
       </div>
@@ -483,8 +344,9 @@ function Reference(): React.ReactElement {
           <Link to="/reference/environment">Script environment</Link>: the <code>DISPAT_*</code> variables a stage receives.
         </li>
         <li>
-          <Link to="/internals/architecture">Architecture</Link> and <Link to="/internals/coverage">Coverage</Link>: how it is built and how
-          it is tested.
+          <Link to="/internals/architecture">Architecture</Link>, <Link to="/internals/coverage">Coverage</Link> and{' '}
+          <Link to="/internals/test-results">Test results</Link>: how it is built, and what its test suite reaches and
+          does.
         </li>
       </ul>
     </section>

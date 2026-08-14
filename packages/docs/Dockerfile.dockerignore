@@ -15,6 +15,16 @@
 packages/*
 !packages/docs
 
+# The landing page is built from the CLI README (plugins/readme-features), and
+# that one file is the only thing this build wants from services/. Every level
+# spelled out, as above: an exception cannot reach into a folder the line
+# before it excluded.
+!services
+services/*
+!services/dispat
+services/dispat/*
+!services/dispat/README.md
+
 # .git is here on purpose: showLastUpdateTime reads the history of every page.
 !.git
 

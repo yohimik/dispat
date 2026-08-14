@@ -40,6 +40,11 @@ RUN apk add --no-cache git \
 # staticDirectories reaches out of the package to ../../imgs, so it is part of
 # this build even though it sits outside packages/docs.
 COPY imgs ./imgs
+# The landing page's terminal tour and feature cards are read out of the CLI
+# README at build time (plugins/readme-features), so it is an input to this
+# build as much as any page is. The layout under /src has to match the
+# repository's, because the plugin resolves it as ../../services/dispat.
+COPY services/dispat/README.md ./services/dispat/README.md
 COPY packages/docs ./packages/docs
 COPY .git ./.git
 
@@ -58,8 +63,16 @@ RUN pnpm --filter dispat-docs typecheck
 # prerelease: the rc train runs long, and every one of them would freeze
 # another full copy of the docs). An already-cut minor is left alone, so
 # building twice is a no-op the second time.
+#
+# DOCS_REQUIRE_REPORT=1 makes the build refuse to start without
+# packages/docs/data/report.json, the coverage and test-results numbers the
+# release measured. The release passes it and nothing else does: a local build
+# and the CI build gate have no report and render those pages without figures,
+# which is fine for them and would not be fine for the site people read.
 FROM source AS build
 ARG DOCS_VERSION
+ARG DOCS_REQUIRE_REPORT
+ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-${DOCS_VERSION}" ]; then \
       pnpm --filter dispat-docs exec docusaurus docs:version "${DOCS_VERSION}"; \
       echo "cut docs version ${DOCS_VERSION}"; \

@@ -11,6 +11,14 @@
 /.docusaurus
 /.cache-loader
 
+# The test report: per-package coverage and what the suite did, measured by the
+# job that gates a release and handed to the job that builds this site as an
+# artifact (see .github/workflows/release.yml). It describes a *run*, not a
+# revision, so committing it would put a number in history that no checkout of
+# that history can reproduce. A build without one renders the same pages with
+# the numbers left out; a release build refuses to start without one.
+/data
+
 # NOTE: versioned_docs/, versioned_sidebars/ and versions.json are NOT
 # ignored.
 #

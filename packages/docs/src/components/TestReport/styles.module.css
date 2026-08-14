@@ -1,0 +1,13 @@
+/* The package rows sit under their module's row, which is the only thing that
+   tells the reader `internal/plan` is part of `services/dispat` rather than a
+   module of its own. */
+.package {
+  padding-left: 2rem;
+}
+
+/* Statement counts and percentages read as columns of figures, not as prose. */
+.number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
