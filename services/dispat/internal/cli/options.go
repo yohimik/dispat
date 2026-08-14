@@ -13,6 +13,7 @@ import (
 type options struct {
 	// global
 	root, cfgName         *string
+	envFiles              *[]string
 	logLevel, logFormat   *string
 	quietParser           *bool
 	showVersion, showHelp *bool
@@ -90,6 +91,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.root = fs.String("root", ".", "monorepo root folder")
 	o.cfgName = fs.String("config", "dispat.json",
 		"config file name, relative to --root; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
+	o.envFiles = fs.StringArray("env-file", nil,
+		"read environment variables from this file instead of ./.env (repeatable, later files win); variables the environment already sets are kept")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")
 	o.logLevel = fs.String("log-level", "", "override the configured logLevel (trace, debug, info, warn, error)")
 	o.logFormat = fs.String("log-format", "", "override the configured logFormat (pretty, json)")

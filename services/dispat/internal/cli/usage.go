@@ -70,7 +70,7 @@ var execFlags = []string{"for-package", "for-space", "fallback", "script-from", 
 
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
-var globalFlags = []string{"root", "config", "concurrency", "log-level", "log-format",
+var globalFlags = []string{"root", "config", "env-file", "concurrency", "log-level", "log-format",
 	"quiet-parser", "version", "help"}
 
 // commands is the table. Order is the order the command list prints in:

@@ -114,8 +114,10 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			args: []string{"if", "--help"}, usage: "usage: dispat if <cond> [flags]",
 			has: []string{"--then", "--elif", "--else", "--on-failure"},
 			// A helper that selects no packages must not offer the selection
-			// flags, nor the other helper's subject flags.
-			hasNot: []string{"--package", "--for-package", "--env", "--tag"},
+			// flags, nor the other helper's subject flags. `--env` is spelled
+			// with its argument, so the global `--env-file` does not answer
+			// for it.
+			hasNot: []string{"--package", "--for-package", "--env string", "--tag"},
 		},
 		"exec": {
 			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [-- args...] [flags]",

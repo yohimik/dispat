@@ -143,6 +143,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			With().Timestamp().Logger(),
 	}
 
+	// The environment files come before every phase below, because dispat's
+	// own variables are in them too: the update check reads DISPAT_UPDATE_CHECK
+	// while printing the version, and the release lock reads its switch long
+	// before any script runs.
+	// What it read is reported through the flag-built logger, since no config
+	// file has been found yet to state a level: this is a startup event, and
+	// --log-level is the only thing that can have an opinion about it. A
+	// failure goes to the bootstrap logger, like every other pre-config
+	// refusal.
+	if err := loadEnvFiles(*o.envFiles, r.logger()); err != nil {
+		r.boot.Error().Err(err).Msg("cannot read an environment file")
+		return 1
+	}
+
 	// Before anything else: the version and the help must both answer without
 	// a config file, and the help before the arity checks.
 	if code, done := r.versionOrHelp(); done {
