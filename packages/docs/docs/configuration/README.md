@@ -3,7 +3,7 @@
 One file at the monorepo root describes everything dispat does; `dispat init` writes a starter one, and
 [Getting started](../getting-started.md) walks through a first configuration.
 
-The format is inferred from the file extension, so JSON, YAML and TOML all work. With no `--config` flag the file is
+The format is inferred from the file extension: JSON, YAML and TOML are the three dispat reads. With no `--config` flag the file is
 **discovered**: the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in the root is used
 (the names [`dispat init`](../cli/init.md) writes under its formats). When the root has none, dispat ascends the parent
 directories. A found file only ends the ascent when it declares `spaces` or `packages`, because a package folder's own
@@ -13,7 +13,9 @@ with no fallback, so a typo there fails loudly instead of silently loading a dif
 as typo protection; [`custom`](./custom.md) is the one place to put keys dispat does not know. Keys are matched
 case-insensitively and map keys are lowercased, so script and space names are effectively case-insensitive. The
 [`env`](./env.md) objects are the exception, because environment variable names are case-sensitive: their keys keep
-the spelling you write. This page is the one home of these resolution rules; the CLI and packages pages link back
+the spelling you write. Any value may also be a [`$ref`](./refs.md) naming another file, which is how a long
+configuration is split across several; the referenced file's content becomes the value, and everything on this page
+holds for the result. This page is the one home of these resolution rules; the CLI and packages pages link back
 here.
 
 This page covers the top level; the larger objects have their own pages:
@@ -31,7 +33,9 @@ This page covers the top level; the larger objects have their own pages:
 | [Script sequences](./scripts.md)      | `scripts`, binding a name to one command or to several, and what a failure inside a sequence does to the rest of it.                        |
 | [Run-level hooks](./run-hooks.md)     | The top-level `run` object: the hooks that observe the run as a whole, the branch guard, the stale-checkout guard.                          |
 | [Static env](./env.md)                | `env`: fixed environment variables added to every script the run executes.                                                                  |
+| [The `.env` file](./dotenv.md)        | The environment file read from the current directory into the run, `--env-file`, and what wins over what.                                    |
 | [custom](./custom.md)                 | `custom`: free-form data dispat never reads.                                                                                                |
+| [Splitting the file](./refs.md)       | `$ref`: moving any part of the configuration into a file of its own, and what a path inside one means.                                       |
 
 Related references: the [CLI](../cli/README.md), the [commit message format](../reference/commits.md) and the
 [script environment variables](../reference/environment.md). Annotated full examples:

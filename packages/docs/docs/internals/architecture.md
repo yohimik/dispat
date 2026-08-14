@@ -20,8 +20,12 @@ as a release tag.
 1. Parse the command line (pflag) and dispatch one of the commands in the [CLI reference](../cli/README.md). An unknown
    command word is `run`'s shorthand (`dispat lint`).
 
-   The controller runs its work in phases ordered by how much each needs to know, and the order is the point: what the
-   flags alone can refuse is refused first, so a usage mistake never costs the reader a configuration error on the way
+   Before the phases, the environment files: `./.env`, or whatever `--env-file` names, is read into the process
+   environment, adding only what the environment does not already define. It comes first because dispat's own
+   variables are in there too, from the update check's switch to the GitHub token.
+
+   The controller then runs its work in phases ordered by how much each needs to know, and the order is the point: what
+   the flags alone can refuse is refused first, so a usage mistake never costs the reader a configuration error on the way
    to it. Then the commands that read no config file at all, then the config, then everything that needs it. The
    commands that answer before any config is loaded are `init`, `self-update`, and the three manifest commands
    (`scanner`, `writer`, `replacer`); `if` joins them because a condition is about the environment rather than the
@@ -44,8 +48,11 @@ as a release tag.
    effective monorepo root; a folder's `.dispatexclude` chooses between the candidate names). A file declaring `spaces`
    ends the ascent. One declaring only `packages` is a candidate that yields to a root above claiming its folder as a
    space, which is how a space folder's file is told from a monorepo of standalone packages. A file declaring neither,
-   meaning a package's in-folder override, does not end the ascent. Then load and validate it (viper; unknown keys rejected;
-   flag bindings applied).
+   meaning a package's in-folder override, does not end the ascent. Then read it: the file is parsed by its own format's
+   parser, so every key keeps the case it was written in, each `$ref` is replaced by the file it names (relative to the
+   file that wrote it, cycles refused with the chain), and viper is handed a lowercased copy of the result to decode
+   and validate (unknown keys rejected; flag bindings applied). The exact-case tree is what the `env` objects are read
+   back from.
 3. Discover packages: every direct sub-folder of each space path not excluded by the space's `.dispatexclude`, names
    unique across spaces, plus every standalone `packages` entry with a `path`. Per-package configuration resolves here,
    through the seven-layer ladder: the root file's own defaults, the space, the space folder's config file, then the

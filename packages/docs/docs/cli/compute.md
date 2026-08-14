@@ -77,7 +77,10 @@ and a kind correction edit the declaring source in place, and a baseline goes in
 file receives is written in a single pass, so a run that changes two of its keys still leaves one backup. Every edited
 file is first copied to `<name>.backup` (untracked files worth a `.gitignore` entry; overwritten on every applying
 run), and each write is atomic. A TOML file is not rewritten in place: `--write` prints a paste-ready block for it and
-fails instead. `--check` overrides both apply modes: it writes nothing and exits `1` when any suggestion exists across
+fails instead. A key kept in a [referenced file](../configuration/refs.md) is written in that file, at the key it
+holds there, so the `$ref` survives the write and the backup sits beside the file that changed; a key composed from a
+reference *and* the keys written beside it belongs to two files at once, and `--write` refuses it rather than
+choosing one. `--check` overrides both apply modes: it writes nothing and exits `1` when any suggestion exists across
 any source, which is the CI gate for a config lagging the manifests.
 
 ## Flags

@@ -31,6 +31,12 @@ alone, because no space or package applies to them.
 Where you can write an `env` map, you can write it in a [space folder's or package folder's own config file](./packages.md)
 too. Those count as layers like any other, the in-folder file being more local than the entry that names it.
 
+## Where else a variable can come from
+
+The `env` objects are the configuration's own statement, so they win over the process environment and over the
+[`.env` file](./dotenv.md) dispat reads from the folder you run it in. A variable nothing here mentions still reaches
+your scripts if the environment or that file defines it.
+
 ## Values can reference other variables
 
 `$NAME` and `${NAME}` in a value are expanded before the script runs, against the script's computed

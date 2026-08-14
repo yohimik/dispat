@@ -76,7 +76,9 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'configuration/scripts', label: 'Script sequences'},
         {type: 'doc', id: 'configuration/run-hooks', label: 'Run-level hooks'},
         {type: 'doc', id: 'configuration/env', label: 'Static env'},
+        {type: 'doc', id: 'configuration/dotenv', label: 'The .env file'},
         {type: 'doc', id: 'configuration/custom', label: 'custom'},
+        {type: 'doc', id: 'configuration/refs', label: 'Splitting the file ($ref)'},
       ],
     },
     {

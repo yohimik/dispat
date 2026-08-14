@@ -1,6 +1,7 @@
 # Script environment variables
 
-Every script receives, on top of the parent environment, any
+Every script receives, on top of the parent environment (which the [`.env` file](../configuration/dotenv.md) fills in
+where nothing else set a name), any
 [static `env` variables the configuration sets](../configuration/env.md), and then the variables below
 (the same variables also expand in
 [record text](../configuration/records.md#variables-in-record-text), so a changelog footer and a publish script name a
