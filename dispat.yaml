@@ -61,9 +61,13 @@ spaces:
     # whole monorepo: compiling is what building a Go library means here.
     scripts:
       build: go build ./...
-      tests:
-        - mkdir -p ../../coverage
-        - go test ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
+      # Through go-test.sh so the run leaves a machine-readable log beside its
+      # coverage profile: the documentation site's coverage and test-results
+      # pages are built from the pair, rather than from numbers typed by hand.
+      # The log is named after the package, as the profile already is.
+      tests: >-
+        sh ../../scripts/go-test.sh "$DISPAT_PACKAGE" --
+        ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
     flow:
       beforePublish: [changelog, commit]
     packages:
@@ -115,13 +119,26 @@ spaces:
           #
           # dest is the package folder, not a dist/ of its own, because half of
           # what comes back is source rather than output.
+          #
+          # DOCS_REQUIRE_REPORT is set for a release and nothing else. The
+          # coverage and test-results pages are built from a report the run
+          # that gated this release measured, handed over as a CI artifact;
+          # a release that lost it would publish those pages with the figures
+          # silently missing, so the build refuses instead. DISPAT_STAGE is
+          # "build" only in a real release — the CI build gate is "run:build",
+          # has no report, and renders the pages without figures on purpose.
           build: |
             DOCS_VERSION=""
             if [ "${DISPAT_IS_PRERELEASE:-false}" != "true" ]; then
               DOCS_VERSION="${DISPAT_VERSION%.*}"
             fi
+            DOCS_REQUIRE_REPORT=""
+            if [ "$DISPAT_STAGE" = "build" ]; then
+              DOCS_REQUIRE_REPORT="1"
+            fi
             docker buildx build --file Dockerfile --target export \
               --build-arg DOCS_VERSION="$DOCS_VERSION" \
+              --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
               --output "type=local,dest=$PWD" ../..
         flow:
           build: build
@@ -197,22 +214,22 @@ spaces:
             # Checked here rather than on the way out, so a leak fails the
             # build, which is still ahead of anything being published.
             - dispat exec verify-unlinked --for pkg:dispat
-          tests:unit:
-            - mkdir -p ../../coverage
-            - go test ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
+          tests:unit: >-
+            sh ../../scripts/go-test.sh dispat --
+            ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
           # The black-box suite of exactly this binary, so it belongs to this
           # package rather than to a space of its own. DISPAT_COVERDIR makes
           # the harness build dispat with -cover and point every invocation's
           # GOCOVERDIR at the folder, which is the only coverage much of the
           # app and cli packages get. The race pass runs the root package only,
-          # as it always has.
+          # as it always has, and keeps its own log so the report can say the
+          # suite is race-clean rather than have someone assert it.
           tests:integration: |
-            mkdir -p ../../coverage
             export DISPAT_COVERDIR="$PWD/../../coverage/covdata"
             rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
-            go test -C ../../tests/integration ./... -count=1 -timeout 20m
+            sh ../../scripts/go-test.sh integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
             go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
-              go test -C ../../tests/integration . -count=1 -timeout 20m -race
+            sh ../../scripts/go-test.sh integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
           tests:
             - dispat exec tests:unit --for pkg:dispat
             - dispat exec tests:integration --for pkg:dispat

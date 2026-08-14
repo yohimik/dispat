@@ -34,6 +34,37 @@ Do not run `go work sync` or `go mod tidy` while the links are in place: both de
 redirect makes redundant, and unlinking needs them back. That is what `--sync-lock=false` is for, and the `lint` job in
 [tests.yml](../.github/workflows/tests.yml) checks for both leaks on every commit.
 
+## Not release stages: the test scripts
+
+Two scripts here belong to the test run rather than to a `flow` slot, and neither takes a `DISPAT_*` variable.
+
+[`go-test.sh`](./go-test.sh) is how every Go `tests` script in [`dispat.yaml`](../dispat.yaml) invokes `go test`:
+
+```sh
+sh scripts/go-test.sh <log-name> -- <go test args...>
+```
+
+It runs the tests with `-json`, keeps the stream as `coverage/testlog/<log-name>.json`, and prints a human summary in
+its place — with the full output of anything that failed, so nothing is lost to the machine format. The exit status is
+the test run's own. The log name is the report's id for that invocation and is chosen to match the coverage profile the
+same script writes (`ccme`, `dispat`, `integration`); a name ending in `-race` marks the race-detector pass.
+
+[`coverage-badge.sh`](./coverage-badge.sh) merges the profiles that run leaves in `coverage/` and writes the README
+badge, and `go run github.com/yohimik/dispat/tools/testreport build` turns the same profiles and logs into
+`packages/docs/data/report.json`, which is where the documentation site's
+[coverage](https://yohimik.github.io/dispat/internals/coverage) and
+[test results](https://yohimik.github.io/dispat/internals/test-results) pages get their numbers. Both are called from
+the [Release workflow](../.github/workflows/release.yml) and nowhere else: only a `--since all` run produces a complete
+set, so a total from a windowed run would be a number about whichever packages happened to change.
+
+To reproduce the whole thing locally:
+
+```sh
+dispat run tests --since all                  # ~6 min: every module's profile and log
+sh scripts/coverage-badge.sh                  # the merged profiles and the badge JSON
+go run github.com/yohimik/dispat/tools/testreport build   # packages/docs/data/report.json
+```
+
 ## Running one by hand
 
 `dispat run <script> --since all --package <name>` runs a script once inside that package, with the exact environment
