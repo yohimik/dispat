@@ -94,6 +94,27 @@ thing to put in one:
 dispat if CI --then 'dispat if TIER=gold --then "deploy gold" --else "deploy standard"'
 ```
 
+## Choosing the folder it runs in
+
+The chosen branch runs where you are standing, so a relative path in it means
+what you meant. `--in` sends it somewhere else:
+
+```console
+$ dispat if CI --then 'make ci' --in ./build
+$ dispat if CI --then 'make ci' --in pkg:core
+```
+
+It takes a folder path, or any of the [place names](./locations.md) `dispat
+exec` takes.
+
+There is one thing worth knowing here. `dispat if` reads no config file, which
+is what makes it cheap enough to call in a loop, and a path or `cwd` keeps it
+that way because your command line already said everything needed. Naming
+`pkg:`, `space:` or `root` does make it read your config, since there is no
+other way to find out where a package lives. You pay for that only when you ask.
+
+A folder that does not exist stops the command with a message naming it.
+
 ## Exit codes
 
 Both commands hand back the exit code of the script they ran. `dispat if CI
@@ -121,7 +142,9 @@ knowing if your script also exits `2`. Ending `--on-failure` with an explicit
 | `--then <script>`     | The script the preceding condition runs. Repeatable, one per condition.        |
 | `--elif <cond>`       | Another condition, tried when every earlier one was false. Repeatable.         |
 | `--else <script>`     | The script to run when no condition held.                                      |
+| `--in <folder>`       | Run the chosen script in this folder: a path, or any [place name](./locations.md). |
 | `--on-failure <script>` | Run this when the chosen script fails, and exit with its code instead.       |
 
-Needs no config file and no git repository. The shell is `/bin/sh -c`, since
-there is no config here to take a `shell` setting from.
+Needs no config file and no git repository, unless `--in` names a package, a
+space or the root. The shell is `/bin/sh -c`, since there is no config here to
+take a `shell` setting from.

@@ -21,7 +21,7 @@ dispat [command] [flags]
 | `github`                  | Create the per-package GitHub release now; see [The github command](./github.md).                           |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
 | `if <cond>`               | Run one of several shell scripts, chosen by a condition on the environment; see [The if command](./if.md). |
-| `exec <script>`           | Run one declared script here, once, for a named subject; see [The exec command](./exec.md). |
+| `exec <script>`           | Run one declared script here, once, for a named subject or the folder you are in; see [The exec command](./exec.md). |
 | `self-update`             | Replace this binary with the latest release; see [The self-update command](./self-update.md).                             |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The scanner command](./scanner.md).                     |
 | `writer <manifest>...`    | Edit manifests in place, format-preserving; see [The writer command](./writer.md).                  |
