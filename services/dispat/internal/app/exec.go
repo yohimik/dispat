@@ -57,11 +57,11 @@ func NeedsPlan(scope string) bool { return scope == EnvScopeDispat || scope == E
 type locationKind int
 
 const (
-	subjectRoot    locationKind = iota // the top level: no name
-	subjectPackage                     // one package
-	subjectSpace                       // one space
-	locationCwd                        // wherever the invocation stands
-	locationPath                       // a folder, named outright
+	kindRoot    locationKind = iota // the top level: no name
+	kindPackage                     // one package
+	kindSpace                       // one space
+	kindCwd                         // wherever the invocation stands
+	kindPath                        // a folder, named outright
 )
 
 // Location is a place in the monorepo, spelled the same way wherever one is
@@ -80,25 +80,25 @@ type Location struct {
 // IsPackage reports whether the location is a package, which is what the
 // DISPAT_* variables need: they describe one package's release, and a space or
 // the top level has no version of its own to report.
-func (l Location) IsPackage() bool { return l.kind == subjectPackage }
+func (l Location) IsPackage() bool { return l.kind == kindPackage }
 
 // Deferred reports whether resolving the location needs the configuration:
 // a name has to be looked up, or a folder turned into the level it stands in.
 // The controller asks before it decides whether a command must load one.
 func (l Location) Deferred() bool {
-	return l.kind == subjectPackage || l.kind == subjectSpace || l.kind == subjectRoot
+	return l.kind == kindPackage || l.kind == kindSpace || l.kind == kindRoot
 }
 
 // label describes the location the way an error message needs to.
 func (l Location) label() string {
 	switch l.kind {
-	case subjectPackage:
+	case kindPackage:
 		return fmt.Sprintf("package %q", l.name)
-	case subjectSpace:
+	case kindSpace:
 		return fmt.Sprintf("space %q", l.name)
-	case locationCwd:
+	case kindCwd:
 		return "the current folder"
-	case locationPath:
+	case kindPath:
 		return fmt.Sprintf("folder %q", l.name)
 	}
 	return "the top level"
@@ -140,19 +140,19 @@ type ExecOptions struct {
 }
 
 // LocationPackage names one package.
-func LocationPackage(name string) Location { return Location{kind: subjectPackage, name: name} }
+func LocationPackage(name string) Location { return Location{kind: kindPackage, name: name} }
 
 // LocationSpace names one space.
-func LocationSpace(name string) Location { return Location{kind: subjectSpace, name: name} }
+func LocationSpace(name string) Location { return Location{kind: kindSpace, name: name} }
 
 // LocationRoot names the top level, which is also the zero value.
 func LocationRoot() Location { return Location{} }
 
 // LocationCwd names wherever the invocation stands.
-func LocationCwd() Location { return Location{kind: locationCwd} }
+func LocationCwd() Location { return Location{kind: kindCwd} }
 
 // LocationPath names a folder outright.
-func LocationPath(path string) Location { return Location{kind: locationPath, name: path} }
+func LocationPath(path string) Location { return Location{kind: kindPath, name: path} }
 
 // The words the grammar reserves. A folder actually called one of them is
 // still reachable, spelled ./root or ./cwd, which is also how a shell tells a
@@ -204,7 +204,7 @@ func ParseSubject(spec string) (Location, error) {
 	if err != nil {
 		return Location{}, err
 	}
-	if loc.kind == locationPath {
+	if loc.kind == kindPath {
 		return Location{}, fmt.Errorf("invalid location %q (want pkg:<name>, space:<name>, %s or %s)",
 			spec, locRoot, locCwd)
 	}
@@ -221,7 +221,10 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 		return 1, err
 	}
 	from := subject
-	if opts.ScriptFrom != nil {
+	// A --script-from saying what --for already said is the subject over again,
+	// resolved once: `--for cwd --script-from cwd` is one question about one
+	// folder, and asking it twice would report the answer twice.
+	if opts.ScriptFrom != nil && *opts.ScriptFrom != opts.Subject {
 		if from, err = a.ResolveSubject(*opts.ScriptFrom, opts.Dir); err != nil {
 			a.log.Error().Err(err).Msg("cannot run the script")
 			return 1, err
@@ -266,7 +269,7 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 // a folder that stands for nothing, and it is said out loud because the
 // invocation asked for a narrower one.
 func (a *App) ResolveSubject(loc Location, dir string) (Location, error) {
-	if loc.kind != locationCwd {
+	if loc.kind != kindCwd {
 		return loc, nil
 	}
 	pkgs, err := a.packages()
@@ -302,7 +305,7 @@ func PlainDir(loc Location, dir string) (string, error) {
 
 // plainDir is the folder arithmetic, without the check.
 func plainDir(loc Location, dir string) string {
-	if loc.kind == locationPath {
+	if loc.kind == kindPath {
 		if filepath.IsAbs(loc.name) {
 			return loc.name
 		}
@@ -346,13 +349,13 @@ func (a *App) ResolveDir(loc Location, dir string) (string, error) {
 // locationDir is ResolveDir without the check, so the two concerns stay apart.
 func (a *App) locationDir(loc Location, dir string) (string, error) {
 	switch loc.kind {
-	case subjectPackage:
+	case kindPackage:
 		p, err := a.discoverPackage(loc.name)
 		if err != nil {
 			return "", err
 		}
 		return p.Dir, nil
-	case subjectSpace:
+	case kindSpace:
 		sc, ok := a.cfg.Space(loc.name)
 		if !ok {
 			return "", fmt.Errorf("unknown space %q", loc.name)
@@ -360,7 +363,7 @@ func (a *App) locationDir(loc Location, dir string) (string, error) {
 		// The same join discovery uses for a space's folder, so a space means
 		// one folder whoever is asking.
 		return filepath.Join(a.root, filepath.FromSlash(sc.Path)), nil
-	case subjectRoot:
+	case kindRoot:
 		return a.root, nil
 	}
 	return plainDir(loc, dir), nil
@@ -414,7 +417,7 @@ type scriptLevel struct {
 func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) {
 	root := scriptLevel{a.cfg.Scripts, "the top level"}
 	switch from.kind {
-	case subjectSpace:
+	case kindSpace:
 		sc, ok := a.cfg.Space(from.name)
 		if !ok {
 			return nil, fmt.Errorf("unknown space %q", from.name)
@@ -424,7 +427,7 @@ func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) 
 			levels = append(levels, root)
 		}
 		return levels, nil
-	case subjectPackage:
+	case kindPackage:
 		p, err := a.discoverPackage(from.name)
 		if err != nil {
 			return nil, err
@@ -465,7 +468,7 @@ func (a *App) execEnv(ctx context.Context, subj Location, scope string) ([]strin
 	if !NeedsPlan(scope) {
 		return a.staticEnv(subj)
 	}
-	if subj.kind != subjectPackage {
+	if subj.kind != kindPackage {
 		err := fmt.Errorf("--env %s needs a package: the DISPAT_* variables describe one package's release, and %s has no version of its own", scope, subj.label())
 		a.log.Error().Err(err).Msg("cannot build the environment")
 		return nil, err
@@ -498,13 +501,13 @@ func (a *App) execEnv(ctx context.Context, subj Location, scope string) ([]strin
 // MergeEnv the build uses.
 func (a *App) declaredEnv(subj Location) ([]string, error) {
 	switch subj.kind {
-	case subjectSpace:
+	case kindSpace:
 		sc, ok := a.cfg.Space(subj.name)
 		if !ok {
 			return nil, fmt.Errorf("unknown space %q", subj.name)
 		}
 		return config.EnvPairs(config.MergeEnv(a.cfg.Env, sc.Env)), nil
-	case subjectPackage:
+	case kindPackage:
 		p, err := a.discoverPackage(subj.name)
 		if err != nil {
 			return nil, err

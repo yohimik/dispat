@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -570,6 +571,24 @@ func TestPlainDirNeedsNoConfiguration(t *testing.T) {
 		_, err := PlainDir(loc, root)
 		require.Error(t, err, "a level is not something a folder alone can place")
 	}
+}
+
+func TestExecResolvesTheFolderOnceWhenBothFlagsAskForIt(t *testing.T) {
+	// --script-from repeating the subject is the subject, so the folder is read
+	// once and the widening is reported once. Two identical lines about one
+	// folder would read as a bug in the command rather than a note about it.
+	var buf strings.Builder
+	a := execRepo(t, layeredConfig())
+	a.log = zerolog.New(&buf)
+
+	from := LocationCwd()
+	_, code, err := runExec(t, a, ExecOptions{
+		Script: "build", Subject: LocationCwd(), ScriptFrom: &from, Dir: a.root,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, 1, strings.Count(buf.String(), "no package and no space"),
+		"one folder, one answer, one line about it")
 }
 
 func TestExecDiscoversTheWorkspaceOnce(t *testing.T) {
