@@ -4,13 +4,43 @@ scripts:
   changelog: dispat changelog
   commit: dispat commit --tag --push
   github: dispat github
-  build-dispat: sh ../../scripts/build-dispat.sh
-  build-docs: pnpm install --frozen-lockfile && pnpm run build
-  cut-docs-version: sh ../../scripts/cut-docs-version.sh
-  deploy-docs: sh ../../scripts/deploy-docs.sh
   docker-login: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-  build-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml build
-  push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
+
+  # A stage gate whose only input is an environment variable. Written here
+  # rather than inside the script it guards, so the condition that decides
+  # whether a stage does anything is visible where the stage is.
+  deploy-docs: >-
+    dispat if 'CI!=true'
+    --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
+    --else 'sh ../../scripts/deploy-docs.sh'
+
+  # postAll fires for every release, including one run by hand. Outside Actions
+  # there is no $GITHUB_OUTPUT to write, and a guard that finds nothing to do
+  # exits 0 — hence no --else.
+  post-release: dispat if GITHUB_OUTPUT --then 'dispat exec post-release-outputs'
+  # What the release did, as step outputs for the job that verifies the
+  # composite action afterwards.
+  #
+  # The dispat package and nothing else: a run that publishes only the docs or
+  # an image is ordinary, and in that run there is no new CLI to install, no
+  # v{version} alias tag to check out and no GitHub release carrying binaries,
+  # so the job that consumes these must skip rather than test the version that
+  # was already out. Asking the status is enough on its own — the
+  # DISPAT_RESULT_* block exists only for a package the run had a result for,
+  # so it is unset when dispat was never planned, and it reads "failed" or
+  # "skipped" rather than "published" when it did not make it.
+  post-release-outputs: >-
+    dispat if 'DISPAT_RESULT_DISPAT_STATUS=published'
+    --then 'echo "cli-released=true" >> "$GITHUB_OUTPUT";
+            echo "cli-version=$DISPAT_RESULT_DISPAT_NEW_VERSION" >> "$GITHUB_OUTPUT";
+            echo "released dispat $DISPAT_RESULT_DISPAT_NEW_VERSION"'
+    --else 'echo "cli-released=false" >> "$GITHUB_OUTPUT";
+            echo "the dispat CLI did not publish in this run"'
+
+# Fired once, after the whole task graph. It reports what the run did to the
+# job that follows it; see post-release-outputs above.
+run:
+  postAll: post-release
 
 versionGroups:
   manifests:
@@ -26,6 +56,14 @@ spaces:
     autoVersion:
       enabled: true
       syncLock: [go-mod-tidy]
+    # The libraries publish as source, so they have no build stage of their
+    # own. `build` still exists because the CI gate sweeps one name across the
+    # whole monorepo: compiling is what building a Go library means here.
+    scripts:
+      build: go build ./...
+      tests:
+        - mkdir -p ../../coverage
+        - go test ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
     flow:
       beforePublish: [changelog, commit]
     packages:
@@ -46,6 +84,11 @@ spaces:
     autoVersion:
       enabled: true
       syncLock: [pnpm-install]
+    # Every package of this space is gated from its own Dockerfile, so the
+    # command is the space's rather than any one package's: a second Node
+    # package brings a Dockerfile and needs no new script and no new CI step.
+    scripts:
+      tests: docker buildx build --file Dockerfile --target typecheck --output type=cacheonly ../..
     packages:
       docs:
         tagFormat: packages/docs/v{version}
@@ -53,9 +96,35 @@ spaces:
         dependencies:
           - provider: dispat
             keep: true
+        scripts:
+          # The site, and the version snapshot that goes in it, from one build.
+          #
+          # `docs` and `dispat` share the `cli` version group, so they release
+          # together, always: there is no run in which the docs are built
+          # without a CLI version to document, and no reason to freeze the
+          # snapshot in a stage of its own ahead of the build. Cutting it here
+          # means the site that ships is the one built *with* it, and the
+          # tracked files it writes — versioned_docs, versioned_sidebars,
+          # versions.json — are staged by the `commit` in beforePublish along
+          # with everything else the release changed.
+          #
+          # A snapshot per minor, not per patch: 1.2.3 and 1.2.4 document the
+          # same surface, and a copy each would grow the repository for
+          # nothing. An empty DOCS_VERSION means no cut at all, which is what a
+          # prerelease gets.
+          #
+          # dest is the package folder, not a dist/ of its own, because half of
+          # what comes back is source rather than output.
+          build: |
+            DOCS_VERSION=""
+            if [ "${DISPAT_IS_PRERELEASE:-false}" != "true" ]; then
+              DOCS_VERSION="${DISPAT_VERSION%.*}"
+            fi
+            docker buildx build --file Dockerfile --target export \
+              --build-arg DOCS_VERSION="$DOCS_VERSION" \
+              --output "type=local,dest=$PWD" ../..
         flow:
-          version: cut-docs-version
-          build: build-docs
+          build: build
           publish: deploy-docs
           beforePublish: [changelog, commit]
 
@@ -77,17 +146,118 @@ spaces:
           - format: v{major}
             moving: true
             channels: [stable]
+        scripts:
+          # The binaries are built against this checkout, not against the
+          # pkg/* versions go.mod happens to pin: those pins are only as fresh
+          # as the last release that bumped them, so a provider changed without
+          # a version bump would ship as its published copy while every test in
+          # CI ran the working tree. link points each workspace dependency at
+          # its folder; unlink takes the redirects back out.
+          #
+          # The bracket is inside the build rather than around it, as
+          # beforeBuild/postBuild hooks, because those are the release
+          # pipeline's and `dispat run build` — which is the CI build gate —
+          # executes the named script and nothing else. A bracket in the hooks
+          # would leave the gate compiling against the published pkg/*, which
+          # is exactly the mistake the bracket exists to prevent, and it would
+          # fail only in CI. flow.onFail keeps unlink as the release's net.
+          link: dispat autowriter --package dispat --since all --sync-lock=false --link-local
+          unlink: dispat autowriter --package dispat --since all --sync-lock=false --unlink-local
+          # The two ways the bracket leaks, both of which only fail for whoever
+          # consumes the published module, long after the tag exists. The
+          # second is the quieter one: `go work sync` — and anything else that
+          # reconciles the workspace while the links are in place — drops the
+          # go.sum entries the redirects made redundant.
+          verify-unlinked: |
+            if grep -q '^replace github.com/yohimik/dispat' go.mod; then
+              echo "a local link survived the build" >&2
+              exit 1
+            fi
+            for m in ccme manifest models scanner writer; do
+              if ! grep -q "^github.com/yohimik/dispat/pkg/$m " go.sum; then
+                echo "go.sum lost its entry for pkg/$m" >&2
+                exit 1
+              fi
+            done
+          build:
+            - dispat exec link --for-package dispat
+            # DISPAT_EXPORT_BASE is where the export is about to land, which is
+            # the one thing the container cannot work out for itself: it names
+            # its artefacts against that path, so what comes back needs no
+            # rewriting here.
+            - >-
+              docker buildx build --file Dockerfile --target export
+              --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
+              --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
+              --output "type=local,dest=$PWD/dist" ../..
+            # Already this stage's outputs, in $DISPAT_OUTPUT's own format.
+            - cat dist/dispat-output >> "$DISPAT_OUTPUT"
+            - rm -f dist/dispat-output
+            - dispat exec unlink --for-package dispat
+            # Checked here rather than on the way out, so a leak fails the
+            # build, which is still ahead of anything being published.
+            - dispat exec verify-unlinked --for-package dispat
+          tests:unit:
+            - mkdir -p ../../coverage
+            - go test ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
+          # The black-box suite of exactly this binary, so it belongs to this
+          # package rather than to a space of its own. DISPAT_COVERDIR makes
+          # the harness build dispat with -cover and point every invocation's
+          # GOCOVERDIR at the folder, which is the only coverage much of the
+          # app and cli packages get. The race pass runs the root package only,
+          # as it always has.
+          tests:integration: |
+            mkdir -p ../../coverage
+            export DISPAT_COVERDIR="$PWD/../../coverage/covdata"
+            rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
+            go test -C ../../tests/integration ./... -count=1 -timeout 20m
+            go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
+              go test -C ../../tests/integration . -count=1 -timeout 20m -race
+          tests:
+            - dispat exec tests:unit --for-package dispat
+            - dispat exec tests:integration --for-package dispat
+        # onFail is the net for the paths the build script never finishes:
+        # unlink is idempotent, so closing an already-closed bracket is a
+        # no-op. It matters because beforePublish runs `dispat commit`, which
+        # stages services/dispat — a link still in place there would be
+        # published as a go.mod no consumer can resolve.
         flow:
-          build: build-dispat
+          build: build
+          onFail: unlink
 
   docker:
     tagFormat: docker/{name}/v{version}
     path: docker
     autoVersion:
       enabled: true
+    # `tests` validates the manifest rather than building it: it proves the
+    # DISPAT_WORKSPACE_DISPAT_VERSION interpolation and the channel overlay
+    # still resolve — the breakage that would otherwise surface first at
+    # release time — in a second. The images themselves are built by `build`,
+    # which the CI gate reaches only when a docker package actually changed.
+    scripts:
+      # The compose files interpolate DISPAT_WORKSPACE_DISPAT_VERSION into the
+      # DISPAT_VERSION build arg, and the Dockerfiles hand it to install.sh.
+      # In a release that is right: the images build after the CLI published,
+      # so the version exists to download. In the CI build gate — `dispat run
+      # build`, where DISPAT_STAGE is "run:build" — it is the version being
+      # planned, which nobody has published yet, so install.sh would 404 on
+      # every gate run where the CLI has commits pending. The gate wants the
+      # newest version that exists instead; the question it answers is whether
+      # the image still builds.
+      build: |
+        if [ "$DISPAT_STAGE" != "build" ]; then
+          tag=$(git tag -l 'services/dispat/v*' --sort=-v:refname | head -n 1)
+          DISPAT_WORKSPACE_DISPAT_VERSION=${tag##*/v}
+          export DISPAT_WORKSPACE_DISPAT_VERSION
+          echo "gate: building against the published $DISPAT_WORKSPACE_DISPAT_VERSION"
+        fi
+        docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
+      tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q
+      push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
     flow:
       login: docker-login
-      build: build-image
+      build: build
       publish: push-image
       beforePublish: [changelog, commit]
     packages:

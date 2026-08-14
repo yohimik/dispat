@@ -4,18 +4,18 @@
 #
 # A publish stage is a shell command, not a GitHub Action, so the official
 # actions/deploy-pages route is unavailable. Pushing a branch is the same
-# mechanism the coverage badge already uses (see the coverage-badge job in
-# .github/workflows/tests.yml), and it needs nothing beyond the contents:write
-# and GITHUB_TOKEN that release.yml already grants.
+# mechanism the coverage badge already uses (see coverage-badge.sh beside this
+# file, and the badges branch step in .github/workflows/release.yml), and it
+# needs nothing beyond the contents:write and GITHUB_TOKEN that release.yml
+# already grants.
+#
+# The tag is the record that this leg committed, so a deploy must only ever
+# happen inside the release run: without a guard, `dispat run deploy-docs`
+# would publish a developer's working tree to the live site. That guard is the
+# `deploy-docs` script in dispat.yaml, which reaches this file only when
+# `dispat if CI!=true` says otherwise.
 set -eu
 
-# The tag is the record that this leg committed, so a deploy must only ever
-# happen inside the release run. Without this guard `dispat run deploy-docs
-# docs` would publish a developer's working tree to the live site.
-if [ "${CI:-}" != "true" ]; then
-  echo "refusing to deploy outside CI (set CI=true to override)" >&2
-  exit 1
-fi
 : "${GITHUB_TOKEN:?GITHUB_TOKEN is required to push gh-pages}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required to push gh-pages}"
 

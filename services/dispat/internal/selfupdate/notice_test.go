@@ -191,9 +191,10 @@ func TestDescribeTellsTheThreeBuildsApart(t *testing.T) {
 	assert.Equal(t, "linux_amd64, go install", goInstall.Platform("linux", "amd64"))
 }
 
-// TestAssetNameMatchesTheBuildScript: this and scripts/build-dispat.sh are
-// the two halves of one contract, and a self-update that cannot find its
-// binary is what a disagreement looks like.
+// TestAssetNameMatchesTheBuildScript: this and services/dispat/Dockerfile,
+// which cross-compiles the release binaries under these names, are the two
+// halves of one contract, and a self-update that cannot find its binary is
+// what a disagreement looks like.
 func TestAssetNameMatchesTheBuildScript(t *testing.T) {
 	assert.Equal(t, "dispat-linux-amd64", AssetName("linux", "amd64"))
 	assert.Equal(t, "dispat-linux-arm64", AssetName("linux", "arm64"))

@@ -11,19 +11,29 @@ name: Release
 # tags pushed with the workflow's own GITHUB_TOKEN would not re-trigger a
 # tag-push workflow anyway, so the binary build and the GitHub release run
 # right here, after the dispat run, keyed off the tag it created.
+#
+# Four jobs, in order: is there anything to release, does the whole suite pass,
+# release it, then check that what was released installs. Each is a gate on the
+# next, so nothing is published by a run whose tests never ran.
 on:
   workflow_dispatch:
 
 permissions:
   contents: write
 
-env:
-  APP_NAME: dispat
+# A release pushes tags, a branch, gh-pages and four images. dispat's own
+# release lock would refuse the second run, but it would refuse it partway in;
+# queueing here means the second dispatch simply waits.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Run dispat, publish binaries
+  plan:
+    name: Is there anything to release
     runs-on: ubuntu-latest
+    outputs:
+      releasing: ${{ steps.status.outputs.releasing }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,10 +46,142 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # The docs package's version/build/publish stages shell out to pnpm; the
-      # pnpm workspace at the repository root is the only Node in this project.
-      # action-setup takes its version from packageManager in package.json, and
-      # must run before setup-node, whose pnpm cache needs pnpm on PATH.
+      - name: Build dispat from the checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
+
+      # `status` computes the plan and prints it without building, tagging or
+      # writing anything. --require-release turns "nothing to release" into
+      # exit 1, which is the whole answer this job exists for — hence the `if`
+      # rather than a bare command, which `set -e` would end the job on.
+      - name: Compute the plan
+        id: status
+        run: |
+          export PATH="$PWD:$PATH"
+          if ./dispat status --require-release; then
+            echo "releasing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "releasing=false" >> "$GITHUB_OUTPUT"
+            echo "### Nothing to release" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No package has commits since its last tag. The release was not attempted." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  tests:
+    name: Full suite
+    needs: plan
+    if: needs.plan.outputs.releasing == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # the badge branch
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build dispat from the checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
+
+      # The bracket the release binary build puts around itself, put around the
+      # suite as well: `link` writes the replace directives into
+      # services/dispat/go.mod, so the tests run in the same module state a
+      # release build does rather than leaving go.work to stand in for it. The
+      # pkg/* versions that go.mod pins are only as fresh as the last release
+      # that bumped them, and this is the gate immediately before the one that
+      # ships the working tree.
+      #
+      # `link` and `unlink` are the scripts in dispat.yaml, so the gate and the
+      # release cannot disagree about what the bracket is.
+      - name: Link the workspace dependencies
+        run: |
+          export PATH="$PWD:$PATH"
+          ./dispat run link --since all -p dispat
+
+      # Again, now that go.mod carries the redirects: the binary that drives
+      # the suite is built from the same checkout it is testing.
+      - name: Rebuild dispat from the linked checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
+
+      # --since all, not a window: this is the gate on a release, so every
+      # package's tests run whether or not it changed. It is also the only run
+      # that produces a complete set of coverage profiles, which is why the
+      # badge is computed here and nowhere else.
+      - name: Run every package's tests
+        run: |
+          export PATH="$PWD:$PATH"
+          ./dispat run tests --since all
+
+      # always(): the redirects must not outlive the job whatever the suite
+      # did, and unlink is idempotent, so closing an already-closed bracket is
+      # a no-op. verify-unlinked catches both ways it leaks — a surviving
+      # replace directive, and the go.sum entries anything that reconciles the
+      # workspace drops while the links are in place.
+      - name: Unlink the workspace dependencies
+        if: always()
+        run: |
+          export PATH="$PWD:$PATH"
+          ./dispat run unlink --since all -p dispat
+          ./dispat run verify-unlinked --since all -p dispat
+
+      - name: Compute coverage totals
+        run: sh scripts/coverage-badge.sh
+
+      - name: Upload merged coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage/coverage.out
+            coverage/coverage.json
+          retention-days: 7
+
+      - name: Push badge JSON to the badges branch
+        # A single-commit orphan branch, force-pushed on every release, so the
+        # badge data carries no history. README references it through the
+        # shields.io endpoint URL.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir badge && cp coverage/coverage.json badge/
+          cd badge
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage.json
+          git commit -qm "chore: update coverage badge"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+
+  release:
+    name: Run dispat, publish binaries
+    needs: tests
+    runs-on: ubuntu-latest
+    outputs:
+      cli-released: ${{ steps.dispat.outputs.cli-released }}
+      cli-version: ${{ steps.dispat.outputs.cli-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history: dispat reads tags and commit ranges
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # The docs package's version stage shells out to pnpm, as does the
+      # packages space's syncLock; the pnpm workspace at the repository root is
+      # the only Node in this project. The site build itself is containerised
+      # and needs none of this. action-setup takes its version from
+      # packageManager in package.json, and must run before setup-node, whose
+      # pnpm cache needs pnpm on PATH.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
 
@@ -66,9 +208,12 @@ jobs:
         run: go build -C services/dispat -o "$PWD/dispat" .
 
       - name: Run the release
+        id: dispat
         # dispat does the whole release itself: autoVersion rewrites, the
-        # release commit, tags, the push, and the GitHub release with the
-        # three cross-compiled binaries its build stage exported.
+        # release commit, tags, the push, and the GitHub release with the six
+        # cross-compiled binaries its containerised build stage exported. The
+        # run.postAll hook writes this step's cli-released / cli-version
+        # outputs; see the post-release scripts in dispat.yaml.
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,9 +226,45 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         # The checkout dir leads PATH so the nested `dispat changelog` /
-        # `dispat commit` invocations inside the stage scripts resolve the
-        # same freshly built binary this release ships. The committer
-        # identity comes from commit.name/commit.email in dispat.yaml.
+        # `dispat commit` / `dispat if` invocations inside the stage scripts
+        # resolve the same freshly built binary this release ships. The
+        # committer identity comes from commit.name/commit.email in
+        # dispat.yaml.
         run: |
           export PATH="$PWD:$PATH"
           ./dispat --log-format json
+
+  post-release:
+    name: ${{ matrix.os }}
+    needs: release
+    # Only when the CLI itself published. A run that released just the docs or
+    # an image has no new version to install, no v{version} alias tag to check
+    # out and no GitHub release carrying binaries.
+    if: needs.release.outputs.cli-released == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      # The tag the release just wrote, rather than main, so this tests exactly
+      # what was published even if something else has landed since.
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.cli-version }}
+
+      # `uses: ./` is the action as a caller gets it, rather than the scripts
+      # it happens to wrap: the inputs, the outputs and the PATH entry are all
+      # part of what is being tested.
+      - id: setup
+        uses: ./
+        with:
+          version: ${{ needs.release.outputs.cli-version }}
+
+      - name: The action installs what was just released
+        shell: bash
+        run: |
+          sh scripts/check-action.sh \
+            "${{ needs.release.outputs.cli-version }}" \
+            "${{ steps.setup.outputs.version }}" \
+            "${{ steps.setup.outputs.path }}"

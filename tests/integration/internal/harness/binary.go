@@ -105,7 +105,7 @@ var stamped struct {
 }
 
 // BuildVersioned compiles dispat with a version baked in, exactly the way
-// scripts/build-dispat.sh does for a release, and returns the path.
+// services/dispat/Dockerfile does for a release, and returns the path.
 //
 // Some behaviour only exists on a released binary: it is the one that reports
 // a real version, checks for updates, and can replace itself. An unstamped

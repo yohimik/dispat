@@ -1,6 +1,12 @@
-# The workflow is the repository's test suite — unit, integration, and the
-# coverage badge derived from them — so both the file and its name (what the
-# README badge renders) say "tests" rather than the generic "CI".
+# The workflow is the repository's test suite — the lint gate, the suite dispat
+# selects from the commits, and the build gate that used to be two workflows of
+# its own — so both the file and its name (what the README badge renders) say
+# "tests" rather than the generic "CI".
+#
+# What is deliberately not here: the coverage badge. A run selected by --since
+# tests part of the monorepo, so a merged total from it would be a number about
+# whichever packages happened to change. The badge is computed from the full
+# --since all suite in the release workflow instead.
 name: tests
 
 on:
@@ -42,10 +48,11 @@ jobs:
           go vet -C services/dispat ./...
           go vet -C tests/integration ./...
 
-      # The two ways a `--link-local` bracket leaks. build-dispat.sh checks
-      # both before its stage reports success; this is the same pair asked of
-      # every commit, because either one only fails for whoever consumes the
-      # published module, long after the tag exists.
+      # The two ways a `--link-local` bracket leaks. The dispat package's
+      # verify-unlinked script checks both before its build reports success;
+      # this is the same pair asked of every commit, because either one only
+      # fails for whoever consumes the published module, long after the tag
+      # exists.
       - name: No local link survived a build
         run: |
           if git grep -n '^replace github.com/yohimik/dispat' -- '*/go.mod'; then
@@ -59,12 +66,14 @@ jobs:
             fi
           done
 
-  unit:
-    name: Unit tests
+  test:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -72,34 +81,63 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Run unit tests with coverage
+      - name: Build dispat from the checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
+
+      # The bracket the release binary build puts around itself, put around the
+      # suite as well: `link` writes the replace directives into
+      # services/dispat/go.mod, so the tests run in the same module state a
+      # release build does rather than leaving go.work to stand in for it. The
+      # pkg/* versions that go.mod pins are only as fresh as the last release
+      # that bumped them, so a provider changed on this very commit would
+      # otherwise be tested as its published copy.
+      #
+      # `link` and `unlink` are the scripts in dispat.yaml, so this gate and
+      # the release cannot disagree about what the bracket is.
+      - name: Link the workspace dependencies
         run: |
-          go test -C pkg/ccme     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-ccme.out"
-          go test -C pkg/manifest ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-manifest.out"
-          go test -C pkg/models   ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-models.out"
-          go test -C pkg/scanner  ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-scanner.out"
-          go test -C pkg/writer   ./... -count=1 -timeout 10m -covermode=atomic -coverprofile="$PWD/cover-writer.out"
-          go test -C services/dispat ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile="$PWD/cover-cli.out"
+          export PATH="$PWD:$PATH"
+          ./dispat run link --since all -p dispat
 
-      - name: Upload unit coverage profiles
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-coverage
-          path: |
-            cover-ccme.out
-            cover-manifest.out
-            cover-models.out
-            cover-scanner.out
-            cover-writer.out
-            cover-cli.out
-          retention-days: 7
+      # Again, now that go.mod carries the redirects: the binary that drives
+      # the suite is built from the same checkout it is testing.
+      - name: Rebuild dispat from the linked checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
 
-  integration:
-    name: Integration tests
+      # HEAD~1 is the whole window on both triggers, which is why no base
+      # revision has to be worked out: a push to main lands one commit, and a
+      # pull_request is checked out as its merge commit, whose first parent is
+      # the base branch tip.
+      #
+      # --consumers is the point of running this through dispat: a change to
+      # pkg/manifest tests scanner, writer and the CLI too, because they are
+      # what the change can break.
+      - name: Run the tests dispat selects
+        run: |
+          export PATH="$PWD:$PATH"
+          ./dispat run tests --since HEAD~1 --consumers
+
+      # always(): the redirects must not outlive the job whatever the suite
+      # did, and unlink is idempotent, so closing an already-closed bracket is
+      # a no-op. verify-unlinked catches both ways it leaks — a surviving
+      # replace directive, and the go.sum entries anything that reconciles the
+      # workspace drops while the links are in place — which is the same pair
+      # the lint job asks of the commit itself.
+      - name: Unlink the workspace dependencies
+        if: always()
+        run: |
+          export PATH="$PWD:$PATH"
+          ./dispat run unlink --since all -p dispat
+          ./dispat run verify-unlinked --since all -p dispat
+
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # dispat reads tags to work out the plan
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -107,125 +145,31 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Run integration tests with binary coverage
-        # DISPAT_COVERDIR makes the harness build the dispat binary with
-        # -cover and point every invocation's GOCOVERDIR at the directory, so
-        # the black-box suite's flows count toward the coverage badge — they
-        # are the only coverage of much of the app and cli packages.
+      # The docker space builds two architectures per image, so the arm64 legs
+      # run emulated. The alternative is a second job on a native arm64 runner
+      # and a digest merge, which is a lot of moving parts for a gate that only
+      # has to answer "does this still build".
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dispat from the checkout
+        run: go build -C services/dispat -o "$PWD/dispat" .
+
+      # No link bracket here, unlike the test job: every package this gate
+      # reaches builds inside a container from a context copied out of the
+      # checkout, and the dispat package's `build` script opens and closes the
+      # bracket itself.
+      #
+      # This is what used to be the docs and images workflows, and the --since
+      # window is what used to be their `paths:` filters: a docker change
+      # builds the images, a docs change builds the site (which is also the
+      # link checker, since docusaurus.config.ts throws on a broken link), a
+      # dispat change cross-compiles the binaries.
+      #
+      # Deliberately without --consumers, unlike the test sweep: every image
+      # depends on the CLI, so consumers would turn any pkg/* change into four
+      # emulated multi-arch image builds.
+      - name: Build what changed
         run: |
-          export DISPAT_COVERDIR="$RUNNER_TEMP/dispat-covdata"
-          mkdir -p "$DISPAT_COVERDIR"
-          go test -C tests/integration ./... -count=1 -timeout 20m
-          go tool covdata textfmt -i="$DISPAT_COVERDIR" -o="$PWD/cover-integration.out"
-
-      - name: Run integration tests under the race detector
-        run: go test -C tests/integration . -count=1 -timeout 20m -race
-
-      - name: Upload integration coverage profile
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-coverage
-          path: cover-integration.out
-          retention-days: 7
-
-  coverage:
-    name: Coverage report
-    needs: [unit, integration]
-    runs-on: ubuntu-latest
-    steps:
-      # go tool cover -func resolves the profiles' import paths through the
-      # workspace, so the sources must be present.
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-
-      - name: Download coverage profiles
-        uses: actions/download-artifact@v4
-        with:
-          pattern: '*-coverage'
-          merge-multiple: true
-
-      - name: Compute coverage totals
-        run: |
-          # Three views of the suite for the job summary — the unit layer
-          # (the workspace modules' own tests), the integration layer (the
-          # black-box suite's instrumented binary — CLI module scope, since
-          # that is the binary) — with only the combined total across all
-          # seven profiles (go tool cover merges the overlapping blocks)
-          # becoming the README badge.
-          merge() { out=$1; shift; { head -n 1 "$1"; tail -q -n +2 "$@"; } > "$out"; }
-          pct() { go tool cover -func="$1" | tail -n 1 | awk '{print $3}'; }
-          badge() { # <label> <percentage> <file>: shields.io endpoint JSON
-            COLOR=red
-            BAND=$(printf '%.0f' "${2%\%}")
-            if   [ "$BAND" -ge 92 ]; then COLOR=brightgreen
-            elif [ "$BAND" -ge 85 ]; then COLOR=green
-            elif [ "$BAND" -ge 75 ]; then COLOR=yellowgreen
-            elif [ "$BAND" -ge 60 ]; then COLOR=yellow
-            elif [ "$BAND" -ge 40 ]; then COLOR=orange
-            fi
-            printf '{"schemaVersion": 1, "label": "%s", "message": "%s", "color": "%s"}\n' \
-              "$1" "$2" "$COLOR" > "$3"
-            cat "$3"
-          }
-
-          merge coverage-unit.out cover-ccme.out cover-manifest.out cover-models.out cover-scanner.out cover-writer.out cover-cli.out
-          merge coverage.out      cover-ccme.out cover-manifest.out cover-models.out cover-scanner.out cover-writer.out cover-cli.out cover-integration.out
-          UNIT=$(pct coverage-unit.out)
-          INTEGRATION=$(pct cover-integration.out)
-          TOTAL=$(pct coverage.out)
-          echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
-
-          {
-            echo "### Test coverage"
-            echo ""
-            echo '| Layer | Statement coverage |'
-            echo '|---|---|'
-            echo "| unit (all modules) | ${UNIT} |"
-            echo "| integration (CLI module, via the instrumented binary) | ${INTEGRATION} |"
-            echo "| **combined total** | **${TOTAL}** |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          badge "coverage" "$TOTAL" coverage.json
-
-      - name: Upload merged coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: |
-            coverage.out
-            coverage.json
-          retention-days: 7
-
-  coverage-badge:
-    name: Publish coverage badge
-    needs: [coverage]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download coverage artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage
-
-      - name: Push badge JSON to the badges branch
-        # A single-commit orphan branch, force-pushed on every main build, so
-        # the badge data carries no history. README references it through the
-        # shields.io endpoint URL.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir badge && cp coverage.json badge/
-          cd badge
-          git init -q -b badges
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add coverage.json
-          git commit -qm "chore: update coverage badge"
-          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+          export PATH="$PWD:$PATH"
+          ./dispat run build --since HEAD~1

@@ -1,0 +1,18 @@
+# The build context of services/dispat/Dockerfile alone. BuildKit reads a
+# <dockerfile>.dockerignore in preference to the one at the repository root, so
+# this widens the context for this build without touching the root file, whose
+# deny-all keeps the four image contexts down to install.sh.
+#
+# Nested re-inclusion needs every level spelled out: an exception cannot reach
+# into a folder the line above excluded, so services/ is let back in before its
+# children are filtered.
+*
+!pkg
+!services
+services/*
+!services/dispat
+
+# The export folder of a previous build. It is the one thing under
+# services/dispat that is output rather than source, and shipping it into the
+# context would grow with every build.
+services/dispat/dist

@@ -9,6 +9,7 @@ on:
       - action.yml
       - install.sh
       - install.ps1
+      - scripts/check-action.sh
       - .github/workflows/action.yml
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - action.yml
       - install.sh
       - install.ps1
+      - scripts/check-action.sh
       - .github/workflows/action.yml
 
 permissions:
@@ -45,20 +47,14 @@ jobs:
         with:
           version: 1.0.0-rc.3
 
-      - name: The action reports what it installed
+      # The same assertions the release's post-release job makes against the
+      # version it just published, so the two cannot drift: this one runs on a
+      # change to the action or an installer, that one on a change to what they
+      # install.
+      - name: The action reports and installs what it said it would
         shell: bash
         run: |
-          set -eu
-          echo "version output: ${{ steps.setup.outputs.version }}"
-          echo "path output:    ${{ steps.setup.outputs.path }}"
-          test "${{ steps.setup.outputs.version }}" = "1.0.0-rc.3"
-          test -x "${{ steps.setup.outputs.path }}"
-
-      - name: dispat is on PATH and runs
-        shell: bash
-        run: |
-          set -eu
-          # Straight off PATH, the way a job after this action would call it:
-          # the $GITHUB_PATH entry is half of what the action promises.
-          dispat --version
-          dispat --version | grep -q '1.0.0-rc.3'
+          sh scripts/check-action.sh \
+            1.0.0-rc.3 \
+            "${{ steps.setup.outputs.version }}" \
+            "${{ steps.setup.outputs.path }}"

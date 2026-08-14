@@ -113,7 +113,8 @@ func Executable() (string, error) {
 }
 
 // AssetName is what the release calls the binary for a platform. It mirrors
-// scripts/build-dispat.sh, which is the other half of this contract.
+// services/dispat/Dockerfile, whose cross-compile loop names the binaries and
+// is the other half of this contract.
 func AssetName(goos, goarch string) string {
 	name := "dispat-" + goos + "-" + goarch
 	if goos == "windows" {

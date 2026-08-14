@@ -841,7 +841,7 @@ func openFolderConfig(dir string) (*viper.Viper, string, error) {
 // shorthand the root accepts must not be a syntax error one folder down.
 func weakDecode(dc *mapstructure.DecoderConfig) {
 	dc.WeaklyTypedInput = true
-	hooks := []mapstructure.DecodeHookFunc{dependencyFormHook, entryLinesHook}
+	hooks := []mapstructure.DecodeHookFunc{dependencyFormHook, entryLinesHook, scriptFormHook}
 	if dc.DecodeHook != nil {
 		hooks = append(hooks, dc.DecodeHook)
 	}

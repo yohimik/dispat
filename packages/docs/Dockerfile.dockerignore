@@ -1,0 +1,26 @@
+# The build context of packages/docs/Dockerfile alone. BuildKit reads a
+# <dockerfile>.dockerignore in preference to the one at the repository root, so
+# this widens the context for this build without touching the root file, whose
+# deny-all keeps the four image contexts down to install.sh.
+#
+# Nested re-inclusion needs every level spelled out: an exception cannot reach
+# into a folder the line above excluded, so packages/ is let back in before its
+# children are filtered.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!imgs
+!packages
+packages/*
+!packages/docs
+
+# .git is here on purpose: showLastUpdateTime reads the history of every page.
+!.git
+
+# Everything under the package that is output rather than source. node_modules
+# in particular must not be copied over the tree pnpm installed in the image.
+packages/docs/node_modules
+packages/docs/build
+packages/docs/.docusaurus
+packages/docs/.cache-loader

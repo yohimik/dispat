@@ -310,7 +310,7 @@ func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...stri
 	// own pairs, and exec keeps the last value for a repeated key, so a
 	// scenario that wants the update check — or the lock — asks for it back by
 	// appending its own value.
-	cmd.Env = append(append(os.Environ(), defaultEnv...), env...)
+	cmd.Env = append(append(baseEnv(), defaultEnv...), env...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -358,6 +358,40 @@ func withRoot(args []string, root string) []string {
 // otherwise. See runBin for why each entry is here.
 var defaultEnv = []string{"DISPAT_UPDATE_CHECK=0", "DISPAT_UNSAFE_DISABLE_LOCK=true"}
 
+// itEnvPrefix is the suite's own namespace in the environment: the fixtures
+// name it in their configs (token-env, static env) and it must reach the
+// binary, unlike everything else dispat spells DISPAT_.
+const itEnvPrefix = "DISPAT_IT_"
+
+// baseEnv is the parent environment with dispat's own variables taken out.
+//
+// The binary reads DISPAT_* from its environment as a matter of design:
+// DISPAT_PACKAGE tells a nested step whose environment it was handed, and the
+// release variables are exactly what `dispat exec --env` is asked to produce
+// or not produce. Inheriting them means the fixture is no longer the only
+// thing deciding what the binary sees.
+//
+// That is not hypothetical. This suite runs as the `dispat` package's
+// tests:integration script, so its own parent is a `dispat run` sweep that
+// exports a full release environment — and a test asserting a version is
+// absent outside a release would read the sweep's instead, and pass or fail on
+// how it was invoked rather than on what it tests.
+//
+// Everything else is inherited: PATH, HOME and the Go toolchain variables are
+// what let the binary run at all. defaultEnv is appended afterwards, so the
+// two kill switches survive being stripped here.
+func baseEnv() []string {
+	all := os.Environ()
+	out := make([]string, 0, len(all))
+	for _, kv := range all {
+		if strings.HasPrefix(kv, "DISPAT_") && !strings.HasPrefix(kv, itEnvPrefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // LockEnabled is what a lock scenario appends to bring the release lock back
 // for one run, on top of a repository that has a remote to take it on.
 var LockEnabled = []string{"DISPAT_UNSAFE_DISABLE_LOCK=false"}
@@ -385,7 +419,7 @@ func (r *Repo) StartReleaseEnv(env []string, flags ...string) *Proc {
 	r.T.Helper()
 	full := append(append([]string{}, flags...), "--root", r.Root)
 	cmd := exec.Command(r.dispatBin, full...)
-	cmd.Env = append(append(os.Environ(), defaultEnv...), env...)
+	cmd.Env = append(append(baseEnv(), defaultEnv...), env...)
 	if dir := coverDir(); dir != "" {
 		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}

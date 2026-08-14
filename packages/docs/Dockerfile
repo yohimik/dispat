@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1
+#
+# The documentation site's build stage, containerised: the static site, built
+# from this checkout and exported to the host as packages/docs/build, which is
+# where the publish stage (scripts/deploy-docs.sh) expects to find it.
+#
+# The build is also the link checker — docusaurus.config.ts sets onBrokenLinks,
+# onBrokenAnchors and onBrokenMarkdownLinks to 'throw' — and the `typecheck`
+# target below is the second gate, so a CI job needs no Node of its own for
+# either.
+ARG NODE_VERSION=22
+
+FROM node:${NODE_VERSION}-alpine AS deps
+
+# corepack takes the pnpm version from packageManager in the root package.json,
+# so the container installs with exactly the pnpm the lockfile was written by.
+# The prompt would block a non-interactive build.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+
+WORKDIR /src
+
+# The manifests alone, before the sources: this layer is the expensive one, and
+# it should survive every edit that does not change a dependency. The workspace
+# root owns the lockfile, so the install runs there and reaches the one member.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/docs/package.json ./packages/docs/
+RUN --mount=type=cache,target=/pnpm-store \
+    pnpm config set store-dir /pnpm-store \
+ && pnpm install --frozen-lockfile
+
+FROM deps AS source
+
+# docusaurus.config.ts sets showLastUpdateTime, which reads the git history of
+# every page, so the repository has to come along and git has to be here to read
+# it. Another uid owns the copied tree, hence safe.directory.
+RUN apk add --no-cache git \
+ && git config --system --add safe.directory '*'
+
+# staticDirectories reaches out of the package to ../../imgs, so it is part of
+# this build even though it sits outside packages/docs.
+COPY imgs ./imgs
+COPY packages/docs ./packages/docs
+COPY .git ./.git
+
+# One gate that is not the build, so it can be asked for on its own.
+FROM source AS typecheck
+RUN pnpm --filter dispat-docs typecheck
+
+# The build, with the version snapshot folded into it.
+#
+# Freezing a Docusaurus version is not a stage of its own because `docs` and
+# `dispat` share the `cli` version group: they release together, always, so the
+# snapshot belongs to the same build that produces the site it appears in — and
+# the site is then built *with* it, which is what ships.
+#
+# DOCS_VERSION is the minor to freeze, or empty for no cut at all (a
+# prerelease: the rc train runs long, and every one of them would freeze
+# another full copy of the docs). An already-cut minor is left alone, so
+# building twice is a no-op the second time.
+FROM source AS build
+ARG DOCS_VERSION
+RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-${DOCS_VERSION}" ]; then \
+      pnpm --filter dispat-docs exec docusaurus docs:version "${DOCS_VERSION}"; \
+      echo "cut docs version ${DOCS_VERSION}"; \
+    fi \
+ && pnpm --filter dispat-docs build
+
+# The build produces two different kinds of thing, and both go back to the
+# package folder:
+#
+#   build/            the site — output, gitignored, read by the publish stage
+#   versioned_docs/   the snapshot — tracked source, picked up by the release
+#   versioned_sidebars/   commit that follows the build
+#   versions.json
+#
+# They are staged together because `--output type=local` writes a stage's whole
+# filesystem to one destination. The three source paths are copied only if they
+# exist: before the first stable release none of them do.
+FROM build AS staged
+RUN mkdir -p /out \
+ && cp -R packages/docs/build /out/build \
+ && for p in versioned_docs versioned_sidebars versions.json; do \
+      if [ -e "packages/docs/$p" ]; then cp -R "packages/docs/$p" "/out/$p"; fi; \
+    done
+
+FROM scratch AS export
+COPY --from=staged /out /

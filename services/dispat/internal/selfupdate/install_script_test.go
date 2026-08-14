@@ -34,7 +34,7 @@ func readRepoFile(t *testing.T, rel string) string {
 }
 
 // TestInstallScriptNamesTheSameAssets: install.sh and AssetName are the two
-// halves of one contract, the same way scripts/build-dispat.sh is (see
+// halves of one contract, the same way services/dispat/Dockerfile is (see
 // TestAssetNameMatchesTheBuildScript). A disagreement here is every install and
 // every image build failing at once on a 404, so the script's template is
 // evaluated against the Go function rather than eyeballed.

@@ -610,6 +610,32 @@ func validateEntryLines(label, key string, lines []EntryLine) error {
 // fileTitle, header and footer lists.
 var entryLinesType = reflect.TypeOf([]public.EntryLine(nil))
 
+// scriptType is the decode target the script hook watches for: one `scripts`
+// entry, at any of the four levels that carry the key.
+var scriptType = reflect.TypeOf(public.Script(nil))
+
+// scriptFormHook lifts a script written as a scalar into the one-element
+// sequence models.NormalizeScript defines it to be.
+//
+// It exists because WeaklyTypedInput would otherwise get there first, and its
+// string-to-slice conversion splits on commas: `echo "a,b"` would decode as
+// the two commands `echo "a` and `b"`, each an unbalanced shell fragment. That
+// is silent — the file is valid, the commands are wrong — and a comma is
+// ordinary in the shell text a script holds (`--output type=local,dest=out`).
+//
+// Only the scalar form is handled here; a list decodes element by element as
+// it always did, and anything else is passed through untouched so mapstructure
+// reports it against the key the user actually wrote.
+func scriptFormHook(_, to reflect.Type, data any) (any, error) {
+	if to != scriptType {
+		return data, nil
+	}
+	if s, ok := data.(string); ok {
+		return []string{s}, nil
+	}
+	return data, nil
+}
+
 // entryLinesHook expands the shorthand element shapes of a record-line list
 // before decoding. An element is a full object, a bare string, or a bare array
 // of strings; the two bare shapes are the common case — text with no filters —

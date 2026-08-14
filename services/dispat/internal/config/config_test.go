@@ -199,6 +199,33 @@ func TestLoadConcurrencyScalarWeakTyping(t *testing.T) {
 	assert.Equal(t, 3, cfg.PublishConcurrency, "and to publish")
 }
 
+func TestLoadScriptWithCommaStaysOneCommand(t *testing.T) {
+	// A comma is ordinary in the shell text a script holds, and weak decoding
+	// would split a scalar on it — leaving two unbalanced fragments that fail
+	// in the shell rather than in the loader. One command in, one command out.
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{
+			"b":     `echo "a,b"`,
+			"build": `docker buildx build --output "type=local,dest=$PWD/dist" ../..`,
+			"multi": "echo \"one, two\"\necho second\n",
+			"list":  []any{`echo "x,y"`, `echo "z,w"`},
+		},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "b"}},
+		},
+	}, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, Script{`echo "a,b"`}, cfg.Scripts["b"],
+		"a scalar script is one command however many commas it contains")
+	assert.Equal(t, Script{`docker buildx build --output "type=local,dest=$PWD/dist" ../..`},
+		cfg.Scripts["build"], "the buildx --output form survives intact")
+	assert.Equal(t, Script{"echo \"one, two\"\necho second\n"}, cfg.Scripts["multi"],
+		"a multi-line scalar is still one command, newlines and all")
+	assert.Equal(t, Script{`echo "x,y"`, `echo "z,w"`}, cfg.Scripts["list"],
+		"an explicit list still decodes element by element")
+}
+
 func TestLoadDefaults(t *testing.T) {
 	cfg, err := loadModel(t, minimalConfig(), "pkgs/core")
 	require.NoError(t, err)
