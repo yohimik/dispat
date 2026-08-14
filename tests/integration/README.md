@@ -40,7 +40,13 @@ go test ./... -count 5           # stability check: repeated runs pass
 
 ## Results
 
-The suite's current status and per-area coverage summary live in **[test results](./docs/test-results.md)**: what passes
-(including `-race` and repeated `-count` runs), what each test file covers, and the planner properties fenced by
-dedicated regression tests. The workspace's unit-test statement coverage table lives in
-**[unit test coverage](https://yohimik.github.io/dispat/internals/coverage)**.
+Nothing about how this suite is doing is written down here, because it would be a claim rather than a measurement.
+Every release runs the whole thing and publishes what it found with the site it releases:
+
+- **[test results](https://yohimik.github.io/dispat/internals/test-results)** — the counts, the timings, the race
+  pass, and what each test file covers;
+- **[test coverage](https://yohimik.github.io/dispat/internals/coverage)** — the statements the whole workspace's
+  tests reach, per package, this suite's instrumented binary included.
+
+The claim-by-claim matrix stays here, in the [test plan](./docs/test-plan.md), because it belongs beside the tests it
+maps: a row per test, saying which goal it proves.

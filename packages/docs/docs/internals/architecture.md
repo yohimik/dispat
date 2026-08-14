@@ -503,9 +503,9 @@ in-memory fakes, and every internal package and every `pkg/` module has its own 
 The integration suite is catalogued claim by claim in the
 [test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md), whose coverage matrix maps
 each of its thirty goals onto the tests that prove it, and summarised per area in
-[test results](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-results.md). The unit suites have
-no equivalent catalogue: what they assert is stated in each test's own name and doc comment. The statement-coverage
-snapshot per package is in [coverage](./coverage.md).
+[test results](./test-results.mdx). The unit suites have
+no equivalent catalogue: what they assert is stated in each test's own name and doc comment. What the whole suite
+reaches, per package, is in [coverage](./coverage.mdx).
 
 The composition claims (the compiled binary, real git over a process boundary, exit codes, scheduling under real
 concurrency, signal handling) live exclusively in the black-box

@@ -153,21 +153,24 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [dispat in CI](https://yohimik.github.io/dispat/reference/ci)                                        | The GitHub Action, the container images, the install script: getting dispat onto a runner, and gating a pipeline on the plan with `--require-release`.                                      |
 | [Updating dispat](https://yohimik.github.io/dispat/reference/self-update)                            | `dispat self-update`: how the binary replaces itself, the backup and the rollback, the update notice.                                                                                      |
 | [Architecture](https://yohimik.github.io/dispat/internals/architecture)                              | Modules, algorithms, execution model, design decisions, testing.                                                                                                                           |
-| [Test coverage](https://yohimik.github.io/dispat/internals/coverage)                                 | The per-package statement coverage table and how to reproduce it.                                                                                                                          |
-| [Integration tests](../../tests/integration)                                                         | The black-box suite: setup, running, results; links the test plan.                                                                                                                         |
+| [Test coverage](https://yohimik.github.io/dispat/internals/coverage)                                 | What the suite reaches, per package, measured by the release that published the page.                                                                                                      |
+| [Test results](https://yohimik.github.io/dispat/internals/test-results)                              | What the suite did: the counts, the timings, the race pass, and what each area covers.                                                                                                     |
+| [Integration tests](../../tests/integration)                                                         | The black-box suite itself: setup, running, and the test plan.                                                                                                                             |
 
 [`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) show every option in
 one annotated file.
 
 ## Testing
 
-The failure semantics above are the tool's main promise, so they are tested at two independent layers (over 1,700 test
-functions and 29 fuzz targets, run by [CI](../../.github/workflows/tests.yml) on every push): unit tests against in-memory
-fakes, and a black-box [integration suite](../../tests/integration) that compiles the real binary and drives it against
-disposable git repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines
-([results](../../tests/integration/docs/test-results.md), [test plan](../../tests/integration/docs/test-plan.md)).
-Together they hold **95.6%** workspace statement coverage
-([per-package table](https://yohimik.github.io/dispat/internals/coverage), [test inventory](https://yohimik.github.io/dispat/internals/architecture#testing)).
+The failure semantics above are the tool's main promise, so they are tested at two independent layers, both run by
+[CI](../../.github/workflows/tests.yml) on every push: unit tests against in-memory fakes, and a black-box
+[integration suite](../../tests/integration) that compiles the real binary and drives it against disposable git
+repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines.
+
+No number about the suite is written here. Every release measures them and publishes them with the site it releases:
+what the tests reach is in [test coverage](https://yohimik.github.io/dispat/internals/coverage), what they did is in
+[test results](https://yohimik.github.io/dispat/internals/test-results), and the claim-by-claim matrix behind the
+integration suite is its [test plan](../../tests/integration/docs/test-plan.md).
 
 ## Next: 1.1.0
 
