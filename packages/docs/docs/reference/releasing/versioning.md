@@ -193,8 +193,52 @@ WRN members of versioning group "platform" are on different major versions: core
 It is a warning rather than an error because every one of those versions is genuinely published, so there is no other
 correct plan. If it is not what you meant, fix it before the release: correct the newcomer's tag, or keep it out of
 the group until its version lines up. Members apart by only a minor or a patch are not reported, because that is the
-ordinary state a failed ride leaves behind and `W210` already covers it. Sparse members are not reported either:
-staying behind is what a sparse mode is for.
+ordinary state a failed ride leaves behind and `W210` already covers it.
+
+### Joining with a versioning of its own
+
+Setting `versioning` on a package overrides its space's without taking the package out of the space's group, so one
+group can hold members in different modes. That is the same override described above, seen from the group's side, and
+it splits the group's work between two different deciders:
+
+* **Where the group goes next** is decided by every member's published version, whatever mode that member is in.
+* **Which members release to get there** is decided by each member's own mode: a plain mode rides along, a sparse one
+  waits until it has changes of its own.
+
+Those two are easy to conflate, and the gap between them is where the surprise lives. A sparse member never rides, but
+its tag still votes. Take a `fixedMajor` space holding `core` at `1.2.0` and `tools` at `9.0.0`, with `tools`
+overridden to the sparse spelling of the same depth so that only the assignment differs:
+
+```json
+{
+  "spaces": {
+    "libs": {"path": "packages", "versioning": "fixedMajor"}
+  },
+  "packages": {
+    "tools": {"versioning": "fixedMajorSparse"}
+  }
+}
+```
+
+A fix in `core` takes the group to major 9, because `tools` is the newest member and no member goes backwards. `core`
+joins the new major line at `9.0.0`, not at `9.0.1`: the major it is moving to is one it has never published, so the
+line starts at its beginning. `tools` publishes nothing at all, having no changes of its own, which is exactly what its
+sparse mode promises. So the member that decided the version is the one member that did not move:
+
+```console
+$ dispat
+WRN members of versioning group "libs" are on different major versions: tools is at 9.0.0 while core is at 1.2.0;
+    the group versions from the newest, so every member moves to major 9  code=W233 package=group:libs
+INF ● changed bump=patch package=core reason=direct version="1.2.0 -> 9.0.0"
+INF unchanged package=tools version=9.0.0
+INF published package=core tag=core@9.0.0
+INF done published=1 failed=0 skipped=0 unchanged=1
+```
+
+Sparseness excuses trailing the group, not deciding it. A sparse member sitting *below* the group's major draws no
+`W233`, because that is the mode working as designed and `W210` catches it up the moment it has something to release. A
+sparse member *holding* the group's major is named like any other, because at that point it is not staying out of the
+way, it is choosing where everybody lands.
 
 ## Acting on a group
 
@@ -244,7 +288,7 @@ already on, so it pins that one package and leaves the rest untouched.
 | `W211` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
 | `W212` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
 | `W213` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
-| `W233` | Members are on different major versions, so the newest one is about to take the rest of the group to its major. |
+| `W233` | Members are on different major versions, so the newest one is about to take the rest of the group to its major. It names the member that decided, including a sparse one, which may not be a member that releases. |
 
 `W210` cannot be suppressed. Nothing in the commit log explains why that package is in the plan, so the warning is the
 only place a reader can find out.

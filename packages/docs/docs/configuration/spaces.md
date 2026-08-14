@@ -223,7 +223,10 @@ The joining rules:
   Group and space names share one namespace (a declaration shadowing a space name is rejected), and an unknown
   reference is an error, the same typo protection as an unknown dependency endpoint.
 - A member's assignment mode is its own: a `fixed` space and a `fixedSparse` package can join the same group. The shared
-  version is computed once, then each member follows its own mode (ride along, or stay behind when unchanged).
+  version is computed once, then each member follows its own mode (ride along, or stay behind when unchanged). The
+  computation reads every member's published version, sparse ones included, so a sparse member can decide where the
+  group lands without releasing anything itself. See
+  [joining with a versioning of its own](../reference/releasing/versioning.md#joining-with-a-versioning-of-its-own).
 - The *depth* is the group's, not the member's, because there is one shared version to compute. Members asking for
   different depths (a `fixedMajor` package inside a `fixedMajorMinor` group, reachable by overriding one package's
   `versioning` without changing its group) resolve to the deepest any of them asked for, since sharing the major and
