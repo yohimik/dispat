@@ -1,10 +1,13 @@
 package integration_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -116,6 +119,81 @@ func TestIfRunsInTheInvocationFolder(t *testing.T) {
 	res := r.CommandAt("packages/core", "if", "!ABSENT", "--then", "cat main.txt")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "core", "the script read a file relative to --root")
+}
+
+// TestIfRunsWhereItIsTold: --in moves the chosen script, in the vocabulary
+// exec uses for the same question. The half a command line settles on its own,
+// a path and cwd, is resolved without reading anything, which is what keeps the
+// command's promise that a condition costs no configuration.
+func TestIfRunsWhereItIsTold(t *testing.T) {
+	r := harness.New(t)
+	require.NoError(t, os.MkdirAll(r.Path("build"), 0o755))
+	require.NoError(t, os.WriteFile(r.Path("build", "marker.txt"), []byte("in-build"), 0o644))
+
+	// No config file exists anywhere in this repository, which is the sharpest
+	// witness available: anything that works here provably read none.
+	require.NoFileExists(t, r.Path("dispat.json"))
+
+	res := r.Command("if", "!ABSENT", "--then", "cat marker.txt", "--in", "build")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "in-build", "a path needs no configuration to resolve")
+
+	res = r.CommandAt("build", "if", "!ABSENT", "--then", "cat marker.txt", "--in", "cwd")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "in-build", "nor does cwd")
+
+	// A folder that is not there is refused by name rather than by whatever the
+	// shell would have said about a directory it could not enter.
+	res = r.Command("if", "!ABSENT", "--then", "true", "--in", "nowhere")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "nowhere")
+
+	// A malformed value is decided by the flags alone, so it is the usage exit.
+	assert.Equal(t, 2, r.Command("if", "!ABSENT", "--then", "true", "--in", "pkg:").Code)
+}
+
+func TestIfReadsTheConfigOnlyForAnInWithANameInIt(t *testing.T) {
+	// The line the feature draws: asking where a package is costs finding out,
+	// and asking anything else still costs nothing. A config file that cannot
+	// be parsed is what makes the difference visible, since every command that
+	// reads one fails on it and every command that does not is unaffected.
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	cfg := harness.BaseFile(2)
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	r.WriteConfigModel(cfg)
+
+	res := r.Command("if", "!ABSENT", "--then", "pwd", "--in", "pkg:core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assertSameFolder(t, r.Path("packages", "core"), res.Stdout)
+
+	res = r.Command("if", "!ABSENT", "--then", "pwd", "--in", "space:libs")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assertSameFolder(t, r.Path("packages"), res.Stdout)
+
+	res = r.CommandAt("packages/core", "if", "!ABSENT", "--then", "pwd", "--in", "root")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assertSameFolder(t, r.Root, res.Stdout)
+
+	res = r.Command("if", "!ABSENT", "--then", "true", "--in", "pkg:ghost")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "ghost")
+
+	// Now break the file. Only the invocations that have to look a name up
+	// notice, which is the whole claim stated as one comparison.
+	require.NoError(t, os.WriteFile(r.Path("dispat.json"), []byte("{ not json"), 0o644))
+
+	res = r.Command("if", "!ABSENT", "--then", "echo ran-anyway")
+	require.Equal(t, 0, res.Code, "a bare if reads no configuration, broken or not")
+	assert.Contains(t, res.Stdout, "ran-anyway")
+
+	res = r.Command("if", "!ABSENT", "--then", "echo ran-anyway", "--in", "build")
+	assert.NotEqual(t, 0, res.Code, "the folder is missing, but the config was still never read")
+	assert.NotContains(t, res.Stdout+res.Stderr, "configuration",
+		"a path is resolved without one")
+
+	res = r.Command("if", "!ABSENT", "--then", "true", "--in", "pkg:core")
+	assert.Equal(t, 1, res.Code, "naming a package is what makes the broken file matter")
 }
 
 func TestIfNests(t *testing.T) {
