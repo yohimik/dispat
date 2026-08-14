@@ -75,13 +75,13 @@ func TestExecResolvesTheSubjectsScript(t *testing.T) {
 	// must not silently run text from a level nobody asked about.
 	a := execRepo(t, layeredConfig())
 	for name, tc := range map[string]struct {
-		subject ExecSubject
+		subject Location
 		want    string
 	}{
-		"top level":  {ExecSubjectRoot(), "root-build"},
-		"space":      {ExecSubjectSpace("libs"), "space-build"},
-		"package":    {ExecSubjectPackage("core"), "core-build"},
-		"standalone": {ExecSubjectPackage("standalone"), "alone-build"},
+		"top level":  {LocationRoot(), "root-build"},
+		"space":      {LocationSpace("libs"), "space-build"},
+		"package":    {LocationPackage("core"), "core-build"},
+		"standalone": {LocationPackage("standalone"), "alone-build"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, code, err := runExec(t, a, ExecOptions{Script: "build", Subject: tc.subject})
@@ -105,7 +105,7 @@ func TestExecWithoutFallbackRefusesANameFromAnotherLevel(t *testing.T) {
 	// The whole point of the exact mode: a script defined a level away is a
 	// mistake worth reporting, not text to run quietly.
 	a := execRepo(t, layeredConfig())
-	_, code, err := runExec(t, a, ExecOptions{Script: "only-root", Subject: ExecSubjectPackage("core")})
+	_, code, err := runExec(t, a, ExecOptions{Script: "only-root", Subject: LocationPackage("core")})
 	require.Error(t, err)
 	assert.Equal(t, 1, code)
 	assert.Contains(t, err.Error(), `no script "only-root"`)
@@ -117,9 +117,9 @@ func TestExecFallbackWalksUpToTheTopLevel(t *testing.T) {
 	// --fallback is dispat run's own resolution, so a name declared once at
 	// the top level is reachable from any package.
 	a := execRepo(t, layeredConfig())
-	for name, subj := range map[string]ExecSubject{
-		"from a package": ExecSubjectPackage("core"),
-		"from a space":   ExecSubjectSpace("libs"),
+	for name, subj := range map[string]Location{
+		"from a package": LocationPackage("core"),
+		"from a space":   LocationSpace("libs"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, _, err := runExec(t, a, ExecOptions{Script: "only-root", Subject: subj, Fallback: true})
@@ -133,7 +133,7 @@ func TestExecFallbackStillPrefersTheNearerLevel(t *testing.T) {
 	// Falling back must not flatten the layers: the package's own answer wins
 	// over its space's, which wins over the top level's.
 	a := execRepo(t, layeredConfig())
-	f, _, err := runExec(t, a, ExecOptions{Script: "build", Subject: ExecSubjectPackage("core"), Fallback: true})
+	f, _, err := runExec(t, a, ExecOptions{Script: "build", Subject: LocationPackage("core"), Fallback: true})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"core-build"}, f.ran, "the nearest level that has the name answers")
 }
@@ -142,16 +142,16 @@ func TestExecFallbackReportsEveryLevelItTried(t *testing.T) {
 	// A missing script and a misplaced one read differently, which is the
 	// reason the two modes have separate messages.
 	a := execRepo(t, layeredConfig())
-	_, _, err := runExec(t, a, ExecOptions{Script: "ghost", Subject: ExecSubjectPackage("core"), Fallback: true})
+	_, _, err := runExec(t, a, ExecOptions{Script: "ghost", Subject: LocationPackage("core"), Fallback: true})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nor in", "the layered mode names the whole chain")
 }
 
 func TestExecRefusesAnUnknownSubject(t *testing.T) {
 	a := execRepo(t, layeredConfig())
-	for name, subj := range map[string]ExecSubject{
-		"package": ExecSubjectPackage("ghost"),
-		"space":   ExecSubjectSpace("ghost"),
+	for name, subj := range map[string]Location{
+		"package": LocationPackage("ghost"),
+		"space":   LocationSpace("ghost"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, code, err := runExec(t, a, ExecOptions{Script: "build", Subject: subj})
@@ -167,10 +167,10 @@ func TestExecRefusesAnUnknownSubjectEvenWhenTheTextResolved(t *testing.T) {
 	// nonsense, which is the one way the environment gets to fail on its own.
 	// It must fail rather than quietly hand the script an empty environment.
 	a := execRepo(t, layeredConfig())
-	from := ExecSubjectRoot()
-	for name, subj := range map[string]ExecSubject{
-		"package": ExecSubjectPackage("ghost"),
-		"space":   ExecSubjectSpace("ghost"),
+	from := LocationRoot()
+	for name, subj := range map[string]Location{
+		"package": LocationPackage("ghost"),
+		"space":   LocationSpace("ghost"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, code, err := runExec(t, a, ExecOptions{
@@ -188,9 +188,9 @@ func TestExecScriptFromMovesTheTextAndNotTheEnvironment(t *testing.T) {
 	// touched the environment the two subjects would collapse back into one,
 	// which is the design this flag exists to avoid.
 	a := execRepo(t, layeredConfig())
-	from := ExecSubjectPackage("core")
+	from := LocationPackage("core")
 	f, _, err := runExec(t, a, ExecOptions{
-		Script: "build", Subject: ExecSubjectSpace("libs"), ScriptFrom: &from,
+		Script: "build", Subject: LocationSpace("libs"), ScriptFrom: &from,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"core-build"}, f.ran, "the text comes from --script-from")
@@ -201,9 +201,9 @@ func TestExecFallbackLayersFromTheOverriddenLocation(t *testing.T) {
 	// With --script-from the chain starts where the text was redirected to,
 	// not at the subject: the flag moved the lookup, so it moves all of it.
 	a := execRepo(t, layeredConfig())
-	from := ExecSubjectSpace("libs")
+	from := LocationSpace("libs")
 	f, _, err := runExec(t, a, ExecOptions{
-		Script: "only-space", Subject: ExecSubjectRoot(), ScriptFrom: &from, Fallback: true,
+		Script: "only-space", Subject: LocationRoot(), ScriptFrom: &from, Fallback: true,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"space-only"}, f.ran)
@@ -214,12 +214,12 @@ func TestExecStaticEnvLayersOverTheSubject(t *testing.T) {
 	// because that is what a release hands a script.
 	a := execRepo(t, layeredConfig())
 	for name, tc := range map[string]struct {
-		subject ExecSubject
+		subject Location
 		want    string
 	}{
-		"top level": {ExecSubjectRoot(), "MSG=from-root"},
-		"space":     {ExecSubjectSpace("libs"), "MSG=from-space"},
-		"package":   {ExecSubjectPackage("core"), "MSG=from-core"},
+		"top level": {LocationRoot(), "MSG=from-root"},
+		"space":     {LocationSpace("libs"), "MSG=from-space"},
+		"package":   {LocationPackage("core"), "MSG=from-core"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, _, err := runExec(t, a, ExecOptions{Script: "build", Subject: tc.subject, Fallback: true})
@@ -336,9 +336,9 @@ func TestExecRefusesTheReleaseVariablesWithoutAPackage(t *testing.T) {
 	// top level cannot supply them. Refusing beats a quietly smaller
 	// environment discovered inside the script.
 	a := execRepo(t, layeredConfig())
-	for name, subj := range map[string]ExecSubject{
-		"top level": ExecSubjectRoot(),
-		"space":     ExecSubjectSpace("libs"),
+	for name, subj := range map[string]Location{
+		"top level": LocationRoot(),
+		"space":     LocationSpace("libs"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, code, err := runExec(t, a, ExecOptions{
@@ -351,33 +351,248 @@ func TestExecRefusesTheReleaseVariablesWithoutAPackage(t *testing.T) {
 	}
 }
 
-func TestParseScriptFrom(t *testing.T) {
-	for spec, want := range map[string]ExecSubject{
-		"root":       ExecSubjectRoot(),
-		"pkg:core":   ExecSubjectPackage("core"),
-		"space:libs": ExecSubjectSpace("libs"),
+func TestParseSubject(t *testing.T) {
+	// The levels a --for or a --script-from may name.
+	for spec, want := range map[string]Location{
+		"root":       LocationRoot(),
+		"cwd":        LocationCwd(),
+		"pkg:core":   LocationPackage("core"),
+		"space:libs": LocationSpace("libs"),
 		// The name is everything after the first colon, so a name may contain
 		// one: "@acme/ui" has none, but a scoped path form might.
-		"pkg:@acme/ui": ExecSubjectPackage("@acme/ui"),
+		"pkg:@acme/ui": LocationPackage("@acme/ui"),
 	} {
 		t.Run(spec, func(t *testing.T) {
-			got, err := ParseScriptFrom(spec)
+			got, err := ParseSubject(spec)
 			require.NoError(t, err)
 			assert.Equal(t, want, got)
 		})
 	}
 	for name, spec := range map[string]string{
-		"no colon":     "core",
+		// A bare word is a folder, and a folder is not a level: --for wants to
+		// know which scripts map to read, and no folder answers that.
+		"a folder":     "core",
+		"a path":       "./packages/core",
 		"empty name":   "pkg:",
 		"unknown kind": "package:core",
 		"empty":        "",
 		"colon only":   ":",
 	} {
 		t.Run("invalid/"+name, func(t *testing.T) {
-			_, err := ParseScriptFrom(spec)
-			require.Error(t, err, "an unusable --script-from must not parse")
+			_, err := ParseSubject(spec)
+			require.Error(t, err, "an unusable subject must not parse")
 		})
 	}
+}
+
+func TestParseLocation(t *testing.T) {
+	// --in takes everything a subject does, and a folder besides.
+	for spec, want := range map[string]Location{
+		"root":       LocationRoot(),
+		"cwd":        LocationCwd(),
+		"pkg:core":   LocationPackage("core"),
+		"space:libs": LocationSpace("libs"),
+		"build":      LocationPath("build"),
+		"./build":    LocationPath("./build"),
+		"../sibling": LocationPath("../sibling"),
+		"/abs/path":  LocationPath("/abs/path"),
+		// The reserved words win, so a folder actually called one of them is
+		// spelled the way a shell would disambiguate it too.
+		"./root": LocationPath("./root"),
+		"./cwd":  LocationPath("./cwd"),
+	} {
+		t.Run(spec, func(t *testing.T) {
+			got, err := ParseLocation(spec)
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+		})
+	}
+	for name, spec := range map[string]string{
+		"empty name":   "pkg:",
+		"unknown kind": "package:core",
+		"colon only":   ":",
+	} {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			_, err := ParseLocation(spec)
+			require.Error(t, err, "a malformed location must not parse as a folder")
+		})
+	}
+}
+
+func TestLocationDeferredMarksWhatNeedsAConfiguration(t *testing.T) {
+	// What `dispat if` asks before deciding whether to load anything.
+	for name, loc := range map[string]Location{
+		"root":    LocationRoot(),
+		"package": LocationPackage("core"),
+		"space":   LocationSpace("libs"),
+	} {
+		assert.True(t, loc.Deferred(), name+" can only be placed by a configuration")
+	}
+	for name, loc := range map[string]Location{
+		"cwd":  LocationCwd(),
+		"path": LocationPath("./build"),
+	} {
+		assert.False(t, loc.Deferred(), name+" is answered by the command line alone")
+	}
+}
+
+func TestResolveSubjectReadsTheFolder(t *testing.T) {
+	// --for cwd is the filter's own reading of a folder, so the level it finds
+	// is the package or space `dispat run` would have narrowed to.
+	a := execRepo(t, layeredConfig())
+	for name, tc := range map[string]struct {
+		dir  string
+		want Location
+	}{
+		"inside a package":    {filepath.Join(a.root, "packages", "core"), LocationPackage("core")},
+		"below a package":     {filepath.Join(a.root, "packages", "core", "src"), LocationPackage("core")},
+		"inside a space":      {filepath.Join(a.root, "packages"), LocationSpace("libs")},
+		"a standalone":        {filepath.Join(a.root, "standalone"), LocationPackage("standalone")},
+		"the monorepo root":   {a.root, LocationRoot()},
+		"in nothing at all":   {filepath.Join(a.root, "docs"), LocationRoot()},
+		"a package not there": {filepath.Join(a.root, "packages", "gone"), LocationSpace("libs")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := a.ResolveSubject(LocationCwd(), tc.dir)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveSubjectLeavesANamedLevelAlone(t *testing.T) {
+	// Only cwd is resolved. A named level is already the answer, and reading
+	// the folder for it would let where you stand change what you asked for.
+	a := execRepo(t, layeredConfig())
+	for _, loc := range []Location{LocationRoot(), LocationPackage("core"), LocationSpace("libs")} {
+		got, err := a.ResolveSubject(loc, filepath.Join(a.root, "standalone"))
+		require.NoError(t, err)
+		assert.Equal(t, loc, got)
+	}
+}
+
+func TestExecFromTheCurrentFolder(t *testing.T) {
+	// The whole feature, end to end inside the app: standing in core's folder
+	// runs core's build with core's environment, without either being named.
+	a := execRepo(t, layeredConfig())
+	core := filepath.Join(a.root, "packages", "core")
+	f, code, err := runExec(t, a, ExecOptions{Script: "build", Subject: LocationCwd(), Dir: core})
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, []string{"core-build"}, f.ran)
+	assert.Contains(t, f.envs[0], "MSG=from-core", "the environment follows the folder too")
+}
+
+func TestExecScriptFromTheCurrentFolder(t *testing.T) {
+	// cwd on --script-from moves the lookup and nothing else, exactly as a
+	// named level does there.
+	a := execRepo(t, layeredConfig())
+	core := filepath.Join(a.root, "packages", "core")
+	from := LocationCwd()
+	f, _, err := runExec(t, a, ExecOptions{
+		Script: "build", Subject: LocationSpace("libs"), ScriptFrom: &from, Dir: core,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core-build"}, f.ran, "the text came from the folder")
+	assert.Contains(t, f.envs[0], "MSG=from-space", "the environment stayed with the subject")
+}
+
+func TestExecRefusesTheReleaseVariablesFromAFolderThatIsNoPackage(t *testing.T) {
+	// The check the controller cannot make: --for cwd may or may not be a
+	// package, and only the resolved folder says which.
+	a := execRepo(t, layeredConfig())
+	_, code, err := runExec(t, a, ExecOptions{
+		Script: "build", Subject: LocationCwd(), Fallback: true,
+		Env: EnvScopeDispat, Dir: a.root,
+	})
+	require.Error(t, err)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, err.Error(), "needs a package")
+}
+
+func TestResolveDirPlacesEveryKind(t *testing.T) {
+	a := execRepo(t, layeredConfig())
+	stood := filepath.Join(a.root, "standalone")
+	for name, tc := range map[string]struct {
+		loc  Location
+		want string
+	}{
+		"a package":   {LocationPackage("core"), filepath.Join(a.root, "packages", "core")},
+		"a space":     {LocationSpace("libs"), filepath.Join(a.root, "packages")},
+		"the root":    {LocationRoot(), a.root},
+		"cwd":         {LocationCwd(), stood},
+		"a rel path":  {LocationPath("../packages/api"), filepath.Join(a.root, "packages", "api")},
+		"an abs path": {LocationPath(filepath.Join(a.root, "packages")), filepath.Join(a.root, "packages")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := a.ResolveDir(tc.loc, stood)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, filepath.Clean(got))
+		})
+	}
+}
+
+func TestResolveDirRefusesWhatIsNotAFolder(t *testing.T) {
+	// Caught here rather than by the shell, which would name neither the flag
+	// nor the value that was wrong.
+	a := execRepo(t, layeredConfig())
+	for name, loc := range map[string]Location{
+		"a missing folder":   LocationPath("nowhere"),
+		"a file":             LocationPath(filepath.Join("packages", "core", "package.json")),
+		"an unknown package": LocationPackage("ghost"),
+		"an unknown space":   LocationSpace("ghost"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := a.ResolveDir(loc, a.root)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestPlainDirNeedsNoConfiguration(t *testing.T) {
+	// What `dispat if --in` leans on: the two kinds a command line settles on
+	// its own, resolved with no App and therefore no config file.
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "build"), 0o755))
+
+	got, err := PlainDir(LocationCwd(), root)
+	require.NoError(t, err)
+	assert.Equal(t, root, got)
+
+	got, err = PlainDir(LocationPath("build"), root)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "build"), got)
+
+	_, err = PlainDir(LocationPath("nowhere"), root)
+	require.Error(t, err, "a missing folder is refused without a configuration too")
+
+	for _, loc := range []Location{LocationRoot(), LocationPackage("core"), LocationSpace("libs")} {
+		_, err := PlainDir(loc, root)
+		require.Error(t, err, "a level is not something a folder alone can place")
+	}
+}
+
+func TestExecDiscoversTheWorkspaceOnce(t *testing.T) {
+	// Three locations in one invocation used to be three filesystem walks.
+	// The cache is what keeps --for cwd as cheap as the flag it replaced.
+	a := execRepo(t, layeredConfig())
+	core := filepath.Join(a.root, "packages", "core")
+	first, err := a.packages()
+	require.NoError(t, err)
+
+	from := LocationCwd()
+	in := LocationPackage("api")
+	_, _, err = runExec(t, a, ExecOptions{
+		Script: "build", Subject: LocationCwd(), ScriptFrom: &from, In: &in, Dir: core,
+	})
+	require.NoError(t, err)
+
+	second, err := a.packages()
+	require.NoError(t, err)
+	require.NotEmpty(t, second)
+	// Same backing array, so no second walk happened: a repeat of discovery
+	// would have built fresh *model.Package values.
+	assert.Same(t, first[0], second[0], "discovery ran once for the whole invocation")
 }
 
 func TestValidEnvScope(t *testing.T) {

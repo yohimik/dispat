@@ -327,7 +327,7 @@ type Package struct {
 	// folder's file and its own folder's file) and *without* the space's or
 	// the top level's. Space.Scripts is the layered map every resolution uses;
 	// this is the narrower question "did this package say so itself", which is
-	// what `dispat exec --for-package` answers without --fallback. Kept here
+	// what `dispat exec --for pkg:<name>` answers without --fallback. Kept here
 	// because the layer fold already computes it and nothing else can: two of
 	// the four layers live in files only discovery reads.
 	OwnScripts    map[string]public.Script

@@ -112,18 +112,23 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		},
 		"if, which would otherwise fail arity first": {
 			args: []string{"if", "--help"}, usage: "usage: dispat if <cond> [flags]",
-			has: []string{"--then", "--elif", "--else", "--on-failure"},
+			// --in is shared with exec: both helpers run one script, and both
+			// can be told where.
+			has: []string{"--then", "--elif", "--else", "--on-failure", "--in"},
 			// A helper that selects no packages must not offer the selection
 			// flags, nor the other helper's subject flags. `--env` is spelled
 			// with its argument, so the global `--env-file` does not answer
 			// for it.
-			hasNot: []string{"--package", "--for-package", "--env string", "--tag"},
+			hasNot: []string{"--package", "--for ", "--script-from", "--env string", "--tag"},
 		},
 		"exec": {
 			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [-- args...] [flags]",
-			has: []string{"--for-package", "--for-space", "--fallback", "--script-from",
-				"--env", "--on-failure"},
-			hasNot: []string{"--then", "--elif", "--package", "--tag", "--on-error"},
+			has: []string{"--for ", "--fallback", "--script-from",
+				"--env", "--on-failure", "--in"},
+			// The pair --for replaced is gone rather than kept beside it, so a
+			// reader is never offered two spellings of one idea.
+			hasNot: []string{"--for-package", "--for-space",
+				"--then", "--elif", "--package", "--tag", "--on-error"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

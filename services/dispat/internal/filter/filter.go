@@ -196,22 +196,35 @@ func Resolve(f Filter, ws Workspace) (Result, error) {
 	return res, nil
 }
 
-// infer turns the invocation folder into the terms the user did not type: the
-// package whose folder they stand in, or failing that the space. The deepest
-// match wins, so standing inside a standalone package nested under another
-// package's folder selects the inner one; a package wins an exact-depth tie,
-// being the more specific of the two.
+// Location is what a folder stands for: the package whose folder it is inside,
+// or failing that the space, or neither. At most one field is ever set.
+type Location struct {
+	Package string
+	Space   string
+}
+
+// Locate reads a folder as the place in the monorepo it stands in: the package
+// whose folder it is inside, or failing that the space. The deepest match wins,
+// so standing inside a standalone package nested under another package's folder
+// finds the inner one; a package wins an exact-depth tie, being the more
+// specific of the two.
 //
-// A versioning group is never inferred: it is a versioning relationship and
-// not a folder, so nowhere is inside one and only --group names it.
-func infer(dir string, ws Workspace) Filter {
+// A versioning group is never located: it is a versioning relationship and not
+// a folder, so nowhere is inside one and only --group names it.
+//
+// This is the whole of what "where I am standing" means in dispat. `dispat run`
+// reads it as a selection and `dispat exec --for cwd` as a subject, through the
+// one function, so the two can never drift into disagreeing about which package
+// a folder belongs to.
+func Locate(dir string, ws Workspace) Location {
 	target := absClean(dir)
-	best, bestLen := Filter{}, -1
+	var best Location
+	bestLen := -1
 	root := absClean(ws.Root)
 	for _, pkg := range ws.Packages {
 		pkgDir := absClean(pkg.Dir)
 		if under(target, pkgDir) && len(pkgDir) > bestLen {
-			best, bestLen = Filter{Packages: []string{pkg.Name}}, len(pkgDir)
+			best, bestLen = Location{Package: pkg.Name}, len(pkgDir)
 		}
 	}
 	for _, name := range sortedKeys(ws.Spaces) {
@@ -222,10 +235,21 @@ func infer(dir string, ws Workspace) Filter {
 			continue
 		}
 		if under(target, spaceDir) && len(spaceDir) > bestLen {
-			best, bestLen = Filter{Spaces: []string{name}}, len(spaceDir)
+			best, bestLen = Location{Space: name}, len(spaceDir)
 		}
 	}
 	return best
+}
+
+// infer turns the invocation folder into the terms the user did not type.
+func infer(dir string, ws Workspace) Filter {
+	switch at := Locate(dir, ws); {
+	case at.Package != "":
+		return Filter{Packages: []string{at.Package}}
+	case at.Space != "":
+		return Filter{Spaces: []string{at.Space}}
+	}
+	return Filter{}
 }
 
 // spaceNames resolves one --space term onto the configured spaces it matches.

@@ -62,11 +62,15 @@ var selectionFlags = []string{"package", "space", "group"}
 // failure does to the dependents.
 var windowFlags = append([]string{"since", "consumers", "on-error"}, selectionFlags...)
 
-// ifFlags and execFlags are the two shell helpers' own, --on-failure aside:
-// both take that one, so it is added to each entry rather than living here.
+// ifFlags and execFlags are the two shell helpers' own, --on-failure and --in
+// aside: both take those two, so they are added to each entry rather than
+// living here.
 var ifFlags = []string{"then", "elif", "else"}
 
-var execFlags = []string{"for-package", "for-space", "fallback", "script-from", "env"}
+var execFlags = []string{"for", "fallback", "script-from", "env"}
+
+// helperFlags are what the two shell helpers share.
+var helperFlags = []string{"on-failure", "in"}
 
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
@@ -285,9 +289,13 @@ a configured script.
 
 The chosen script's exit code becomes the command's, so it stays transparent
 in a pipeline, and --on-failure replaces that code with its own. Nothing
-matching with no --else runs nothing and exits 0. Needs no config file and no
-git repository.`,
-		flags: append(append([]string{}, ifFlags...), "on-failure"),
+matching with no --else runs nothing and exits 0.
+
+--in runs the chosen script somewhere else: a folder path, or pkg:<name>,
+space:<name>, root or cwd. Needs no config file and no git repository, unless
+--in names a package, a space or the root, which only a configuration can
+point at.`,
+		flags: append(append([]string{}, ifFlags...), helperFlags...),
 	},
 	{
 		name:     cmdExec,
@@ -300,24 +308,28 @@ dependency graph, which is what makes it usable as a step inside another
 script.
 
 One subject decides where the script is looked up and whose environment it
-gets: --for-package, --for-space, or neither for the top level. The folder the
-command was invoked from is never consulted, so the same invocation resolves
-the same way from anywhere in the repository.
+gets: --for pkg:<name>, --for space:<name>, or neither for the top level. The
+folder the command was invoked from is consulted only when --for cwd asks it
+to, so every other invocation resolves the same way from anywhere in the
+repository.
 
 Without --fallback only the named level is read, so a script defined a level
 away fails loudly instead of running text nobody asked for; with it the name
 resolves the way "dispat run" resolves it, the package over its space over the
-top level. --script-from (pkg:<name>, space:<name> or root) moves the lookup
+top level. --script-from takes the same values as --for and moves the lookup
 alone, leaving the environment with the subject.
 
 --env says what the subject adds: static, its declared env, which is the
 default; dispat, the DISPAT_* release variables; or both. The last two compute
 a plan, and nothing else here does.
 
+--in runs the script somewhere other than where the invocation stands: a
+folder path, or the same pkg:<name>, space:<name>, root or cwd.
+
 Anything after "--" is appended to the declared command, so a script in the
 configuration takes a value from the terminal without being edited. The
 --on-failure script never receives them.`,
-		flags: append(append([]string{}, execFlags...), "on-failure"),
+		flags: append(append([]string{}, execFlags...), helperFlags...),
 	},
 	{
 		name:  cmdSelfUpdate,

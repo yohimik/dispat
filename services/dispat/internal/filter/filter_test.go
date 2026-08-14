@@ -306,6 +306,45 @@ func TestResolveInfersFromTheInvocationFolder(t *testing.T) {
 	})
 }
 
+func TestLocateReadsAFolderAsAPlace(t *testing.T) {
+	// The same rule Resolve infers with, asked directly: `dispat exec --for
+	// cwd` needs the place rather than the selection, and the two must never
+	// disagree about which package a folder belongs to.
+	ws := fixture(t)
+	for name, tc := range map[string]struct {
+		dir  string
+		want Location
+	}{
+		"a package folder":                      {"packages/core", Location{Package: "core"}},
+		"a folder inside a package":             {"packages/core/src/deep", Location{Package: "core"}},
+		"a space folder":                        {"packages", Location{Space: "libs"}},
+		"inside a space, outside every package": {"packages/.cache", Location{Space: "libs"}},
+		"the deepest match wins":                {"apps/group/deep/src", Location{Package: "deep"}},
+		"a prefix sibling is not inside":        {"packages/core-extra", Location{Space: "libs"}},
+		"the monorepo root":                     {".", Location{}},
+		"outside every space":                   {"tools", Location{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := Locate(filepath.Join(ws.Root, filepath.FromSlash(tc.dir)), ws)
+			assert.Equal(t, tc.want, got)
+			assert.False(t, got.Package != "" && got.Space != "", "a folder stands for one thing")
+		})
+	}
+}
+
+func TestLocateSkipsAPackageRootedAtTheMonorepoRoot(t *testing.T) {
+	// The counterpart of the space guard below. A standalone package whose
+	// folder *is* the root would otherwise swallow every invocation, making
+	// --for cwd mean that package from everywhere.
+	ws := fixture(t)
+	ws.Packages = append(ws.Packages, &model.Package{Name: "rooted", Dir: ws.Root})
+
+	assert.Equal(t, Location{Package: "rooted"}, Locate(ws.Root, ws),
+		"standing in its folder is standing in it")
+	assert.Equal(t, Location{Package: "core"}, Locate(filepath.Join(ws.Root, "packages", "core"), ws),
+		"a package below it is still the deeper, and therefore the better, match")
+}
+
 func TestResolveInferenceSkipsASpaceRootedAtTheMonorepoRoot(t *testing.T) {
 	ws := fixture(t)
 	ws.Spaces["top"] = "."

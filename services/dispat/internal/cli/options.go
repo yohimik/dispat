@@ -64,11 +64,12 @@ type options struct {
 	ifElse         *string
 
 	// exec
-	execForPackage, execForSpace, execScriptFrom, execEnv *string
-	execFallback                                          *bool
+	execFor, execScriptFrom, execEnv *string
+	execFallback                     *bool
 
 	// shared by the two shell helpers
 	onFailure *string
+	helperIn  *string
 
 	// scanner, writer, replacer
 	scanRootOnly                           *bool
@@ -182,18 +183,18 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"another condition, tried when every earlier one was false; repeatable, each needing its own --then")
 	o.ifElse = fs.String("else", "",
 		"the script to run when no condition held; without it, nothing matching runs nothing and exits 0")
-	o.execForPackage = fs.String("for-package", "",
-		"run the script of this package, in its environment; one exact name, no globs")
-	o.execForSpace = fs.String("for-space", "",
-		"run the script of this space, in its environment; one exact name, no globs")
+	o.execFor = fs.String("for", "",
+		"run the script of this level, in its environment: pkg:<name>, space:<name>, root or cwd (the package or space the invocation stands in); one exact name, no globs")
 	o.execFallback = fs.Bool("fallback", false,
 		"resolve the script name the way dispat run does, falling back from the package to its space to the top level, instead of the named level alone")
 	o.execScriptFrom = fs.String("script-from", "",
-		"take the script text from somewhere other than the subject: pkg:<name>, space:<name> or root; the environment still comes from the subject")
+		"take the script text from somewhere other than the subject: pkg:<name>, space:<name>, root or cwd; the environment still comes from the subject")
 	o.execEnv = fs.String("env", app.EnvScopeStatic,
 		"what the subject adds to the environment: static (its declared env), dispat (the DISPAT_* release variables, which computes a plan) or both")
 	o.onFailure = fs.String("on-failure", "",
 		"run this script when the chosen script fails, and exit with the failure script's code instead of the failed script's")
+	o.helperIn = fs.String("in", "",
+		"run the script in this folder: a path, or pkg:<name>, space:<name>, root or cwd; without it the script runs where the invocation stands (a folder actually called root or cwd is written ./root)")
 	o.scanRootOnly = fs.Bool("root-only", false,
 		"read only the manifests sitting directly in the folder, without descending")
 	o.wrSetVersion = fs.String("set-version", "",

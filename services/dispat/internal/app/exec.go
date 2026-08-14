@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -23,6 +26,10 @@ import (
 // build` is core's script with core's environment rather than two independent
 // choices. --script-from is the one escape hatch, and it moves the lookup
 // alone.
+//
+// The subject, that escape hatch and the working directory are all spelled the
+// same way, as a Location: three flags asking where in the monorepo something
+// is, answered by one grammar rather than three.
 
 // What --env may ask the subject to contribute.
 const (
@@ -46,34 +53,53 @@ func ValidEnvScope(v string) bool {
 // the only git-touching path in the command.
 func NeedsPlan(scope string) bool { return scope == EnvScopeDispat || scope == EnvScopeBoth }
 
-// subjectKind is which level of the configuration a subject names.
-type subjectKind int
+// locationKind is which place in the monorepo a location names.
+type locationKind int
 
 const (
-	subjectRoot    subjectKind = iota // the top level: no name
-	subjectPackage                    // one package
-	subjectSpace                      // one space
+	subjectRoot    locationKind = iota // the top level: no name
+	subjectPackage                     // one package
+	subjectSpace                       // one space
+	locationCwd                        // wherever the invocation stands
+	locationPath                       // a folder, named outright
 )
 
-// ExecSubject is the level an invocation is about. The zero value is the top
-// level, which is what an invocation naming nothing gets.
-type ExecSubject struct {
-	kind subjectKind
+// Location is a place in the monorepo, spelled the same way wherever one is
+// asked for: pkg:<name>, space:<name>, root, cwd, or — where a folder makes
+// sense — a path. The zero value is the top level, which is what an invocation
+// naming nothing gets.
+//
+// One vocabulary rather than one per flag. --for and --script-from name a
+// level of the configuration, --in names a folder, and the three read the same
+// because they are three answers to the same question.
+type Location struct {
+	kind locationKind
 	name string
 }
 
-// IsPackage reports whether the subject is a package, which is what the
+// IsPackage reports whether the location is a package, which is what the
 // DISPAT_* variables need: they describe one package's release, and a space or
 // the top level has no version of its own to report.
-func (s ExecSubject) IsPackage() bool { return s.kind == subjectPackage }
+func (l Location) IsPackage() bool { return l.kind == subjectPackage }
 
-// label describes the subject the way an error message needs to.
-func (s ExecSubject) label() string {
-	switch s.kind {
+// Deferred reports whether resolving the location needs the configuration:
+// a name has to be looked up, or a folder turned into the level it stands in.
+// The controller asks before it decides whether a command must load one.
+func (l Location) Deferred() bool {
+	return l.kind == subjectPackage || l.kind == subjectSpace || l.kind == subjectRoot
+}
+
+// label describes the location the way an error message needs to.
+func (l Location) label() string {
+	switch l.kind {
 	case subjectPackage:
-		return fmt.Sprintf("package %q", s.name)
+		return fmt.Sprintf("package %q", l.name)
 	case subjectSpace:
-		return fmt.Sprintf("space %q", s.name)
+		return fmt.Sprintf("space %q", l.name)
+	case locationCwd:
+		return "the current folder"
+	case locationPath:
+		return fmt.Sprintf("folder %q", l.name)
 	}
 	return "the top level"
 }
@@ -84,10 +110,10 @@ type ExecOptions struct {
 	Script string
 	// Subject is what the invocation is about: the script's level and the
 	// environment's. The zero value is the top level.
-	Subject ExecSubject
+	Subject Location
 	// ScriptFrom overrides where the text is looked up, leaving the
 	// environment with Subject. Nil means the subject is used for both.
-	ScriptFrom *ExecSubject
+	ScriptFrom *Location
 	// Fallback resolves the name the way dispat run does, falling back from a
 	// package to its space to the top level, instead of the named level alone.
 	Fallback bool
@@ -99,57 +125,121 @@ type ExecOptions struct {
 	// command. They reach the script and nothing else: OnFailure is about the
 	// failure rather than about the work, so it is left as it was written.
 	Args []string
-	// Dir is the working directory: --root, as the user spelled it.
-	Dir            string
+	// Dir is where the invocation stands: --root, as the user spelled it. It
+	// is the working directory unless In names another, and it is the folder
+	// a cwd location resolves against.
+	Dir string
+	// In is the working directory, when the invocation named one. Nil leaves
+	// the script in Dir, which is what every invocation before --in existed
+	// got.
+	In             *Location
 	Stdout, Stderr io.Writer
 	// Runner executes the script. Nil means a ShellRunner on the configured
 	// shell; tests pass their own.
 	Runner script.Runner
 }
 
-// ExecSubjectPackage names a package as the subject of an exec invocation.
-func ExecSubjectPackage(name string) ExecSubject {
-	return ExecSubject{kind: subjectPackage, name: name}
-}
+// LocationPackage names one package.
+func LocationPackage(name string) Location { return Location{kind: subjectPackage, name: name} }
 
-// ExecSubjectSpace names a space.
-func ExecSubjectSpace(name string) ExecSubject { return ExecSubject{kind: subjectSpace, name: name} }
+// LocationSpace names one space.
+func LocationSpace(name string) Location { return Location{kind: subjectSpace, name: name} }
 
-// ExecSubjectRoot names the top level, which is also the zero value.
-func ExecSubjectRoot() ExecSubject { return ExecSubject{} }
+// LocationRoot names the top level, which is also the zero value.
+func LocationRoot() Location { return Location{} }
 
-// ParseScriptFrom reads a --script-from value: pkg:<name>, space:<name> or
-// root. It lives here rather than in the controller because the subject type
-// it produces is the app's.
-func ParseScriptFrom(spec string) (ExecSubject, error) {
-	if spec == "root" {
-		return ExecSubjectRoot(), nil
+// LocationCwd names wherever the invocation stands.
+func LocationCwd() Location { return Location{kind: locationCwd} }
+
+// LocationPath names a folder outright.
+func LocationPath(path string) Location { return Location{kind: locationPath, name: path} }
+
+// The words the grammar reserves. A folder actually called one of them is
+// still reachable, spelled ./root or ./cwd, which is also how a shell tells a
+// path from a word.
+const (
+	locRoot = "root"
+	locCwd  = "cwd"
+)
+
+// ParseLocation reads the full grammar — pkg:<name>, space:<name>, root, cwd,
+// or anything else as a folder path — for the flags a folder makes sense for.
+//
+// It lives here rather than in the controller because the type it produces is
+// the app's, and its errors name no flag: three flags share this grammar, and
+// each says which one it was reading.
+func ParseLocation(spec string) (Location, error) {
+	switch spec {
+	case locRoot:
+		return LocationRoot(), nil
+	case locCwd:
+		return LocationCwd(), nil
 	}
 	kind, name, ok := strings.Cut(spec, ":")
-	if !ok || name == "" {
-		return ExecSubject{}, fmt.Errorf("invalid --script-from %q (want pkg:<name>, space:<name> or root)", spec)
+	if !ok {
+		// No colon, so nothing claims to be a level: a folder is the only
+		// thing left it can be.
+		return LocationPath(spec), nil
+	}
+	if name == "" {
+		return Location{}, fmt.Errorf("invalid location %q: %s names nothing", spec, kind)
 	}
 	switch kind {
 	case "pkg":
-		return ExecSubjectPackage(name), nil
+		return LocationPackage(name), nil
 	case "space":
-		return ExecSubjectSpace(name), nil
+		return LocationSpace(name), nil
 	}
-	return ExecSubject{}, fmt.Errorf("invalid --script-from %q: unknown kind %q (want pkg, space or root)", spec, kind)
+	return Location{}, fmt.Errorf("invalid location %q: unknown kind %q (want pkg, space, %s or %s)",
+		spec, kind, locRoot, locCwd)
+}
+
+// ParseSubject is ParseLocation for the flags that name a level of the
+// configuration rather than a folder. A subject decides which scripts map is
+// read and whose environment a script gets, and a bare folder answers neither,
+// so the path form is refused here instead of being resolved into a level
+// nobody named.
+func ParseSubject(spec string) (Location, error) {
+	loc, err := ParseLocation(spec)
+	if err != nil {
+		return Location{}, err
+	}
+	if loc.kind == locationPath {
+		return Location{}, fmt.Errorf("invalid location %q (want pkg:<name>, space:<name>, %s or %s)",
+			spec, locRoot, locCwd)
+	}
+	return loc, nil
 }
 
 // Exec resolves the named script and runs it, returning the process exit code.
 func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
-	from := opts.Subject
+	// The locations first, because everything below is about a level or a
+	// folder and a cwd one is neither until the workspace has been read.
+	subject, err := a.ResolveSubject(opts.Subject, opts.Dir)
+	if err != nil {
+		a.log.Error().Err(err).Msg("cannot run the script")
+		return 1, err
+	}
+	from := subject
 	if opts.ScriptFrom != nil {
-		from = *opts.ScriptFrom
+		if from, err = a.ResolveSubject(*opts.ScriptFrom, opts.Dir); err != nil {
+			a.log.Error().Err(err).Msg("cannot run the script")
+			return 1, err
+		}
+	}
+	dir := opts.Dir
+	if opts.In != nil {
+		if dir, err = a.ResolveDir(*opts.In, opts.Dir); err != nil {
+			a.log.Error().Err(err).Msg("cannot run the script")
+			return 1, err
+		}
 	}
 	commands, err := a.lookupScript(opts.Script, from, opts.Fallback)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot run the script")
 		return 1, err
 	}
-	env, err := a.execEnv(ctx, opts.Subject, opts.Env)
+	env, err := a.execEnv(ctx, subject, opts.Env)
 	if err != nil {
 		return 1, err
 	}
@@ -158,11 +248,122 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 		runner = &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
 	}
 	log := a.log.With().Str("script", opts.Script).Logger()
-	log.Debug().Str("subject", opts.Subject.label()).Str("from", from.label()).Msg("running script")
+	log.Debug().Str("subject", subject.label()).Str("from", from.label()).
+		Str("dir", dir).Msg("running script")
 	return shellCall{
-		Runner: runner, Dir: opts.Dir, Scripts: script.AppendArgsToLast(commands, opts.Args), Env: env,
+		Runner: runner, Dir: dir, Scripts: script.AppendArgsToLast(commands, opts.Args), Env: env,
 		OnFailure: opts.OnFailure, Stdout: opts.Stdout, Stderr: opts.Stderr, Log: log,
 	}.run(ctx)
+}
+
+// ResolveSubject turns a location into the level of the configuration it
+// names. Every kind but cwd already is one; cwd is the folder the invocation
+// stands in, read through the same rule `dispat run` reads it with, so
+// standing somewhere means one thing across the whole CLI.
+//
+// A folder inside no package and no space resolves to the top level. That is
+// the widest answer rather than a refusal, matching the filter's own reading of
+// a folder that stands for nothing, and it is said out loud because the
+// invocation asked for a narrower one.
+func (a *App) ResolveSubject(loc Location, dir string) (Location, error) {
+	if loc.kind != locationCwd {
+		return loc, nil
+	}
+	pkgs, err := a.packages()
+	if err != nil {
+		return Location{}, err
+	}
+	at := filter.Locate(dir, a.discoveredWorkspace(pkgs))
+	switch {
+	case at.Package != "":
+		a.log.Debug().Str("dir", dir).Str("subject", at.Package).Msg("current folder resolved to a package")
+		return LocationPackage(at.Package), nil
+	case at.Space != "":
+		a.log.Debug().Str("dir", dir).Str("subject", at.Space).Msg("current folder resolved to a space")
+		return LocationSpace(at.Space), nil
+	}
+	a.log.Info().Str("dir", dir).Msg("the current folder is in no package and no space, using the top level")
+	return LocationRoot(), nil
+}
+
+// PlainDir resolves the locations a folder alone can answer: cwd, which is
+// where the invocation stands, and a path, which the command line already
+// spelled in full. Neither needs a configuration, which is what lets
+// `dispat if --in ./build` keep the command's promise to read nothing.
+//
+// A location naming a level is refused rather than guessed at. The caller
+// asked for the config-free half knowing which half it had.
+func PlainDir(loc Location, dir string) (string, error) {
+	if loc.Deferred() {
+		return "", fmt.Errorf("%s cannot be resolved without a configuration", loc.label())
+	}
+	return checkDir(loc, plainDir(loc, dir))
+}
+
+// plainDir is the folder arithmetic, without the check.
+func plainDir(loc Location, dir string) string {
+	if loc.kind == locationPath {
+		if filepath.IsAbs(loc.name) {
+			return loc.name
+		}
+		// Relative to where the invocation stands, not to the monorepo root:
+		// --in is a folder the caller is pointing at, and they point from
+		// where they are.
+		return filepath.Join(dir, filepath.FromSlash(loc.name))
+	}
+	return dir
+}
+
+// checkDir refuses a folder that is not there, or is not a folder, before any
+// script is handed to a shell. Left to the shell it would surface as whatever
+// that shell says about a working directory it cannot enter, naming neither
+// the flag nor the value that was wrong.
+func checkDir(loc Location, dir string) (string, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("cannot run in %s: %w", loc.label(), err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("cannot run in %s: %s is not a folder", loc.label(), dir)
+	}
+	return dir, nil
+}
+
+// ResolveDir turns any location into the folder a script runs in, including
+// the ones only the configuration can place.
+func (a *App) ResolveDir(loc Location, dir string) (string, error) {
+	out, err := a.locationDir(loc, dir)
+	if err != nil {
+		return "", err
+	}
+	if out, err = checkDir(loc, out); err != nil {
+		return "", err
+	}
+	a.log.Debug().Str("in", loc.label()).Str("dir", out).Msg("working directory resolved")
+	return out, nil
+}
+
+// locationDir is ResolveDir without the check, so the two concerns stay apart.
+func (a *App) locationDir(loc Location, dir string) (string, error) {
+	switch loc.kind {
+	case subjectPackage:
+		p, err := a.discoverPackage(loc.name)
+		if err != nil {
+			return "", err
+		}
+		return p.Dir, nil
+	case subjectSpace:
+		sc, ok := a.cfg.Space(loc.name)
+		if !ok {
+			return "", fmt.Errorf("unknown space %q", loc.name)
+		}
+		// The same join discovery uses for a space's folder, so a space means
+		// one folder whoever is asking.
+		return filepath.Join(a.root, filepath.FromSlash(sc.Path)), nil
+	case subjectRoot:
+		return a.root, nil
+	}
+	return plainDir(loc, dir), nil
 }
 
 // lookupScript finds the shell text for a name at the given level: the one
@@ -173,7 +374,7 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 // asked about. --fallback is `dispat run`'s own resolution, the package over
 // its space over the top level, and the two report their failure differently
 // because "not in that map" and "nowhere in this chain" are different problems.
-func (a *App) lookupScript(name string, from ExecSubject, fallback bool) (public.Script, error) {
+func (a *App) lookupScript(name string, from Location, fallback bool) (public.Script, error) {
 	levels, err := a.scriptLevels(from, fallback)
 	if err != nil {
 		return nil, err
@@ -210,7 +411,7 @@ type scriptLevel struct {
 // knows all four. --fallback then skips straight to the package's effective
 // map, which is already every layer plus its space's and the top level's, so
 // the layered case reads exactly what `dispat run` would resolve.
-func (a *App) scriptLevels(from ExecSubject, fallback bool) ([]scriptLevel, error) {
+func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) {
 	root := scriptLevel{a.cfg.Scripts, "the top level"}
 	switch from.kind {
 	case subjectSpace:
@@ -242,7 +443,7 @@ func (a *App) scriptLevels(from ExecSubject, fallback bool) ([]scriptLevel, erro
 // discoverPackage finds one package in the workspace by name,
 // case-insensitively.
 func (a *App) discoverPackage(name string) (*model.Package, error) {
-	pkgs, _, err := config.DiscoverPackages(a.cfg, a.root)
+	pkgs, err := a.packages()
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +461,7 @@ func (a *App) discoverPackage(name string) (*model.Package, error) {
 // declared env from the configuration alone, and only dispat and both reach for
 // a plan. That is the whole performance claim of the command, so the plan sits
 // behind this check and nowhere earlier.
-func (a *App) execEnv(ctx context.Context, subj ExecSubject, scope string) ([]string, error) {
+func (a *App) execEnv(ctx context.Context, subj Location, scope string) ([]string, error) {
 	if !NeedsPlan(scope) {
 		return a.staticEnv(subj)
 	}
@@ -287,7 +488,7 @@ func (a *App) execEnv(ctx context.Context, subj ExecSubject, scope string) ([]st
 	return withoutStatic(env, pl.Releases[name].Pkg.Space.Env), nil
 }
 
-// declaredEnv is the ExecSubject's declared env as the sorted KEY=value pairs a
+// declaredEnv is the Location's declared env as the sorted KEY=value pairs a
 // script receives, layered file under space under package.
 //
 // A package's layers are already merged onto the built model by the package
@@ -295,7 +496,7 @@ func (a *App) execEnv(ctx context.Context, subj ExecSubject, scope string) ([]st
 // mergers would be two answers to the same question. A space has no built form
 // outside a package, so its two layers are merged here through the same
 // MergeEnv the build uses.
-func (a *App) declaredEnv(subj ExecSubject) ([]string, error) {
+func (a *App) declaredEnv(subj Location) ([]string, error) {
 	switch subj.kind {
 	case subjectSpace:
 		sc, ok := a.cfg.Space(subj.name)
@@ -325,9 +526,9 @@ func (a *App) plannedPackage(pl *plan.Plan, name string) (string, error) {
 	return "", fmt.Errorf("package %q is not in the release plan, so it has no DISPAT_* variables", name)
 }
 
-// staticEnv is the declared env of the ExecSubject, expanded the way a release
+// staticEnv is the declared env of the Location, expanded the way a release
 // expands it.
-func (a *App) staticEnv(subj ExecSubject) ([]string, error) {
+func (a *App) staticEnv(subj Location) ([]string, error) {
 	static, err := a.declaredEnv(subj)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot build the environment")

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -33,6 +34,28 @@ type App struct {
 	log  zerolog.Logger
 	git  *gitx.CLI
 	scan scanner.Scanner
+
+	// The discovered workspace, remembered for the run. Discovery walks the
+	// filesystem and is repeatable rather than cheap, and one exec invocation
+	// can now ask for it three times over — a cwd subject, a cwd script-from
+	// and an --in naming a package. See packages.
+	pkgsOnce sync.Once
+	pkgs     []*model.Package
+	pkgsErr  error
+}
+
+// packages is the discovered workspace, walked once per App.
+//
+// Discovery is deterministic and side-effect free, so remembering its answer
+// changes nothing about what a caller sees; it only stops the same walk being
+// paid for two and three times in one invocation. Callers that need the
+// declared dependencies alongside it still call config.DiscoverPackages
+// themselves, since that is a different question.
+func (a *App) packages() ([]*model.Package, error) {
+	a.pkgsOnce.Do(func() {
+		a.pkgs, _, a.pkgsErr = config.DiscoverPackages(a.cfg, a.root)
+	})
+	return a.pkgs, a.pkgsErr
 }
 
 // New assembles an App for one monorepo.

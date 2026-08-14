@@ -46,9 +46,11 @@ type runner struct {
 	update   *notice
 
 	// What the flag-only phase parsed for the commands that asked for it.
-	write    writeRequest
-	subs     []writer.Substitution
-	execOpts app.ExecOptions
+	write      writeRequest
+	subs       []writer.Substitution
+	execOpts   app.ExecOptions
+	ifBranches []app.Branch
+	ifIn       *app.Location
 }
 
 // usage prints one command's help on the error stream.
@@ -158,6 +160,13 @@ func (r *runner) validateFlags() (int, bool) {
 // repository it is standing in, and this is glue that may run dozens of times
 // in one script, where a GitHub request per call and a notice on stdout would
 // both be wrong.
+//
+// --in is the one thing that can change that, and only when it names something
+// a configuration defines. A path or cwd is a folder the command line already
+// spelled in full, so it is resolved here and the command runs with nothing
+// read; pkg:, space: and root have to be looked up, so the phase defers and
+// runConfigured performs the command once the file is loaded. Asking where a
+// package is costs finding out, and asking nothing still costs nothing.
 func (r *runner) runIf() (int, bool) {
 	if r.inv.cmd != cmdIf {
 		return 0, false
@@ -166,17 +175,42 @@ func (r *runner) runIf() (int, bool) {
 	if !ok {
 		return 2, true
 	}
+	in, ok := helperIn(r.o, r.boot)
+	if !ok {
+		return 2, true
+	}
+	r.ifBranches = branches
+	r.ifIn = in
+	if in != nil && in.Deferred() {
+		return 0, false
+	}
+	dir := *r.o.root
+	if in != nil {
+		// Neither kind left needs the configuration, so no App is built to
+		// resolve them: a path and cwd are answered by the command line alone.
+		var err error
+		if dir, err = app.PlainDir(*in, dir); err != nil {
+			r.boot.Error().Err(err).Msg("invalid --in")
+			return 1, true
+		}
+	}
+	return r.runIfIn(dir), true
+}
+
+// runIfIn performs `if` in the resolved folder. Both callers reach the command
+// through here, so the options it runs with are written once.
+func (r *runner) runIfIn(dir string) int {
 	ctx, stop := signalCtx()
 	defer stop()
 	code, err := app.RunIf(ctx, app.IfOptions{
-		Branches: branches, Else: *r.o.ifElse, OnFailure: *r.o.onFailure,
-		Lookup: os.Getenv, Dir: *r.o.root,
+		Branches: r.ifBranches, Else: *r.o.ifElse, OnFailure: *r.o.onFailure,
+		Lookup: os.Getenv, Dir: dir,
 		Stdout: r.stdout, Stderr: r.stderr, Log: r.logger(),
 	})
 	if err != nil {
-		return 1, true
+		return 1
 	}
-	return code, true
+	return code
 }
 
 // prepareExec validates exec's flags and builds its options. The command
@@ -186,7 +220,7 @@ func (r *runner) prepareExec() (int, bool) {
 	if r.inv.cmd != cmdExec {
 		return 0, false
 	}
-	subj, ok := execSubject(r.o, r.usage, r.boot)
+	subj, ok := execSubject(r.o, r.boot)
 	if !ok {
 		return 2, true
 	}
@@ -194,11 +228,15 @@ func (r *runner) prepareExec() (int, bool) {
 	if !ok {
 		return 2, true
 	}
+	in, ok := helperIn(r.o, r.boot)
+	if !ok {
+		return 2, true
+	}
 	if !checkExecEnv(r.o, subj, r.usage, r.boot) {
 		return 2, true
 	}
 	r.execOpts = app.ExecOptions{
-		Script: r.inv.script, Subject: subj, ScriptFrom: from,
+		Script: r.inv.script, Subject: subj, ScriptFrom: from, In: in,
 		Fallback: *r.o.execFallback, Env: *r.o.execEnv, OnFailure: *r.o.onFailure,
 		Args: r.inv.args, Dir: *r.o.root, Stdout: r.stdout, Stderr: r.stderr,
 	}
@@ -365,6 +403,16 @@ func (r *runner) runConfigured() int {
 			return 1
 		}
 		return code
+	}
+	if r.inv.cmd == cmdIf {
+		// Only an --in naming a package, a space or the root gets this far;
+		// every other `if` already ran without reading any of this.
+		dir, err := app.New(resolvedRoot, cfg, log).ResolveDir(*r.ifIn, *r.o.root)
+		if err != nil {
+			log.Error().Err(err).Msg("invalid --in")
+			return 1
+		}
+		return r.runIfIn(dir)
 	}
 	// Now that the configuration has spoken, the check can start: a run that
 	// switched it off must make no request at all, which means not making one

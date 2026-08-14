@@ -180,7 +180,7 @@ spaces:
               fi
             done
           build:
-            - dispat exec link --for-package dispat
+            - dispat exec link --for pkg:dispat
             # DISPAT_EXPORT_BASE is where the export is about to land, which is
             # the one thing the container cannot work out for itself: it names
             # its artefacts against that path, so what comes back needs no
@@ -193,10 +193,10 @@ spaces:
             # Already this stage's outputs, in $DISPAT_OUTPUT's own format.
             - cat dist/dispat-output >> "$DISPAT_OUTPUT"
             - rm -f dist/dispat-output
-            - dispat exec unlink --for-package dispat
+            - dispat exec unlink --for pkg:dispat
             # Checked here rather than on the way out, so a leak fails the
             # build, which is still ahead of anything being published.
-            - dispat exec verify-unlinked --for-package dispat
+            - dispat exec verify-unlinked --for pkg:dispat
           tests:unit:
             - mkdir -p ../../coverage
             - go test ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
@@ -214,8 +214,8 @@ spaces:
             go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
               go test -C ../../tests/integration . -count=1 -timeout 20m -race
           tests:
-            - dispat exec tests:unit --for-package dispat
-            - dispat exec tests:integration --for-package dispat
+            - dispat exec tests:unit --for pkg:dispat
+            - dispat exec tests:integration --for pkg:dispat
         # onFail is the net for the paths the build script never finishes:
         # unlink is idempotent, so closing an already-closed bracket is a
         # no-op. It matters because beforePublish runs `dispat commit`, which
