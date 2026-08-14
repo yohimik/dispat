@@ -63,13 +63,15 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
 10. **Config loading, resolution and options** (`config_test.go`): which file the binary picks when no `--config`
     names one and how far it climbs to find it, a flag beating the file at *runtime* rather than in the parsed
     struct, a custom shell actually being invoked, an unknown key stopping the run, the `commitErrors` policy, the
-    parser options, initials baselines, a fused prerelease tag format written and read back, and the rejections the
-    layers carry, each landing before any work is done.
+    parser options, initials baselines, a fused prerelease tag format written and read back, a configuration split
+    across files with `$ref`, and the rejections the layers carry, each landing before any work is done.
 11. **The static `env` layers** (`env_test.go`): plain environment variables declared at the top level, on a space
     and on a package, merging with the most local winning. The part only the binary can witness is that a key arrives
     with its case intact and that a `$DISPAT_VERSION` reference expands against the package the script runs for. The
     refusals are the load-bearing half: a script may trust `DISPAT_VERSION` precisely because no static key is
-    allowed to shadow it.
+    allowed to shadow it. The `.env` file sits beside them: read from the current directory into the run's own
+    environment, under the environment and under the config's `env`, and reaching dispat's own reads as well as the
+    scripts'.
 12. **The configuration ladder from the root down** (`levels_test.go`): the root file is the bottom layer of the same
     fold a space and a package go through, so a space-shaped setting written once at the top reaches every space and
     every standalone package. Each level below can still say otherwise, including saying `false` against a `true`,
@@ -124,7 +126,8 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
 23. **The `compute` command** (`compute_test.go`): everything the binary derives from the manifests. The dependency
     graph: the detect/apply/check loop with its backup and convergence, `keep` and removal semantics, and the W220
     ambiguity reaching the JSON events. The baselines: `initials` entries seeded from the versions the manifests
-    declare, against real tags.
+    declare, against real tags. And the writes a `$ref` redirects: into the fragment that holds the key, or refused
+    when a fragment and the keys beside it compose one value.
 24. **Native auto-versioning** (`autoversion_test.go`): files reconciled by the binary at the version stage, under
     either of the two strategies or neither: range reconciliation under the match policy, own-version writes, the
     W192/W197/W203/W221 diagnostics, literal substitution over files nothing parses, and the serialised `syncLock`
@@ -451,6 +454,9 @@ filed under the areas they touch.
 | `TestConfigDispatexcludeSelectsTheConfigFile`           | A folder holding two config files names the one to skip in its `.dispatexclude`, and the surviving file decides: proven at the repository root, in a space folder and in a package folder, each by the tag only that file's format could produce.                                                                              |
 | `TestConfigResolutionAscendsPastASpaceFile`            | A space folder's file declares `packages`, like a monorepo of standalone packages does; run from inside the space and from the space folder itself, resolution still reaches the root above, because that root claims the folder.                                                                                             |
 | `TestConfigSpaceLayerRejections`                       | What the new layers may not say, each refused before any work: `path` on a space's `packages` entry, `path` and `spaces` in a space file, `packages` on a package entry, and a space `packages` key matching no folder of that space.                                                                                          |
+| `TestConfigRefSplitsTheFile`                           | A configuration split across four files with `$ref` (JSON and YAML fragments, one a folder down referencing a fourth beside it) releases exactly as the one-file version, and `--log-level trace` names every file it read.                                                                    |
+| `TestConfigRefCycleFailsBeforeAnyWork`                 | A fragment referencing its way back to the root config exits 1 naming the whole chain, with nothing tagged and no script run.                                                                                                                                                                  |
+| `TestConfigRefMissingFragmentIsNamed`                  | A fragment that is not there names the file that pointed at it, the key that did, and what was missing.                                                                                                                                                                                       |
 
 ### Goal 11: the static `env` layers (`env_test.go`)
 
@@ -461,6 +467,10 @@ filed under the areas they touch.
 | `TestStaticEnvRefusesUnusableKeys`                     | The two other keys that could never reach a script intact, an `=` in the name and an empty name, are each refused with the reason.                                                                                                                                                           |
 | `TestStaticEnvFromFolderConfigFiles`                   | The two in-folder layers, a space folder's config file and a package folder's, reach the scripts with their case intact and the most local winning.                                                                                                                                          |
 | `TestStaticEnvReachesTheLoginScript`                   | A space's `env` reaches its login script, which runs once per space in the space folder with no package in view.                                                                                                                                                                             |
+| `TestStaticEnvFromARefKeepsKeyCase`                    | An `env` object written in a `$ref` fragment reaches a script with its keys spelled as the fragment wrote them.                                                                                                                                                                                |
+| `TestDotenvReachesScriptsAndDispat`                    | A `.env` in the current directory reaches a script, the process environment beats it, the config's `env` beats both, and no value is ever logged.                                                                                                                                             |
+| `TestDotenvFileFlag`                                   | `--env-file` replaces the default file, repeats with the later file winning, and exits 1 when a named file is not there.                                                                                                                                                                      |
+| `TestDotenvSteersDispatItself`                         | A variable only the environment file defines is expanded by dispat itself, into the changelog footer it writes.                                                                                                                                                                                |
 
 ### Goal 12: the configuration ladder from the root down (`levels_test.go`)
 
@@ -713,6 +723,8 @@ file it is running from is exercised for real rather than mocked.
 (The command's finer grain, meaning cross-ecosystem matching, interactive selection, the TOML snippet fallback,
 stale-endpoint removals, the manifest-rank and version-shape rules behind a baseline, and error paths, is unit-tested
 in `services/dispat/internal/app`, where each case is one in-memory monorepo away instead of one binary invocation.)
+| `TestComputeWritesThroughARef`           | A `packages` map kept in a `$ref` fragment is edited in the fragment, at the key it holds, with the reference intact in the root config and the backup beside the file that was written.                                                                                                       |
+| `TestComputeRefusesAComposedKey`         | A key composed from a fragment and the keys beside the reference is refused rather than guessed at, leaving every file and every backup untouched.                                                                                                                                             |
 
 ### Goal 24: native auto-versioning (`autoversion_test.go`)
 

@@ -23,6 +23,9 @@ type Repo struct {
 	Root string
 
 	dispatBin, tsmarkBin string
+	// workDir is the folder invocations run *from*, empty for the test
+	// process's own. See WorkFrom.
+	workDir string
 }
 
 // New creates an empty git repository in a fresh temp directory. Tests still
@@ -49,6 +52,14 @@ func New(t testing.TB) *Repo {
 // DefaultBranch is the branch every harness repository and bare remote starts
 // on.
 const DefaultBranch = "main"
+
+// WorkFrom makes every later invocation run *from* this folder of the
+// repository, the way a shell in that folder would. Only what dispat reads
+// from the current directory notices — the `.env` file — since the harness
+// passes --root either way.
+func (r *Repo) WorkFrom(relPath ...string) {
+	r.workDir = r.Path(relPath...)
+}
 
 // Path joins parts onto the repository root.
 func (r *Repo) Path(parts ...string) string {
@@ -305,6 +316,7 @@ func (r *Repo) runAtEnv(root string, env []string, stdin string, args ...string)
 func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...string) RunResult {
 	r.T.Helper()
 	cmd := exec.Command(bin, withRoot(args, root)...)
+	cmd.Dir = r.workDir // empty inherits the test process's folder
 	// No test may reach api.github.com, and most fixtures have no remote to
 	// take the release lock on. Both kill switches go in before the caller's
 	// own pairs, and exec keeps the last value for a repeated key, so a

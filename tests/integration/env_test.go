@@ -159,3 +159,115 @@ func TestStaticEnvReachesTheLoginScript(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://npm.corp.example|libs", string(data))
 }
+
+// TestStaticEnvFromARefKeepsKeyCase: an `env` object written in a referenced
+// fragment reaches a script exactly as an inline one does, case and all. The
+// two features meet here: the loader parses a fragment with its own parser,
+// and the exact spelling has to survive that as much as it survives the root
+// file's parse.
+func TestStaticEnvFromARefKeepsKeyCase(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("cfg/env.yaml", "MiXed_Case: kept\nROOT_V: root\n")
+	r.WriteConfigRaw(map[string]any{
+		"logLevel":    "info",
+		"logFormat":   "json",
+		"github":      map[string]any{"enabled": false},
+		"updateCheck": false,
+		"scripts": map[string]any{
+			"build":   `printf '%s|%s' "$MiXed_Case" "$ROOT_V" > env.txt`,
+			"publish": "echo publishing",
+		},
+		"env": map[string]any{"$ref": "./cfg/env.yaml"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "packages",
+				"flow": map[string]any{"build": []string{"build"}, "publish": []string{"publish"}}},
+		},
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): referenced env")
+
+	r.ReleaseOK()
+	written, err := os.ReadFile(r.Path("packages", "core", "env.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "kept|root", string(written),
+		"a referenced env object keeps its keys spelled as the fragment wrote them")
+}
+
+// TestDotenvReachesScriptsAndDispat: the `.env` beside the terminal is read
+// into the run's own environment, so a script sees it — and so does dispat,
+// which is what lets a token live in a file. The two rules that keep it
+// predictable are proven beside it: a variable the environment already sets is
+// never replaced, and the config's own `env` still wins over both.
+func TestDotenvReachesScriptsAndDispat(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(`printf '%s|%s|%s' "$FROM_FILE" "$FROM_ENVIRONMENT" "$FROM_CONFIG" > env.txt`, 1)
+	cfg.Env = map[string]string{"FROM_CONFIG": "config"}
+	r.WriteConfigModel(cfg)
+	r.WriteFile(".env", "FROM_FILE=file\nFROM_ENVIRONMENT=file\nFROM_CONFIG=file\nDISPAT_IT_TOKEN=from-file\n")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): dotenv")
+	r.WorkFrom() // the repository root is where the .env sits
+
+	res := r.CommandEnv([]string{"FROM_ENVIRONMENT=environment"}, "release")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	written, err := os.ReadFile(r.Path("packages", "core", "env.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "file|environment|config", string(written),
+		"the file fills in what nothing else set, the environment beats the file, the config beats both")
+
+	// And dispat's own reads see it: the token the github step looks up is
+	// resolved from the file, which is only visible because the step reports
+	// the variable it read.
+	assert.NotContains(t, res.Stdout, "from-file", "a value from an environment file is never logged")
+}
+
+// TestDotenvFileFlag: --env-file replaces the default file, is repeatable with
+// the later file winning, and a named file that is not there stops the run
+// rather than being quietly skipped.
+func TestDotenvFileFlag(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(`printf '%s|%s' "$SOURCE" "$ONLY_BASE" > env.txt`, 1))
+	r.WriteFile(".env", "SOURCE=default\n")
+	r.WriteFile("base.env", "SOURCE=base\nONLY_BASE=yes\n")
+	r.WriteFile("ci.env", "SOURCE=ci\n")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): dotenv flag")
+	r.WorkFrom()
+
+	res := r.Release("--env-file", "base.env", "--env-file", "ci.env")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	written, err := os.ReadFile(r.Path("packages", "core", "env.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "ci|yes", string(written),
+		"the named files replace ./.env, and the later one wins")
+
+	missing := r.Status("--env-file", "absent.env")
+	assert.Equal(t, 1, missing.Code, "a named file that is not there is a mistake worth stopping for")
+	assert.Contains(t, missing.Stderr, "cannot read the environment file")
+}
+
+// TestDotenvSteersDispatItself: an environment file feeds dispat's own reads,
+// not only the scripts it runs. The changelog footer is where that is visible
+// without a network: dispat expands $VARIABLE in record text itself, while
+// writing the file, so a value that only ever existed in the file arriving in
+// the changelog is the whole claim.
+func TestDotenvSteersDispatItself(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{
+		EntryFormatConfig: models.EntryFormatConfig{
+			Footer: []models.EntryLine{{Line: []string{"released by $DISPAT_IT_RELEASER"}}},
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.WriteFile(".env", "DISPAT_IT_RELEASER=the-env-file\n")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): dotenv switch")
+	r.WorkFrom()
+
+	r.ReleaseOK()
+	log, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(log), "released by the-env-file",
+		"dispat expanded a variable that only the environment file defined")
+}

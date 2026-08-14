@@ -453,3 +453,89 @@ func TestComputeInteractiveChoosesAmongBothKinds(t *testing.T) {
 	assert.NotContains(t, res.Stdout, "+ add")
 	assert.NotContains(t, res.Stdout, "+ initial core")
 }
+
+// TestComputeWritesThroughARef: a configuration that keeps its packages in a
+// referenced fragment is still writable. compute edits the fragment, at the
+// key the fragment holds, and the reference in the root config survives — the
+// alternative, flattening the fragment into the file that named it, would undo
+// the split on the first write.
+func TestComputeWritesThroughARef(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("cfg/packages.json", `{"web": {"dependencies": ["ghost"]}}`)
+	r.WriteConfigRaw(map[string]any{
+		"logLevel":    "info",
+		"logFormat":   "json",
+		"github":      map[string]any{"enabled": false},
+		"updateCheck": false,
+		"scripts":     map[string]any{"build": echoBuild, "publish": "echo publishing"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "packages",
+				"flow": map[string]any{"build": []string{"build"}, "publish": []string{"publish"}}},
+		},
+		"packages": map[string]any{"$ref": "./cfg/packages.json"},
+	})
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "ghost")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/web/package.json", `{"name": "@acme/web", "dependencies": {"@acme/core": "workspace:*"}}`)
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core"}`)
+	r.Commit("feat(core,ghost,web): bootstrap")
+
+	res := r.Command("compute", "--write")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	fragment, err := os.ReadFile(r.Path("cfg", "packages.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(fragment), "core", "the detected edge landed in the fragment")
+	assert.NotContains(t, string(fragment), "ghost", "and the stale one was removed there")
+	assert.FileExists(t, r.Path("cfg", "packages.json.backup"), "the file it wrote keeps the backup")
+
+	root, err := os.ReadFile(r.Path("dispat.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(root), `"$ref": "./cfg/packages.json"`, "the reference survived the write")
+	assert.NoFileExists(t, r.Path("dispat.json.backup"), "the file that was not edited was not backed up")
+
+	// The rewritten split configuration still loads, and status reads the
+	// edge compute just wrote.
+	next := r.StatusOK()
+	assert.Contains(t, next.Stdout, "web")
+}
+
+// TestComputeRefusesAComposedKey: a key made of a fragment *and* the keys
+// written beside the reference comes from two files at once, so compute
+// refuses rather than guessing which file to write, and says what to change.
+func TestComputeRefusesAComposedKey(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("cfg/deps.json", `{"web": ["ghost"]}`)
+	r.WriteConfigRaw(map[string]any{
+		"logLevel":    "info",
+		"logFormat":   "json",
+		"github":      map[string]any{"enabled": false},
+		"updateCheck": false,
+		"scripts":     map[string]any{"build": echoBuild, "publish": "echo publishing"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "packages",
+				"flow": map[string]any{"build": []string{"build"}, "publish": []string{"publish"}}},
+		},
+		"dependencies": map[string]any{"$ref": "./cfg/deps.json", "core": []string{"ghost"}},
+	})
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "ghost")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/web/package.json", `{"name": "@acme/web"}`)
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core"}`)
+	r.Commit("feat(core,ghost,web): bootstrap")
+
+	before, err := os.ReadFile(r.Path("dispat.json"))
+	require.NoError(t, err)
+
+	res := r.Command("compute", "--write")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "cannot be rewritten in place")
+
+	after, err := os.ReadFile(r.Path("dispat.json"))
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "a refused write leaves every file as it was")
+	assert.NoFileExists(t, r.Path("dispat.json.backup"))
+	assert.NoFileExists(t, r.Path("cfg", "deps.json.backup"))
+}

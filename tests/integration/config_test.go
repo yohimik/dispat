@@ -619,3 +619,78 @@ func TestConfigCustomObjectIsIgnored(t *testing.T) {
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
 }
+
+// TestConfigRefSplitsTheFile: a configuration split across files with `$ref`
+// releases exactly as the same configuration written in one file. The
+// fragments are deliberately awkward — one JSON, one YAML, one a folder down
+// referencing a fourth beside itself — because the claim is that where the
+// text lives changes nothing at all, and that a path inside a fragment still
+// means what it would have meant inline.
+func TestConfigRefSplitsTheFile(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("cfg/scripts.yaml", "build: echo building\npublish: echo publishing\n")
+	r.WriteFile("cfg/flow.json", `{"build": ["build"], "publish": ["publish"]}`)
+	r.WriteFile("cfg/spaces.json", `{"libs": {"path": "packages", "flow": {"$ref": "./flow.json"}}}`)
+	r.WriteConfigRaw(map[string]any{
+		"logLevel":    "info",
+		"logFormat":   "json",
+		"github":      map[string]any{"enabled": false},
+		"updateCheck": false,
+		"scripts":     map[string]any{"$ref": "./cfg/scripts.yaml"},
+		"spaces":      map[string]any{"$ref": "./cfg/spaces.json"},
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.ReleaseOK()
+	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Contains(t, res.Stdout, "building", "the referenced scripts ran")
+
+	// The files it was made of are on the record, which is how a split
+	// configuration answers "where did that come from".
+	trace := r.Status("--log-level", "trace")
+	require.Equal(t, 0, trace.Code, "stderr:\n%s", trace.Stderr)
+	for _, file := range []string{"dispat.json", "cfg/scripts.yaml", "cfg/spaces.json", "cfg/flow.json"} {
+		assert.Contains(t, trace.Stdout, file, "every file read is traced")
+	}
+}
+
+// TestConfigRefCycleFailsBeforeAnyWork: a reference that reaches its own file
+// again is refused with the path it took, and the run stops where every
+// configuration error stops — before a tag, a commit or a script.
+func TestConfigRefCycleFailsBeforeAnyWork(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("cfg/spaces.json", `{"libs": {"path": "packages", "flow": {"$ref": "../dispat.json"}}}`)
+	r.WriteConfigRaw(map[string]any{
+		"scripts": map[string]any{"build": "echo building > built.txt"},
+		"spaces":  map[string]any{"$ref": "./cfg/spaces.json"},
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Release()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stderr, "$ref cycle")
+	assert.Contains(t, res.Stderr, "a file cannot reference itself")
+	assert.Empty(t, r.TagList(), "nothing released")
+	assert.NoFileExists(t, r.Path("built.txt"), "no script ran")
+}
+
+// TestConfigRefMissingFragmentIsNamed: the everyday mistake — a fragment that
+// moved or was never committed — names the file that pointed at it, the key
+// that did, and what was missing.
+func TestConfigRefMissingFragmentIsNamed(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigRaw(map[string]any{
+		"scripts": map[string]any{"build": "echo building"},
+		"spaces":  map[string]any{"$ref": "./cfg/spaces.json"},
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Status()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stderr, "spaces: $ref", "the key that pointed at it")
+	assert.Contains(t, res.Stderr, "cfg/spaces.json", "and what it pointed at")
+	assert.Contains(t, res.Stderr, "cannot read")
+}
