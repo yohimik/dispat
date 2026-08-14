@@ -236,11 +236,17 @@ func TestRefSiblingKeysOverride(t *testing.T) {
 func TestRefSiblingsNeedAnObject(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "shell.json", `["/bin/bash", "-c"]`)
-	path := writeFile(t, dir, "dispat.json", `{"shell": {"$ref": "./shell.json", "extra": 1}}`)
+	writeFile(t, dir, "format.json", `"{name}@{version}"`)
 
-	_, err := Load(path, nil)
+	list := writeFile(t, dir, "dispat.json", `{"shell": {"$ref": "./shell.json", "extra": 1}}`)
+	_, err := Load(list, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "the file is a list, so the keys beside the $ref have nothing to override")
+
+	single := writeFile(t, dir, "dispat.yaml", `{"tagFormat": {"$ref": "./format.json", "extra": 1}}`)
+	_, err = Load(single, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the file is a single value, so the keys beside the $ref have nothing to override")
 }
 
 // TestRefTheDocumentItself: a config file may be nothing but a reference, which
@@ -454,4 +460,63 @@ func TestCloneValueCopiesEveryContainer(t *testing.T) {
 	assert.Equal(t, "v", original["generic"].(map[any]any)[1].(map[string]any)["deep"])
 	assert.Equal(t, "v", original["list"].([]any)[0].(map[string]any)["deep"])
 	assert.Equal(t, "one", original["typed"].(map[string][]string)["a"][0])
+}
+
+// TestRefEmptyFileInEveryFormat: "this file is empty" is one answer across the
+// three formats, even though TOML spells an empty document as an empty table
+// and the other two as no value at all.
+func TestRefEmptyFileInEveryFormat(t *testing.T) {
+	for _, name := range []string{"empty.json", "empty.yaml", "empty.toml"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := ""
+			if name == "empty.json" {
+				body = "null" // an empty .json file is not a document at all
+			}
+			writeFile(t, dir, name, body)
+			path := writeFile(t, dir, "dispat.json", `{"env": {"$ref": "./`+name+`"}}`)
+
+			_, err := Load(path, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "the file is empty, so the key would have no value")
+		})
+	}
+}
+
+// TestResolveEditNestingIsCapped: the loader refuses a cycle long before an
+// edit is collected, so the writer's own bound only has to stop rather than
+// explain. It counts the references followed, not the keys walked.
+func TestResolveEditNestingIsCapped(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i <= maxRefDepth+1; i++ {
+		writeFile(t, dir, fmt.Sprintf("f%d.json", i), fmt.Sprintf(`{"next": {"$ref": "./f%d.json"}}`, i+1))
+	}
+	path := writeFile(t, dir, "dispat.json", `{"packages": {"$ref": "./f0.json"}}`)
+
+	// Every key of the path crosses one more reference, which is the only way
+	// to nest this far: a key path dispat itself builds is three keys long.
+	keyPath := []string{"packages"}
+	for i := 0; i <= maxRefDepth+1; i++ {
+		keyPath = append(keyPath, "next")
+	}
+	_, _, err := ResolveEdit(path, keyPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "$ref nesting is more than 32 files deep")
+
+	// A path of many keys through one file is not nesting, and is not capped.
+	deep := map[string]any{}
+	node := deep
+	keys := make([]string, 0, maxRefDepth+2)
+	for i := 0; i <= maxRefDepth+1; i++ {
+		key := fmt.Sprintf("k%d", i)
+		child := map[string]any{}
+		node[key] = child
+		node = child
+		keys = append(keys, key)
+	}
+	writeJSON(t, filepath.Join(dir, "deep.json"), deep)
+	file, inner, err := ResolveEdit(filepath.Join(dir, "deep.json"), keys)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "deep.json"), file)
+	assert.Equal(t, keys, inner)
 }

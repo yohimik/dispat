@@ -296,16 +296,13 @@ func labelOr(label string) string {
 }
 
 // kindOf names what a referenced file turned out to hold, for the one error
-// that has to say why it cannot be used.
+// that has to say why it cannot be used. A file holding nothing never reaches
+// here: that is refused as it is read.
 func kindOf(v any) string {
-	switch v.(type) {
-	case []any:
+	if _, isList := v.([]any); isList {
 		return "a list"
-	case nil:
-		return "empty"
-	default:
-		return "a single value"
 	}
+	return "a single value"
 }
 
 // documentObject asserts what a config file's top level has to be. An empty
@@ -348,6 +345,12 @@ func decodeFile(path string) (any, error) {
 		doc := map[string]any{}
 		if err := toml.Unmarshal(data, &doc); err != nil {
 			return nil, err
+		}
+		if len(doc) == 0 {
+			// TOML spells an empty document as an empty table, where the other
+			// two spell it as no value at all. Saying no value keeps "this file
+			// is empty" one answer across the three formats.
+			return nil, nil
 		}
 		return doc, nil
 	default:

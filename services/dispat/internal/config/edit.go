@@ -213,8 +213,11 @@ func ResolveEdit(path string, keyPath []string) (string, []string, error) {
 	return resolveEdit(path, keyPath, 0)
 }
 
-func resolveEdit(path string, keyPath []string, depth int) (string, []string, error) {
-	if depth > maxRefDepth {
+// resolveEdit is ResolveEdit with the number of references already followed,
+// which is what bounds it: the loader refuses a cycle long before an edit is
+// collected, so this only has to stop rather than explain.
+func resolveEdit(path string, keyPath []string, followed int) (string, []string, error) {
+	if followed > maxRefDepth {
 		return "", nil, fmt.Errorf("$ref nesting is more than %d files deep at %s", maxRefDepth, path)
 	}
 	doc, err := decodeFile(path)
@@ -254,7 +257,7 @@ func resolveEdit(path string, keyPath []string, depth int) (string, []string, er
 				return path, keyPath, nil
 			}
 		}
-		return resolveEdit(refPath(target, path), rest, depth+1)
+		return resolveEdit(refPath(target, path), rest, followed+1)
 	}
 	return path, keyPath, nil
 }
