@@ -9,6 +9,7 @@ package config
 // would produce.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,6 +112,325 @@ func TestViperFromTreeLeavesTheTreeAlone(t *testing.T) {
 		"env":       map[string]any{"MiXed": "v"},
 		"aliasTags": []any{map[string]any{"Format": "latest"}},
 	}}}, tree.root, "the tree keeps every key as the file spelled it")
+}
+
+// TestRefReplacesTheValue: the whole point, at three levels of nesting and in
+// every position a value can be. A referenced document becomes the value
+// wholesale, whether it is an object, a list or a single value.
+func TestRefReplacesTheValue(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "spaces.json", `{"libs": {"path": "pkgs", "flow": {"$ref": "./flow.yaml"}}}`)
+	writeFile(t, dir, "flow.yaml", "build:\n  - build\n")
+	writeFile(t, dir, "shell.json", `["/bin/bash", "-c"]`)
+	writeFile(t, dir, "tagformat.yaml", "'{name}-{version}'\n")
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"$ref": "./spaces.json"},
+		"shell": {"$ref": "./shell.json"},
+		"tagFormat": {"$ref": "./tagformat.yaml"}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path)
+	assert.Equal(t, []string{"build"}, cfg.Spaces["libs"].Flow.Build, "an object through two files")
+	assert.Equal(t, []string{"/bin/bash", "-c"}, cfg.Shell, "a referenced list")
+	assert.Equal(t, "{name}-{version}", cfg.TagFormat, "a referenced single value")
+	assert.Equal(t, []string{
+		path,
+		filepath.Join(dir, "shell.json"),
+		filepath.Join(dir, "spaces.json"),
+		filepath.Join(dir, "flow.yaml"),
+		filepath.Join(dir, "tagformat.yaml"),
+	}, cfg.SourceFiles, "every file read, in the order it was read")
+}
+
+// TestRefLoadsTheSameConfigurationAsInline: a configuration split across files
+// is the configuration it was split out of, which is the claim that matters
+// more than any single key.
+func TestRefLoadsTheSameConfigurationAsInline(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Env = map[string]string{"MiXed": "v"}
+	inline, err := loadModel(t, cfg, "pkgs/core")
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	writeJSON(t, filepath.Join(dir, "spaces.json"), cfg.Spaces)
+	writeFile(t, dir, "env.yaml", "MiXed: v\n")
+	split := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"run": {},
+		"spaces": {"$ref": "./spaces.json"},
+		"env": {"$ref": "./env.yaml"}
+	}`)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "pkgs", "core"), 0o755))
+
+	loaded, err := Load(split, nil)
+	require.NoError(t, err)
+	loaded.SourceFiles, inline.SourceFiles = nil, nil
+	assert.Equal(t, inline, loaded)
+	assert.Equal(t, map[string]string{"MiXed": "v"}, loaded.Env,
+		"a referenced env object keeps its key case like an inline one")
+}
+
+// TestRefResolvesAgainstTheFileThatWroteIt: a relative reference is relative to
+// its own file, not to the monorepo root, which is what lets a folder of
+// fragments be moved as a folder. Proven with the same file name sitting in
+// both places, holding different things.
+func TestRefResolvesAgainstTheFileThatWroteIt(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", "build:\n  - wrong\n")
+	writeFile(t, dir, "cfg/flow.yaml", "build:\n  - right\n")
+	writeFile(t, dir, "cfg/spaces.json", `{"libs": {"path": "pkgs", "flow": {"$ref": "./flow.yaml"}}}`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"$ref": "./cfg/spaces.json"}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"right"}, cfg.Spaces["libs"].Flow.Build)
+}
+
+// TestRefAbsolutePath: an absolute path is used as written, for the fragment
+// that lives outside the repository.
+func TestRefAbsolutePath(t *testing.T) {
+	shared := writeFile(t, t.TempDir(), "scripts.json", `{"build": "echo shared"}`)
+	dir := t.TempDir()
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"$ref": "`+filepath.ToSlash(shared)+`"},
+		"spaces": {"libs": {"path": "pkgs", "flow": {"build": ["build"]}}}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, Script{"echo shared"}, cfg.Scripts["build"])
+}
+
+// TestRefSiblingKeysOverride: a reference brings in a base and the keys beside
+// it settle the rest, so one shared fragment serves the places that agree with
+// it and the places that agree with most of it.
+func TestRefSiblingKeysOverride(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "space.yaml", "path: pkgs\nflow:\n  build:\n    - build\nversioning: fixed\n")
+	writeFile(t, dir, "independent.json", `"independent"`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {
+			"libs": {"$ref": "./space.yaml"},
+			"apps": {"$ref": "./space.yaml", "Versioning": {"$ref": "./independent.json"}}
+		}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "fixed", cfg.Spaces["libs"].Versioning, "the fragment as it is")
+	assert.Equal(t, "independent", cfg.Spaces["apps"].Versioning,
+		"the sibling wins, however the two files spell the key, and may be a reference itself")
+	assert.Equal(t, "pkgs", cfg.Spaces["apps"].Path, "everything it did not override survives")
+}
+
+// TestRefSiblingsNeedAnObject: keys beside a reference override the object it
+// brought in, so a fragment that is not an object leaves them nothing to
+// override and the file is refused rather than half-applied.
+func TestRefSiblingsNeedAnObject(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell.json", `["/bin/bash", "-c"]`)
+	path := writeFile(t, dir, "dispat.json", `{"shell": {"$ref": "./shell.json", "extra": 1}}`)
+
+	_, err := Load(path, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the file is a list, so the keys beside the $ref have nothing to override")
+}
+
+// TestRefTheDocumentItself: a config file may be nothing but a reference, which
+// is how a repository keeps its real configuration somewhere other than the
+// name dispat looks for.
+func TestRefTheDocumentItself(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "cfg/real.yaml", "scripts:\n  build: echo b\nspaces:\n  libs:\n    path: pkgs\n    flow:\n      build: [build]\n")
+	path := writeFile(t, dir, "dispat.json", `{"$ref": "./cfg/real.yaml"}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path)
+}
+
+// TestRefInsideCustom: `custom` is free-form data dispat never reads, and a
+// reference means there what it means everywhere else. One rule, no exception
+// to remember.
+func TestRefInsideCustom(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "team.json", `{"team": "platform"}`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"libs": {"path": "pkgs", "flow": {"build": ["build"]}}},
+		"custom": {"owners": {"$ref": "./team.json"}}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"owners": map[string]any{"team": "platform"}}, cfg.Custom)
+}
+
+// TestRefTheSameFileTwiceIsNotACycle: a fragment used in two places is read
+// twice and lands in both, because only a file already being read is a cycle.
+func TestRefTheSameFileTwiceIsNotACycle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "flow.yaml", "build:\n  - build\n")
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {
+			"libs": {"path": "pkgs", "flow": {"$ref": "./flow.yaml"}},
+			"apps": {"path": "apps", "flow": {"$ref": "./flow.yaml"}}
+		}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"build"}, cfg.Spaces["libs"].Flow.Build)
+	assert.Equal(t, []string{"build"}, cfg.Spaces["apps"].Flow.Build)
+}
+
+// TestRefCycles: a file that reaches itself is refused with the way it got
+// there, however many files the loop runs through.
+func TestRefCycles(t *testing.T) {
+	t.Run("a file referencing itself", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeFile(t, dir, "dispat.json", `{"spaces": {"$ref": "./dispat.json"}}`)
+
+		_, err := Load(path, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "$ref cycle: "+path+" (spaces) -> "+path)
+		assert.Contains(t, err.Error(), "a file cannot reference itself, directly or through another")
+	})
+
+	t.Run("through two more files", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "a.json", `{"libs": {"$ref": "./b.json"}}`)
+		writeFile(t, dir, "b.json", `{"path": "pkgs", "flow": {"$ref": "./dispat.json"}}`)
+		path := writeFile(t, dir, "dispat.json", `{"spaces": {"$ref": "./a.json"}}`)
+
+		_, err := Load(path, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "$ref cycle: "+
+			path+" (spaces) -> "+filepath.Join(dir, "a.json")+" (libs) -> "+
+			filepath.Join(dir, "b.json")+" (flow) -> "+path)
+	})
+
+	t.Run("two names for one file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeFile(t, dir, "dispat.json", `{"spaces": {"$ref": "./cfg/../dispat.json"}}`)
+
+		_, err := Load(path, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "$ref cycle")
+	})
+}
+
+// TestRefNestingIsCapped: a chain nobody wrote on purpose stops at a depth
+// rather than at a stack overflow. Each file references the next, so the cap
+// is what ends it.
+func TestRefNestingIsCapped(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i <= maxRefDepth+1; i++ {
+		writeFile(t, dir, fmt.Sprintf("f%d.json", i), fmt.Sprintf(`{"next": {"$ref": "./f%d.json"}}`, i+1))
+	}
+	path := writeFile(t, dir, "dispat.json", `{"spaces": {"$ref": "./f0.json"}}`)
+
+	_, err := Load(path, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), fmt.Sprintf("$ref nesting is more than %d files deep", maxRefDepth))
+}
+
+// TestRefFailures: everything a reference can get wrong, each named where it
+// was written and with what it pointed at.
+func TestRefFailures(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct{ name, body, want string }{
+		{"missing file", `{"env": {"$ref": "./absent.json"}}`,
+			`env: $ref "./absent.json": cannot read`},
+		{"unreadable format", `{"env": {"$ref": "./env.ini"}}`,
+			"dispat reads json, yaml and toml config files"},
+		{"empty file", `{"env": {"$ref": "./empty.yaml"}}`,
+			`env: $ref "./empty.yaml": the file is empty, so the key would have no value`},
+		{"not a string", `{"env": {"$ref": 7}}`,
+			"env: $ref must name another config file"},
+		{"empty string", `{"env": {"$ref": "  "}}`,
+			"env: $ref must name another config file"},
+		{"deep inside a list", `{"aliasTags": [{"$ref": "./absent.json"}]}`,
+			`aliasTags[0]: $ref "./absent.json": cannot read`},
+		{"the document itself", `{"$ref": "./absent.json"}`,
+			`the document: $ref "./absent.json": cannot read`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeFile(t, dir, "env.ini", "A = 1\n")
+			writeFile(t, dir, "empty.yaml", "")
+			path := writeFile(t, dir, "dispat.json", tc.body)
+
+			_, err := Load(path, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestRefKeepsPathsRepositoryRelative: a reference moves text, not meaning. A
+// space's path written in a fragment one folder down still points where it
+// would have pointed inline, because it is the monorepo root it is resolved
+// against.
+func TestRefKeepsPathsRepositoryRelative(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "cfg/spaces.json", `{"libs": {"path": "pkgs", "flow": {"build": ["build"]}}}`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"$ref": "./cfg/spaces.json"}
+	}`)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "pkgs", "core"), 0o755))
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(cfg, dir)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, filepath.Join(dir, "pkgs", "core"), pkgs[0].Dir)
+}
+
+// TestRefInFolderConfigFiles: a space folder's file and a package folder's file
+// are read the same way the root config is, so they may be split too.
+func TestRefInFolderConfigFiles(t *testing.T) {
+	cfg := minimalConfig()
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	writeFile(t, root, "pkgs/env.yaml", "SPACE_KEY: s\n")
+	writeFile(t, root, "pkgs/dispat.json", `{"env": {"$ref": "./env.yaml"}}`)
+	writeFile(t, root, "pkgs/core/scripts.json", `{"build": "echo core"}`)
+	writeFile(t, root, "pkgs/core/dispat.json", `{"scripts": {"$ref": "./scripts.json"}}`)
+
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, []string{"SPACE_KEY=s"}, pkgs[0].Space.Env,
+		"the space folder's referenced env, with its case")
+	assert.Equal(t, Script{"echo core"}, pkgs[0].Space.Scripts["build"],
+		"the package folder's referenced scripts")
+}
+
+// TestRefRefusalsSurviveAReference: a folder file may not declare what only a
+// monorepo root may, and writing it in a referenced fragment is the same
+// mistake, refused the same way.
+func TestRefRefusalsSurviveAReference(t *testing.T) {
+	cfg := minimalConfig()
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	writeFile(t, root, "pkgs/nested.json", `{"other": {"path": "elsewhere"}}`)
+	writeFile(t, root, "pkgs/dispat.json", `{"spaces": {"$ref": "./nested.json"}}`)
+
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, _, err = Discover(loaded, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "declares spaces")
 }
 
 // TestCloneValueCopiesEveryContainer: the parsers in use produce string-keyed

@@ -917,7 +917,12 @@ func TestExampleConfigsAreValid(t *testing.T) {
 	// JSON one, and it has to be: an example is the shape most people copy,
 	// and two that disagree teach two different things while claiming to
 	// teach one. Comparing the loaded models rather than the text is what
-	// lets each file keep its own comments and key order.
+	// lets each file keep its own comments and key order. The files each was
+	// read from are the one difference that is not a difference in what they
+	// configure.
+	for _, cfg := range loaded {
+		cfg.SourceFiles = nil
+	}
 	assert.Equal(t, loaded[0], loaded[1], "the two examples must describe one configuration")
 }
 

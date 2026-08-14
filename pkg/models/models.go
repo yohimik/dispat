@@ -167,6 +167,12 @@ type File struct {
 	// field is optional and defaults to the specification value.
 	Parser *ParserConfig `mapstructure:"parser" json:"parser,omitempty"`
 
+	// SourceFiles are the files this configuration was read from: the config
+	// file itself, followed by every file a `$ref` in it named, in the order
+	// they were read. Populated by the loader, so that a configuration split
+	// across files can say what it was made of.
+	SourceFiles []string `mapstructure:"-" json:"-"`
+
 	// Resolved values, populated by validation.
 	BuildConcurrency   int                     `mapstructure:"-" json:"-"`
 	PublishConcurrency int                     `mapstructure:"-" json:"-"`

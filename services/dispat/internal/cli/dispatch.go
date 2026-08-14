@@ -343,9 +343,17 @@ func (r *runner) runConfigured() int {
 		Str("config", cfgPath).
 		Str("root", resolvedRoot).
 		Bool("explicitConfig", r.fs.Changed("config")).
+		Int("configFiles", len(cfg.SourceFiles)).
 		Int("spaces", len(cfg.Spaces)).
 		Int("packages", len(cfg.Packages)).
 		Msg("configuration loaded")
+	// Which files a configuration was actually made of is only interesting
+	// once it is made of more than one, and then it is the first question:
+	// a `$ref` naming the wrong fragment looks exactly like a key nobody
+	// wrote.
+	for _, file := range cfg.SourceFiles {
+		log.Trace().Str("file", file).Msg("configuration file read")
+	}
 
 	if r.inv.cmd == cmdExec {
 		// Straight after the config, which is all it needs: no plan unless

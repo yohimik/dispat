@@ -1,9 +1,12 @@
 package config
 
-// How a config file becomes a tree. Each format dispat reads has a parser of
-// its own, and this is the one place that calls them: the root config, a space
-// or package folder's own file, the probes the ascent classifies candidates
-// with, and the readers behind `dispat compute --write` all arrive here.
+// How a config file becomes a tree, and the one thing that can happen on the
+// way: a `$ref` naming another file, whose content becomes the value.
+//
+// Each format dispat reads has a parser of its own, and this is the one place
+// that calls them: the root config, a space or package folder's own file, the
+// probes the ascent classifies candidates with, and the readers behind
+// `dispat compute --write` all arrive here.
 //
 // Parsing the file rather than letting viper do it is what keeps every key
 // spelled the way the file wrote it. Viper lowercases every map key it reads,
@@ -12,6 +15,12 @@ package config
 // names, so the tree is kept exact-case and viper is handed a lowercased copy
 // of it. One parse then serves both, where reading the file twice used to be
 // the price of an `env` object.
+//
+// A reference is resolved against the directory of the file that wrote it, and
+// the file it names may hold references of its own, resolved against theirs. A
+// file is never cached between positions: the same fragment referenced from
+// two keys is read twice and each copy is its own value, which is what makes a
+// file that appears twice in one chain, and only that, a cycle.
 
 import (
 	"encoding/json"
@@ -33,6 +42,16 @@ import (
 // extension decides the format, here as everywhere else.
 var errUnsupportedFormat = errors.New("dispat reads json, yaml and toml config files")
 
+// refKey is the key that makes an object a reference. It is matched exactly:
+// a config file is written by hand, and one spelling keeps `$Ref` an unknown
+// key rather than a reference that works in some files and not others.
+const refKey = "$ref"
+
+// maxRefDepth caps how far references may nest. The chain check below catches
+// a file that reaches itself under a path it can be named by; this catches the
+// ones it cannot, such as two names for one file through a symlink.
+const maxRefDepth = 32
+
 // tree is one parsed config file: the document, and every file the document
 // was composed from, in the order they were read.
 type tree struct {
@@ -40,17 +59,248 @@ type tree struct {
 	files []string
 }
 
-// readTree parses a config file into a tree whose keys are spelled as written.
+// readTree parses a config file into a tree whose keys are spelled as written,
+// with every `$ref` it holds resolved.
 func readTree(path string) (*tree, error) {
-	doc, err := decodeFile(path)
+	r := &refResolver{}
+	doc, err := r.document(path)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read %s: %w", path, err)
+		return nil, err
 	}
 	root, err := documentObject(doc, path)
 	if err != nil {
 		return nil, err
 	}
-	return &tree{root: root, files: []string{path}}, nil
+	return &tree{root: root, files: r.files}, nil
+}
+
+// refResolver resolves the references of one file and everything it pulls in.
+// It holds the chain being followed, so a cycle is reported as the path that
+// closed it rather than as a stack overflow.
+type refResolver struct {
+	chain []refFrame
+	files []string
+}
+
+// refFrame is one file on the chain, and the key that carried the reference
+// out of it.
+type refFrame struct {
+	file string // as it was opened, which is how the error names it
+	id   string // the same file, absolute and cleaned, for comparison
+	key  string
+}
+
+// document parses one file and resolves what it holds: the entry point for the
+// file readTree was asked for and for every file a reference names.
+func (r *refResolver) document(path string) (any, error) {
+	doc, err := decodeFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	r.files = append(r.files, path)
+	return r.value(doc, path, "")
+}
+
+// value resolves one node. A reference is replaced by the file it names; every
+// other object and array is walked, because a reference can sit at any depth.
+// label is where the node sits in its own file, for the errors.
+func (r *refResolver) value(v any, file, label string) (any, error) {
+	switch node := v.(type) {
+	case map[string]any:
+		return r.object(node, file, label)
+	case []any:
+		out := make([]any, len(node))
+		for i, item := range node {
+			resolved, err := r.value(item, file, fmt.Sprintf("%s[%d]", label, i))
+			if err != nil {
+				return nil, err
+			}
+			out[i] = resolved
+		}
+		return out, nil
+	default:
+		return v, nil
+	}
+}
+
+// object resolves an object, which is where a reference can be. Keys are
+// walked in order so that a file with two mistakes in it always reports the
+// same one first.
+func (r *refResolver) object(node map[string]any, file, label string) (any, error) {
+	target, isRef, err := refTarget(node)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %s: %w", file, labelOr(label), err)
+	}
+	if !isRef {
+		out := make(map[string]any, len(node))
+		for _, key := range sortedKeys(node) {
+			resolved, err := r.value(node[key], file, joinLabel(label, key))
+			if err != nil {
+				return nil, err
+			}
+			out[key] = resolved
+		}
+		return out, nil
+	}
+
+	base, err := r.follow(target, file, label)
+	if err != nil {
+		return nil, err
+	}
+	if len(node) == 1 {
+		return base, nil
+	}
+	// Keys written beside a reference override what it brought in, so a shared
+	// fragment can be used as it is in one place and adjusted in another.
+	object, ok := base.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: %s: $ref %q: the file is %s, so the keys beside the $ref have nothing to override",
+			file, labelOr(label), target, kindOf(base))
+	}
+	for _, key := range sortedKeys(node) {
+		if key == refKey {
+			continue
+		}
+		resolved, err := r.value(node[key], file, joinLabel(label, key))
+		if err != nil {
+			return nil, err
+		}
+		// The overriding key is written whichever way the two files spell it:
+		// leaving both spellings in would hand viper two keys that fold
+		// together, and which one survived would be a matter of luck.
+		if existing, found := foldKey(object, key); found {
+			delete(object, existing)
+		}
+		object[key] = resolved
+	}
+	return object, nil
+}
+
+// follow reads the file a reference names, with the reference on the chain so
+// that a file reaching back to itself is refused instead of followed forever.
+func (r *refResolver) follow(target, file, label string) (any, error) {
+	path := target
+	if !filepath.IsAbs(path) {
+		// A relative reference is relative to the file that wrote it, which is
+		// the only base that lets a fragment be moved with the file naming it.
+		path = filepath.Join(filepath.Dir(file), filepath.FromSlash(target))
+	}
+	r.chain = append(r.chain, refFrame{file: file, id: identity(file), key: labelOr(label)})
+	defer func() { r.chain = r.chain[:len(r.chain)-1] }()
+	if err := r.checkChain(path); err != nil {
+		return nil, err
+	}
+
+	doc, err := r.document(path)
+	if err != nil {
+		var chain *chainError
+		if errors.As(err, &chain) {
+			// A chain failure already names every file involved, so the frames
+			// it unwinds through leave it as it is.
+			return nil, err
+		}
+		return nil, fmt.Errorf("%s: %s: $ref %q: %w", file, labelOr(label), target, err)
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("%s: %s: $ref %q: the file is empty, so the key would have no value",
+			file, labelOr(label), target)
+	}
+	return doc, nil
+}
+
+// chainError is a cycle or a chain too deep to be meant. It carries every file
+// involved, which is why the frames it unwinds through pass it on untouched
+// instead of prefixing it with hops it already names.
+type chainError struct{ text string }
+
+func (e *chainError) Error() string { return e.text }
+
+// checkChain refuses a reference that would read a file already being read,
+// and one that has nested further than anyone means to.
+func (r *refResolver) checkChain(target string) error {
+	id := identity(target)
+	for _, frame := range r.chain {
+		if frame.id == id {
+			return &chainError{fmt.Sprintf(
+				"$ref cycle: %s; a file cannot reference itself, directly or through another",
+				r.chainText(target))}
+		}
+	}
+	if len(r.chain) > maxRefDepth {
+		return &chainError{fmt.Sprintf("$ref nesting is more than %d files deep: %s",
+			maxRefDepth, r.chainText(target))}
+	}
+	return nil
+}
+
+// chainText renders the files being read, each labelled with the key that
+// carried the reference out of it, ending on the file that closed the chain.
+func (r *refResolver) chainText(last string) string {
+	parts := make([]string, 0, len(r.chain)+1)
+	for _, frame := range r.chain {
+		parts = append(parts, fmt.Sprintf("%s (%s)", frame.file, frame.key))
+	}
+	return strings.Join(append(parts, last), " -> ")
+}
+
+// refTarget reports whether an object is a reference, and what it names.
+func refTarget(node map[string]any) (string, bool, error) {
+	raw, ok := node[refKey]
+	if !ok {
+		return "", false, nil
+	}
+	target, ok := raw.(string)
+	if !ok || strings.TrimSpace(target) == "" {
+		return "", true, errors.New("$ref must name another config file")
+	}
+	return target, true, nil
+}
+
+// identity is the name two paths to one file agree on.
+func identity(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
+}
+
+// foldKey finds the key an object already spells some way or another.
+func foldKey(node map[string]any, key string) (string, bool) {
+	for name := range node {
+		if strings.EqualFold(name, key) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// joinLabel extends a node's label with one more key.
+func joinLabel(label, key string) string {
+	if label == "" {
+		return key
+	}
+	return label + "." + key
+}
+
+// labelOr names the document itself when a node has no key above it.
+func labelOr(label string) string {
+	if label == "" {
+		return "the document"
+	}
+	return label
+}
+
+// kindOf names what a referenced file turned out to hold, for the one error
+// that has to say why it cannot be used.
+func kindOf(v any) string {
+	switch v.(type) {
+	case []any:
+		return "a list"
+	case nil:
+		return "empty"
+	default:
+		return "a single value"
+	}
 }
 
 // documentObject asserts what a config file's top level has to be. An empty

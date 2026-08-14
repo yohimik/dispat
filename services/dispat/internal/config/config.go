@@ -497,6 +497,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	// every other map key. This runs before validation so the keys it reports
 	// on are the ones the file actually wrote.
 	restoreEnvCase(envRestorerOf(t), &cfg)
+	cfg.SourceFiles = t.files
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
