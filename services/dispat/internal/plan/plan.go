@@ -98,6 +98,59 @@ const (
 	// sign that it named the provider when it meant the consumer (§13.7d).
 	CodeEmptyCancel = "W170"
 
+	// --- corrections (§7.4, §13.4b) and reverted changelogs (§7.3) ---
+	//
+	// The specification reserves these for the release engine: it validates the
+	// shape of an `Edits` or `Deletes` footer and leaves resolving the target
+	// against history, and everything that follows from it, here.
+
+	// CodeCorrectionUnknownTarget marks a correction target that names no
+	// commit, names more than one, or names a commit that is not a proper
+	// ancestor of the correction's own. Unit-scoped: the correction contributes
+	// nothing and its siblings still apply.
+	CodeCorrectionUnknownTarget = "E210"
+	// CodeCorrectionBadSelector marks a unit selector past the end of the target
+	// commit, or a bare sha naming a commit that carries several units and so
+	// does not say which record is meant (§7.4.1). Unit-scoped.
+	CodeCorrectionBadSelector = "E211"
+	// CodeCorrectionControlTarget marks a correction aimed at a `cancel` or
+	// `release` unit. Neither carries a record that could be restated or
+	// discarded (§7.4.2). Unit-scoped.
+	CodeCorrectionControlTarget = "E212"
+	// CodeCorrectionWidens marks a correction whose scope-set reaches a package
+	// its target's record never claimed. Narrowing a record is how one scoped
+	// `(*)` is corrected for some of its packages only; widening would extend
+	// someone else's record, so it is refused. Unit-scoped.
+	CodeCorrectionWidens = "E213"
+	// CodeCorrectionNoop marks a correction that found nothing to act on: the
+	// target is already released, already discarded, or a wildcard whose scope
+	// holds nothing pending.
+	//
+	// Non-suppressible, and not by dispat's choice: an operator who writes a
+	// correction has to be able to see that it did not take (§17.1). It is
+	// dispat's own code rather than the parser's, so `--quiet-parser` cannot
+	// reach it either.
+	CodeCorrectionNoop = "W209"
+	// CodeCorrectionSuperseded marks a correction of a target a newer correction
+	// already claimed. The newest wins, by the same rule as §8.6.
+	CodeCorrectionSuperseded = "W210"
+	// CodeCorrectionIdentical marks an `Edits` restating its target as the same
+	// type, breaking marker and description. The correction applies; it just
+	// changes nothing.
+	CodeCorrectionIdentical = "W211"
+	// CodeRevertSuppressed marks a revert and its target leaving the changelog
+	// together (§7.3). Both units still count toward the bump: the work happened
+	// and was undone, and the version has to carry both halves.
+	CodeRevertSuppressed = "W212"
+	// CodeRevertNonAncestor marks a `Reverts` value naming a commit that is not
+	// an ancestor of the revert. The footer stays informational and the revert
+	// releases normally (§7.3).
+	CodeRevertNonAncestor = "W213"
+	// CodeCorrectionVoid marks a correction whose own record a newer correction
+	// discarded for a package. It is void there: none of its effects apply, so
+	// whatever it would have discarded stands (§7.4.2).
+	CodeCorrectionVoid = "W215"
+
 	// --- propagation and channels (§9, §11, §13.8) ---
 
 	// CodePropagatedChannelConflict reports conflicting propagated channels;
@@ -968,6 +1021,11 @@ type commitRec struct {
 	key    string
 	rank   int // position in history, 0 = newest
 	units  []*ccme.Unit
+	// unitCount is how many units the message carried, invalid ones included.
+	// units holds only those that parsed, and a correction's "#n" selector
+	// counts positions in the message (§7.4.1), so the two are different
+	// numbers and both are needed.
+	unitCount int
 	// scope[i] is the resolved scope-set of units[i] (§6), as package names.
 	scope []map[string]bool
 	// derivedSet memoises derived(commit) (§6.2).
@@ -1054,6 +1112,14 @@ type computation struct {
 	held    map[string]bool
 	pinned  map[string]pin
 
+	// corrections state (§13.4b, §7.3). dropped holds every claimed
+	// (package, record) pair and the correction that claimed it; corrects and
+	// noteDrops are the plan marking §13.10 requires, per package.
+	dropped   map[dropKey]*correctionRec
+	corrects  map[string]map[*ccme.Unit][]string
+	noteDrops map[string]map[*ccme.Unit]bool
+	shaCache  map[string]string
+
 	// channel axis state, produced by §9.2 phase 1 and settled by §13.8.
 	proposed    map[string]channelPick
 	channel     map[string]string
@@ -1084,6 +1150,7 @@ type computation struct {
 //	§13.3  pending window per package, measured from its last *stable* tag
 //	§13.4  parse the union of windows into units, resolve scopes
 //	§13.5  cancellation closures
+//	§13.4b corrections, applied to the stream the phases below read
 //	§13.6a holds, resolved before propagation
 //	§13.6  direct bumps
 //	§13.7  propagation — channel axis, channel resolution, then the bump axis
@@ -1113,6 +1180,9 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		proposed:    make(map[string]channelPick),
 		channel:     make(map[string]string, len(pkgs)),
 		channelFrom: make(map[string]string),
+		dropped:     make(map[dropKey]*correctionRec),
+		corrects:    make(map[string]map[*ccme.Unit][]string),
+		noteDrops:   make(map[string]map[*ccme.Unit]bool),
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
@@ -1155,9 +1225,10 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	if err := cp.parseAndResolve(); err != nil { // §13.4
 		return nil, err
 	}
-	cp.collectCancels() // §13.5
-	cp.resolveHolds()   // §13.6a
-	cp.directBumps()    // §13.6
+	cp.collectCancels()   // §13.5
+	cp.applyCorrections() // §13.4b, on the stream every phase below reads
+	cp.resolveHolds()     // §13.6a
+	cp.directBumps()      // §13.6
 	if err := cp.ancestryFailed(); err != nil {
 		return nil, err
 	}
@@ -1624,12 +1695,17 @@ func (cp *computation) parseAndResolve() error {
 		cp.liftDiagnostics(data, rec.key)
 
 		rec.units = data.ValidUnits()
+		rec.unitCount = len(data.Units)
 		rec.scope = make([]map[string]bool, len(rec.units))
 		for i, u := range rec.units {
 			scopes, written := unitScopes(u)
 			res := cp.resolveScopeSet(scopes, written, rec)
 			cp.reportScope(res, rec, "")
-			if res.inert() {
+			// A correction with no scope-set takes the union of its targets'
+			// packages, and §7.4.2 disapplies the file-derived fallback for it.
+			// Its resolution here is provisional, so neither the inert warning
+			// nor the set itself means anything until §13.4b has settled it.
+			if res.inert() && !(isCorrection(u) && !written) {
 				cp.warn(CodeInertUnit, "", rec.key,
 					"unit resolved to no package and is inert: "+u.Header.Raw)
 			}

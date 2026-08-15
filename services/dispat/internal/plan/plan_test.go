@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -121,6 +122,26 @@ func (f *fakeGit) IsAncestor(_ context.Context, a, b string) (bool, error) {
 		return false, nil
 	}
 	return ia <= ib, nil
+}
+
+// ResolveCommit answers the commitResolver capability the corrections pass
+// looks for, the way `git rev-parse` does: an abbreviation resolves to the one
+// commit carrying it, and an ambiguous one resolves to nothing.
+func (f *fakeGit) ResolveCommit(_ context.Context, rev string) (string, error) {
+	var found string
+	for _, c := range f.history {
+		if !strings.HasPrefix(c.sha, rev) {
+			continue
+		}
+		if found != "" {
+			return "", errors.New("ambiguous argument: " + rev)
+		}
+		found = c.sha
+	}
+	if found == "" {
+		return "", errors.New("unknown revision: " + rev)
+	}
+	return found, nil
 }
 
 func (f *fakeGit) CreateTag(context.Context, string, string, string) error { return nil }
