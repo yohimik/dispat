@@ -114,8 +114,9 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   [Details](https://yohimik.github.io/dispat/editing/autowriter).
 - **Every release step is also a command.** `dispat changelog`, `autoversion`, `commit` and `github` each run one thing
   the release normally does, at the moment your own flow needs it, and the release stage then finds the work done and
-  skips it. `dispat if` branches on an environment variable and `dispat exec` runs one declared script once, so a
-  custom pipeline can be assembled from the same pieces without giving up the ordering.
+  skips it. `dispat if` branches on a condition (an environment variable, a file's existence, or whether the selected
+  packages changed) and `dispat exec` runs one declared script once, so a custom pipeline can be assembled from the
+  same pieces without giving up the ordering.
   [Details](https://yohimik.github.io/dispat/reference/releasing/steps).
 
 ## Documentation
@@ -133,7 +134,7 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [The replacer](https://yohimik.github.io/dispat/editing/replacer)                           | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.                                                                                              |
 | [API reference](https://yohimik.github.io/dispat/api)                                                | The three surfaces dispat exposes: the command line, the configuration file, and the Go packages.                                                                                          |
 | [CLI](https://yohimik.github.io/dispat/cli)                                                          | Every command, flag and exit code.                                                                                                                                                         |
-| [dispat if](https://yohimik.github.io/dispat/cli/if)                                                 | Branching on a variable inside a configured script.                                                                                                                                        |
+| [dispat if](https://yohimik.github.io/dispat/cli/if)                                                 | Branching on a variable, a file or the changed packages inside a configured script.                                                                                                        |
 | [dispat exec](https://yohimik.github.io/dispat/cli/exec)                                             | Running one declared script on its own.                                                                                                                                                    |
 | [Naming a place](https://yohimik.github.io/dispat/cli/locations)                                     | The `pkg:`, `space:`, `root` and `cwd` values `--for`, `--script-from` and `--in` share.                                                                                                    |
 | [Configuration file](https://yohimik.github.io/dispat/configuration)                                 | Top-level options, script sequences, run-level hooks; links the pages below.                                                                                                               |

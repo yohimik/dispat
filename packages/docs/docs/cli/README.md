@@ -23,7 +23,7 @@ dispat [command] [flags]
 | `commit`                  | Create the per-package release commit; see [The commit command](./commit.md).                               |
 | `github`                  | Create the per-package GitHub release now; see [The github command](./github.md).                           |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
-| `if <cond>`               | Run one of several shell scripts, chosen by a condition on the environment; see [The if command](./if.md). |
+| `if <cond>`               | Run one of several shell scripts, chosen by a condition on the environment, the filesystem or the changed packages; see [The if command](./if.md). |
 | `exec <script>`           | Run one declared script here, once, for a named subject or the folder you are in; see [The exec command](./exec.md). |
 | `self-update`             | Replace this binary with the latest release; see [The self-update command](./self-update.md).                             |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The scanner command](./scanner.md).                     |
@@ -100,7 +100,8 @@ publish nothing never makes a real release queue behind it.
 The two [shell helpers](./if.md#exit-codes) are the exception: `if` and `exec` hand back the exit code of the
 script they ran, so `dispat if CI --then 'exit 7'` exits `7` and a pipeline gating on a specific code still works with a
 helper in the middle. `--on-failure` replaces that code with its own. `2` still means a bad command line, which is worth
-knowing if a script exits `2` itself.
+knowing if a script exits `2` itself. A condition that is false is not a failure, but an `if --changed` that cannot be
+evaluated at all, a revision git cannot resolve or a configuration that cannot be loaded, exits `1`.
 
 ## Interruption
 

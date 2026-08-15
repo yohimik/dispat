@@ -104,7 +104,9 @@ $ dispat if CI --then 'make ci' --in pkg:core
 enough to call in a loop. A path or `cwd` keeps it that way, since your command
 line already said everything needed. Naming `pkg:`, `space:` or `root` does
 make it read your config, because there is no other way to find out where a
-package lives. You pay for that only when you ask for it.
+package lives. So does the [`--changed`](./if.md#changed-packages) condition,
+which asks about the repository itself. You pay for that only when you ask for
+it.
 
 ## See also
 

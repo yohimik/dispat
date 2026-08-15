@@ -144,6 +144,30 @@ pipeline would skip the release instead of failing. Exit `3` is the answer; ever
 one. A step that *should* fail the pipeline when nothing released (a manually dispatched release, say) wants the
 bare form instead.
 
+## Gating a step on what changed
+
+Where `--require-release` gates a whole job, [`dispat if --changed`](../cli/if.md#changed-packages) gates one step
+inside a script, with the same selection `dispat run` covers packages by. A PR pipeline that builds the docs only
+when the docs changed, downstream dependencies included:
+
+```sh
+dispat if --changed -p docs --consumers --since origin/main --then 'dispat run build-docs'
+```
+
+The condition holds when the selection is reached by the changes, runs its `--then`, and passes that script's exit
+code through; when nothing relevant changed it runs nothing and exits `0`, so the step stays green on quiet days.
+Counting changes against a branch base needs the history to reach it, which is the same `fetch-depth: 0` the release
+job already uses.
+
+File tests gate on artifacts the same way, with no repository involved. A docs deploy that requires the test report
+to have been produced first:
+
+```sh
+dispat if -f packages/docs/data/report.json \
+  --then 'dispat run deploy-docs' \
+  --else 'echo "no test report; run the test job first" >&2; exit 1'
+```
+
 ## The container images
 
 Four images, one per base, on `linux/amd64` and `linux/arm64`:
