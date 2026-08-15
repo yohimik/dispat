@@ -547,6 +547,49 @@ func TestResolveEditRefusesAComposedKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "write dependencies beside the $ref")
 }
 
+// TestResolveEditRefusesAMergedKey: a key merged from several referenced files
+// is held by no one of them, so the edit is refused with the ways out rather
+// than written to whichever file happens to be first.
+func TestResolveEditRefusesAMergedKey(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "base.json", `{"web": ["core"]}`)
+	writeFile(t, dir, "extra.json", `{"api": ["core"]}`)
+	path := writeFile(t, dir, "dispat.json", `{"dependencies": {"$ref": ["./base.json", "./extra.json"]}}`)
+
+	_, _, err := ResolveEdit(path, []string{"dependencies"})
+	require.ErrorIs(t, err, ErrMultiRefEdit)
+	assert.Contains(t, err.Error(), "write dependencies beside the $ref, or point the $ref at a single file")
+}
+
+// TestResolveEditFollowsAListOfOne: a list naming one file is that reference
+// written the long way, and the edit lands in the file it names.
+func TestResolveEditFollowsAListOfOne(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "packages.json", `{"core": {"dependencies": ["util"]}}`)
+	path := writeFile(t, dir, "dispat.json", `{"packages": {"$ref": ["./packages.json"]}}`)
+
+	file, inner, err := ResolveEdit(path, []string{"packages", "core", "dependencies"})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "packages.json"), file)
+	assert.Equal(t, []string{"core", "dependencies"}, inner)
+}
+
+// TestResolveEditPrefersTheKeyBesideAMergedRef: the keys beside a reference are
+// the nearest layer whether it names one file or several, so a key written
+// there is edited there and the merge is never in the way.
+func TestResolveEditPrefersTheKeyBesideAMergedRef(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "base.json", `{"core": {"dependencies": ["util"]}}`)
+	writeFile(t, dir, "extra.json", `{"web": {"dependencies": ["core"]}}`)
+	path := writeFile(t, dir, "dispat.json",
+		`{"packages": {"$ref": ["./base.json", "./extra.json"], "core": {"dependencies": ["local"]}}}`)
+
+	file, inner, err := ResolveEdit(path, []string{"packages", "core", "dependencies"})
+	require.NoError(t, err)
+	assert.Equal(t, path, file, "the nearer layer holds the key")
+	assert.Equal(t, []string{"packages", "core", "dependencies"}, inner)
+}
+
 // TestResolveEditLeavesAPlainKeyAlone: a config with no reference in the way,
 // and a key no file holds, come back exactly as they were asked for.
 func TestResolveEditLeavesAPlainKeyAlone(t *testing.T) {

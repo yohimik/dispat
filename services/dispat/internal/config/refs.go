@@ -18,6 +18,8 @@ package config
 //
 // A reference is resolved against the directory of the file that wrote it, and
 // the file it names may hold references of its own, resolved against theirs. A
+// reference may name several files instead of one, which are read in order and
+// merged: objects key by key with the later file winning, lists end to end. A
 // file is never cached between positions: the same fragment referenced from
 // two keys is read twice and each copy is its own value, which is what makes a
 // file that appears twice in one chain, and only that, a cycle.
@@ -127,7 +129,7 @@ func (r *refResolver) value(v any, file, label string) (any, error) {
 // walked in order so that a file with two mistakes in it always reports the
 // same one first.
 func (r *refResolver) object(node map[string]any, file, label string) (any, error) {
-	target, isRef, err := refTarget(node)
+	targets, isRef, err := refTargets(node)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s: %w", file, labelOr(label), err)
 	}
@@ -143,7 +145,7 @@ func (r *refResolver) object(node map[string]any, file, label string) (any, erro
 		return out, nil
 	}
 
-	base, err := r.follow(target, file, label)
+	base, err := r.followAll(targets, file, label)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +156,7 @@ func (r *refResolver) object(node map[string]any, file, label string) (any, erro
 	// fragment can be used as it is in one place and adjusted in another.
 	object, ok := base.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%s: %s: $ref %q: the file is %s, so the keys beside the $ref have nothing to override",
-			file, labelOr(label), target, kindOf(base))
+		return nil, fmt.Errorf("%s: %s: %s", file, labelOr(label), nothingToOverride(targets, base))
 	}
 	for _, key := range sortedKeys(node) {
 		if key == refKey {
@@ -174,6 +175,80 @@ func (r *refResolver) object(node map[string]any, file, label string) (any, erro
 		object[key] = resolved
 	}
 	return object, nil
+}
+
+// followAll reads every file a reference names and merges what they hold, in
+// the order they are written: objects key by key with the later file winning,
+// lists by adding one after another. One file is the whole answer, which is
+// what a reference naming a single file has always been.
+func (r *refResolver) followAll(targets []string, file, label string) (any, error) {
+	base, err := r.follow(targets[0], file, label)
+	if err != nil || len(targets) == 1 {
+		return base, err
+	}
+	for _, target := range targets[1:] {
+		next, err := r.follow(target, file, label)
+		if err != nil {
+			return nil, err
+		}
+		merged, err := mergeFragments(base, next, targets[0], target)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", file, labelOr(label), err)
+		}
+		base = merged
+	}
+	return base, nil
+}
+
+// mergeFragments adds one referenced file to what the files before it hold.
+// Objects are merged whole key by whole key, the way a key written beside a
+// reference overrides it; lists are joined. Anything else has no meaning to
+// give: a single value cannot be merged with another, and an object and a list
+// are not the same kind of answer, so both are refused rather than guessed at.
+func mergeFragments(base, next any, firstTarget, target string) (any, error) {
+	switch first := base.(type) {
+	case map[string]any:
+		object, ok := next.(map[string]any)
+		if !ok {
+			return nil, unmergeableFragments(firstTarget, base, target, next)
+		}
+		for _, key := range sortedKeys(object) {
+			// The later file's spelling of a key is the one that survives:
+			// leaving both in would hand viper two keys that fold together,
+			// and which one won would be a matter of luck.
+			if existing, found := foldKey(first, key); found {
+				delete(first, existing)
+			}
+			first[key] = object[key]
+		}
+		return first, nil
+	case []any:
+		list, ok := next.([]any)
+		if !ok {
+			return nil, unmergeableFragments(firstTarget, base, target, next)
+		}
+		return append(first, list...), nil
+	default:
+		return nil, unmergeableFragments(firstTarget, base, target, next)
+	}
+}
+
+// unmergeableFragments says which two files disagreed about what a reference
+// holds, and what each of them holds instead.
+func unmergeableFragments(firstTarget string, first any, target string, next any) error {
+	return fmt.Errorf("$ref: %q holds %s and %q holds %s; the files of one $ref must all hold objects, or all hold lists",
+		firstTarget, kindOf(first), target, kindOf(next))
+}
+
+// nothingToOverride explains a reference whose files leave the keys beside it
+// with nothing to override, naming the files when there is more than one.
+func nothingToOverride(targets []string, base any) string {
+	if len(targets) == 1 {
+		return fmt.Sprintf("$ref %q: the file is %s, so the keys beside the $ref have nothing to override",
+			targets[0], kindOf(base))
+	}
+	return fmt.Sprintf("$ref: the files merge to %s, so the keys beside the $ref have nothing to override",
+		kindOf(base))
 }
 
 // follow reads the file a reference names, with the reference on the chain so
@@ -238,18 +313,42 @@ func (r *refResolver) chainText(last string) string {
 	return strings.Join(append(parts, last), " -> ")
 }
 
-// refTarget reports whether an object is a reference, and what it names.
-func refTarget(node map[string]any) (string, bool, error) {
+// refTargets reports whether an object is a reference, and the files it names:
+// one for a reference naming a file, each of them in order for a reference
+// naming a list of files. A list of one is the same reference written the long
+// way, and is read as one rather than refused.
+func refTargets(node map[string]any) ([]string, bool, error) {
 	raw, ok := node[refKey]
 	if !ok {
-		return "", false, nil
+		return nil, false, nil
 	}
-	target, ok := raw.(string)
-	if !ok || strings.TrimSpace(target) == "" {
-		return "", true, errors.New("$ref must name another config file")
+	switch value := raw.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return nil, true, errRefTarget
+		}
+		return []string{value}, true, nil
+	case []any:
+		if len(value) == 0 {
+			return nil, true, errors.New("$ref names no files: the list must hold at least one path")
+		}
+		targets := make([]string, 0, len(value))
+		for i, item := range value {
+			target, ok := item.(string)
+			if !ok || strings.TrimSpace(target) == "" {
+				return nil, true, fmt.Errorf("$ref[%d] must name another config file", i)
+			}
+			targets = append(targets, target)
+		}
+		return targets, true, nil
+	default:
+		return nil, true, errRefTarget
 	}
-	return target, true, nil
 }
+
+// errRefTarget is what a reference naming anything but a file, or a list of
+// them, returns.
+var errRefTarget = errors.New("$ref must name another config file, or a list of them")
 
 // refPath is where a reference points: relative to the file that wrote it,
 // which is the only base that lets a folder of fragments be moved as a folder,
@@ -295,14 +394,18 @@ func labelOr(label string) string {
 	return label
 }
 
-// kindOf names what a referenced file turned out to hold, for the one error
-// that has to say why it cannot be used. A file holding nothing never reaches
+// kindOf names what a referenced file turned out to hold, for the errors that
+// have to say why it cannot be used. A file holding nothing never reaches
 // here: that is refused as it is read.
 func kindOf(v any) string {
-	if _, isList := v.([]any); isList {
+	switch v.(type) {
+	case map[string]any:
+		return "an object"
+	case []any:
 		return "a list"
+	default:
+		return "a single value"
 	}
-	return "a single value"
 }
 
 // documentObject asserts what a config file's top level has to be. An empty

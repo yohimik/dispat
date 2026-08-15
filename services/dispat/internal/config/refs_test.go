@@ -381,6 +381,186 @@ func TestRefFailures(t *testing.T) {
 	}
 }
 
+// TestRefListMergesObjects: a reference may name several files, which are read
+// in order and merged key by key. The last file to write a key wins it, in its
+// own spelling, so a shared fragment can be adjusted by the ones after it.
+func TestRefListMergesObjects(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "base.yaml", "MiXed: base\nKept: base\n")
+	writeFile(t, dir, "extra.json", `{"mixed": "extra", "Added": "extra"}`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"libs": {"path": "pkgs", "flow": {"build": ["build"]}}},
+		"env": {"$ref": ["./base.yaml", "./extra.json"]}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"mixed": "extra", "Kept": "base", "Added": "extra"}, cfg.Env,
+		"the later file wins the key it shares, and only its spelling survives")
+	assert.Equal(t, []string{path, filepath.Join(dir, "base.yaml"), filepath.Join(dir, "extra.json")},
+		cfg.SourceFiles, "every file the reference named, in the order it was read")
+}
+
+// TestRefListConcatenatesLists: files that hold lists are added one after
+// another, which is what lets a common block of lines be extended in place
+// rather than copied.
+func TestRefListConcatenatesLists(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "shell.json", `["/bin/bash"]`)
+	writeFile(t, dir, "flags.yaml", "- -e\n- -c\n")
+	writeFile(t, dir, "common.yaml", "- shared line\n")
+	writeFile(t, dir, "release.json", `[{"line": "release line", "package": ["core"]}]`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"libs": {"path": "pkgs", "flow": {"build": ["build"]}}},
+		"shell": {"$ref": ["./shell.json", "./flags.yaml"]},
+		"changelog": {"footer": {"$ref": ["./common.yaml", "./release.json"]}}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/bin/bash", "-e", "-c"}, cfg.Shell, "in the order the files are named")
+	require.Len(t, cfg.Changelog.Footer, 2, "the shorthands of both files expand as they always do")
+	assert.Equal(t, []string{"shared line"}, cfg.Changelog.Footer[0].Line)
+	assert.Equal(t, []string{"core"}, cfg.Changelog.Footer[1].Package)
+}
+
+// TestRefListOfOneIsTheSameReference: a list holding one file is the reference
+// naming that file, written the long way. Refusing it would make the list form
+// a trap for anything that generates configuration.
+func TestRefListOfOneIsTheSameReference(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "scripts.json", `{"build": "echo shared"}`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"$ref": ["./scripts.json"]},
+		"spaces": {"libs": {"path": "pkgs", "flow": {"build": ["build"]}}}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, Script{"echo shared"}, cfg.Scripts["build"])
+}
+
+// TestRefListMixedKindsAreRefused: merging asks the files to agree on what they
+// hold. Two kinds of answer have no merge between them, and neither has a
+// single value with anything, so the files are named rather than guessed at.
+func TestRefListMixedKindsAreRefused(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "object.json", `{"build": "echo b"}`)
+	writeFile(t, dir, "list.json", `["build"]`)
+	writeFile(t, dir, "single.json", `"echo b"`)
+
+	for _, tc := range []struct{ name, body, want string }{
+		{"an object then a list", `{"scripts": {"$ref": ["./object.json", "./list.json"]}}`,
+			`$ref: "./object.json" holds an object and "./list.json" holds a list`},
+		{"a list then an object", `{"shell": {"$ref": ["./list.json", "./object.json"]}}`,
+			`$ref: "./list.json" holds a list and "./object.json" holds an object`},
+		{"a single value", `{"scripts": {"$ref": ["./single.json", "./object.json"]}}`,
+			`$ref: "./single.json" holds a single value and "./object.json" holds an object`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeFile(t, dir, "dispat.json", tc.body)
+
+			_, err := Load(path, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, err.Error(), "the files of one $ref must all hold objects, or all hold lists")
+		})
+	}
+}
+
+// TestRefListSiblingKeysOverrideTheMerge: the keys beside a reference are the
+// nearest layer of all, so they settle what the files merged to. They still
+// need an object to override, and a merge that produced a list says so.
+func TestRefListSiblingKeysOverrideTheMerge(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "base.yaml", "path: pkgs\nversioning: fixed\nflow:\n  build:\n    - build\n")
+	writeFile(t, dir, "extra.json", `{"versioning": "independent"}`)
+	writeFile(t, dir, "one.json", `["/bin/bash"]`)
+	writeFile(t, dir, "two.json", `["-c"]`)
+
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"libs": {"$ref": ["./base.yaml", "./extra.json"], "Versioning": "fixed"}}
+	}`)
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "fixed", cfg.Spaces["libs"].Versioning, "the sibling outranks every file the $ref named")
+	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path, "everything it did not override survives the merge")
+
+	list := writeFile(t, dir, "dispat.yaml", `{"shell": {"$ref": ["./one.json", "./two.json"], "extra": 1}}`)
+	_, err = Load(list, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(),
+		"$ref: the files merge to a list, so the keys beside the $ref have nothing to override")
+}
+
+// TestRefListFailures: what a list of files can get wrong, each named where it
+// was written. A file the list names is read exactly as a single file is, so
+// its own refusals arrive unchanged.
+func TestRefListFailures(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct{ name, body, want string }{
+		{"no files at all", `{"env": {"$ref": []}}`,
+			"env: $ref names no files: the list must hold at least one path"},
+		{"a file that is not named", `{"env": {"$ref": ["./env.yaml", 7]}}`,
+			"env: $ref[1] must name another config file"},
+		{"a name that is blank", `{"env": {"$ref": ["./env.yaml", "  "]}}`,
+			"env: $ref[1] must name another config file"},
+		{"neither a file nor a list", `{"env": {"$ref": 7}}`,
+			"env: $ref must name another config file, or a list of them"},
+		{"a file that is missing", `{"env": {"$ref": ["./env.yaml", "./absent.json"]}}`,
+			`env: $ref "./absent.json": cannot read`},
+		{"a file that is empty", `{"env": {"$ref": ["./env.yaml", "./empty.yaml"]}}`,
+			`env: $ref "./empty.yaml": the file is empty, so the key would have no value`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeFile(t, dir, "env.yaml", "MiXed: v\n")
+			writeFile(t, dir, "empty.yaml", "")
+			path := writeFile(t, dir, "dispat.json", tc.body)
+
+			_, err := Load(path, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestRefListCycleNamesThePathThatClosedIt: every file a reference names is
+// followed on its own, so a cycle through the second of them is the cycle it
+// is, reported by the way it got there.
+func TestRefListCycleNamesThePathThatClosedIt(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "first.yaml", "MiXed: v\n")
+	writeFile(t, dir, "second.json", `{"deeper": {"$ref": "./dispat.json"}}`)
+	path := writeFile(t, dir, "dispat.json", `{"env": {"$ref": ["./first.yaml", "./second.json"]}}`)
+
+	_, err := Load(path, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "$ref cycle: "+path+" (env) -> "+
+		filepath.Join(dir, "second.json")+" (deeper) -> "+path)
+}
+
+// TestRefListResolvesEachAgainstItsOwnFolder: the files of one reference may
+// live in different folders, and each is resolved against the file that named
+// it, as every reference is.
+func TestRefListResolvesEachAgainstItsOwnFolder(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "cfg/spaces.json", `{"$ref": ["./base.json", "../overlay.json"]}`)
+	writeFile(t, dir, "cfg/base.json", `{"libs": {"path": "pkgs", "flow": {"build": ["build"]}}}`)
+	writeFile(t, dir, "overlay.json", `{"apps": {"path": "apps", "flow": {"build": ["build"]}}}`)
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"$ref": "./cfg/spaces.json"}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path)
+	assert.Equal(t, "apps", cfg.Spaces["apps"].Path)
+}
+
 // TestRefKeepsPathsRepositoryRelative: a reference moves text, not meaning. A
 // space's path written in a fragment one folder down still points where it
 // would have pointed inline, because it is the monorepo root it is resolved

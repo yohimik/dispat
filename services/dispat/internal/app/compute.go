@@ -291,7 +291,7 @@ func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []confi
 		func() error { return a.collectInitialEdits(&edits, cfgPath, apply.initials) },
 	} {
 		err := collect()
-		if errors.Is(err, config.ErrRefEdit) {
+		if errors.Is(err, config.ErrRefEdit) || errors.Is(err, config.ErrMultiRefEdit) {
 			a.log.Error().Err(err).Msg("cannot rewrite a key a $ref composes")
 			return err
 		}

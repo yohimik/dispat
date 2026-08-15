@@ -197,6 +197,11 @@ func RenderKeyTOML(keyPath []string, value any) (string, error) {
 // picking one.
 var ErrRefEdit = errors.New("a key composed from a $ref and the keys beside it cannot be rewritten in place")
 
+// ErrMultiRefEdit reports a key whose value is merged from several referenced
+// files. No one of them holds the value, so the caller explains the ways out
+// rather than choosing a file to write to.
+var ErrMultiRefEdit = errors.New("a key merged from several $ref files cannot be rewritten in place")
+
 // ResolveEdit reports which file holds a key, and under which key path there.
 //
 // A `$ref` crossed on the way down moves the edit into the file it names, with
@@ -237,7 +242,7 @@ func resolveEdit(path string, keyPath []string, followed int) (string, []string,
 		if !ok {
 			return path, keyPath, nil
 		}
-		target, isRef, err := refTarget(child)
+		targets, isRef, err := refTargets(child)
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: %s: %w", path, strings.Join(keyPath[:depth+1], "."), err)
 		}
@@ -257,7 +262,13 @@ func resolveEdit(path string, keyPath []string, followed int) (string, []string,
 				return path, keyPath, nil
 			}
 		}
-		return resolveEdit(refPath(target, path), rest, followed+1)
+		if len(targets) > 1 {
+			// The value is merged from every file the reference names, so no
+			// one of them can be handed the write.
+			return "", nil, fmt.Errorf("%s: %s: %w; write %s beside the $ref, or point the $ref at a single file",
+				path, strings.Join(keyPath[:depth+1], "."), ErrMultiRefEdit, keyPath[len(keyPath)-1])
+		}
+		return resolveEdit(refPath(targets[0], path), rest, followed+1)
 	}
 	return path, keyPath, nil
 }
