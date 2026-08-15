@@ -54,11 +54,11 @@ func npmSpec(path string) string { return "file:" + path }
 // after it and one manifest is small enough that re-reading it is cheaper than
 // tracking the shift.
 func linkNpm(path string, links []Link) (LinkResult, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return LinkResult{}, err
 	}
-	data := rep.bytes()
+	data := sp.bytes()
 	var res LinkResult
 	for _, r := range links {
 		var doc map[string]any
@@ -79,9 +79,9 @@ func linkNpm(path string, links []Link) (LinkResult, error) {
 		}
 	}
 	if len(res.Applied) > 0 {
-		rep.setWhole(data)
+		sp.setWhole(data)
 	}
-	return res, rep.commit(func(out []byte) error {
+	return res, sp.commit(func(out []byte) error {
 		return npmVerifyLinks(out, res.Applied)
 	})
 }

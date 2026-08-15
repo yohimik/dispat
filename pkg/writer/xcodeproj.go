@@ -32,12 +32,12 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 	if strings.ContainsAny(version, "\";{}\n\r") {
 		return res, fmt.Errorf("%s: refusing to write %q into a project file: it could not survive as one token", path, version)
 	}
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
 
-	lines := rep.lines()
+	lines := sp.lines()
 	before := 0
 	changed := false
 	for i, line := range lines {
@@ -55,10 +55,10 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 	if !changed {
 		return res, nil
 	}
-	rep.setLines(lines)
+	sp.setLines(lines)
 	res.VersionWritten = true
-	return res, rep.commit(func(out []byte) error {
-		return pbxVerify(rep.bytes(), out, version, before)
+	return res, sp.commit(func(out []byte) error {
+		return pbxVerify(sp.bytes(), out, version, before)
 	})
 }
 

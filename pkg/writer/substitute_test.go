@@ -37,7 +37,7 @@ func subNames(subs []Substitution) string {
 	return strings.Join(parts, ",")
 }
 
-func TestSubstituteLinksEveryOccurrence(t *testing.T) {
+func TestReplaceReplacesEveryOccurrence(t *testing.T) {
 	path := seedText(t, "README.md", "acme-core:1.2.3 and again acme-core:1.2.3\nplus acme-core:1.2.3\n")
 	res, err := Substitute(path, []Substitution{{Find: "acme-core:1.2.3", Write: "acme-core:1.3.0"}})
 	if err != nil {
@@ -229,18 +229,18 @@ func TestSubstituteBytesIgnoresAnEmptyFind(t *testing.T) {
 	}
 }
 
-// The internal replacer's own edges, which no format writer can reach on
+// The internal splicer's own edges, which no format writer can reach on
 // purpose but which stand between a bug and a corrupted manifest.
 
-func TestLinkrRefusesOverlappingPatches(t *testing.T) {
+func TestSplicerRefusesOverlappingPatches(t *testing.T) {
 	path := seedText(t, "notes.txt", "0123456789")
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep.replace(span{0, 5}, []byte("A"))
-	rep.replace(span{3, 8}, []byte("B"))
-	err = rep.commit(nil)
+	sp.replace(span{0, 5}, []byte("A"))
+	sp.replace(span{3, 8}, []byte("B"))
+	err = sp.commit(nil)
 	if !errors.Is(err, errOverlappingPatches) {
 		t.Fatalf("got %v, want errOverlappingPatches", err)
 	}
@@ -249,15 +249,15 @@ func TestLinkrRefusesOverlappingPatches(t *testing.T) {
 	}
 }
 
-func TestLinkrRefusesSpansOnARegeneratedFile(t *testing.T) {
+func TestSplicerRefusesSpansOnARegeneratedFile(t *testing.T) {
 	path := seedText(t, "notes.txt", "0123456789")
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep.setWhole([]byte("whole"))
-	rep.replace(span{0, 1}, []byte("X"))
-	if err := rep.commit(nil); !errors.Is(err, errMixedEdits) {
+	sp.setWhole([]byte("whole"))
+	sp.replace(span{0, 1}, []byte("X"))
+	if err := sp.commit(nil); !errors.Is(err, errMixedEdits) {
 		t.Fatalf("got %v, want errMixedEdits", err)
 	}
 	if got := readText(t, path); got != "0123456789" {
@@ -265,18 +265,18 @@ func TestLinkrRefusesSpansOnARegeneratedFile(t *testing.T) {
 	}
 }
 
-func TestLinkrAppliesPatchesInOffsetOrder(t *testing.T) {
+func TestSplicerAppliesPatchesInOffsetOrder(t *testing.T) {
 	// Queued out of order and of different widths, so a splice that used stale
 	// offsets would land visibly wrong.
 	path := seedText(t, "notes.txt", "aaa bbb ccc")
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep.replace(span{8, 11}, []byte("CCCCC"))
-	rep.replace(span{0, 3}, []byte("A"))
-	rep.replace(span{4, 7}, []byte("BB"))
-	if err := rep.commit(nil); err != nil {
+	sp.replace(span{8, 11}, []byte("CCCCC"))
+	sp.replace(span{0, 3}, []byte("A"))
+	sp.replace(span{4, 7}, []byte("BB"))
+	if err := sp.commit(nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := readText(t, path); got != "A BB CCCCC" {
@@ -284,15 +284,15 @@ func TestLinkrAppliesPatchesInOffsetOrder(t *testing.T) {
 	}
 }
 
-func TestLinkrLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
+func TestSplicerLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
 	path := seedText(t, "notes.txt", "before")
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep.setWhole([]byte("after"))
+	sp.setWhole([]byte("after"))
 	boom := errors.New("boom")
-	if err := rep.commit(func([]byte) error { return boom }); !errors.Is(err, boom) {
+	if err := sp.commit(func([]byte) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("got %v, want the verifier's error", err)
 	}
 	if got := readText(t, path); got != "before" {
@@ -300,29 +300,29 @@ func TestLinkrLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
 	}
 }
 
-func TestLinkrAtAndTextReadTheFileAsFound(t *testing.T) {
+func TestSplicerAtAndTextReadTheFileAsFound(t *testing.T) {
 	path := seedText(t, "notes.txt", "hello world")
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep.replace(span{0, 5}, []byte("bye"))
+	sp.replace(span{0, 5}, []byte("bye"))
 	// The queued patch is not applied to the working copy, so a locator may
 	// keep using offsets into it right up to the commit.
-	if got := string(rep.at(span{6, 11})); got != "world" {
+	if got := string(sp.at(span{6, 11})); got != "world" {
 		t.Errorf("at = %q", got)
 	}
-	if rep.text() != "hello world" {
-		t.Errorf("text = %q", rep.text())
+	if sp.text() != "hello world" {
+		t.Errorf("text = %q", sp.text())
 	}
 }
 
-func TestOpenLinkrRefusesAnOversizedFile(t *testing.T) {
+func TestOpenSplicerRefusesAnOversizedFile(t *testing.T) {
 	path := seedText(t, "huge.txt", "x")
 	if err := os.Truncate(path, maxManifestBytes+1); err != nil {
 		t.Skipf("cannot make a sparse file here: %v", err)
 	}
-	if _, err := openReplacer(path); !errors.Is(err, ErrManifestTooLarge) {
+	if _, err := openSplicer(path); !errors.Is(err, ErrManifestTooLarge) {
 		t.Fatalf("got %v, want ErrManifestTooLarge", err)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Substitute is the replacer with the format knowledge taken away: literal
+// Substitute is the splicer with the format knowledge taken away: literal
 // text in, literal text out, over any file at all. Nothing is parsed, so
 // nothing has to be understood first, which is what makes it reach the places
 // a manifest writer cannot: a Gradle coordinate built by a build script, a
@@ -82,15 +82,15 @@ func Substitute(path string, subs []Substitution) (SubstituteResult, error) {
 			return SubstituteResult{}, fmt.Errorf("%w (substitution %d)", ErrEmptyFind, i+1)
 		}
 	}
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return SubstituteResult{}, err
 	}
-	if looksBinary(rep.bytes()) {
+	if looksBinary(sp.bytes()) {
 		return SubstituteResult{}, fmt.Errorf("%s: %w", path, ErrBinaryFile)
 	}
 
-	out, counts := SubstituteBytes(rep.bytes(), subs)
+	out, counts := SubstituteBytes(sp.bytes(), subs)
 	res := SubstituteResult{Path: path}
 	for i, s := range subs {
 		switch {
@@ -103,8 +103,8 @@ func Substitute(path string, subs []Substitution) (SubstituteResult, error) {
 			res.Count += counts[i]
 		}
 	}
-	rep.setWhole(out)
-	return res, rep.commit(nil)
+	sp.setWhole(out)
+	return res, sp.commit(nil)
 }
 
 // SubstituteBytes applies the substitutions in memory, returning the result

@@ -11,11 +11,11 @@ import (
 	"strings"
 )
 
-// The replacer is the one place this package turns an intention into bytes on
-// disk. Every format writer reads its file through openReplacer and writes it
+// The splicer is the one place this package turns an intention into bytes on
+// disk. Every format writer reads its file through openSplicer and writes it
 // through commit, so the read cap, the splice, the overlap check, the proof
 // that the result still parses and the atomic write are written once and
-// behave the same for all twenty-one of them.
+// behave the same for every format writer.
 //
 // A writer expresses its change one of two ways. The span writers queue byte
 // ranges through replace, which cannot disturb anything they do not cover. The
@@ -42,8 +42,8 @@ var errOverlappingPatches = errors.New("two replacements cover the same bytes")
 // finished file. The two describe the same bytes twice and only one can win.
 var errMixedEdits = errors.New("a regenerated file cannot also carry span replacements")
 
-// replacer holds one file's contents and the changes queued against it.
-type replacer struct {
+// splicer holds one file's contents and the changes queued against it.
+type splicer struct {
 	path    string
 	data    []byte
 	patches []patch
@@ -51,10 +51,10 @@ type replacer struct {
 	rebuilt bool
 }
 
-// openReplacer reads the file at path, refusing one larger than the cap. The
+// openSplicer reads the file at path, refusing one larger than the cap. The
 // size is checked against the open handle and again against what was read, so
 // a file growing between the two cannot slip past.
-func openReplacer(path string) (*replacer, error) {
+func openSplicer(path string) (*splicer, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func openReplacer(path string) (*replacer, error) {
 	if int64(len(data)) > maxManifestBytes {
 		return nil, tooLarge(path, int64(len(data)))
 	}
-	return &replacer{path: path, data: data}, nil
+	return &splicer{path: path, data: data}, nil
 }
 
 // tooLarge is the refusal every read cap reports.
@@ -84,34 +84,34 @@ func tooLarge(path string, size int64) error {
 
 // bytes is the file as it was read. The queued patches are not applied to it,
 // so a locator may keep using offsets into it until commit.
-func (r *replacer) bytes() []byte { return r.data }
+func (r *splicer) bytes() []byte { return r.data }
 
 // text is the file as it was read, as a string.
-func (r *replacer) text() string { return string(r.data) }
+func (r *splicer) text() string { return string(r.data) }
 
 // at is the file's current bytes across a span.
-func (r *replacer) at(s span) []byte { return r.data[s.start:s.end] }
+func (r *splicer) at(s span) []byte { return r.data[s.start:s.end] }
 
 // replace queues text in place of the span's bytes.
-func (r *replacer) replace(s span, text []byte) {
+func (r *splicer) replace(s span, text []byte) {
 	r.patches = append(r.patches, patch{s, text})
 }
 
 // lines is the line-oriented view of the file, freshly split so the caller
 // owns it. A writer that edits it hands it back through setLines.
-func (r *replacer) lines() []string { return strings.Split(string(r.data), "\n") }
+func (r *splicer) lines() []string { return strings.Split(string(r.data), "\n") }
 
 // setLines takes a line view back, joined the way it was split.
-func (r *replacer) setLines(lines []string) { r.setWhole([]byte(strings.Join(lines, "\n"))) }
+func (r *splicer) setLines(lines []string) { r.setWhole([]byte(strings.Join(lines, "\n"))) }
 
 // setWhole takes a regenerated file: what a formatter produces, where there
 // are no spans to speak of.
-func (r *replacer) setWhole(data []byte) {
+func (r *splicer) setWhole(data []byte) {
 	r.whole, r.rebuilt = data, true
 }
 
 // result is the file the queued changes describe.
-func (r *replacer) result() ([]byte, error) {
+func (r *splicer) result() ([]byte, error) {
 	if r.rebuilt {
 		if len(r.patches) > 0 {
 			return nil, errMixedEdits
@@ -150,7 +150,7 @@ func (r *replacer) result() ([]byte, error) {
 // commits bytes it has not proved still read as the format they are in; the
 // formats with no cheap grammar to check against pass a guard that re-runs
 // their own reader instead.
-func (r *replacer) commit(verify func(out []byte) error) error {
+func (r *splicer) commit(verify func(out []byte) error) error {
 	out, err := r.result()
 	if err != nil {
 		return fmt.Errorf("%s: internal error: %w", r.path, err)

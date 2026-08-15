@@ -37,7 +37,7 @@
 // dependency at a local folder, the way a go.mod replace does. Five formats
 // have such a directive; SupportsLink reports which.
 //
-// Underneath both sits one replacer. Every format writer reads its file
+// Underneath both sits one splicer. Every format writer reads its file
 // through it and writes its file through it, so the read cap, the splice, the
 // proof that the result still parses and the atomic write happen in one place
 // for all of them. Substitute is that same machinery with the format knowledge

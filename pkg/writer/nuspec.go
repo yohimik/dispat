@@ -18,11 +18,11 @@ import (
 // package at whatever was written, so a token value is left alone and reported
 // missing: the same rule the plist writer applies to $(MARKETING_VERSION).
 func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	data := rep.bytes()
+	data := sp.bytes()
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
 		// A nuspec has one dependency field; a group is a target framework,
@@ -81,7 +81,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 					break // already the wanted text: no change, not missing
 				}
 				applied[i] = true
-				rep.replace(s, xmlEscape(edits[i].Range))
+				sp.replace(s, xmlEscape(edits[i].Range))
 
 			// The package's own version is a direct child of <metadata>, which
 			// keeps a <dependency> element's version out of the running.
@@ -113,8 +113,8 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 	if version != "" && versionSpan != nil {
 		if string(data[versionSpan.start:versionSpan.end]) != version {
 			res.VersionWritten = true
-			rep.replace(*versionSpan, xmlEscape(version))
+			sp.replace(*versionSpan, xmlEscape(version))
 		}
 	}
-	return res, rep.commit(verifyXML)
+	return res, sp.commit(verifyXML)
 }

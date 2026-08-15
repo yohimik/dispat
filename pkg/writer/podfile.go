@@ -24,7 +24,7 @@ func rewritePodfile(path string, edits []Edit) (Result, error) {
 // declare dependencies as `<call> 'Name', 'requirement'`, differing only in how
 // the call is spelled and whether the file also carries a version of its own.
 func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), version string) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -48,7 +48,7 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 	seen := make(map[int]bool, len(edits))
 	writable := make(map[int]bool, len(edits))
 	applied := make(map[int]bool, len(edits))
-	lines := rep.lines()
+	lines := sp.lines()
 	changed := false
 	versionDone := version == ""
 	for li, raw := range lines {
@@ -112,11 +112,11 @@ func rewriteRubyPods(path string, edits []Edit, call func(string) (int, bool), v
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
 	// There is no grammar to re-parse against, so the reader is run over the
 	// result and must agree that every splice landed where it was aimed.
-	return res, rep.commit(func(out []byte) error {
+	return res, sp.commit(func(out []byte) error {
 		return verifyRubyPods(string(out), call, res.Applied, version, res.VersionWritten)
 	})
 }

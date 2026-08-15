@@ -35,11 +35,11 @@ func rewritePackagesConfig(path string, edits []Edit) (Result, error) {
 // A package declared more than once (the same entry repeated under two
 // conditioned ItemGroups) is spliced in every place and reported once.
 func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr string) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	data := rep.bytes()
+	data := sp.bytes()
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
 		// These files have one dependency field, so a kinded edit (beyond the long
@@ -86,7 +86,7 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 			continue // already the wanted text: no change, not missing
 		}
 		applied[i] = true
-		rep.replace(s, xmlEscape(edits[i].Range))
+		sp.replace(s, xmlEscape(edits[i].Range))
 	}
 	// Reported in edit order rather than document order, so the result does not
 	// depend on where in the file a declaration happens to sit.
@@ -101,5 +101,5 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 			res.Missing = append(res.Missing, e)
 		}
 	}
-	return res, rep.commit(verifyXML)
+	return res, sp.commit(verifyXML)
 }

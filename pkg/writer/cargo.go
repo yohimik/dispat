@@ -46,12 +46,12 @@ var cargoTables = []struct {
 // override the workspace on purpose, which is dependency management rather
 // than version syncing.
 func rewriteCargo(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
 	var raw cargoManifest
-	if err := toml.Unmarshal(rep.bytes(), &raw); err != nil {
+	if err := toml.Unmarshal(sp.bytes(), &raw); err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 
@@ -86,7 +86,7 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 
 	var (
 		res     Result
-		lines   = rep.lines()
+		lines   = sp.lines()
 		index   = buildTOMLIndex(lines)
 		changed bool
 	)
@@ -128,9 +128,9 @@ func rewriteCargo(path, version string, edits []Edit) (Result, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(verifyTOML)
+	return res, sp.commit(verifyTOML)
 }
 
 // cargoTableOf selects one of the decoded dependency tables by name.

@@ -23,7 +23,7 @@ import (
 // ${property} is kept verbatim: the value lives in a <properties> block or a
 // parent POM, and overwriting the reference with a literal would sever it.
 func rewriteMaven(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -34,7 +34,7 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 		// coordinate alone identifies the declaration.
 		wanted[e.Name] = i
 	}
-	spans, declared, versionSpan, err := mavenSpans(rep.bytes(), wanted)
+	spans, declared, versionSpan, err := mavenSpans(sp.bytes(), wanted)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -50,19 +50,19 @@ func rewriteMaven(path, version string, edits []Edit) (Result, error) {
 			}
 			continue
 		}
-		if string(rep.at(s)) == e.Range {
+		if string(sp.at(s)) == e.Range {
 			continue // already the wanted text: no change, not missing
 		}
 		res.Applied = append(res.Applied, e)
-		rep.replace(s, xmlEscape(e.Range))
+		sp.replace(s, xmlEscape(e.Range))
 	}
 	if version != "" && versionSpan != nil {
-		if string(rep.at(*versionSpan)) != version {
+		if string(sp.at(*versionSpan)) != version {
 			res.VersionWritten = true
-			rep.replace(*versionSpan, xmlEscape(version))
+			sp.replace(*versionSpan, xmlEscape(version))
 		}
 	}
-	return res, rep.commit(verifyXML)
+	return res, sp.commit(verifyXML)
 }
 
 // mavenSpans locates the version span of each wanted dependency and of the

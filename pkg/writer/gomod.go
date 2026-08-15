@@ -8,7 +8,7 @@ import (
 
 // go.mod is the one format here with no spans to speak of: x/mod's modfile
 // owns the layout and hands back the whole file, so both writers regenerate it
-// and let the replacer decide whether that changed anything.
+// and let the splicer decide whether that changed anything.
 
 // rewriteGoMod edits a go.mod's require directives via x/mod's modfile,
 // which preserves formatting and comments by design. go.mod has one
@@ -17,11 +17,11 @@ import (
 // ignores it for go.mod). Only modules the file already requires are
 // updated: adding a require is dependency management, not version syncing.
 func rewriteGoMod(path string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	f, err := modfile.Parse(path, rep.bytes(), nil)
+	f, err := modfile.Parse(path, sp.bytes(), nil)
 	if err != nil {
 		return Result{}, err
 	}
@@ -52,8 +52,8 @@ func rewriteGoMod(path string, edits []Edit) (Result, error) {
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
-	rep.setWhole(out)
-	return res, rep.commit(nil)
+	sp.setWhole(out)
+	return res, sp.commit(nil)
 }
 
 // linkGoMod adds, repoints and removes replace directives. x/mod's modfile
@@ -67,11 +67,11 @@ func rewriteGoMod(path string, edits []Edit) (Result, error) {
 // The other formats have no such notion, so this is the only writer that reads
 // the field.
 func linkGoMod(path string, links []Link) (LinkResult, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return LinkResult{}, err
 	}
-	f, err := modfile.Parse(path, rep.bytes(), nil)
+	f, err := modfile.Parse(path, sp.bytes(), nil)
 	if err != nil {
 		return LinkResult{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -112,6 +112,6 @@ func linkGoMod(path string, links []Link) (LinkResult, error) {
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
-	rep.setWhole(out)
-	return res, rep.commit(nil)
+	sp.setWhole(out)
+	return res, sp.commit(nil)
 }

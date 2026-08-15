@@ -22,11 +22,11 @@ func rewriteNpm(path, version string, edits []Edit) (Result, error) {
 // are called, which fieldOf resolves; everything else (the single tokenising
 // pass, the back-to-front splice, the re-validation) is identical.
 func rewriteJSON(path, version string, edits []Edit, fieldOf func(Edit) string) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	spans, versionSpan, err := npmSpans(rep.bytes(), edits, fieldOf)
+	spans, versionSpan, err := npmSpans(sp.bytes(), edits, fieldOf)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -38,19 +38,19 @@ func rewriteJSON(path, version string, edits []Edit, fieldOf func(Edit) string) 
 			res.Missing = append(res.Missing, e)
 			continue
 		}
-		if string(current(rep.bytes(), s)) == e.Range {
+		if string(current(sp.bytes(), s)) == e.Range {
 			continue // already the wanted text: no change, not missing
 		}
 		res.Applied = append(res.Applied, e)
-		rep.replace(s, quote(e.Range))
+		sp.replace(s, quote(e.Range))
 	}
 	if version != "" && versionSpan != nil {
-		if string(current(rep.bytes(), *versionSpan)) != version {
+		if string(current(sp.bytes(), *versionSpan)) != version {
 			res.VersionWritten = true
-			rep.replace(*versionSpan, quote(version))
+			sp.replace(*versionSpan, quote(version))
 		}
 	}
-	return res, rep.commit(verifyJSON)
+	return res, sp.commit(verifyJSON)
 }
 
 // verifyJSON is the JSON formats' proof that a rewrite still parses.

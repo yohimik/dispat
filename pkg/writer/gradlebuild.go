@@ -22,7 +22,7 @@ import (
 // Coordinates named through a version catalog (`implementation libs.retrofit`)
 // or built by interpolation carry no literal to replace and are missing.
 func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -49,7 +49,7 @@ func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
 		found        = make(map[int]bool, len(edits))
 		applied      = make(map[int]bool, len(edits))
 		versionFound bool
-		lines        = rep.lines()
+		lines        = sp.lines()
 		changed      bool
 	)
 	for li, raw := range lines {
@@ -99,10 +99,10 @@ func rewriteGradleBuild(path, version string, edits []Edit) (Result, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(func(out []byte) error {
-		return gradleVerify(rep.text(), string(out), res.Applied, version, res.VersionWritten)
+	return res, sp.commit(func(out []byte) error {
+		return gradleVerify(sp.text(), string(out), res.Applied, version, res.VersionWritten)
 	})
 }
 

@@ -22,7 +22,7 @@ func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(n
 // line declares are Missing. Requirements files declare no own version, so
 // the version argument has no target here.
 func rewriteRequirements(path string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -33,7 +33,7 @@ func rewriteRequirements(path string, edits []Edit) (Result, error) {
 
 	var res Result
 	found := make(map[int]bool, len(edits))
-	lines := rep.lines()
+	lines := sp.lines()
 	changed := false
 	for li, raw := range lines {
 		line := strings.TrimSuffix(raw, "\r")
@@ -64,9 +64,9 @@ func rewriteRequirements(path string, edits []Edit) (Result, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(nil)
+	return res, sp.commit(nil)
 }
 
 // requirementSpans locates, in one requirement line, the declared name and the

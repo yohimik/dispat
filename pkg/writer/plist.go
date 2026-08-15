@@ -34,11 +34,11 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 	if version == "" {
 		return res, nil
 	}
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	s, current, ok, err := plistVersionSpan(rep.bytes())
+	s, current, ok, err := plistVersionSpan(sp.bytes())
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
@@ -50,9 +50,9 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 		return res, nil
 	}
 
-	rep.replace(s, xmlEscape(version))
+	sp.replace(s, xmlEscape(version))
 	res.VersionWritten = true
-	return res, rep.commit(verifyXML)
+	return res, sp.commit(verifyXML)
 }
 
 // plistVersionSpan locates the byte span of the marketing version's <string>

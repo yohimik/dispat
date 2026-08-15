@@ -30,11 +30,11 @@ func rewriteAndroidManifest(path, version string, edits []Edit) (Result, error) 
 	if version == "" {
 		return res, nil
 	}
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
-	s, current, ok, err := androidVersionNameSpan(rep.bytes())
+	s, current, ok, err := androidVersionNameSpan(sp.bytes())
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
@@ -42,9 +42,9 @@ func rewriteAndroidManifest(path, version string, edits []Edit) (Result, error) 
 		return res, nil
 	}
 
-	rep.replace(s, xmlEscape(version))
+	sp.replace(s, xmlEscape(version))
 	res.VersionWritten = true
-	return res, rep.commit(verifyXML)
+	return res, sp.commit(verifyXML)
 }
 
 // androidVersionNameSpan locates the byte span of the root <manifest>

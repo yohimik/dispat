@@ -26,18 +26,18 @@ import (
 
 // tomlLink applies path redirects to a package-keyed table.
 func tomlLink(path, table string, links []Link) (LinkResult, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return LinkResult{}, err
 	}
 	var doc map[string]any
-	if err := toml.Unmarshal(rep.bytes(), &doc); err != nil {
+	if err := toml.Unmarshal(sp.bytes(), &doc); err != nil {
 		return LinkResult{}, fmt.Errorf("%s: %w", path, err)
 	}
 
 	var (
 		res     LinkResult
-		lines   = rep.lines()
+		lines   = sp.lines()
 		changed bool
 	)
 	for _, r := range links {
@@ -64,9 +64,9 @@ func tomlLink(path, table string, links []Link) (LinkResult, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(func(out []byte) error {
+	return res, sp.commit(func(out []byte) error {
 		return tomlVerifyLinks(out, table, res.Applied)
 	})
 }

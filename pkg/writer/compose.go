@@ -38,13 +38,13 @@ type composeLayout struct {
 // manifest.ComposeIdentity with the services they found, so the two cannot
 // disagree.
 func rewriteCompose(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
 	var (
 		res    Result
-		lines  = rep.lines()
+		lines  = sp.lines()
 		layout = scanComposeLines(lines)
 		w      = newImageTagWriter(path, edits)
 	)
@@ -71,9 +71,9 @@ func rewriteCompose(path, version string, edits []Edit) (Result, error) {
 	changed := w.apply(lines)
 	w.fill(&res)
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(func(out []byte) error {
+	return res, sp.commit(func(out []byte) error {
 		after := scanComposeLines(strings.Split(string(out), "\n"))
 		// The file's own images carry the version rather than an edit's range,
 		// so checking them against the edits would compare the wrong numbers.

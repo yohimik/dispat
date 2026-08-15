@@ -49,12 +49,12 @@ type catalogSlot struct {
 // A catalog declares no version of its own, so Rewrite's version argument has
 // no target here.
 func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
 	var raw gradleCatalog
-	if err := toml.Unmarshal(rep.bytes(), &raw); err != nil {
+	if err := toml.Unmarshal(sp.bytes(), &raw); err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 	slots := catalogSlots(&raw)
@@ -94,7 +94,7 @@ func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
 		t.edits = append(t.edits, e)
 	}
 
-	lines := rep.lines()
+	lines := sp.lines()
 	index := buildTOMLIndex(lines)
 	changed := false
 	for _, id := range order {
@@ -114,9 +114,9 @@ func rewriteGradleCatalog(path string, edits []Edit) (Result, error) {
 		changed = true
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(verifyTOML)
+	return res, sp.commit(verifyTOML)
 }
 
 // catalogSlots indexes every library's version location by its Maven

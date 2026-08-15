@@ -39,7 +39,7 @@ type pyLocation struct {
 // entry whose value is a table of constraints rather than a scalar, or whose
 // text the requirement reader cannot make sense of, is reported missing.
 func rewritePyproject(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -47,7 +47,7 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 	// would otherwise splice happily into a file that was already broken and
 	// then blame itself when the result failed to parse.
 	var input map[string]any
-	if err := toml.Unmarshal(rep.bytes(), &input); err != nil {
+	if err := toml.Unmarshal(sp.bytes(), &input); err != nil {
 		return Result{}, fmt.Errorf("%s: %w", path, err)
 	}
 	wanted := make(map[pyTarget]int, len(edits))
@@ -63,7 +63,7 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 		res            Result
 		found          = make(map[int]bool, len(edits))
 		seen           = make(map[int]bool, len(edits))
-		lines          = rep.lines()
+		lines          = sp.lines()
 		changed        bool
 		table          string
 		arrayDepth     int
@@ -171,9 +171,9 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(verifyTOML)
+	return res, sp.commit(verifyTOML)
 }
 
 // pyArrayKind reports the kind an array-valued key declares, for the tables
@@ -223,7 +223,7 @@ func pyPoetryValueSpan(body string, afterEq int) (start, end int, ok bool) {
 // earlier offsets stay valid.
 func pySpliceRequirements(lines []string, li int, body string, from int, kind manifest.Kind,
 	wanted map[pyTarget]int, edits []Edit, found map[int]bool) []Edit {
-	// A within-line splice, distinct from the file-wide patches the replacer
+	// A within-line splice, distinct from the file-wide patches the splicer
 	// queues: these offsets are into one line's bytes.
 	type splice struct {
 		start, end int

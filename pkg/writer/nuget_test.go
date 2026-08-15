@@ -48,7 +48,7 @@ func TestNuspecRewriteVersionAndDependencies(t *testing.T) {
 	}
 }
 
-func TestNuspecRewriteRefusesLinkmentTokens(t *testing.T) {
+func TestNuspecRewriteRefusesReplacementTokens(t *testing.T) {
 	// Writing a literal over $version$ would sever the link to the project and
 	// freeze the package at whatever was written.
 	src := "<package><metadata>\n  <id>$id$</id>\n  <version>$version$</version>\n  <dependencies>\n    <dependency id=\"A\" version=\"$v$\" />\n  </dependencies>\n</metadata></package>\n"

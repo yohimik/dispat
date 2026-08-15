@@ -396,7 +396,7 @@ func FuzzLink(f *testing.F) {
 	})
 }
 
-// FuzzSubstituteBytes hammers the zero-parsing replacer. It has no grammar to
+// FuzzSubstituteBytes hammers the zero-parsing splicer. It has no grammar to
 // protect, so its contract is arithmetic instead: it never panics, it never
 // touches the caller's input, and the result is exactly as long as the
 // occurrences it reported say it should be.

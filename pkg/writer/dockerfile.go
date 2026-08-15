@@ -19,13 +19,13 @@ import (
 // scanner reads them with, so the writer cannot fail to find a dependency the
 // scanner reported.
 func rewriteDockerfile(path string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
 	var (
 		res   Result
-		lines = rep.lines()
+		lines = sp.lines()
 		w     = newImageTagWriter(path, edits)
 	)
 	for _, ref := range manifest.DockerfileRefs(lines) {
@@ -36,9 +36,9 @@ func rewriteDockerfile(path string, edits []Edit) (Result, error) {
 	changed := w.apply(lines)
 	w.fill(&res)
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(func(out []byte) error {
+	return res, sp.commit(func(out []byte) error {
 		after := manifest.DockerfileRefs(strings.Split(string(out), "\n"))
 		texts := make([]string, 0, len(after))
 		for _, ref := range after {

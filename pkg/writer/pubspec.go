@@ -25,7 +25,7 @@ var pubspecTables = map[manifest.Kind]string{
 // to replace and is reported missing. So is a dependency in a block this
 // format has no kind for.
 func rewritePubspec(path, version string, edits []Edit) (Result, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -53,7 +53,7 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		res     Result
 		seen    = make(map[int]bool, len(edits))
 		found   = make(map[int]bool, len(edits))
-		lines   = rep.lines()
+		lines   = sp.lines()
 		changed bool
 		block   string
 		depth   = noBlock
@@ -132,9 +132,9 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(nil)
+	return res, sp.commit(nil)
 }
 
 // stripYAMLComment cuts a trailing comment, ignoring '#' inside quotes and the
@@ -237,13 +237,13 @@ const pubspecOverrides = "dependency_overrides"
 // Indentation follows the file. A pubspec written with four spaces keeps four,
 // because the block's own entries decide the width rather than a constant here.
 func linkPubspec(path string, links []Link) (LinkResult, error) {
-	rep, err := openReplacer(path)
+	sp, err := openSplicer(path)
 	if err != nil {
 		return LinkResult{}, err
 	}
 	var (
 		res     LinkResult
-		lines   = rep.lines()
+		lines   = sp.lines()
 		changed bool
 	)
 	for _, r := range links {
@@ -277,9 +277,9 @@ func linkPubspec(path string, links []Link) (LinkResult, error) {
 		}
 	}
 	if changed {
-		rep.setLines(lines)
+		sp.setLines(lines)
 	}
-	return res, rep.commit(func(out []byte) error {
+	return res, sp.commit(func(out []byte) error {
 		return pubspecVerifyOverrides(out, res.Applied)
 	})
 }
