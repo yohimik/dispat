@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -148,4 +150,63 @@ func TestConditionMatch(t *testing.T) {
 			assert.Equal(t, want, c.Match(lookup))
 		})
 	}
+}
+
+func TestResolvedConditionAnswersWithoutTheEnvironment(t *testing.T) {
+	// A resolved condition carries an answer computed before the chain ran, so
+	// Match reports that answer and reads nothing: the lookup must not even be
+	// consulted, or a condition about the repository would silently become a
+	// condition about a variable.
+	looked := false
+	lookup := func(string) string { looked = true; return "" }
+
+	held := ResolvedCondition("--changed", true)
+	assert.True(t, held.Match(lookup), "a condition resolved true matches")
+	assert.Equal(t, "--changed", held.Spec, "the spec quotes what the user typed")
+
+	missed := ResolvedCondition("-f report.json", false)
+	assert.False(t, missed.Match(lookup), "a condition resolved false does not match")
+	assert.Equal(t, "-f report.json", missed.Spec)
+
+	assert.False(t, looked, "the environment must not be consulted")
+}
+
+func TestFileConditionReadsTheFilesystem(t *testing.T) {
+	// The -f and -d file tests, against a real folder: -f asks for a regular
+	// file, -d for a directory, and a path that is absent or the wrong kind is
+	// false rather than an error, matching the shell's [ -f ] and [ -d ].
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "report.json"), []byte("{}"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "build"), 0o755))
+
+	for name, tc := range map[string]struct {
+		path    string
+		wantDir bool
+		held    bool
+	}{
+		"-f on a file":         {path: "report.json", held: true},
+		"-f on a folder":       {path: "build", held: false},
+		"-f on a missing path": {path: "ghost.json", held: false},
+		"-d on a folder":       {path: "build", wantDir: true, held: true},
+		"-d on a file":         {path: "report.json", wantDir: true, held: false},
+		"-d on a missing path": {path: "ghost", wantDir: true, held: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := FileCondition(dir, tc.path, tc.wantDir)
+			assert.Equal(t, tc.held, c.Match(func(string) string { return "" }))
+		})
+	}
+
+	// An absolute path ignores the folder it would otherwise be joined onto,
+	// and a relative one is read from that folder alone.
+	abs := FileCondition(t.TempDir(), filepath.Join(dir, "report.json"), false)
+	assert.True(t, abs.Match(func(string) string { return "" }),
+		"an absolute path is used as it is")
+	rel := FileCondition(t.TempDir(), "report.json", false)
+	assert.False(t, rel.Match(func(string) string { return "" }),
+		"a relative path resolves against the given folder, not the process cwd")
+
+	// The spec keeps the flag spelling, so logs quote the test as typed.
+	assert.Equal(t, "-f report.json", FileCondition(dir, "report.json", false).Spec)
+	assert.Equal(t, "-d build", FileCondition(dir, "build", true).Spec)
 }

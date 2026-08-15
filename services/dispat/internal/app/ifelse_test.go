@@ -192,6 +192,45 @@ func TestRunIfReportsARunnerFailureAsDispatsOwn(t *testing.T) {
 	assert.Equal(t, 1, code)
 }
 
+func TestRunIfTakesAResolvedLeadingBranch(t *testing.T) {
+	// A leading condition answered before the chain ran — --changed, a file
+	// test — slots into the chain as any other branch: resolved true wins over
+	// a true elif behind it, resolved false falls through to the elifs and the
+	// else. This is what lets RunIf stay untouched by the non-env conditions.
+	f := &fakeRunner{}
+	env := map[string]string{"ENV": "prod"}
+
+	code := runIf(t, f, env, IfOptions{
+		Branches: []Branch{
+			{Cond: ResolvedCondition("--changed", true), Script: "build"},
+			{Cond: mustCond(t, "ENV=prod"), Script: "deploy"},
+		},
+		Else: "echo idle",
+	})
+	assert.Equal(t, 0, code)
+	assert.Equal(t, []string{"build"}, f.ran,
+		"a leading condition resolved true wins even over a true elif")
+
+	f = &fakeRunner{}
+	runIf(t, f, env, IfOptions{
+		Branches: []Branch{
+			{Cond: ResolvedCondition("--changed", false), Script: "build"},
+			{Cond: mustCond(t, "ENV=prod"), Script: "deploy"},
+		},
+		Else: "echo idle",
+	})
+	assert.Equal(t, []string{"deploy"}, f.ran,
+		"a leading condition resolved false falls through to the elif chain")
+
+	f = &fakeRunner{}
+	runIf(t, f, map[string]string{}, IfOptions{
+		Branches: []Branch{{Cond: ResolvedCondition("--changed", false), Script: "build"}},
+		Else:     "echo idle",
+	})
+	assert.Equal(t, []string{"echo idle"}, f.ran,
+		"resolved false with nothing else true reaches the else")
+}
+
 func TestRunIfRunsInTheGivenDirectory(t *testing.T) {
 	f := &fakeRunner{}
 	runIf(t, f, map[string]string{"CI": "1"}, IfOptions{
