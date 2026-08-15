@@ -248,8 +248,53 @@ func TestScanHonoursContext(t *testing.T) {
 	cancel()
 	dir := t.TempDir()
 	write(t, dir, "package.json", `{"name": "x"}`)
-	if _, err := New().Scan(ctx, dir); err == nil {
-		t.Error("cancelled context should fail the scan")
+	if _, err := New().Scan(ctx, dir); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled scan: got %v, want context.Canceled", err)
+	}
+}
+
+func TestScanSkipsAFolderWearingAManifestName(t *testing.T) {
+	// A directory (or a symlink to one) named like a manifest is not a
+	// manifest: both entry points step over it without an error, the same
+	// treatment the walk gives real directories.
+	dir := t.TempDir()
+	write(t, dir, "healthy/package.json", `{"name": "x", "version": "1.0.0"}`)
+	target := filepath.Join(dir, "healthy")
+	if err := os.Symlink(target, filepath.Join(dir, "Podfile")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	mans, err := New().Scan(context.Background(), dir)
+	if err != nil {
+		t.Errorf("scan: a folder wearing a manifest's name is a skip, not an error: %v", err)
+	}
+	if len(mans) != 1 || mans[0].Path != "healthy/package.json" {
+		t.Errorf("only the real manifest is read: %+v", mans)
+	}
+
+	mans, err = New().ScanRoot(context.Background(), dir)
+	if err != nil {
+		t.Errorf("scan root: %v", err)
+	}
+	if len(mans) != 0 {
+		t.Errorf("the root holds no real manifest: %+v", mans)
+	}
+}
+
+func TestDedupeDepsLeavesTheInputAlone(t *testing.T) {
+	// The helper returns a fresh slice: a caller that retains the original
+	// must not find it rewritten underneath.
+	in := []DeclaredDep{
+		{Name: "a", Range: "1"},
+		{Name: "a", Range: "1"},
+		{Name: "b", Range: "2"},
+	}
+	got := dedupeDeps(in)
+	if len(got) != 2 {
+		t.Fatalf("dedupe: %+v", got)
+	}
+	if in[1] != (DeclaredDep{Name: "a", Range: "1"}) || in[2] != (DeclaredDep{Name: "b", Range: "2"}) {
+		t.Errorf("the input's elements were rewritten: %+v", in)
 	}
 }
 

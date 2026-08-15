@@ -154,10 +154,12 @@ func pep508Dep(req string, kind Kind) DeclaredDep {
 func normalizePyName(name string) string { return manifest.NormalizePyName(name) }
 
 // dedupeDeps drops exact duplicates: a package listed both in [project] and a
-// Poetry table during a migration should not become two declarations.
+// Poetry table during a migration should not become two declarations. The
+// result is a fresh slice; the caller's stays as it was, so the helper is safe
+// for a slice the caller also retains.
 func dedupeDeps(deps []DeclaredDep) []DeclaredDep {
 	seen := make(map[DeclaredDep]bool, len(deps))
-	out := deps[:0]
+	out := make([]DeclaredDep, 0, len(deps))
 	for _, d := range deps {
 		if seen[d] {
 			continue

@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -237,16 +238,38 @@ const maxManifestBytes = 16 << 20
 // joined into the scan error like any parse failure.
 var ErrManifestTooLarge = errors.New("scanner: manifest exceeds 16 MiB")
 
-// readManifest is os.ReadFile behind the size cap.
+// errNotAFile marks a directory wearing a manifest's name: a symlink to a
+// folder called Podfile is not a manifest, and both scan entry points skip it
+// the way the walk skips real directories.
+var errNotAFile = errors.New("scanner: not a regular file")
+
+// readManifest reads one manifest behind the size cap. The size is checked
+// against the open handle and again against what was read, so a file growing
+// between the two cannot slip past the cap.
 func readManifest(path string) ([]byte, error) {
-	info, err := os.Stat(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, errNotAFile
 	}
 	if info.Size() > maxManifestBytes {
 		return nil, fmt.Errorf("%w (%d bytes)", ErrManifestTooLarge, info.Size())
 	}
-	return os.ReadFile(path)
+	data, err := io.ReadAll(io.LimitReader(f, maxManifestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxManifestBytes {
+		return nil, fmt.Errorf("%w (%d bytes)", ErrManifestTooLarge, int64(len(data)))
+	}
+	return data, nil
 }
 
 // fsScanner is the filesystem Scanner.
@@ -263,7 +286,11 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 	)
 	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			// Cancellation ends the walk cleanly and joins the context error,
+			// exactly as ScanRoot breaks its loop: the manifests already read
+			// come back beside it either way.
+			errs = append(errs, ctxErr)
+			return filepath.SkipAll
 		}
 		if err != nil {
 			// A folder the walk cannot read (permissions, a vanished entry) is
@@ -287,11 +314,18 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
-			return err
+			// Even a path that cannot be made relative stays inside the
+			// partial-result contract: reported and stepped over, never the
+			// end of the walk.
+			errs = append(errs, err)
+			return nil
 		}
 		rel = filepath.ToSlash(rel)
 		data, err := readManifest(path)
 		if err != nil {
+			if errors.Is(err, errNotAFile) {
+				return nil
+			}
 			errs = append(errs, fmt.Errorf("%s: %w", rel, err))
 			return nil
 		}
@@ -338,6 +372,9 @@ func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 		}
 		data, err := readManifest(filepath.Join(dir, name))
 		if err != nil {
+			if errors.Is(err, errNotAFile) {
+				continue
+			}
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
 		}

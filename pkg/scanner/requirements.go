@@ -12,9 +12,6 @@ import (
 // canonical case; the line loop is kept separate from the PEP 508 parsing so
 // further line formats can reuse it.
 
-// isRequirementsFile is pkg/manifest's rule, shared verbatim with the writer.
-func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(name) }
-
 // requirementsKind maps the file name onto the dependency field it stands for:
 // a dev/test requirements file installs for contributors, not consumers. Whole
 // words only, "requirements-latest.txt" contains the letters of "test" but is
