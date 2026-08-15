@@ -40,6 +40,10 @@ func parseGradleBuild(rel string, data []byte) (Manifest, error) {
 		line = raw
 		masked, inComment = gradleMask(raw, inComment)
 
+		// The switch's order is load-bearing: a line inside defaultConfig is
+		// classified by that innermost scope even when an android or
+		// dependencies block encloses it, so a case moving above another
+		// changes which lines each one ever sees.
 		switch {
 		case gradleScopeHas(scope, "defaultConfig"):
 			if v, ok := gradleProperty(line, masked, "applicationId"); ok && m.Name == "" {

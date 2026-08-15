@@ -60,7 +60,9 @@ func isBuildSettingRef(v string) bool {
 // keys. Only the top level counts: a real Info.plist nests dictionaries and
 // arrays (CFBundleURLTypes, UIApplicationSceneManifest) that carry <key>
 // elements of their own, and a flat walk would happily read a CFBundleVersion
-// out of one of them. Nested values are skipped wholesale.
+// out of one of them. Nested values are skipped wholesale. A plist with no
+// root dictionary returns a nil map with a nil error, deliberately: the nil
+// map reads as absent keys at the call site, which is the honest answer.
 func plistTopLevelStrings(data []byte) (map[string]string, error) {
 	dec := newXMLDecoder(data)
 	found, err := plistSeekRootDict(dec)

@@ -102,7 +102,10 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 			return ctxErr // interrupted mid-stage: no more rewrites
 		}
 		if !writer.Supported(m.Path) {
-			continue // read-only ecosystem (Cargo, Python, ...): flow.version's job
+			// Defensive: every scanned format has a writer today, and the
+			// fence tests keep it so. The guard stays for the day one gains a
+			// reader first.
+			continue
 		}
 		edits := tc.manifestEdits(av, m)
 		version := ""
