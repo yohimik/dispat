@@ -35,15 +35,15 @@ type AutoReplacerOptions struct {
 	Window WindowOptions
 	// OnError is the failure policy for a failed package's dependents.
 	OnError string
-	// Subs are the literal find/write pairs, applied to each file in order.
+	// Replacements are the literal find/write pairs, applied to each file in order.
 	// Either half may carry the placeholders.
-	Subs []writer.Substitution
+	Replacements []writer.Replacement
 	// Files are the globs selecting what each covered package offers up,
 	// relative to its own folder.
 	Files []string
 	// OnlyUpdated narrows the fan-out to the providers this run releases.
 	OnlyUpdated bool
-	// Strict turns a substitution that matched nothing in any covered package
+	// Strict turns a replacement that matched nothing in any covered package
 	// into a failed command.
 	Strict bool
 	// JSON renders one event per package through the log instead of a listing.
@@ -52,7 +52,7 @@ type AutoReplacerOptions struct {
 	Out io.Writer
 }
 
-// AutoReplacer applies the invocation's substitutions to every covered
+// AutoReplacer applies the invocation's replacements to every covered
 // package's files. Every package is swept in dependency order, exactly as
 // `dispat run` sweeps scripts.
 //
@@ -66,7 +66,7 @@ func (a *App) AutoReplacer(ctx context.Context, opts AutoReplacerOptions) error 
 	}
 	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
-		a.log.Error().Err(err).Msg("cannot substitute")
+		a.log.Error().Err(err).Msg("cannot replace")
 		return err
 	}
 
@@ -87,9 +87,9 @@ func (a *App) AutoReplacer(ctx context.Context, opts AutoReplacerOptions) error 
 		return drainErr
 	}
 	if rep.Failed > 0 {
-		return fmt.Errorf("%d package(s) failed to substitute", rep.Failed)
+		return fmt.Errorf("%d package(s) failed to replace", rep.Failed)
 	}
-	// The strict gate asks whether a substitution found its text, so it only
+	// The strict gate asks whether a replacement found its text, so it only
 	// has an answer once something was opened. A selection the window emptied
 	// tried nothing, and calling every pattern stale for that would turn
 	// "nothing changed today" into a failure.
@@ -105,7 +105,7 @@ func (a *App) AutoReplacer(ctx context.Context, opts AutoReplacerOptions) error 
 // The rules are the same for every package, so they are built once. What
 // differs per package is the facts the placeholders render against and the
 // providers the fan-out covers, which is what resolve computes. The counts and
-// which substitutions ever matched are guarded by mu.
+// which replacements ever matched are guarded by mu.
 type replacerWork struct {
 	app   *App
 	pl    *plan.Plan
@@ -132,8 +132,8 @@ func (a *App) newReplacerWork(ctx context.Context, pl *plan.Plan, opts AutoRepla
 
 	// One rule per --sub, all sharing the --files globs: the config form pairs
 	// each rule with its own globs, and the command line has one set to give.
-	rules := make([]model.ReplaceRule, 0, len(opts.Subs))
-	for _, s := range opts.Subs {
+	rules := make([]model.ReplaceRule, 0, len(opts.Replacements))
+	for _, s := range opts.Replacements {
 		rules = append(rules, model.ReplaceRule{Files: opts.Files, Find: s.Find, Write: s.Write})
 	}
 	return &replacerWork{
@@ -146,11 +146,11 @@ func (a *App) newReplacerWork(ctx context.Context, pl *plan.Plan, opts AutoRepla
 
 func (w *replacerWork) stage() string { return "autoreplacer" }
 
-// resolve prepares one package's substitution. Every covered package has files
+// resolve prepares one package's replacement. Every covered package has files
 // to offer, so unlike the writer's sweep this one never resolves to nothing:
 // whether the globs select anything is the walk's answer, not this one's.
 func (w *replacerWork) resolve(ctx context.Context, rel *plan.Release) (task, error) {
-	sub := release.Substituter{
+	rep := release.Replacer{
 		Dir:   rel.Pkg.Dir,
 		Rules: w.rules,
 		Facts: release.PackageFacts{
@@ -164,11 +164,11 @@ func (w *replacerWork) resolve(ctx context.Context, rel *plan.Release) (task, er
 		Log:       w.app.log.With().Str("package", rel.Pkg.Name).Str("stage", w.stage()).Logger(),
 	}
 	return func(ctx context.Context) error {
-		rep, err := sub.Run(ctx)
+		report, err := rep.Run(ctx)
 		if err != nil {
 			return err
 		}
-		w.record(rel.Pkg.Name, rep)
+		w.record(rel.Pkg.Name, report)
 		return nil
 	}, nil
 }
@@ -241,7 +241,7 @@ func (w *replacerWork) ownedBy(rel *plan.Release) func(string) bool {
 }
 
 // record folds one package's outcome into the run-wide tally.
-func (w *replacerWork) record(pkg string, rep release.SubstituteReport) {
+func (w *replacerWork) record(pkg string, rep release.ReplaceReport) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.files += rep.Files
@@ -253,7 +253,7 @@ func (w *replacerWork) record(pkg string, rep release.SubstituteReport) {
 		return
 	}
 	if w.json {
-		w.app.log.Info().Str("package", pkg).Int("files", rep.Files).Msg("files substituted")
+		w.app.log.Info().Str("package", pkg).Int("files", rep.Files).Msg("files replaced")
 		return
 	}
 	fmt.Fprintf(listing(w.out), "%s\n  %d file(s) rewritten\n", pkg, rep.Files)
@@ -266,15 +266,15 @@ func (w *replacerWork) tally() (files, occurrences int) {
 }
 
 // stale is the --strict gate, asked across the whole sweep rather than per
-// package: a substitution missing from one package's files is the ordinary case
+// package: a replacement missing from one package's files is the ordinary case
 // when one invocation covers twenty of them, while one no package anywhere
 // carries is a pattern that has gone stale. It is the same rule `dispat
-// replacer` applies to its substitutions.
+// replacer` applies to its replacements.
 //
 // The question is asked per --sub rather than per rendered text, because a
 // template is what the operator wrote: a fan-out pattern matching for any one
 // provider has done its job, and a converged re-run is answered by the probe
-// the engine pairs with every substitution.
+// the engine pairs with every replacement.
 func (w *replacerWork) stale() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -283,13 +283,13 @@ func (w *replacerWork) stale() error {
 		if w.matched[i] {
 			continue
 		}
-		w.app.log.Error().Str("find", rule.Find).Msg("substitution matched nothing")
+		w.app.log.Error().Str("find", rule.Find).Msg("replacement matched nothing")
 		stale++
 	}
 	if stale == 0 {
 		return nil
 	}
-	err := fmt.Errorf("%d substitution(s) matched nothing", stale)
-	w.app.log.Error().Err(err).Msg("substitutions are not clean")
+	err := fmt.Errorf("%d replacement(s) matched nothing", stale)
+	w.app.log.Error().Err(err).Msg("replacements are not clean")
 	return err
 }

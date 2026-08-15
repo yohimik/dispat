@@ -534,7 +534,7 @@ func (w *writerWork) changedPackages() []string {
 // rather than per manifest: an edit missing from *this* package's manifest is
 // the ordinary case when one invocation covers twenty of them, while an edit no
 // manifest anywhere declares is a pattern that has gone stale. It is the same
-// rule `dispat replacer` applies to its substitutions.
+// rule `dispat replacer` applies to its replacements.
 func (w *writerWork) stale() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

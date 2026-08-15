@@ -279,14 +279,14 @@ func TestManifestsCommandWordsKeepTheirScripts(t *testing.T) {
 
 // TestManifestsReplacerNeedsNoConfig: the replacer command over files that
 // are not manifests at all, in a folder with no dispat config anywhere and no
-// git history. Substitutions apply in the order they were given, every
+// git history. Replacements apply in the order they were given, every
 // occurrence is replaced, and the paths resolve against --root.
 func TestManifestsReplacerNeedsNoConfig(t *testing.T) {
 	r := harness.New(t)
 	r.WriteFile("build.gradle", "implementation 'com.acme:core:1.2.0'\ntestImplementation 'com.acme:core:1.2.0'\n")
 	r.WriteFile("docs/README.md", "Requires com.acme:core:1.2.0 and nothing else.\n")
 
-	res := r.Command("replacer", "--sub", "com.acme:core:1.2.0=>com.acme:core:1.3.0",
+	res := r.Command("replacer", "--replace", "com.acme:core:1.2.0=>com.acme:core:1.3.0",
 		"build.gradle", "docs/README.md")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "2 file(s), 3 occurrence(s): 2 applied, 0 skipped, 0 missing")
@@ -298,8 +298,8 @@ func TestManifestsReplacerNeedsNoConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Requires com.acme:core:1.3.0 and nothing else.\n", string(readme))
 
-	// Repeated --sub values apply in order, each over what the last left.
-	res = r.Command("replacer", "--sub", "1.3.0=>1.4.0", "--sub", "1.4.0=>2.0.0", "build.gradle")
+	// Repeated --rep values apply in order, each over what the last left.
+	res = r.Command("replacer", "--replace", "1.3.0=>1.4.0", "--replace", "1.4.0=>2.0.0", "build.gradle")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	gradle, err = os.ReadFile(r.Path("build.gradle"))
 	require.NoError(t, err)
@@ -315,19 +315,19 @@ func TestManifestsReplacerOutcomesReachTheExitCode(t *testing.T) {
 	// Nothing to write is a usage error.
 	assert.Equal(t, 2, r.Command("replacer", "notes.txt").Code)
 	// So is a spec with no separator.
-	assert.Equal(t, 2, r.Command("replacer", "--sub", "no-separator", "notes.txt").Code)
+	assert.Equal(t, 2, r.Command("replacer", "--replace", "no-separator", "notes.txt").Code)
 	// No file to work on is a usage error too.
-	assert.Equal(t, 2, r.Command("replacer", "--sub", "a=>b").Code)
+	assert.Equal(t, 2, r.Command("replacer", "--replace", "a=>b").Code)
 
 	// A pattern matching nothing is quiet by default and fatal under --strict.
-	assert.Equal(t, 0, r.Command("replacer", "--sub", "absent=>x", "notes.txt").Code)
-	strict := r.Command("replacer", "--strict", "--sub", "absent=>x", "notes.txt")
+	assert.Equal(t, 0, r.Command("replacer", "--replace", "absent=>x", "notes.txt").Code)
+	strict := r.Command("replacer", "--strict", "--replace", "absent=>x", "notes.txt")
 	assert.Equal(t, 1, strict.Code)
 	assert.Contains(t, strict.Stdout+strict.Stderr, "matched nothing")
 
 	// An unreadable file fails the command; the others are still attempted.
 	r.WriteFile("keep.txt", "version 1.0.0\n")
-	failed := r.Command("replacer", "--sub", "1.0.0=>1.1.0", "absent.txt", "keep.txt")
+	failed := r.Command("replacer", "--replace", "1.0.0=>1.1.0", "absent.txt", "keep.txt")
 	assert.Equal(t, 1, failed.Code)
 	kept, err := os.ReadFile(r.Path("keep.txt"))
 	require.NoError(t, err)
@@ -341,12 +341,12 @@ func TestManifestsReplacerJSONEvents(t *testing.T) {
 	r.WriteFile("notes.txt", "keep 1.0.0 keep\n")
 
 	res := r.Command("replacer", "--log-format", "json",
-		"--sub", "1.0.0=>1.1.0", "--sub", "absent=>x", "--sub", "keep=>keep", "notes.txt")
+		"--replace", "1.0.0=>1.1.0", "--replace", "absent=>x", "--replace", "keep=>keep", "notes.txt")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 
 	file := findEvent(t, res.Events, "file updated")
 	assert.Equal(t, "notes.txt", file.Str("path"))
-	summary := findEvent(t, res.Events, "substitution complete")
+	summary := findEvent(t, res.Events, "replace complete")
 	for _, key := range []string{"occurrences", "applied", "missing", "skipped"} {
 		assert.Equal(t, float64(1), summary[key], "%s in %v", key, summary)
 	}
@@ -371,7 +371,7 @@ func TestManifestsReplacerWordKeepsItsScript(t *testing.T) {
 	r.WriteFile("packages/core/notes.txt", "version 1.0.0\n")
 	r.Commit("feat(core): first release")
 
-	bare := r.Command("replacer", "--sub", "1.0.0=>1.1.0", "packages/core/notes.txt")
+	bare := r.Command("replacer", "--replace", "1.0.0=>1.1.0", "packages/core/notes.txt")
 	require.Equal(t, 0, bare.Code, "stderr:\n%s", bare.Stderr)
 	assert.NotContains(t, bare.Stdout, "the script ran", "the bare word is the command")
 	data, err := os.ReadFile(r.Path("packages", "core", "notes.txt"))

@@ -19,7 +19,7 @@ You can reach the replacer two ways: as the `dispat replacer` command, for one-o
 ## The command
 
 ```console
-$ dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle README.md
+$ dispat replacer --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle README.md
 build.gradle
   applied  com.acme:core:1.2.0 -> com.acme:core:1.3.0
   2 occurrence(s) replaced
@@ -29,7 +29,7 @@ README.md
 2 file(s), 3 occurrence(s): 2 applied, 0 skipped, 0 missing
 ```
 
-Each `--sub` is one substitution, written `find=>write`. The separator is `=>` rather than `=` because both halves are
+Each `--replace` is one replacement, written `find=>write`. The separator is `=>` rather than `=` because both halves are
 ordinary text and a version string carries `=` often enough (`>=1.0`, `VERSION=1.2.3`) that splitting on it would
 refuse perfectly sensible edits. The split happens at the first `=>`, so a `=>` inside the replacement survives.
 
@@ -45,7 +45,7 @@ replacing one of them would leave the file disagreeing with itself.
 `2.0.0`:
 
 ```console
-$ dispat replacer --sub '1.0.0=>1.1.0' --sub '1.1.0=>2.0.0' notes.txt
+$ dispat replacer --replace '1.0.0=>1.1.0' --replace '1.1.0=>2.0.0' notes.txt
 ```
 
 That is occasionally what you want and always worth knowing. Order is yours to choose, so choose it deliberately.
@@ -55,7 +55,7 @@ time, with its permissions and its modification time intact.
 
 ### Outcomes
 
-Every substitution ends up in one of three buckets, the same three the writer command uses:
+Every replacement ends up in one of three buckets, the same three the writer command uses:
 
 | Outcome     | Meaning                                                                                   |
 |-------------|-------------------------------------------------------------------------------------------|
@@ -63,12 +63,12 @@ Every substitution ends up in one of three buckets, the same three the writer co
 | **missing** | The text does not occur in the file.                                                      |
 | **skipped** | The text occurs, but `find` and `write` are the same, so there was nothing to do.          |
 
-A missing substitution is not an error by itself. Running one command over twenty files where the pattern belongs in
+A missing replacement is not an error by itself. Running one command over twenty files where the pattern belongs in
 one of them is the ordinary case. What is worth catching is a pattern that matched **nowhere at all**, because that
 usually means it has gone stale. `--strict` turns exactly that into a failed command:
 
 ```console
-$ dispat replacer --strict --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle
+$ dispat replacer --strict --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle
 $ echo $?
 1
 ```
@@ -89,16 +89,16 @@ it quietly, because a glob reaching an image is ordinary and failing the release
 `--log-format json` gives one event per file plus a summary, on the same stream the rest of dispat writes to:
 
 ```console
-$ dispat replacer --log-format json --sub '1.2.0=>1.3.0' build.gradle
-{"level":"info","path":"build.gradle","occurrences":2,"substitutions":{"applied":[{"find":"1.2.0","write":"1.3.0"}]},"message":"file updated"}
-{"level":"info","files":1,"occurrences":2,"applied":1,"skipped":0,"missing":0,"message":"substitution complete"}
+$ dispat replacer --log-format json --replace '1.2.0=>1.3.0' build.gradle
+{"level":"info","path":"build.gradle","occurrences":2,"replacements":{"applied":[{"find":"1.2.0","write":"1.3.0"}]},"message":"file updated"}
+{"level":"info","files":1,"occurrences":2,"applied":1,"skipped":0,"missing":0,"message":"replace complete"}
 ```
 
 ### Exit codes
 
 `0` when everything asked for was done. `1` for a file that cannot be read or written, or a `--strict` run with a
-pattern that matched nothing. `2` for a command line that does not make sense: no file named, no `--sub` given, or a
-`--sub` with no separator or with nothing to find.
+pattern that matched nothing. `2` for a command line that does not make sense: no file named, no `--replace` given, or a
+`--replace` with no separator or with nothing to find.
 
 ## Replacing during a release
 
@@ -151,7 +151,7 @@ whose publish nothing waited for.
 
 If a rule mentions no provider placeholder, it is applied once, for the package's own version.
 
-One rule expanded across several providers still substitutes in the order the providers are declared, each over what
+One rule expanded across several providers still replaces in the order the providers are declared, each over what
 the last left. That matters when two providers' versions overlap: a rule finding a bare `{providerPrevious}` for a
 provider moving `1.0.0` to `1.1.0` and another moving `1.1.0` to `1.2.0` will run the first result through the second
 rule. Name the provider in the pattern, as every example here does, and the two cannot collide.

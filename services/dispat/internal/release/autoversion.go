@@ -57,7 +57,7 @@ func WorkspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log z
 
 // autoVersion is the version stage's native reconciliation: the parsing
 // strategy first, then the replacing one, so a package using both sees its
-// manifests reconciled before the literal substitutions run over the rest of
+// manifests reconciled before the literal replacements run over the rest of
 // its files. Runs inside the version stage frame, after beforeVersion and
 // before any flow.version script, and its failure fails the stage. With
 // neither strategy configured it does nothing at all, which is how a space

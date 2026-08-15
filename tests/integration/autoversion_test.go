@@ -4,7 +4,7 @@ package integration
 // an autoVersion block gets its files reconciled by dispat itself at the
 // version stage — the parsing strategy rewriting declared ranges and own
 // versions under the match / range policy, the replacing strategy
-// substituting literal text in whatever else the release has to keep in step
+// replacing literal text in whatever else the release has to keep in step
 // — and its syncLock scripts run between version and build under their own
 // concurrency budget. Either strategy may be off, and with both off the lock
 // scripts are the whole of the version stage.

@@ -40,7 +40,7 @@ const (
 	cmdChangelog    = "changelog"    // write pending changelog entries now
 	cmdAutoversion  = "autoversion"  // native manifest reconciliation, plus syncLock
 	cmdAutowriter   = "autowriter"   // the writer's edits, over the whole selection
-	cmdAutoreplacer = "autoreplacer" // literal substitutions, over the whole selection
+	cmdAutoreplacer = "autoreplacer" // literal replacements, over the whole selection
 	cmdCommit       = "commit"       // per-package release commit (--tag, --push)
 	cmdGithub       = "github"       // per-package GitHub release, published now
 

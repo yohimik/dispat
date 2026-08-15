@@ -10,13 +10,13 @@ packages the run covers, looks in the files you point it at inside each one,
 and replaces the text you asked for.
 
 ```console
-$ dispat autoreplacer --files '**/*.gradle' --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' --since all
+$ dispat autoreplacer --files '**/*.gradle' --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' --since all
 packages/web
   1 file(s) rewritten
 2 package(s): 1 file(s), 1 occurrence(s)
 ```
 
-Two flags do the work. `--sub` is the find and write pair, split on `=>`.
+Two flags do the work. `--replace` is the find and write pair, split on `=>`.
 `--files` says which files to look in, as globs relative to each package's own
 folder. Both are repeatable.
 
@@ -26,7 +26,7 @@ Typing the versions in means editing the command every release. Placeholders
 let you write the pattern once:
 
 ```sh
-dispat autoreplacer --files README.md --sub '{name} {previous}=>{name} {version}'
+dispat autoreplacer --files README.md --replace '{name} {previous}=>{name} {version}'
 ```
 
 `{name}`, `{version}` and `{previous}` are the covered package: what it is
@@ -36,12 +36,12 @@ Three more placeholders talk about the packages it depends on:
 
 ```sh
 dispat autoreplacer --files '**/*.gradle' \
-  --sub 'com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}'
+  --replace 'com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}'
 ```
 
 `{provider}`, `{providerVersion}` and `{providerPrevious}` turn one pattern
-into one substitution per dependency. If web depends on core and utils, that
-single `--sub` becomes two substitutions when web is visited, and neither of
+into one replacement per dependency. If web depends on core and utils, that
+single `--replace` becomes two replacements when web is visited, and neither of
 them had to be typed.
 
 Which dependencies count is read from the manifests, the same way
@@ -61,7 +61,7 @@ selected one, all the way down the graph:
 
 ```sh
 dispat autoreplacer --consumers --files '**/*.gradle' \
-  --sub 'com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}'
+  --replace 'com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}'
 ```
 
 That is the shape this command is usually wanted in: the providers that moved
@@ -73,7 +73,7 @@ is described in [Choosing the packages](../../cli/run.md#choosing-the-packages).
 `--since all` reaches the whole monorepo.
 
 `--only-updated` narrows the fan-out to the providers this run is releasing, so
-a dependency released last week is left as it is. A `--sub` with no
+a dependency released last week is left as it is. A `--replace` with no
 `{provider}` placeholder is about the package itself, so this flag does not
 affect it.
 
@@ -107,18 +107,18 @@ do nothing, which is how a typo hides, so the command asks for it.
 That is the point and the risk. The replacer does exactly what it is told, with
 no idea whether the text it found is the version you meant or a coincidence.
 
-Give a substitution enough context to be unambiguous. `com.acme:core:1.2.0` is
+Give a replacement enough context to be unambiguous. `com.acme:core:1.2.0` is
 safe. A bare `1.2.0` will find things you did not intend.
 
 ## Catching a pattern that has gone stale
 
-`--strict` fails the command when a `--sub` matched nothing in any covered
+`--strict` fails the command when a `--replace` matched nothing in any covered
 package:
 
 ```console
-$ dispat autoreplacer --files '*.gradle' --sub 'com.acme:core:9.9.9=>x' --strict --since all
-ERR substitution matched nothing  find=com.acme:core:9.9.9
-ERR substitutions are not clean  error="1 substitution(s) matched nothing"
+$ dispat autoreplacer --files '*.gradle' --replace 'com.acme:core:9.9.9=>x' --strict --since all
+ERR replacement matched nothing  find=com.acme:core:9.9.9
+ERR replacements are not clean  error="1 replacement(s) matched nothing"
 ```
 
 The question is asked across the whole run, not per package. One package out of
@@ -146,7 +146,7 @@ fails at the end.
 - The same text across every package the plan picks: this command.
 - A dependency a manifest declares: [`dispat autowriter`](./autowriter.md),
   which understands the manifest instead of guessing at its bytes.
-- The same substitutions on every release, without running a command:
+- The same replacements on every release, without running a command:
   [`autoVersion.replace`](../../configuration/autoversion.md), which is this
   command's rules written into the configuration.
 
@@ -156,4 +156,4 @@ fails at the end.
 |------|-------------------------------------------------------------------|
 | `0`  | Every file that matched was rewritten                             |
 | `1`  | A file could not be written, or `--strict` found a stale pattern  |
-| `2`  | No `--sub`, no `--files`, or a malformed `--sub`                  |
+| `2`  | No `--replace`, no `--files`, or a malformed `--replace`                  |

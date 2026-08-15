@@ -47,7 +47,7 @@ type runner struct {
 
 	// What the flag-only phase parsed for the commands that asked for it.
 	write      writeRequest
-	subs       []writer.Substitution
+	reps       []writer.Replacement
 	execOpts   app.ExecOptions
 	ifBranches []app.Branch
 	ifIn       *app.Location
@@ -94,7 +94,7 @@ func (r *runner) versionOrHelp() (int, bool) {
 
 // validateFlags is everything the flags alone decide, before any config is
 // loaded, so a usage mistake never first costs the user a config error. It
-// fills in write and subs for the commands whose flags carry a request.
+// fills in write and reps for the commands whose flags carry a request.
 func (r *runner) validateFlags() (int, bool) {
 	cmd := r.inv.cmd
 	if sweepCommand(cmd) && !app.ValidOnError(*r.o.onError) {
@@ -135,12 +135,12 @@ func (r *runner) validateFlags() (int, bool) {
 	}
 	if cmd == cmdAutoreplacer {
 		var err error
-		if r.subs, err = parseSubSpecs(*r.o.rpSub); err != nil {
-			r.boot.Error().Err(err).Msg("invalid substitution")
+		if r.reps, err = parseReplaceSpecs(*r.o.rpReplace); err != nil {
+			r.boot.Error().Err(err).Msg("invalid replacement")
 			return 2, true
 		}
-		if len(r.subs) == 0 {
-			r.boot.Error().Msg("autoreplacer needs something to write: --sub 'find=>write'")
+		if len(r.reps) == 0 {
+			r.boot.Error().Msg("autoreplacer needs something to write: --replace 'find=>write'")
 			r.usage(cmd)
 			return 2, true
 		}
@@ -317,18 +317,18 @@ func (r *runner) runManifests() int {
 			return 1
 		}
 	case cmdReplacer:
-		subs, err := parseSubSpecs(*r.o.rpSub)
+		reps, err := parseReplaceSpecs(*r.o.rpReplace)
 		if err != nil {
-			r.boot.Error().Err(err).Msg("invalid substitution")
+			r.boot.Error().Err(err).Msg("invalid replacement")
 			return 2
 		}
-		if len(subs) == 0 {
-			r.boot.Error().Msg("replacer needs something to write: --sub 'find=>write'")
+		if len(reps) == 0 {
+			r.boot.Error().Msg("replacer needs something to write: --replace 'find=>write'")
 			r.usage(r.inv.cmd)
 			return 2
 		}
-		if app.SubstituteFiles(ctx, app.SubstituteOptions{
-			Root: *r.o.root, Paths: r.inv.paths, Subs: subs, Strict: *r.o.strict,
+		if app.ReplaceFiles(ctx, app.ReplaceOptions{
+			Root: *r.o.root, Paths: r.inv.paths, Replacements: reps, Strict: *r.o.strict,
 			JSON: *r.o.logFormat == "json", Out: r.stdout, Log: log,
 		}) != nil {
 			return 1
@@ -494,7 +494,7 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 	case cmdAutoreplacer:
 		if a.AutoReplacer(ctx, app.AutoReplacerOptions{
 			Window: window, OnError: *o.onError,
-			Subs: r.subs, Files: *o.rpFiles,
+			Replacements: r.reps, Files: *o.rpFiles,
 			OnlyUpdated: *o.onlyUpdated, Strict: *o.strict,
 			JSON: cfg.LogFormat == "json", Out: r.stdout,
 		}) != nil {

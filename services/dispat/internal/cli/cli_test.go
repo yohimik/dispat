@@ -77,7 +77,7 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		"run": {
 			args: []string{"run", "--help"}, usage: "usage: dispat run <script> [-- args...] [flags]",
 			has:    []string{"--on-error", "--since", "--consumers", "--package"},
-			hasNot: []string{"--set-version", "--tag", "--sub", "--interactive"},
+			hasNot: []string{"--set-version", "--tag", "--replace", "--interactive"},
 		},
 		"commit": {
 			args: []string{"commit", "--help"}, usage: "usage: dispat commit [flags]",
@@ -428,7 +428,7 @@ func TestReplacerCommand(t *testing.T) {
 	// No config file and no git repository: the replacer only ever looks at
 	// the files it is pointed at.
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"replacer", "--root", root, "--sub", "acme-core:1.0.0=>acme-core:1.1.0", "README.md"},
+	code := Run([]string{"replacer", "--root", root, "--replace", "acme-core:1.0.0=>acme-core:1.1.0", "README.md"},
 		&stdout, &stderr)
 	assert.Equal(t, 0, code, stderr.String())
 	assert.Contains(t, stdout.String(), "2 occurrence(s) replaced")
@@ -440,18 +440,18 @@ func TestReplacerCommand(t *testing.T) {
 	// A pattern matching nothing is quiet by default and fatal under --strict.
 	stdout.Reset()
 	stderr.Reset()
-	assert.Equal(t, 0, Run([]string{"replacer", "--root", root, "--sub", "absent=>x", "README.md"},
+	assert.Equal(t, 0, Run([]string{"replacer", "--root", root, "--replace", "absent=>x", "README.md"},
 		&stdout, &stderr))
-	assert.Equal(t, 1, Run([]string{"replacer", "--root", root, "--strict", "--sub", "absent=>x", "README.md"},
+	assert.Equal(t, 1, Run([]string{"replacer", "--root", root, "--strict", "--replace", "absent=>x", "README.md"},
 		&stdout, &stderr))
 
 	// Nothing to write is a usage error, as it is for the writer.
 	assert.Equal(t, 2, Run([]string{"replacer", "--root", root, "README.md"}, &stdout, &stderr))
-	// So is a malformed substitution.
-	assert.Equal(t, 2, Run([]string{"replacer", "--root", root, "--sub", "no-separator", "README.md"},
+	// So is a malformed replacement.
+	assert.Equal(t, 2, Run([]string{"replacer", "--root", root, "--replace", "no-separator", "README.md"},
 		&stdout, &stderr))
 	// A file that is not there fails the command.
-	assert.Equal(t, 1, Run([]string{"replacer", "--root", root, "--sub", "a=>b", "absent.md"},
+	assert.Equal(t, 1, Run([]string{"replacer", "--root", root, "--replace", "a=>b", "absent.md"},
 		&stdout, &stderr))
 }
 
@@ -460,16 +460,16 @@ func TestParseSubSpec(t *testing.T) {
 	// "=>" in the replacement text does too.
 	for _, tc := range []struct {
 		spec string
-		want writer.Substitution
+		want writer.Replacement
 	}{
-		{"1.0.0=>1.1.0", writer.Substitution{Find: "1.0.0", Write: "1.1.0"}},
-		{"VERSION=1.0.0=>VERSION=1.1.0", writer.Substitution{Find: "VERSION=1.0.0", Write: "VERSION=1.1.0"}},
-		{"a=>b=>c", writer.Substitution{Find: "a", Write: "b=>c"}},
+		{"1.0.0=>1.1.0", writer.Replacement{Find: "1.0.0", Write: "1.1.0"}},
+		{"VERSION=1.0.0=>VERSION=1.1.0", writer.Replacement{Find: "VERSION=1.0.0", Write: "VERSION=1.1.0"}},
+		{"a=>b=>c", writer.Replacement{Find: "a", Write: "b=>c"}},
 		// An empty replacement deletes what it finds.
-		{"drop-me=>", writer.Substitution{Find: "drop-me"}},
-		{" spaced =>  padded ", writer.Substitution{Find: " spaced ", Write: "  padded "}},
+		{"drop-me=>", writer.Replacement{Find: "drop-me"}},
+		{" spaced =>  padded ", writer.Replacement{Find: " spaced ", Write: "  padded "}},
 	} {
-		got, err := parseSubSpec(tc.spec)
+		got, err := parseReplaceSpec(tc.spec)
 		require.NoError(t, err, "spec: %s", tc.spec)
 		assert.Equal(t, tc.want, got, "spec: %s", tc.spec)
 	}
@@ -479,7 +479,7 @@ func TestParseSubSpec(t *testing.T) {
 		"=>only-a-replacement", // an empty find matches everywhere
 		"",
 	} {
-		_, err := parseSubSpec(spec)
+		_, err := parseReplaceSpec(spec)
 		assert.Error(t, err, "spec %q must be rejected", spec)
 	}
 }

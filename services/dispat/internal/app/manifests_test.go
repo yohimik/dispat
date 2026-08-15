@@ -560,7 +560,7 @@ func TestUnwrapJoined(t *testing.T) {
 	assert.Len(t, unwrapJoined(errors.Join(single, second)), 2)
 }
 
-func TestSubstituteFilesReplacesLiteralTextAnywhere(t *testing.T) {
+func TestReplaceFilesReplacesLiteralTextAnywhere(t *testing.T) {
 	// The replacer parses nothing, so it reaches the files no manifest writer
 	// covers: a build script, a Helm chart, a README.
 	root := manifestRepo(t, map[string]string{
@@ -568,11 +568,11 @@ func TestSubstituteFilesReplacesLiteralTextAnywhere(t *testing.T) {
 		"README.md":    "Use com.acme:core:1.2.0 in your build.\n",
 	})
 	var out bytes.Buffer
-	require.NoError(t, SubstituteFiles(context.Background(), SubstituteOptions{
-		Root:  root,
-		Paths: []string{"build.gradle", "README.md"},
-		Subs:  []writer.Substitution{{Find: "com.acme:core:1.2.0", Write: "com.acme:core:1.3.0"}},
-		Out:   &out, Log: zerolog.Nop(),
+	require.NoError(t, ReplaceFiles(context.Background(), ReplaceOptions{
+		Root:         root,
+		Paths:        []string{"build.gradle", "README.md"},
+		Replacements: []writer.Replacement{{Find: "com.acme:core:1.2.0", Write: "com.acme:core:1.3.0"}},
+		Out:          &out, Log: zerolog.Nop(),
 	}))
 
 	gradle, err := os.ReadFile(filepath.Join(root, "build.gradle"))
@@ -585,67 +585,67 @@ func TestSubstituteFilesReplacesLiteralTextAnywhere(t *testing.T) {
 	assert.Contains(t, out.String(), "2 file(s), 3 occurrence(s): 2 applied, 0 skipped, 0 missing")
 }
 
-func TestSubstituteFilesStrictWantsEveryPatternFoundSomewhere(t *testing.T) {
+func TestReplaceFilesStrictWantsEveryPatternFoundSomewhere(t *testing.T) {
 	// A pattern belonging to one file of many is the ordinary case, so strict
 	// asks only that each one matched *somewhere*.
 	files := map[string]string{"a.txt": "alpha 1.0.0\n", "b.txt": "beta 1.0.0\n"}
-	opts := func(root string, subs []writer.Substitution, strict bool, log zerolog.Logger) SubstituteOptions {
-		return SubstituteOptions{
-			Root: root, Paths: []string{"a.txt", "b.txt"}, Subs: subs,
+	opts := func(root string, reps []writer.Replacement, strict bool, log zerolog.Logger) ReplaceOptions {
+		return ReplaceOptions{
+			Root: root, Paths: []string{"a.txt", "b.txt"}, Replacements: reps,
 			Strict: strict, Out: io.Discard, Log: log,
 		}
 	}
-	bothFound := []writer.Substitution{
+	bothFound := []writer.Replacement{
 		{Find: "alpha 1.0.0", Write: "alpha 1.1.0"},
 		{Find: "beta 1.0.0", Write: "beta 1.1.0"},
 	}
-	require.NoError(t, SubstituteFiles(context.Background(),
+	require.NoError(t, ReplaceFiles(context.Background(),
 		opts(manifestRepo(t, files), bothFound, true, zerolog.Nop())))
 
 	// One that matches nowhere is quiet by default and fatal under strict.
-	stale := append(append([]writer.Substitution(nil), bothFound...),
-		writer.Substitution{Find: "gamma 1.0.0", Write: "gamma 1.1.0"})
-	require.NoError(t, SubstituteFiles(context.Background(),
+	stale := append(append([]writer.Replacement(nil), bothFound...),
+		writer.Replacement{Find: "gamma 1.0.0", Write: "gamma 1.1.0"})
+	require.NoError(t, ReplaceFiles(context.Background(),
 		opts(manifestRepo(t, files), stale, false, zerolog.Nop())))
 
 	var logs bytes.Buffer
-	err := SubstituteFiles(context.Background(),
+	err := ReplaceFiles(context.Background(),
 		opts(manifestRepo(t, files), stale, true, zerolog.New(&logs)))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "1 substitution(s) matched nothing")
+	assert.Contains(t, err.Error(), "1 replacement(s) matched nothing")
 	assert.Contains(t, logs.String(), "gamma 1.0.0")
 }
 
-func TestSubstituteFilesAttemptsEveryFileAndJoinsTheFailures(t *testing.T) {
+func TestReplaceFilesAttemptsEveryFileAndJoinsTheFailures(t *testing.T) {
 	// A binary file among the targets must not cost the others their
-	// substitutions, and the run still fails at the end.
+	// replacements, and the run still fails at the end.
 	root := manifestRepo(t, map[string]string{
 		"notes.txt": "version 1.0.0\n",
 		"blob.bin":  "head\x00 version 1.0.0",
 	})
 	var out, logs bytes.Buffer
-	err := SubstituteFiles(context.Background(), SubstituteOptions{
-		Root:  root,
-		Paths: []string{"blob.bin", "notes.txt"},
-		Subs:  []writer.Substitution{{Find: "1.0.0", Write: "1.1.0"}},
-		Out:   &out, Log: zerolog.New(&logs),
+	err := ReplaceFiles(context.Background(), ReplaceOptions{
+		Root:         root,
+		Paths:        []string{"blob.bin", "notes.txt"},
+		Replacements: []writer.Replacement{{Find: "1.0.0", Write: "1.1.0"}},
+		Out:          &out, Log: zerolog.New(&logs),
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, writer.ErrBinaryFile)
-	assert.Contains(t, logs.String(), "substitution failed")
+	assert.Contains(t, logs.String(), "replace failed")
 
 	data, readErr := os.ReadFile(filepath.Join(root, "notes.txt"))
 	require.NoError(t, readErr)
 	assert.Equal(t, "version 1.1.0\n", string(data), "the usable file was still written")
 }
 
-func TestSubstituteFilesJSONEvents(t *testing.T) {
+func TestReplaceFilesJSONEvents(t *testing.T) {
 	root := manifestRepo(t, map[string]string{"notes.txt": "keep 1.0.0 keep\n"})
 	var out bytes.Buffer
-	require.NoError(t, SubstituteFiles(context.Background(), SubstituteOptions{
+	require.NoError(t, ReplaceFiles(context.Background(), ReplaceOptions{
 		Root:  root,
 		Paths: []string{"notes.txt"},
-		Subs: []writer.Substitution{
+		Replacements: []writer.Replacement{
 			{Find: "1.0.0", Write: "1.1.0"},
 			{Find: "absent", Write: "x"},
 			{Find: "keep", Write: "keep"},
@@ -658,25 +658,25 @@ func TestSubstituteFilesJSONEvents(t *testing.T) {
 	assert.Equal(t, "file updated", evs[0]["message"])
 	assert.Equal(t, "notes.txt", evs[0]["path"])
 	assert.Equal(t, float64(1), evs[0]["occurrences"])
-	subs := evs[0]["substitutions"].(map[string]any)
-	applied := subs["applied"].([]any)
+	reps := evs[0]["replacements"].(map[string]any)
+	applied := reps["applied"].([]any)
 	require.Len(t, applied, 1)
 	assert.Equal(t, "1.0.0", applied[0].(map[string]any)["find"])
 	assert.Equal(t, "1.1.0", applied[0].(map[string]any)["write"])
-	require.Len(t, subs["missing"].([]any), 1)
-	require.Len(t, subs["skipped"].([]any), 1)
+	require.Len(t, reps["missing"].([]any), 1)
+	require.Len(t, reps["skipped"].([]any), 1)
 
-	assert.Equal(t, "substitution complete", evs[1]["message"])
+	assert.Equal(t, "replace complete", evs[1]["message"])
 	assert.Equal(t, float64(1), evs[1]["occurrences"])
 }
 
-func TestSubstituteFilesSaysWhenNothingChanged(t *testing.T) {
+func TestReplaceFilesSaysWhenNothingChanged(t *testing.T) {
 	root := manifestRepo(t, map[string]string{"notes.txt": "already 1.1.0\n"})
 	var out bytes.Buffer
-	require.NoError(t, SubstituteFiles(context.Background(), SubstituteOptions{
+	require.NoError(t, ReplaceFiles(context.Background(), ReplaceOptions{
 		Root: root, Paths: []string{"notes.txt"},
-		Subs: []writer.Substitution{{Find: "1.0.0", Write: "1.1.0"}},
-		JSON: true, Out: &out, Log: zerolog.New(&out),
+		Replacements: []writer.Replacement{{Find: "1.0.0", Write: "1.1.0"}},
+		JSON:         true, Out: &out, Log: zerolog.New(&out),
 	}))
 	evs := events(t, out.String())
 	require.Len(t, evs, 2)
@@ -684,14 +684,14 @@ func TestSubstituteFilesSaysWhenNothingChanged(t *testing.T) {
 	assert.Equal(t, float64(0), evs[1]["applied"])
 }
 
-func TestSubstituteFilesPropagatesCancellation(t *testing.T) {
+func TestReplaceFilesPropagatesCancellation(t *testing.T) {
 	root := manifestRepo(t, map[string]string{"notes.txt": "version 1.0.0\n"})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := SubstituteFiles(ctx, SubstituteOptions{
+	err := ReplaceFiles(ctx, ReplaceOptions{
 		Root: root, Paths: []string{"notes.txt"},
-		Subs: []writer.Substitution{{Find: "1.0.0", Write: "1.1.0"}},
-		Log:  zerolog.Nop(),
+		Replacements: []writer.Replacement{{Find: "1.0.0", Write: "1.1.0"}},
+		Log:          zerolog.Nop(),
 	})
 	assert.ErrorIs(t, err, context.Canceled)
 	data, readErr := os.ReadFile(filepath.Join(root, "notes.txt"))

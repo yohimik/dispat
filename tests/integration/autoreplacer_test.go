@@ -55,20 +55,20 @@ func TestAutoReplacerFansOutAcrossWorkspaceProviders(t *testing.T) {
 	r := arpRepo(t)
 
 	res := r.Command("autoreplacer", "--since", "all", "--files", "*.gradle",
-		"--sub", "com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}")
+		"--replace", "com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "build.gradle"),
 		"'com.acme:core:0.1.0'", "the coordinate followed the provider")
 }
 
-// TestAutoReplacerPackageScopedPatternRunsOnce: a --sub naming no provider is
+// TestAutoReplacerPackageScopedPatternRunsOnce: a --replace naming no provider is
 // about the covered package itself, so it is rendered once and --only-updated
 // leaves it alone.
 func TestAutoReplacerPackageScopedPatternRunsOnce(t *testing.T) {
 	r := arpRepo(t)
 
 	res := r.Command("autoreplacer", "--since", "all", "--files", "README.md",
-		"--sub", "{name} {previous}=>{name} {version}")
+		"--replace", "{name} {previous}=>{name} {version}")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "README.md"), "web 0.1.0",
 		"the package's own version was written")
@@ -81,7 +81,7 @@ func TestAutoReplacerGlobsSelectWithinThePackage(t *testing.T) {
 	before := arpRead(t, r, "packages", "web", "README.md")
 
 	res := r.Command("autoreplacer", "--since", "all", "--files", "*.gradle",
-		"--sub", "0.0.0=>9.9.9")
+		"--replace", "0.0.0=>9.9.9")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "build.gradle"), "9.9.9")
 	assert.Equal(t, before, arpRead(t, r, "packages", "web", "README.md"),
@@ -98,7 +98,7 @@ func TestAutoReplacerOnlyUpdatedNarrowsTheFanOut(t *testing.T) {
 	r.Commit("feat(web): only web this time")
 
 	res := r.Command("autoreplacer", "--only-updated", "--files", "*.gradle",
-		"--sub", "com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}")
+		"--replace", "com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "build.gradle"), "0.0.0",
 		"core is not in this run, so its coordinate is left alone")
@@ -109,11 +109,11 @@ func TestAutoReplacerOnlyUpdatedNarrowsTheFanOut(t *testing.T) {
 // outside the window by definition. --consumers is what reaches it.
 func TestAutoReplacerConsumersReachesThePackagesTheWindowLeftOut(t *testing.T) {
 	r := arpRepo(t)
-	sub := "com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}"
+	rep := "com.acme:{provider}:{providerPrevious}=>com.acme:{provider}:{providerVersion}"
 
 	// Bring the coordinate up to date, then release, so the next run has a
 	// genuine one-version gap to close.
-	require.Equal(t, 0, r.Command("autoreplacer", "--since", "all", "--files", "*.gradle", "--sub", sub).Code)
+	require.Equal(t, 0, r.Command("autoreplacer", "--since", "all", "--files", "*.gradle", "--replace", rep).Code)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "build.gradle"), "com.acme:core:0.1.0")
 	r.Command("commit", "--tag")
 	r.WriteFile("packages/core/extra.txt", "core moved\n")
@@ -121,12 +121,12 @@ func TestAutoReplacerConsumersReachesThePackagesTheWindowLeftOut(t *testing.T) {
 
 	// Without --consumers the window covers core alone, and core has no gradle
 	// file, so web's coordinate stays a version behind.
-	res := r.Command("autoreplacer", "--files", "*.gradle", "--sub", sub)
+	res := r.Command("autoreplacer", "--files", "*.gradle", "--replace", rep)
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "build.gradle"), "com.acme:core:0.1.0",
 		"web is outside the window")
 
-	res = r.Command("autoreplacer", "--consumers", "--files", "*.gradle", "--sub", sub)
+	res = r.Command("autoreplacer", "--consumers", "--files", "*.gradle", "--replace", rep)
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "web", "build.gradle"), "com.acme:core:0.2.0",
 		"--consumers pulled web in and its coordinate followed")
@@ -138,7 +138,7 @@ func TestAutoReplacerConsumersReachesThePackagesTheWindowLeftOut(t *testing.T) {
 func TestAutoReplacerConvergesUnderStrict(t *testing.T) {
 	r := arpRepo(t)
 	args := []string{"autoreplacer", "--since", "all", "--strict", "--files", "README.md",
-		"--sub", "{name} {previous}=>{name} {version}"}
+		"--replace", "{name} {previous}=>{name} {version}"}
 
 	res := r.Command(args...)
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
@@ -156,22 +156,22 @@ func TestAutoReplacerOutcomesReachTheExitCode(t *testing.T) {
 	r := arpRepo(t)
 
 	res := r.Command("autoreplacer", "--since", "all", "--strict", "--files", "*.gradle",
-		"--sub", "nowhere-at-all=>x")
+		"--replace", "nowhere-at-all=>x")
 	assert.Equal(t, 1, res.Code, "a pattern no package carries is stale")
 	assert.Contains(t, res.Stdout, "matched nothing")
 
 	res = r.Command("autoreplacer", "--since", "all", "--files", "*.gradle",
-		"--sub", "nowhere-at-all=>x")
+		"--replace", "nowhere-at-all=>x")
 	assert.Equal(t, 0, res.Code, "without --strict the same run is tolerated")
 
 	assert.Equal(t, 2, r.Command("autoreplacer").Code, "nothing to write")
-	assert.Equal(t, 2, r.Command("autoreplacer", "--sub", "a=>b").Code,
-		"a sub with no files to look in selects nothing")
+	assert.Equal(t, 2, r.Command("autoreplacer", "--replace", "a=>b").Code,
+		"a rep with no files to look in selects nothing")
 	assert.Equal(t, 2, r.Command("autoreplacer", "--files", "*.md").Code,
 		"files with nothing to write")
-	assert.Equal(t, 2, r.Command("autoreplacer", "--files", "*.md", "--sub", "no-separator").Code,
-		"a malformed sub spec")
-	assert.Equal(t, 2, r.Command("autoreplacer", "extra", "--files", "*.md", "--sub", "a=>b").Code,
+	assert.Equal(t, 2, r.Command("autoreplacer", "--files", "*.md", "--replace", "no-separator").Code,
+		"a malformed rep spec")
+	assert.Equal(t, 2, r.Command("autoreplacer", "extra", "--files", "*.md", "--replace", "a=>b").Code,
 		"packages are flags, not positional arguments")
 }
 
@@ -199,7 +199,7 @@ func TestAutoReplacerLeavesANestedPackageToItsOwner(t *testing.T) {
 	// inner's file, or race inner for it.
 	res := r.Command("autoreplacer", "--since", "all",
 		"--files", "note.md", "--files", "**/note.md",
-		"--sub", "pinned 0.0.0=>written by {name}")
+		"--replace", "pinned 0.0.0=>written by {name}")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, arpRead(t, r, "packages", "outer", "note.md"), "written by outer")
 	assert.Contains(t, arpRead(t, r, "packages", "outer", "inner", "note.md"), "written by inner",

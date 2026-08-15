@@ -135,14 +135,14 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     when a fragment and the keys beside it compose one value.
 24. **Native auto-versioning** (`autoversion_test.go`): files reconciled by the binary at the version stage, under
     either of the two strategies or neither: range reconciliation under the match policy, own-version writes, the
-    W192/W197/W203/W221 diagnostics, literal substitution over files nothing parses, and the serialised `syncLock`
+    W192/W197/W203/W221 diagnostics, literal replacement over files nothing parses, and the serialised `syncLock`
     slot.
 25. **The manifest commands** (`manifests_test.go`): `dispat scanner`, `dispat writer` and `dispat replacer`, the
     `pkg/scanner` and `pkg/writer` libraries exposed as commands. What only the binary can witness: that they run
     with no config file, no commit and no plan at all, and that their outcomes reach the process exit code.
 26. **The `autowriter` command** (`autowriter_test.go`): `dispat writer`'s edits applied to the packages the plan
     selects, including the edits derived from the workspace itself (`--set-local`, `--link-local`).
-27. **The `autoreplacer` command** (`autoreplacer_test.go`): a substitution fanned out across the packages the
+27. **The `autoreplacer` command** (`autoreplacer_test.go`): a replacement fanned out across the packages the
     plan selects, rendered once per workspace provider a covered package declares.
 28. **Docker through the binary** (`docker_test.go`): the ecosystem dispat was built around and the last one it could
     read: an image-to-image edge derived from a `FROM` line nobody wrote into the config, and a release reconciling
@@ -766,7 +766,7 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | `TestManifestsWriterRedirects`                   | `--link` adds the local-folder directive and an empty path removes it, and the scanner reads back what the writer just wrote, which is the pair's whole contract.                                                                  |
 | `TestManifestsWriterOutcomesReachTheExitCode`    | The three outcomes mapped onto exit codes: missing is tolerated (0) until `--strict` (1); a path no writer covers exits 1 while the usable manifests of the same batch are still written; a malformed `--set`, an invocation with nothing to write, and one with no manifest are usage errors (2). |
 | `TestManifestsCommandWordsKeepTheirScripts`      | The command words are reserved: the bare `dispat scanner` is the command even where the config defines a `scanner` script, while `dispat run scanner` still reaches the script.                                                       |
-| `TestManifestsReplacerNeedsNoConfig`             | The replacer runs over files that are not manifests at all, with no config file and no git history: every occurrence replaced, the paths resolved against `--root`, and repeated `--sub` values applied in order, each over what the last left. |
+| `TestManifestsReplacerNeedsNoConfig`             | The replacer runs over files that are not manifests at all, with no config file and no git history: every occurrence replaced, the paths resolved against `--root`, and repeated `--replace` values applied in order, each over what the last left. |
 | `TestManifestsReplacerOutcomesReachTheExitCode`  | Nothing to write, a spec with no separator and no file to work on are usage errors (2); a pattern matching nothing is tolerated (0) until `--strict` (1); an unreadable path exits 1 while the usable files of the same batch are still written. |
 | `TestManifestsReplacerJSONEvents`                | `--log-format json` carries one event per file with its path and occurrence count, plus the summary splitting applied, missing and skipped.                                                                                            |
 | `TestManifestsReplacerWordKeepsItsScript`        | `replacer` is reserved like the other command words, and `dispat run replacer` still reaches a script of that name.                                                                                                                   |
@@ -803,13 +803,13 @@ in `services/dispat/internal/app`, where each case is one in-memory monorepo awa
 | Test                                            | Claim proven                                                                                                                                                                                                                          |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestAutoReplacerFansOutAcrossWorkspaceProviders` | A `{provider}` pattern is rendered once per workspace package the covered package declares, so a coordinate follows its provider with no dependency named on the command line.                                                     |
-| `TestAutoReplacerPackageScopedPatternRunsOnce` | A `--sub` naming no provider is about the covered package itself and writes its own version.                                                                                                                                         |
+| `TestAutoReplacerPackageScopedPatternRunsOnce` | A `--replace` naming no provider is about the covered package itself and writes its own version.                                                                                                                                         |
 | `TestAutoReplacerGlobsSelectWithinThePackage` | A glob reaches only what it names, inside the package folder the sweep handed over; a file no glob selected is untouched.                                                                                                             |
 | `TestAutoReplacerOnlyUpdatedNarrowsTheFanOut` | `--only-updated` drops a provider released outside this run, so its coordinate is left as it is.                                                                                                                                      |
 | `TestAutoReplacerConsumersReachesThePackagesTheWindowLeftOut` | The package carrying a stale coordinate is the one nothing changed in, so the window excludes it; `--consumers` is what pulls it in and closes the gap.                                                                |
 | `TestAutoReplacerConvergesUnderStrict`        | The probe tells "already reconciled" apart from "never matched", so a converged re-run of a `{previous}=>{version}` pattern is clean rather than stale.                                                                               |
 | `TestAutoReplacerLeavesANestedPackageToItsOwner` | A package nested inside another declines that package's files, which its owner's own turn writes, so one file is never written from two goroutines.                                                                                |
-| `TestAutoReplacerOutcomesReachTheExitCode`    | `--strict` is asked across the sweep; no `--sub`, no `--files`, a malformed spec and a positional argument are usage errors (2).                                                                                                      |
+| `TestAutoReplacerOutcomesReachTheExitCode`    | `--strict` is asked across the sweep; no `--replace`, no `--files`, a malformed spec and a positional argument are usage errors (2).                                                                                                      |
 
 ### Goal 28: Docker through the binary (`docker_test.go`)
 

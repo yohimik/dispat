@@ -1,7 +1,7 @@
 package cli
 
 // Command-line syntax for the `dispat writer` edits and the `dispat replacer`
-// substitutions. It lives here rather than in the app package so the
+// replacements. It lives here rather than in the app package so the
 // application never sees a flag spelling: the controller turns text into
 // pkg/writer values, and a malformed spec is a usage error like any other bad
 // command line.
@@ -65,40 +65,40 @@ func parseLinkSpec(spec string) (writer.Link, error) {
 	return writer.Link{Name: name, Path: path}, nil
 }
 
-// subSeparator joins the two halves of a `--sub` value. It is two characters
+// replaceSeparator joins the two halves of a `--replace` value. It is two characters
 // rather than "=" because both halves are arbitrary literal text and a version
 // string carries "=" often enough (">=1.0", "VERSION=1.2.3") that splitting on
-// it would refuse ordinary substitutions.
-const subSeparator = "=>"
+// it would refuse ordinary replacements.
+const replaceSeparator = "=>"
 
-// parseSubSpec reads one `--sub` value: `find=>write`.
+// parseReplaceSpec reads one `--replace` value: `find=>write`.
 //
 // The split is at the first separator, so a "=>" inside the replacement text
 // survives; a "=>" inside the text being searched for cannot be expressed, and
 // says so rather than silently truncating.
-func parseSubSpec(spec string) (writer.Substitution, error) {
-	find, write, ok := strings.Cut(spec, subSeparator)
+func parseReplaceSpec(spec string) (writer.Replacement, error) {
+	find, write, ok := strings.Cut(spec, replaceSeparator)
 	if !ok {
-		return writer.Substitution{}, fmt.Errorf("--sub %q: want find%swrite", spec, subSeparator)
+		return writer.Replacement{}, fmt.Errorf("--replace %q: want find%swrite", spec, replaceSeparator)
 	}
 	if find == "" {
-		return writer.Substitution{}, fmt.Errorf("--sub %q: no text to find", spec)
+		return writer.Replacement{}, fmt.Errorf("--replace %q: no text to find", spec)
 	}
-	return writer.Substitution{Find: find, Write: write}, nil
+	return writer.Replacement{Find: find, Write: write}, nil
 }
 
-// parseSubSpecs reads every `--sub` value of one invocation, keeping the order
+// parseReplaceSpecs reads every `--replace` value of one invocation, keeping the order
 // they were given in, which is the order they apply in.
-func parseSubSpecs(specs []string) ([]writer.Substitution, error) {
-	subs := make([]writer.Substitution, 0, len(specs))
+func parseReplaceSpecs(specs []string) ([]writer.Replacement, error) {
+	reps := make([]writer.Replacement, 0, len(specs))
 	for _, spec := range specs {
-		sub, err := parseSubSpec(spec)
+		rep, err := parseReplaceSpec(spec)
 		if err != nil {
 			return nil, err
 		}
-		subs = append(subs, sub)
+		reps = append(reps, rep)
 	}
-	return subs, nil
+	return reps, nil
 }
 
 // parseEditSpecs reads every `--set` and `--link` value of one invocation,

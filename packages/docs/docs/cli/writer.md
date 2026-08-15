@@ -22,4 +22,4 @@ Beside the [global flags](./README.md#global-flags):
 | `--set-version`       |             | `writer` and `autowriter`: rewrite the manifest's own version field. For `autowriter`, `{version}` writes the covered package's planned version, and only its root manifests are touched. |
 | `--set`               |             | `writer` and `autowriter`: set one dependency's declared range, `[kind:]name=range`; repeatable. For `autowriter`, `{version}` in the range is the planned version of the package the edit names. |
 | `--link`              |             | `writer` and `autowriter`: point a dependency at a local folder, `name=path`; an empty path removes the redirect. Repeatable. |
-| `--strict`            |             | Turns a tolerated finding into a failure. `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--sub` that matched nothing. |
+| `--strict`            |             | Turns a tolerated finding into a failure. `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--replace` that matched nothing. |

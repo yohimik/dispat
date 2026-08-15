@@ -249,7 +249,7 @@ func TestReplaceRuleWarnsW197ForAProviderOutsideTheRun(t *testing.T) {
 
 func TestReplaceRuleWritesAFileOnceForSeveralRules(t *testing.T) {
 	// Two rules selecting one file must not read or write it twice: the walk
-	// gathers the rules per file and one substitution call carries them all.
+	// gathers the rules per file and one replacement call carries them all.
 	root := t.TempDir()
 	space := avReplaceSpace(
 		model.ReplaceRule{Files: []string{"app.env"}, Find: "SELF={previous}", Write: "SELF={version}"},
@@ -311,7 +311,7 @@ func TestReplaceRunsAfterTheManifestStrategy(t *testing.T) {
 }
 
 func TestReplaceRuleFailureFailsTheVersionStage(t *testing.T) {
-	// The folder is read-only, so the substitution cannot write its temp
+	// The folder is read-only, so the replacement cannot write its temp
 	// file: the native step's error fails the package at the version stage.
 	root := t.TempDir()
 	space := avReplaceSpace(model.ReplaceRule{

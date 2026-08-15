@@ -72,16 +72,16 @@ type WriteOptions struct {
 	Log zerolog.Logger
 }
 
-// SubstituteOptions is one `dispat replacer` invocation.
-type SubstituteOptions struct {
+// ReplaceOptions is one `dispat replacer` invocation.
+type ReplaceOptions struct {
 	// Root is the folder Paths resolve against.
 	Root string
 	// Paths are the files to edit, relative to Root. Any file at all: the
 	// replacer parses nothing, so nothing has to be a manifest.
 	Paths []string
-	// Subs are the literal find/write pairs, applied to each file in order.
-	Subs []writer.Substitution
-	// Strict turns a substitution that matched nothing anywhere into a failed
+	// Replacements are the literal find/write pairs, applied to each file in order.
+	Replacements []writer.Replacement
+	// Strict turns a replacement that matched nothing anywhere into a failed
 	// command, which is the CI gate for a pattern that has gone stale.
 	Strict bool
 	// JSON renders one event per file through Log instead of a listing.
@@ -107,8 +107,8 @@ type editView struct {
 	Range string `json:"range"`
 }
 
-// subView is one requested substitution as the JSON output spells it.
-type subView struct {
+// replacementView is one requested replacement as the JSON output spells it.
+type replacementView struct {
 	Find  string `json:"find"`
 	Write string `json:"write"`
 }
@@ -343,21 +343,21 @@ func (e manifestEdit) apply(path string) (writer.Result, writer.LinkResult, erro
 	return res, linkRes, nil
 }
 
-// SubstituteFiles applies the literal substitutions to each named file. Every
+// ReplaceFiles applies the literal replacements to each named file. Every
 // file is attempted even after one fails, since each file's write is atomic
 // and independent, and the failures are joined into the returned error so one
 // run reports the whole picture.
 //
-// Strict fails on a substitution that matched nothing in any of the files,
+// Strict fails on a replacement that matched nothing in any of the files,
 // rather than in each of them: a run over twenty files where the pattern only
 // belongs in one is the ordinary case, and a pattern found nowhere at all is
 // the stale one worth catching.
-func SubstituteFiles(ctx context.Context, opts SubstituteOptions) error {
+func ReplaceFiles(ctx context.Context, opts ReplaceOptions) error {
 	var (
 		errs                      []error
 		applied, skipped, missing int
 		occurrences               int
-		found                     = make(map[writer.Substitution]bool, len(opts.Subs))
+		found                     = make(map[writer.Replacement]bool, len(opts.Replacements))
 	)
 	out := listing(opts.Out)
 	for _, rel := range opts.Paths {
@@ -365,9 +365,9 @@ func SubstituteFiles(ctx context.Context, opts SubstituteOptions) error {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
-		res, err := writer.Substitute(path, opts.Subs)
+		res, err := writer.Replace(path, opts.Replacements)
 		if err != nil {
-			opts.Log.Error().Err(err).Str("file", rel).Msg("substitution failed")
+			opts.Log.Error().Err(err).Str("file", rel).Msg("replace failed")
 			errs = append(errs, err)
 			continue
 		}
@@ -382,16 +382,16 @@ func SubstituteFiles(ctx context.Context, opts SubstituteOptions) error {
 		missing += len(res.Missing)
 		occurrences += res.Count
 		if opts.JSON {
-			logSubstitute(opts.Log, rel, res)
+			logReplace(opts.Log, rel, res)
 			continue
 		}
-		printSubstitute(out, rel, res)
+		printReplace(out, rel, res)
 	}
 
 	if opts.JSON {
 		opts.Log.Info().Int("files", len(opts.Paths)).Int("occurrences", occurrences).
 			Int("applied", applied).Int("skipped", skipped).Int("missing", missing).
-			Msg("substitution complete")
+			Msg("replace complete")
 	} else {
 		fmt.Fprintf(out, "%d file(s), %d occurrence(s): %d applied, %d skipped, %d missing\n",
 			len(opts.Paths), occurrences, applied, skipped, missing)
@@ -403,32 +403,32 @@ func SubstituteFiles(ctx context.Context, opts SubstituteOptions) error {
 	}
 	if opts.Strict {
 		var stale int
-		for _, s := range opts.Subs {
+		for _, s := range opts.Replacements {
 			if !found[s] {
-				opts.Log.Error().Str("find", s.Find).Msg("substitution matched nothing")
+				opts.Log.Error().Str("find", s.Find).Msg("replacement matched nothing")
 				stale++
 			}
 		}
 		if stale > 0 {
-			err := fmt.Errorf("%d substitution(s) matched nothing", stale)
-			opts.Log.Error().Err(err).Msg("substitutions are not clean")
+			err := fmt.Errorf("%d replacement(s) matched nothing", stale)
+			opts.Log.Error().Err(err).Msg("replacements are not clean")
 			return err
 		}
 	}
 	return nil
 }
 
-// printSubstitute writes one file's listing entry: one line per substitution
+// printReplace writes one file's listing entry: one line per replacement
 // with its outcome, and the occurrence count for the ones that landed.
-func printSubstitute(out io.Writer, rel string, res writer.SubstituteResult) {
+func printReplace(out io.Writer, rel string, res writer.ReplaceResult) {
 	fmt.Fprintln(out, rel)
 	for _, group := range []struct {
 		outcome string
-		subs    []writer.Substitution
+		reps    []writer.Replacement
 	}{
 		{"applied", res.Applied}, {"skipped", res.Skipped}, {"missing", res.Missing},
 	} {
-		for _, s := range group.subs {
+		for _, s := range group.reps {
 			fmt.Fprintf(out, "  %-7s  %s -> %s\n", group.outcome, s.Find, s.Write)
 		}
 	}
@@ -437,8 +437,8 @@ func printSubstitute(out io.Writer, rel string, res writer.SubstituteResult) {
 	}
 }
 
-// logSubstitute emits one file's result as a structured event.
-func logSubstitute(log zerolog.Logger, rel string, res writer.SubstituteResult) {
+// logReplace emits one file's result as a structured event.
+func logReplace(log zerolog.Logger, rel string, res writer.ReplaceResult) {
 	msg := "file unchanged"
 	if len(res.Applied) > 0 {
 		msg = "file updated"
@@ -446,21 +446,21 @@ func logSubstitute(log zerolog.Logger, rel string, res writer.SubstituteResult) 
 	log.Info().
 		Str("path", rel).
 		Int("occurrences", res.Count).
-		Interface("substitutions", outcomeView[subView]{
-			Applied: subViews(res.Applied),
-			Skipped: subViews(res.Skipped),
-			Missing: subViews(res.Missing),
+		Interface("replacements", outcomeView[replacementView]{
+			Applied: replacementViews(res.Applied),
+			Skipped: replacementViews(res.Skipped),
+			Missing: replacementViews(res.Missing),
 		}).
 		Msg(msg)
 }
 
-func subViews(subs []writer.Substitution) []subView {
-	if len(subs) == 0 {
+func replacementViews(reps []writer.Replacement) []replacementView {
+	if len(reps) == 0 {
 		return nil
 	}
-	out := make([]subView, 0, len(subs))
-	for _, s := range subs {
-		out = append(out, subView{Find: s.Find, Write: s.Write})
+	out := make([]replacementView, 0, len(reps))
+	for _, s := range reps {
+		out = append(out, replacementView{Find: s.Find, Write: s.Write})
 	}
 	return out
 }

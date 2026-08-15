@@ -44,14 +44,14 @@ type ProviderFacts struct {
 	Prerelease bool
 }
 
-// Substituter runs the replacing strategy over one package folder: literal
-// text substitution across whatever files the rules point at, parsing nothing.
+// Replacer runs the replacing strategy over one package folder: literal
+// text replacement across whatever files the rules point at, parsing nothing.
 //
 // It reaches the versions the manifest writers cannot, a coordinate a Gradle
 // script builds by hand, a base image in a Helm chart, an example in a README,
 // at the cost of doing exactly what it is told, which is why a rule states the
 // text it looks for rather than deriving it.
-type Substituter struct {
+type Replacer struct {
 	// Dir is the package folder, and the root of the one walk.
 	Dir string
 	// Rules are the find/write pairs with their file globs.
@@ -59,7 +59,7 @@ type Substituter struct {
 	// Facts render the package-scoped placeholders.
 	Facts PackageFacts
 	// Providers render the provider-scoped ones, fanning a rule that mentions
-	// any of them out into one substitution per provider.
+	// any of them out into one replacement per provider.
 	Providers []ProviderFacts
 	// Owned reports that a slash-relative path belongs to this package rather
 	// than to one nested inside it. A nil Owned owns everything, which is what
@@ -69,8 +69,8 @@ type Substituter struct {
 	Log zerolog.Logger
 }
 
-// SubstituteReport is what one Run did.
-type SubstituteReport struct {
+// ReplaceReport is what one Run did.
+type ReplaceReport struct {
 	// Changed reports that at least one file was rewritten, which is what a
 	// caller keys a lock-file refresh or a commit off.
 	Changed bool
@@ -93,14 +93,14 @@ type SubstituteReport struct {
 // belong to the file rather than to the rule, a folder that cannot be entered
 // or a binary blob a glob happened to reach, are reported and stepped over:
 // failing a release over a PNG would be the worse trade.
-func (s Substituter) Run(ctx context.Context) (SubstituteReport, error) {
-	rep := SubstituteReport{Matched: map[int]bool{}}
+func (s Replacer) Run(ctx context.Context) (ReplaceReport, error) {
+	report := ReplaceReport{Matched: map[int]bool{}}
 	if len(s.Rules) == 0 {
-		return rep, nil
+		return report, nil
 	}
 	expansions := s.expand()
 	if len(expansions) == 0 {
-		return rep, nil
+		return report, nil
 	}
 
 	// One walk of the package folder, matching every rule's globs as it goes,
@@ -108,19 +108,19 @@ func (s Substituter) Run(ctx context.Context) (SubstituteReport, error) {
 	// four of them is still written once.
 	files, err := selectFiles(ctx, s.Dir, globsOf(s.Rules, expansions), s.Owned, s.Log)
 	if err != nil {
-		return rep, err
+		return report, err
 	}
 
-	// Keyed by substitution because that is what the writer reports back;
+	// Keyed by replacement because that is what the writer reports back;
 	// folded onto rule indexes for the caller, which thinks in rules.
-	matched := map[writer.Substitution]bool{}
+	matched := map[writer.Replacement]bool{}
 	for _, f := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return rep, ctxErr // interrupted mid-stage: no more rewrites
+			return report, ctxErr // interrupted mid-stage: no more rewrites
 		}
-		subs := fileSubstitutions(expansions, f.rules)
+		reps := fileReplacements(expansions, f.rules)
 		path := filepath.Join(s.Dir, filepath.FromSlash(f.path))
-		res, err := writer.Substitute(path, subs)
+		res, err := writer.Replace(path, reps)
 		if err != nil {
 			// A file too large to read or holding binary data is not a
 			// failure of the rule: a glob reaching one is ordinary.
@@ -128,65 +128,65 @@ func (s Substituter) Run(ctx context.Context) (SubstituteReport, error) {
 				s.Log.Debug().Err(err).Str("file", f.path).Msg("file skipped")
 				continue
 			}
-			return rep, err
+			return report, err
 		}
-		for _, sub := range res.Applied {
-			matched[sub] = true
+		for _, rep := range res.Applied {
+			matched[rep] = true
 		}
-		for _, sub := range res.Skipped {
-			matched[sub] = true
+		for _, rep := range res.Skipped {
+			matched[rep] = true
 		}
 		if len(res.Applied) > 0 {
-			rep.Changed = true
-			rep.Files++
-			rep.Occurrences += res.Count
+			report.Changed = true
+			report.Files++
+			report.Occurrences += res.Count
 			s.Log.Info().Str("file", f.path).Int("occurrences", res.Count).
 				Msg("file reconciled")
 		}
 	}
 	for _, e := range expansions {
-		if matched[e.sub] || matched[e.probe] {
-			rep.Matched[e.rule] = true
+		if matched[e.rep] || matched[e.probe] {
+			report.Matched[e.rule] = true
 		}
 	}
 	s.report(expansions, matched, selectingRules(files))
-	return rep, nil
+	return report, nil
 }
 
-// expansion is one rule rendered against one set of facts: the substitution to
+// expansion is one rule rendered against one set of facts: the replacement to
 // make, and where it came from so a rule that reconciles nothing can be named.
 type expansion struct {
 	rule     int
 	provider string // empty when the rule mentions no provider
 	// probe changes nothing and asks whether the file already reads the way
 	// the rule wants. It is what tells "already reconciled" apart from "never
-	// matched": after a first run the text sub looks for is gone, and without
+	// matched": after a first run the text rep looks for is gone, and without
 	// the probe every re-run would report the rule stale.
-	sub   writer.Substitution
-	probe writer.Substitution
+	rep   writer.Replacement
+	probe writer.Replacement
 }
 
 // expand renders every rule against the package and its providers. A rule
 // mentioning a provider placeholder is rendered once per provider, which is
 // what lets one rule cover a package with four dependencies; a rule mentioning
 // none is rendered once, for the package's own version.
-func (s Substituter) expand() []expansion {
+func (s Replacer) expand() []expansion {
 	var out []expansion
 	for i, rule := range s.Rules {
 		if !mentionsProvider(rule) {
-			sub := writer.Substitution{
+			rep := writer.Replacement{
 				Find:  renderRule(rule.Find, s.Facts, ProviderFacts{}),
 				Write: renderRule(rule.Write, s.Facts, ProviderFacts{}),
 			}
-			out = append(out, expansion{rule: i, sub: sub, probe: probeFor(sub)})
+			out = append(out, expansion{rule: i, rep: rep, probe: probeFor(rep)})
 			continue
 		}
 		for _, prov := range s.Providers {
-			sub := writer.Substitution{
+			rep := writer.Replacement{
 				Find:  renderRule(rule.Find, s.Facts, prov),
 				Write: renderRule(rule.Write, s.Facts, prov),
 			}
-			out = append(out, expansion{rule: i, provider: prov.Name, sub: sub, probe: probeFor(sub)})
+			out = append(out, expansion{rule: i, provider: prov.Name, rep: rep, probe: probeFor(rep)})
 		}
 	}
 	return out
@@ -196,25 +196,25 @@ func (s Substituter) expand() []expansion {
 // provider caught up from an earlier release (W197), a stable release now
 // naming a prerelease provider (W203), and a rule that reached files but found
 // its text in none of them (W222).
-func (s Substituter) report(expansions []expansion, matched map[writer.Substitution]bool, selecting map[int]bool) {
+func (s Replacer) report(expansions []expansion, matched map[writer.Replacement]bool, selecting map[int]bool) {
 	byName := make(map[string]ProviderFacts, len(s.Providers))
 	for _, p := range s.Providers {
 		byName[p.Name] = p
 	}
 	told := make(map[string]bool, len(s.Providers))
 	for _, e := range expansions {
-		if !matched[e.sub] && !matched[e.probe] {
+		if !matched[e.rep] && !matched[e.probe] {
 			if !selecting[e.rule] {
 				continue // the rule reached no file here; it is about other packages
 			}
 			s.Log.Warn().Str("code", plan.CodeReplaceRuleMatchedNothing).
-				Str("find", e.sub.Find).
+				Str("find", e.rep.Find).
 				Strs("files", s.Rules[e.rule].Files).
 				Msg("replace rule matched nothing; check the pattern and the file globs")
 			continue
 		}
 		// Said once per provider, however many rules named it.
-		if e.provider == "" || told[e.provider] || !matched[e.sub] {
+		if e.provider == "" || told[e.provider] || !matched[e.rep] {
 			continue
 		}
 		told[e.provider] = true
@@ -262,10 +262,10 @@ func renderRule(text string, pkg PackageFacts, prov ProviderFacts) string {
 	).Replace(text)
 }
 
-// probeFor is the no-op substitution that asks whether a rule's result is
+// probeFor is the no-op replacement that asks whether a rule's result is
 // already in the file.
-func probeFor(sub writer.Substitution) writer.Substitution {
-	return writer.Substitution{Find: sub.Write, Write: sub.Write}
+func probeFor(rep writer.Replacement) writer.Replacement {
+	return writer.Replacement{Find: rep.Write, Write: rep.Write}
 }
 
 // selectedFile is one file a rule reached, with the rules that reached it.
@@ -292,7 +292,7 @@ func selectingRules(files []selectedFile) map[int]bool {
 // globsOf is each rule's file globs, positioned so an expansion's rule index
 // still indexes the result, and emptied for the rules that expanded into
 // nothing: a provider-scoped rule in a package with no providers selects
-// nothing, and reading its files to substitute nothing would be pure waste.
+// nothing, and reading its files to replace nothing would be pure waste.
 func globsOf(rules []model.ReplaceRule, expansions []expansion) [][]string {
 	out := make([][]string, len(rules))
 	for _, e := range expansions {
@@ -316,7 +316,7 @@ func selectFiles(ctx context.Context, dir string, globs [][]string,
 		if err != nil {
 			// The package folder itself has to be readable; anything below it
 			// is reported and stepped over, matching how a scan treats a
-			// sub-tree it cannot enter. Failing the release over an
+			// rep-tree it cannot enter. Failing the release over an
 			// unreadable folder no rule was ever going to reach would be the
 			// worse trade, and a rule that then reconciles nothing is exactly
 			// what W222 is for.
@@ -369,27 +369,27 @@ func selectFiles(ctx context.Context, dir string, globs [][]string,
 	return out, err
 }
 
-// fileSubstitutions is what one file receives: every expansion of every rule
+// fileReplacements is what one file receives: every expansion of every rule
 // selecting it, in rule order, each followed by its probe, and with duplicates
 // dropped so a text two rules ask for the same way is counted once.
-func fileSubstitutions(expansions []expansion, rules []int) []writer.Substitution {
+func fileReplacements(expansions []expansion, rules []int) []writer.Replacement {
 	wanted := make(map[int]bool, len(rules))
 	for _, i := range rules {
 		wanted[i] = true
 	}
-	seen := make(map[writer.Substitution]bool, len(expansions))
-	subs := make([]writer.Substitution, 0, len(expansions)*2)
+	seen := make(map[writer.Replacement]bool, len(expansions))
+	reps := make([]writer.Replacement, 0, len(expansions)*2)
 	for _, e := range expansions {
 		if !wanted[e.rule] {
 			continue
 		}
-		for _, s := range []writer.Substitution{e.sub, e.probe} {
+		for _, s := range []writer.Replacement{e.rep, e.probe} {
 			if seen[s] {
 				continue
 			}
 			seen[s] = true
-			subs = append(subs, s)
+			reps = append(reps, s)
 		}
 	}
-	return subs
+	return reps
 }

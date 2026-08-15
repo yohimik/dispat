@@ -242,14 +242,14 @@ const (
 //
 // Two strategies live here and either may be off. The parsing one reads the
 // package's manifests and rewrites the declarations naming a workspace
-// provider; the replacing one substitutes literal text in whatever files the
+// provider; the replacing one replaces literal text in whatever files the
 // rules point at, parsing nothing. With both off the block still schedules a
 // version task, which is how a space asks for syncLock and nothing else.
 type AutoVersion struct {
 	// Manifests is the parsing strategy's scope: the package's root
 	// manifests, every manifest under it, or none at all.
 	Manifests ManifestScope
-	// Replace are the resolved literal substitution rules; empty means the
+	// Replace are the resolved literal replacement rules; empty means the
 	// replacing strategy is off.
 	Replace []ReplaceRule
 	// Kinds are the manifest fields eligible for rewriting; always fully
@@ -285,7 +285,7 @@ type AutoVersion struct {
 	SyncLockConcurrency int
 }
 
-// ReplaceRule is one resolved literal substitution: which files it applies to
+// ReplaceRule is one resolved literal replacement: which files it applies to
 // and the templated text it looks for and writes.
 type ReplaceRule struct {
 	Files       []string
