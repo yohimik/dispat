@@ -455,7 +455,7 @@ func TestReplacerCommand(t *testing.T) {
 		&stdout, &stderr))
 }
 
-func TestParseSubSpec(t *testing.T) {
+func TestParseReplaceSpec(t *testing.T) {
 	// The split is at the first "=>", so an "=" on either side survives and a
 	// "=>" in the replacement text does too.
 	for _, tc := range []struct {
