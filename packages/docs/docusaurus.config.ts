@@ -9,9 +9,34 @@ import testReport from './plugins/test-report';
 const GITHUB = 'https://github.com/yohimik/dispat';
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
 
+// One description and one keyword list, used by the meta tags and by both
+// structured-data blocks below, so a crawler is never told two different things
+// about the same project.
+const DESCRIPTION =
+  'dispat is a release tool for polyglot monorepos. It reads your conventional commits, works out every ' +
+  'package version with propagation to dependants, and builds and publishes each changed package in dependency ' +
+  'order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell ' +
+  'command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.';
+
+const KEYWORDS = [
+  'monorepo release tool',
+  'monorepo',
+  'polyglot monorepo',
+  'release automation',
+  'monorepo versioning',
+  'semantic release monorepo',
+  'conventional commits',
+  'semantic versioning',
+  'changelog',
+  'lerna alternative',
+  'npm',
+  'docker',
+  'go modules',
+];
+
 const config: Config = {
   title: 'dispat',
-  tagline: 'Release orchestration for polyglot monorepos: conventional commits in, ordered parallel publishes out',
+  tagline: 'The monorepo release tool: conventional commits in, ordered parallel publishes out',
   favicon: 'logo.png',
 
   url: 'https://yohimik.github.io',
@@ -165,28 +190,33 @@ const config: Config = {
         '@context': 'https://schema.org',
         '@type': 'SoftwareSourceCode',
         name: 'dispat',
-        description:
-          'A release manager for polyglot monorepos: reads conventional commits, computes semantic versions with ' +
-          'propagation to dependants, and builds and publishes packages in dependency order, in parallel, with ' +
-          'changelogs, git tags and GitHub releases. Packages are folders and stages are shell commands, so npm, Go, ' +
-          'Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.',
+        description: DESCRIPTION,
         url: 'https://yohimik.github.io/dispat/',
         codeRepository: GITHUB,
         programmingLanguage: 'Go',
         license: 'https://opensource.org/licenses/MIT',
         author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
-        keywords: [
-          'monorepo',
-          'polyglot monorepo',
-          'release automation',
-          'release orchestration',
-          'conventional commits',
-          'semantic versioning',
-          'changelog',
-          'npm',
-          'docker',
-          'go modules',
-        ],
+        keywords: KEYWORDS,
+      }),
+    },
+    {
+      // The same project stated as an application rather than as source, which
+      // is the type a search engine reads a "free developer tool" answer out of.
+      tagName: 'script',
+      attributes: {type: 'application/ld+json'},
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'dispat',
+        description: DESCRIPTION,
+        url: 'https://yohimik.github.io/dispat/',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Linux, macOS, Windows',
+        softwareRequirements: 'git',
+        license: 'https://opensource.org/licenses/MIT',
+        author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
+        offers: {'@type': 'Offer', price: '0', priceCurrency: 'USD'},
+        keywords: KEYWORDS,
       }),
     },
   ],
@@ -202,18 +232,12 @@ const config: Config = {
     },
     image: 'logo.png',
     metadata: [
-      {
-        name: 'description',
-        content:
-          'dispat is release orchestration for polyglot monorepos: conventional commits in, ordered parallel ' +
-          'publishes out, with changelogs, git tags and GitHub releases.',
-      },
+      {name: 'description', content: DESCRIPTION},
       {
         name: 'keywords',
         content:
-          'monorepo, polyglot monorepo, release, release orchestration, conventional commits, semantic versioning, ' +
-          'changelog, git tags, github releases, npm, docker, go modules, cargo, maven, nuget, pypi, rubygems, ' +
-          'pub, ios, android, lerna alternative, npm workspaces, pnpm workspaces',
+          `${KEYWORDS.join(', ')}, release orchestration, git tags, github releases, cargo, maven, nuget, pypi, ` +
+          'rubygems, pub, ios, android, npm workspaces, pnpm workspaces',
       },
       // og:title/og:image/og:description come from the page title, themeConfig
       // image and each page's description. The card type is `summary` because
@@ -227,8 +251,13 @@ const config: Config = {
     navbar: {
       title: 'dispat',
       logo: {alt: 'dispat logo', src: 'logo.png'},
+      // Two sidebars, two items. Docs is what a reader works through, API is
+      // what a reader looks something up in; see the comment in sidebars.ts.
+      // A docSidebar item lands on its sidebar's first page, so Docs opens on
+      // Getting started and API on the API overview.
       items: [
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
+        {type: 'docSidebar', sidebarId: 'api', position: 'left', label: 'API'},
         {href: GITHUB, label: 'GitHub', position: 'right'},
         {href: DISCORD, label: 'Discord', position: 'right'},
       ],
@@ -236,16 +265,27 @@ const config: Config = {
     footer: {
       style: 'dark',
       links: [
+        // The columns follow the two sidebars, so the footer answers the same
+        // question the navbar does: work through it, or look something up in it.
         {
           title: 'Docs',
           items: [
             {label: 'Getting started', to: '/getting-started'},
             {label: 'Concepts', to: '/concepts'},
-            {label: 'Cookbook', to: '/cookbook'},
+            {label: 'Examples', to: '/examples'},
+            {label: 'Releasing', to: '/reference/releasing/versioning'},
+            {label: 'dispat in CI', to: '/reference/ci'},
+            {label: 'Internals', to: '/internals/architecture'},
+          ],
+        },
+        {
+          title: 'API',
+          items: [
+            {label: 'Overview', to: '/api'},
             {label: 'CLI', to: '/cli'},
             {label: 'Configuration', to: '/configuration'},
-            {label: 'Reference', to: '/reference/commits'},
-            {label: 'Internals', to: '/internals/architecture'},
+            {label: 'Go packages', to: '/go'},
+            {label: 'Commit messages', to: '/reference/commits'},
           ],
         },
         {
@@ -254,8 +294,6 @@ const config: Config = {
             {label: 'GitHub', href: GITHUB},
             {label: 'Discord', href: DISCORD},
             {label: 'Releases', href: `${GITHUB}/releases`},
-            // The Go modules are listed on the landing page, beside the
-            // manifest reader and writer, rather than one of them here.
             {label: 'License', href: `${GITHUB}/blob/main/LICENSE.md`},
           ],
         },

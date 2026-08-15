@@ -25,6 +25,16 @@ import styles from './index.module.css';
 // See plugins/readme. What is still written here is the landing page's own:
 // the badges, the install blocks, the reading list and the invitation.
 //
+// Four strings here do restate something written elsewhere, and are the whole
+// of what a rewrite has to keep in step by hand:
+//   - the <Features> heading repeats the repository README's "## Why one more
+//     monorepo tool?", which plugins/readme/parse.ts matches literally;
+//   - MANIFESTS mirrors the format tables in pkg/scanner's README;
+//   - the three INSTALL_* commands repeat the repository README's install
+//     blocks and Getting started's;
+//   - <Layout> title and description restate the tagline and description in
+//     docusaurus.config.ts.
+//
 // Every internal link goes through <Link> (or useBaseUrl for assets), never a
 // raw path: Docusaurus mounts its router without a `basename` and registers
 // routes with baseUrl already in them, so a bare "/getting-started" resolves
@@ -124,8 +134,8 @@ function Hero(): React.ReactElement {
           <Link className="button button--primary button--lg" to="/getting-started">
             Get started
           </Link>
-          <Link className="button button--secondary button--lg" to="/cookbook">
-            Cookbook
+          <Link className="button button--secondary button--lg" to="/examples">
+            Examples
           </Link>
         </div>
         {/* `console` rather than the README's `sh`: this is a transcript, and
@@ -191,9 +201,9 @@ const MANIFESTS: [language: string, files: string][] = [
   ['Docker: images and Compose', 'Dockerfile, Containerfile, compose.yaml, docker-compose.yml, and their .override spellings'],
 ];
 
-// dispat's pieces are separate Go modules, usable with no dispat in sight, and
-// nothing on the site said so. Links point at GitHub because these are packages
-// rather than pages.
+// dispat's pieces are separate Go modules, usable with no dispat in sight. Each
+// card links to its page under the API sidebar, which is where the surface and
+// the guarantees are written down; those pages link on to pkg.go.dev.
 function Libraries(): React.ReactElement {
   return (
     <section className="container margin-bottom--xl">
@@ -204,7 +214,7 @@ function Libraries(): React.ReactElement {
         Parsing commit messages and reading and rewriting dependency manifests are problems far older than releases, so
         dispat keeps all three as standalone Go modules with no dependency on the CLI, on git or on a network. The
         manifest pair shares its vocabulary through{' '}
-        <Link to={`${GITHUB}/tree/main/pkg/manifest`}>
+        <Link to="/go/manifest">
           <code>pkg/manifest</code>
         </Link>{' '}
         (dependency kinds, manifest file-name rules, PEP 503 normalisation) so the reader and the writer can never
@@ -213,7 +223,7 @@ function Libraries(): React.ReactElement {
       <div className={styles.libraries}>
         <div className={styles.feature}>
           <Heading as="h3" className={styles.featureTitle}>
-            <Link to={`${GITHUB}/tree/main/pkg/ccme`}>
+            <Link to="/go/ccme">
               <code>pkg/ccme</code>
             </Link>
             : the commit parser
@@ -231,7 +241,7 @@ function Libraries(): React.ReactElement {
         </div>
         <div className={styles.feature}>
           <Heading as="h3" className={styles.featureTitle}>
-            <Link to={`${GITHUB}/tree/main/pkg/scanner`}>
+            <Link to="/go/scanner">
               <code>pkg/scanner</code>
             </Link>
             : the manifest reader
@@ -244,7 +254,7 @@ function Libraries(): React.ReactElement {
         </div>
         <div className={styles.feature}>
           <Heading as="h3" className={styles.featureTitle}>
-            <Link to={`${GITHUB}/tree/main/pkg/writer`}>
+            <Link to="/go/writer">
               <code>pkg/writer</code>
             </Link>
             : the manifest writer
@@ -283,7 +293,7 @@ function Libraries(): React.ReactElement {
         <p>
           The mobile formats also carry a build number beside their marketing version (<code>CFBundleVersion</code>,{' '}
           <code>android:versionCode</code>, <code>CURRENT_PROJECT_VERSION</code>): the scanner reads it, and no writer
-          ever rewrites it. <Link to="/cli">
+          ever rewrites it. <Link to="/cli/compute">
             <code>dispat compute</code>
           </Link>{' '}
           derives a monorepo&apos;s dependency graph from these files, and{' '}
@@ -307,8 +317,8 @@ function Install(): React.ReactElement {
         Install
       </Heading>
       <p className={styles.sectionLead}>
-        One command. The script downloads the binary for your platform, checks it against the checksum GitHub
-        published, and puts it on your <code>PATH</code>.
+        One command, and no runtime to install first. The script downloads the binary for your platform, checks it
+        against the checksum GitHub published, and puts it on your <code>PATH</code>.
       </p>
       <div className={styles.install}>
         <CodeBlock language="sh" title="Linux and macOS">
@@ -353,12 +363,15 @@ function Reference(): React.ReactElement {
           model.
         </li>
         <li>
-          <Link to="/cookbook">Cookbook</Link>: worked examples.{' '}
-          <Link to="/cookbook/recipes">Recipes</Link> for npm, Docker, Go, Python, mobile and pnpm workspaces, and{' '}
-          <Link to="/cookbook/editing/autowriter">editing every package at once</Link>.
+          <Link to="/examples">Examples</Link>: a complete setup per package manager, npm to Docker to Android, and{' '}
+          <Link to="/editing/autowriter">editing every package at once</Link>.
         </li>
         <li>
           <Link to="/cli">CLI</Link> and <Link to="/configuration">Configuration</Link>: every command, every option.
+        </li>
+        <li>
+          <Link to="/go">Go packages</Link>: the commit parser, the manifest reader and the manifest writer, importable
+          on their own.
         </li>
         <li>
           <Link to="/reference/commits">Commit messages</Link>: the Conventional Commits superset that carries release intent.
@@ -424,8 +437,8 @@ function Community(): React.ReactElement {
 export default function Home(): React.ReactElement {
   return (
     <Layout
-      title="Release orchestration for polyglot monorepos"
-      description="dispat is release orchestration for polyglot monorepos: it reads conventional commits, computes semantic versions with propagation to dependants, and builds and publishes packages in graph order, in parallel, with changelogs, git tags and GitHub releases. Packages are folders and stages are shell commands, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.">
+      title="The monorepo release tool"
+      description="dispat is a release tool for polyglot monorepos. It reads your conventional commits, works out every package version with propagation to dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.">
       <Hero />
       <main>
         <Features />

@@ -1,8 +1,8 @@
 {
   "id": "/dispat/",
-  "name": "dispat — release orchestration for polyglot monorepos",
+  "name": "dispat: the release tool for polyglot monorepos",
   "short_name": "dispat",
-  "description": "Release orchestration for polyglot monorepos: conventional commits in, ordered parallel publishes out.",
+  "description": "A monorepo release tool that reads your conventional commits, works out every version, and publishes each changed package in dependency order.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/dispat/",
@@ -35,6 +35,7 @@
   "shortcuts": [
     {"name": "Getting started", "url": "/dispat/getting-started"},
     {"name": "CLI reference", "url": "/dispat/cli"},
-    {"name": "Configuration", "url": "/dispat/configuration"}
+    {"name": "Configuration", "url": "/dispat/configuration"},
+    {"name": "API reference", "url": "/dispat/api"}
   ]
 }

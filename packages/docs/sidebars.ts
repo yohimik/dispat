@@ -13,34 +13,85 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 // `configuration/README` (its permalink is /configuration). Every folder is a
 // category: the reading path stays at the root, everything else is grouped by
 // what it is about, and the CLI category carries one page per command.
+//
+// Two sidebars, one navbar item each. `docs` is what a reader works through:
+// getting started, the mental model, one example per package manager, and the
+// guides to editing, releasing and running dispat in CI. `api` is what a reader
+// looks something up in: the command line, the configuration file, the Go
+// packages, and the three formats around them. Every page belongs to exactly
+// one of the two, so a reader is never shown the same page under two headings.
 const sidebars: SidebarsConfig = {
   docs: [
     'getting-started',
     'concepts',
     {
       type: 'category',
-      label: 'Cookbook',
-      collapsed: true,
-      link: {type: 'doc', id: 'cookbook/README'},
+      label: 'Examples',
+      collapsed: false,
+      link: {type: 'doc', id: 'examples/README'},
       items: [
-        {type: 'doc', id: 'cookbook/recipes', label: 'Recipes'},
-        {
-          type: 'category',
-          label: 'Editing the monorepo',
-          collapsed: true,
-          items: [
-            {type: 'doc', id: 'cookbook/editing/manifests', label: 'Manifest tools'},
-            {type: 'doc', id: 'cookbook/editing/autowriter', label: 'Editing across the monorepo'},
-            {type: 'doc', id: 'cookbook/editing/autoreplacer', label: 'Replacing across the monorepo'},
-            {type: 'doc', id: 'cookbook/editing/replacer', label: 'The replacer'},
-          ],
-        },
+        {type: 'doc', id: 'examples/npm', label: 'An npm monorepo'},
+        {type: 'doc', id: 'examples/pnpm', label: 'A pnpm workspace'},
+        {type: 'doc', id: 'examples/docker', label: 'A Docker image chain'},
+        {type: 'doc', id: 'examples/android', label: 'An Android app'},
+        {type: 'doc', id: 'examples/mixed', label: 'npm and Docker in one graph'},
+        {type: 'doc', id: 'examples/single-package', label: 'A single package'},
+        {type: 'doc', id: 'examples/adopting', label: 'Adopting dispat'},
+        {type: 'doc', id: 'examples/layout', label: 'Config beside the code'},
       ],
     },
     {
       type: 'category',
-      label: 'CLI',
+      label: 'Editing the monorepo',
       collapsed: true,
+      items: [
+        {type: 'doc', id: 'editing/manifests', label: 'Manifest tools'},
+        {type: 'doc', id: 'editing/autowriter', label: 'Editing across the monorepo'},
+        {type: 'doc', id: 'editing/autoreplacer', label: 'Replacing across the monorepo'},
+        {type: 'doc', id: 'editing/replacer', label: 'The replacer'},
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Releasing',
+      collapsed: true,
+      items: [
+        {type: 'doc', id: 'reference/releasing/versioning', label: 'Shared versions'},
+        {type: 'doc', id: 'reference/releasing/steps', label: 'Release steps'},
+        {type: 'doc', id: 'reference/releasing/partial-releases', label: 'Partial releases'},
+        {type: 'doc', id: 'reference/releasing/prerelease-branches', label: 'Prerelease branches'},
+        {type: 'doc', id: 'reference/releasing/release-lock', label: 'The release lock'},
+        {type: 'doc', id: 'reference/releasing/recovery', label: 'Recovering from a failed run'},
+      ],
+    },
+    {
+      type: 'category',
+      label: 'dispat in CI',
+      collapsed: true,
+      items: [
+        {type: 'doc', id: 'reference/ci', label: 'Getting dispat onto a runner'},
+        {type: 'doc', id: 'reference/pipelines', label: 'Pipeline patterns'},
+      ],
+    },
+    {type: 'doc', id: 'reference/corrections', label: 'Correcting a record'},
+    {type: 'doc', id: 'reference/self-update', label: 'Updating dispat'},
+    {
+      type: 'category',
+      label: 'Internals',
+      collapsed: true,
+      items: [
+        {type: 'doc', id: 'internals/architecture', label: 'Architecture'},
+        {type: 'doc', id: 'internals/coverage', label: 'Test coverage'},
+        {type: 'doc', id: 'internals/test-results', label: 'Test results'},
+      ],
+    },
+  ],
+  api: [
+    'api',
+    {
+      type: 'category',
+      label: 'CLI',
+      collapsed: false,
       link: {type: 'doc', id: 'cli/README'},
       items: [
         {type: 'doc', id: 'cli/release', label: 'release'},
@@ -89,38 +140,20 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Reference',
+      label: 'Go packages',
       collapsed: true,
+      link: {type: 'doc', id: 'go/README'},
       items: [
-        {type: 'doc', id: 'reference/commits', label: 'Commit messages'},
-        {type: 'doc', id: 'reference/corrections', label: 'Correcting a record'},
-        {type: 'doc', id: 'reference/environment', label: 'Script environment'},
-        {
-          type: 'category',
-          label: 'Releasing',
-          collapsed: true,
-          items: [
-            {type: 'doc', id: 'reference/releasing/versioning', label: 'Shared versions'},
-            {type: 'doc', id: 'reference/releasing/steps', label: 'Release steps'},
-            {type: 'doc', id: 'reference/releasing/partial-releases', label: 'Partial releases'},
-            {type: 'doc', id: 'reference/releasing/release-lock', label: 'The release lock'},
-          ],
-        },
-        {type: 'doc', id: 'reference/plan-errors', label: 'When there is no plan'},
-        {type: 'doc', id: 'reference/ci', label: 'dispat in CI'},
-        {type: 'doc', id: 'reference/self-update', label: 'Updating dispat'},
+        {type: 'doc', id: 'go/ccme', label: 'ccme'},
+        {type: 'doc', id: 'go/scanner', label: 'scanner'},
+        {type: 'doc', id: 'go/writer', label: 'writer'},
+        {type: 'doc', id: 'go/manifest', label: 'manifest'},
+        {type: 'doc', id: 'go/models', label: 'models'},
       ],
     },
-    {
-      type: 'category',
-      label: 'Internals',
-      collapsed: true,
-      items: [
-        {type: 'doc', id: 'internals/architecture', label: 'Architecture'},
-        {type: 'doc', id: 'internals/coverage', label: 'Test coverage'},
-        {type: 'doc', id: 'internals/test-results', label: 'Test results'},
-      ],
-    },
+    {type: 'doc', id: 'reference/commits', label: 'Commit messages'},
+    {type: 'doc', id: 'reference/environment', label: 'Script environment'},
+    {type: 'doc', id: 'reference/plan-errors', label: 'Diagnostic codes'},
   ],
 };
 
