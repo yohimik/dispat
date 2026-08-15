@@ -40,31 +40,34 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-          cache: true
-
-      - name: Build dispat from the checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+      # TEMPORARY BOOTSTRAP until 1.0.0: bin/dispat is the committed driver,
+      # refreshed by scripts/refresh-bootstrap.sh, so this gate needs no Go
+      # toolchain at all. Once a stable release exists this step becomes
+      # `uses: ./` and bin/dispat is deleted.
+      - name: Put the bootstrap dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
       # `status` computes the plan and prints it without building, tagging or
-      # writing anything. --require-release turns "nothing to release" into
-      # exit 1, which is the whole answer this job exists for — hence the `if`
-      # rather than a bare command, which `set -e` would end the job on.
+      # writing anything. --require-release answers with exit 3 when the plan
+      # releases nothing — the whole answer this job exists for — and exit 1
+      # when something is wrong, so the mapping is a `case` rather than an
+      # `if`: an `if` would read a broken configuration as "nothing to
+      # release" and skip the release instead of failing.
       - name: Compute the plan
         id: status
         run: |
-          export PATH="$PWD:$PATH"
-          if ./dispat status --require-release; then
-            echo "releasing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "releasing=false" >> "$GITHUB_OUTPUT"
-            echo "### Nothing to release" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "No package has commits since its last tag. The release was not attempted." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          rc=0
+          dispat status --require-release || rc=$?
+          case "$rc" in
+            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
+            3)
+              echo "releasing=false" >> "$GITHUB_OUTPUT"
+              echo "### Nothing to release" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "No package has commits since its last tag. The release was not attempted." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *) exit "$rc" ;;
+          esac
 
   tests:
     name: Full suite
@@ -85,8 +88,11 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Build dispat from the checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+      # TEMPORARY BOOTSTRAP until 1.0.0: the committed driver, as in the plan
+      # job. The driver is only the driver; the suite builds and tests the
+      # checkout's own dispat regardless.
+      - name: Put the bootstrap dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -96,26 +102,17 @@ jobs:
       # that bumped them, and this is the gate immediately before the one that
       # ships the working tree.
       #
-      # `link` and `unlink` are the scripts in dispat.yaml, so the gate and the
-      # release cannot disagree about what the bracket is.
+      # `link` and `unlink` are the scripts in services/dispat/dispat.yaml, so
+      # the gate and the release cannot disagree about what the bracket is.
       - name: Link the workspace dependencies
-        run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run link --since all -p dispat
-
-      # Again, now that go.mod carries the redirects: the binary that drives
-      # the suite is built from the same checkout it is testing.
-      - name: Rebuild dispat from the linked checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+        run: dispat run link --since all -p dispat
 
       # --since all, not a window: this is the gate on a release, so every
       # package's tests run whether or not it changed. It is also the only run
       # that produces a complete set of coverage profiles, which is why the
       # badge is computed here and nowhere else.
       - name: Run every package's tests
-        run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run tests --since all
+        run: dispat run tests --since all
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is
@@ -125,9 +122,8 @@ jobs:
       - name: Unlink the workspace dependencies
         if: always()
         run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run unlink --since all -p dispat
-          ./dispat run verify-unlinked --since all -p dispat
+          dispat run unlink --since all -p dispat
+          dispat run verify-unlinked --since all -p dispat
 
       - name: Compute coverage totals
         run: sh scripts/coverage-badge.sh
@@ -219,8 +215,18 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build dispat from the checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+      # This job alone rebuilds the driver from the checkout: it is about to
+      # write the changelogs, the release commit and the tags of the version
+      # being shipped, and a committed driver lagging the checkout would
+      # silently skip configuration the new version defines. The same
+      # containerised build the bootstrap refresh uses, overwriting bin/dispat
+      # in the workspace only — at 1.0.0 this becomes the composite action
+      # installing the previous published release.
+      - name: Build a fresh driver from the checkout
+        run: sh scripts/refresh-bootstrap.sh
+
+      - name: Put the fresh dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
       # The test report from the job that gated this one, put where the docs
       # package's build expects it. Deliberately not tolerant of a missing
@@ -252,14 +258,11 @@ jobs:
           # The docker space's login stage authenticates the image pushes.
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        # The checkout dir leads PATH so the nested `dispat changelog` /
-        # `dispat commit` / `dispat if` invocations inside the stage scripts
-        # resolve the same freshly built binary this release ships. The
-        # committer identity comes from commit.name/commit.email in
-        # dispat.yaml.
-        run: |
-          export PATH="$PWD:$PATH"
-          ./dispat --log-format json
+        # bin/ leads PATH so the nested `dispat changelog` / `dispat commit` /
+        # `dispat if` invocations inside the stage scripts resolve the same
+        # freshly built driver. The committer identity comes from
+        # commit.name/commit.email in dispat.yaml.
+        run: dispat --log-format json
 
   post-release:
     name: ${{ matrix.os }}

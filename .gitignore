@@ -1,4 +1,7 @@
 .idea
+# The local dev build at the root only. bin/dispat is deliberately tracked:
+# it is the CI bootstrap driver, refreshed by scripts/refresh-bootstrap.sh
+# until 1.0.0 ships and the composite action takes over.
 /dispat
 dispat.*.backup
 node_modules

@@ -90,8 +90,13 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      - name: Build dispat from the checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+      # TEMPORARY BOOTSTRAP until 1.0.0: bin/dispat is the committed driver,
+      # refreshed by scripts/refresh-bootstrap.sh, so no job builds the driver
+      # it is driven by. Once a stable release exists this step becomes
+      # `uses: ./` and bin/dispat is deleted. The driver is only the driver:
+      # the suite below builds and tests the checkout's own dispat regardless.
+      - name: Put the bootstrap dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -101,17 +106,10 @@ jobs:
       # that bumped them, so a provider changed on this very commit would
       # otherwise be tested as its published copy.
       #
-      # `link` and `unlink` are the scripts in dispat.yaml, so this gate and
-      # the release cannot disagree about what the bracket is.
+      # `link` and `unlink` are the scripts in services/dispat/dispat.yaml, so
+      # this gate and the release cannot disagree about what the bracket is.
       - name: Link the workspace dependencies
-        run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run link --since all -p dispat
-
-      # Again, now that go.mod carries the redirects: the binary that drives
-      # the suite is built from the same checkout it is testing.
-      - name: Rebuild dispat from the linked checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+        run: dispat run link --since all -p dispat
 
       # HEAD~1 is the whole window on both triggers, which is why no base
       # revision has to be worked out: a push to main lands one commit, and a
@@ -122,9 +120,7 @@ jobs:
       # pkg/manifest tests scanner, writer and the CLI too, because they are
       # what the change can break.
       - name: Run the tests dispat selects
-        run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run tests --since HEAD~1 --consumers
+        run: dispat run tests --since HEAD~1 --consumers
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is
@@ -135,9 +131,8 @@ jobs:
       - name: Unlink the workspace dependencies
         if: always()
         run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run unlink --since all -p dispat
-          ./dispat run verify-unlinked --since all -p dispat
+          dispat run unlink --since all -p dispat
+          dispat run verify-unlinked --since all -p dispat
 
   build:
     name: Build
@@ -161,8 +156,10 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build dispat from the checkout
-        run: go build -C services/dispat -o "$PWD/dispat" .
+      # TEMPORARY BOOTSTRAP until 1.0.0: the committed driver, as in the test
+      # job above.
+      - name: Put the bootstrap dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
       # No link bracket here, unlike the test job: every package this gate
       # reaches builds inside a container from a context copied out of the
@@ -179,6 +176,4 @@ jobs:
       # depends on the CLI, so consumers would turn any pkg/* change into four
       # emulated multi-arch image builds.
       - name: Build what changed
-        run: |
-          export PATH="$PWD:$PATH"
-          ./dispat run build --since HEAD~1
+        run: dispat run build --since HEAD~1
