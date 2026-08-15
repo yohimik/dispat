@@ -238,8 +238,9 @@ jobs:
         # dispat does the whole release itself: autoVersion rewrites, the
         # release commit, tags, the push, and the GitHub release with the six
         # cross-compiled binaries its containerised build stage exported. The
-        # run.postAll hook writes this step's cli-released / cli-version
-        # outputs; see the post-release scripts in dispat.yaml.
+        # dispat package's announce stage writes this step's cli-released /
+        # cli-version outputs, and only fires when that package published;
+        # see services/dispat/dispat.yaml.
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

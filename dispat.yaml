@@ -60,35 +60,6 @@ scripts:
       go build -C services/dispat -o /src/bin/dispat.new .
     - mv bin/dispat.new bin/dispat
 
-  # postAll fires for every release, including one run by hand. Outside Actions
-  # there is no $GITHUB_OUTPUT to write, and a guard that finds nothing to do
-  # exits 0 — hence no --else.
-  post-release: dispat if GITHUB_OUTPUT --then 'dispat exec post-release-outputs'
-  # What the release did, as step outputs for the job that verifies the
-  # composite action afterwards.
-  #
-  # The dispat package and nothing else: a run that publishes only the docs or
-  # an image is ordinary, and in that run there is no new CLI to install, no
-  # v{version} alias tag to check out and no GitHub release carrying binaries,
-  # so the job that consumes these must skip rather than test the version that
-  # was already out. Asking the status is enough on its own — the
-  # DISPAT_RESULT_* block exists only for a package the run had a result for,
-  # so it is unset when dispat was never planned, and it reads "failed" or
-  # "skipped" rather than "published" when it did not make it.
-  #
-  # Each argument sits on one line of its own: a `>-` fold keeps the newlines
-  # of any deeper-indented continuation, which would put `--else` on a shell
-  # line of its own and break the branch.
-  post-release-outputs: >-
-    dispat if 'DISPAT_RESULT_DISPAT_STATUS=published'
-    --then 'echo "cli-released=true" >> "$GITHUB_OUTPUT"; echo "cli-version=$DISPAT_RESULT_DISPAT_NEW_VERSION" >> "$GITHUB_OUTPUT"; echo "released dispat $DISPAT_RESULT_DISPAT_NEW_VERSION"'
-    --else 'echo "cli-released=false" >> "$GITHUB_OUTPUT"; echo "the dispat CLI did not publish in this run"'
-
-# Fired once, after the whole task graph. It reports what the run did to the
-# job that follows it; see post-release-outputs above.
-run:
-  postAll: post-release
-
 versionGroups:
   manifests:
     versioning: fixed
