@@ -31,6 +31,12 @@ manifest declares, such as a Docker base-image chain. The planner treats kept ed
 Both packages must exist, and their names are matched the way every other name-keyed part of the config is matched,
 without regard to case. Self-dependencies and cycles are rejected; duplicates are ignored.
 
+One direction is closed. A package of a
+[`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none) may consume
+releasable packages, for example through a permanent local link, but a releasable package cannot name one as a
+provider: the provider would never have a version for auto-versioning to write, so the edge is refused when the
+configuration loads. Between two `none` packages an edge is ordinary, and orders their script runs.
+
 ## Where an edge can be written
 
 The same object can be written at three levels, and every declaration merges into one graph. Nothing overrides

@@ -298,6 +298,47 @@ members already agree on the shared part releases nothing on a quiet run. And un
 that fell behind the group, because an earlier release failed or because the group was formed out of unequal versions,
 is caught up on the next run rather than staying behind for ever.
 
+## Packages that never release (`none`)
+
+One versioning value is not a sharing mode at all. A space with `versioning: none` holds packages that stand outside
+the release flow entirely: they are never versioned, never tagged, never changelogged, never published. What they do
+instead is run scripts. Think of a folder of smoke tests, deployment tooling or generated sandboxes that you want
+swept by [`dispat run`](../../cli/run.md) alongside the real packages, without dispat ever trying to release them.
+
+```json
+{
+  "spaces": {
+    "packages": {
+      "path": "packages"
+    },
+    "tools": {
+      "path": "tools",
+      "versioning": "none"
+    }
+  }
+}
+```
+
+What this means in practice:
+
+* **The release plan skips them, permanently.** The plan graph reports each changed one as
+  `script-only (versioning: none)` instead of a version transition, and the summary counts them under `scriptOnly`.
+  This is not a hold waiting to be lifted; there is no version being withheld.
+* **They are always on the default run window.** A package leaves the window when a release consumes its changes, and
+  nothing ever consumes a `none` package's. Whenever it has pending commits, `dispat run` reaches it, which is the
+  point. `--since` narrows the window as usual when you want less.
+* **Dependencies point one way.** A `none` package may depend on releasable packages, and a
+  [permanent local link](../../editing/manifests.md) is the natural way to wire one up: the
+  "remove links before publishing" warning stays quiet when the link targets only `none` packages, because they never
+  publish. A releasable package cannot depend on a `none` package; the provider would never have a version for
+  [auto-versioning](../../configuration/autoversion.md) to write, so the edge is refused when the configuration loads.
+* **Directives aimed at them are inert.** A `Release-As` footer whose scope resolves to a `none` package moves nothing
+  and is reported as `W238`. Naming one in `dispat release --package` is answered with a log line instead of a silent
+  no-op.
+* **Release-only settings do nothing.** `tagFormat`, `aliasTags`, publish stages, changelog and GitHub blocks on a
+  `none` space load without error and never take effect. `none` also cannot join or form a
+  [versioning group](#putting-packages-in-a-group): a group exists to share versions, and these packages have none.
+
 ## Where to go next
 
 * [Space options](../../configuration/spaces.md#versioning) for the reference table and the exact rules.

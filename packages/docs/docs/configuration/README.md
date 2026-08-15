@@ -29,7 +29,7 @@ The larger objects have their own pages:
 
 | Page                                  | Covers                                                                                                                                      |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the seven `versioning` modes and versioning groups, `scripts`, the space's `packages` map and `dependencies`, the space configuration file, `.dispatexclude`. |
+| [Spaces](./spaces.md)                 | Space options, stages and hooks, login, announce, outcome scripts, the `versioning` modes (shared versions and `none`) and versioning groups, `scripts`, the space's `packages` map and `dependencies`, the space configuration file, `.dispatexclude`. |
 | [Packages](./packages.md)             | The `packages` maps: per-package overrides and the ladder that orders them, standalone packages via `path`, package-declared dependencies, in-folder config files. |
 | [What counts as a change](./change-scope.md) | `src` and `ignore`: which of a package's files make a scopeless commit address it, and the `.dispatignore` file. |
 | [Tags and baselines](./versions.md)   | `tagFormat`, `initials`.                                                                                                                    |

@@ -123,6 +123,7 @@ where that package stands:
 | `⊝ not selected`                      | it would have released, and your selection left it out          |
 | `⊘ withheld until its providers release` | you asked for it, and the release order cannot reach it yet  |
 | `‖ held (Release-As: none)`           | a commit directive is holding it back, nothing to do with you   |
+| `∅ script-only (versioning: none)`    | its space [never releases](./versioning.md#packages-that-never-release-none); it runs scripts instead |
 | `unchanged`                           | nothing pending for it at all                                   |
 
 Without `--strict`, `status` keeps its usual promise of exiting 0 even when it has something to warn about. With
@@ -131,8 +132,8 @@ a release job.
 
 `--require-release` is the neighbouring gate, and the two answer different questions. `--strict` asks whether the
 selection can go out *as written*; `--require-release` asks whether it goes out *at all*, exiting 3 when the narrowed
-plan releases nothing. Only `● changed` counts as releasing: `⊝ not selected`, `⊘ withheld`, `‖ held` and
-`unchanged` are all packages this run will not publish. Both flags work on `release` as well as
+plan releases nothing. Only `● changed` counts as releasing: `⊝ not selected`, `⊘ withheld`, `‖ held`,
+`∅ script-only` and `unchanged` are all packages this run will not publish. Both flags work on `release` as well as
 `status`, and both refuse before anything is built; see
 [Gating a pipeline on the plan](../ci.md#gating-a-pipeline-on-the-plan).
 

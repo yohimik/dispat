@@ -160,6 +160,13 @@ walkthrough with worked examples is [Shared versions](../reference/releasing/ver
 | `fixedMajorMinorSparse`   | `MAJOR.MINOR`   | The same, with `fixedSparse` assignment: an unchanged member keeps its previous version and adopts the shared major and minor on its own next release.                                                                             |
 | `fixedMajor`              | `MAJOR`         | Minor and patch releases stay each package's own; only a major release moves the whole group, riding unchanged members as `fixed` does.                                                                                            |
 | `fixedMajorSparse`        | `MAJOR`         | The same, with `fixedSparse` assignment: an unchanged member keeps its previous version and adopts the shared major on its own next release.                                                                                       |
+| `none`                    | not applicable  | The space's packages are never released: no versions, tags, changelogs or publishes. They exist to run scripts, and a changed package sits in the default [`dispat run`](../cli/run.md) window. See [Packages that never release](../reference/releasing/versioning.md#packages-that-never-release-none). |
+
+A `none` space cannot join or form a versioning group, and a releasable package cannot declare a dependency on one of
+its packages: such a provider never has a version for auto-versioning to write, so the configuration is refused at
+load. The reverse direction is fine: a `none` package may depend on releasable packages, for example through a
+permanent [local link](../editing/manifests.md). Release-only settings on a `none` space (`tagFormat`, `aliasTags`,
+publish stages, changelog and GitHub blocks) load without error and never take effect.
 
 A space with shared versioning is a versioning group whose name is the space's own. The general mechanism, groups
 that cut across the filesystem included, is described under [Versioning groups](#versioning-groups); everything there

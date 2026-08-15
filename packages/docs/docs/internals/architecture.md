@@ -498,7 +498,7 @@ the specification predates or does not have. They are numbered from `W220` and `
 | `W230`, `W231`         | [Releasing part of the graph](../reference/releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
-| `W238`                 | A `Release-As` footer naming a package whose [versioning is `none`](../reference/releasing/versioning.md#none): the directive moves nothing |
+| `W238`                 | A `Release-As` footer naming a package whose [versioning is `none`](../reference/releasing/versioning.md#packages-that-never-release-none): the directive moves nothing |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 

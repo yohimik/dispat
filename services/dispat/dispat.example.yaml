@@ -52,6 +52,8 @@ spaces:
     #   fixedMajorMinorSparse   the same, unchanged members staying behind
     #   fixedMajor              MAJOR: only a breaking change moves the group
     #   fixedMajorSparse        the same, unchanged members staying behind
+    #   none                    never released at all: no versions, tags or
+    #                           publishes; the packages exist to run scripts
     versioning: independent
     # The space's own scripts: the same shape as the top-level `scripts`,
     # layered over them for this space's packages. `flow` entries name them,

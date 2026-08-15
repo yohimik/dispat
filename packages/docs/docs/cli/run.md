@@ -12,8 +12,10 @@ means either that no level defines the name, or that none of the selected packag
 
 Selection happens in three steps, in this order:
 
-1. **A window** decides which packages are on the table. By default that is the changed packages, the same set a
-   release would process. `--since <rev>` instead selects the packages the commits in `rev..HEAD` address: `HEAD~1`
+1. **A window** decides which packages are on the table. By default that is the changed packages: the set a release
+   would process, plus every changed package of a
+   [`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none), which runs
+   scripts without ever releasing. `--since <rev>` instead selects the packages the commits in `rev..HEAD` address: `HEAD~1`
    for the last commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or
    the reserved `all` for every package, changed or not. Selection follows the planner's
    [scope semantics](../reference/commits.md#scope-sets): a commit's written scopes are authoritative, and only scopeless units

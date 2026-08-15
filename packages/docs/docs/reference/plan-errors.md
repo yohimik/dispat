@@ -127,6 +127,9 @@ Not an error, and worth naming because it reads like one.
 - **`W230` / `W231`**. The selection is releasable but incomplete: a consumer is withheld because its provider was
   left out, or a versioning group is being split. Both release what they can and warn. `--strict` turns either into a
   refusal before anything is built; see [Partial releases](./releasing/partial-releases.md).
+- **A package of a `versioning: none` space.** It is never released, whatever it has pending: the graph shows it as
+  `script-only (versioning: none)`, and a `Release-As` aimed at it warns `W238` and moves nothing. See
+  [Packages that never release](./releasing/versioning.md#packages-that-never-release-none).
 
 ## Getting more out of the failure
 
