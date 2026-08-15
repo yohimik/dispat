@@ -11,6 +11,9 @@ there, and which one you want is decided by where your pipeline runs:
 
 All three end at the same binary, and the last two are the same script: the images install themselves with it.
 
+This page is about getting the binary onto a runner. What to run once it is there, from per-commit test windows to a
+fully gated release pipeline, is [Pipeline patterns](./pipelines.md).
+
 ## The GitHub Action
 
 ```yaml
