@@ -69,7 +69,7 @@ select the run, and `--consumers` pulls in everyone carrying a reference to
 them.
 
 Everything else about choosing packages works as it does everywhere else, and
-is described in [Choosing the packages](../../cli/run.md#choosing-the-packages).
+is described in [Choosing the packages](../cli/run.md#choosing-the-packages).
 `--since all` reaches the whole monorepo.
 
 `--only-updated` narrows the fan-out to the providers this run is releasing, so
@@ -147,7 +147,7 @@ fails at the end.
 - A dependency a manifest declares: [`dispat autowriter`](./autowriter.md),
   which understands the manifest instead of guessing at its bytes.
 - The same replacements on every release, without running a command:
-  [`autoVersion.replace`](../../configuration/autoversion.md), which is this
+  [`autoVersion.replace`](../configuration/autoversion.md), which is this
   command's rules written into the configuration.
 
 ## Exit codes
