@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Substitute is the splicer with the format knowledge taken away: literal
+// Replace is the splicer with the format knowledge taken away: literal
 // text in, literal text out, over any file at all. Nothing is parsed, so
 // nothing has to be understood first, which is what makes it reach the places
 // a manifest writer cannot: a Gradle coordinate built by a build script, a
@@ -14,11 +14,11 @@ import (
 //
 // The price of reaching everywhere is that it does exactly what it is told. A
 // Find that also occurs somewhere unintended is replaced there too, so a
-// substitution should carry enough context to be unambiguous: "acme-core:1.2.3"
+// replacement should carry enough context to be unambiguous: "acme-core:1.2.3"
 // rather than "1.2.3".
 
-// Substitution is one literal find/write pair.
-type Substitution struct {
+// Replacement is one literal find/write pair.
+type Replacement struct {
 	// Find is the text to look for, matched byte for byte. It is not a
 	// pattern: no globs, no regular expressions, no escapes. Empty is an
 	// error, since it would match at every position.
@@ -28,23 +28,23 @@ type Substitution struct {
 	Write string
 }
 
-// SubstituteResult reports what one file's substitutions did. It splits the
+// ReplaceResult reports what one file's replacements did. It splits the
 // same three ways Result does, and for the same reasons.
-type SubstituteResult struct {
+type ReplaceResult struct {
 	// Path of the file the call targeted, echoed back so a caller batching
 	// several keeps the correlation.
 	Path string
-	// Applied are the substitutions that changed the file.
-	Applied []Substitution
-	// Missing are the substitutions whose Find the file does not contain.
-	Missing []Substitution
-	// Skipped are the substitutions whose Find the file contains but which
+	// Applied are the replacements that changed the file.
+	Applied []Replacement
+	// Missing are the replacements whose Find the file does not contain.
+	Missing []Replacement
+	// Skipped are the replacements whose Find the file contains but which
 	// would write it back unchanged, because Find and Write are the same
-	// text. Re-running an already-substituted file is the ordinary way this
+	// text. Re-running an already-replaced file is the ordinary way this
 	// happens, so it is not worth a warning.
-	Skipped []Substitution
+	Skipped []Replacement
 	// Count is how many occurrences were replaced across every applied
-	// substitution.
+	// replacement.
 	Count int
 }
 
@@ -52,8 +52,8 @@ type SubstituteResult struct {
 // errors.Is.
 var ErrBinaryFile = errors.New("writer: file looks binary")
 
-// ErrEmptyFind marks a substitution with nothing to find; test with errors.Is.
-var ErrEmptyFind = errors.New("writer: substitution with no text to find")
+// ErrEmptyFind marks a replacement with nothing to find; test with errors.Is.
+var ErrEmptyFind = errors.New("writer: replacement with no text to find")
 
 // binarySniff is how many leading bytes decide whether a file is text. A NUL
 // in a file's first few kilobytes is the same signal git, grep and diff all
@@ -61,10 +61,10 @@ var ErrEmptyFind = errors.New("writer: substitution with no text to find")
 // happens to contain the version text.
 const binarySniff = 8 << 10
 
-// Substitute replaces literal text inside the file at path and writes it back,
+// Replace replaces literal text inside the file at path and writes it back,
 // atomically and only when something actually changed.
 //
-// The substitutions apply in order, each over what the one before it left, so
+// The replacements apply in order, each over what the one before it left, so
 // a later Find may match text an earlier Write put there. That is occasionally
 // what a caller wants and always worth knowing, which is why the order is the
 // caller's to choose rather than sorted here.
@@ -76,23 +76,23 @@ const binarySniff = 8 << 10
 // A file over the package's 16 MiB read cap gives ErrManifestTooLarge, and one
 // that looks binary gives ErrBinaryFile. Both are sentinels, so a caller
 // walking a folder can skip those files and carry on rather than fail.
-func Substitute(path string, subs []Substitution) (SubstituteResult, error) {
-	for i, s := range subs {
+func Replace(path string, reps []Replacement) (ReplaceResult, error) {
+	for i, s := range reps {
 		if s.Find == "" {
-			return SubstituteResult{}, fmt.Errorf("%w (substitution %d)", ErrEmptyFind, i+1)
+			return ReplaceResult{}, fmt.Errorf("%w (replacement %d)", ErrEmptyFind, i+1)
 		}
 	}
 	sp, err := openSplicer(path)
 	if err != nil {
-		return SubstituteResult{}, err
+		return ReplaceResult{}, err
 	}
 	if looksBinary(sp.bytes()) {
-		return SubstituteResult{}, fmt.Errorf("%s: %w", path, ErrBinaryFile)
+		return ReplaceResult{}, fmt.Errorf("%s: %w", path, ErrBinaryFile)
 	}
 
-	out, counts := SubstituteBytes(sp.bytes(), subs)
-	res := SubstituteResult{Path: path}
-	for i, s := range subs {
+	out, counts := ReplaceBytes(sp.bytes(), reps)
+	res := ReplaceResult{Path: path}
+	for i, s := range reps {
 		switch {
 		case counts[i] == 0:
 			res.Missing = append(res.Missing, s)
@@ -107,16 +107,16 @@ func Substitute(path string, subs []Substitution) (SubstituteResult, error) {
 	return res, sp.commit(nil)
 }
 
-// SubstituteBytes applies the substitutions in memory, returning the result
+// ReplaceBytes applies the replacements in memory, returning the result
 // and how many occurrences of each Find the text held when its turn came. A
-// substitution whose Find is empty, or whose Write is the same text, counts
+// replacement whose Find is empty, or whose Write is the same text, counts
 // its occurrences and changes nothing.
 //
-// The input is never modified: a substitution that matches builds a new slice,
+// The input is never modified: a replacement that matches builds a new slice,
 // and one that does not returns what it was given.
-func SubstituteBytes(data []byte, subs []Substitution) ([]byte, []int) {
-	counts := make([]int, len(subs))
-	for i, s := range subs {
+func ReplaceBytes(data []byte, reps []Replacement) ([]byte, []int) {
+	counts := make([]int, len(reps))
+	for i, s := range reps {
 		if s.Find == "" {
 			continue // an empty pattern matches at every position and means nothing
 		}

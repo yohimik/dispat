@@ -396,11 +396,11 @@ func FuzzLink(f *testing.F) {
 	})
 }
 
-// FuzzSubstituteBytes hammers the zero-parsing splicer. It has no grammar to
+// FuzzReplaceBytes hammers the zero-parsing splicer. It has no grammar to
 // protect, so its contract is arithmetic instead: it never panics, it never
 // touches the caller's input, and the result is exactly as long as the
 // occurrences it reported say it should be.
-func FuzzSubstituteBytes(f *testing.F) {
+func FuzzReplaceBytes(f *testing.F) {
 	for _, seed := range []struct{ data, find, write string }{
 		{"acme:1.0.0 acme:1.0.0", "1.0.0", "1.1.0"},
 		{"nothing here", "absent", "x"},
@@ -416,8 +416,8 @@ func FuzzSubstituteBytes(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data, find, write string) {
 		in := []byte(data)
 		kept := string(in)
-		subs := []Substitution{{Find: find, Write: write}}
-		out, counts := SubstituteBytes(in, subs)
+		reps := []Replacement{{Find: find, Write: write}}
+		out, counts := ReplaceBytes(in, reps)
 		if string(in) != kept {
 			t.Fatalf("input mutated:\n in: %q\nnow: %q", kept, in)
 		}

@@ -28,10 +28,10 @@ func readText(t *testing.T, path string) string {
 	return string(data)
 }
 
-// subNames renders a result's substitutions as "find=>write" for comparison.
-func subNames(subs []Substitution) string {
-	parts := make([]string, 0, len(subs))
-	for _, s := range subs {
+// repNames renders a result's replacements as "find=>write" for comparison.
+func repNames(reps []Replacement) string {
+	parts := make([]string, 0, len(reps))
+	for _, s := range reps {
 		parts = append(parts, s.Find+"=>"+s.Write)
 	}
 	return strings.Join(parts, ",")
@@ -39,14 +39,14 @@ func subNames(subs []Substitution) string {
 
 func TestReplaceReplacesEveryOccurrence(t *testing.T) {
 	path := seedText(t, "README.md", "acme-core:1.2.3 and again acme-core:1.2.3\nplus acme-core:1.2.3\n")
-	res, err := Substitute(path, []Substitution{{Find: "acme-core:1.2.3", Write: "acme-core:1.3.0"}})
+	res, err := Replace(path, []Replacement{{Find: "acme-core:1.2.3", Write: "acme-core:1.3.0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Count != 3 {
 		t.Errorf("Count = %d, want 3", res.Count)
 	}
-	if got := subNames(res.Applied); got != "acme-core:1.2.3=>acme-core:1.3.0" {
+	if got := repNames(res.Applied); got != "acme-core:1.2.3=>acme-core:1.3.0" {
 		t.Errorf("Applied = %q", got)
 	}
 	want := "acme-core:1.3.0 and again acme-core:1.3.0\nplus acme-core:1.3.0\n"
@@ -58,11 +58,11 @@ func TestReplaceReplacesEveryOccurrence(t *testing.T) {
 	}
 }
 
-func TestSubstituteAppliesInOrderOverTheLast(t *testing.T) {
-	// The second substitution sees what the first wrote, which is the
+func TestReplaceAppliesInOrderOverTheLast(t *testing.T) {
+	// The second replacement sees what the first wrote, which is the
 	// documented chaining and the reason the caller picks the order.
 	path := seedText(t, "notes.txt", "one\n")
-	res, err := Substitute(path, []Substitution{
+	res, err := Replace(path, []Replacement{
 		{Find: "one", Write: "two"},
 		{Find: "two", Write: "three"},
 	})
@@ -73,13 +73,13 @@ func TestSubstituteAppliesInOrderOverTheLast(t *testing.T) {
 		t.Errorf("file = %q, want %q", got, "three\n")
 	}
 	if len(res.Applied) != 2 {
-		t.Errorf("Applied = %q, want both", subNames(res.Applied))
+		t.Errorf("Applied = %q, want both", repNames(res.Applied))
 	}
 }
 
-func TestSubstituteSplitsMissingSkippedAndApplied(t *testing.T) {
+func TestReplaceSplitsMissingSkippedAndApplied(t *testing.T) {
 	path := seedText(t, "Dockerfile", "FROM acme/base:1.0.0\n")
-	res, err := Substitute(path, []Substitution{
+	res, err := Replace(path, []Replacement{
 		{Find: "acme/base:1.0.0", Write: "acme/base:1.1.0"},
 		{Find: "acme/other:1.0.0", Write: "acme/other:1.1.0"},
 		{Find: "FROM", Write: "FROM"},
@@ -87,13 +87,13 @@ func TestSubstituteSplitsMissingSkippedAndApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := subNames(res.Applied); got != "acme/base:1.0.0=>acme/base:1.1.0" {
+	if got := repNames(res.Applied); got != "acme/base:1.0.0=>acme/base:1.1.0" {
 		t.Errorf("Applied = %q", got)
 	}
-	if got := subNames(res.Missing); got != "acme/other:1.0.0=>acme/other:1.1.0" {
+	if got := repNames(res.Missing); got != "acme/other:1.0.0=>acme/other:1.1.0" {
 		t.Errorf("Missing = %q", got)
 	}
-	if got := subNames(res.Skipped); got != "FROM=>FROM" {
+	if got := repNames(res.Skipped); got != "FROM=>FROM" {
 		t.Errorf("Skipped = %q", got)
 	}
 	if res.Count != 1 {
@@ -101,9 +101,9 @@ func TestSubstituteSplitsMissingSkippedAndApplied(t *testing.T) {
 	}
 }
 
-func TestSubstituteAnEmptyWriteDeletes(t *testing.T) {
+func TestReplaceAnEmptyWriteDeletes(t *testing.T) {
 	path := seedText(t, "list.txt", "keep DROPME keep\n")
-	if _, err := Substitute(path, []Substitution{{Find: " DROPME", Write: ""}}); err != nil {
+	if _, err := Replace(path, []Replacement{{Find: " DROPME", Write: ""}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readText(t, path); got != "keep keep\n" {
@@ -111,13 +111,13 @@ func TestSubstituteAnEmptyWriteDeletes(t *testing.T) {
 	}
 }
 
-func TestSubstituteLeavesAnUnchangedFileAlone(t *testing.T) {
+func TestReplaceLeavesAnUnchangedFileAlone(t *testing.T) {
 	path := seedText(t, "notes.txt", "nothing to do here\n")
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Substitute(path, []Substitution{{Find: "absent", Write: "x"}})
+	res, err := Replace(path, []Replacement{{Find: "absent", Write: "x"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,16 +131,16 @@ func TestSubstituteLeavesAnUnchangedFileAlone(t *testing.T) {
 	// No write at all, so the file keeps its modification time: the atomic
 	// rename would have replaced the inode.
 	if !after.ModTime().Equal(before.ModTime()) {
-		t.Error("a no-op substitution rewrote the file")
+		t.Error("a no-op replacement rewrote the file")
 	}
 }
 
-func TestSubstitutePreservesPermissions(t *testing.T) {
+func TestReplacePreservesPermissions(t *testing.T) {
 	path := seedText(t, "script.sh", "VERSION=1.0.0\n")
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Substitute(path, []Substitution{{Find: "1.0.0", Write: "1.1.0"}}); err != nil {
+	if _, err := Replace(path, []Replacement{{Find: "1.0.0", Write: "1.1.0"}}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
@@ -152,9 +152,9 @@ func TestSubstitutePreservesPermissions(t *testing.T) {
 	}
 }
 
-func TestSubstituteRefusesAnEmptyFind(t *testing.T) {
+func TestReplaceRefusesAnEmptyFind(t *testing.T) {
 	path := seedText(t, "notes.txt", "x\n")
-	_, err := Substitute(path, []Substitution{{Find: "x", Write: "y"}, {Find: "", Write: "z"}})
+	_, err := Replace(path, []Replacement{{Find: "x", Write: "y"}, {Find: "", Write: "z"}})
 	if !errors.Is(err, ErrEmptyFind) {
 		t.Fatalf("got %v, want ErrEmptyFind", err)
 	}
@@ -164,9 +164,9 @@ func TestSubstituteRefusesAnEmptyFind(t *testing.T) {
 	}
 }
 
-func TestSubstituteRefusesABinaryFile(t *testing.T) {
+func TestReplaceRefusesABinaryFile(t *testing.T) {
 	path := seedText(t, "blob.bin", "prefix\x00 1.0.0 suffix")
-	_, err := Substitute(path, []Substitution{{Find: "1.0.0", Write: "1.1.0"}})
+	_, err := Replace(path, []Replacement{{Find: "1.0.0", Write: "1.1.0"}})
 	if !errors.Is(err, ErrBinaryFile) {
 		t.Fatalf("got %v, want ErrBinaryFile", err)
 	}
@@ -175,11 +175,11 @@ func TestSubstituteRefusesABinaryFile(t *testing.T) {
 	}
 }
 
-func TestSubstituteAcceptsANULBeyondTheSniff(t *testing.T) {
+func TestReplaceAcceptsANULBeyondTheSniff(t *testing.T) {
 	// The sniff looks at the head alone, the way git and grep do, so a text
 	// file with one stray byte far into it is still text.
 	path := seedText(t, "long.txt", "1.0.0\n"+strings.Repeat("a", binarySniff)+"\x00")
-	if _, err := Substitute(path, []Substitution{{Find: "1.0.0", Write: "1.1.0"}}); err != nil {
+	if _, err := Replace(path, []Replacement{{Find: "1.0.0", Write: "1.1.0"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readText(t, path); !strings.HasPrefix(got, "1.1.0\n") {
@@ -187,27 +187,27 @@ func TestSubstituteAcceptsANULBeyondTheSniff(t *testing.T) {
 	}
 }
 
-func TestSubstituteRefusesAnOversizedFile(t *testing.T) {
+func TestReplaceRefusesAnOversizedFile(t *testing.T) {
 	path := seedText(t, "huge.txt", "1.0.0\n")
 	if err := os.Truncate(path, maxManifestBytes+1); err != nil {
 		t.Skipf("cannot make a sparse file here: %v", err)
 	}
-	_, err := Substitute(path, []Substitution{{Find: "1.0.0", Write: "1.1.0"}})
+	_, err := Replace(path, []Replacement{{Find: "1.0.0", Write: "1.1.0"}})
 	if !errors.Is(err, ErrManifestTooLarge) {
 		t.Fatalf("got %v, want ErrManifestTooLarge", err)
 	}
 }
 
-func TestSubstituteReportsAMissingFile(t *testing.T) {
-	_, err := Substitute(filepath.Join(t.TempDir(), "absent.txt"), []Substitution{{Find: "a", Write: "b"}})
+func TestReplaceReportsAMissingFile(t *testing.T) {
+	_, err := Replace(filepath.Join(t.TempDir(), "absent.txt"), []Replacement{{Find: "a", Write: "b"}})
 	if err == nil {
 		t.Fatal("a missing file must error")
 	}
 }
 
-func TestSubstituteBytesLeavesTheInputAlone(t *testing.T) {
+func TestReplaceBytesLeavesTheInputAlone(t *testing.T) {
 	in := []byte("1.0.0")
-	out, counts := SubstituteBytes(in, []Substitution{{Find: "1.0.0", Write: "2.0.0"}})
+	out, counts := ReplaceBytes(in, []Replacement{{Find: "1.0.0", Write: "2.0.0"}})
 	if string(in) != "1.0.0" {
 		t.Errorf("input mutated: %q", in)
 	}
@@ -219,11 +219,11 @@ func TestSubstituteBytesLeavesTheInputAlone(t *testing.T) {
 	}
 }
 
-func TestSubstituteBytesIgnoresAnEmptyFind(t *testing.T) {
-	// Direct callers get the same protection Substitute enforces up front: an
+func TestReplaceBytesIgnoresAnEmptyFind(t *testing.T) {
+	// Direct callers get the same protection Replace enforces up front: an
 	// empty pattern matches everywhere, so it does nothing rather than
 	// shredding the input.
-	out, counts := SubstituteBytes([]byte("abc"), []Substitution{{Find: "", Write: "X"}})
+	out, counts := ReplaceBytes([]byte("abc"), []Replacement{{Find: "", Write: "X"}})
 	if string(out) != "abc" || counts[0] != 0 {
 		t.Errorf("out = %q, counts = %v", out, counts)
 	}
