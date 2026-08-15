@@ -901,6 +901,7 @@ The manifest fields traversed as graph edges are a property of the **workspace**
 
 `devDependencies` is excluded: a package that uses another only for its test suite does not need republishing when that
 other package changes, and including such edges would make almost every workspace one large strongly-connected blob.
+The value `"all"` selects every kind, `devDependencies` included, for repositories that accept that trade.
 
 There is deliberately **no per-unit override**. Which dependency fields imply "must be republished" is a fact about how
 the repository builds and ships, not about any individual change, and it does not vary from commit to commit. A per-unit
@@ -2497,7 +2498,7 @@ Defaults are chosen so that an unconfigured repository behaves conservatively an
 | `maxDescriptionLength`      | `100`                                                        | `W120` threshold.                                                                         |
 | `propagation.bump`          | `"patch"`                                                    | Default `Propagate`.                                                                      |
 | `propagation.depth`         | `0`                                                          | Default `Propagate-Depth`. Set to `1` for direct consumers, `"all"` for the full closure. |
-| `propagation.kinds`         | `["dependencies","peerDependencies","optionalDependencies"]` | Manifest fields traversed as propagation edges (§8.4).                                    |
+| `propagation.kinds`         | `["dependencies","peerDependencies","optionalDependencies"]` | Manifest fields traversed as propagation edges (§8.4). `"all"` selects every kind.        |
 | `propagation.channel`       | `"inherit"`                                                  | Default `Propagate-Channel`. Consulted only where channel depth is above `0`.             |
 | `propagation.channelDepth`  | `0`                                                          | Default `Propagate-Channel-Depth` (§8.3a). Set to `1` or `"all"` to carry trains along.   |
 | `propagation.respectRanges` | `false`                                                      | Skip dependents whose declared range still admits the new version (§9.2).                 |

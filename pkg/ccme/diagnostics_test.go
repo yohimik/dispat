@@ -249,17 +249,25 @@ func TestParserLimits(t *testing.T) {
 		}
 	})
 
-	t.Run("defaults are applied and disableable", func(t *testing.T) {
+	t.Run("defaults are applied and the bounds cannot be disabled", func(t *testing.T) {
 		got := DefaultParser().Config().Limits
 		if got.UnitsPerMessage != DefaultUnitsPerMessage ||
 			got.ScopeTermsPerUnit != DefaultScopeTermsPerUnit ||
 			got.MessageBytes != DefaultMessageBytes {
 			t.Errorf("default limits = %+v", got)
 		}
-		off := MustNewParser(Config{Limits: Limits{MessageBytes: -1, UnitsPerMessage: -1}})
+		// §14.1: the parser bounds may be raised or lowered, never disabled.
+		for _, bad := range []Limits{
+			{MessageBytes: -1}, {UnitsPerMessage: -1}, {ScopeTermsPerUnit: -1},
+		} {
+			if _, err := NewParser(Config{Limits: bad}); err == nil {
+				t.Errorf("NewParser accepted a negative limit %+v", bad)
+			}
+		}
+		raised := MustNewParser(Config{Limits: Limits{UnitsPerMessage: 500}})
 		big := strings.Repeat("feat(core): a\n\n---\n\n", 200) + "fix(core): b"
-		if _, err := off.Parse(big); err != nil {
-			t.Errorf("negative limits should disable the bound: %v", err)
+		if _, err := raised.Parse(big); err != nil {
+			t.Errorf("a raised limit should admit the message: %v", err)
 		}
 	})
 }
@@ -310,7 +318,7 @@ func TestSilentFailureWarningsCannotBeSuppressed(t *testing.T) {
 		Types:                map[string]Bump{},
 		MessageLevelTrailers: []string{"BREAKING CHANGE", "BREAKING-CHANGE", "Breaking change"},
 		IssueTrailers:        []string{"BREAKING CHANGE", "Breaking change"},
-		Limits:               Limits{UnitsPerMessage: -1, ScopeTermsPerUnit: -1, MessageBytes: -1},
+		Limits:               Limits{UnitsPerMessage: 1 << 20, ScopeTermsPerUnit: 1 << 20, MessageBytes: 1 << 30},
 	}
 	for _, cfg := range []Config{{}, permissive} {
 		p := MustNewParser(cfg)

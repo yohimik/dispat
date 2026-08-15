@@ -485,6 +485,10 @@ func TestConfigAccessors(t *testing.T) {
 	if err := bad.withDefaults().Validate(); err == nil {
 		t.Error("Validate() accepted a separator starting with a type character")
 	}
+	badDepth := Config{Propagation: PropagationConfig{ChannelDepth: Depth(-5)}}
+	if err := badDepth.withDefaults().Validate(); err == nil {
+		t.Error("Validate() accepted a negative propagation.channelDepth")
+	}
 
 	// The default helpers hand out fresh copies.
 	a, b := DefaultTypes(), DefaultTypes()

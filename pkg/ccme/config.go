@@ -107,8 +107,9 @@ const (
 // Limits are the parser bounds of §14.1. Exceeding any of them is E158, which
 // is message-scoped: the commit contributes nothing.
 //
-// The zero value of each field selects the default. A negative value disables
-// that bound, which is only appropriate for trusted input.
+// The zero value of each field selects the default. The bounds cannot be
+// disabled: a commit message is untrusted input (§18.3), so a negative value
+// is rejected by Validate. Raise the numbers instead.
 type Limits struct {
 	// UnitsPerMessage caps the number of units in one message. Zero value: 64.
 	UnitsPerMessage int
@@ -313,6 +314,9 @@ func (c Config) Validate() error {
 	if c.Propagation.Depth < 0 && c.Propagation.Depth != DepthAll {
 		return fmt.Errorf("ccme: config: invalid propagation.depth %d", int(c.Propagation.Depth))
 	}
+	if c.Propagation.ChannelDepth < 0 && c.Propagation.ChannelDepth != DepthAll {
+		return fmt.Errorf("ccme: config: invalid propagation.channelDepth %d", int(c.Propagation.ChannelDepth))
+	}
 	for _, kind := range c.Propagation.Kinds {
 		if _, ok := ParseDependencyKind(string(kind)); !ok {
 			return fmt.Errorf("ccme: config: invalid propagation.kind %q", string(kind))
@@ -327,6 +331,16 @@ func (c Config) Validate() error {
 		if err := validateChannelName(ch); err != nil {
 			return fmt.Errorf("ccme: config: channels.allowed: %w", err)
 		}
+	}
+	// §14.1: the parser bounds cannot be disabled, only raised or lowered.
+	if c.Limits.UnitsPerMessage < 0 {
+		return fmt.Errorf("ccme: config: limits.unitsPerMessage %d: the parser bounds cannot be disabled", c.Limits.UnitsPerMessage)
+	}
+	if c.Limits.ScopeTermsPerUnit < 0 {
+		return fmt.Errorf("ccme: config: limits.scopeTermsPerUnit %d: the parser bounds cannot be disabled", c.Limits.ScopeTermsPerUnit)
+	}
+	if c.Limits.MessageBytes < 0 {
+		return fmt.Errorf("ccme: config: limits.messageBytes %d: the parser bounds cannot be disabled", c.Limits.MessageBytes)
 	}
 	return nil
 }
