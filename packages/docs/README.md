@@ -28,9 +28,9 @@ the workspace root by itself.
 ## The build is the link checker
 
 `docusaurus.config.ts` sets `onBrokenLinks`, `onBrokenAnchors` and `onBrokenMarkdownLinks` to `throw`: every relative
-link and every `#anchor` is resolved at build time, so a dead one fails the build instead of shipping.
-[`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) runs that build on every pull request touching this
-folder, and does nothing else: deployment belongs to the release run.
+link and every `#anchor` is resolved at build time, so a dead one fails the build instead of shipping. The build job of
+[`.github/workflows/tests.yml`](../../.github/workflows/tests.yml) runs that build for every change that reaches this
+package, and does nothing else: deployment belongs to the release run.
 
 `baseUrl` is `/dispat/`, and Docusaurus mounts its router **without** a `basename`: routes are registered with the base
 URL already in them. Internal links in a `.tsx` page must therefore go through `@docusaurus/Link` or `useBaseUrl`, never
