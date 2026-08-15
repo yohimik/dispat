@@ -46,7 +46,7 @@ $ dispat scanner packages/core      # what that folder's manifests declare; no c
 $ dispat writer packages/core/package.json --set @acme/utils=^2.0.0   # one format-preserving edit
 $ dispat autowriter --set @acme/utils='^{version}' --since all       # ...the same edit in every package
 $ dispat autowriter --set-local --since all                          # ...or every workspace range, worked out
-$ dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle   # literal text, no parsing
+$ dispat replacer --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle   # literal text, no parsing
 $ dispat run build --since all -p core   # try the build script in packages/core with the real DISPAT_* env
 $ dispat release -g platform        # release one versioning group; -s libs releases one space
 $ dispat lint                       # run a script in every changed package that has it, in graph order

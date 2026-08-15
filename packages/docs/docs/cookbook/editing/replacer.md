@@ -41,7 +41,7 @@ Three things are worth knowing before you use it in anger.
 **Every occurrence is replaced, not just the first.** A version usually appears in a file more than once, and
 replacing one of them would leave the file disagreeing with itself.
 
-**Substitutions apply in the order you wrote them, each over what the one before it left.** So this really does end at
+**Replacements apply in the order you wrote them, each over what the one before it left.** So this really does end at
 `2.0.0`:
 
 ```console

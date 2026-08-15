@@ -10,9 +10,9 @@ import (
 )
 
 // The build-counter writers. The version rewriters deliberately never touch a
-// build counter — it is a monotonic count, not a semantic version, and the
-// two move for different reasons — so writing one is its own entry point
-// rather than a flag on Rewrite. The formats are the ones whose counter the
+// build counter (a monotonic count is not a semantic version, and the two
+// move for different reasons), so writing one is its own entry point rather
+// than a flag on Rewrite. The formats are the ones whose counter the
 // scanner reads: CFBundleVersion, android:versionCode,
 // CURRENT_PROJECT_VERSION, Gradle's versionCode, and the + suffix a pubspec
 // version carries.

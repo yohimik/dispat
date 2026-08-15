@@ -34,12 +34,14 @@
 // than semantic versions, and the two move for different reasons. Writing one
 // is its own decision, and SetBuild is that decision's entry point.
 //
-// Relink is the other half of the package. Where Rewrite changes the version
+// Relink is the link half of the package. Where Rewrite changes the version
 // text a manifest declares, Relink manages the directive that points a
 // dependency at a local folder, the way a go.mod replace does. Five formats
-// have such a directive; SupportsLink reports which.
+// have such a directive; SupportsLink reports which, Links enumerates the
+// directives a file already carries, and DropLinks removes them all without
+// being told their names.
 //
-// Underneath both sits one splicer. Every format writer reads its file
+// Underneath everything sits one splicer. Every format writer reads its file
 // through it and writes its file through it, so the read cap, the splice, the
 // proof that the result still parses and the atomic write happen in one place
 // for all of them. Replace is that same machinery with the format knowledge

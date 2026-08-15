@@ -168,7 +168,7 @@ reports each link in `Skipped`.
 
 `Links` is the other direction: it enumerates the directives a file already carries, across every place the five
 formats keep one, so a CI gate can prove no local link survived a build without knowing any names in advance.
-`DropLinks` is `Links` followed by the matching removals — the shape of an "unlink whatever the build linked" step.
+`DropLinks` is `Links` followed by the matching removals: the shape of an "unlink whatever the build linked" step.
 
 ```go
 links, err := writer.Links("services/svc/go.mod")   // what the file redirects today
@@ -202,7 +202,7 @@ equivalent, so a project not using uv gains a table its tooling will ignore.
 ## Writing the build counter
 
 The version rewriters never touch a build counter: it is a monotonic count rather than a semantic version, and the two
-move for different reasons. `SetBuild` is the separate write that moves it, in the five places a format keeps one —
+move for different reasons. `SetBuild` is the separate write that moves it, in the five places a format keeps one:
 `CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION` (every build configuration, like the marketing
 version), Gradle's `versionCode`, and the `+` suffix a pubspec version carries.
 
