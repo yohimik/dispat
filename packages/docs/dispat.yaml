@@ -6,13 +6,33 @@ dependencies:
   - provider: dispat
     keep: true
 scripts:
-  # A stage gate whose only input is an environment variable. Written here
-  # rather than inside the script it guards, so the condition that decides
-  # whether a stage does anything is visible where the stage is.
-  deploy-docs: >-
-    dispat if 'CI!=true'
-    --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
-    --else 'sh ../../scripts/deploy-docs.sh'
+  # Publish stage: force-push the built site to an orphan gh-pages branch.
+  #
+  # A publish stage is a shell command, not a GitHub Action, so the official
+  # actions/deploy-pages route is unavailable. Pushing a branch is the same
+  # mechanism the coverage badge uses (the push-badge script at the root), and
+  # it needs nothing beyond the contents:write and GITHUB_TOKEN that
+  # release.yml already grants.
+  #
+  # The tag is the record that this leg committed, so a deploy must only ever
+  # happen inside the release run: without the `dispat if` guard on the first
+  # line, `dispat run deploy-docs` would publish a developer's working tree to
+  # the live site. The .nojekyll stops GitHub Pages running Jekyll over the
+  # branch, which would drop any path segment starting with an underscore.
+  deploy-docs: |
+    set -eu
+    dispat if 'CI!=true' --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
+    : "${GITHUB_TOKEN:?GITHUB_TOKEN is required to push gh-pages}"
+    : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required to push gh-pages}"
+    touch build/.nojekyll
+    cd build
+    git init -q -b gh-pages
+    git config user.name "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+    git add -A
+    git commit -qm "docs: deploy ${DISPAT_NEW_VERSION}"
+    git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+    echo "deployed ${DISPAT_NEW_VERSION} to gh-pages"
   # The site, and the version snapshot that goes in it, from one build.
   #
   # `docs` and `dispat` share the `cli` version group, so they release

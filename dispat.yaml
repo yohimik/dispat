@@ -16,10 +16,49 @@ scripts:
   # is a number about, which is why the release workflow is their one caller.
   coverage-badge: sh scripts/coverage-badge.sh
   test-report: go run github.com/yohimik/dispat/tools/testreport build -commit "$GITHUB_SHA"
-  push-badge: >-
-    dispat if 'CI!=true'
-    --then 'echo "refusing to push the badge outside CI (set CI=true to override)" >&2; exit 1'
-    --else 'sh scripts/push-badge.sh'
+
+  # Publish the coverage badge: force-push coverage/coverage.json to an orphan
+  # badges branch, a single commit with no history, the same mechanism
+  # deploy-docs uses for the site. README reads the file through the shields.io
+  # endpoint URL. The `dispat if` guard keeps it inside CI: a release run is
+  # the only context in which the push is a record rather than an accident.
+  push-badge: |
+    set -eu
+    dispat if 'CI!=true' --then 'echo "refusing to push the badge outside CI (set CI=true to override)" >&2; exit 1'
+    : "${GITHUB_TOKEN:?GITHUB_TOKEN is required to push the badges branch}"
+    : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required to push the badges branch}"
+    rm -rf badge && mkdir badge && cp coverage/coverage.json badge/
+    cd badge
+    git init -q -b badges
+    git config user.name "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+    git add coverage.json
+    git commit -qm "chore: update coverage badge"
+    git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+    echo "pushed the coverage badge to the badges branch"
+
+  # Build the CI bootstrap driver bin/dispat (linux/amd64) inside Docker, so a
+  # Go toolchain on the runner stays a concern of the jobs that test Go. Run
+  # and commit the result whenever the config or the workflows start using a
+  # driver feature newer than the committed binary; a stale driver fails
+  # loudly (an unknown config key or flag), never silently.
+  #
+  # TEMPORARY until 1.0.0: once a stable release exists, the workflows install
+  # dispat through the composite action instead, and bin/dispat and this
+  # script are deleted.
+  #
+  # The whole repository is the build context so go.work is in effect and the
+  # pkg/* modules resolve from the tree. Keep the image in sync with
+  # GO_VERSION in services/dispat/Dockerfile. Built to a temporary name and
+  # renamed because the dispat driving this script may be bin/dispat itself,
+  # and overwriting a running binary in place fails with ETXTBSY on Linux;
+  # a rename swaps the directory entry and leaves the running inode alone.
+  refresh-bootstrap:
+    - >-
+      docker run --rm -v "$PWD":/src -w /src golang:1.26
+      env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-buildvcs=false
+      go build -C services/dispat -o /src/bin/dispat.new .
+    - mv bin/dispat.new bin/dispat
 
   # postAll fires for every release, including one run by hand. Outside Actions
   # there is no $GITHUB_OUTPUT to write, and a guard that finds nothing to do

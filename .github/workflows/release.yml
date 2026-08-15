@@ -41,7 +41,7 @@ jobs:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
       # TEMPORARY BOOTSTRAP until 1.0.0: bin/dispat is the committed driver,
-      # refreshed by scripts/refresh-bootstrap.sh, so this gate needs no Go
+      # refreshed by `dispat exec refresh-bootstrap`, so this gate needs no Go
       # toolchain at all. Once a stable release exists this step becomes
       # `uses: ./` and bin/dispat is deleted.
       - name: Put the bootstrap dispat on PATH
@@ -207,18 +207,19 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      - name: Put the bootstrap dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+
       # This job alone rebuilds the driver from the checkout: it is about to
       # write the changelogs, the release commit and the tags of the version
       # being shipped, and a committed driver lagging the checkout would
-      # silently skip configuration the new version defines. The same
-      # containerised build the bootstrap refresh uses, overwriting bin/dispat
-      # in the workspace only — at 1.0.0 this becomes the composite action
-      # installing the previous published release.
-      - name: Build a fresh driver from the checkout
-        run: sh scripts/refresh-bootstrap.sh
-
-      - name: Put the fresh dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+      # silently skip configuration the new version defines. The committed
+      # driver runs the containerised rebuild of its own file (the script
+      # renames over it, so the running binary is undisturbed) — at 1.0.0
+      # this becomes the composite action installing the previous published
+      # release.
+      - name: Rebuild the driver from the checkout
+        run: dispat exec refresh-bootstrap
 
       # The test report from the job that gated this one, put where the docs
       # package's build expects it. Deliberately not tolerant of a missing

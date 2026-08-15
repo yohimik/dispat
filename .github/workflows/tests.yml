@@ -96,7 +96,7 @@ jobs:
           cache: true
 
       # TEMPORARY BOOTSTRAP until 1.0.0: bin/dispat is the committed driver,
-      # refreshed by scripts/refresh-bootstrap.sh, so no job builds the driver
+      # refreshed by `dispat exec refresh-bootstrap`, so no job builds the driver
       # it is driven by. Once a stable release exists this step becomes
       # `uses: ./` and bin/dispat is deleted. The driver is only the driver:
       # the suite below builds and tests the checkout's own dispat regardless.

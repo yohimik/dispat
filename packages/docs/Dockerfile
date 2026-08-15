@@ -2,7 +2,8 @@
 #
 # The documentation site's build stage, containerised: the static site, built
 # from this checkout and exported to the host as packages/docs/build, which is
-# where the publish stage (scripts/deploy-docs.sh) expects to find it.
+# where the publish stage (the deploy-docs script in dispat.yaml beside this
+# file) expects to find it.
 #
 # The build is also the link checker — docusaurus.config.ts sets onBrokenLinks,
 # onBrokenAnchors and onBrokenMarkdownLinks to 'throw' — and the `typecheck`

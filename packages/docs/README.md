@@ -111,7 +111,7 @@ rebuilt after the CLI it documents:
 | Stage     | Script                                                   | What it does                                                                             |
 |-----------|----------------------------------------------------------|------------------------------------------------------------------------------------------|
 | `build`   | the `build` script in [`dispat.yaml`](./dispat.yaml)     | The containerised production build via [`Dockerfile`](./Dockerfile), exported back into the package folder. On the way it freezes a `versioned_docs` snapshot, once per **stable minor** (the `DOCS_VERSION` build arg; prereleases cut nothing). |
-| `publish` | [`scripts/deploy-docs.sh`](../../scripts/deploy-docs.sh) | Force-pushes `build/` to an orphan `gh-pages` branch. Refuses to run outside CI.         |
+| `publish` | the `deploy-docs` script in [`dispat.yaml`](./dispat.yaml) | Force-pushes `build/` to an orphan `gh-pages` branch. Refuses to run outside CI.         |
 
 Tags are `packages/docs/v<version>`. `versioned_docs/`, `versioned_sidebars/` and `versions.json` are **source**, not
 build output: a script writes them once and they are edited by hand afterwards, so they are tracked (see

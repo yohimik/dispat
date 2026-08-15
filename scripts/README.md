@@ -1,23 +1,22 @@
 # Release scripts
 
-The shell scripts behind this repository's own release stages and CI checks. They are referenced by name from
-`scripts` entries in the dispat configuration, which since the split lives beside the code it configures: the root
-[`dispat.yaml`](../dispat.yaml) holds what every space shares, each space carries a `<space>/dispat.yaml`, and the two
-packages with exceptions of their own carry [`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml) and
-[`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml). Package scripts run **inside the releasing package's
-folder**, which is why those reach the repository root as `../../`; root scripts run at the repository root.
+The shell scripts behind this repository's release stages and CI checks that carry enough logic to deserve a file of
+their own. Anything smaller lives directly in the dispat configuration as a script entry: `push-badge` and
+`refresh-bootstrap` in the root [`dispat.yaml`](../dispat.yaml), `deploy-docs` in
+[`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), and the link bracket in
+[`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml). Since the config split, each script entry sits beside
+the code it configures: the root file holds what every space shares, each space carries a `<space>/dispat.yaml`, and
+the two packages with exceptions of their own carry a package file. Package scripts run **inside the releasing
+package's folder**, which is why paths here are reached as `../../`; root scripts run at the repository root.
 Everything they need arrives in the environment: the
 [`DISPAT_*` variables](https://yohimik.github.io/dispat/reference/environment) a stage is given, plus whatever CI
 exports.
 
-| Script                                         | Called from                                | Reads                                                           | Produces |
-|------------------------------------------------|--------------------------------------------|-----------------------------------------------------------------|----------|
-| [`deploy-docs.sh`](./deploy-docs.sh)           | `deploy-docs` in `packages/docs/dispat.yaml` (`publish` slot) | `CI`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `DISPAT_NEW_VERSION` | A force-pushed orphan `gh-pages` branch carrying `packages/docs/build`. |
-| [`push-badge.sh`](./push-badge.sh)             | `push-badge` in the root `dispat.yaml`     | `CI`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`                       | A force-pushed orphan `badges` branch carrying `coverage.json`, which the README badge reads through the shields.io endpoint URL. |
-| [`coverage-badge.sh`](./coverage-badge.sh)     | `coverage-badge` in the root `dispat.yaml` | `coverage/*.out`, `GITHUB_STEP_SUMMARY`                         | The merged coverage profiles and the badge JSON in `coverage/`. |
-| [`go-test.sh`](./go-test.sh)                   | every Go `tests` script                    | its arguments                                                   | The test run itself, plus `coverage/testlog/<name>.json` for the report. |
-| [`check-action.sh`](./check-action.sh)         | the Action workflow and the release's post-release job | its arguments                                       | Assertions that the composite action installed what it promised. |
-| [`refresh-bootstrap.sh`](./refresh-bootstrap.sh) | by hand, and the release job's fresh-driver step | Docker                                              | `bin/dispat`, the committed linux/amd64 CI bootstrap driver. Temporary until 1.0.0. |
+| Script                                     | Called from                                            | Reads                                   | Produces |
+|--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
+| [`coverage-badge.sh`](./coverage-badge.sh) | `coverage-badge` in the root `dispat.yaml`             | `coverage/*.out`, `GITHUB_STEP_SUMMARY` | The merged coverage profiles and the badge JSON in `coverage/`. |
+| [`go-test.sh`](./go-test.sh)               | every Go `tests` script                                | its arguments                           | The test run itself, plus `coverage/testlog/<name>.json` for the report. |
+| [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
 
 There is no build script here, and no docs-version script either, on purpose. The builds happen inside Docker: the
 CLI's six release binaries come out of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile) (see the `build`
@@ -25,8 +24,9 @@ script in `services/dispat/dispat.yaml`, which brackets the build with `dispat a
 `--unlink-local` so the binaries carry this checkout rather than the `pkg/*` versions `go.mod` pins), the site and its
 per-minor version snapshot come out of the docs package's Dockerfile (the `DOCS_VERSION` build arg decides whether a
 snapshot is cut, and an empty one, which is what a prerelease gets, cuts nothing), and the images are
-[`docker compose` builds](../docker/README.md) driven from `docker/dispat.yaml`. Nothing is left for a host shell to
-decide.
+[`docker compose` builds](../docker/README.md) driven from `docker/dispat.yaml`. The CI bootstrap driver `bin/dispat`
+is built inside Docker too, by `dispat exec refresh-bootstrap` (temporary until 1.0.0). Nothing is left for a host
+shell to decide.
 
 Do not run `go work sync` or `go mod tidy` while the link bracket is in place: both delete the `go.sum` entries a
 local redirect makes redundant, and unlinking needs them back. That is what `--sync-lock=false` is for, and the `lint`
@@ -74,7 +74,7 @@ dispat run build --since all -p docs       # the containerised site build
 dispat run build --since all -s docker     # docker compose build, all four images, pushing nothing
 ```
 
-The two pushing scripts are the exception: **do not run `deploy-docs.sh` or `push-badge.sh`**, by hand or through
+The two pushing scripts, `deploy-docs` and `push-badge`, are the exception: **do not run them**, by hand or through
 dispat. Each publishes to the live repository (the site, the badge), and the release run is the only context in which
 that is a record rather than an accident, so both refuse unless `CI=true`.
 
