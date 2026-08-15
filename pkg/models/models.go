@@ -496,6 +496,9 @@ func (c *CommitConfig) VerifyEnabled() bool { return c == nil || c.Verify == nil
 // release it too, at the shared version, with a single "no changes" changelog
 // entry explaining the bump; the *Sparse modes leave it at its previous
 // version until it next changes, at which point it joins the shared part.
+//
+// VersioningNone sits outside both axes: its packages are excluded from
+// releasing entirely and exist to run scripts.
 const (
 	// VersioningIndependent is the default: every package's version is
 	// computed from its own history alone.
@@ -527,6 +530,11 @@ const (
 	// a package with no changes of its own keeps its previous version instead
 	// of riding along.
 	VersioningFixedMajorSparse = "fixedMajorSparse"
+	// VersioningNone keeps the space's packages outside the release flow
+	// entirely: they are never versioned, tagged, changelogged or published.
+	// They exist to run scripts, and may depend on releasable packages, while
+	// a releasable package must not depend on them.
+	VersioningNone = "none"
 )
 
 // VersionGroupConfig declares one entry of the top-level `versionGroups`

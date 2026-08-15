@@ -74,13 +74,15 @@ const (
 	VersioningFixedMajorMinorSparse = public.VersioningFixedMajorMinorSparse
 	VersioningFixedMajor            = public.VersioningFixedMajor
 	VersioningFixedMajorSparse      = public.VersioningFixedMajorSparse
+	VersioningNone                  = public.VersioningNone
 )
 
 // versioningNames lists every accepted versioning value in the order error
 // messages spell them: the default first, then the shared modes from the most
-// shared to the least. It is the single list normalizeVersioning matches
-// against and every "want ..." message is rendered from, so a mode can never
-// be accepted by one and omitted by the other.
+// shared to the least, then none, which shares nothing and releases nothing.
+// It is the single list normalizeVersioning matches against and every
+// "want ..." message is rendered from, so a mode can never be accepted by one
+// and omitted by the other.
 var versioningNames = []string{
 	VersioningIndependent,
 	VersioningFixed,
@@ -89,6 +91,7 @@ var versioningNames = []string{
 	VersioningFixedMajorMinorSparse,
 	VersioningFixedMajor,
 	VersioningFixedMajorSparse,
+	VersioningNone,
 }
 
 // sharedVersioningNames lists the modes a versionGroups declaration accepts:

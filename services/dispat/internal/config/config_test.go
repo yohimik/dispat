@@ -960,6 +960,9 @@ func TestLoadVersioning(t *testing.T) {
 		"fixedmajorminor":       VersioningFixedMajorMinor,
 		"fixedMajorMinorSparse": VersioningFixedMajorMinorSparse,
 		"fixedmajorminorsparse": VersioningFixedMajorMinorSparse,
+		"none":                  VersioningNone,
+		"None":                  VersioningNone,
+		"NONE":                  VersioningNone,
 	} {
 		cfg, err := load(t, raw)
 		require.NoError(t, err, "versioning %q", raw)
@@ -988,7 +991,12 @@ func TestVersioningNamesCoverTheModel(t *testing.T) {
 		VersioningFixed, VersioningFixedSparse,
 		VersioningFixedMajorMinor, VersioningFixedMajorMinorSparse,
 		VersioningFixedMajor, VersioningFixedMajorSparse,
-	}, sharedVersioningNames(), "the shared list is the full one without independent")
+	}, sharedVersioningNames(), "the shared list is the full one without independent and none")
+	for _, name := range versioningNames {
+		releasable := model.Versioning(name).Releasable()
+		assert.Equal(t, name != VersioningNone, releasable,
+			"only none is excluded from the release flow, got Releasable()=%v for %q", releasable, name)
+	}
 }
 
 func TestQuotedNames(t *testing.T) {

@@ -413,6 +413,36 @@ func TestVersionGroupPartialModes(t *testing.T) {
 	assert.Equal(t, model.VersioningFixedMajorMinorSparse, byName["app"].Space.Versioning)
 }
 
+// TestVersioningNoneGroups: none shares nothing, so it cannot declare a
+// group, cannot be joined as one, and cannot sit next to a versionGroup
+// reference on the same layer.
+func TestVersioningNoneGroups(t *testing.T) {
+	cfg := validConfig()
+	cfg.VersionGroups = map[string]VersionGroupConfig{"core-group": {Versioning: VersioningNone}}
+	_, err := loadModel(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "a group exists to share versions")
+
+	cfg = validConfig()
+	apps := cfg.Spaces["apps"]
+	apps.Versioning = VersioningNone
+	cfg.Spaces["apps"] = apps
+	withLibs(&cfg, func(s *SpaceConfig) { s.VersionGroup = "apps" })
+	_, err = loadModel(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `does not version as a group (its versioning is "none")`)
+
+	cfg = validConfig()
+	cfg.VersionGroups = map[string]VersionGroupConfig{"core-group": {Versioning: VersioningFixed}}
+	withLibs(&cfg, func(s *SpaceConfig) {
+		s.Versioning = VersioningNone
+		s.VersionGroup = "core-group"
+	})
+	_, err = loadModel(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "versioning and versionGroup are mutually exclusive")
+}
+
 // TestVersionGroupSpaceReference: versionGroup on a space joins a declared
 // group (adopting its mode) or another shared space's implicit group; the
 // unknown and the independent references fail at load.

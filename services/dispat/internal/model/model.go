@@ -47,6 +47,11 @@ const (
 	// VersioningFixedMajor, but a package with no changes of its own keeps its
 	// previous version instead of riding along.
 	VersioningFixedMajorSparse Versioning = "fixedMajorSparse"
+	// VersioningNone keeps the space's packages outside the release flow
+	// entirely: they are never versioned, tagged, changelogged or published.
+	// They exist to run scripts, and may depend on releasable packages, while
+	// a releasable package must not depend on them.
+	VersioningNone Versioning = "none"
 )
 
 // SharedVersioningDepth is the depth at which a group shares the whole
@@ -91,6 +96,11 @@ func (v Versioning) Sparse() bool {
 // which is exactly the modes that hold some leading part of the version in
 // common.
 func (v Versioning) Shared() bool { return v.SharedDepth() > 0 }
+
+// Releasable reports whether the mode's packages take part in the release
+// flow at all. Only VersioningNone says no: its packages exist to run
+// scripts and are never versioned, tagged or published.
+func (v Versioning) Releasable() bool { return v != VersioningNone }
 
 // Space groups packages that share build and publish behaviour. A package
 // whose configuration overrides its space's carries its own Space value — a
