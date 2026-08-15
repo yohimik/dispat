@@ -66,6 +66,15 @@ func linkNpm(path string, links []Link) (LinkResult, error) {
 			return res, fmt.Errorf("%s: %w", path, err)
 		}
 		field := npmOverrideField(doc)
+		if r.Path == "" {
+			// A removal aims at the directive wherever a hand-edited file
+			// keeps it, not at the field a write would choose: the verify
+			// below proves the name gone from every field, so removing it
+			// from only the chosen one could never commit.
+			if holder, ok := npmFieldHolding(doc, r.Name); ok {
+				field = holder
+			}
+		}
 		next, applied, err := npmApplyLink(data, field, r)
 		if err != nil {
 			return res, fmt.Errorf("%s: %w", path, err)
@@ -120,6 +129,27 @@ func npmApplyLink(data []byte, field []string, r Link) ([]byte, bool, error) {
 		out = append(out, want...)
 		return append(out, data[entry.value.end:]...), true, nil
 	}
+}
+
+// npmFieldHolding finds the override field that declares the name, in the
+// same order the lister reads them.
+func npmFieldHolding(doc map[string]any, name string) ([]string, bool) {
+	for _, field := range npmOverrideFields {
+		obj := doc
+		for _, key := range field {
+			obj, _ = obj[key].(map[string]any)
+			if obj == nil {
+				break
+			}
+		}
+		if obj == nil {
+			continue
+		}
+		if _, ok := obj[name]; ok {
+			return field, true
+		}
+	}
+	return nil, false
 }
 
 // npmCreateField writes the override map itself, and the pnpm object around it

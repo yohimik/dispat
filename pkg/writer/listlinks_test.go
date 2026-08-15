@@ -169,6 +169,36 @@ func TestLinksReadsEveryNpmOverrideField(t *testing.T) {
 	}
 }
 
+func TestDropLinksClearsEveryNpmField(t *testing.T) {
+	// A hand-edited file can hold redirects in two override fields at once.
+	// A removal aims at the directive wherever it lives, so one sweep clears
+	// the file and the version pin, which is not a redirect, survives.
+	src := `{
+  "name": "@acme/web",
+  "resolutions": { "left-pad": "file:../left-pad" },
+  "overrides": { "core": "link:../core", "pinned": "^1.2.3" }
+}`
+	path := seed(t, "package.json", src)
+	res, err := DropLinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 2 || len(res.Missing) != 0 {
+		t.Fatalf("DropLinks = %+v, want both redirects applied and none missing", res)
+	}
+	got := read(t, path)
+	if strings.Contains(got, "file:") || strings.Contains(got, "link:") {
+		t.Errorf("a redirect survived the sweep:\n%s", got)
+	}
+	if !strings.Contains(got, `"pinned": "^1.2.3"`) {
+		t.Errorf("the version pin is not a redirect and must survive:\n%s", got)
+	}
+	after, err := Links(path)
+	if err != nil || len(after) != 0 {
+		t.Errorf("Links after the sweep = %+v, %v", after, err)
+	}
+}
+
 func TestLinksOnFilesWithoutAny(t *testing.T) {
 	// A linkable manifest with no directive, and a recognised format that
 	// cannot hold one: both report empty without an error, and a drop leaves
