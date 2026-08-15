@@ -38,12 +38,10 @@ jobs:
       - name: Put the bootstrap dispat on PATH
         run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
+      # The negated grep fails the step exactly when gofmt lists a file, and
+      # the list itself is the message.
       - name: gofmt
-        run: |
-          out=$(gofmt -l .)
-          if [ -n "$out" ]; then
-            echo "gofmt needs to run on:"; echo "$out"; exit 1
-          fi
+        run: "! gofmt -l . | grep ."
 
       # One name swept across the monorepo instead of a module list to keep in
       # step by hand: each Go space defines what `vet` means for its packages,
@@ -66,13 +64,14 @@ jobs:
       # verify-unlinked script checks both before its build reports success;
       # this is the same pair asked of every commit, because either one only
       # fails for whoever consumes the published module, long after the tag
-      # exists.
+      # exists. From the repository root the scanner reads every module's
+      # replace directives the way go.mod means them (a parenthesised block
+      # included) instead of grepping for one spelling. The go.sum half stays
+      # a grep until the scanner grows a sum gate: `go work sync` pruning an
+      # entry is a toolchain fact no manifest scan can see today.
       - name: No local link survived a build
         run: |
-          if git grep -n '^replace github.com/yohimik/dispat' -- '*/go.mod'; then
-            echo "an intra-repo link is committed; --link-local must not outlive a build"
-            exit 1
-          fi
+          dispat scanner --verify-unlinked
           for m in ccme manifest models scanner writer; do
             if ! grep -q "^github.com/yohimik/dispat/pkg/$m " services/dispat/go.sum; then
               echo "services/dispat/go.sum lost its entry for pkg/$m; a go work sync pruned it"
