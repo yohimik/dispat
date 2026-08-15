@@ -8,8 +8,8 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Thirty-one goals across thirty-two test files, one file each except goal 21, which the two shell helpers split between
-`if_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
+Thirty-three goals across thirty-four test files, one file each except goal 21, which the two shell helpers split
+between `if_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
 in, so a reader looking for "how does a plan get computed" or "which command does what" lands in one place.
 
 ### Planning and versioning
@@ -170,6 +170,23 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     correction undoes it. `Reverts` closes the file: it takes a reverted entry and its revert out of the changelog
     while both still count toward the bump.
 
+### Composing the configuration, and choosing what records
+
+32. **References naming several files** (`multiref_test.go`): a `$ref` may name a list of files, read in order and
+    merged — objects key by key with the later file winning, lists end to end. What a split configuration must keep:
+    every fragment on the traced record, environment variable case through the merge, the keys beside the reference
+    outranking every file it named, and record lines from two fragments arriving as one list in order. The refusals
+    are configuration errors, so they stop the run before a tag, a commit or a script: no files at all, a name that is
+    not a file, files holding different kinds, a missing file, and a cycle closed by any of them. `compute --write`
+    refuses a key merged from several files rather than choosing one to write to.
+33. **The channels a record reaches** (`channels_test.go`): `changelog.channels` and `github.channels` choose which
+    releases are recorded at all — the stable line, one named prerelease channel, or every prerelease — while the
+    releases themselves are still planned, tagged and published. A line inside an entry carries its own `channels`, so
+    one footer says one thing on the betas and another on the stable release, with the sections between them
+    unfiltered. The claims that keep it honest: a line's channels combine with its package filters, two policies
+    differing only in a line's channels do not share a releaser, the skip is an info event naming the channel, and
+    `dispat preview --changelog/--github` shows each body under its own entry format before anything is released.
+
 ### Where areas deliberately meet
 
 Five subjects are asserted from more than one goal, on purpose, because a property and the feature that carries it
@@ -290,6 +307,10 @@ tests/integration/
 
   correcting the record
   corrections_test.go       goal 31
+
+  composing the configuration, and choosing what records
+  multiref_test.go          goal 32
+  channels_test.go          goal 33
 
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
@@ -568,7 +589,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRecordsChangelogDisabled`                                    | `changelog.enabled=false` switches the file recorder off without touching anything else: the release still publishes and tags, no changelog appears.                                                                                                                                                                                                           |
 | `TestRecordsCommitModeGithubFinalize`                             | GitHub in commit mode: releases created in the finalize phase, the body documenting the exact commit and tag, the recorder opt-in per package (no export, no release), a `PACKAGE_<KEY>` export overriding commit and `target_commitish`, and `commit.messageFormat` rendering `{packages}`/`{tags}`.                                                          |
 | `TestRecordsGitHubAllPackages`                                    | `github.allPackages` gives every published package a release without exporting `DISPAT_EXPORT_GITHUB`, leaving the export to add assets only; the default keeps the export as the per-package opt-in.                                                                                                                                                          |
-| `TestRecordsPrereleaseOptOut`                                     | `changelog.prerelease` / `github.prerelease` set to false leave a beta tagged and published but unrecorded, while the graduation to stable writes the one entry and the one release covering the window; a per-package override opts back in.                                    |
+| `TestRecordsChannelsHoldPrereleasesBack`                          | `changelog.channels` / `github.channels` naming the stable line alone leave a beta tagged and published but unrecorded, while the graduation to stable writes the one entry and the one release covering the window; a per-package override naming the stable line and every prerelease opts back in. |
 | `TestRecordsGitHubReleaseExistsIsASkip`                           | A release the repository already carries is a W224 skip rather than the API's 422, so a repeated `dispat github` and the release that follows both converge instead of failing.                                                                                                 |
 | `TestRecordsHeaderAndFooterPerEntry`                              | `header` and `footer` belong to the entry, not the file: two releases leave two of each, bracketing that entry's sections, while a multi-line `fileTitle` heads the file exactly once.                                                                                          |
 | `TestRecordsReleaseNameSubHeader`                                 | `releaseName` writes an interpolated sub-header under the entry's date line, and the entry stays recognisable by its tag line, so a re-run still skips it.                                                                                                                      |
@@ -596,6 +617,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestCommandsInitThenStatusCompose` | `dispat init --format toml` then a plain `dispat status`: the fallback finds `dispat.toml` with no `--config` anywhere, the starter config loads and discovers the package, and a second `init` refuses to overwrite (exit 1).                                                               |
 | `TestCommandsPreviewNotesWindowing` | `dispat preview --package <name>` prints the pending notes (header, sections, entries), reports "no pending changes" once released, errors on an unknown package; and across a prerelease train the preview and each entry narrow to the fresh changeset while the graduation collects the whole train. |
 | `TestCommandsPreviewAllPackages`    | `dispat preview` with no filter renders every package with something pending in publish order, keeps quiet packages out, reports "no pending changes" once nothing is pending, and rejects a positional package name (exit 2).                                                               |
+| `TestCommandsPreviewRecordBodies`   | `--github` renders what the releases page would receive, under the github entry format rather than the changelog's and without the release block a run adds from what it published; `--changelog --github` prints both under one header, labelled; a record switched off says so; and nothing pending stays nothing pending whichever body was asked for. |
 | `TestCommandsHelpIsScopedToTheCommand` | `dispat <command> --help` prints that command's synopsis and its own flags only; the program help lists every command with the global flags alone. Both exit 0 with no config file or repository.                                            |
 | `TestCommandsVersionNamesThePlatform`  | `--version` reports the platform alongside the version, so a bug report says which of the release's binaries is running.                                                                                                                     |
 | `TestCommandsReservedWordsShadowTheirScripts` | A command word always wins over a run script of the same name, and `dispat run <word>` is how the script is reached instead. Table-driven over the words whose bare form needs arguments, so the command winning shows as the usage exit; the words whose bare form does something observable prove the same rule in their own areas. |
@@ -653,7 +675,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestStandaloneCommitMessageAndIncludeFlags`    | `--message-format` renders `{packages}`/`{tags}` into the subject and `--include` stages an extra path outside the package folder alongside the folder's own changes.                                                                                        |
 | `TestStandaloneGithubPublishesFromAStageScript` | The github step inside an announce stage: the build's `DISPAT_EXPORT_GITHUB` reaches the command through the stage environment, one release is created for the package `DISPAT_PACKAGE` names, and the exported file is attached.        |
 | `TestStandaloneGithubSelection`                 | The github command selects like every other step command: no opt-in publishes nothing (exit 0), the exported opt-in publishes, a non-releasing package is a logged no-op, an unknown term exits 1 and a positional argument exits 2. |
-| `TestStandaloneGithubFailures`                  | The error paths: a prerelease held back by `github.prerelease` publishes nothing and states why; an unresolvable token and a refused verification both exit 1 before any release is created; an API that rejects the creation exits 1. |
+| `TestStandaloneGithubFailures`                  | The error paths: a release on a channel `github.channels` does not name publishes nothing and states why; an unresolvable token and a refused verification both exit 1 before any release is created; an API that rejects the creation exits 1. |
 | `TestStandaloneCommitPushWithoutRemoteFails`    | `--push` without a remote exits 1, while the local commit and tag it had already made survive.                                                                                                                                                               |
 | `TestStandaloneStepsTakeTheWindowFlags`         | The steps take `dispat run`'s window: `--since` picks what a revision addressed, `--consumers` pulls the dependents in, `--on-error` is validated on every sweeping command, and a package tagged by `dispat commit --tag` falls off the recomputed window until `--since all` puts it back. |
 
@@ -894,6 +916,36 @@ control.
 | `TestRevertTakesBothEntriesOutOfTheChangelog`           | The revert trap and its changelog half together: the bump keeps the reverted commit's major, because consumers may have seen it already, while the changelog loses both entries because the release contains neither the change nor its removal (W212). The run converges. |
 | `TestRevertWithAnUnreachableTargetStaysInformational`   | The two degraded forms: a well-formed sha naming no reachable commit is W213 and the revert releases and is documented as usual, and a value that is not a sha at all is the parser's W214 with no second code from dispat.                        |
 | `TestRevertSuppressionIsVoidedByACorrection`            | Discarding a revert's record voids its changelog suppression, so the entry it hid returns and there is no W212 left to report. The §7.4 voiding rule applied to §7.3.                                                                              |
+
+### Goal 32: references naming several files (`multiref_test.go`)
+
+`$ref` is a shape the typed model deliberately cannot express, so these configs go through `WriteConfigRaw` on top of
+`rawSplitConfig()` — the raw spelling of `harness.BaseFile` plus the canonical one-space flow — exactly as the
+single-file reference scenarios in goal 10 do.
+
+| Test                                        | Claim proven                                                                                                                                                                                                       |
+|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestMultiRefMergesObjectFragments`         | A shared fragment and the file that adjusts it become one object: the later file wins the key it shares, the key only the first file wrote survives, the merged script actually runs, and every file read is on the traced record. |
+| `TestMultiRefConcatenatesLineFragments`     | The case the feature exists for: a common block of record lines and the lines a repository adds arrive as one list, in the order the files are named, across two formats, and a merged line keeps the package filter it was written with. |
+| `TestMultiRefSiblingOverrideAndEnvCase`     | The keys beside a reference outrank every file it named, and an environment variable merged out of two fragments reaches a script spelled as its file spelled it — the thing a merge could plausibly lose, since the loader hands viper a lowercased copy of the tree. |
+| `TestMultiRefRefusals`                      | No files at all, a name that is not a file, files holding different kinds, and a missing file are each a configuration error that stops the run before a tag, a commit or a script.                                |
+| `TestMultiRefCycleNamesThePath`             | Every file a reference names is followed on its own, so a cycle closed by the second of them is refused naming the file that closed it, with nothing released.                                                      |
+| `TestMultiRefComputeWriteRefuses`           | A key merged from several files is held by no one of them, so `compute --write` refuses, names the ways out and leaves every file and backup exactly as it found them; a list naming one file is written through as the plain reference it is. |
+
+### Goal 33: the channels a record reaches (`channels_test.go`)
+
+Two packages are compared inside one run wherever they can be, because "this one records and that one does not" is the
+claim, and a single run makes it without depending on anything between runs.
+
+| Test                                     | Claim proven                                                                                                                                                                                                        |
+|------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestChannelsNamedChannelGate`           | A policy naming one prerelease channel records there and nowhere else while a policy naming every prerelease makes the complementary cut, driven across a beta, an rc and the graduation; the skip names the restriction that held the release back and the channel it was on. |
+| `TestChannelsFilterRecordLines`          | A line carries its own channels, so one configured footer says one thing on the betas and another on the stable release, while the sections between the lines stay whatever the release carries; the GitHub body agrees with the changelog entry, since one entry format has one answer wherever it is rendered. |
+| `TestChannelsCombineWithPackageFilters`  | Channels is one filter among the others: a line naming a package and a channel is written only where both hold.                                                                                                     |
+| `TestChannelsKeepReleasersApart`         | Two packages whose GitHub policies differ only in a line's channels do not share a releaser, which is what keeps one package's entry format from rendering the other's body.                                        |
+| `TestChannelsValidationRefusals`         | A restriction naming nothing is refused where it is written, on a line and on the object alike, as is a file title that varied by channel — it is written once and matched on the next release. Nothing runs.       |
+| `TestChannelsPreviewShowsBothBodies`     | `dispat preview --changelog --github` prints both bodies under one header, labelled, each under its own entry format; a record the channels hold back says so instead of showing a body nothing would receive; and naming the changelog prints exactly what naming nothing prints. |
+| `TestChannelsAreReportedInTheSkipEvent`  | The skip is an info-level event carrying the package, the tag and the channel, so a flow can tell "held back by configuration" from "failed" without reading prose, while the release itself is still tagged.       |
 
 ## Regression fences
 

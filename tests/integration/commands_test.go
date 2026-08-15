@@ -141,6 +141,63 @@ func TestCommandsPreviewAllPackages(t *testing.T) {
 	assert.Equal(t, 2, r.Command("preview", "core").Code)
 }
 
+// TestCommandsPreviewRecordBodies: which body `dispat preview` prints.
+// --github renders what the releases page would receive, under the github
+// entry format rather than the changelog's, and covers every selected package
+// under one header each. A record switched off says so instead of showing a
+// body nothing would receive.
+func TestCommandsPreviewRecordBodies(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{EntryFormatConfig: models.EntryFormatConfig{
+		Footer: []models.EntryLine{{Line: []string{"read the changelog"}}},
+	}}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: "https://example.invalid", TokenEnv: "DISPAT_IT_TOKEN",
+		EntryFormatConfig: models.EntryFormatConfig{
+			ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
+			Footer:      []models.EntryLine{{Line: []string{"read the release"}}},
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core,utils): streaming api")
+
+	gh := r.Command("preview", "--github")
+	require.Equal(t, 0, gh.Code, "stderr:\n%s", gh.Stderr)
+	assert.Contains(t, gh.Stdout, "### core 0.1.0", "the configured release name heads each body")
+	assert.Contains(t, gh.Stdout, "### utils 0.1.0", "every package with something pending")
+	assert.Contains(t, gh.Stdout, "read the release")
+	assert.Contains(t, gh.Stdout, "- streaming api", "the sections are the release's own")
+	assert.NotContains(t, gh.Stdout, "read the changelog", "under the github format alone")
+	assert.NotContains(t, gh.Stdout, "### Release", "a preview has published nothing to report")
+
+	both := r.Command("preview", "--changelog", "--github", "--package", "core")
+	require.Equal(t, 0, both.Code, "stderr:\n%s", both.Stderr)
+	assert.Equal(t, 1, strings.Count(both.Stdout, "## core@0.1.0"), "one package, one header")
+	assert.Contains(t, both.Stdout, "read the changelog")
+	assert.Contains(t, both.Stdout, "read the release")
+	assert.Less(t, strings.Index(both.Stdout, "--- changelog ---"),
+		strings.Index(both.Stdout, "--- github release ---"),
+		"both are labelled, the changelog first")
+
+	// A record switched off has no body to show, and says which record it was.
+	cfg.GitHub.Enabled = models.Bool(false)
+	r.WriteConfigModel(cfg)
+	off := r.Command("preview", "--github", "--package", "core")
+	require.Equal(t, 0, off.Code, "stderr:\n%s", off.Stderr)
+	assert.Contains(t, off.Stdout, "github release withheld: disabled by config")
+	assert.NotContains(t, off.Stdout, "read the release")
+
+	// Nothing pending is still nothing pending, whichever body was asked for.
+	r.ReleaseOK()
+	empty := r.Command("preview", "--github")
+	require.Equal(t, 0, empty.Code, "stderr:\n%s", empty.Stderr)
+	assert.Contains(t, empty.Stdout, "no pending changes")
+}
+
 // TestCommandsHelpIsScopedToTheCommand: `dispat <command> --help` prints
 // that command's synopsis and its own flags, not the whole program's. The
 // program help without a command word lists every command and the global

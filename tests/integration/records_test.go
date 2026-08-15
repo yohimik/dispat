@@ -579,13 +579,14 @@ func TestRecordsGitHubAllPackages(t *testing.T) {
 	assert.ElementsMatch(t, []string{"core@0.1.0", "utils@0.1.0"}, tags)
 }
 
-// TestRecordsPrereleaseOptOut: changelog.prerelease and github.prerelease
-// hold the betas back. The beta is still planned, tagged and published — the
-// flow is untouched — but it leaves no changelog entry and no GitHub
-// release; the graduation to stable writes the one entry covering the whole
-// window and creates the one release. Without the opt-out (utils here) both
-// records are written for the beta as before.
-func TestRecordsPrereleaseOptOut(t *testing.T) {
+// TestRecordsChannelsHoldPrereleasesBack: changelog.channels and
+// github.channels naming the stable line alone hold the betas back. The beta
+// is still planned, tagged and published — the flow is untouched — but it
+// leaves no changelog entry and no GitHub release; the graduation to stable
+// writes the one entry covering the whole window and creates the one release.
+// A package naming both the stable line and every prerelease (utils here)
+// records its beta as a package restricting nothing would.
+func TestRecordsChannelsHoldPrereleasesBack(t *testing.T) {
 	type ghRelease struct {
 		TagName    string `json:"tag_name"`
 		Prerelease bool   `json:"prerelease"`
@@ -594,15 +595,17 @@ func TestRecordsPrereleaseOptOut(t *testing.T) {
 
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Changelog = &models.ChangelogConfig{Prerelease: models.Bool(false)}
+	cfg.Changelog = &models.ChangelogConfig{Channels: []string{"stable"}}
 	cfg.GitHub = &models.GitHubConfig{
-		Enabled: models.Bool(true), AllPackages: models.Bool(true), Prerelease: models.Bool(false),
+		Enabled: models.Bool(true), AllPackages: models.Bool(true), Channels: []string{"stable"},
 		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
 	}
-	// utils opts back in, so the two policies are compared inside one run.
+	// utils opts back in, so the two policies are compared inside one run. A
+	// nearer layer states the whole restriction, so opting back in is naming
+	// the stable line and every prerelease channel together.
 	cfg.Packages = map[string]models.PackageConfig{"utils": {
-		Changelog: &models.ChangelogConfig{Prerelease: models.Bool(true)},
-		GitHub:    &models.GitHubConfig{Prerelease: models.Bool(true)},
+		Changelog: &models.ChangelogConfig{Channels: []string{"stable", "*"}},
+		GitHub:    &models.GitHubConfig{Channels: []string{"stable", "*"}},
 	}}
 	r.WriteConfigModel(cfg)
 	t.Setenv("DISPAT_IT_TOKEN", "tkn")
@@ -615,7 +618,7 @@ func TestRecordsPrereleaseOptOut(t *testing.T) {
 
 	assert.True(t, r.HasTag("core@0.1.0-beta.0"), "the beta is still tagged and published")
 	assert.NoFileExists(t, r.Path("packages/core/CHANGELOG.md"),
-		"changelog.prerelease false leaves the beta unrecorded")
+		"a changelog recording on the stable line alone leaves the beta unrecorded")
 	assert.FileExists(t, r.Path("packages/utils/CHANGELOG.md"),
 		"a package that opted back in still records its beta")
 

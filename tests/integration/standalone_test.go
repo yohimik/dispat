@@ -415,19 +415,19 @@ func TestStandaloneGithubSelection(t *testing.T) {
 	assert.Equal(t, 2, r.Command("github", "core").Code)
 }
 
-// TestStandaloneGithubFailures: the github step's error paths. A prerelease
-// held back by github.prerelease publishes nothing and says so; a package
-// whose token cannot be resolved fails the command outright rather than
-// silently publishing nothing, because a step the flow asked for must not
+// TestStandaloneGithubFailures: the github step's error paths. A release on a
+// channel the policy does not record on publishes nothing and says so; a
+// package whose token cannot be resolved fails the command outright rather
+// than silently publishing nothing, because a step the flow asked for must not
 // pass quietly when it could not run; and an API that rejects the up-front
 // verification fails before any release is created.
 func TestStandaloneGithubFailures(t *testing.T) {
-	t.Run("a prerelease held back", func(t *testing.T) {
+	t.Run("a channel that records nothing", func(t *testing.T) {
 		srv, bodies := githubFake(t)
 		r := harness.New(t)
 		cfg := libsConfig(echoBuild, 1)
 		cfg.GitHub = &models.GitHubConfig{
-			Enabled: models.Bool(true), AllPackages: models.Bool(true), Prerelease: models.Bool(false),
+			Enabled: models.Bool(true), AllPackages: models.Bool(true), Channels: []string{"stable"},
 			Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
 		}
 		r.WriteConfigModel(cfg)
@@ -437,8 +437,9 @@ func TestStandaloneGithubFailures(t *testing.T) {
 
 		res := r.Command("github", "--package", "core")
 		assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-		assert.Empty(t, bodies(), "github.prerelease false holds the beta back here too")
-		assert.Contains(t, res.Stdout, "github.prerelease is false", "the skip states its reason")
+		assert.Empty(t, bodies(), "a policy recording on the stable line alone holds the beta back here too")
+		assert.Contains(t, res.Stdout, "the release's channel is not in github.channels",
+			"the skip states its reason")
 	})
 
 	t.Run("no token", func(t *testing.T) {
