@@ -62,8 +62,10 @@ as a release tag.
    the layers exist. Dependency declarations are collected from
    every source (the root object, the entries, the in-folder files) into one merged list.
 4. Build the dependency graph from the merged relations; topologically sort it (cycles abort with the members named).
-5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply cancellation and holds,
-   compute direct bumps, run the three propagation phases, then versions. Every versioning group is versioned as one,
+5. Plan (see below): resolve baselines, compute pending windows, parse the union of them, apply corrections,
+   cancellation and holds, compute direct bumps, run the three propagation phases, then versions. Corrections rewrite
+   the parsed stream in place, so every phase after them reads a stream it cannot tell from one that was authored
+   that way. Every versioning group is versioned as one,
    whether it is a space with its own shared mode or a declared `versionGroups` entry its members joined (see
    "Versioning groups" below).
 6. Print the diagnostics, then narrow the plan to the invocation's `--package` / `--space` / `--group` selection.
@@ -468,14 +470,17 @@ keeps dispat language-agnostic:
 | `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps                                                                                                                         |
 | Per-run safety limits (max packages, majors, channel moves) | (nothing; the exact-pin major-jump guard *is* enforced, with a default of 1)                                                                                                          |
 | Post-run convergence verification                           | (nothing; re-run `status`)                                                                                                                                                            |
+| `requireCodeownerFor`, the CODEOWNER gate on directives     | (nothing; the specification's own configuration for it is unmodelled, so no directive can be gated on approval)                                                                       |
 
 A consequence for the diagnostics registry: the specification codes that belong to these registry- and audit-aware
 features are never emitted by dispat. `E197` (publish-order violation), `E198` (registry identity unverifiable) and
 `E199` (convergence check failed) assume an engine that queries registries and audits its own runs; `W195` (staleness
 audit) and `W196` (published version adopted from the registry) belong to the same features. Every other code of the
 registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`), is implemented and
-emitted. What each of those six means for somebody looking at one, and what to do about it, is in
-[When there is no plan](../reference/plan-errors.md).
+emitted. That includes the codes the registry leaves to the engine rather than to the parser: `E210`-`E213` and
+`W209`-`W215`, which resolve an `Edits` or `Deletes` target against history and report what the correction did, are
+raised here (see [Correcting a record](../reference/corrections.md)). What each of those six means for somebody
+looking at one, and what to do about it, is in [When there is no plan](../reference/plan-errors.md).
 
 In the other direction, twenty codes are dispat's own, outside the specification's registry, attached to features the
 specification predates or does not have. They are numbered from `W220` and `E220` upward, clear of the registry (which

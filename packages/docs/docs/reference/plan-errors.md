@@ -99,9 +99,15 @@ you the plan.
 | `E154` | `Release-As` names an exact version but the scope reaches more than one package. |
 | `E156` | `Release-As` is below what the pending commits require: a breaking change cannot ship as a patch. |
 | `E157` | `Release-As` raises the major more than one above the computed version. A typo'd major is not undoable, so this is refused by default. |
+| `E210` | An `Edits` or `Deletes` target names no commit, names more than one, or is not an earlier commit than the correction. |
+| `E211` | A correction's unit position is past the end of the target commit, or a bare sha names a commit carrying several units. |
+| `E212` | A correction targets a `cancel` or `release` unit, neither of which carries a record to correct. |
+| `E213` | A correction names a package its target's record does not. Narrowing a record is legal; widening is not. |
 
 Every rejected `Release-As` falls back to the ordinarily computed version rather than swallowing the commit, so a
-sibling `feat` in the same commit still releases.
+sibling `feat` in the same commit still releases. The four correction errors work the same way: the correction
+contributes nothing and the record it aimed at stands untouched. See
+[Correcting a release record](./corrections.md).
 
 Note the asymmetry between including and excluding an unknown name. Including one is `E130` above; **excluding** one
 is `W130`, a warning, because a scope that excludes a package somebody has since deleted or renamed is harmless and

@@ -68,7 +68,9 @@ Both depths default to `0`, and neither bounds the other: a unit reaches nobody 
 | `Propagate-Channel-Scope: <scope-set>` | Restricts the channel axis. Defaults to `Propagate-Scope`.                                    |
 | `Channel: <value>`                     | The unit's own channel, same grammar.                                                         |
 | `Release-As: <none\|auto\|version>`    | Release control; see below.                                                                   |
-| `Reverts: <sha>`                       | Informational.                                                                                |
+| `Reverts: <sha>`                       | Informational for the bump; suppresses both changelog entries. See [corrections](./corrections.md). |
+| `Edits: <sha[#n]\|*>`                  | Restate the records named, as this unit. See [corrections](./corrections.md).                 |
+| `Deletes: <sha[#n]\|*>`                | Discard the records named. See [corrections](./corrections.md).                               |
 
 ## Channels and prereleases
 
@@ -124,3 +126,7 @@ bump; how large a change is, is declared by the type. The version also decides t
 `cancel` only reaches backwards: it discards contributions from commits that are ancestors of the cancel, and work
 landing afterwards accumulates normally. A `cancel` on a provider that has already published is a no-op and says so:
 the version is public, and the right target for stopping a pending catch-up is the **consumer**.
+
+`cancel` names nothing and discards everything behind it. To act on one record rather than the whole ledger, `Edits`
+restates a named commit's record and `Deletes` discards it; both reach only unreleased work, and both can be undone by
+a later correction. See [Correcting a release record](./corrections.md).

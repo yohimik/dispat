@@ -658,6 +658,63 @@ instead a *provider* fails, its consumers are skipped and reported with
 An interrupted run (Ctrl-C, a killed CI job) follows the same rule: packages whose publish completed keep their record,
 everything else is reported as `cancelled`, and the next run picks up exactly the remainder.
 
+## Fixing a commit message after it is pushed
+
+A commit went in as a breaking feature and it was not one. The message is already on the remote, so amending it is off
+the table, and the release it would cause is a major nobody wants.
+
+```console
+$ git log --oneline -1
+b9fb604 feat(core)!: rewrite internals
+
+$ dispat status
+12:04:05 INF unchanged channel=stable package=app space=libs version=0.1.0
+12:04:05 INF ● changed bump=major channel=stable ownCommits=1 package=core reason=direct space=libs version="0.1.0 -> 1.0.0"
+12:04:05 INF release plan ready held=0 packages=2 releasing=1
+```
+
+Write the message you should have written, and point it at the one you did. The commit needs no files of its own:
+
+```console
+$ git commit --allow-empty -m "fix(core): rewrite internals
+
+The change is a refactor with a defensive fix, not a breaking feature.
+
+Edits: b9fb604"
+
+$ dispat status
+12:04:05 INF unchanged channel=stable package=app space=libs version=0.1.0
+12:04:05 INF ● changed bump=patch channel=stable corrected=1 ownCommits=1 package=core reason=direct space=libs version="0.1.0 -> 0.1.1"
+12:04:05 INF release plan ready held=0 packages=2 releasing=1
+```
+
+`core` is back to a patch, and `corrected=1` says one entry in this release replaces an earlier record. The changelog
+carries the new description and names what it stands in for:
+
+```markdown
+## core@0.1.1
+
+### Fixes
+
+- rewrite internals (corrects b9fb60428723)
+The change is a refactor with a defensive fix, not a breaking feature.
+```
+
+Two things decide whether this works. The correction has to point at an **earlier** commit, and the record has to be
+**unreleased**. If `core@1.0.0` had already gone out, the correction would be a no-op and dispat would say so with
+`W209` rather than quietly doing nothing.
+
+If the record should not exist at all rather than say something else, use `Deletes:` and a type that bumps nothing:
+
+```console
+$ git commit --allow-empty -m "chore(core): that release note was invented
+
+Deletes: b9fb604"
+```
+
+The full set of rules, including correcting a record for one package out of several and undoing a correction you got
+wrong, is in [Correcting a release record](../reference/corrections.md).
+
 ## A beta channel: try, iterate, graduate
 
 A risky rewrite goes out on a prerelease channel first. The channel is declared in the commit; the publish script sees

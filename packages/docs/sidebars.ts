@@ -93,6 +93,7 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         {type: 'doc', id: 'reference/commits', label: 'Commit messages'},
+        {type: 'doc', id: 'reference/corrections', label: 'Correcting a record'},
         {type: 'doc', id: 'reference/environment', label: 'Script environment'},
         {
           type: 'category',
