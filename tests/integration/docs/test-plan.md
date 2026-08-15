@@ -8,8 +8,8 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Thirty-three goals across thirty-four test files, one file each except goal 21, which the two shell helpers split
-between `if_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
+Thirty-three goals across thirty-five test files, one file each except goal 21, which the two shell helpers split
+between `if_test.go`, `if_changed_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
 in, so a reader looking for "how does a plan get computed" or "which command does what" lands in one place.
 
 ### Planning and versioning
@@ -113,15 +113,17 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     shares: the term spellings and their globs, the invocation folder standing in for the terms nobody typed, the
     filter narrowing a window and never widening it, and partial releases, where publish order withholds a consumer
     whose provider was left out (`W230`) and a split versioning group is warned about and released (`W231`).
-21. **The shell helpers** (`if_test.go`, `exec_test.go`): the two commands that run one script instead of sweeping a
-    selection. `dispat if` picks a shell string from a condition on the environment; `dispat exec` runs one *declared*
-    script, where one subject decides both which level is read and whose environment the script gets. The pair's
-    load-bearing claim is that a declared script reading `DISPAT_*` becomes runnable outside a release. Both take a
-    place in the monorepo the same way, `pkg:`, `space:`, `root` or `cwd`, on the subject, on the script source and on
-    the folder the script runs in, so the second claim is that each of the three moves only its own half: `--for cwd`
-    infers a subject without a plan, `--script-from` still leaves the environment alone, and `--in` changes nothing
-    about resolution. The third is `dispat if`'s cost, which stays nil until an `--in` names something only a
-    configuration can place.
+21. **The shell helpers** (`if_test.go`, `if_changed_test.go`, `exec_test.go`): the two commands that run one script
+    instead of sweeping a selection. `dispat if` picks a shell string from a condition on the environment, the
+    filesystem (`--file`/`--dir`) or the repository (`--changed`); `dispat exec` runs one *declared* script, where one
+    subject decides both which level is read and whose environment the script gets. The pair's load-bearing claim is
+    that a declared script reading `DISPAT_*` becomes runnable outside a release. Both take a place in the monorepo
+    the same way, `pkg:`, `space:`, `root` or `cwd`, on the subject, on the script source and on the folder the script
+    runs in, so the second claim is that each of the three moves only its own half: `--for cwd` infers a subject
+    without a plan, `--script-from` still leaves the environment alone, and `--in` changes nothing about resolution.
+    The third is `dispat if`'s cost, which stays nil until an `--in` names something only a configuration can place or
+    `--changed` asks about the repository itself. The fourth is `--changed`'s selection: the same window, filter and
+    consumer expansion every sweeping command uses, composed so that `--consumers` reaches downstream of the changes.
 22. **Self-update** (`selfupdate_test.go`): dispat replacing its own binary, which is the one thing no other area can
     witness, because it is the one command that overwrites the file it is running from. Two binaries are built at two
     versions and a fake releases API hands one out.
@@ -290,6 +292,7 @@ tests/integration/
   standalone_test.go        goal 19
   filter_test.go            goal 20
   if_test.go                goal 21 (dispat if)
+  if_changed_test.go        goal 21 (dispat if --changed)
   exec_test.go              goal 21 (dispat exec)
   selfupdate_test.go        goal 22
 
@@ -719,7 +722,17 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestIfRunsWhereItIsTold`                       | `--in` moves the chosen script: a path and `cwd` in a repository holding no config file at all, so anything that works there provably read none, plus a missing folder named rather than left to the shell and a malformed value taken as the usage exit. |
 | `TestIfReadsTheConfigOnlyForAnInWithANameInIt`  | The line the flag draws, stated as one comparison: `pkg:`, `space:` and `root` place the script correctly, then the config file is broken and only the invocations that had to look a name up notice.                  |
 | `TestIfNests`                                   | A branch is shell text, so another `dispat if` inside one is ordinary, which is how a chain grows past what one condition can say.                                                                                     |
-| `TestIfIsReservedAndNeedsNoRepository`          | `if` is a command word, never the run shorthand; a missing condition, an unpaired `--then` and a name no environment could carry are all usage exits taken before any config is read.                                  |
+| `TestIfIsReservedAndNeedsNoRepository`          | `if` is a command word, never the run shorthand; a missing condition, an unpaired `--then`, a name no environment could carry, two leading conditions at once and a selection flag without `--changed` are all usage exits taken before any config is read. |
+| `TestIfFileConditions`                          | `-f` and `-d` in a repository holding no config file at all: a regular file, a folder, a missing path and the wrong kind each answer as the shell's `[ -f ]` and `[ -d ]` would, false rather than an error, and the chosen script's code still passes through. |
+| `TestIfFileConditionResolvesWhereTheScriptRuns` | A relative `-f` path resolves where the chosen script runs, after `--in`, so the test and a path inside the script text mean the same file; an absolute path works from anywhere; `--in pkg:` still costs only what `--in` costs alone.                  |
+| `TestIfChangedGatesOnTheReleaseWindow`          | Without `--since` the window is the release window: the gate holds while something is pending, stops holding once it is released, and holds again on the next commit, so one invocation converges with the repository's state.                             |
+| `TestIfChangedWithSince`                        | `--since HEAD~1` follows what the last commit addressed, a scopeless commit touching no package answers false, `--since all` holds regardless, and a revision git cannot resolve is a failure naming it, never a silent false.                             |
+| `TestIfChangedNarrowsToTheSelection`            | `-p`, `-s` and `-g` narrow the gate the way they narrow every command, a named package outside the window is a false said out loud, and a term matching no package is an error rather than a gate that never fires.                                       |
+| `TestIfChangedConsumersReachDownstream`         | `--consumers` expands the window before the filter narrows it, so `-p web --consumers` holds when web or anything web transitively consumes changed, the one composition under which the flag can flip the answer at all.                                 |
+| `TestIfChangedInfersFromTheInvocationFolder`    | Invoked inside a package folder with no terms, the gate narrows to that package exactly as `run` does; from the root the same invocation asks about everything.                                                                                            |
+| `TestIfChangedChainsWithElif`                   | `--changed` leads the chain like any other condition: true it wins even over a true `--elif` behind it, false the elifs get their ordinary turn.                                                                                                           |
+| `TestIfChangedReadsTheConfigOnlyWhenAsked`      | `--changed` is the one condition that costs a config file and a git repository, and only it pays: with the file broken or the repository gone, a bare condition still runs where `--changed` refuses.                                                      |
+| `TestIfChangedPropagatesTheExitCode`            | The helper stays transparent whatever the condition asked: the chosen script's code is the command's, `--on-failure` stays quiet on success, and a false answer with no `--else` runs nothing and succeeds.                                                |
 | `TestExecResolvesTheSubjectsScript`             | The subject picks the level, and only that level: root, space and package each answer with their own text, a package declaring nothing is a reported miss, and standing in a package folder changes no answer.         |
 | `TestExecForCwdReadsTheInvocationFolder`        | `--for cwd` reads the folder the way `dispat run` reads it: a package, a folder below one, the space holding it, the root, and a folder inside neither widening to the top level with the widening said out loud.      |
 | `TestExecForCwdCarriesTheFoldersEnvironment`    | An inferred subject is a subject, so it moves the environment as well as the text, reaches the `DISPAT_*` variables from a package folder, and is refused from a space folder once the folder has been read.           |
