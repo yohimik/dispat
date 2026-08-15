@@ -126,7 +126,7 @@ func TestDependencyKindHelpers(t *testing.T) {
 	t.Parallel()
 
 	for _, in := range []string{
-		"dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "all",
+		"dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "*",
 	} {
 		if got, ok := ParseDependencyKind(in); !ok || string(got) != in {
 			t.Errorf("ParseDependencyKind(%q) = %q, %v", in, got, ok)

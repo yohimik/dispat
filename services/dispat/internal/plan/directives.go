@@ -111,7 +111,8 @@ func (p channelPropagation) inert() bool {
 }
 
 // kindSet maps ccme's dependency kinds onto the graph's. A nil result means
-// every kind, which is what "all" and an unrecognised list both denote.
+// every kind, which is what the "*" wildcard and an unrecognised list both
+// denote.
 func kindSet(kinds []ccme.DependencyKind) map[model.DepKind]bool {
 	if len(kinds) == 0 {
 		return nil

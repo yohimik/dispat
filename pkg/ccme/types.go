@@ -120,13 +120,14 @@ func (d Depth) String() string {
 // (§8.4).
 type DependencyKind string
 
-// Dependency kinds.
+// Dependency kinds. KindAll is the wildcard "*", reusing the scope-set
+// selector of §5.2: every kind is traversed, devDependencies included.
 const (
 	KindDependencies         DependencyKind = "dependencies"
 	KindDevDependencies      DependencyKind = "devDependencies"
 	KindPeerDependencies     DependencyKind = "peerDependencies"
 	KindOptionalDependencies DependencyKind = "optionalDependencies"
-	KindAll                  DependencyKind = "all"
+	KindAll                  DependencyKind = "*"
 )
 
 // ParseDependencyKind validates a single dependency-edge kind (§8.4).
