@@ -14,16 +14,6 @@ import (
 	"github.com/yohimik/dispat/pkg/writer"
 )
 
-// kindWords maps the spellings a `--set` spec may prefix a name with onto the
-// manifest vocabulary. Only these four words are read as a kind, which is what
-// lets a Maven `group:artifact` coordinate keep its colon.
-var kindWords = map[string]manifest.Kind{
-	"dependencies":         manifest.KindDependencies,
-	"devDependencies":      manifest.KindDevDependencies,
-	"peerDependencies":     manifest.KindPeerDependencies,
-	"optionalDependencies": manifest.KindOptionalDependencies,
-}
-
 // parseEditSpec reads one `--set` value: `[kind:]name=range`.
 //
 // The name and the range split at the first "=", because a range legitimately
@@ -39,7 +29,9 @@ func parseEditSpec(spec string) (writer.Edit, error) {
 	}
 	kind := manifest.KindDependencies
 	if prefix, rest, found := strings.Cut(name, ":"); found {
-		if k, isKind := kindWords[prefix]; isKind {
+		// Only a non-empty kind word claims the prefix, which is what lets a
+		// Maven `group:artifact` coordinate keep its colon.
+		if k, isKind := manifest.ParseKind(prefix); isKind && prefix != "" {
 			kind, name = k, rest
 		}
 	}

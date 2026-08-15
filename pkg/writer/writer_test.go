@@ -30,6 +30,60 @@ func read(t *testing.T, path string) string {
 	return string(data)
 }
 
+func TestRewriteReadsTheLongKindSpellingAsTheZeroKind(t *testing.T) {
+	// An Edit carrying Kind "dependencies" must behave exactly like the zero
+	// Kind in every format. The Podfile and pubspec writers historically
+	// compared against the zero value alone, so the long spelling fell through
+	// their kind tables and the edit was silently dropped.
+	cases := map[string]struct{ file, content, want string }{
+		"podfile": {
+			"Podfile",
+			"target 'Acme' do\n  pod 'Alamofire', '~> 5.6'\nend\n",
+			"pod 'Alamofire', '~> 5.9'",
+		},
+		"pubspec": {
+			"pubspec.yaml",
+			"name: acme\ndependencies:\n  http: ^0.13.0\n",
+			"http: ^1.0.0",
+		},
+	}
+	ranges := map[string]string{"Alamofire": "~> 5.9", "http": "^1.0.0"}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for _, kind := range []manifest.Kind{manifest.KindDependencies, manifest.Kind("dependencies")} {
+				path := seed(t, tc.file, tc.content)
+				dep := "Alamofire"
+				if name == "pubspec" {
+					dep = "http"
+				}
+				res, err := Rewrite(path, "", []Edit{{Name: dep, Kind: kind, Range: ranges[dep]}})
+				if err != nil {
+					t.Fatalf("kind %q: %v", kind, err)
+				}
+				if len(res.Applied) != 1 {
+					t.Fatalf("kind %q: edit dropped: %+v", kind, res)
+				}
+				if !strings.Contains(read(t, path), tc.want) {
+					t.Errorf("kind %q: file missing %q", kind, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestRewriteLeavesTheCallerEditsAlone(t *testing.T) {
+	// Canonicalising the long spelling must copy, never write through: the
+	// edits slice belongs to the caller.
+	path := seed(t, "package.json", `{"name":"a","dependencies":{"x":"^1.0.0"}}`)
+	edits := []Edit{{Name: "x", Kind: manifest.Kind("dependencies"), Range: "^2.0.0"}}
+	if _, err := Rewrite(path, "", edits); err != nil {
+		t.Fatal(err)
+	}
+	if edits[0].Kind != manifest.Kind("dependencies") {
+		t.Errorf("the caller's edit was mutated to %q", edits[0].Kind)
+	}
+}
+
 func TestNpmRewritePreservesEveryOtherByte(t *testing.T) {
 	// Deliberately odd formatting: tabs, blank lines, unsorted keys, spaces
 	// inside braces, no trailing newline. Only the three targeted scalars may

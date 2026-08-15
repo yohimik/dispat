@@ -175,12 +175,24 @@ func dispatch(base string) (rewriteFunc, bool) {
 // ignored for them and Result.VersionWritten stays false. The file is
 // rewritten only when something changed.
 func Rewrite(path, version string, edits []Edit) (Result, error) {
-	for _, e := range edits {
-		// The long spelling "dependencies" is accepted as a convenience for
-		// the zero kind; anything else outside the four fields is refused.
-		if k := e.Kind; !k.Valid() && k != "dependencies" {
-			return Result{}, fmt.Errorf("writer: edit %q: unknown dependency kind %q", e.Name, k)
+	// Kinds are canonicalised here, once, so no format writer ever sees the
+	// long spelling of the zero kind; anything outside the four fields is
+	// refused before a file is opened. The copy is taken only when a kind
+	// actually changes, and never in place: the edits belong to the caller.
+	copied := false
+	for i, e := range edits {
+		kind, ok := manifest.ParseKind(string(e.Kind))
+		if !ok {
+			return Result{}, fmt.Errorf("writer: edit %q: unknown dependency kind %q", e.Name, e.Kind)
 		}
+		if kind == e.Kind {
+			continue
+		}
+		if !copied {
+			edits = append([]Edit(nil), edits...)
+			copied = true
+		}
+		edits[i].Kind = kind
 	}
 	rewrite, ok := dispatch(filepath.Base(path))
 	if !ok {

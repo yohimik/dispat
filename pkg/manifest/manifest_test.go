@@ -19,6 +19,26 @@ func TestKind(t *testing.T) {
 	}
 }
 
+func TestParseKind(t *testing.T) {
+	for word, want := range map[string]Kind{
+		"":                     KindDependencies,
+		"dependencies":         KindDependencies,
+		"devDependencies":      KindDevDependencies,
+		"peerDependencies":     KindPeerDependencies,
+		"optionalDependencies": KindOptionalDependencies,
+	} {
+		got, ok := ParseKind(word)
+		if !ok || got != want {
+			t.Errorf("ParseKind(%q) = %q, %v; want %q", word, got, ok, want)
+		}
+	}
+	for _, word := range []string{"Dependencies", "dev", "scripts", "dependency"} {
+		if _, ok := ParseKind(word); ok {
+			t.Errorf("ParseKind(%q) must refuse a word that is not a kind", word)
+		}
+	}
+}
+
 func TestIsRequirementsFile(t *testing.T) {
 	for name, want := range map[string]bool{
 		"requirements.txt":           true,

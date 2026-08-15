@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // rewriteCsproj edits an SDK-style .csproj: the project's own <Version>
@@ -34,7 +36,7 @@ func rewriteCsproj(path, version string, edits []Edit) (Result, error) {
 	}
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
-		if e.Kind == "" || e.Kind == "dependencies" {
+		if e.Kind == manifest.KindDependencies {
 			wanted[e.Name] = i
 		}
 	}

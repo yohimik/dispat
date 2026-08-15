@@ -20,7 +20,7 @@ func rewriteComposer(path, version string, edits []Edit) (Result, error) {
 // equivalent field.
 func composerField(e Edit) string {
 	switch e.Kind {
-	case manifest.KindDependencies, "dependencies":
+	case manifest.KindDependencies:
 		return "require"
 	case manifest.KindDevDependencies:
 		return "require-dev"

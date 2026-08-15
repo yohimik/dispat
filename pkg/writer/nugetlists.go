@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // rewritePackagesProps edits a Directory.Packages.props: the central version
@@ -42,9 +44,9 @@ func rewriteXMLPackageList(path string, edits []Edit, elem, idAttr, versionAttr 
 	data := sp.bytes()
 	wanted := make(map[string]int, len(edits))
 	for i, e := range edits {
-		// These files have one dependency field, so a kinded edit (beyond the long
-		// spelling of the zero kind) names something they cannot express.
-		if e.Kind == "" || e.Kind == "dependencies" {
+		// These files have one dependency field, so a kinded edit names something
+		// they cannot express.
+		if e.Kind == manifest.KindDependencies {
 			wanted[e.Name] = i
 		}
 	}

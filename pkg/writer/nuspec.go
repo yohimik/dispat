@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
 // rewriteNuspec edits a .nuspec, NuGet's own package manifest: the package's
@@ -27,7 +29,7 @@ func rewriteNuspec(path, version string, edits []Edit) (Result, error) {
 	for i, e := range edits {
 		// A nuspec has one dependency field; a group is a target framework,
 		// not a kind.
-		if e.Kind == "" || e.Kind == "dependencies" {
+		if e.Kind == manifest.KindDependencies {
 			wanted[e.Name] = i
 		}
 	}

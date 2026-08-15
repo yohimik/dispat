@@ -37,6 +37,20 @@ func (k Kind) Valid() bool {
 	return false
 }
 
+// ParseKind maps a dependency-field spelling onto its Kind. The four field
+// names are accepted, with "dependencies" read as the long spelling of the
+// zero value, so a caller carrying a word from a config file or a command
+// line never has to know the zero value stands for the plain field.
+func ParseKind(word string) (Kind, bool) {
+	switch word {
+	case "", "dependencies":
+		return KindDependencies, true
+	case string(KindDevDependencies), string(KindPeerDependencies), string(KindOptionalDependencies):
+		return Kind(word), true
+	}
+	return "", false
+}
+
 // NameWords splits a file's base name into its separator-delimited words.
 func NameWords(base string) []string {
 	return strings.FieldsFunc(base, func(r rune) bool {
