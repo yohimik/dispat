@@ -11,10 +11,6 @@ import (
 // surrounding spacing and trailing comment all survive, only the specifier
 // text changes.
 
-// isRequirementsFile is pkg/manifest's rule, shared verbatim with the
-// scanner.
-func isRequirementsFile(name string) bool { return manifest.IsRequirementsFile(name) }
-
 // rewriteRequirements edits a requirements file line by line: a line whose
 // requirement name matches an edit (PEP 503-normalised, so "Acme_Core"
 // matches "acme-core") gets its version specifier replaced. Lines that are

@@ -30,6 +30,38 @@ func read(t *testing.T, path string) string {
 	return string(data)
 }
 
+func TestWriterValueMirrorsThePackageFunctions(t *testing.T) {
+	// New() is the package-level entry points behind one seam. Each method
+	// must reach the same machinery the free function does; a fake standing
+	// in for it is the point, and this proves the real one holds up its end.
+	w := New()
+	path := seed(t, "go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n")
+	if _, err := w.Rewrite(path, "", []Edit{{Name: "example.com/dep", Range: "v1.1.0"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Relink(path, []Link{{Name: "example.com/dep", Path: "../dep"}}); err != nil {
+		t.Fatal(err)
+	}
+	links, err := w.Links(path)
+	if err != nil || len(links) != 1 {
+		t.Fatalf("Links = %+v, %v", links, err)
+	}
+	if _, err := w.DropLinks(path); err != nil {
+		t.Fatal(err)
+	}
+	notes := seed(t, "notes.txt", "v1.0.0\n")
+	if _, err := w.Replace(notes, []Replacement{{Find: "v1.0.0", Write: "v1.1.0"}}); err != nil {
+		t.Fatal(err)
+	}
+	plist := seed(t, "Info.plist", "<plist><dict><key>CFBundleVersion</key><string>1</string></dict></plist>")
+	if _, err := w.SetBuild(plist, "2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); strings.Contains(got, "replace ") || !strings.Contains(got, "v1.1.0") {
+		t.Errorf("the seam did not reach the filesystem writer:\n%s", got)
+	}
+}
+
 func TestRewriteReadsTheLongKindSpellingAsTheZeroKind(t *testing.T) {
 	// An Edit carrying Kind "dependencies" must behave exactly like the zero
 	// Kind in every format. The Podfile and pubspec writers historically
