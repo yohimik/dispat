@@ -486,7 +486,7 @@ emitted. That includes the codes the registry leaves to the engine rather than t
 raised here (see [Correcting a record](../reference/corrections.md)). What each of those six means for somebody
 looking at one, and what to do about it, is in [Diagnostic codes](../reference/plan-errors.md).
 
-In the other direction, twenty-four codes are dispat's own, outside the specification's registry, attached to features
+In the other direction, twenty-five codes are dispat's own, outside the specification's registry, attached to features
 the specification predates or does not have. They are numbered from `W220` and `E215` upward, clear of the registry
 (which ends at `W215` and `E213`) and of `W195`/`W196`, which the specification reserves for the audit features above.
 
@@ -498,6 +498,7 @@ the specification predates or does not have. They are numbered from `W220` and `
 | `W230`, `W231`         | [Releasing part of the graph](../reference/releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
+| `W238`                 | A `Release-As` footer naming a package whose [versioning is `none`](../reference/releasing/versioning.md#none): the directive moves nothing |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 

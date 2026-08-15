@@ -207,6 +207,11 @@ const (
 	// asks for, which satisfies all of them, and the warning is what explains
 	// the sharing none of the shallower members declared.
 	CodeFixedDepthConflict = "W237"
+	// CodeNonePinned reports a Release-As directive whose scope resolved to a
+	// versioning-none package. The directive is inert — a none package is
+	// never versioned or released — and the warning is what tells the author
+	// the footer they wrote moves nothing.
+	CodeNonePinned = "W238"
 
 	// --- release outcomes (§13.7a, §13.9) ---
 
@@ -788,17 +793,35 @@ func (r *Release) SharedDepth() int {
 	return r.Pkg.Space.Versioning.SharedDepth()
 }
 
-// Releasing reports whether the package is in this run's plan: it has a
-// reason, it is not held, and this invocation's selection did not leave it out.
-// Every released package is versioned and tagged whatever its publish target —
-// an exception there costs convergence (§13.7c).
+// Releasable reports whether the package takes part in the release flow at
+// all: false only under versioning "none", whose packages exist to run
+// scripts and are never versioned, tagged or published. Nil-safe like
+// SharedDepth, and permanent where Held is per-run: a held package keeps a
+// computed version waiting, a none package never has one.
+func (r *Release) Releasable() bool {
+	return r.Pkg == nil || r.Pkg.Space == nil || r.Pkg.Space.Versioning.Releasable()
+}
+
+// Releasing reports whether the package is in this run's plan: it is
+// releasable at all, it has a reason, it is not held, and this invocation's
+// selection did not leave it out. Every released package is versioned and
+// tagged whatever its publish target — an exception there costs convergence
+// (§13.7c).
 //
 // This is the one gate the whole run reads: the executor's task graph, the
 // workspace environment, auto-versioning's provider ranges, the finalize phase
 // and the summary all ask it, which is what makes narrowing a plan a single
 // decision rather than a condition repeated in five places.
 func (r *Release) Releasing() bool {
-	return r.Changed() && !r.Held && !r.Deselected
+	return r.Changed() && !r.Held && !r.Deselected && r.Releasable()
+}
+
+// RunsScripts reports whether the package sits in the default script window:
+// releasing, or a changed versioning-none package the selection kept. Run
+// scripts are the one thing a none package exists for, so the window that
+// would otherwise be exactly the plan admits it too.
+func (r *Release) RunsScripts() bool {
+	return r.Releasing() || (!r.Releasable() && r.Changed() && !r.Deselected)
 }
 
 // TagFormat is the release tag template of the package's space, or the
@@ -1448,6 +1471,11 @@ func (cp *computation) loadTagsAndWindows() error {
 	sem := make(chan struct{}, 16)
 	var wg sync.WaitGroup
 	for i, p := range cp.pkgs {
+		// A versioning-none package is never tagged, so there is nothing to
+		// query: its tags stay empty and its window is the whole history.
+		if !(&Release{Pkg: p}).Releasable() {
+			continue
+		}
 		wg.Add(1)
 		go func(i int, p *model.Package) {
 			defer wg.Done()
@@ -1515,7 +1543,9 @@ func (cp *computation) loadTagsAndWindows() error {
 				rel.Current, rel.FromInitials = init, true
 			}
 		default: // never stably released: the window is the whole history (§13.3)
-			if init, ok := cp.initials[p.Name]; ok {
+			// Initials seed a first release; a versioning-none package never
+			// has one, so a fabricated Current must not appear for it.
+			if init, ok := cp.initials[p.Name]; ok && rel.Releasable() {
 				rel.Current, rel.FromInitials = init, true
 			}
 		}
@@ -2113,6 +2143,18 @@ func (cp *computation) newerCommit(a, b string) bool {
 // is what keeps the independent loop and the fixed-group fallback agreeing
 // about pin precedence.
 func (cp *computation) versionOne(name string, rel *Release) {
+	if !rel.Releasable() {
+		// A none package carries no version: Next mirrors Current (both zero)
+		// so nothing downstream reads a fabricated release, and a pin aimed
+		// at it is inert rather than an error — the commit may legitimately
+		// pin other packages of its scope.
+		if _, ok := cp.pinned[name]; ok {
+			cp.pkgWarn(rel, CodeNonePinned, "",
+				"Release-As names a package with versioning \"none\"; the directive moves nothing")
+		}
+		rel.Next = rel.Current
+		return
+	}
 	if p, ok := cp.pinned[name]; ok {
 		cp.applyPin(rel, p)
 		return

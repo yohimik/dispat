@@ -76,6 +76,14 @@ func (a *App) narrow(pl *plan.Plan, f filter.Filter) (plan.Narrowing, error) {
 	n := pl.Narrow(sel.Names)
 	a.log.Info().Str("selection", sel.Description).Strs("releasing", n.Release).
 		Msg("release narrowed to the selection")
+	// A selected none package vanishes from the narrowed plan by design;
+	// saying why beats a silent drop when someone names one directly.
+	for _, name := range sel.Names {
+		if rel := pl.Releases[name]; rel != nil && !rel.Releasable() {
+			a.log.Info().Str("package", name).
+				Msg("package has versioning \"none\" and is never released")
+		}
+	}
 	for _, w := range n.Withheld {
 		a.log.Warn().Str("code", plan.CodeSelectionWithheld).Str("package", w.Pkg).
 			Strs("waitingFor", w.Waiting).
@@ -150,15 +158,18 @@ func (a *App) coveredPackages(ctx context.Context, pl *plan.Plan, opts WindowOpt
 	return covered, nil
 }
 
-// windowPackages resolves the window alone: the packages --since addresses, or
-// the release window when no revision was named.
+// windowPackages resolves the window alone: the packages --since addresses,
+// or the release window when no revision was named — plus every changed
+// versioning-none package, which runs scripts without ever releasing.
 func (a *App) windowPackages(ctx context.Context, pl *plan.Plan, opts WindowOptions) ([]string, error) {
 	if opts.Since != "" {
 		return a.sincePackages(ctx, pl, opts.Since)
 	}
 	var window []string
-	for _, rel := range pl.Releasing() {
-		window = append(window, rel.Pkg.Name)
+	for _, name := range pl.Order {
+		if rel := pl.Releases[name]; rel != nil && rel.RunsScripts() {
+			window = append(window, name)
+		}
 	}
 	return window, nil
 }

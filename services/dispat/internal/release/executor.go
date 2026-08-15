@@ -250,8 +250,10 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		// Releasing(), not Changed(). A package held by `Release-As: none` has
 		// a bump and a computed version — both are reported (W154) — but it is
 		// excluded from the plan by §13.6a and MUST NOT be built, published or
-		// tagged. A channel-only release, conversely, has no bump at all and
-		// must still be executed: it is a release like any other (§13.9).
+		// tagged; a package of a versioning-none space is excluded permanently
+		// for the same reason. A channel-only release, conversely, has no bump
+		// at all and must still be executed: it is a release like any other
+		// (§13.9).
 		if rel.Releasing() {
 			changed[name] = true
 			results[name] = &Result{
