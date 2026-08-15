@@ -1,7 +1,7 @@
 name: Release
 
-# dispat releases itself: this workflow builds the CLI from the checkout and
-# runs it against the repository. dispat computes the plan from the
+# dispat releases itself: the release job builds a fresh CLI from the checkout
+# and runs it against the repository. dispat computes the plan from the
 # conventional commits, rewrites the go.mods (autoVersion), writes the
 # changelogs, creates one release commit carrying all of it, tags every
 # released module on that commit (pkg/<name>/v<version>,
@@ -125,8 +125,11 @@ jobs:
           dispat run unlink --since all -p dispat
           dispat run verify-unlinked --since all -p dispat
 
+      # The three steps below run through `dispat exec` so the release logic
+      # they carry is dispat.yaml's, and this workflow stays plumbing: what
+      # remains here is checkouts, toolchains and artifact transport.
       - name: Compute coverage totals
-        run: sh scripts/coverage-badge.sh
+        run: dispat exec coverage-badge
 
       - name: Upload merged coverage
         uses: actions/upload-artifact@v4
@@ -143,7 +146,7 @@ jobs:
       # release job as an artifact rather than a commit — the numbers describe
       # a run, not a revision, and the site is built there.
       - name: Build the test report
-        run: go run github.com/yohimik/dispat/tools/testreport build -commit "$GITHUB_SHA"
+        run: dispat exec test-report
 
       - name: Upload the test report
         uses: actions/upload-artifact@v4
@@ -153,20 +156,9 @@ jobs:
           retention-days: 7
 
       - name: Push badge JSON to the badges branch
-        # A single-commit orphan branch, force-pushed on every release, so the
-        # badge data carries no history. README references it through the
-        # shields.io endpoint URL.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir badge && cp coverage/coverage.json badge/
-          cd badge
-          git init -q -b badges
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add coverage.json
-          git commit -qm "chore: update coverage badge"
-          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+        run: dispat exec push-badge
 
   release:
     name: Run dispat, publish binaries
@@ -233,7 +225,7 @@ jobs:
       # artifact: the site that ships must carry the numbers of the run that
       # let it ship, and a silently numberless page is worse than a failed job.
       # The docs build refuses to produce a release site without it either —
-      # see DOCS_REQUIRE_REPORT in dispat.yaml.
+      # see DOCS_REQUIRE_REPORT in packages/docs/dispat.yaml.
       - name: Fetch the test report
         uses: actions/download-artifact@v4
         with:

@@ -23,6 +23,13 @@ on:
 permissions:
   contents: read
 
+# A version is pinned rather than left to resolve, because the resolution path
+# needs a stable release to find and this repository is still on its rc train.
+# One place to bump per rc; drop the pin for the empty default once 1.0.0 is
+# out — that is the path most callers take.
+env:
+  DISPAT_PIN: 1.0.0-rc.3
+
 jobs:
   action:
     name: ${{ matrix.os }}
@@ -37,15 +44,10 @@ jobs:
       # `uses: ./` is the action as a caller gets it, rather than the scripts it
       # happens to wrap: the inputs, the outputs and the PATH entry are all part
       # of what is being tested.
-      #
-      # A version is pinned rather than left to resolve, because the resolution
-      # path needs a stable release to find and this repository is still on its
-      # rc train. Swap this for the empty default once 1.0.0 is out — that is
-      # the path most callers take.
       - id: setup
         uses: ./
         with:
-          version: 1.0.0-rc.3
+          version: ${{ env.DISPAT_PIN }}
 
       # The same assertions the release's post-release job makes against the
       # version it just published, so the two cannot drift: this one runs on a
@@ -55,6 +57,6 @@ jobs:
         shell: bash
         run: |
           sh scripts/check-action.sh \
-            1.0.0-rc.3 \
+            "${{ env.DISPAT_PIN }}" \
             "${{ steps.setup.outputs.version }}" \
             "${{ steps.setup.outputs.path }}"

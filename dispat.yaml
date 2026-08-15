@@ -10,6 +10,17 @@ scripts:
   commit: dispat commit --tag --push
   github: dispat github
 
+  # The release workflow's own stages, as dispat scripts rather than workflow
+  # bash, so the release logic lives here and the workflow stays plumbing.
+  # Only a `--since all` suite run leaves the complete profile set the badge
+  # is a number about, which is why the release workflow is their one caller.
+  coverage-badge: sh scripts/coverage-badge.sh
+  test-report: go run github.com/yohimik/dispat/tools/testreport build -commit "$GITHUB_SHA"
+  push-badge: >-
+    dispat if 'CI!=true'
+    --then 'echo "refusing to push the badge outside CI (set CI=true to override)" >&2; exit 1'
+    --else 'sh scripts/push-badge.sh'
+
   # postAll fires for every release, including one run by hand. Outside Actions
   # there is no $GITHUB_OUTPUT to write, and a guard that finds nothing to do
   # exits 0 — hence no --else.
