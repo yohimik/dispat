@@ -2,8 +2,8 @@ import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import {usePluginData} from '@docusaurus/useGlobalData';
-import {README_FEATURES_PLUGIN} from '@site/plugins/readme-features/name';
-import type {ReadmeData} from '@site/plugins/readme-features/types';
+import {README_PLUGIN} from '@site/plugins/readme/name';
+import type {Argument, ReadmeData} from '@site/plugins/readme/types';
 import Inlines from '@site/src/components/Inline';
 import CodeBlock from '@theme/CodeBlock';
 import Heading from '@theme/Heading';
@@ -14,14 +14,16 @@ import styles from './index.module.css';
 
 // The docs own the root (docs.routeBasePath === '/'), so this page is the site
 // entry point: yohimik.github.io/dispat/, the URL every README and every search
-// result points at. It carries the same claims as the repository README,
-// because a redirect gave crawlers and readers nothing to land on.
+// result points at. It carries the same claims as the two READMEs, because a
+// redirect gave crawlers and readers nothing to land on.
 //
-// The terminal tour and the feature cards are *read* from the CLI README at
-// build time rather than restated here: they used to be a second copy under a
-// comment promising to keep them in step, which is not a promise a comment can
-// keep. See plugins/readme-features. Everything below them still mirrors the
-// repository README by hand.
+// Those claims are *read* from the READMEs at build time rather than restated
+// here: the opening, the "why one more monorepo tool?" argument and the
+// inspiration list from the repository README, the terminal tour and the
+// feature cards from the CLI one. They used to be a second copy under a comment
+// promising to keep them in step, which is not a promise a comment can keep.
+// See plugins/readme. What is still written here is the landing page's own:
+// the badges, the install blocks, the reading list and the invitation.
 //
 // Every internal link goes through <Link> (or useBaseUrl for assets), never a
 // raw path: Docusaurus mounts its router without a `basename` and registers
@@ -30,9 +32,46 @@ import styles from './index.module.css';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 
-/** The terminal tour and key features, as the CLI README states them. */
+/** The two READMEs, parsed at build time. */
 function useReadme(): ReadmeData {
-  return usePluginData(README_FEATURES_PLUGIN) as ReadmeData;
+  return usePluginData(README_PLUGIN) as ReadmeData;
+}
+
+/**
+ * A README paragraph, its list, and the paragraph closing it: the shape of
+ * both arguments the repository README makes.
+ */
+function Argued({
+  argument,
+  className,
+  children,
+}: {
+  argument: Argument;
+  className: string;
+  children?: React.ReactNode;
+}): React.ReactElement {
+  const List = argument.ordered ? 'ol' : 'ul';
+  return (
+    <>
+      <p className={styles.sectionLead}>
+        <Inlines tokens={argument.intro} />
+      </p>
+      <List className={className}>
+        {argument.items.map((item, i) => (
+          // The list comes from a file read at build time and never reorders.
+          // eslint-disable-next-line react/no-array-index-key
+          <li key={i}>
+            <Inlines tokens={item} />
+          </li>
+        ))}
+      </List>
+      {(argument.outro || children) && (
+        <p className={styles.sectionLead}>
+          {argument.outro && <Inlines tokens={argument.outro} />} {children}
+        </p>
+      )}
+    </>
+  );
 }
 
 // One command per block, and the platform in the block's title rather than in
@@ -44,7 +83,7 @@ const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/ma
 
 function Hero(): React.ReactElement {
   const {siteConfig} = useDocusaurusContext();
-  const {transcript, transcriptNote} = useReadme();
+  const {repository, cli} = useReadme();
 
   return (
     <header className={styles.hero}>
@@ -53,7 +92,10 @@ function Hero(): React.ReactElement {
         <Heading as="h1" className={styles.title}>
           {siteConfig.title}
         </Heading>
-        <p className={styles.tagline}>{siteConfig.tagline}</p>
+        {/* No tagline line here, deliberately: the repository README's opening
+            paragraph below says what the tagline says, in more words, and one
+            under the other read as a stutter. siteConfig.tagline is still the
+            navbar's, the page <title>'s and the meta description's. */}
         {/* The same two badges the repository README carries: the tests workflow
             and the coverage endpoint the coverage job publishes to the badges
             branch. The coverage one links to the page that explains the number
@@ -70,11 +112,14 @@ function Hero(): React.ReactElement {
             />
           </Link>
         </div>
-        <p className={styles.lead}>
-          dispat reads conventional commits to track changed packages, computes their next semantic versions
-          (propagating bumps to dependants), and builds and publishes them in the right order, in parallel, with
-          changelogs, git tags and GitHub releases on the way out.
-        </p>
+        {/* The repository README's opening, up to its install commands. */}
+        {repository.lead.map((paragraph, i) => (
+          // Read from a file at build time; the order never changes.
+          // eslint-disable-next-line react/no-array-index-key
+          <p className={styles.lead} key={i}>
+            <Inlines tokens={paragraph} />
+          </p>
+        ))}
         <div className={styles.buttons}>
           <Link className="button button--primary button--lg" to="/getting-started">
             Get started
@@ -87,10 +132,10 @@ function Hero(): React.ReactElement {
             shell-session highlighting is what tells the commands from their
             output. The README fence has to stay `sh` for GitHub. */}
         <CodeBlock language="console" className={styles.transcript}>
-          {transcript}
+          {cli.transcript}
         </CodeBlock>
         <p className={styles.transcriptNote}>
-          <Inlines tokens={transcriptNote} />
+          <Inlines tokens={cli.transcriptNote} />
         </p>
       </div>
     </header>
@@ -98,42 +143,24 @@ function Hero(): React.ReactElement {
 }
 
 function Features(): React.ReactElement {
-  const {features} = useReadme();
+  const {repository, cli} = useReadme();
 
   return (
     <section className="container margin-vert--xl">
       <Heading as="h2" className={styles.sectionTitle}>
         Why one more monorepo tool?
       </Heading>
-      <p className={styles.sectionLead}>
-        Every major monorepo tool can topologically sort a dependency graph: build everything in order, then publish
-        everything, or publish only what changed, sequentially. Two situations break that model in practice.
-      </p>
-      <ol className={styles.problems}>
-        <li>
-          <strong>An error in the middle of a run.</strong> Half the packages are published, half are not. Most tools
-          either abort the whole run or plough on and leave you to reconstruct what shipped. Re-running tends to
-          re-release things that are already out, or you end up writing recovery scripts by hand.
-        </li>
-        <li>
-          <strong>
-            A consumer that can only be <em>built</em> after its provider is <em>published</em>.
-          </strong>{' '}
-          A Node package can be built before its consumers publish, but a Docker image is often buildable only by pulling
-          its base image from a registry, which means the provider must already be published. &ldquo;Build all, then
-          publish all&rdquo; assumes every ecosystem behaves like npm, and mixed graphs break it.
-        </li>
-      </ol>
-      <p className={styles.sectionLead}>
-        Modern projects are exactly that mix: many packages on different infrastructure (npm next to Docker next to Go)
-        wired into one dependency graph. dispat is built for that case, and{' '}
+      {/* The repository README's section of the same name. The pointer at the
+          end is the landing page's own: the README has no Concepts page to
+          send a reader to. */}
+      <Argued argument={repository.problems} className={styles.problems}>
         <Link to="/concepts">Concepts</Link> works both situations through end to end.
-      </p>
+      </Argued>
       {/* The cards are the CLI README's `## Key features` bullets, one card
           each, read at build time. Adding a bullet there adds a card here. */}
       <div className={styles.features}>
-        {features.map((feature, i) => (
-          <div className={[styles.feature, i === features.length - 1 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
+        {cli.features.map((feature, i) => (
+          <div className={[styles.feature, i === cli.features.length - 1 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
             <Heading as="h3" className={styles.featureTitle}>
               {feature.title}
             </Heading>
@@ -356,34 +383,18 @@ function Reference(): React.ReactElement {
 // Community is last on purpose: a reader who got this far has the shape of the
 // tool and is deciding whether to adopt it, which is the moment an invitation
 // is worth anything.
-// The repository README's Inspiration section, kept in step with it: a reader
-// deciding whether to adopt this wants to know what it descends from.
 function Inspiration(): React.ReactElement {
+  const {repository} = useReadme();
+
   return (
     <section className="container margin-bottom--xl">
       <Heading as="h2" className={styles.sectionTitle}>
         Inspiration
       </Heading>
-      <p className={styles.sectionLead}>dispat stands on the shoulders of two things.</p>
-      <ul className={styles.reference}>
-        <li>
-          <Link to="https://lerna.js.org/">Lerna</Link>, and the workspaces of{' '}
-          <Link to="https://docs.npmjs.com/cli/using-npm/workspaces">npm</Link> and{' '}
-          <Link to="https://pnpm.io/workspaces">pnpm</Link> it grew up beside. Between them they proved that many
-          packages in one repository can share a dependency graph, and that versioning and publishing all of them can be
-          a single command. dispat takes that idea beyond JavaScript and rebuilds it around an explicit dependency graph
-          and an explicit error model.
-        </li>
-        <li>
-          <Link to="https://www.conventionalcommits.org/">Conventional Commits</Link>: commit messages as
-          machine-readable release intent. dispat&apos;s parser,{' '}
-          <Link to={`${GITHUB}/tree/main/pkg/ccme`}>
-            <code>pkg/ccme</code>
-          </Link>
-          , implements a strict superset of Conventional Commits 1.0.0 that adds the monorepo dimension: scopes as
-          packages, propagation depth, prerelease channels.
-        </li>
-      </ul>
+      {/* The repository README's section of the same name, read at build time
+          rather than kept in step by hand. Its relative link to pkg/ccme comes
+          back as a GitHub URL; see plugins/readme/inline.ts. */}
+      <Argued argument={repository.inspiration} className={styles.reference} />
     </section>
   );
 }

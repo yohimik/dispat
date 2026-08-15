@@ -3,7 +3,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 import type {Config} from '@docusaurus/types';
 import {themes as prismThemes} from 'prism-react-renderer';
 
-import readmeFeatures from './plugins/readme-features';
+import readme from './plugins/readme';
 import testReport from './plugins/test-report';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
@@ -39,7 +39,7 @@ const config: Config = {
     // Both are imported as functions rather than named by path: the config is
     // TypeScript, and importing them means they are compiled by the same
     // loader and type-checked by `pnpm typecheck` along with everything else.
-    readmeFeatures,
+    readme,
     testReport,
     [
       // Installable, and readable offline once installed. The plugin emits

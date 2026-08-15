@@ -86,6 +86,13 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   stale. The upside is that dispat composes with the caching you already have instead of replacing it: BuildKit layers,
   an Nx, Turborepo or Bazel cache, ccache, the Gradle build cache all keep working inside the stage, and none of them
   can change which versions are computed, what publishes in which order, or what gets tagged.
+- **A release is a distributed transaction, and is treated as one.** Publishing a graph means irreversible writes
+  across independent services (an npm registry, a Docker registry, GitHub) with no rollback to fall back on. Each
+  package's leg commits by durably recording its completion: the annotated git tag, written only after the publish
+  succeeded. There are no state files and no registry queries, so nothing can drift from what actually happened, and
+  recovery is deterministic replay — the plan is a pure function of history, graph and configuration, so a re-run
+  recomputes the same transaction and executes only the legs whose record is missing.
+  [Details](https://yohimik.github.io/dispat/internals/architecture).
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
   release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
   verified before any work, and nothing is ever published against an unpublished dependency. Two releases of one

@@ -1,9 +1,9 @@
 import Link from '@docusaurus/Link';
-import type {Inline} from '@site/plugins/readme-features/types';
+import type {Inline} from '@site/plugins/readme/types';
 import React from 'react';
 
-// Renders the inline-markdown tokens the readme-features plugin parsed out of
-// services/dispat/README.md.
+// Renders the inline-markdown tokens the readme plugin parsed out of the
+// repository README and the CLI one.
 //
 // The plugin cannot hand over React elements — global data is JSON — so the
 // markdown crosses as a token tree and becomes elements here. Links are the

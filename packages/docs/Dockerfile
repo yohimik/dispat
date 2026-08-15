@@ -40,10 +40,11 @@ RUN apk add --no-cache git \
 # staticDirectories reaches out of the package to ../../imgs, so it is part of
 # this build even though it sits outside packages/docs.
 COPY imgs ./imgs
-# The landing page's terminal tour and feature cards are read out of the CLI
-# README at build time (plugins/readme-features), so it is an input to this
-# build as much as any page is. The layout under /src has to match the
-# repository's, because the plugin resolves it as ../../services/dispat.
+# The landing page is read out of the two READMEs at build time
+# (plugins/readme), so they are inputs to this build as much as any page is.
+# The layout under /src has to match the repository's, because the plugin
+# resolves them from the site folder as ../../.
+COPY README.md ./README.md
 COPY services/dispat/README.md ./services/dispat/README.md
 COPY packages/docs ./packages/docs
 COPY .git ./.git

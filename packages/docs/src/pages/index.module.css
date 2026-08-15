@@ -21,14 +21,8 @@
   font-size: 3rem;
 }
 
-.tagline {
-  margin-bottom: 1rem;
-  font-size: 1.25rem;
-  font-weight: 500;
-  color: var(--ifm-color-primary);
-}
 
-/* Readable line length for the two long paragraphs on an otherwise wide page. */
+/* Readable line length for the long paragraphs on an otherwise wide page. */
 .lead,
 .sectionLead {
   max-width: 52rem;

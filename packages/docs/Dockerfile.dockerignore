@@ -15,10 +15,11 @@
 packages/*
 !packages/docs
 
-# The landing page is built from the CLI README (plugins/readme-features), and
-# that one file is the only thing this build wants from services/. Every level
-# spelled out, as above: an exception cannot reach into a folder the line
-# before it excluded.
+# The landing page is built from the repository README and the CLI one
+# (plugins/readme). The second is the only thing this build wants from
+# services/, so every level is spelled out, as above: an exception cannot reach
+# into a folder the line before it excluded.
+!README.md
 !services
 services/*
 !services/dispat
