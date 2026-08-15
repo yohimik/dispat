@@ -1,18 +1,14 @@
+# The monorepo's shared configuration: what every space needs, and nothing any
+# one of them owns. Each space carries its own dispat.yaml in its folder, and
+# the two packages with exceptions of their own (packages/docs and
+# services/dispat) carry a package file beside their code — see
+# https://yohimik.github.io/dispat/docs/examples/layout.
 scripts:
   go-mod-tidy: go mod tidy
   pnpm-install: pnpm install
   changelog: dispat changelog
   commit: dispat commit --tag --push
   github: dispat github
-  docker-login: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-
-  # A stage gate whose only input is an environment variable. Written here
-  # rather than inside the script it guards, so the condition that decides
-  # whether a stage does anything is visible where the stage is.
-  deploy-docs: >-
-    dispat if 'CI!=true'
-    --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
-    --else 'sh ../../scripts/deploy-docs.sh'
 
   # postAll fires for every release, including one run by hand. Outside Actions
   # there is no $GITHUB_OUTPUT to write, and a guard that finds nothing to do
@@ -48,261 +44,17 @@ versionGroups:
   cli:
     versioning: fixedMajorMinor
 
+# A space's existence and its path live here; everything else it says about
+# itself lives in <space>/dispat.yaml.
 spaces:
   pkg:
-    tagFormat: pkg/{name}/v{version}
     path: pkg
-    isBuildWaitingPublish: true
-    autoVersion:
-      enabled: true
-      syncLock: [go-mod-tidy]
-    # The libraries publish as source, so they have no build stage of their
-    # own. `build` still exists because the CI gate sweeps one name across the
-    # whole monorepo: compiling is what building a Go library means here.
-    scripts:
-      build: go build ./...
-      # Through go-test.sh so the run leaves a machine-readable log beside its
-      # coverage profile: the documentation site's coverage and test-results
-      # pages are built from the pair, rather than from numbers typed by hand.
-      # The log is named after the package, as the profile already is.
-      tests: >-
-        sh ../../scripts/go-test.sh "$DISPAT_PACKAGE" --
-        ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
-    flow:
-      beforePublish: [changelog, commit]
-    packages:
-      manifest:
-        versionGroup: manifests
-      scanner:
-        versionGroup: manifests
-        dependencies: [manifest]
-      writer:
-        versionGroup: manifests
-        dependencies: [manifest]
-      models:
-        versionGroup: cli
-        dependencies: [ccme]
-
   packages:
     path: packages
-    autoVersion:
-      enabled: true
-      syncLock: [pnpm-install]
-    # Every package of this space is gated from its own Dockerfile, so the
-    # command is the space's rather than any one package's: a second Node
-    # package brings a Dockerfile and needs no new script and no new CI step.
-    scripts:
-      tests: docker buildx build --file Dockerfile --target typecheck --output type=cacheonly ../..
-    packages:
-      docs:
-        tagFormat: packages/docs/v{version}
-        versionGroup: cli
-        dependencies:
-          - provider: dispat
-            keep: true
-        scripts:
-          # The site, and the version snapshot that goes in it, from one build.
-          #
-          # `docs` and `dispat` share the `cli` version group, so they release
-          # together, always: there is no run in which the docs are built
-          # without a CLI version to document, and no reason to freeze the
-          # snapshot in a stage of its own ahead of the build. Cutting it here
-          # means the site that ships is the one built *with* it, and the
-          # tracked files it writes — versioned_docs, versioned_sidebars,
-          # versions.json — are staged by the `commit` in beforePublish along
-          # with everything else the release changed.
-          #
-          # A snapshot per minor, not per patch: 1.2.3 and 1.2.4 document the
-          # same surface, and a copy each would grow the repository for
-          # nothing. An empty DOCS_VERSION means no cut at all, which is what a
-          # prerelease gets.
-          #
-          # dest is the package folder, not a dist/ of its own, because half of
-          # what comes back is source rather than output.
-          #
-          # DOCS_REQUIRE_REPORT is set for a release and nothing else. The
-          # coverage and test-results pages are built from a report the run
-          # that gated this release measured, handed over as a CI artifact;
-          # a release that lost it would publish those pages with the figures
-          # silently missing, so the build refuses instead. DISPAT_STAGE is
-          # "build" only in a real release — the CI build gate is "run:build",
-          # has no report, and renders the pages without figures on purpose.
-          build: |
-            DOCS_VERSION=""
-            if [ "${DISPAT_IS_PRERELEASE:-false}" != "true" ]; then
-              DOCS_VERSION="${DISPAT_VERSION%.*}"
-            fi
-            DOCS_REQUIRE_REPORT=""
-            if [ "$DISPAT_STAGE" = "build" ]; then
-              DOCS_REQUIRE_REPORT="1"
-            fi
-            docker buildx build --file Dockerfile --target export \
-              --build-arg DOCS_VERSION="$DOCS_VERSION" \
-              --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
-              --output "type=local,dest=$PWD" ../..
-        flow:
-          build: build
-          publish: deploy-docs
-          beforePublish: [changelog, commit]
-
   services:
-    tagFormat: services/{name}/v{version}
     path: services
-    isBuildWaitingPublish: true
-    autoVersion:
-      enabled: true
-      syncLock: [go-mod-tidy]
-    flow:
-      beforePublish: [changelog, commit, github]
-    packages:
-      dispat:
-        versionGroup: cli
-        dependencies: [ccme, manifest, models, scanner, writer]
-        aliasTags:
-          - format: v{version}
-          - format: v{major}
-            moving: true
-            channels: [stable]
-        scripts:
-          # The binaries are built against this checkout, not against the
-          # pkg/* versions go.mod happens to pin: those pins are only as fresh
-          # as the last release that bumped them, so a provider changed without
-          # a version bump would ship as its published copy while every test in
-          # CI ran the working tree. link points each workspace dependency at
-          # its folder; unlink takes the redirects back out.
-          #
-          # The bracket is inside the build rather than around it, as
-          # beforeBuild/postBuild hooks, because those are the release
-          # pipeline's and `dispat run build` — which is the CI build gate —
-          # executes the named script and nothing else. A bracket in the hooks
-          # would leave the gate compiling against the published pkg/*, which
-          # is exactly the mistake the bracket exists to prevent, and it would
-          # fail only in CI. flow.onFail keeps unlink as the release's net.
-          link: dispat autowriter --package dispat --since all --sync-lock=false --link-local
-          unlink: dispat autowriter --package dispat --since all --sync-lock=false --unlink-local
-          # The two ways the bracket leaks, both of which only fail for whoever
-          # consumes the published module, long after the tag exists. The
-          # first is the scanner's own gate, which reads the replace directives
-          # the way go.mod means them (a parenthesised block included) instead
-          # of grepping for one spelling. The second is the quieter leak:
-          # `go work sync`, and anything else that reconciles the workspace
-          # while the links are in place, drops the go.sum entries the
-          # redirects made redundant, and that is a toolchain fact no manifest
-          # scan can see, so it stays a grep.
-          verify-unlinked: |
-            dispat scanner --root-only --verify-unlinked || exit 1
-            for m in ccme manifest models scanner writer; do
-              if ! grep -q "^github.com/yohimik/dispat/pkg/$m " go.sum; then
-                echo "go.sum lost its entry for pkg/$m" >&2
-                exit 1
-              fi
-            done
-          build:
-            - dispat exec link --for pkg:dispat
-            # DISPAT_EXPORT_BASE is where the export is about to land, which is
-            # the one thing the container cannot work out for itself: it names
-            # its artefacts against that path, so what comes back needs no
-            # rewriting here.
-            - >-
-              docker buildx build --file Dockerfile --target export
-              --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
-              --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
-              --output "type=local,dest=$PWD/dist" ../..
-            # Already this stage's outputs, in $DISPAT_OUTPUT's own format.
-            - cat dist/dispat-output >> "$DISPAT_OUTPUT"
-            - rm -f dist/dispat-output
-            - dispat exec unlink --for pkg:dispat
-            # Checked here rather than on the way out, so a leak fails the
-            # build, which is still ahead of anything being published.
-            - dispat exec verify-unlinked --for pkg:dispat
-          tests:unit: >-
-            sh ../../scripts/go-test.sh dispat --
-            ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
-          # The black-box suite of exactly this binary, so it belongs to this
-          # package rather than to a space of its own. DISPAT_COVERDIR makes
-          # the harness build dispat with -cover and point every invocation's
-          # GOCOVERDIR at the folder, which is the only coverage much of the
-          # app and cli packages get. The race pass runs the root package only,
-          # as it always has, and keeps its own log so the report can say the
-          # suite is race-clean rather than have someone assert it.
-          tests:integration: |
-            export DISPAT_COVERDIR="$PWD/../../coverage/covdata"
-            rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
-            sh ../../scripts/go-test.sh integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
-            go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
-            sh ../../scripts/go-test.sh integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
-          tests:
-            - dispat exec tests:unit --for pkg:dispat
-            - dispat exec tests:integration --for pkg:dispat
-        # onFail is the net for the paths the build script never finishes:
-        # unlink is idempotent, so closing an already-closed bracket is a
-        # no-op. It matters because beforePublish runs `dispat commit`, which
-        # stages services/dispat — a link still in place there would be
-        # published as a go.mod no consumer can resolve.
-        flow:
-          build: build
-          onFail: unlink
-
   docker:
-    tagFormat: docker/{name}/v{version}
     path: docker
-    autoVersion:
-      enabled: true
-    # `tests` validates the manifest rather than building it: it proves the
-    # DISPAT_WORKSPACE_DISPAT_VERSION interpolation and the channel overlay
-    # still resolve — the breakage that would otherwise surface first at
-    # release time — in a second. The images themselves are built by `build`,
-    # which the CI gate reaches only when a docker package actually changed.
-    scripts:
-      # The compose files interpolate DISPAT_WORKSPACE_DISPAT_VERSION into the
-      # DISPAT_VERSION build arg, and the Dockerfiles hand it to install.sh.
-      # In a release that is right: the images build after the CLI published,
-      # so the version exists to download. In the CI build gate — `dispat run
-      # build`, where DISPAT_STAGE is "run:build" — it is the version being
-      # planned, which nobody has published yet, so install.sh would 404 on
-      # every gate run where the CLI has commits pending. The gate wants the
-      # newest version that exists instead; the question it answers is whether
-      # the image still builds.
-      build: |
-        if [ "$DISPAT_STAGE" != "build" ]; then
-          tag=$(git tag -l 'services/dispat/v*' --sort=-v:refname | head -n 1)
-          DISPAT_WORKSPACE_DISPAT_VERSION=${tag##*/v}
-          export DISPAT_WORKSPACE_DISPAT_VERSION
-          echo "gate: building against the published $DISPAT_WORKSPACE_DISPAT_VERSION"
-        fi
-        docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
-      tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q
-      push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
-    flow:
-      login: docker-login
-      build: build
-      publish: push-image
-      beforePublish: [changelog, commit]
-    packages:
-      dispat-ubuntu:
-        versionGroup: cli
-        dependencies:
-          - provider: dispat
-            keep: true
-        manifestNames: [docker.io/yohimik/dispat-ubuntu]
-      dispat-debian:
-        versionGroup: cli
-        dependencies:
-          - provider: dispat
-            keep: true
-        manifestNames: [docker.io/yohimik/dispat-debian]
-      dispat-alpine:
-        versionGroup: cli
-        dependencies:
-          - provider: dispat
-            keep: true
-        manifestNames: [docker.io/yohimik/dispat-alpine]
-      dispat-dind:
-        versionGroup: cli
-        dependencies:
-          - provider: dispat
-            keep: true
-        manifestNames: [docker.io/yohimik/dispat-dind]
 
 concurrency: [0, 1]
 

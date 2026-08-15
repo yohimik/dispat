@@ -1,0 +1,58 @@
+# The docs package's own configuration: everything unusual about the
+# documentation site, beside the Dockerfile that builds it.
+tagFormat: packages/docs/v{version}
+versionGroup: cli
+dependencies:
+  - provider: dispat
+    keep: true
+scripts:
+  # A stage gate whose only input is an environment variable. Written here
+  # rather than inside the script it guards, so the condition that decides
+  # whether a stage does anything is visible where the stage is.
+  deploy-docs: >-
+    dispat if 'CI!=true'
+    --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
+    --else 'sh ../../scripts/deploy-docs.sh'
+  # The site, and the version snapshot that goes in it, from one build.
+  #
+  # `docs` and `dispat` share the `cli` version group, so they release
+  # together, always: there is no run in which the docs are built
+  # without a CLI version to document, and no reason to freeze the
+  # snapshot in a stage of its own ahead of the build. Cutting it here
+  # means the site that ships is the one built *with* it, and the
+  # tracked files it writes — versioned_docs, versioned_sidebars,
+  # versions.json — are staged by the `commit` in beforePublish along
+  # with everything else the release changed.
+  #
+  # A snapshot per minor, not per patch: 1.2.3 and 1.2.4 document the
+  # same surface, and a copy each would grow the repository for
+  # nothing. An empty DOCS_VERSION means no cut at all, which is what a
+  # prerelease gets.
+  #
+  # dest is the package folder, not a dist/ of its own, because half of
+  # what comes back is source rather than output.
+  #
+  # DOCS_REQUIRE_REPORT is set for a release and nothing else. The
+  # coverage and test-results pages are built from a report the run
+  # that gated this release measured, handed over as a CI artifact;
+  # a release that lost it would publish those pages with the figures
+  # silently missing, so the build refuses instead. DISPAT_STAGE is
+  # "build" only in a real release — the CI build gate is "run:build",
+  # has no report, and renders the pages without figures on purpose.
+  build: |
+    DOCS_VERSION=""
+    if [ "${DISPAT_IS_PRERELEASE:-false}" != "true" ]; then
+      DOCS_VERSION="${DISPAT_VERSION%.*}"
+    fi
+    DOCS_REQUIRE_REPORT=""
+    if [ "$DISPAT_STAGE" = "build" ]; then
+      DOCS_REQUIRE_REPORT="1"
+    fi
+    docker buildx build --file Dockerfile --target export \
+      --build-arg DOCS_VERSION="$DOCS_VERSION" \
+      --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
+      --output "type=local,dest=$PWD" ../..
+flow:
+  build: build
+  publish: deploy-docs
+  beforePublish: [changelog, commit]

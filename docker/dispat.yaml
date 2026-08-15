@@ -1,0 +1,62 @@
+# The docker space: the four published images. Authentication belongs to the
+# space, not to any one image, so docker-login lives here with the flow.login
+# slot that runs it once per space and run.
+tagFormat: docker/{name}/v{version}
+autoVersion:
+  enabled: true
+# `tests` validates the manifest rather than building it: it proves the
+# DISPAT_WORKSPACE_DISPAT_VERSION interpolation and the channel overlay
+# still resolve — the breakage that would otherwise surface first at
+# release time — in a second. The images themselves are built by `build`,
+# which the CI gate reaches only when a docker package actually changed.
+scripts:
+  docker-login: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+  # The compose files interpolate DISPAT_WORKSPACE_DISPAT_VERSION into the
+  # DISPAT_VERSION build arg, and the Dockerfiles hand it to install.sh.
+  # In a release that is right: the images build after the CLI published,
+  # so the version exists to download. In the CI build gate — `dispat run
+  # build`, where DISPAT_STAGE is "run:build" — it is the version being
+  # planned, which nobody has published yet, so install.sh would 404 on
+  # every gate run where the CLI has commits pending. The gate wants the
+  # newest version that exists instead; the question it answers is whether
+  # the image still builds.
+  build: |
+    if [ "$DISPAT_STAGE" != "build" ]; then
+      tag=$(git tag -l 'services/dispat/v*' --sort=-v:refname | head -n 1)
+      DISPAT_WORKSPACE_DISPAT_VERSION=${tag##*/v}
+      export DISPAT_WORKSPACE_DISPAT_VERSION
+      echo "gate: building against the published $DISPAT_WORKSPACE_DISPAT_VERSION"
+    fi
+    docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
+  tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q
+  push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
+flow:
+  login: docker-login
+  build: build
+  publish: push-image
+  beforePublish: [changelog, commit]
+packages:
+  dispat-ubuntu:
+    versionGroup: cli
+    dependencies:
+      - provider: dispat
+        keep: true
+    manifestNames: [docker.io/yohimik/dispat-ubuntu]
+  dispat-debian:
+    versionGroup: cli
+    dependencies:
+      - provider: dispat
+        keep: true
+    manifestNames: [docker.io/yohimik/dispat-debian]
+  dispat-alpine:
+    versionGroup: cli
+    dependencies:
+      - provider: dispat
+        keep: true
+    manifestNames: [docker.io/yohimik/dispat-alpine]
+  dispat-dind:
+    versionGroup: cli
+    dependencies:
+      - provider: dispat
+        keep: true
+    manifestNames: [docker.io/yohimik/dispat-dind]

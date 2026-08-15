@@ -1,0 +1,10 @@
+# The packages space: the pnpm workspace. This file is the space's own
+# configuration; the docs package's exceptions live in packages/docs/dispat.yaml.
+autoVersion:
+  enabled: true
+  syncLock: [pnpm-install]
+# Every package of this space is gated from its own Dockerfile, so the
+# command is the space's rather than any one package's: a second Node
+# package brings a Dockerfile and needs no new script and no new CI step.
+scripts:
+  tests: docker buildx build --file Dockerfile --target typecheck --output type=cacheonly ../..

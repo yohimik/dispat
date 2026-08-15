@@ -1,0 +1,90 @@
+# The dispat package's own configuration: the CLI's alias tags, the local-link
+# bracket its build wraps around itself, and the split test suites. The
+# dispat.example.* files beside this one are documentation samples, not
+# configuration; dispat resolves the exact names dispat.{json,yaml,yml,toml}.
+versionGroup: cli
+dependencies: [ccme, manifest, models, scanner, writer]
+aliasTags:
+  - format: v{version}
+  - format: v{major}
+    moving: true
+    channels: [stable]
+scripts:
+  # The binaries are built against this checkout, not against the
+  # pkg/* versions go.mod happens to pin: those pins are only as fresh
+  # as the last release that bumped them, so a provider changed without
+  # a version bump would ship as its published copy while every test in
+  # CI ran the working tree. link points each workspace dependency at
+  # its folder; unlink takes the redirects back out.
+  #
+  # The bracket is inside the build rather than around it, as
+  # beforeBuild/postBuild hooks, because those are the release
+  # pipeline's and `dispat run build` — which is the CI build gate —
+  # executes the named script and nothing else. A bracket in the hooks
+  # would leave the gate compiling against the published pkg/*, which
+  # is exactly the mistake the bracket exists to prevent, and it would
+  # fail only in CI. flow.onFail keeps unlink as the release's net.
+  link: dispat autowriter --package dispat --since all --sync-lock=false --link-local
+  unlink: dispat autowriter --package dispat --since all --sync-lock=false --unlink-local
+  # The two ways the bracket leaks, both of which only fail for whoever
+  # consumes the published module, long after the tag exists. The
+  # first is the scanner's own gate, which reads the replace directives
+  # the way go.mod means them (a parenthesised block included) instead
+  # of grepping for one spelling. The second is the quieter leak:
+  # `go work sync`, and anything else that reconciles the workspace
+  # while the links are in place, drops the go.sum entries the
+  # redirects made redundant, and that is a toolchain fact no manifest
+  # scan can see, so it stays a grep.
+  verify-unlinked: |
+    dispat scanner --root-only --verify-unlinked || exit 1
+    for m in ccme manifest models scanner writer; do
+      if ! grep -q "^github.com/yohimik/dispat/pkg/$m " go.sum; then
+        echo "go.sum lost its entry for pkg/$m" >&2
+        exit 1
+      fi
+    done
+  build:
+    - dispat exec link --for pkg:dispat
+    # DISPAT_EXPORT_BASE is where the export is about to land, which is
+    # the one thing the container cannot work out for itself: it names
+    # its artefacts against that path, so what comes back needs no
+    # rewriting here.
+    - >-
+      docker buildx build --file Dockerfile --target export
+      --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
+      --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
+      --output "type=local,dest=$PWD/dist" ../..
+    # Already this stage's outputs, in $DISPAT_OUTPUT's own format.
+    - cat dist/dispat-output >> "$DISPAT_OUTPUT"
+    - rm -f dist/dispat-output
+    - dispat exec unlink --for pkg:dispat
+    # Checked here rather than on the way out, so a leak fails the
+    # build, which is still ahead of anything being published.
+    - dispat exec verify-unlinked --for pkg:dispat
+  tests:unit: >-
+    sh ../../scripts/go-test.sh dispat --
+    ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
+  # The black-box suite of exactly this binary, so it belongs to this
+  # package rather than to a space of its own. DISPAT_COVERDIR makes
+  # the harness build dispat with -cover and point every invocation's
+  # GOCOVERDIR at the folder, which is the only coverage much of the
+  # app and cli packages get. The race pass runs the root package only,
+  # as it always has, and keeps its own log so the report can say the
+  # suite is race-clean rather than have someone assert it.
+  tests:integration: |
+    export DISPAT_COVERDIR="$PWD/../../coverage/covdata"
+    rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
+    sh ../../scripts/go-test.sh integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
+    go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
+    sh ../../scripts/go-test.sh integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
+  tests:
+    - dispat exec tests:unit --for pkg:dispat
+    - dispat exec tests:integration --for pkg:dispat
+# onFail is the net for the paths the build script never finishes:
+# unlink is idempotent, so closing an already-closed bracket is a
+# no-op. It matters because beforePublish runs `dispat commit`, which
+# stages services/dispat — a link still in place there would be
+# published as a go.mod no consumer can resolve.
+flow:
+  build: build
+  onFail: unlink

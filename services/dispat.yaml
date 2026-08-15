@@ -1,0 +1,9 @@
+# The services space. This file is the space's own configuration; the dispat
+# package's exceptions live in services/dispat/dispat.yaml.
+tagFormat: services/{name}/v{version}
+isBuildWaitingPublish: true
+autoVersion:
+  enabled: true
+  syncLock: [go-mod-tidy]
+flow:
+  beforePublish: [changelog, commit, github]
