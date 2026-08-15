@@ -47,7 +47,10 @@ func goTest(args []string) (int, error) {
 	}
 	logPath := filepath.Join(logDir, name+".json")
 
-	logf(levelInfo, "%s: go test %s -json", name, strings.Join(rest, " "))
+	// To stdout beside the summary, not through logf: the command line is the
+	// run's human output, and a stderr line would surface as a warning in the
+	// driver's log.
+	fmt.Printf("%s: go test %s -json\n", name, strings.Join(rest, " "))
 
 	f, err := os.Create(logPath)
 	if err != nil {
