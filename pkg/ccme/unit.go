@@ -366,7 +366,7 @@ func (p *Parser) applyDefaults(u *Unit) {
 	if !d.ChannelDepthSet {
 		d.ChannelDepth = p.cfg.Propagation.ChannelDepth
 	}
-	// §8.4 removed the per-unit override, so the edge kinds always come from
+	// §8.4 defines no per-unit override, so the edge kinds always come from
 	// configuration. The slice is shared, and documented read-only.
 	d.Kinds = p.cfg.Propagation.Kinds
 	// Propagate-Channel-Scope defaults to the unit's Propagate-Scope (§8.1).
@@ -551,9 +551,9 @@ func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
 	return out, nil
 }
 
-// errReleaseAsBump reports the removed bump form, which is E151 with an
-// explanation rather than a bare "invalid value": it was legal in earlier
-// drafts and reads plausible, so the diagnostic has to say why it is gone.
+// errReleaseAsBump reports the bump form that §8.6 deliberately excludes. It
+// is E151 with an explanation rather than a bare "invalid value": the spelling
+// reads plausible, so the diagnostic has to say why it does not exist.
 var errReleaseAsBump = errors.New(
 	"Release-As has no bump form: how large a change is, is declared by the type; " +
 		"change the type, or map it in the types configuration")

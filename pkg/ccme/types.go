@@ -455,7 +455,7 @@ type Directives struct {
 	ReleaseAs *ReleaseAs
 
 	// Kinds are the manifest fields traversed as propagation edges. They come
-	// from configuration alone: §8.4 removed the per-unit override, because
+	// from configuration alone: §8.4 defines no per-unit override, because
 	// which dependency fields imply "must be republished" is a fact about the
 	// repository, not about any one commit.
 	//

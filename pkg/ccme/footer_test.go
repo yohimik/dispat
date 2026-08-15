@@ -191,7 +191,7 @@ func TestInvalidFooterValues(t *testing.T) {
 		{"Release-As: 1.2", CodeE151},
 		{"Release-As: v1.2.3", CodeE151},
 		{"Release-As: 01.2.3", CodeE151},
-		// §8.6: the bump form was removed; edge case 73i.
+		// §8.6: Release-As has no bump form; edge case 73i.
 		{"Release-As: patch", CodeE151},
 		{"Release-As: minor", CodeE151},
 		{"Release-As: major", CodeE151},

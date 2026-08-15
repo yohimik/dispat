@@ -727,9 +727,9 @@ func TestWorkedExampleD2(t *testing.T) {
 func TestWorkedExampleD7(t *testing.T) {
 	t.Parallel()
 
-	// §D.7 was rewritten when the Release-As bump form was removed: a
-	// repository that ships compiled artefacts states that once in `types`
-	// rather than overriding the bump on every commit.
+	// §D.7: a repository that ships compiled artefacts states that once in
+	// `types` rather than overriding the bump on every commit, because
+	// Release-As has no bump form (§8.6).
 	types := DefaultTypes()
 	types["build"] = BumpPatch
 	p := MustNewParser(Config{Types: types})

@@ -272,8 +272,8 @@ func TestParserLimits(t *testing.T) {
 	})
 }
 
-// TestReleaseAsHasNoBumpForm covers edge case 73i: the bump form was removed,
-// and the diagnostic has to explain why rather than say "invalid value".
+// TestReleaseAsHasNoBumpForm covers edge case 73i: Release-As has no bump
+// form, and the diagnostic has to explain why rather than say "invalid value".
 func TestReleaseAsHasNoBumpForm(t *testing.T) {
 	t.Parallel()
 
@@ -285,7 +285,7 @@ func TestReleaseAsHasNoBumpForm(t *testing.T) {
 			continue
 		}
 		if !strings.Contains(res.Errors()[0].Message, "no bump form") {
-			t.Errorf("Release-As: %s message = %q, want it to explain the removal",
+			t.Errorf("Release-As: %s message = %q, want it to explain the missing bump form",
 				v, res.Errors()[0].Message)
 		}
 	}
