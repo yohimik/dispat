@@ -114,6 +114,12 @@ func (a *App) computePlan(ctx context.Context) (*plan.Plan, error) {
 	return pl, nil
 }
 
+// ErrNothingToRelease is the --require-release refusal: the plan is correct
+// and it releases nothing. It is exported so the cli can give it an exit code
+// of its own — a pipeline gating on `dispat status --require-release` needs
+// "nothing to do" told apart from "something is wrong".
+var ErrNothingToRelease = errors.New("the plan releases nothing and --require-release is set")
+
 // selectedPlan is computePlan for the two commands that release the plan
 // rather than read it: the plan is narrowed to the invocation's selection
 // between the diagnostics and the graph, so the graph printed is the run the
@@ -141,11 +147,11 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 	// The same placement, for the same reason: --require-release is a refusal
 	// about the plan, and it belongs after the plan that explains it. A fatal
 	// plan is left alone so releaseBlocked keeps the truer message — "no correct
-	// plan exists" outranks "nothing to release", and both exit 1 anyway.
+	// plan exists" outranks "nothing to release", and a fatal plan exits 1
+	// where this refusal exits 3.
 	if opts.RequireRelease && !pl.Fatal() && len(pl.Releasing()) == 0 {
-		err := errors.New("the plan releases nothing and --require-release is set")
-		a.log.Error().Err(err).Msg("refusing to release")
-		return nil, err
+		a.log.Error().Err(ErrNothingToRelease).Msg("refusing to release")
+		return nil, ErrNothingToRelease
 	}
 	return pl, nil
 }

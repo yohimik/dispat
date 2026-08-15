@@ -75,12 +75,12 @@ func TestPlanRequireRelease(t *testing.T) {
 	require.Equal(t, "unchanged", harness.GraphLine(res.Events, "core").Str("message"))
 
 	res = r.Status("--require-release")
-	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, 3, res.Code, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, "unchanged", harness.GraphLine(res.Events, "core").Str("message"),
 		"the plan is still printed before the refusal")
 
 	r.ReleaseOK() // the no-op contract, unchanged without the flag
-	assert.Equal(t, 1, r.Release("--require-release").Code)
+	assert.Equal(t, 3, r.Release("--require-release").Code)
 	assert.Empty(t, r.TagList(), "a refused run releases nothing")
 	assert.Zero(t, buildRuns(r), "and executes nothing")
 
@@ -99,10 +99,10 @@ func TestPlanRequireRelease(t *testing.T) {
 	r.WriteFile("packages/core/held.txt", "x")
 	r.Commit("feat(core): work held back\n---\nrelease(core): hold it\n\nRelease-As: none\n")
 	res = r.Status("--require-release")
-	assert.Equal(t, 1, res.Code, "a held package is not something this run releases")
+	assert.Equal(t, 3, res.Code, "a held package is not something this run releases")
 	assert.Equal(t, "‖ held (Release-As: none)",
 		harness.GraphLine(res.Events, "core").Str("message"))
-	assert.Equal(t, 1, r.Release("--require-release").Code)
+	assert.Equal(t, 3, r.Release("--require-release").Code)
 	assert.Equal(t, 1, r.TagCount("core@"), "still just the one release")
 	assert.Equal(t, 1, buildRuns(r), "and still just the one build")
 }

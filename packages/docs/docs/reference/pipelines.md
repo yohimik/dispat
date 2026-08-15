@@ -111,17 +111,20 @@ jobs:
       - uses: yohimik/dispat@v1
       - id: plan
         run: |
-          if dispat status --require-release; then
-            echo "releasing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "releasing=false" >> "$GITHUB_OUTPUT"
-          fi
+          rc=0
+          dispat status --require-release || rc=$?
+          case "$rc" in
+            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "releasing=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
 ```
 
-Two details carry the safety. The command is wrapped in `if` because the exit `1` is the *answer*, and a bare command
-under `set -e` would fail the job instead of answering. And the job needs only `contents: read`: `status` takes no
-release lock and creates no tag, so write permission stays out of every job except the one that releases. That is the
-permission gate.
+Two details carry the safety. The exit code is mapped through a `case` because exit `3` is the *answer* and every
+other nonzero code is a failure: a bare command under `set -e` would fail the job instead of answering, and a plain
+`if` would read a broken configuration as "nothing to release" and skip the release instead of failing. And the job
+needs only `contents: read`: `status` takes no release lock and creates no tag, so write permission stays out of
+every job except the one that releases. That is the permission gate.
 
 **Stage 2: the human gate.** The release workflow triggers on `workflow_dispatch`, so a person decides when a release
 run starts, and a `concurrency` group with `cancel-in-progress: false` queues a second dispatch behind the first

@@ -83,9 +83,10 @@ remaining work already done.
 Both `release` and `status` print the plan's diagnostics before the graph, and both narrow it to their
 [selection](./release.md) between the two.
 
-`status` exits `1` in only three cases: a repository-scoped failure (an unreadable tag, a version that would go
-backwards, a dependency cycle, a shallow clone), a `--strict` selection the plan cannot release, or
-`--require-release` with nothing to release. For anything else the plan it just printed is the plan a release would
+`status` exits `1` in only two cases: a repository-scoped failure (an unreadable tag, a version that would go
+backwards, a dependency cycle, a shallow clone), or a `--strict` selection the plan cannot release.
+`--require-release` with nothing to release exits `3`, a code of its own, so a pipeline gating on it can tell
+"nothing to do" from "something is wrong". For anything else the plan it just printed is the plan a release would
 use, so there is nothing to fail over. When a release *would* refuse, for example under `commitErrors: error`,
 `status` says so in a warning and still exits `0`. A withheld package or a split versioning group is a warning on
 both commands and exits `0` without `--strict`.

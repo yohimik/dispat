@@ -92,10 +92,11 @@ and a job triggered on every merge must not go red because this particular merge
 whose *point* is that something shipped needs the opposite: a deploy that runs after the release, an announcement, a
 downstream trigger. Passing quietly on an empty plan is how a pipeline ends up deploying nothing.
 
-`--require-release` is that gate. On `release` and `status` alike, it exits `1` when the plan releases nothing:
+`--require-release` is that gate. On `release` and `status` alike, it exits `3` when the plan releases nothing, a
+code of its own beside exit `1`'s failures:
 
 ```sh
-dispat status --require-release    # 0 if this run would publish something, 1 if not
+dispat status --require-release    # 0 releasing, 3 nothing to release, 1 something is wrong
 ```
 
 Only packages the run will actually publish count. A package held by `Release-As: none`, one
@@ -116,11 +117,13 @@ jobs:
       - uses: yohimik/dispat@v1
       - id: plan
         run: |
-          if dispat status --require-release --log-format json; then
-            echo "releasing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "releasing=false" >> "$GITHUB_OUTPUT"
-          fi
+          rc=0
+          dispat status --require-release --log-format json || rc=$?
+          case "$rc" in
+            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "releasing=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
 
   release:
     needs: plan
@@ -134,9 +137,12 @@ answered before the [release lock](./releasing/release-lock.md) is taken and bef
 `dispat --require-release` in a single-job pipeline refuses without ever claiming the repository or executing one of
 your scripts.
 
-Note the shell here: `if dispat status --require-release` rather than a bare `run:` step, because `set -e` would
-otherwise end the job on the `1` that is the whole point. A step that *should* fail the pipeline when nothing
-released (a manually dispatched release, say) wants the bare form instead.
+Note the shell here: the exit code is captured and mapped rather than run bare, because `set -e` would otherwise end
+the job on the `3` that is the whole answer. And it is a `case` rather than an `if`, because an `if` folds every
+nonzero code together: a broken configuration or an unreadable tag would read as "nothing to release" and the
+pipeline would skip the release instead of failing. Exit `3` is the answer; everything else is a failure and stays
+one. A step that *should* fail the pipeline when nothing released (a manually dispatched release, say) wants the
+bare form instead.
 
 ## The container images
 

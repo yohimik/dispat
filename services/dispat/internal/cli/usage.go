@@ -101,7 +101,9 @@ or DISPAT_UNSAFE_DISABLE_LOCK=true in the environment, switches it off for
 repositories with no remote to coordinate through.
 
 --require-release refuses a run that would publish nothing, before the lock is
-taken, for the CI stage whose point is that this run releases something.
+taken, for the CI stage whose point is that this run releases something. The
+refusal exits 3, apart from exit 1's failures, so a pipeline can tell "nothing
+to do" from "something is wrong".
 
 This is what a bare "dispat" does.`,
 		flags: append([]string{"strict", "require-release"}, selectionFlags...),
@@ -118,9 +120,10 @@ a release would, so the graph shows what "dispat release" with the same
 flags is about to do.
 
 Exits 0 even when a release would refuse, because showing the plan is the
-job; only a repository that cannot produce a correct plan at all, a --strict
-selection the plan cannot release, or --require-release with nothing to
-release, exits 1.`,
+job. A repository that cannot produce a correct plan at all, or a --strict
+selection the plan cannot release, exits 1; --require-release with a correct
+plan that releases nothing exits 3, so a pipeline gating on it can tell
+"nothing to do" from "something is wrong".`,
 		flags: append([]string{"strict", "require-release"}, selectionFlags...),
 	},
 	{

@@ -47,6 +47,10 @@ func TestConfigUnknownKeyIsRejected(t *testing.T) {
 	res := r.Status()
 	assert.Equal(t, 1, res.Code,
 		"an unknown key must fail config loading, not be silently ignored\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	res = r.Status("--require-release")
+	assert.Equal(t, 1, res.Code,
+		"a broken configuration is exit 1, never the exit 3 of --require-release's clean-but-empty plan")
 }
 
 // TestConfigFileFallbackResolution: without --config the binary resolves the

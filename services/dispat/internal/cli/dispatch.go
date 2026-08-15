@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -473,7 +474,13 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict, RequireRelease: *o.requireRelease}
 	switch r.inv.cmd {
 	case cmdStatus:
-		if a.Status(ctx, relOpts) != nil {
+		// A clean plan that releases nothing is exit 3, apart from exit 1's
+		// real failures, so a pipeline can gate on --require-release without
+		// reading a broken configuration as "nothing to release".
+		if err := a.Status(ctx, relOpts); err != nil {
+			if errors.Is(err, app.ErrNothingToRelease) {
+				return 3
+			}
 			return 1
 		}
 	case cmdRun:
@@ -561,7 +568,12 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 			return 1
 		}
 	default:
+		// The same mapping as status, so the two commands sharing
+		// --require-release cannot disagree about what its refusal means.
 		if _, err := a.Release(ctx, relOpts); err != nil {
+			if errors.Is(err, app.ErrNothingToRelease) {
+				return 3
+			}
 			return 1
 		}
 	}
