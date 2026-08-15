@@ -196,7 +196,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.ifElse = fs.String("else", "",
 		"the script to run when no condition held; without it, nothing matching runs nothing and exits 0")
 	o.ifChanged = fs.Bool("changed", false,
-		"if: the leading condition holds when changed packages are selected (the release window, or what --since addresses), narrowed by --package/--space/--group and expanded by --consumers")
+		"if: the leading condition holds when changed packages are selected (the release window, or what --since addresses), expanded downstream by --consumers and then narrowed by --package/--space/--group")
 	o.ifDir = fs.StringP("dir", "d", "",
 		"if: the leading condition holds when this path exists and is a folder; a relative path resolves where the chosen script runs, after --in")
 	o.execFor = fs.String("for", "",

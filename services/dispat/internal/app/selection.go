@@ -138,32 +138,46 @@ func (a *App) coveredPackages(ctx context.Context, pl *plan.Plan, opts WindowOpt
 	if err != nil {
 		return nil, err
 	}
-	var window []string
-	if opts.Since != "" {
-		if window, err = a.sincePackages(ctx, pl, opts.Since); err != nil {
-			return nil, err
-		}
-	} else {
-		for _, rel := range pl.Releasing() {
-			window = append(window, rel.Pkg.Name)
-		}
+	window, err := a.windowPackages(ctx, pl, opts)
+	if err != nil {
+		return nil, err
 	}
 	covered := sel.Keep(window)
-	if sel.Active() {
-		kept := make(map[string]bool, len(covered))
-		for _, name := range covered {
-			kept[name] = true
-		}
-		for _, name := range sel.Names {
-			if !kept[name] {
-				a.log.Info().Str("package", name).Msg("package is outside the window, nothing to do")
-			}
-		}
-	}
+	a.reportOutsideWindow(sel, covered)
 	if opts.Consumers {
 		covered = withConsumers(pl, covered)
 	}
 	return covered, nil
+}
+
+// windowPackages resolves the window alone: the packages --since addresses, or
+// the release window when no revision was named.
+func (a *App) windowPackages(ctx context.Context, pl *plan.Plan, opts WindowOptions) ([]string, error) {
+	if opts.Since != "" {
+		return a.sincePackages(ctx, pl, opts.Since)
+	}
+	var window []string
+	for _, rel := range pl.Releasing() {
+		window = append(window, rel.Pkg.Name)
+	}
+	return window, nil
+}
+
+// reportOutsideWindow says out loud which explicitly named packages the window
+// left out, because "I asked for core and nothing happened" deserves a reason.
+func (a *App) reportOutsideWindow(sel filter.Result, covered []string) {
+	if !sel.Active() {
+		return
+	}
+	kept := make(map[string]bool, len(covered))
+	for _, name := range covered {
+		kept[name] = true
+	}
+	for _, name := range sel.Names {
+		if !kept[name] {
+			a.log.Info().Str("package", name).Msg("package is outside the window, nothing to do")
+		}
+	}
 }
 
 // withConsumers expands a selection with every package that transitively
@@ -201,21 +215,39 @@ func withConsumers(pl *plan.Plan, selected []string) []string {
 	return out
 }
 
-// ChangedSelection answers `if --changed`: the packages the window covers,
-// under exactly the rule every sweeping command selects by — the release
-// window, or what --since addresses, narrowed by the filter and expanded by
-// --consumers. The condition is then simply "is that selection non-empty",
-// so a gate and the run it guards can never disagree about what changed.
+// ChangedSelection answers `if --changed`: the same window, filter and
+// consumer expansion every sweeping command selects with, composed in the one
+// order that lets --consumers speak. A sweep expands after narrowing, because
+// there --consumers asks for the selection's dependents; a gate that narrowed
+// first would find --consumers unable to ever flip its answer, since expanding
+// a selection never empties it and never fills an empty one. So the gate
+// expands the window first, and the filter then asks whether the selection is
+// among what the changes reach: `if --changed -p web --consumers` holds when
+// web, or anything web transitively consumes, changed. The condition is simply
+// "is the result non-empty".
 //
-// The plan is the quiet step-command plan: diagnostics logged, no graph,
-// a fatal plan refused — a gate may run many times in one pipeline, and it
-// asks a question rather than printing a report.
+// The plan is the quiet step-command plan: diagnostics logged, no graph, a
+// fatal plan refused — a gate may run many times in one pipeline, and it asks
+// a question rather than printing a report.
 func (a *App) ChangedSelection(ctx context.Context, opts WindowOptions) ([]string, error) {
 	pl, err := a.stepPlan(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return a.coveredPackages(ctx, pl, opts)
+	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
+	if err != nil {
+		return nil, err
+	}
+	window, err := a.windowPackages(ctx, pl, opts)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Consumers {
+		window = withConsumers(pl, window)
+	}
+	covered := sel.Keep(window)
+	a.reportOutsideWindow(sel, covered)
+	return covered, nil
 }
 
 // sincePackages resolves --since onto package names: every package for

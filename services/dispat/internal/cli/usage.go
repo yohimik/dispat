@@ -297,10 +297,12 @@ NAME!=value, NAME~glob or NAME!~glob. --file/-f <path> and --dir/-d <path> ask
 the filesystem: the path exists and is a regular file, or a folder; a path
 that is absent or the wrong kind is false, never an error, and a relative
 path resolves where the chosen script runs. --changed asks the repository:
-it holds when changed packages are selected, under the same rule dispat run
-covers packages by, so --since picks the window (the release window without
-it, 'all' for every package), --package/--space/--group narrow it and
---consumers expands it downstream. Every --elif is an environment condition.
+it holds when changed packages are selected. --since picks the window (the
+release window without it, 'all' for every package), --consumers expands it
+downstream, and --package/--space/--group then narrow it, so the gate asks
+whether the selection is among what the changes reach: --changed -p web
+--consumers holds when web, or anything web transitively consumes, changed.
+Every --elif is an environment condition.
 The scripts are shell text, not script names: this is the shell's own
 if/elif/else, spelled to fit on one line inside a configured script.
 
