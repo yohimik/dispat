@@ -18,7 +18,7 @@ Build: []string{"build"}, Publish: []string{"publish"},
 },
 Packages: map[string]models.PackageConfig{
 "core": {RevertOnFail: models.Bool(false)}, // override for a space package
-"cli":  {Path: "tools/cli", Dependencies: []string{"core"}}, // standalone package
+"cli":  {Path: "tools/cli", Dependencies: models.Providers("core")}, // standalone package
 },
 }
 data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
@@ -32,8 +32,10 @@ of a `PackageConfig` override, where absent must mean "inherit".
 
 A `Packages` entry plays one of two roles: without `Path` it overrides the space configuration of the package whose
 folder name matches the key; with `Path` it declares a standalone package outside every space. The model always holds
-dependency edges as the flat `[]DependencyConfig` list; the consumer-keyed shorthand the config file accepts is expanded
-by the CLI's loader, not expressed here.
+dependency edges as the flat `[]DependencyConfig` list, and the expansion lives here too: `Dependencies` and
+`ProviderList` unmarshal every shorthand the config file accepts (a bare provider name, a consumer-keyed map, a full
+edge object) into that flat list, and marshal back the shortest spelling that says the same thing. `Providers` builds
+the list in code the way the shorthand does in a file.
 
 A `Scripts` value is a `Script`: the commands one name binds, in the order they run. It decodes from either shape the
 config file accepts (a bare string or an array of them) and marshals back as the shortest one that carries what the

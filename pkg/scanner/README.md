@@ -2,8 +2,9 @@
 
 A deliberately lightweight manifest reader: thin per-format parsers turning dependency manifests into one
 ecosystem-neutral shape: the package's declared identity (name, version) and its declared dependencies with their
-ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no network. The goal is to
-support **all package managers**; the shared vocabulary (dependency kinds, the file-name rules) lives in
+ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no network. The recognised
+formats are fixed at build time, twenty-three of them across fifteen ecosystems, and fence tests hold the reader and
+the writer to the same list; the shared vocabulary (dependency kinds, the file-name rules) lives in
 [`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can never drift apart. It only reads;
 rewriting is the writer's job. This is the library behind
 `dispat compute` (deriving a monorepo's dependency graph from its manifests) and the executor's native auto-versioning.
@@ -12,6 +13,9 @@ rewriting is the writer's job. This is the library behind
 sc := scanner.New()
 mans, err := sc.Scan(ctx, "packages/web") // every manifest under the folder
 roots, err := sc.ScanRoot(ctx, "packages/web") // only the folder's own manifests
+
+mans, err = scanner.Scan(ctx, "packages/web") // the package-level conveniences
+roots, err = scanner.ScanRoot(ctx, "packages/web")
 ```
 
 Both methods share one error contract: a manifest that fails to parse is skipped, its error joined into the returned
@@ -26,24 +30,27 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | `go.mod`            | gomod     | module path, direct requires, indirect ones apart in `Indirect`, relative `replace` targets as local paths |
 | `Cargo.toml`        | cargo     | name, version, `[dependencies]`/`[dev-dependencies]`/`[build-dependencies]`, renames, `path` keys |
 | `pyproject.toml`    | python    | PEP 621, PEP 735 groups, Poetry, PEP 503 name normalisation                                       |
-| `requirements*.txt` | python    | PEP 508 lines, continuations, editable local installs (`-e ./pkg`)                                |
+| requirements files  | python    | PEP 508 lines, continuations, editable local installs (`-e ./pkg`)                                |
 | `composer.json`     | composer  | name, version, require/require-dev (platform requirements filtered)                               |
 | `pom.xml`           | maven     | `groupId:artifactId` coordinates, scopes onto dependency kinds                                    |
-| `*.csproj`          | nuget     | `PackageId`/`AssemblyName`, `PackageReference`, `ProjectReference` as local paths                 |
+| `*.csproj`          | nuget     | `PackageId`/`AssemblyName` (the file's base name when both are absent), `<Version>`, `PackageReference`, `ProjectReference` as local paths |
 | `*.fsproj`/`*.vbproj` | nuget   | the same SDK-style schema, since F# and VB projects share it                                      |
 | `*.nuspec`          | nuget     | `id`, `version`, dependencies flat or inside targetFramework groups                                |
 | `Directory.Packages.props` | nuget | Central Package Management: every `PackageVersion` the repository pins                        |
 | `packages.config`   | nuget     | the legacy list, with `developmentDependency` onto devDependencies                                 |
-| `pubspec.yaml`      | pub       | name, version, dependencies, `dependency_overrides` folded onto their declarations                |
-| `Gemfile`           | rubygems  | `gem` declarations, `:path` local gems, development and test groups onto devDependencies          |
+| `pubspec.yaml`/`.yml` | pub     | name, version (its `+` suffix as the build number), dependencies, `dependency_overrides` folded onto their declarations |
+| `Gemfile`           | rubygems  | `gem` declarations, `:path` local gems, development and test groups onto devDependencies (a group is tracked by line, so a block that never closes scopes every later declaration) |
 | `*.gemspec`         | rubygems  | name, version, `add_dependency`/`add_runtime_dependency`/`add_development_dependency`             |
-| `Dockerfile`        | docker    | every `FROM`, `COPY --from` and `RUN --mount=…,from=` image; stage aliases and `scratch` excluded  |
+| `Dockerfile`, `Containerfile` | docker | every `FROM`, `COPY --from` and `RUN --mount=…,from=` image; stage aliases and `scratch` excluded |
 | `compose.yaml`      | docker    | the image the file builds as its identity, every other service's image as a dependency            |
 
 A Dockerfile is matched by name rather than by extension, so `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile` and
 Podman's `Containerfile` all count. A compose file is matched by name too: `compose.yaml`, `compose.yml`,
 `docker-compose.yaml`, `docker-compose.yml` and the `.override.` variant of each, which is the set the Compose
-specification itself loads.
+specification itself loads. A requirements file is matched by whole words rather than a glob: a `.txt` whose base name
+starts or ends with the word `requirements` counts, so `dev-requirements.txt` and `requirements-test.txt` land in
+devDependencies while `requirements-latest.txt` stays a plain requirements file and `old-requirements-notes.txt` is
+prose, not a manifest.
 
 Docker has no version field, so the reader takes the identity from the images the file names. The rule, in order: the
 service that declares both a `build` section and a tagged `image` is producing that image here, which is as close to
@@ -72,8 +79,14 @@ package.
 | `build.gradle`(`.kts`) | gradle    | `applicationId`/`namespace`, `versionName`, `versionCode`, literal coordinates, `project(…)`  |
 
 `Manifest.BuildNumber` carries the monotonic counter these formats keep beside their marketing version
-(`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`). It is not a semantic version, and no writer
-rewrites it.
+(`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`, Gradle's `versionCode`, a pubspec version's `+`
+suffix). It is not a semantic version, so no version write ever moves it; the writer's `SetBuild` is the one entry
+point that does.
+
+`Manifest.Dropped` names the entries a manifest declared but the parser could not coerce into a dependency, one line
+each (`service db: not a mapping`). They are not errors: the manifest parsed, and the caller decides whether the drops
+are worth reporting. The shapes a format reads selectively by design are not dropped entries; those are listed under
+[Not read today](#not-read-today).
 
 `Manifest.Indirect` carries the requirements a manifest records as transitive bookkeeping rather than as its own
 declarations. Only `go.mod` has the distinction and only its parser fills the field; a requirement in `Deps` never
@@ -107,8 +120,7 @@ The full guide is [Manifest tools](https://yohimik.github.io/dispat/cookbook/edi
 
 ## Not read today
 
-The goal is full coverage of every package manager. These gaps are written down so nobody meets them for the first time
-in production.
+These gaps are written down so nobody meets them for the first time in production.
 
 Not read: npm `workspaces`, `overrides` and `resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and
 target-specific tables; Maven `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and
@@ -141,8 +153,21 @@ read from an `AndroidManifest.xml`, so a modern project correctly reads empty th
 Apple build-setting references are kept as written where a version is expected, matching the Maven `${property}` rule.
 A `$(PRODUCT_BUNDLE_IDENTIFIER)`-shaped *identifier* reads as empty instead: every project spells it identically, and
 `NameIndex` would report the shared literal as an ambiguous name. `Info.plist` is matched by exact name, so the legacy
-`MyApp-Info.plist` spelling is not recognised. Swift Package Manager dependencies are out of scope, because
-`Package.swift` is executable Swift rather than a manifest.
+`MyApp-Info.plist` spelling is not recognised.
+
+### Whole ecosystems not read
+
+Some package managers have no reader here at all. Each entry states what reading it would take, so the cost of closing
+a gap is known before anyone starts.
+
+- Swift Package Manager: `Package.swift` is executable Swift rather than a manifest, the same objection that keeps
+  the statement-shape readers above conservative.
+- Helm: `Chart.yaml` is plain YAML with a `version`, an `appVersion` and a `dependencies` list, the cheapest gap in
+  this list to close.
+- Elixir: `mix.exs` is executable Elixir, readable only the way the Ruby files are read, by recognising the statement
+  shapes that declare something.
+- Deno: `deno.json` is plain JSON whose imports map carries versioned specifiers.
+- Conan: `conanfile.txt` is a flat list; `conanfile.py` is executable Python and shares Swift PM's objection.
 
 ## Requirements
 

@@ -188,7 +188,7 @@ const MANIFESTS: [language: string, files: string][] = [
   ['Ruby: Bundler, RubyGems', 'Gemfile, *.gemspec'],
   ['Swift, Objective-C: iOS, CocoaPods', 'Info.plist, project.pbxproj, Podfile, *.podspec'],
   ['Kotlin, Java: Android, Gradle', 'AndroidManifest.xml, libs.versions.toml, build.gradle(.kts)'],
-  ['Docker: images and Compose', 'Dockerfile, compose.yaml, docker-compose.yml, and their .override spellings'],
+  ['Docker: images and Compose', 'Dockerfile, Containerfile, compose.yaml, docker-compose.yml, and their .override spellings'],
 ];
 
 // dispat's pieces are separate Go modules, usable with no dispat in sight, and

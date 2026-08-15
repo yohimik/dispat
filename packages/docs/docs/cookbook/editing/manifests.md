@@ -76,6 +76,11 @@ $ dispat scanner packages/core --log-format json
 {"level":"info","manifests":1,"dependencies":0,"failed":0,"message":"scan complete"}
 ```
 
+A manifest event also carries a `dropped` array when the parser met a declared entry it could not read, one line per
+entry (`service db: not a mapping`), and a `buildNumber` field where the format keeps a counter. At `--log-level
+debug` the scan narrates itself too: where it starts, what each manifest held, and each dropped entry as its own
+event.
+
 ### When a manifest will not parse
 
 A file that cannot be read is reported and skipped, and everything that did parse is still printed. That is deliberate:

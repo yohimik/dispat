@@ -3,11 +3,11 @@
 A deliberately lightweight manifest writer: format-preserving in-place edits where only the version text being changed
 is replaced, and every other byte of the file (indentation, key order, comments) survives verbatim. The writing
 counterpart of [`pkg/scanner`](../scanner), sharing its vocabulary through
-[`pkg/manifest`](../manifest), and the library behind dispat's native auto-versioning. The goal is to support **all
-package managers**; each ecosystem gains a writer once its rewrite can be made byte-precise.
+[`pkg/manifest`](../manifest), and the library behind dispat's native auto-versioning. Every format the scanner reads
+has a writer here, fenced by tests; each rewrite is byte-precise or it does not ship.
 
-Every format writer reads and writes through one internal replacer, so the read cap, the splice, the proof that the
-result still parses and the atomic write happen in one place for all of them. `Substitute` is that same machinery with
+Every format writer reads and writes through one internal splicer, so the read cap, the splice, the proof that the
+result still parses and the atomic write happen in one place for all of them. `Replace` is that same machinery with
 the format knowledge taken away, for the versions no manifest holds.
 
 ```go
@@ -15,6 +15,11 @@ res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
 {Name: "@acme/core", Kind: "dependencies", Range: "^1.3.0"},
 })
 // res.Applied, res.Skipped, res.Missing, res.VersionWritten, res.Path
+
+w := writer.New() // the same entry points behind one Writer value,
+                  // mirroring scanner.Scanner, so a caller wiring the two
+                  // halves together can fake the writes in tests
+res, err = w.Rewrite("packages/web/package.json", "1.3.0", nil)
 ```
 
 Writes are atomic, through a same-folder temp file, an fsync and a rename, and are skipped entirely when nothing
@@ -105,32 +110,32 @@ dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a mi
 for the four dependency fields, so a Maven `group:artifact` coordinate keeps its colon. The full guide is
 [Manifest tools](https://yohimik.github.io/dispat/cookbook/editing/manifests).
 
-`dispat replacer <file>...` is `Substitute` with the same report attached:
+`dispat replacer <file>...` is `Replace` with the same report attached:
 
 ```sh
-dispat replacer --sub 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle README.md
-dispat replacer --strict --sub 'stale-pattern=>x' Dockerfile   # exit 1 when it matched nothing
+dispat replacer --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle README.md
+dispat replacer --strict --replace 'stale-pattern=>x' Dockerfile   # exit 1 when it matched nothing
 ```
 
-## Replacing literal text: `Substitute`
+## Replacing literal text: `Replace`
 
 Some versions do not live in a manifest: a coordinate a Gradle script assembles by hand, a base image in a Dockerfile,
-the install line in a README. `Substitute` is the replacer with the format knowledge taken away.
+the install line in a README. `Replace` is the format writer with the format knowledge taken away.
 
 ```go
-res, err := writer.Substitute("build.gradle", []writer.Substitution{
+res, err := writer.Replace("build.gradle", []writer.Replacement{
 {Find: "com.acme:core:1.2.0", Write: "com.acme:core:1.3.0"},
 })
 // res.Applied, res.Skipped, res.Missing, res.Count, res.Path
 ```
 
-It runs over any file at all, replaces every occurrence rather than the first, and applies its substitutions in order,
+It runs over any file at all, replaces every occurrence rather than the first, and applies its replacements in order,
 each over what the one before it left. It shares the read cap and the atomic write with the rest of the package, and it
 refuses a file that looks binary (`ErrBinaryFile`, decided by a NUL byte in the first 8 KiB) so a replacement never
-lands in a PNG that happens to contain the version text. `SubstituteBytes` is the same work in memory, without touching
+lands in a PNG that happens to contain the version text. `ReplaceBytes` is the same work in memory, without touching
 the caller's input.
 
-Because it parses nothing it also cannot tell an intended match from an accidental one, so a substitution should carry
+Because it parses nothing it also cannot tell an intended match from an accidental one, so a replacement should carry
 enough context to be unambiguous: `com.acme:core:1.2.0`, not `1.2.0`.
 
 ## Redirecting a dependency to a local folder
@@ -161,6 +166,15 @@ directive on the name alone and ignore it.
 `SupportsLink` answers in advance whether a file has anywhere to put one. Every other format writes nothing and
 reports each link in `Skipped`.
 
+`Links` is the other direction: it enumerates the directives a file already carries, across every place the five
+formats keep one, so a CI gate can prove no local link survived a build without knowing any names in advance.
+`DropLinks` is `Links` followed by the matching removals — the shape of an "unlink whatever the build linked" step.
+
+```go
+links, err := writer.Links("services/svc/go.mod")   // what the file redirects today
+res, err := writer.DropLinks("services/svc/go.mod") // remove them all
+```
+
 npm, Yarn and pnpm each name that map differently, so the field is chosen by reading the file rather than by guessing.
 An existing `resolutions` or `pnpm.overrides` wins, then a `packageManager` field naming yarn or pnpm, and npm's
 `overrides` is the default. All three read a `file:` specifier, which is the portable spelling, and the scanner reads it
@@ -185,11 +199,23 @@ redirect there would be wrong, so Composer is left alone.
 The pyproject table is uv's, and only uv's. Poetry spells the same idea on the declaration and PEP 621 has no
 equivalent, so a project not using uv gains a table its tooling will ignore.
 
-## Not written today
+## Writing the build counter
 
-Build numbers are read but never written. `CFBundleVersion`, `android:versionCode` and `CURRENT_PROJECT_VERSION` are
-monotonic counters rather than semantic versions, and nothing upstream computes one; bumping them belongs to a
-`flow.version` script.
+The version rewriters never touch a build counter: it is a monotonic count rather than a semantic version, and the two
+move for different reasons. `SetBuild` is the separate write that moves it, in the five places a format keeps one —
+`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION` (every build configuration, like the marketing
+version), Gradle's `versionCode`, and the `+` suffix a pubspec version carries.
+
+```go
+res, err := writer.SetBuild("ios/App/Info.plist", "42")
+// res.BuildWritten, res.Path
+```
+
+A counter the file does not declare is not created (the pubspec suffix, part of the version scalar, is the one
+exception), a counter deferring to a build setting is left alone, and the Android and Gradle counters must be
+integers. A format with no counter at all gives `ErrNoBuildCounter`.
+
+## Behaviours worth reading first
 
 Three behaviours are worth reading before turning these on.
 
