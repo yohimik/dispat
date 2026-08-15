@@ -658,3 +658,83 @@ func TestCorrectionsAreIdempotent(t *testing.T) {
 		assert.Equal(t, unitsOf(first.Releases[name]), unitsOf(second.Releases[name]), name)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// bug fences
+// ---------------------------------------------------------------------------
+
+func TestCorrectionReachingNoPackageStillReportsW209(t *testing.T) {
+	// Bug fence. A correction with no scope-set takes its packages from its
+	// targets, so a target no pending window still holds leaves it addressing
+	// nothing. It used to skip straight to the next correction and say
+	// nothing at all, which is the one shape W209 exists to prevent: an
+	// operator writes a correction, sees no diagnostic, and believes the
+	// record was fixed.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: shipped everywhere"},
+		commit{sha: shaB, message: "chore: drop it\n\nDeletes: " + shaA},
+	).tag("core", "2.0.0", shaA).tag("utils", "1.0.0", shaA).tag("app", "1.0.0", shaA)
+
+	p := compute(t, git, nil)
+
+	assert.True(t, hasCode(p, CodeCorrectionNoop),
+		"a correction that reached nothing must still say so: %v", codes(p))
+}
+
+func TestCorrectionWideningIsReportedOncePerPackage(t *testing.T) {
+	// Bug fence. Two targets that both omit the same package is one mistake in
+	// one scope-set, and the operator fixes it once. Reporting it per target
+	// scales the noise with the number of footers.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core): one"},
+		commit{sha: shaB, message: "feat(core): two"},
+		commit{sha: shaC, message: "fix(core,utils): both of those\n\nEdits: " + shaA + "\nEdits: " + shaB},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	n := 0
+	for _, d := range p.Diagnostics {
+		if d.Code == CodeCorrectionWidens {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "one offending package, one diagnostic: %v", codes(p))
+}
+
+func TestCorrectionNamingOneTargetTwiceIsNotSuperseded(t *testing.T) {
+	// Bug fence. §7.4.1 collapses several targets into the one carrying
+	// record, so a unit naming one target twice is redundant, not superseded.
+	// Reporting W210 there told the operator their correction had been
+	// overridden by a newer commit, and named the correction's own commit as
+	// the one that did it.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: the original"},
+		commit{sha: shaB, message: "fix(core): restated\n\nEdits: " + shaA + "\nEdits: " + shaA},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.False(t, hasCode(p, CodeCorrectionSuperseded), "nothing superseded anything: %v", codes(p))
+	assert.Equal(t, ccme.BumpPatch, core.Bump, "the correction still applies")
+	require.Len(t, core.Units, 1)
+	assert.Equal(t, []string{shaA}, core.UnitCorrects(core.Units[0]), "and the record is named once")
+}
+
+func TestCorrectionSelectorCountsMessagePositions(t *testing.T) {
+	// Bug fence for the off-by-one triangle: the selector is 1-based and
+	// counted over the message, ccme's unit index is 0-based, and the units
+	// dispat keeps are only those that parsed. A commit whose first unit is
+	// broken is where all three disagree, so "#2" has to still find the
+	// second unit of the message rather than the second survivor.
+	git := newFakeGit(
+		commit{sha: shaA, message: "this is not a header\n\n---\n\nfeat(core)!: the real one"},
+		commit{sha: shaB, message: "chore(core): drop the second\n\nDeletes: " + shaA + "#2"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	assert.Equal(t, ccme.BumpNone, p.Releases["core"].Bump, "the record named by #2 went")
+	assert.Empty(t, unitsOf(p.Releases["core"]))
+}

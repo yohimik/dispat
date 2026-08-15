@@ -391,18 +391,21 @@ func (cp *computation) reconcileScope(c *correctionRec) bool {
 	// packages only; widening would extend someone else's record to packages it
 	// never claimed.
 	c.scope = c.rec.scope[c.pos]
-	ok := true
+	// One diagnostic per offending package, not one per target that omits it:
+	// two targets missing the same package is one mistake in the scope-set.
+	outside := make(map[string]bool)
 	for _, set := range shaSets {
-		for _, name := range sortedKeys(c.scope) {
-			if set[name] {
-				continue
+		for name := range c.scope {
+			if !set[name] {
+				outside[name] = true
 			}
-			cp.err(CodeCorrectionWidens, name, c.rec.key, fmt.Sprintf(
-				"correction names %s, which its target's record does not; a correction may narrow a record, never widen it (§7.4.2)", name))
-			ok = false
 		}
 	}
-	return ok
+	for _, name := range sortedKeys(outside) {
+		cp.err(CodeCorrectionWidens, name, c.rec.key, fmt.Sprintf(
+			"correction names %s, which its target's record does not; a correction may narrow a record, never widen it (§7.4.2)", name))
+	}
+	return len(outside) == 0
 }
 
 // dropRecords is phase 3 of §13.4b: the corrections applied newest first, each
@@ -417,6 +420,15 @@ func (cp *computation) dropRecords(corr []*correctionRec) {
 	voided := 0
 
 	for _, c := range corr {
+		if len(c.scope) == 0 {
+			// The correction reached no package at all: every sha target named
+			// a commit no pending window still holds, so there was nothing for
+			// it to inherit a scope from. Reporting it is the whole point of
+			// W209 being non-suppressible, and skipping straight to the next
+			// correction here would make it the one shape that fails silently.
+			cp.reportEmptyReach(c)
+			continue
+		}
 		live := make(map[string]bool, len(c.scope))
 		for _, name := range sortedKeys(c.scope) {
 			if cp.dropped[dropKey{name, c.rec.key, c.unit.Index}] != nil {
@@ -431,6 +443,8 @@ func (cp *computation) dropRecords(corr []*correctionRec) {
 			live[name] = true
 		}
 		if len(live) == 0 {
+			// Fully void. W215 has already named every package, so there is
+			// nothing left to say.
 			continue
 		}
 		if trace {
@@ -457,6 +471,15 @@ func (cp *computation) dropRecords(corr []*correctionRec) {
 		Msg("plan: corrections applied")
 }
 
+// reportEmptyReach reports a correction that addresses no package: one W209
+// per target, naming what it looked for.
+func (cp *computation) reportEmptyReach(c *correctionRec) {
+	for _, t := range c.targets {
+		cp.warn(CodeCorrectionNoop, "", c.rec.key, fmt.Sprintf(
+			"%s: %s addresses no pending record; released work is history and cannot be corrected (§7.4.2)", t.kind, t.raw))
+	}
+}
+
 // dropTarget claims one named record, per package.
 func (cp *computation) dropTarget(c *correctionRec, t resolvedTarget, live map[string]bool, trace bool) {
 	if t.unit == nil {
@@ -479,9 +502,14 @@ func (cp *computation) dropTarget(c *correctionRec, t resolvedTarget, live map[s
 		}
 		key := dropKey{name, t.key, t.unit.Index}
 		if prev := cp.dropped[key]; prev != nil {
-			cp.warn(CodeCorrectionSuperseded, name, c.rec.key, fmt.Sprintf(
-				"%s: %s was already corrected by the newer commit %s; the newest correction wins (§7.4.2)",
-				t.kind, t.raw, shortKey(prev.rec.key)))
+			// A unit naming one target twice is redundant rather than
+			// superseded: §7.4.1 collapses several targets into the one
+			// carrying record, so there is no older correction to report.
+			if prev != c {
+				cp.warn(CodeCorrectionSuperseded, name, c.rec.key, fmt.Sprintf(
+					"%s: %s was already corrected by the newer commit %s; the newest correction wins (§7.4.2)",
+					t.kind, t.raw, shortKey(prev.rec.key)))
+			}
 			continue
 		}
 		cp.dropped[key] = c
