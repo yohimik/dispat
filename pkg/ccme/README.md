@@ -270,12 +270,15 @@ This package parses messages. It does not read git, load a workspace, walk a dep
 the diagnostics that need any of those are never emitted:
 
 `E130`, `E153`, `E156`, `E157`, `E182`, `E185`, `E191`, `E195`, `E196`, `E197`, `E198`, `E199`,
-`E200`, `W130`, `W131`, `W134`, `W135`, `W153`, `W154`, `W158`, `W159`, `W160`, `W170`, `W171`,
-`W172`, `W185`, `W186`, `W190`, `W192`, `W193`, `W194`, `W195`, `W196`, `W197`, `W199`, `W200`,
-`W202`, `W203`, `W204`, `W205`, `W206`, `W208`.
+`E200`, `E210`, `E211`, `E212`, `E213`, `W130`, `W131`, `W134`, `W135`, `W153`, `W154`, `W158`,
+`W159`, `W160`, `W170`, `W171`, `W172`, `W185`, `W186`, `W190`, `W192`, `W193`, `W194`, `W195`,
+`W196`, `W197`, `W199`, `W200`, `W202`, `W203`, `W204`, `W205`, `W206`, `W208`, `W209`, `W210`,
+`W211`, `W212`, `W213`, `W215`.
 
-The two `W2xx` codes that *are* decidable from a message alone are emitted: `W201` for a propagation value on an axis
-whose depth is `0`, and `W207` for a channel transition whose sides are equal.
+The three `W2xx` codes that *are* decidable from a message alone are emitted: `W201` for a propagation value on an
+axis whose depth is `0`, `W207` for a channel transition whose sides are equal, and `W214` for a `Reverts` value that
+is not a commit sha. The correction footers follow the same split: their shape is validated here (`E151`, `E173`) and
+their targets are resolved against history by the engine (§13.4b).
 
 `E154` is enforced for the cases decidable from the message alone: two or more explicit include terms, or an include
 term addressing the whole workspace.
