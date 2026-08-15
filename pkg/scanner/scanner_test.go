@@ -378,6 +378,19 @@ func TestReadManifestErrors(t *testing.T) {
 	}
 }
 
+func TestPackageLevelScanWalksLikeTheInterface(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "package.json", `{"name":"root","version":"1.0.0"}`)
+	write(t, dir, "nested/go.mod", "module example.com/nested\n")
+	mans, err := Scan(context.Background(), dir) // package-level convenience
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(mans) != 2 {
+		t.Fatalf("the walk descends into subfolders: %+v", mans)
+	}
+}
+
 func TestScanRootErrorPaths(t *testing.T) {
 	if _, err := New().ScanRoot(context.Background(), filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Error("an unreadable folder must error")

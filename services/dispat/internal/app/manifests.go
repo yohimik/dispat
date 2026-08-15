@@ -70,6 +70,8 @@ type WriteOptions struct {
 	Out io.Writer
 	// Log carries the per-manifest events in JSON mode.
 	Log zerolog.Logger
+	// Writer applies the edits; nil means the filesystem writer.
+	Writer writer.Writer
 }
 
 // ReplaceOptions is one `dispat replacer` invocation.
@@ -90,6 +92,8 @@ type ReplaceOptions struct {
 	Out io.Writer
 	// Log carries the per-file events in JSON mode.
 	Log zerolog.Logger
+	// Writer applies the replacements; nil means the filesystem writer.
+	Writer writer.Writer
 }
 
 // depView is one dependency declaration as the JSON output spells it.
@@ -257,7 +261,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 		applied, skipped, missing int
 	)
 	out := listing(opts.Out)
-	edit := manifestEdit{Version: opts.Version, Edits: opts.Edits, Links: opts.Links}
+	edit := manifestEdit{Version: opts.Version, Edits: opts.Edits, Links: opts.Links, Writer: opts.Writer}
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -312,6 +316,8 @@ type manifestEdit struct {
 	// Links point dependencies at local folders, or remove the redirect
 	// when their Path is empty.
 	Links []writer.Link
+	// Writer applies the edits; nil means the filesystem writer.
+	Writer writer.Writer
 }
 
 // empty reports an edit set with nothing in it, which is what makes a manifest
@@ -330,13 +336,17 @@ func (e manifestEdit) apply(path string) (writer.Result, writer.LinkResult, erro
 		linkRes writer.LinkResult
 		err     error
 	)
+	w := e.Writer
+	if w == nil {
+		w = writer.New()
+	}
 	if e.Version != "" || len(e.Edits) > 0 {
-		if res, err = writer.Rewrite(path, e.Version, e.Edits); err != nil {
+		if res, err = w.Rewrite(path, e.Version, e.Edits); err != nil {
 			return res, linkRes, err
 		}
 	}
 	if len(e.Links) > 0 {
-		if linkRes, err = writer.Relink(path, e.Links); err != nil {
+		if linkRes, err = w.Relink(path, e.Links); err != nil {
 			return res, linkRes, err
 		}
 	}
@@ -360,12 +370,16 @@ func ReplaceFiles(ctx context.Context, opts ReplaceOptions) error {
 		found                     = make(map[writer.Replacement]bool, len(opts.Replacements))
 	)
 	out := listing(opts.Out)
+	w := opts.Writer
+	if w == nil {
+		w = writer.New()
+	}
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
-		res, err := writer.Replace(path, opts.Replacements)
+		res, err := w.Replace(path, opts.Replacements)
 		if err != nil {
 			opts.Log.Error().Err(err).Str("file", rel).Msg("replace failed")
 			errs = append(errs, err)

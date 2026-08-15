@@ -203,3 +203,31 @@ func Supported(path string) bool {
 	_, ok := dispatch(filepath.Base(path))
 	return ok
 }
+
+// Writer is the package-level entry points behind one swappable value,
+// mirroring the scanner's Scanner: a caller wiring the two halves together can
+// fake the writes the same way it fakes the reads. Supported and SupportsLink
+// stay package-level; they are table lookups with nothing worth faking.
+type Writer interface {
+	Rewrite(path, version string, edits []Edit) (Result, error)
+	Relink(path string, links []Link) (LinkResult, error)
+	Replace(path string, reps []Replacement) (ReplaceResult, error)
+}
+
+// fsWriter is the Writer whose writes land on the filesystem.
+type fsWriter struct{}
+
+// New returns the filesystem-backed Writer.
+func New() Writer { return fsWriter{} }
+
+func (fsWriter) Rewrite(path, version string, edits []Edit) (Result, error) {
+	return Rewrite(path, version, edits)
+}
+
+func (fsWriter) Relink(path string, links []Link) (LinkResult, error) {
+	return Relink(path, links)
+}
+
+func (fsWriter) Replace(path string, reps []Replacement) (ReplaceResult, error) {
+	return Replace(path, reps)
+}

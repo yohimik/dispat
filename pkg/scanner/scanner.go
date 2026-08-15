@@ -351,6 +351,11 @@ func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 	return mans, errors.Join(errs...)
 }
 
+// Scan is the package-level convenience over New().Scan.
+func Scan(ctx context.Context, dir string) ([]Manifest, error) {
+	return New().Scan(ctx, dir)
+}
+
 // ScanRoot is the package-level convenience over New().ScanRoot.
 func ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 	return New().ScanRoot(ctx, dir)

@@ -272,6 +272,57 @@ func (f failingScanner) ScanRoot(context.Context, string) ([]scanner.Manifest, e
 	return nil, f.err
 }
 
+// failingWriter is a Writer whose writes are refused: the write half's
+// swappable seam, paired with failingScanner on the read half.
+type failingWriter struct{ err error }
+
+func (f failingWriter) Rewrite(string, string, []writer.Edit) (writer.Result, error) {
+	return writer.Result{}, f.err
+}
+func (f failingWriter) Relink(string, []writer.Link) (writer.LinkResult, error) {
+	return writer.LinkResult{}, f.err
+}
+func (f failingWriter) Replace(string, []writer.Replacement) (writer.ReplaceResult, error) {
+	return writer.ReplaceResult{}, f.err
+}
+
+func TestWriteManifestsUsesTheInjectedWriter(t *testing.T) {
+	// The command reaches the disk only through its Writer: with a refusing
+	// one injected, the run fails and the healthy manifest keeps every byte.
+	root := manifestRepo(t, map[string]string{"package.json": webPackageJSON})
+	var out, logs bytes.Buffer
+	err := WriteManifests(context.Background(), WriteOptions{
+		Root:   root,
+		Paths:  []string{"package.json"},
+		Edits:  []writer.Edit{{Name: "@acme/core", Kind: manifest.KindDependencies, Range: "^1.3.0"}},
+		Out:    &out,
+		Log:    zerolog.New(&logs),
+		Writer: failingWriter{err: errors.New("refused by the fake")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refused by the fake")
+	data, readErr := os.ReadFile(filepath.Join(root, "package.json"))
+	require.NoError(t, readErr)
+	assert.Equal(t, webPackageJSON, string(data), "the filesystem writer must not have run")
+}
+
+func TestReplaceFilesUsesTheInjectedWriter(t *testing.T) {
+	root := manifestRepo(t, map[string]string{"notes.txt": "version 1.0.0\n"})
+	var out, logs bytes.Buffer
+	err := ReplaceFiles(context.Background(), ReplaceOptions{
+		Root:         root,
+		Paths:        []string{"notes.txt"},
+		Replacements: []writer.Replacement{{Find: "1.0.0", Write: "1.1.0"}},
+		Out:          &out,
+		Log:          zerolog.New(&logs),
+		Writer:       failingWriter{err: errors.New("refused by the fake")},
+	})
+	require.Error(t, err)
+	data, readErr := os.ReadFile(filepath.Join(root, "notes.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "version 1.0.0\n", string(data), "the filesystem writer must not have run")
+}
+
 func TestScanManifestsPropagatesCancellation(t *testing.T) {
 	// An interrupted scan is an interruption, not a parse failure: the
 	// context error comes back as itself, so a Ctrl-C is never reported as a
