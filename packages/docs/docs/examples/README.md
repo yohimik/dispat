@@ -17,7 +17,7 @@ If a term is new, [Concepts](../concepts.md) defines all of them in a few minute
 | [Registry login, once per space](./login.md) | The `login` slot: one authentication per space, whatever the registry. |
 | [A single package, no monorepo](./single-package.md) | dispat on a repository with one thing in it. |
 | [Adopting dispat](./adopting.md) | Deriving the graph and the starting versions from the manifests, in a new repository or one that already ships. |
-| [Keeping configuration beside the code](./layout.md) | In-folder config files and `.dispatexclude`. |
+| [Keeping configuration beside the code](./layout.md) | Space and package config files in their own folders, and `.dispatexclude`. |
 
 The pages under [Editing the monorepo](../editing/manifests.md) are the other half of the worked examples: the
 commands that change files across many packages between releases. How a release behaves once it covers more than one

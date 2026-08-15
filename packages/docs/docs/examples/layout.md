@@ -1,7 +1,8 @@
 # Keeping configuration beside the code
 
-Two ways to keep a folder's release configuration in the folder itself: a space configuration file for a space's own
-exceptions, and a `.dispatexclude` for the moment a migration leaves two config files in one place.
+Three ways to keep a folder's release configuration in the folder itself: a space configuration file for a space's own
+exceptions, a package configuration file for one package's, and a `.dispatexclude` for the moment a migration leaves
+two config files in one place.
 
 ## Keeping a space's exceptions inside its folder
 
@@ -47,6 +48,30 @@ The same entries can go in the root file instead, under the space rather than at
 
 Use whichever keeps the exception where you will look for it. When both name the same package, the nearer one wins; the
 full order is [the override ladder](../configuration/packages.md#the-override-ladder).
+
+## Keeping a package's exceptions inside its folder
+
+One level further down, a package folder can carry a config file of its own. Its top-level object is exactly a package
+entry, it is the most local layer of the ladder, so it beats every entry above that names the same package, and the
+file travels with the package: a package moved between spaces keeps its exceptions.
+
+The `reports` exception from the space file above, moved into the package itself:
+
+```json title="packages/reports/dispat.json"
+{
+  "revertOnFail": true,
+  "versionGroup": "platform"
+}
+```
+
+Now the folder says everything unusual about itself: it rolls back on failure, and it versions with the `platform`
+group. The one key a package file cannot carry is `path`, because a file cannot move the folder it lives in, and a
+package file that declares `spaces` or `packages` is refused with guidance: a folder holding a monorepo root of its
+own belongs behind a `.dispatexclude`, not half-merged.
+
+Resolution stays root-first here too. Running the CLI from inside the package ascends past the package's own file, and
+past its space's, to the monorepo root, so `cd packages/reports && dispat lint` works whatever the folders on the way
+carry. The full rules are [in-folder configuration files](../configuration/packages.md#in-folder-configuration-files).
 
 ## Two config files in one folder
 
