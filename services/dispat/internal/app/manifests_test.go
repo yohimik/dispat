@@ -285,6 +285,12 @@ func (f failingWriter) Relink(string, []writer.Link) (writer.LinkResult, error) 
 func (f failingWriter) Replace(string, []writer.Replacement) (writer.ReplaceResult, error) {
 	return writer.ReplaceResult{}, f.err
 }
+func (f failingWriter) Links(string) ([]writer.Link, error) {
+	return nil, f.err
+}
+func (f failingWriter) DropLinks(string) (writer.LinkResult, error) {
+	return writer.LinkResult{}, f.err
+}
 
 func TestWriteManifestsUsesTheInjectedWriter(t *testing.T) {
 	// The command reaches the disk only through its Writer: with a refusing

@@ -224,6 +224,8 @@ type Writer interface {
 	Rewrite(path, version string, edits []Edit) (Result, error)
 	Relink(path string, links []Link) (LinkResult, error)
 	Replace(path string, reps []Replacement) (ReplaceResult, error)
+	Links(path string) ([]Link, error)
+	DropLinks(path string) (LinkResult, error)
 }
 
 // fsWriter is the Writer whose writes land on the filesystem.
@@ -242,4 +244,12 @@ func (fsWriter) Relink(path string, links []Link) (LinkResult, error) {
 
 func (fsWriter) Replace(path string, reps []Replacement) (ReplaceResult, error) {
 	return Replace(path, reps)
+}
+
+func (fsWriter) Links(path string) ([]Link, error) {
+	return Links(path)
+}
+
+func (fsWriter) DropLinks(path string) (LinkResult, error) {
+	return DropLinks(path)
 }
