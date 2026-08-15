@@ -115,7 +115,9 @@ const config: Config = {
         // swRegister is left at its default: that file is what implements the
         // strategies above. reloadPopup is not an option at all in v3 -- it is
         // Joi.forbidden() and fails the build; the reload prompt is
-        // @theme/PwaReloadPopup, customised by swizzling if it ever needs to be.
+        // @theme/PwaReloadPopup, pinned by the re-export in
+        // src/theme/PwaReloadPopup (see the comment there for why), which is
+        // also the file to grow into a custom prompt if one is ever wanted.
       } satisfies PwaOptions,
     ],
   ],
