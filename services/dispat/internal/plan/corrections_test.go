@@ -738,3 +738,59 @@ func TestCorrectionSelectorCountsMessagePositions(t *testing.T) {
 	assert.Equal(t, ccme.BumpNone, p.Releases["core"].Bump, "the record named by #2 went")
 	assert.Empty(t, unitsOf(p.Releases["core"]))
 }
+
+func TestCorrectionWildcardSkipsARecordANewerCorrectionClaimed(t *testing.T) {
+	// The wildcard drops every pending tuple "not superseded" (§13.4b), and
+	// superseded means silently skipped: W210 belongs to a correction that
+	// named the same target, not to a sweep that happens to cover it. Here the
+	// edit is newer, so it claims the record first and the older wildcard
+	// steps over it; the restatement itself is newer than the wildcard, so
+	// the sweep cannot reach it either.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: the original"},
+		commit{sha: shaB, message: "chore(core): clear the ledger\n\nDeletes: *"},
+		commit{sha: shaC, message: "fix(core): the restatement\n\nEdits: " + shaA},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.Equal(t, []string{"fix: the restatement"}, unitsOf(core), "the newer edit wins over the older sweep")
+	assert.False(t, hasCode(p, CodeCorrectionSuperseded), "a sweep is not a superseded correction: %v", codes(p))
+}
+
+func TestCorrectionSHAResolutionIsMemoised(t *testing.T) {
+	// Two corrections naming the same abbreviation resolve it once; the second
+	// answer comes from the memo. The claim that matters is that the memoised
+	// answer is the same answer, superseding included.
+	long := "abcdef0111111111111111111111111111111111"
+	git := newFakeGit(
+		commit{sha: long, message: "feat(core)!: the original"},
+		commit{sha: shaB, message: "chore(core): drop it\n\nDeletes: abcdef01111"},
+		commit{sha: shaC, message: "fix(core): restate it\n\nEdits: abcdef01111"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	assert.True(t, hasCode(p, CodeCorrectionSuperseded), "both resolved to the same commit: %v", codes(p))
+	assert.Equal(t, []string{"fix: restate it"}, unitsOf(p.Releases["core"]))
+}
+
+func TestRevertOfACommitOutsideEveryWindowIsSilent(t *testing.T) {
+	// A revert of a commit no pending window still holds suppresses nothing
+	// and says nothing: the entry is published history, so the revert's own
+	// entry appearing normally is the correct account (§7.3). Silence is
+	// deliberate here where a correction would say W209, because a revert is
+	// not asking dispat to change anything.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: long shipped"},
+		commit{sha: shaB, message: "revert(core): long shipped\n\nReverts: " + shaA},
+	).tag("core", "2.0.0", shaA).tag("utils", "1.0.0", shaA).tag("app", "1.0.0", shaA)
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.Equal(t, []string{"revert: long shipped"}, notesOf(core), "the revert is news; the target is history")
+	assert.False(t, hasCode(p, CodeRevertSuppressed), "codes: %v", codes(p))
+	assert.False(t, hasCode(p, CodeRevertNonAncestor), "the target is real, just released: %v", codes(p))
+}

@@ -482,9 +482,9 @@ emitted. That includes the codes the registry leaves to the engine rather than t
 raised here (see [Correcting a record](../reference/corrections.md)). What each of those six means for somebody
 looking at one, and what to do about it, is in [When there is no plan](../reference/plan-errors.md).
 
-In the other direction, twenty codes are dispat's own, outside the specification's registry, attached to features the
-specification predates or does not have. They are numbered from `W220` and `E220` upward, clear of the registry (which
-ends at `W215` and `E213`) and of `W195`/`W196`, which the specification reserves for the audit features above.
+In the other direction, twenty-four codes are dispat's own, outside the specification's registry, attached to features
+the specification predates or does not have. They are numbered from `W220` and `E215` upward, clear of the registry
+(which ends at `W215` and `E213`) and of `W195`/`W196`, which the specification reserves for the audit features above.
 
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
