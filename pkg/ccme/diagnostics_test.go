@@ -198,7 +198,7 @@ func TestEmptyBreakingChangeValue(t *testing.T) {
 }
 
 // TestParserLimits covers §14.1: the parser bounds are always enforced, and
-// exceeding one is message-scoped — the commit contributes nothing (§16).
+// exceeding one is message-scoped: the commit contributes nothing (§16).
 func TestParserLimits(t *testing.T) {
 	t.Parallel()
 
@@ -307,7 +307,7 @@ func TestReleaseAsHasNoBumpForm(t *testing.T) {
 
 // TestSilentFailureWarningsCannotBeSuppressed covers §14.2: configuration must
 // not be able to turn off W155 or W156. The package offers no suppression
-// mechanism at all, so this holds by construction — the test exists to make
+// mechanism at all, so this holds by construction; the test exists to make
 // that a property somebody has to deliberately break rather than one that
 // could be lost by adding a plausible-looking Config field.
 func TestSilentFailureWarningsCannotBeSuppressed(t *testing.T) {

@@ -340,7 +340,7 @@ func (p *Parser) reconcile(b *unitBuilder, fd footerDirectives) {
 // reconcileDepth resolves a depth, where the inline side may have been merely
 // implied rather than written (§8.3).
 //
-// A sigil that implies a depth — "^" implies 1, "%%" implies 1 — states a
+// A sigil that implies a depth ("^" implies 1, "%%" implies 1) states a
 // default, not an intent, so a footer that names one wins silently. "^^" is
 // different: it *asserts* a depth of all, so a footer that disagrees is E113,
 // exactly as a disagreeing "+N" is. Only a depth the author wrote as a number
@@ -418,7 +418,7 @@ func (p *Parser) checkPropagationRedundancy(b *unitBuilder) {
 	d := u.Directives
 	pos := u.Header.Position
 
-	// "Supplied" means written by the unit, in the header or a footer — never
+	// "Supplied" means written by the unit, in the header or a footer, never
 	// taken from configuration (§8.3b).
 	bumpValueSupplied := d.PropagateSet && d.Propagate != PropagateNone
 	bumpNothing := d.Propagate == PropagateNone || d.Depth == 0
@@ -543,7 +543,7 @@ func (p *Parser) applyBumps(b *unitBuilder) {
 	}
 
 	// §13.6: bumpOf(unit) comes from the type mapping and "!" alone. No footer
-	// overrides it — Release-As acts on the release, not on the bump. In
+	// overrides it; Release-As acts on the release, not on the bump. In
 	// particular a hold retains its unit's bump, because the pending work
 	// accumulates rather than being discarded; that is the whole difference
 	// between a hold and a cancel (§8.6.2).
@@ -551,7 +551,7 @@ func (p *Parser) applyBumps(b *unitBuilder) {
 
 // isScopeChar reports whether c may appear inside a scope term: §5.2's
 // scope-char, any byte above US-ASCII space except "(", ")", "," and ":".
-// High bytes pass — scope names may be UTF-8 — but ASCII control characters
+// High bytes pass, since scope names may be UTF-8, but ASCII control characters
 // do not.
 func isScopeChar(c byte) bool {
 	return c > 0x20 && c != '(' && c != ')' && c != ',' && c != ':'

@@ -233,7 +233,7 @@ func TestValidReleaseAsForms(t *testing.T) {
 			continue
 		}
 		// §13.6: bumpOf(unit) comes from the type and "!" alone. No form of
-		// Release-As touches it — in particular a hold retains its unit's
+		// Release-As touches it; in particular a hold retains its unit's
 		// bump, because the pending work accumulates (§8.6.1).
 		if res.Units[0].Bump != BumpPatch {
 			t.Errorf("Release-As: %s changed the fix unit's bump to %s",

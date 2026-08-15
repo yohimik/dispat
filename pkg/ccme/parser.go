@@ -1,4 +1,4 @@
-// Package ccme implements a parser for Conventional Commits — Monorepo
+// Package ccme implements a parser for Conventional Commits: Monorepo
 // Extension (CCME) 1.0.0, a strict superset of Conventional Commits 1.0.0.
 //
 // The parser is a single left-to-right index scan with one byte of lookahead:
@@ -60,8 +60,8 @@
 //
 // Two consequences are worth knowing. Result and its Units retain a reference
 // to the message string, so holding a Result alive holds the message alive.
-// And Directives.Kinds always aliases the parser's configuration — §8.4 has no
-// per-unit override — so it must be treated as read-only.
+// And Directives.Kinds always aliases the parser's configuration, since §8.4 has no
+// per-unit override, so it must be treated as read-only.
 //
 // # Scope
 //
@@ -79,11 +79,11 @@
 // The parser bounds of §14.1 are always enforced, because a commit message is
 // untrusted input (§18): exceeding limits.unitsPerMessage,
 // limits.scopeTermsPerUnit or limits.messageBytes is E158, which is
-// message-scoped — the commit contributes nothing.
+// message-scoped: the commit contributes nothing.
 //
 // The hold machinery of §8.6.1 is split the same way: this package parses and
-// classifies Release-As values — all three of which are package-level, since
-// §8.6 has no bump form — but resolving which directive wins over a window,
+// classifies Release-As values, all three of which are package-level since
+// §8.6 has no bump form, but resolving which directive wins over a window,
 // and what that means for a release plan, belongs to the engine.
 //
 // Section references in the documentation are to the CCME specification.
@@ -170,7 +170,7 @@ type Result struct {
 
 // ValidUnits returns the units with no error-severity diagnostic.
 //
-// When every unit is valid — the overwhelmingly common case — it returns
+// When every unit is valid, the overwhelmingly common case, it returns
 // Units itself rather than a copy, so treat the result as read-only.
 func (r *Result) ValidUnits() []*Unit {
 	n := 0
@@ -330,7 +330,7 @@ func (p *Parser) Parse(message string) (*Result, error) {
 }
 
 // propagateMessageScopedErrors applies the blast radius §16 assigns to E158.
-// It is raised where it is detected — inside one unit's scope-set — but it is
+// It is raised where it is detected, inside one unit's scope-set, but it is
 // message-scoped, so once any unit trips it the whole commit contributes
 // nothing.
 func (r *Result) propagateMessageScopedErrors() {
@@ -374,7 +374,7 @@ func fatalResult(message, code, text string) (*Result, error) {
 	return res, res.err()
 }
 
-// ParseSubject parses a single commit subject — the header line on its own.
+// ParseSubject parses a single commit subject, the header line on its own.
 // It is the narrow entry point for commit-lint style checks; the message is
 // normalised first, and a subject containing a line break is rejected.
 func (p *Parser) ParseSubject(subject string) (*Result, error) {
@@ -458,7 +458,7 @@ type unitSource struct {
 }
 
 // text returns lines[a:b] joined with LF. When the unit is contiguous in the
-// message — which it always is unless it contains an escaped separator — the
+// message, which it always is unless it contains an escaped separator, the
 // result is a substring and costs nothing.
 func (src unitSource) text(a, b int) string {
 	if a >= b {
@@ -589,7 +589,7 @@ func (u *Unit) checkStrandedBreakingChange(lines []string, from, to, startLine i
 //
 // A BREAKING CHANGE footer's value is free text that may span the following
 // lines, so a line inside such a value is part of the breaking change already
-// in force, not a failed attempt to declare one — the walk mirrors
+// in force, not a failed attempt to declare one; the walk mirrors
 // isFooterBlock's and skips those lines.
 func (u *Unit) checkMiscasedBreakingChange(lines []string, startLine int) {
 	prevBreaking := false

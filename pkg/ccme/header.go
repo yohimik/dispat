@@ -80,8 +80,8 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 
 	// --- 2. optional scope-set -------------------------------------------
 	//
-	// A scope term is always a contiguous run of the header — every other case
-	// of the switch below ends the term — so each one is sliced out of the
+	// A scope term is always a contiguous run of the header (every other case
+	// of the switch below ends the term), so each one is sliced out of the
 	// line rather than accumulated into a buffer.
 	if sc.accept('(') {
 		h.HasScopeSet = true
@@ -339,7 +339,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	}
 	if sc.eof() {
 		// Trailing whitespace has already been stripped (§4.1), so "feat: "
-		// arrives here as "feat:" — an empty description, not a bad separator.
+		// arrives here as "feat:", an empty description rather than a bad separator.
 		return h, warns, fail(CodeE121, at(sc.i), "empty description")
 	}
 	if !sc.accept(' ') {
@@ -384,7 +384,7 @@ func parsePropagateValue(v string, pos Position) (Propagate, error) {
 //
 // The digit run is unbounded in length and saturates at 1024 rather than being
 // rejected, because no dependency graph is deeper: "+20000" is "all", not an
-// error (vectors 14r1-14r3). Leading zeros are rejected, though — "0" alone is
+// error (vectors 14r1-14r3). Leading zeros are rejected, though; "0" alone is
 // the only depth that may start with one (14r4, 14r5).
 func parseDepthValue(v string, pos Position) (Depth, error) {
 	switch v {

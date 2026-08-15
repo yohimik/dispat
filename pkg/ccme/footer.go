@@ -92,7 +92,7 @@ func isBreakingKey(key string) bool {
 }
 
 // miscasedBreakingPrefix reports whether a line opens with something that
-// equals BREAKING CHANGE case-insensitively — but not exactly — followed by
+// equals BREAKING CHANGE case-insensitively, but not exactly, followed by
 // ": ". Such a line is not a footer at all, because the generic key loop halts
 // at the space, so it can only be caught by looking for it (§20.5).
 //
@@ -119,7 +119,7 @@ func containsFold(list []string, key string) bool {
 }
 
 // equalFoldASCII compares two strings ignoring ASCII case. Footer keys are
-// ASCII by grammar (§20.5), so this is exact — and unlike strings.EqualFold it
+// ASCII by grammar (§20.5), so this is exact, and unlike strings.EqualFold it
 // does no Unicode work.
 func equalFoldASCII(a, b string) bool {
 	if len(a) != len(b) {
@@ -159,7 +159,7 @@ type Footer struct {
 	Known bool
 	// MiscasedBreaking reports a key that equals BREAKING CHANGE or
 	// BREAKING-CHANGE case-insensitively but not exactly. Such a footer is
-	// NOT breaking — it is an unknown key — and carries W155 (§8.1.1).
+	// NOT breaking (it is an unknown key) and carries W155 (§8.1.1).
 	MiscasedBreaking bool
 	// MessageLevel reports an authorship or review trailer, which the release
 	// engine ignores wherever it appears (§4.5).
@@ -177,7 +177,7 @@ func (f Footer) IsBreakingChange() bool { return f.CanonicalKey == FooterBreakin
 //
 // The literal BREAKING CHANGE is tested first because it is the only key
 // containing a space; the generic loop below would halt there. The comparison
-// is case-sensitive, and deliberately not generalised — treating keys as
+// is case-sensitive, and deliberately not generalised: treating keys as
 // space-bearing would make ordinary prose like "Note this is important: ..."
 // parse as a footer (§8.1.1).
 func footerKeyEnd(line string) int {
@@ -210,7 +210,7 @@ func footerKeyEnd(line string) int {
 }
 
 // isKeySeparator reports whether what follows a key is ": ", or a bare ":" at
-// end of line — the empty-value form.
+// end of line, the empty-value form.
 func isKeySeparator(rest string) bool {
 	return rest == ":" || strings.HasPrefix(rest, ": ")
 }

@@ -331,8 +331,8 @@ func (t CorrectionTarget) String() string { return t.Raw }
 // ReleaseAsKind discriminates the three forms of a Release-As value (§8.6).
 type ReleaseAsKind int
 
-// Release-As forms. All three operate at the same level — the package, for the
-// current window — because Release-As decides whether and at what version a
+// Release-As forms. All three operate at the same level, the package for the
+// current window, because Release-As decides whether and at what version a
 // package is released, never how large a change is (§8.6).
 //
 // There is deliberately no bump form: how large a change is, is a property of

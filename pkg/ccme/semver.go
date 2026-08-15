@@ -42,7 +42,7 @@ func (v Version) IsPrerelease() bool { return len(v.Prerelease) > 0 }
 
 // MarshalText implements encoding.TextMarshaler, rendering the version the
 // way String does (build metadata dropped), so a Version crossing a module
-// boundary — a config model's initial versions, say — serialises as "1.2.3"
+// boundary, say a config model's initial versions, serialises as "1.2.3"
 // rather than as a struct.
 func (v Version) MarshalText() ([]byte, error) { return []byte(v.String()), nil }
 
@@ -64,7 +64,7 @@ func (v Version) Core() Version {
 
 // Bumped returns the version incremented by b: the next major, minor or patch
 // core above v's, with prerelease and build dropped. Bumping a *prerelease*
-// baseline therefore both graduates it and moves the core — 1.2.0-beta.1
+// baseline therefore both graduates it and moves the core: 1.2.0-beta.1
 // bumped minor is 1.3.0, not 1.2.0; whether the train should instead graduate
 // to its own target is the release engine's §11 decision, made against the
 // stable baseline, never through this helper. BumpNone returns v unchanged,

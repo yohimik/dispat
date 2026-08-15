@@ -16,7 +16,7 @@ const utf8BOM = "\uFEFF"
 //  4. strip trailing blank lines from the end of the message.
 //
 // Nothing else is altered. Normalize is idempotent, and returns the input
-// string unchanged — with no allocation — when it is already normalised, which
+// string unchanged, with no allocation, when it is already normalised, which
 // is the common case for messages read straight from git.
 func Normalize(message string) string {
 	if !needsNormalizing(message) {
@@ -70,7 +70,7 @@ func needsNormalizing(m string) bool {
 // ones are dropped simply by never being emitted.
 func normalizeSlow(m string) string {
 	// Every leading BOM goes, not just the first. §4.1 says "a leading UTF-8
-	// BOM", and after removing one, a second is again a leading BOM — reading
+	// BOM", and after removing one, a second is again a leading BOM; reading
 	// the rule any other way makes Normalize non-idempotent: a doubled BOM
 	// normalises to a single BOM and then to the empty string, so a Result
 	// whose Message field is documented as normalised would not be. Found by
@@ -137,7 +137,7 @@ func splitLines(s string) []string {
 }
 
 // splitUnits implements §20.2. A separator line is compared for byte equality
-// against the configured string — no pattern matching, so "----" is not a
+// against the configured string; no pattern matching happens, so "----" is not a
 // separator and a Markdown rule in a body does not truncate a unit.
 //
 // A line consisting of a backslash followed by the separator is escaped: it

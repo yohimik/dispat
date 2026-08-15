@@ -146,8 +146,8 @@ func TestVersionCore(t *testing.T) {
 }
 
 // TestBumpedSemantics pins the documented behaviour before 1.0.0 freezes it:
-// bumping moves the core and drops prerelease/build — a prerelease baseline
-// graduates *and* moves — while BumpNone returns the value unchanged.
+// bumping moves the core and drops prerelease/build (a prerelease baseline
+// graduates *and* moves), while BumpNone returns the value unchanged.
 func TestBumpedSemantics(t *testing.T) {
 	t.Parallel()
 

@@ -8,7 +8,7 @@ import (
 )
 
 // The race detector adds its own allocations, so these budgets only hold in a
-// normal build — hence the build tag. `go test` covers them; `go test -race`
+// normal build, hence the build tag. `go test` covers them; `go test -race`
 // skips the file entirely.
 
 // allocSink keeps the parser's output live so the compiler cannot elide the
@@ -59,8 +59,8 @@ func TestAllocationBudget(t *testing.T) {
 }
 
 // TestAllocationByteBudget pins bytes/op alongside the counts: a change that
-// keeps the allocation count but grows what each allocation holds — a copied
-// message, a fatter buffer — passes the count gate and trips this one. The
+// keeps the allocation count but grows what each allocation holds (a copied
+// message, a fatter buffer) passes the count gate and trips this one. The
 // budgets are measured values rounded up ~30% so a toolchain change does not
 // fail the build for a size-class difference.
 func TestAllocationByteBudget(t *testing.T) {

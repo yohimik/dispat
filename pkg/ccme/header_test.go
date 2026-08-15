@@ -284,7 +284,7 @@ func TestHeaderDefaults(t *testing.T) {
 	if d.Propagate != PropagatePatch {
 		t.Errorf("default Propagate = %q, want patch", d.Propagate)
 	}
-	// §8.3: both axes default to depth 0 — a unit propagates nothing unless
+	// §8.3: both axes default to depth 0: a unit propagates nothing unless
 	// it says so.
 	if d.Depth != 0 {
 		t.Errorf("default Depth = %s, want 0", d.Depth)
@@ -612,7 +612,7 @@ func TestInertDirectiveDiagnostics(t *testing.T) {
 		{"#38a release is silenced by its type", "release(core)^minor: x", nil},
 		{"a real bump at a real depth", "feat(core)^minor+2: x", nil},
 		// "^none" alone leaves the depth at the caret's implied 1, so the
-		// directive still resolves to "propagate nothing" — redundant, not
+		// directive still resolves to "propagate nothing"; redundant, not
 		// inert.
 		{"#38 caret none", "feat(core)^none: x", []string{CodeW152}},
 
@@ -692,7 +692,7 @@ func TestDiagnosticPositions(t *testing.T) {
 	t.Parallel()
 
 	p := DefaultParser()
-	// "feat(core)^med: x" — the bad value starts at byte 11 (1-based column 12).
+	// "feat(core)^med: x": the bad value starts at byte 11 (1-based column 12).
 	res, _ := p.ParseSubject("feat(core)^med: x")
 	if len(res.Errors()) != 1 {
 		t.Fatalf("codes: %s", codesOf(res))

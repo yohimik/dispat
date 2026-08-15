@@ -71,7 +71,7 @@ type PropagationConfig struct {
 	Bump Propagate
 
 	// Depth is the default Propagate-Depth (§8.3). Zero value: 0, which is
-	// also the specification default — a unit does not propagate unless it
+	// also the specification default: a unit does not propagate unless it
 	// says so, so there is no ambiguity between "unset" and "no propagation".
 	//
 	// Repositories that bundle rather than declare their dependencies should
@@ -79,12 +79,12 @@ type PropagationConfig struct {
 	Depth Depth
 
 	// ChannelDepth is the default Propagate-Channel-Depth (§8.3a). Zero value:
-	// 0 — a unit moves nobody else's channel unless it says so. Set 1 or
+	// 0: a unit moves nobody else's channel unless it says so. Set 1 or
 	// DepthAll to carry release trains along by default.
 	ChannelDepth Depth
 
 	// Kinds is the set of dependency edges propagation follows (§8.4). It is
-	// configuration only — the spec has no per-unit override — so every unit
+	// configuration only, since the spec has no per-unit override, so every unit
 	// of every message sees this list. A nil slice selects
 	// DefaultPropagateKinds; a non-nil empty slice traverses no edges at all.
 	Kinds []DependencyKind

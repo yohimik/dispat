@@ -79,7 +79,7 @@ var diagnosticCodes = func() map[string]bool {
 	return set
 }()
 
-// IsDiagnosticCode reports whether code is one this package emits — a
+// IsDiagnosticCode reports whether code is one this package emits: a
 // finding about a commit message itself, as opposed to one about the
 // workspace, the graph or the git history, which are the caller's to
 // produce. A tool presenting both kinds together uses it to tell them
@@ -200,7 +200,7 @@ func warn(code string, pos Position, format string, args ...any) Diagnostic {
 
 // asDiagnostic converts an error produced by this package back into a
 // Diagnostic. It panics on foreign errors, which cannot occur: every error
-// funnelled here was built by fail. The panic is deliberate — the silent
+// funnelled here was built by fail. The panic is deliberate; the silent
 // alternative would fabricate a diagnostic with a zero Position, violating
 // the Line >= 1 invariant every real diagnostic holds.
 func asDiagnostic(err error) Diagnostic {
