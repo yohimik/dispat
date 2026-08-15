@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Thirty-three goals across thirty-five test files, one file each except goal 21, which the two shell helpers split
+Thirty-four goals across thirty-six test files, one file each except goal 21, which the two shell helpers split
 between `if_test.go`, `if_changed_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
 in, so a reader looking for "how does a plan get computed" or "which command does what" lands in one place.
 
@@ -39,6 +39,13 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
    a package joining a versioning group with no version, and one joining with a version that outranks the group's;
    and the boundary where `revertOnFail` stops. Each one fails by producing a *plausible* release rather than an
    error, which is what makes them worth a file of their own.
+
+34. **Versioning `none`** (`versioning_none_test.go`): the mode that leaves the release flow entirely. A `none`
+    package is never versioned, tagged, changelogged or published, runs scripts from the default `dispat run`
+    window whenever it has pending changes (it always does: nothing consumes its window), may depend on releasable
+    packages — including through a permanent local link — and is refused as a provider to any releasable package
+    at config load. Also: the graph's script-only line, an inert `Release-As` reported as W238, inert release-only
+    settings, and explicit `--package` selection answered out loud.
 
 ### Scheduling and execution
 
@@ -959,6 +966,18 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestChannelsValidationRefusals`         | A restriction naming nothing is refused where it is written, on a line and on the object alike, as is a file title that varied by channel — it is written once and matched on the next release. Nothing runs.       |
 | `TestChannelsPreviewShowsBothBodies`     | `dispat preview --changelog --github` prints both bodies under one header, labelled, each under its own entry format; a record the channels hold back says so instead of showing a body nothing would receive; and naming the changelog prints exactly what naming nothing prints. |
 | `TestChannelsAreReportedInTheSkipEvent`  | The skip is an info-level event carrying the package, the tag and the channel, so a flow can tell "held back by configuration" from "failed" without reading prose, while the release itself is still tagged.       |
+
+### Goal 34: versioning `none` (`versioning_none_test.go`)
+
+| Test                                        | Claim proven                                                                                                                                                                                                     |
+|---------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestVersioningNoneLifecycle`               | A change touching a releasable and a none space releases only the former; the none package gets no tag and no changelog, its graph line reads script-only with no version transition, and a converged second run reports it script-only again with no catch-up noise — the state is permanent, not pending. |
+| `TestVersioningNoneRunDefaultWindow`        | The default `dispat run` window is the release plan plus every changed none package: the none package runs scripts while nothing is releasing and an unchanged released package does not, and a fresh change brings the releasable one back while the none one never left. |
+| `TestVersioningNoneProviderEdgeRejected`    | A releasable consumer of a none provider fails the config load, with the error naming the declaration that carries the edge (the root list and a space's own object produce different labels); a none consumer of anything, and a none-to-none edge, load and release normally. |
+| `TestVersioningNoneConsumerWithLocalLink`   | The state none packages exist for: `--link-local` over a none-only selection writes the link without the "must be removed before publishing" warning, the linked provider keeps releasing, and a `{version}` placeholder naming the none package is refused instead of expanding. |
+| `TestVersioningNonePackageSelection`        | Naming a none package directly is answered by command: `release --package` says the package is never released and exits cleanly with nothing tagged; `run --package` runs the script.                             |
+| `TestVersioningNoneReleaseAsInert`          | A `Release-As` footer aimed at a none package moves nothing, is reported as W238, and leaves the rest of the run untouched.                                                                                       |
+| `TestVersioningNoneReleaseOnlySettingsInert` | Release-only settings on a none space (`tagFormat`, publish stages) load without error and never execute; the same build script still runs through `dispat run`.                                                 |
 
 ## Regression fences
 
