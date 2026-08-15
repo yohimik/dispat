@@ -149,7 +149,8 @@ func TestSummarizeReportsCriticals(t *testing.T) {
 func TestPreviewOne(t *testing.T) {
 	a, _ := loggedApp(t)
 	pl := reportPlan()
-	assert.Empty(t, a.previewOne(pl.Releases["quiet"]), "nothing pending, nothing rendered")
+	assert.Empty(t, a.previewOne(pl.Releases["quiet"], PreviewOptions{}),
+		"nothing pending, nothing rendered")
 
 	changed := pl.Releases["changed"]
 	changed.Units = []*ccme.Unit{{
@@ -157,9 +158,83 @@ func TestPreviewOne(t *testing.T) {
 		Bump:   ccme.BumpMinor,
 		Valid:  true,
 	}}
-	notes := a.previewOne(changed)
+	notes := a.previewOne(changed, PreviewOptions{})
 	assert.Contains(t, notes, "## changed@1.1.0", "the header carries the tag")
 	assert.Contains(t, notes, "add streaming")
+}
+
+// TestPreviewOneBodies: which bodies a preview renders, and how it labels them
+// when it renders both. Neither flag is the changelog entry, which is what a
+// bare preview has always printed.
+func TestPreviewOneBodies(t *testing.T) {
+	newPreview := func(t *testing.T) (*App, *plan.Release) {
+		t.Helper()
+		a, _ := loggedApp(t)
+		rel := reportPlan().Releases["changed"]
+		// The channel the planner resolves for every release; the record
+		// policies are read against it.
+		rel.Channel, rel.BaselineChannel = ccme.ChannelStable, ccme.ChannelStable
+		rel.Units = []*ccme.Unit{{
+			Header: ccme.Header{Type: "feat", Description: "add streaming"},
+			Bump:   ccme.BumpMinor,
+			Valid:  true,
+		}}
+		rel.Pkg.Changelog = model.ChangelogSpec{Enabled: true,
+			Format: model.RecordFormat{Footer: []model.EntryLine{{Line: []string{"from the changelog"}}}}}
+		rel.Pkg.GitHub = model.GitHubSpec{Enabled: true,
+			Format: model.RecordFormat{
+				ReleaseName: "changed ${DISPAT_VERSION}",
+				Footer:      []model.EntryLine{{Line: []string{"from the release"}}},
+			}}
+		return a, rel
+	}
+
+	t.Run("neither flag prints the changelog entry", func(t *testing.T) {
+		a, rel := newPreview(t)
+		notes := a.previewOne(rel, PreviewOptions{})
+		assert.Equal(t, notes, a.previewOne(rel, PreviewOptions{Changelog: true}),
+			"which is what --changelog prints too")
+		assert.Contains(t, notes, "from the changelog")
+		assert.NotContains(t, notes, "from the release")
+		assert.NotContains(t, notes, "---", "one body needs no label")
+	})
+
+	t.Run("the github body carries the github format", func(t *testing.T) {
+		a, rel := newPreview(t)
+		notes := a.previewOne(rel, PreviewOptions{GitHub: true})
+		assert.Contains(t, notes, "from the release")
+		assert.Contains(t, notes, "### changed 1.1.0", "the release name heads it")
+		assert.NotContains(t, notes, "from the changelog")
+	})
+
+	t.Run("both are printed under one header, labelled", func(t *testing.T) {
+		a, rel := newPreview(t)
+		notes := a.previewOne(rel, PreviewOptions{Changelog: true, GitHub: true})
+		assert.Equal(t, 1, strings.Count(notes, "## changed@1.1.0"), "one package, one header")
+		assert.Contains(t, notes, "--- changelog ---")
+		assert.Contains(t, notes, "--- github release ---")
+		assert.Less(t, strings.Index(notes, "--- changelog ---"),
+			strings.Index(notes, "--- github release ---"), "the changelog comes first")
+		assert.Contains(t, notes, "from the changelog")
+		assert.Contains(t, notes, "from the release")
+	})
+
+	t.Run("a policy that would write nothing says so", func(t *testing.T) {
+		a, rel := newPreview(t)
+		rel.Pkg.GitHub.Channels = []string{"beta"}
+		assert.Contains(t, a.previewOne(rel, PreviewOptions{GitHub: true}),
+			"github release withheld: the channels do not admit stable")
+
+		rel.Pkg.GitHub.Enabled = false
+		assert.Contains(t, a.previewOne(rel, PreviewOptions{GitHub: true}),
+			"github release withheld: disabled by config")
+
+		rel.Pkg.Changelog.Channels = []string{"beta"}
+		assert.Contains(t, a.previewOne(rel, PreviewOptions{Changelog: true}),
+			"changelog entry withheld: the channels do not admit stable")
+		assert.Contains(t, a.previewOne(rel, PreviewOptions{}), "from the changelog",
+			"a bare preview shows the notes rather than the policy")
+	})
 }
 
 // TestPrintDiagnosticsQuietParser: parser.quiet hides the commit-message

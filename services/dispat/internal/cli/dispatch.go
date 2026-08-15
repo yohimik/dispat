@@ -481,7 +481,8 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 			return 1
 		}
 	case cmdPreview:
-		res, err := a.Preview(ctx, sel)
+		res, err := a.Preview(ctx, app.PreviewOptions{
+			Filter: sel, Changelog: *o.pvChangelog, GitHub: *o.pvGithub})
 		if err != nil {
 			return 1
 		}

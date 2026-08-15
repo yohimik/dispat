@@ -156,8 +156,12 @@ already exists. Needs no configuration and no git repository of its own.`,
 		short: "print the pending release notes",
 		long: `Print the pending release notes (breaking changes, features, fixes)
 for every package with something pending, or for the selected ones.
-Nothing is written and nothing is released.`,
-		flags: selectionFlags,
+Nothing is written and nothing is released.
+
+--changelog prints the changelog entry body and --github the GitHub
+release body, each under its own entry format. Together they print both,
+labelled. Naming neither prints the changelog entry.`,
+		flags: append([]string{"changelog", "github"}, selectionFlags...),
 	},
 	{
 		name:  cmdChangelog,

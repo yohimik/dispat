@@ -28,6 +28,9 @@ type options struct {
 	// init
 	initFormat *string
 
+	// preview
+	pvChangelog, pvGithub *bool
+
 	// compute
 	computeWrite, computeInteractive *bool
 
@@ -116,6 +119,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"narrow to every package of the named versioning groups (repeatable, comma-separated, '*' globs); a group is a versionGroups entry or a space that versions as one, so it may cross spaces")
 	o.initFormat = fs.String("format", "json",
 		"config file format (json, yaml or toml)")
+	o.pvChangelog = fs.Bool("changelog", false,
+		"preview the changelog entry body (the default when neither --changelog nor --github is given)")
+	o.pvGithub = fs.Bool("github", false,
+		"preview the GitHub release body, under the github entry format; beside --changelog, both are printed")
 	o.computeWrite = fs.Bool("write", false,
 		"apply every suggestion to the config file")
 	o.computeInteractive = fs.BoolP("interactive", "i", false,
