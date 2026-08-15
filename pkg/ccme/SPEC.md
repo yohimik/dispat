@@ -41,7 +41,7 @@ constitutes a patch, minor, and major revision of the document.
 
 ## 1. Summary
 
-CCME adds five capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
+CCME adds six capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
 intent across a workspace of many packages:
 
 | # | Capability                                                                                                     | Syntax                                                         |
@@ -51,6 +51,7 @@ intent across a workspace of many packages:
 | 3 | **Cancellation** — discard accumulated, unreleased release metadata without touching code                      | type `cancel`                                                  |
 | 4 | **Explicit or derived targeting** — scope names a package, or is omitted to derive packages from changed files | `feat(api,web)` / `feat`                                       |
 | 5 | **Prerelease channels** — enter, iterate on, graduate, and carry consumers along, each under its own depth     | `%beta`, `%%beta++1`, `%beta>stable`                           |
+| 6 | **Corrections** — restate or discard a past commit's pending release record                                    | `Edits: <sha>`, `Deletes: <sha>`, `Deletes: *`                 |
 
 Capabilities 2 and 5 are two **independent axes** of the same idea. A commit says separately how far a *version bump*
 travels (`^`, `^^`, `+N`) and how far a *channel* travels (`%%`, `++N`), because the answers differ: a change usually
@@ -60,13 +61,13 @@ needs its consumers rebuilt, and much less often needs them moved onto a prerele
 Everything is designed so that a conforming parser can be written with a linear index scan and no regular-expression
 engine (§20). Appendix A gives regular expressions for implementers who prefer them.
 
-Alongside these five sits one guarantee that is not syntax: **a release is durable under partial failure.** Publishing
+Alongside these six sits one guarantee that is not syntax: **a release is durable under partial failure.** Publishing
 is a sequence of independent, individually-fallible registry operations, and any of them may fail. The engine therefore
 computes propagation against the *consumer's* release position rather than the provider's (§13.7a), publishes in
 dependency order and skips the dependents of anything that failed (§19), and converges to an empty plan by re-running
 (§13.7c). A half-finished release is a resumable state, not a lost one.
 
-**Example carrying all five:**
+**Example carrying five of the six:**
 
 ```
 feat(@acme/core)^^minor%beta++*: streaming reader
@@ -120,6 +121,7 @@ to be interpreted as described in RFC 2119.
 | **Channel**              | `stable`, or the prerelease identifier a package's baseline carries. Derived from tags, never stored (§11.1).           |
 | **Transition**           | A channel value of the form `<from>><to>`: move only packages whose baseline channel is `<from>` (§11.2).               |
 | **Resolvable**           | A released version an installer will select for a given consumer. A prerelease is resolvable only on its own line.      |
+| **Correction**           | A unit carrying an `Edits` or `Deletes` footer: a targeted rewrite of pending release records (§7.4).                   |
 | **Graduation**           | Ending a package's prerelease line by releasing it on `stable` (§11.5). Never happens implicitly.                       |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
@@ -162,7 +164,7 @@ Base-spec elements retained without modification: `type` (modulo casing), `(scop
 footer/trailer form, `BREAKING CHANGE:` and `BREAKING-CHANGE:` footers, and the `revert` convention.
 
 CCME adds: the `---` separator, multi-term scope-sets, inline directives, the types `cancel` and `release`, and the
-footer keys listed in §8.1.
+footer keys listed in §8.1, including the correction footers `Edits` and `Deletes` (§7.4).
 
 ---
 
@@ -671,12 +673,139 @@ directive syntax available to every type.
 and a `revert` of it both sit in one window, the package still takes a `major` — the `feat!` contributed `major`, the
 `revert` contributed `patch`, and `max()` gives `major`. This is correct: the release will contain neither the feature
 nor its removal, but consumers may already have seen the `feat!` in a prerelease, and silently downgrading the bump
-would be worse. `Reverts:` is informational precisely because acting on it would require the engine to reason about
-whether the revert was complete. To also drop the version signal, pair the revert with a `cancel`.
+would be worse. For the *bump*, `Reverts:` is informational, because acting on it would require the engine to reason
+about whether the revert was complete. To also drop the version signal, pair the revert with a `cancel`, or discard
+the one commit's record with `Deletes:` (§7.4).
+
+**`Reverts` and the changelog.** For the *changelog*, `Reverts: <sha>` is not informational. When the reverted
+commit's unit is still undischarged for a package, that unit's changelog entry and the revert unit's own entry are
+both suppressed for that package: the release then describes neither the change nor its removal, which is accurate,
+since it contains neither. The suppression is reported per package as `W212`, so the plan accounts for the absent
+entries. When the reverted commit has already released for a package, nothing is suppressed for it: the earlier
+changelog is published history, and the revert's own entry appears normally. Two degraded forms exist, and both leave
+the footer informational: a value that is not a well-formed commit sha (7 to 64 lowercase hexadecimal characters) is
+reported as `W214` at parse time, and a well-formed sha naming a commit that is not an ancestor-or-self of the revert
+is reported as `W213` by the engine. In both cases the revert still releases and still bumps.
 
 There is a third, weaker option that is often the one actually wanted: `Release-As: none` holds a release without
-discarding anything (§8.6.1). The three form a ladder — **`revert`** undoes the code, **`Release-As: none`** defers the
-release, **`cancel`** erases the metadata.
+discarding anything (§8.6.1). Together with the corrections of §7.4 these form a ladder: **`revert`** undoes the
+code, **`Release-As: none`** defers the release, **`Edits:`** restates one commit's record, **`Deletes:`** discards
+one commit's record, and **`cancel`** erases the ledger.
+
+### 7.4 Corrections: `Edits` and `Deletes`
+
+Release metadata accumulates in history, where it cannot be rewritten. `cancel` (§10) discards a package's whole
+pending ledger behind a positional barrier; the correction footers `Edits` and `Deletes` operate on named records. A
+correction is an **ordinary unit** carrying one of the two footers: the unit keeps its own type, scope-set,
+description, and breaking marker, releases like any other unit, and additionally rewrites the pending records it
+names. Corrections act on release records, never on code, and never touch a published tag or a published changelog.
+
+```
+fix(core): guard against empty input       chore(core): restate the changeset
+
+Edits: 4f2a1c9                             Deletes: *
+```
+
+The first message discards the record of commit `4f2a1c9` and stands in its place: whatever `4f2a1c9` claimed to be,
+the ledger now carries this `fix` instead, with this description as the changelog text. The second discards every
+pending record for `core` while contributing nothing itself, because `chore` maps to bump `none`.
+
+#### 7.4.1 Syntax
+
+The target lives in a footer, following the precedent of `Reverts:`. The values are:
+
+```
+Edits:   <sha>[#<n>]  |  Edits: *
+Deletes: <sha>[#<n>]  |  Deletes: *
+```
+
+* `<sha>` is 7 to 64 lowercase hexadecimal characters, a full or abbreviated commit id.
+* `<n>` is a 1-based unit index into the target commit, written without leading zeros. A bare `<sha>` is legal only
+  when the target commit contains a single unit; naming a multi-unit commit without a selector is `E211`.
+* `*` names every record pending for the unit's resolved scope-set. It is the whole value; `*` does not combine with
+  a sha.
+* A malformed value of either footer is `E151`.
+
+Rules for the unit around the footer:
+
+* Any type from §7.1 may carry the footers, including a type mapping to `none`, which is how a pure deletion is
+  written. The two **control** types may not: a correction footer on a `cancel` unit falls under `E171`, and on a
+  `release` unit it is `E173`, because neither carries a record that could restate anything.
+* A unit MAY carry several correction footers, `Edits` and `Deletes` mixed freely. Several `Edits` targets collapse
+  into the one carrying record: the unit restates all of them at once.
+* Everything else about the unit is ordinary. Its scope-set resolves per §6, its directives mean what they always
+  mean, and `!` marks the restatement breaking.
+
+#### 7.4.2 Semantics
+
+Corrections rewrite the stream of pending tuples (§13.4) before cancellation, holds, and propagation run; §13.4b
+places them in the algorithm. All of the following are normative.
+
+**A correction reaches only undischarged work.** A correction applies to a `(package, unit)` pair only while the
+package's pending window still contains the target commit (§13.4a). Once a package has released the target, the
+record is published history: the correction is a no-op for that package and `W209` reports it. `W209` is
+non-suppressible, because an operator who writes a correction must be able to see that it did not take. The carrying
+unit still contributes its own record normally.
+
+**A correction reaches only strict ancestors.** The target MUST be a proper ancestor of the correction's commit:
+units of the correction's own commit are never targets, so a single commit can discard old records and supply their
+restatement together, which is what makes the one-commit form of §D.6 safe where the `cancel` form is a trap. A
+well-formed sha that is unknown, unreachable, or not a proper ancestor is `E210`; a selector out of range is `E211`;
+a target unit that is a control unit is `E212`. Each is unit-scoped: the offending unit contributes nothing, and
+other units still apply.
+
+**Scopes must agree.** A correction claims to restate or discard a record, and a record is a claim about specific
+packages, so the two scopes are reconciled rather than combined:
+
+* A correction unit with **no scope-set** and a sha target takes the target unit's resolved package set as its own.
+  This is the recommended form: a correction commit is typically empty, so the file-derived fallback of §6.2 would
+  resolve to nothing, and the target already says which packages are meant.
+* A correction unit **with a scope-set** and a sha target is legal exactly when its resolved package set equals the
+  target unit's; anything else is `E213`. Permitting the sets to differ would let a correction silently narrow or
+  widen someone else's record. Restating the matching scope is not an error; it is how an author makes the
+  correction's reach visible in the message.
+* The wildcard has no target scope to agree with. `Deletes: *` and `Edits: *` take the correction unit's resolved
+  scope-set as their reach, defaulting to `*`: the scope-set selects whether the whole workspace's pending records
+  are cleared or only the named packages'.
+
+**`Deletes` discards the record.** Each named target unit is treated as if it had failed to parse (§16): it
+contributes no direct bump, no propagation on either axis, no channel, and no changelog entry, for every package
+whose window still contains it. `Deletes: *` does the same for every pending unit, direct and propagated
+contributions alike, for each package in the correction unit's resolved scope-set. The wildcard's reach differs from
+`cancel` in exactly one respect: its barrier excludes its own commit, where `cancel`'s is ancestor-or-self (§10.3).
+
+**`Edits` is `Deletes` plus a restatement.** `Edits: T` discards `T` exactly as `Deletes: T` would, and designates
+the carrying unit as `T`'s restatement: the carrying unit's type, breaking marker, and description are what the
+ledger and the changelog now say about that work. No merging of the two records takes place; the target's directives
+die with its record, and the carrying unit's own directives apply as written. A changelog SHOULD render the
+restatement once, as the carrying unit's entry, and MAY annotate it as correcting the target commit. `Edits: *`
+restates a scope's entire pending changeset as the single carrying record. An `Edits` whose carrying unit has the
+same type, breaking marker, and description as its target changes nothing and is reported as `W211`.
+
+**The newest correction wins.** When several corrections name the same target unit, the one in the newest commit
+applies; within one commit, the last unit applies. The rule and its rationale are those of §8.6, and `W210` reports
+each superseded correction. A `Deletes` followed by a newer `Edits` of the same target therefore ends with the
+restatement in force: the sequence is read positionally, and each correction supersedes the last.
+
+**Corrections compose with the rest of the algorithm without special cases.** Cancellation, holds, propagation,
+channel resolution, and versioning all run on the corrected stream (§13.4b). A cancel whose barrier covers a target
+discards it like any other unit, after which a correction of that target has nothing to act on and reports `W209`.
+Every operand is read from history and tags at `HEAD`, so corrections are deterministic, idempotent, and preserve
+G1 through G8 of §13.7c: a corrected record discharges with the window exactly as the original would have.
+
+**Worked example.** From `core@1.4.2`, with commit `A` classified `feat(core)!: rewrite internals` by mistake:
+
+```
+fix(core): rewrite internals
+
+The change is a refactor with a defensive fix, not a breaking feature.
+
+Edits: <sha of A>
+```
+
+`A`'s `major` leaves the window and this unit's `patch` enters it, so `core` releases `1.4.3` rather than `2.0.0`,
+and the changelog carries one entry, this one. Had `core` already released `2.0.0`, the correction would be a no-op
+with `W209`, because `2.0.0` is published history.
 
 ---
 
@@ -699,7 +828,9 @@ does not). **`BREAKING CHANGE` is the sole exception and is case-sensitive** —
 | `Propagate-Channel-Scope`             | —                 | scope-set                                                  | the unit's `Propagate-Scope` | unit                        |
 | `Channel`                             | `%x`              | `<channel>` \| `stable` \| `<from>><to>`                   | inherited from baseline      | unit                        |
 | `Release-As`                          | —                 | exact semver \| `none` \| `auto`                           | —                            | package, this window (§8.6) |
-| `Reverts`                             | —                 | commit sha                                                 | —                            | unit, informational         |
+| `Reverts`                             | —                 | commit sha                                                 | —                            | unit; changelog (§7.3)      |
+| `Edits`                               | —                 | `<sha>[#<n>]` \| `*`                                       | —                            | targeted records (§7.4)     |
+| `Deletes`                             | —                 | `<sha>[#<n>]` \| `*`                                       | —                            | targeted records (§7.4)     |
 
 Unknown footer keys are ignored with `W150` — this keeps CCME compatible with organisation-specific trailers.
 
@@ -1472,7 +1603,9 @@ absence of one.
 **When not to use `cancel`.** If the changes are real and you intend to ship them later — an embargo, a coordinated
 launch, a broken publish pipeline — use `Release-As: none` (§8.6.1). A hold defers; a cancel destroys. `cancel` discards
 changelog entries irrecoverably, and the only way to get them back is to rewrite the commits that produced them. Reach
-for it when the metadata was never meaningful in the first place.
+for it when the metadata was never meaningful in the first place. And when only one commit's record is wrong, prefer
+the corrections of §7.4: `Edits:` restates the one record and `Deletes:` discards it, leaving the rest of the ledger
+intact.
 
 ### 10.2 Syntax
 
@@ -1938,6 +2071,73 @@ consumer's ledger — with `cancel(<consumer>)` or a hold on the consumer. §13.
 Every operand is computed from tags and ancestry at `HEAD`, so the rule is deterministic (§17.2) and independent of
 which run published what.
 
+### 13.4b Apply corrections
+
+Resolve and apply the `Edits` and `Deletes` footers of §7.4 to the tuple stream of §13.4, before cancellation runs.
+Every later phase (§13.5 through §13.10, and §9.2 inside §13.7) operates on the corrected stream and needs no further
+knowledge of corrections.
+
+```
+applyCorrections(tuples, units):
+    # ---- resolve each correction unit ----
+    corr = []
+    for u in units where u carries Edits or Deletes footers:
+        if u.type in {cancel, release}:   already E171 / E173 at parse; skip
+        targets = []
+        for f in u.correctionFooters:                  # in written order
+            if f.value == '*':  targets.append(WILDCARD(f.kind)); continue
+            (C, n) = resolveSha(f.value)               # E210 if unknown, unreachable,
+            if C is not a proper ancestor of commitOf(u): raise E210    # or not older
+            t = unitOf(C, n)                           # E211 if n out of range, or if
+                                                       #   bare sha and C is multi-unit
+            if t is a control unit:       raise E212
+            targets.append((t, f.kind))                # kind: edit or delete
+
+    # ---- reconcile scopes (§7.4.2) ----
+        shaSets = { resolve(t) : (t, _) in targets, t != WILDCARD }
+        if u has no scope-set:
+            if shaSets is empty:      S = resolve('*')          # wildcard-only unit
+            else if |shaSets| == 1:   S = the one member        # inherited from the target
+            else:                     raise E213                # targets disagree
+        else:
+            S = resolve(u.scopeSet)
+            if some member of shaSets != S:   raise E213
+        u.effectiveScope = S                           # replaces §6 resolution for u
+
+    # ---- apply, newest commit first, last unit first (§8.6 order) ----
+    for u in corr in §11.6 precedence order:
+        for (t, kind) in u.targets:
+            if t == WILDCARD:
+                for P in u.effectiveScope:
+                    drop every tuple (P, C, i, x) where C is a proper
+                    ancestor of commitOf(u) and not superseded(P, C, i)
+                if nothing was dropped for any P:      warn W209
+                continue
+            for P in resolve(t):
+                if commitOf(t) not in W(P):            warn W209; continue   # discharged
+                if (t) already corrected by a newer u': warn W210; continue
+                drop the tuple (P, commitOf(t), t.index, t)
+            if kind == edit:
+                mark u as the restatement of t          # changelog linkage, §13.10
+                if u.type == t.type and u.breaking == t.breaking
+                   and u.description == t.description:  warn W211
+    return tuples
+```
+
+Notes, all normative:
+
+* The correction unit itself remains an ordinary tuple source: its own record enters the stream under
+  `u.effectiveScope` exactly as a scope-set of that value would have entered it.
+* `superseded(P, C, i)` is the newest-wins rule: a record already claimed by a newer correction is not re-dropped,
+  and the older correction reports `W210`.
+* Discharge is tested against the target's window per package, which is what confines corrections to unreleased work
+  (§13.4a) and what makes them idempotent: after the package releases, the same correction is a `W209` no-op.
+* Corrections precede §13.5, so a cancel barrier covering a corrected record discards the corrected form, and a
+  barrier covering the correction's own commit discards the restatement record like any other pending unit.
+* Every input is the message stream, ancestry, and tags at `HEAD`, so the step is a pure function of the repository:
+  determinism (§17.2) and the guarantees G1 through G8 (§13.7c) are unaffected, because downstream phases cannot
+  distinguish a corrected stream from one that was authored that way.
+
 ### 13.5 Apply cancellation
 
 Compute the ancestor closure of each `cancel` commit. Discard tuples per §10.3. `cancel` units themselves are then
@@ -2371,6 +2571,12 @@ glance that the plan is discharging an earlier run's unfinished work rather than
 The plan MUST additionally be emitted in the publish order of §19.2, so that the order in which packages will actually
 be published is visible before the run starts rather than inferred afterwards.
 
+**Changelog entries.** A package's changelog entries for a release are its surviving corrected tuples (§13.4b), with
+two adjustments: an entry restated by `Edits` renders once, as the correcting unit's entry, and MAY be annotated with
+the commit it corrects (§7.4); and an entry suppressed by a revert, together with the revert's own entry, is omitted
+with `W212` (§7.3). The plan MUST mark corrected and suppressed entries, because records that were rewritten or
+removed are exactly what a reviewer of the plan needs to see.
+
 ### 13.11 Complexity and scale
 
 This section is **normative for cost bounds and informative for technique**. A conforming implementation MUST produce
@@ -2539,7 +2745,7 @@ originate from them until an operator sets a value.
 | `maxPackagesPerRun`     | `null`  | Refuse or gate a run releasing more than this many packages (§18.2).                         |
 | `maxMajorsPerRun`       | `null`  | Refuse or gate a run applying more than this many `major` bumps.                             |
 | `maxChannelMovesPerRun` | `null`  | Refuse or gate a run moving more than this many packages between channels (§18.2).           |
-| `requireCodeownerFor`   | `[]`    | Directives (`cancel`, `Release-As`, `^^`, `++`, `>` transitions) needing CODEOWNER approval. |
+| `requireCodeownerFor`   | `[]`    | Directives (`cancel`, `Release-As`, `Edits`, `Deletes`, `^^`, `++`, `>` transitions) needing CODEOWNER approval. |
 
 `maxMajorJump` sits in the first group deliberately, and it is the row most often misread: a fresh repository that
 writes `Release-As: 5.0.0` against a computed `1.5.0` gets `E157` with no configuration involved. It is a default, not
@@ -2550,9 +2756,11 @@ an opt-in.
 Configuration MUST NOT be able to change:
 
 * the meaning of `cancel`, or the ancestor-or-self rule (§10.3);
+* the correction rules of §7.4: the strict-ancestor reach, the scope-agreement requirement, and the confinement of
+  corrections to undischarged work;
 * the `max()` combination rule (§9.1);
 * the requirement that tags are the sole state store (§12.4);
-* the non-suppressibility of `W155`, `W156`, `W172`, `W193`, `W194`, `W202`, and `W208` (§17.1);
+* the non-suppressibility of `W155`, `W156`, `W172`, `W193`, `W194`, `W202`, `W208`, and `W209` (§17.1);
 * determinism, idempotency, or convergence (§17.2);
 * the admission rule of §13.4a — that a dependent's eligibility is tested against the **dependent's** window;
 * that a propagated channel never graduates a dependent unless written as a transition naming the train (§9.3);
@@ -2780,14 +2988,34 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 109 | A breaking change lands on a stranded consumer after the failure         | It releases at `max(major, propagated)` = `major`. G3 pins the version only while `HEAD` is unchanged (§13.7c).                                                                                     |
 | 110 | `cancel(*)` after a partial failure                                      | Every pending contribution is discarded, propagated ones included; nothing releases. The changelog is unrecoverable (§8.6.2).                                                                       |
 
+### 15.7 Corrections and reverted changelogs
+
+| #   | Case                                                                     | Resolution                                                                                                                                                                                            |
+|-----|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 111 | `Edits: <sha>` where every affected package has released the target      | No-op, `W209` (non-suppressible). The carrying unit still contributes its own record normally (§7.4.2).                                                                                               |
+| 112 | Correction unit with no scope-set, in an empty commit                    | Takes the target unit's resolved package set; the file-derived fallback of §6.2 does not apply (§7.4.2).                                                                                              |
+| 113 | Correction unit whose scope-set resolves differently from the target's   | `E213`; the unit contributes nothing.                                                                                                                                                                 |
+| 114 | Bare `<sha>` naming a multi-unit commit                                  | `E211`. Name the unit: `<sha>#2`.                                                                                                                                                                     |
+| 115 | `chore(core): x` + `Deletes: *`                                          | Every pending record for `core` is discarded; `chore` maps to `none`, so nothing replaces them. The pure-deletion form.                                                                               |
+| 116 | `Deletes: T`, then a newer commit `Edits: T`                             | The restatement is in force: the newest correction of a target wins, and the superseded delete reports `W210` (§7.4.2).                                                                               |
+| 117 | Correction naming its own commit, or a descendant                        | `E210`. A correction reaches proper ancestors only, which is what lets one commit delete old records and restate them together.                                                                        |
+| 118 | Correction naming a `cancel` or `release` unit                           | `E212`.                                                                                                                                                                                               |
+| 119 | `cancel` barrier covering a correction's commit                          | The restatement record is discarded like any pending unit; a later correction of a cancelled target has nothing to act on and reports `W209` (§13.4b).                                                |
+| 120 | `Edits: T` where the carrying unit equals `T` in type, `!`, and text     | Applied, and `W211` reports that it changes nothing.                                                                                                                                                  |
+| 121 | Two `Edits` footers in one unit                                          | Both targets are discarded and both are restated by the one carrying record (§7.4.1).                                                                                                                 |
+| 122 | `Edits: *`                                                               | The scope's whole pending changeset collapses into the single carrying record.                                                                                                                        |
+| 123 | `Deletes: T` where `T` propagated to dependents                          | The propagated contributions fall with the record: dependents whose windows still hold `T` are no longer reached by it (§13.4b).                                                                       |
+| 124 | `feat!` and a `revert` of it in one window, `Reverts` well-formed        | Bump stays `major` (§7.3); both changelog entries are suppressed, `W212`.                                                                                                                             |
+| 125 | `Reverts: not-a-sha` / `Reverts:` naming an unreachable commit           | `W214` at parse / `W213` from the engine; the footer is informational, the revert releases and bumps normally (§7.3).                                                                                 |
+
 ---
 
 ## 16. Diagnostics registry
 
 Errors (`E`) MUST be reported. Their blast radius depends on the code:
 
-* **Unit-scoped** (`E100`–`E181`, except `E158`) — the offending unit contributes nothing; other units in the same
-  commit still apply, and other commits are unaffected.
+* **Unit-scoped** (`E100`–`E181` except `E158`, and `E210`–`E213`) — the offending unit contributes nothing; other
+  units in the same commit still apply, and other commits are unaffected.
 * **Message-scoped** (`E001`, `E002`, `E158`) — the commit contributes nothing.
 * **Repository-scoped** (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`) — the run cannot produce a correct plan and
   MUST abort. These are integrity failures, not authoring mistakes, and no partial release may be emitted.
@@ -2807,8 +3035,10 @@ rather than style notes. `W193`, `W194`, `W202` and `W208` are release-time, not
 non-suppressible for the same reason: each reports a release outcome that a reader of the commit log alone cannot
 account for. `W193` and `W202` explain a package's *presence* in a plan — a catch-up and a channel-only release both
 appear with no commits of their own — while `W194` and `W208` explain an *absence*: a package that was planned and not
-attempted, and a dependent a caret reached but could not oblige. The complete non-suppressible set is therefore
-`W155`, `W156`, `W172`, `W193`, `W194`, `W202`, and `W208` (§14.2, §17.1 #8).
+attempted, and a dependent a caret reached but could not oblige. `W209` joins them because a correction that did not
+take is a silent wrong answer: the author believes a record was rewritten and it was not. The complete
+non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`, `W208`, and `W209` (§14.2,
+§17.1 #8).
 
 ### Errors
 
@@ -2838,6 +3068,7 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `E158` | A `limits.*` cap was exceeded (§14.1). Message-scoped.                                                                                                                                                    |
 | `E170` | `cancel` unit with `!`.                                                                                                                                                                                   |
 | `E171` | `cancel` unit with inline directives or a §8.1 release-directive footer. Message-level trailers (§4.5) and unknown keys are exempt.                                                                       |
+| `E173` | Correction footer (`Edits`, `Deletes`) on a `release` unit, which carries no record that could restate anything (§7.4).                                                                                   |
 | `E180` | Reserved channel name `latest`.                                                                                                                                                                           |
 | `E181` | Channel name contains uppercase or illegal characters, or is outside `channels.allowed`. Applies to both sides of a transition.                                                                           |
 | `E182` | Existing prerelease tag uses a non-numeric counter (§15.5 #64). Repository-scoped; no offending unit.                                                                                                     |
@@ -2849,6 +3080,10 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `E198` | The registry already holds this version and its identity could not be verified as this run's artefact (§19.4). Run-scoped.                                                                                |
 | `E199` | Convergence check failed: a package remains stale after a fully successful run (§19.6). Run-scoped.                                                                                                       |
 | `E200` | The dependency graph contains a cycle over runtime edge kinds (§13.1). Repository-scoped; names the members.                                                                                              |
+| `E210` | A correction targets a commit that is unknown, unreachable, or not a proper ancestor of the correction's own commit (§7.4.2).                                                                             |
+| `E211` | A correction's unit selector is out of range, or a bare sha names a multi-unit commit (§7.4.1).                                                                                                           |
+| `E212` | A correction targets a control unit (§7.4.2).                                                                                                                                                             |
+| `E213` | A correction's resolved scope-set differs from its target's, or its sha targets resolve to differing sets while the unit carries no scope-set (§7.4.2, §13.4b).                                           |
 
 ### Warnings
 
@@ -2901,6 +3136,12 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `W206` | A channel transition matched no package; usually a mistyped `<from>` (§5.3).                                                                                                                                                                                                                              |
 | `W207` | A channel transition whose `<from>` equals its `<to>`; inert.                                                                                                                                                                                                                                             |
 | `W208` | Propagated bump suppressed: no source package releases on a channel this dependent can resolve (§9.3a). Names the unit, the origin's channel and the target's.                                                                                                                                            |
+| `W209` | A correction had nothing to act on: the target is discharged, already discarded, or the wildcard's scope holds nothing pending (§7.4.2). Non-suppressible.                                                                                                                                                 |
+| `W210` | A correction was superseded by a newer correction of the same target; the newest wins (§7.4.2).                                                                                                                                                                                                            |
+| `W211` | An `Edits` restatement carries the same type, breaking marker, and description as its target; the correction changes nothing (§7.4.2).                                                                                                                                                                     |
+| `W212` | A revert suppressed its target's changelog entry, and its own, for a package whose window still held both (§7.3).                                                                                                                                                                                          |
+| `W213` | A `Reverts` value names a commit that is not an ancestor-or-self of the revert; the footer is informational for this unit (§7.3).                                                                                                                                                                          |
+| `W214` | A `Reverts` value is not a well-formed commit sha; the footer is informational for this unit (§7.3).                                                                                                                                                                                                       |
 
 ---
 
@@ -2921,12 +3162,14 @@ An implementation conforms to CCME 1.0.0 if and only if it:
    graduates a dependent only through an explicit transition (§9.3); and suppresses a propagated bump the target cannot
    resolve (§9.3a).
 8. Reproduces every vector in Appendix B.
-9. Emits every diagnostic in §16 under the stated conditions, with `W155`, `W156`, `W172`, `W193`, `W194`, `W202`, and
-   `W208` non-suppressible.
+9. Emits every diagnostic in §16 under the stated conditions, with `W155`, `W156`, `W172`, `W193`, `W194`, `W202`,
+   `W208`, and `W209` non-suppressible.
 10. Admits propagation per §13.4a — against the **dependent's** window — and therefore satisfies G1–G8 of §13.7c.
 11. Publishes per §19: dependency-first order, tag-after-publish, dependents blocked on failure, ranges reconciled
     against current versions.
 12. Produces the plan of §13 exactly, whatever internal representation or optimisation it uses (§13.11).
+13. Applies corrections per §7.4 and §13.4b — strict-ancestor reach, scope agreement, newest-wins precedence,
+    confinement to undischarged work — and suppresses reverted changelog entries per §7.3.
 
 An implementation that computes correct plans but publishes them in an arbitrary order does **not** conform. The
 guarantees of §13.7c are joint properties of the computation and the publish protocol; either alone is insufficient,
@@ -2997,6 +3240,8 @@ engine.
 | **Induced-failure widening**   | Causing one publish to fail, hoping the retry releases more           | **Not possible.** §13.7c G5: a later run's target set is a subset of the first's. A retry can only discharge work already planned and reviewed.                                                                                                                  |
 | **Stale-consumer wedge**       | A hold left in place on a widely-depended package                     | Consumers accumulate unreleased propagation indefinitely. Visible as `W154` plus a growing `W193` set; surfaced by the audit of §13.7b.                                                                                                                          |
 | **Artefact adoption**          | Pre-publishing a version the engine is about to publish               | Blocked by the identity check of §19.4: an unverifiable pre-existing version is `E198`, never silently tagged.                                                                                                                                                   |
+| **Record falsification**       | `fix: x` + `Edits: <sha>` targeting someone's `feat!`                 | Downgrades a pending breaking change to a patch, shipping it under a compatible number. Confined to undischarged work (§7.4.2) and to matching scopes (`E213`); the plan marks every corrected entry (§13.10), and `requireCodeownerFor` can gate the footer.     |
+| **Targeted ledger wipe**       | `chore(pkg): x` + `Deletes: *`                                        | Discards a scope's pending records without the visibility of a `cancel` unit. Same reach as the ledger-wipe row, same mitigations, plus the corrected-entry marking of §13.10.                                                                                   |
 
 Note that none of these require unusual syntax. They are ordinary, valid CCME — which is the point: **the format's
 expressive power is exactly its attack surface.**
@@ -3025,7 +3270,7 @@ Implementations SHOULD additionally offer, and repositories accepting external c
 5. **A blast-radius gate** — refuse or require explicit approval when a single run would release more than
    `maxPackagesPerRun` packages, or apply a `major` bump to more than `maxMajorsPerRun` (§14).
 6. **A directive allowlist** — restrict which directives may originate from outside a trusted path. `cancel`,
-   `Release-As`, `^^`, `++*`, and any transition ending in `>stable` are the high-privilege ones;
+   `Release-As`, `Edits`, `Deletes`, `^^`, `++*`, and any transition ending in `>stable` are the high-privilege ones;
    `requireCodeownerFor` names the directives that must be approved by a CODEOWNER.
 7. **A channel-move gate** — refuse or require approval when a single run would move more than
    `maxChannelMovesPerRun` packages between channels, in either direction. Channel moves are the cheapest broad effect
@@ -4453,6 +4698,62 @@ unless stated otherwise.
 Vector 92 is the one to implement first of these: `W172` is non-suppressible precisely because the commit looks like it
 does something and does nothing, and it is the most likely authoring mistake with `cancel`.
 
+### B.11 Corrections — `Edits`, `Deletes`, and `Reverts`
+
+Parsing vectors. Each message is a header, a blank line, and the footer shown:
+
+| #    | Header + footer                                       | Expected                                                                                   |
+|------|-------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| 111a | `fix(core): x` + `Edits: 4f2a1c9`                     | Valid; correction target sha `4f2a1c9`, no selector                                        |
+| 111b | `fix(core): x` + `Edits: 4f2a1c9#2`                   | Valid; unit selector `2`                                                                   |
+| 111c | `feat(core): x` + `Edits: *`                          | Valid; wildcard restatement                                                                |
+| 111d | `chore(core): x` + `Deletes: *`                       | Valid; wildcard deletion, carrying bump `none`                                             |
+| 111e | `fix(core)!: x` + `Edits: 4f2a1c9`                    | Valid; the restatement is breaking                                                         |
+| 111f | `fix(core): x` + `Edits: 4f2a1c9` + `Deletes: abcdef0`| Valid; one unit, two corrections                                                           |
+| 111g | `fix(core): x` + `Edits: XYZ`                         | `E151` — not a sha                                                                         |
+| 111h | `fix(core): x` + `Edits: 4F2A1C9`                     | `E151` — lowercase hexadecimal only                                                        |
+| 111i | `fix(core): x` + `Edits: 4f2a1`                       | `E151` — shorter than 7 characters                                                         |
+| 111j | `fix(core): x` + `Edits: 4f2a1c9#0`                   | `E151` — selectors are 1-based                                                             |
+| 111k | `fix(core): x` + `Edits: 4f2a1c9#02`                  | `E151` — no leading zeros                                                                  |
+| 111l | `fix(core): x` + `Edits: *#1`                         | `E151` — the wildcard takes no selector                                                    |
+| 111m | `release(core)%stable: x` + `Edits: 4f2a1c9`          | `E173` — correction footer on a `release` unit                                             |
+| 111n | `cancel(core): x` + `Deletes: *`                      | `E171` — `cancel` takes a scope-set and nothing else                                       |
+| 111o | `fix(core): x` + `Reverts: not-a-sha`                 | Valid; `W214`, the footer is informational                                                 |
+| 111p | `revert(core): undo x` + `Reverts: 4f2a1c9`           | Valid; bump `patch`, sha recorded                                                          |
+
+Run sequences, from `core@1.4.2` in the workspace of B.1. `A` is `feat(core)!: rewrite internals`:
+
+**Vector 112** — restatement before release. `A`, then `B`: `fix(core): rewrite internals` + `Edits: <A>`.
+
+→ `core` releases `1.4.3`, not `2.0.0`; one changelog entry, `B`'s. `A`'s record left the window when the correction
+applied (§13.4b).
+
+**Vector 113** — restatement after release. `A` published as `core@2.0.0`, then `B` lands.
+
+→ `W209`, non-suppressible: `A` is discharged, and `2.0.0` is published history. `B`'s own `patch` still applies, so
+`core` plans `2.0.1` with `B`'s entry alone.
+
+**Vector 114** — precedence. `A`, then `B`: `chore(core): drop it` + `Deletes: <A>`, then `C`:
+`fix(core): rewrite internals` + `Edits: <A>`.
+
+→ The newest correction of `A` wins: `core` releases `1.4.3` with `C`'s entry, and `B` reports `W210`.
+
+**Vector 115** — scope agreement. `A` is scoped `(core)`; `B`: `fix(core,cli): x` + `Edits: <A>`.
+
+→ `E213`; `B` contributes nothing, `A` stands.
+
+**Vector 116** — wildcard reach. Pending records exist for `core` and `cli`; `B`: `chore(core): restate` +
+`Deletes: *`.
+
+→ Only `core`'s pending records are discarded; `cli`'s stand. The wildcard's reach is the carrying unit's resolved
+scope-set (§7.4.2).
+
+**Vector 117** — revert suppression. `A`: `feat(core): streaming reader`; `B`: `revert(core): undo streaming reader`
++ `Reverts: <A>`; both in `W(core)`.
+
+→ `core` releases at `max(minor, patch)` = `1.5.0` (§7.3), and its changelog carries neither `A`'s entry nor `B`'s;
+`W212` accounts for both.
+
 ---
 
 ## 23. Appendix C — Formal grammar (ABNF)
@@ -4503,6 +4804,12 @@ footer-key      = "BREAKING CHANGE" / "BREAKING-CHANGE" / 1*( ALPHA / DIGIT / "-
                                              ; the generic form is case-insensitive
 footer-value    = *( %x20-FF )               ; MAY be empty (BREAKING CHANGE -> W157)
 continuation    = 1*WSP 1*( %x20-FF )
+
+correction-value = "*" / sha [ "#" unit-no ] ; the value grammar of Edits and Deletes (§7.4.1)
+sha              = 7*64LHEX                  ; full or abbreviated commit id, lowercase
+unit-no          = NZDIGIT *DIGIT            ; 1-based, no leading zeros
+LHEX             = DIGIT / %x61-66
+NZDIGIT          = %x31-39
 
 tag             = package-name "@" semver    ; split at the LAST "@"
 
@@ -4694,7 +5001,21 @@ The second commit is optional and only needed if a package's manifest and tag di
 Three commits ago someone pushed `feat(@acme/core)!: refactor internals`. The change is neither breaking nor a feature,
 the branch is protected, and history cannot be rewritten.
 
-**Correct form — two commits:**
+**Preferred form — one commit, a correction (§7.4):**
+
+```
+fix(@acme/core): refactor internals
+
+The change is a refactor with a defensive fix, not a breaking feature.
+
+Edits: 4f2a1c9
+```
+
+The mistaken record is discarded and this unit stands in its place: `@acme/core` gets a patch, not a major, the
+changelog carries this description, and the rest of the pending ledger is untouched. Corrections reach only proper
+ancestors, so the restatement in the same commit is safe by construction.
+
+**Alternative form — two commits, a barrier:**
 
 ```
 # commit N  (empty commit)
@@ -4707,7 +5028,10 @@ Restating the change correctly. The metadata from 4f2a1c9 is cancelled
 by the preceding commit.
 ```
 
-Result: `@acme/core` gets a patch, not a major. No history was rewritten and no tag was touched.
+Same outcome for this history, but the barrier discards **everything** pending for `@acme/core`, not just the
+mistaken record. Use it when the whole ledger is wrong; use `Edits:` when one record is.
+
+Result of either: `@acme/core` gets a patch, not a major. No history was rewritten and no tag was touched.
 
 **The mistake to avoid — one commit:**
 
