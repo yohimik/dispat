@@ -131,7 +131,7 @@ func (a *App) AutoWriter(ctx context.Context, opts AutoWriterOptions) error {
 		return err
 	}
 
-	work, err := a.newWriterWork(ctx, pl, opts)
+	work, err := a.newWriterWork(ctx, pl, covered, opts)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot rewrite the manifests")
 		return err
@@ -238,7 +238,7 @@ type writeTally struct{ applied, skipped, missing int }
 // workspace index when one is needed, the placeholders expanded, and the edits
 // the --only-updated filter kept. Everything that can fail the whole command
 // rather than one package fails here, before a single file is opened.
-func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, opts AutoWriterOptions) (*writerWork, error) {
+func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, covered []string, opts AutoWriterOptions) (*writerWork, error) {
 	if s := opts.scope(); s != model.ScopeRoot && s != model.ScopeAll {
 		return nil, fmt.Errorf("unknown manifest scope %q (want %q or %q)", s, model.ScopeRoot, model.ScopeAll)
 	}
@@ -294,9 +294,23 @@ func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, opts AutoWriterO
 	if opts.LinkLocal {
 		// Worth saying out loud rather than burying in the docs: nothing in the
 		// release path removes these, so a link still in place at publish time
-		// ships a manifest consumers cannot resolve.
-		a.log.Warn().
-			Msg("local links must be removed before publishing; run autowriter --unlink-local first")
+		// ships a manifest consumers cannot resolve. A sweep touching only
+		// versioning-none packages never publishes, so for it a permanent
+		// local link is the supported state rather than a hazard.
+		anyReleasable := false
+		for _, name := range covered {
+			if rel := pl.Releases[name]; rel != nil && rel.Releasable() {
+				anyReleasable = true
+				break
+			}
+		}
+		if anyReleasable {
+			a.log.Warn().
+				Msg("local links must be removed before publishing; run autowriter --unlink-local first")
+		} else {
+			a.log.Debug().
+				Msg("link warning suppressed: every covered package has versioning \"none\"")
+		}
 	}
 	return w, nil
 }
@@ -314,6 +328,10 @@ func (w *writerWork) expand(names map[string]string, dep, text string) (string, 
 	if rel == nil {
 		return "", fmt.Errorf("%s: %s names no package in this workspace, so %s cannot be resolved",
 			dep, dep, VersionPlaceholder)
+	}
+	if !rel.Releasable() {
+		return "", fmt.Errorf("%s: %s has versioning \"none\" and never carries a version, so %s cannot be resolved",
+			dep, pkg, VersionPlaceholder)
 	}
 	return strings.ReplaceAll(text, VersionPlaceholder, plannedVersion(rel)), nil
 }
@@ -355,7 +373,14 @@ func (w *writerWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 	}
 	edits := w.edits
 	if w.version != "" {
-		edits.Version = strings.ReplaceAll(w.version, VersionPlaceholder, plannedVersion(rel))
+		if strings.Contains(w.version, VersionPlaceholder) && !rel.Releasable() {
+			// A none package has no planned version to stamp; writing the
+			// zero one would put "0.0.0" into a manifest nobody versions.
+			w.app.log.Debug().Str("package", rel.Pkg.Name).
+				Msg("own-version write skipped: the package has versioning \"none\"")
+		} else {
+			edits.Version = strings.ReplaceAll(w.version, VersionPlaceholder, plannedVersion(rel))
+		}
 	}
 	return func(ctx context.Context) error { return w.write(ctx, rel, mans, edits) }, nil
 }

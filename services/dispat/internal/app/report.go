@@ -75,7 +75,7 @@ func shortCommit(c string) string {
 // actually be published in is visible before the run rather than inferred
 // afterwards.
 func (a *App) printGraph(pl *plan.Plan) {
-	releasing, held, deselected := 0, 0, 0
+	releasing, held, deselected, scriptOnly := 0, 0, 0, 0
 	for _, name := range pl.Order {
 		rel := pl.Releases[name]
 		ev := a.log.Info().
@@ -88,6 +88,14 @@ func (a *App) printGraph(pl *plan.Plan) {
 			ev.Str("version", rel.Previous().String()).
 				Str("channel", rel.Channel).
 				Msg("unchanged")
+			continue
+		}
+		// Before the version fields attach: a none package has no version to
+		// show and no hold to explain, only the scripts it exists to run.
+		if !rel.Releasable() {
+			scriptOnly++
+			ev.Int("ownCommits", len(rel.Units)).
+				Msg("∅ script-only (versioning: none)")
 			continue
 		}
 
@@ -146,6 +154,11 @@ func (a *App) printGraph(pl *plan.Plan) {
 		// line reads exactly as it always has.
 		ev = ev.Int("deselected", deselected)
 	}
+	if scriptOnly > 0 {
+		// Same restraint: only a workspace that has none packages sees the
+		// count at all.
+		ev = ev.Int("scriptOnly", scriptOnly)
+	}
 	ev.Msg("release plan ready")
 }
 
@@ -202,8 +215,15 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 	// A deselected package is not unchanged — it has a version waiting for the
 	// next run — so it is counted on its own and taken out of that total.
 	// Narrow only ever touches releasing packages, so it can never overlap the
-	// held ones.
+	// held ones. A changed none package is not unchanged either: it ran no
+	// release, but calling it unchanged forever would misstate what it did.
 	left := pl.Deselected()
+	scriptOnly := 0
+	for _, name := range pl.Order {
+		if rel := pl.Releases[name]; rel != nil && !rel.Releasable() && rel.Changed() && !rel.Deselected {
+			scriptOnly++
+		}
+	}
 	ev := a.log.Info().
 		Int("published", published).
 		Int("failed", failed).
@@ -218,7 +238,10 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 	if len(left) > 0 {
 		ev = ev.Int("deselected", len(left))
 	}
-	ev.Int("unchanged", len(pl.Order)-len(results)-len(pl.Held())-len(left)).
+	if scriptOnly > 0 {
+		ev = ev.Int("scriptOnly", scriptOnly)
+	}
+	ev.Int("unchanged", len(pl.Order)-len(results)-len(pl.Held())-len(left)-scriptOnly).
 		Dur("took", took).
 		Msg("done")
 	return failed, critical

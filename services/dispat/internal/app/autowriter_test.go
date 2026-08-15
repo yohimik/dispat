@@ -74,7 +74,7 @@ func arSet(name, rng string) writer.Edit {
 func arRun(t *testing.T, a *App, pl *plan.Plan, opts AutoWriterOptions) error {
 	t.Helper()
 	opts.Window.Since = SinceAll
-	work, err := a.newWriterWork(context.Background(), pl, opts)
+	work, err := a.newWriterWork(context.Background(), pl, nil, opts)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func TestAutoWriterOnlyUpdated(t *testing.T) {
 
 func TestAutoWriterOnlyUpdatedCanEmptyTheInvocation(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	work, err := a.newWriterWork(context.Background(), pl,
+	work, err := a.newWriterWork(context.Background(), pl, nil,
 		AutoWriterOptions{OnlyUpdated: true, Edits: []writer.Edit{arSet("left-pad", "^9.9.9")}})
 	require.NoError(t, err)
 	assert.True(t, work.nothingToWrite(), "a run updating none of the named packages writes nothing")
@@ -223,7 +223,7 @@ func TestAutoWriterLeavesANestedPackageToItsOwner(t *testing.T) {
 	arSeed(t, a, "packages/core/web/package.json",
 		`{"name": "@acme/web", "version": "1.0.0", "dependencies": {"@acme/core": "^1.0.0"}}`)
 
-	work, err := a.newWriterWork(context.Background(), pl, AutoWriterOptions{
+	work, err := a.newWriterWork(context.Background(), pl, nil, AutoWriterOptions{
 		Manifests: string(model.ScopeAll), Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	mans, err := work.manifests(context.Background(), pl.Releases["core"])
@@ -238,7 +238,7 @@ func TestAutoWriterSkipsAPackageWithNothingWritable(t *testing.T) {
 	require.NoError(t, os.RemoveAll(filepath.Join(a.root, "packages", "core", "package.json")))
 	arSeed(t, a, "packages/core/notes.txt", "nothing to parse")
 
-	work, err := a.newWriterWork(context.Background(), pl,
+	work, err := a.newWriterWork(context.Background(), pl, nil,
 		AutoWriterOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	task, err := work.resolve(context.Background(), pl.Releases["core"])
@@ -249,7 +249,7 @@ func TestAutoWriterSkipsAPackageWithNothingWritable(t *testing.T) {
 
 func TestAutoWriterRejectsAnUnknownScope(t *testing.T) {
 	a, pl, _ := arRepo(t)
-	_, err := a.newWriterWork(context.Background(), pl, AutoWriterOptions{Manifests: "none"})
+	_, err := a.newWriterWork(context.Background(), pl, nil, AutoWriterOptions{Manifests: "none"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown manifest scope "none"`)
 }
@@ -290,7 +290,7 @@ func TestAutoWriterKeepsGoingPastAManifestItCannotRead(t *testing.T) {
 	a, pl, buf := arRepo(t)
 	arSeed(t, a, "packages/web/nested/package.json", "{ this is not json")
 
-	work, err := a.newWriterWork(context.Background(), pl,
+	work, err := a.newWriterWork(context.Background(), pl, nil,
 		AutoWriterOptions{Manifests: string(model.ScopeAll), Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	mans, err := work.manifests(context.Background(), pl.Releases["web"])
@@ -304,7 +304,7 @@ func TestAutoWriterStopsWhenTheContextIsDone(t *testing.T) {
 	a, pl, _ := arRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	work, err := a.newWriterWork(context.Background(), pl,
+	work, err := a.newWriterWork(context.Background(), pl, nil,
 		AutoWriterOptions{Edits: []writer.Edit{arSet("@acme/core", "^2.0.0")}})
 	require.NoError(t, err)
 	_, err = work.manifests(ctx, pl.Releases["web"])

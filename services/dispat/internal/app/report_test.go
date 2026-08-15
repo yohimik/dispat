@@ -25,7 +25,8 @@ func loggedApp(t *testing.T) (*App, *bytes.Buffer) {
 	return New(t.TempDir(), &config.File{}, zerolog.New(&buf)), &buf
 }
 
-// reportPlan is a three-package plan: one releasing, one held, one unchanged.
+// reportPlan is a four-package plan: one releasing, one held, one unchanged,
+// one changed but never releasable (versioning none).
 func reportPlan() *plan.Plan {
 	libs := &model.Space{Name: "libs"}
 	rel := func(n string) *plan.Release {
@@ -40,10 +41,15 @@ func reportPlan() *plan.Plan {
 	held := rel("held")
 	held.Bump, held.NewWork, held.Held = ccme.BumpPatch, true, true
 	held.Next = ccme.Version{Major: 1, Patch: 1}
+	scripted := &plan.Release{
+		Pkg:     &model.Package{Name: "scripted", Dir: "scripted", Space: &model.Space{Name: "tools", Versioning: model.VersioningNone}},
+		Bump:    ccme.BumpPatch,
+		NewWork: true,
+	}
 	return &plan.Plan{
-		Order: []string{"changed", "held", "quiet"},
+		Order: []string{"changed", "held", "quiet", "scripted"},
 		Releases: map[string]*plan.Release{
-			"changed": changed, "held": held, "quiet": rel("quiet"),
+			"changed": changed, "held": held, "quiet": rel("quiet"), "scripted": scripted,
 		},
 		Providers: map[string][]string{"changed": {"quiet"}},
 	}
@@ -81,11 +87,19 @@ func TestPrintGraph(t *testing.T) {
 	assert.Contains(t, out, "unchanged")
 	assert.Contains(t, out, "held (Release-As: none)")
 	assert.Contains(t, out, "changed")
+	assert.Contains(t, out, "script-only (versioning: none)")
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "script-only") {
+			assert.NotContains(t, line, `"version"`, "a none package renders no version transition")
+			assert.NotContains(t, line, `"bump"`)
+		}
+	}
 	assert.Contains(t, out, `"version":"1.0.0 -> 1.1.0"`)
 	assert.Contains(t, out, `"dependsOn":["quiet"]`)
-	assert.Contains(t, out, `"packages":3`)
+	assert.Contains(t, out, `"packages":4`)
 	assert.Contains(t, out, `"releasing":1`)
 	assert.Contains(t, out, `"held":1`)
+	assert.Contains(t, out, `"scriptOnly":1`)
 }
 
 func TestSummarize(t *testing.T) {

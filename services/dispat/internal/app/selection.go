@@ -167,9 +167,15 @@ func (a *App) windowPackages(ctx context.Context, pl *plan.Plan, opts WindowOpti
 	}
 	var window []string
 	for _, name := range pl.Order {
-		if rel := pl.Releases[name]; rel != nil && rel.RunsScripts() {
-			window = append(window, name)
+		rel := pl.Releases[name]
+		if rel == nil || !rel.RunsScripts() {
+			continue
 		}
+		if !rel.Releasing() {
+			a.log.Debug().Str("package", name).
+				Msg("changed package joins the window without releasing (versioning: none)")
+		}
+		window = append(window, name)
 	}
 	return window, nil
 }

@@ -2080,7 +2080,10 @@ func (cp *computation) finalise() {
 			continue
 		}
 		rel.Bump = ccme.MaxBump(rel.OwnBump, rel.PropagatedBump)
-		rel.Held = cp.held[name]
+		// A hold suspends a release a none package was never going to make;
+		// leaving Held false keeps it out of the held counts and W154, so the
+		// one exclusion the graph reports for it is its versioning.
+		rel.Held = cp.held[name] && rel.Releasable()
 		// §13.10: the plan marks its corrected and suppressed entries. Both
 		// maps are keyed by unit, and rel.Units holds pointers into the same
 		// parsed messages, so the marks travel with the units to every
