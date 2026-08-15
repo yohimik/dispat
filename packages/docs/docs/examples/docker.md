@@ -3,9 +3,9 @@
 Docker monorepo versioning with dispat: images that depend on images, released in an order where a consumer's build
 waits for its base image to be published, and `FROM` lines that follow the released versions.
 
-Docker is the case that breaks "build everything, then publish everything": an image that starts `FROM` your base image
-can only be *built* after the base image is *pushed* to the registry. The per-space
-`isBuildWaitingPublish` flag states exactly that.
+Docker is the case that breaks "build everything, then publish everything", because an image that starts `FROM` your
+base image can only be *built* after the base image is *pushed* to the registry. The per-space `isBuildWaitingPublish`
+flag states exactly that.
 
 ```json
 {

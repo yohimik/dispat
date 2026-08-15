@@ -9,11 +9,12 @@ If a term is new, [Concepts](../concepts.md) defines all of them in a few minute
 
 | Example | What it covers |
 |---------|----------------|
-| [An npm monorepo](./npm.md) | The smallest useful setup, from zero to a published release, plus registry login. |
+| [An npm monorepo](./npm.md) | The smallest useful setup, from zero to a published release. |
 | [A pnpm workspace](./pnpm.md) | `workspace:` ranges, the shared lock file, and `pnpm publish` mid-release. |
 | [A Docker image chain](./docker.md) | Images depending on images, where a build needs its base *published*. |
 | [An Android app](./android.md) | Gradle, a monotonic `versionCode`, and a bundle attached to the GitHub release. |
 | [npm and Docker in one graph](./mixed.md) | The mixed case dispat was built for. |
+| [Registry login, once per space](./login.md) | The `login` slot: one authentication per space, whatever the registry. |
 | [A single package, no monorepo](./single-package.md) | dispat on a repository with one thing in it. |
 | [Adopting dispat](./adopting.md) | Deriving the graph and the starting versions from the manifests, in a new repository or one that already ships. |
 | [Keeping configuration beside the code](./layout.md) | In-folder config files and `.dispatexclude`. |

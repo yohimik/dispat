@@ -1,11 +1,8 @@
 # A pnpm workspace
 
-Releasing a pnpm workspace: `workspace:` ranges left intact, the shared lock file regenerated and committed, and
-`pnpm publish` told not to argue with a mid-release git tree.
-
-Same shape as [An npm package](./npm.md), with three differences that come from the package manager rather than
-from dispat: the lock file is the workspace root's, internal ranges use the `workspace:` protocol, and `pnpm publish`
-has an opinion about the state of your git tree.
+Releasing a pnpm workspace: the same shape as [an npm monorepo](./npm.md), with three differences that come from the
+package manager rather than from dispat. The lock file is the workspace root's, internal ranges use the `workspace:`
+protocol, and `pnpm publish` has an opinion about the state of your git tree.
 
 ```json
 {

@@ -35,6 +35,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'examples/docker', label: 'A Docker image chain'},
         {type: 'doc', id: 'examples/android', label: 'An Android app'},
         {type: 'doc', id: 'examples/mixed', label: 'npm and Docker in one graph'},
+        {type: 'doc', id: 'examples/login', label: 'Registry login'},
         {type: 'doc', id: 'examples/single-package', label: 'A single package'},
         {type: 'doc', id: 'examples/adopting', label: 'Adopting dispat'},
         {type: 'doc', id: 'examples/layout', label: 'Config beside the code'},

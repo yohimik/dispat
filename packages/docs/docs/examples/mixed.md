@@ -1,10 +1,8 @@
 # npm and Docker in one graph
 
-The polyglot monorepo release dispat exists for: npm packages and Docker images in one dependency graph, each space
-with its own scripts and its own ordering rule.
-
-The polyglot case dispat exists for: a TypeScript library, a service that uses it, and a Docker image that ships the
-service. Each space brings its own scripts and its own ordering rule; the dependency edges connect them into one graph.
+The polyglot monorepo release dispat exists for: a TypeScript library, a service that uses it, and a Docker image that
+ships the service. Each space brings its own scripts and its own ordering rule, and the dependency edges connect them
+into one graph.
 
 ```json
 {

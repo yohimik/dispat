@@ -3,9 +3,8 @@
 dispat on a repository with one thing in it: automatic semantic versioning, changelogs and tags for a single package,
 with no monorepo required.
 
-dispat is built for monorepos, but nothing requires more than one package. A repository whose whole deliverable is a
-single package skips `spaces` entirely and declares one standalone `packages` entry pointing at the folder the code
-lives in:
+dispat is built for monorepos, but nothing requires more than one package. A repository whose whole deliverable is one
+package skips `spaces` entirely and declares one standalone `packages` entry pointing at the folder the code lives in:
 
 ```json
 {
@@ -36,6 +35,6 @@ $ dispat status
 09:31:07 INF release plan ready held=0 packages=1 releasing=1
 ```
 
-Everything else on this page works unchanged with one package: channels, the changelog, GitHub releases, hooks,
+Everything else in these examples works unchanged with one package: channels, the changelog, GitHub releases, hooks,
 `dispat run`. If the repository grows a second deliverable later, add another entry (or a space) and declare the edge
 between them; the single-package setup is just the smallest case of the general one.

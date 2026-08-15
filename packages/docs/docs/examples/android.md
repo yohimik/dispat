@@ -3,9 +3,9 @@
 Releasing an Android app from a monorepo: Gradle builds driven by the computed version, a monotonic `versionCode`, and
 a bundle attached to the GitHub release.
 
-Gradle projects fit the same two slots. The version travels through environment variables into Gradle properties, and
-the "publish" of an app is whatever your delivery is: a Play upload, an artifact repository, an APK attached to a GitHub
-release.
+Gradle projects fit the same build and publish slots as every other ecosystem. The version travels through environment
+variables into Gradle properties, and the "publish" of an app is whatever your delivery is: a Play upload, an artifact
+repository, an APK attached to a GitHub release.
 
 ```json
 {
