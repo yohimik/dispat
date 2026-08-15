@@ -28,9 +28,10 @@ const (
 	CodeE141 = "E141" // release unit with "!"
 	CodeE151 = "E151" // footer value is not valid for its key
 	CodeE154 = "E154" // exact Release-As on a multi-package scope-set
+	CodeE158 = "E158" // a limits.* cap was exceeded; message-scoped
 	CodeE170 = "E170" // cancel unit with "!"
 	CodeE171 = "E171" // cancel unit with directives or footers
-	CodeE158 = "E158" // a limits.* cap was exceeded; message-scoped
+	CodeE173 = "E173" // correction footer on a release unit
 	CodeE180 = "E180" // reserved channel name "latest"
 	CodeE181 = "E181" // channel name contains uppercase or illegal characters
 
@@ -52,6 +53,7 @@ const (
 	CodeW157 = "W157" // BREAKING CHANGE with an empty value
 	CodeW201 = "W201" // a propagation value was supplied while its axis's depth is 0
 	CodeW207 = "W207" // a channel transition whose from equals its to; inert
+	CodeW214 = "W214" // Reverts value is not a commit sha; footer is informational
 )
 
 // silentFailureCodes backs SilentFailureCodes; an array so the policy set
@@ -64,11 +66,11 @@ var diagnosticCodes = func() map[string]bool {
 	codes := [...]string{
 		CodeE001, CodeE002, CodeE100, CodeE101, CodeE102, CodeE103, CodeE104,
 		CodeE110, CodeE111, CodeE112, CodeE113, CodeE120, CodeE121, CodeE140,
-		CodeE141, CodeE151, CodeE154, CodeE170, CodeE171, CodeE158, CodeE180,
-		CodeE181,
+		CodeE141, CodeE151, CodeE154, CodeE158, CodeE170, CodeE171, CodeE173,
+		CodeE180, CodeE181,
 		CodeW001, CodeW101, CodeW110, CodeW112, CodeW120, CodeW121, CodeW132,
 		CodeW133, CodeW140, CodeW141, CodeW150, CodeW151, CodeW152, CodeW155,
-		CodeW156, CodeW157, CodeW201, CodeW207,
+		CodeW156, CodeW157, CodeW201, CodeW207, CodeW214,
 	}
 	set := make(map[string]bool, len(codes))
 	for _, c := range codes {

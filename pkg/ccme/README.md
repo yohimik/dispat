@@ -222,8 +222,11 @@ entirely); it is the single highest-value knob here, and it costs nothing but pe
 
 Everything in a commit message: normalisation (§4.1), unit splitting and the escaped separator (§4.2), the header
 grammar (§5) including scope-sets, the `^` / `^^` / `+` / `++` / `%` / `%%` sigils, channel transitions (§11.2) and the
-breaking marker, the body/footer split (§4.4, §20.5), the nine-entry footer registry (§8.1), inline-versus-footer
-reconciliation (§5.3), type-to-bump mapping (§7), and the `cancel` / `release` control rules (§7.2, §10.2).
+breaking marker, the body/footer split (§4.4, §20.5), the eleven-entry footer registry (§8.1), inline-versus-footer
+reconciliation (§5.3), type-to-bump mapping (§7), the `cancel` / `release` control rules (§7.2, §10.2), and the
+correction footers `Edits:` and `Deletes:` (§7.4), whose values are shape-validated here and resolved against history
+by the release engine. `Reverts:` values are shape-validated too (`W214` when the value is not a commit sha), because
+§7.3 makes the footer suppress reverted changelog entries.
 
 Diagnostics carry a code, a severity and an exact position, so a caller can point a caret at the offending byte:
 

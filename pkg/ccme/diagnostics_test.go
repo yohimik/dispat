@@ -14,11 +14,11 @@ import (
 var allDiagnosticCodes = []string{
 	CodeE001, CodeE002, CodeE100, CodeE101, CodeE102, CodeE103, CodeE104,
 	CodeE110, CodeE111, CodeE112, CodeE113, CodeE120, CodeE121, CodeE140,
-	CodeE141, CodeE151, CodeE154, CodeE158, CodeE170, CodeE171, CodeE180,
-	CodeE181,
+	CodeE141, CodeE151, CodeE154, CodeE158, CodeE170, CodeE171, CodeE173,
+	CodeE180, CodeE181,
 	CodeW001, CodeW101, CodeW110, CodeW112, CodeW120, CodeW132, CodeW133,
 	CodeW140, CodeW141, CodeW150, CodeW151, CodeW152, CodeW155, CodeW156,
-	CodeW157, CodeW121, CodeW201, CodeW207,
+	CodeW157, CodeW121, CodeW201, CodeW207, CodeW214,
 }
 
 // diagnosticCase is a minimal input that provokes exactly one code, so the
@@ -53,6 +53,7 @@ var diagnosticCases = []diagnosticCase{
 		cfg: Config{Limits: Limits{UnitsPerMessage: 8}}},
 	{code: CodeE170, message: "cancel(*)!: x"},
 	{code: CodeE171, message: "cancel(core)^minor: x"},
+	{code: CodeE173, message: "release(core)%stable: x\n\nEdits: 4f2a1c9ab"},
 	{code: CodeE180, message: "feat(core)%latest: x"},
 	{code: CodeE181, message: "feat(core)%Beta: x"},
 
@@ -73,6 +74,7 @@ var diagnosticCases = []diagnosticCase{
 	// more specific finding and suppresses W152 for that axis.
 	{code: CodeW201, message: "feat(core): a\n\nPropagate: minor\nPropagate-Depth: 0"},
 	{code: CodeW207, message: "feat(core)%beta>beta: x"},
+	{code: CodeW214, message: "revert(core): undo the reader\n\nReverts: not-a-sha"},
 	{code: CodeW121, message: "feat:x", cfg: Config{Lenient: true}},
 	// The two silent failures of §8.1.1, plus the empty-value note.
 	{code: CodeW155, message: "feat(core): a\n\nBreaking change: gone"},
@@ -515,8 +517,8 @@ func TestErrorsInvalidateOnlyTheirOwnUnit(t *testing.T) {
 func TestIsDiagnosticCode(t *testing.T) {
 	for _, code := range []string{
 		CodeE001, CodeE100, CodeE113, CodeE121, CodeE140, CodeE151, CodeE158,
-		CodeE170, CodeE181, CodeW001, CodeW101, CodeW120, CodeW133, CodeW152,
-		CodeW155, CodeW157, CodeW201, CodeW207,
+		CodeE170, CodeE173, CodeE181, CodeW001, CodeW101, CodeW120, CodeW133,
+		CodeW152, CodeW155, CodeW157, CodeW201, CodeW207, CodeW214,
 	} {
 		if !IsDiagnosticCode(code) {
 			t.Errorf("%s is emitted by this package but not recognised as its own", code)

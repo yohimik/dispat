@@ -301,6 +301,33 @@ func (s ScopeSet) String() string {
 	return strings.Join(parts, ",")
 }
 
+// CorrectionTarget is a parsed Edits or Deletes footer value (§7.4.1):
+//
+//	correction-value = "*" / sha [ "#" unit-no ]
+//
+// Resolving the sha, the selector, and the correction's effect requires git
+// history and is the release engine's §13.4b; the parser validates shape.
+type CorrectionTarget struct {
+	// SHA is the full or abbreviated commit id, 7 to 64 lowercase hexadecimal
+	// characters. Empty when All is set.
+	SHA string
+	// UnitSelector is the 1-based unit index into the target commit, or 0 when
+	// no selector was written. A bare SHA is legal only for single-unit
+	// targets; the engine enforces that (E211).
+	UnitSelector int
+	// All reports the wildcard "*": every record pending for the carrying
+	// unit's resolved scope-set (§7.4.2).
+	All bool
+	// Raw is the value as written.
+	Raw string
+}
+
+// IsWildcard reports whether the target is the "*" form.
+func (t CorrectionTarget) IsWildcard() bool { return t.All }
+
+// String implements fmt.Stringer.
+func (t CorrectionTarget) String() string { return t.Raw }
+
 // ReleaseAsKind discriminates the three forms of a Release-As value (§8.6).
 type ReleaseAsKind int
 
@@ -454,6 +481,15 @@ type Directives struct {
 	// --- release control (§8.6) ---
 
 	ReleaseAs *ReleaseAs
+
+	// --- corrections (§7.4) ---
+
+	// Edits holds the targets this unit restates: each named record is
+	// discarded and this unit's type, breaking marker and description stand in
+	// its place. Applying them is the engine's §13.4b.
+	Edits []CorrectionTarget
+	// Deletes holds the targets this unit discards without restatement.
+	Deletes []CorrectionTarget
 
 	// Kinds are the manifest fields traversed as propagation edges. They come
 	// from configuration alone: §8.4 defines no per-unit override, because

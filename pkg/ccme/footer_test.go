@@ -125,8 +125,8 @@ Reverts: 4f2a1c9`
 	if !d.Depth.IsAll() || !d.DepthSet {
 		t.Errorf("Propagate-Depth = %s", d.Depth)
 	}
-	// §8.4 removed the per-unit override: the edge kinds always come from
-	// configuration now.
+	// §8.4 defines no per-unit override: the edge kinds always come from
+	// configuration.
 	if len(d.Kinds) != len(DefaultPropagateKinds()) {
 		t.Errorf("Kinds = %v, want the configured default", d.Kinds)
 	}

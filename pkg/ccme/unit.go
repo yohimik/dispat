@@ -108,10 +108,15 @@ type footerDirectives struct {
 	cscopeSet    bool
 	releaseAs    *ReleaseAs
 	reverts      []string
+	edits        []CorrectionTarget
+	deletes      []CorrectionTarget
 	breaking     *string
 	// registryKeys counts footers from the §8.1 registry, which is what makes
 	// a cancel unit E171 and a release unit non-inert.
 	registryKeys int
+	// correctionKeys counts Edits and Deletes footers, which are E173 on a
+	// release unit (§7.4.1).
+	correctionKeys int
 }
 
 // applySemantics runs everything that follows a successful header parse:
@@ -142,6 +147,11 @@ func (p *Parser) applySemantics(u *Unit) {
 	case TypeRelease:
 		if u.Breaking {
 			b.errf(CodeE141, u.Header.Position, "a release unit must not be marked breaking")
+		}
+		if fd.correctionKeys > 0 {
+			// §7.4.1: a release unit carries no record that could restate
+			// anything, so a correction footer on one is an error.
+			b.errf(CodeE173, u.Header.Position, "a release unit must not carry a correction footer")
 		}
 		if u.Header.Inline.IsEmpty() && fd.registryKeys == 0 {
 			b.warnf(CodeW141, u.Header.Position, "release unit carries no directive and is inert")
@@ -261,7 +271,31 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 			fd.releaseAs = ra
 
 		case FooterReverts:
+			// The value is recorded as written either way; a malformed sha
+			// leaves the footer informational for the engine (§7.3).
+			if !isCommitSHA(f.Value) {
+				b.warnf(CodeW214, f.Position,
+					"%s value %q is not a commit sha; the footer is informational", f.CanonicalKey, f.Value)
+			}
 			fd.reverts = append(fd.reverts, f.Value)
+
+		case FooterEdits:
+			fd.correctionKeys++
+			t, err := parseCorrectionTarget(f.Value)
+			if err != nil {
+				b.errf(CodeE151, f.Position, "invalid %s value %q: %s", f.CanonicalKey, f.Value, err.Error())
+				continue
+			}
+			fd.edits = append(fd.edits, t)
+
+		case FooterDeletes:
+			fd.correctionKeys++
+			t, err := parseCorrectionTarget(f.Value)
+			if err != nil {
+				b.errf(CodeE151, f.Position, "invalid %s value %q: %s", f.CanonicalKey, f.Value, err.Error())
+				continue
+			}
+			fd.deletes = append(fd.deletes, t)
 		}
 	}
 	return fd
@@ -299,6 +333,8 @@ func (p *Parser) reconcile(b *unitBuilder, fd footerDirectives) {
 		u.Directives.PropagateChannelScope, u.Directives.PropagateChannelScopeSet = fd.cscope, true
 	}
 	u.Directives.ReleaseAs = fd.releaseAs
+	u.Directives.Edits = fd.edits
+	u.Directives.Deletes = fd.deletes
 }
 
 // reconcileDepth resolves a depth, where the inline side may have been merely
@@ -557,6 +593,81 @@ func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
 var errReleaseAsBump = errors.New(
 	"Release-As has no bump form: how large a change is, is declared by the type; " +
 		"change the type, or map it in the types configuration")
+
+// isLowerHex reports whether c is a lowercase hexadecimal digit.
+func isLowerHex(c byte) bool { return isDigit(c) || (c >= 'a' && c <= 'f') }
+
+// isCommitSHA reports whether s is a full or abbreviated commit id: 7 to 64
+// lowercase hexadecimal characters (§7.4.1). Git prints ids in lowercase, and
+// the grammar follows it: an uppercase id does not validate.
+func isCommitSHA(s string) bool {
+	if len(s) < 7 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isLowerHex(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// Sentinel errors for correction-target validation, surfaced inside an E151
+// diagnostic exactly as the scope-set sentinels above are.
+var (
+	errCorrectionNotSHA      = errors.New("expected a commit sha of 7 to 64 lowercase hexadecimal characters, or *")
+	errCorrectionSelector    = errors.New("the unit selector is 1-based, written without leading zeros")
+	errCorrectionWildcardSel = errors.New("the wildcard * takes no unit selector")
+)
+
+// parseCorrectionTarget parses an Edits or Deletes footer value (§7.4.1):
+//
+//	correction-value = "*" / sha [ "#" unit-no ]
+//
+// Resolving the sha against history is the engine's job; the parser validates
+// shape only.
+func parseCorrectionTarget(v string) (CorrectionTarget, error) {
+	if v == "*" {
+		return CorrectionTarget{All: true, Raw: v}, nil
+	}
+	sha, sel := v, ""
+	if i := strings.IndexByte(v, '#'); i >= 0 {
+		sha, sel = v[:i], v[i+1:]
+	}
+	if sha == "*" {
+		return CorrectionTarget{}, errCorrectionWildcardSel
+	}
+	if !isCommitSHA(sha) {
+		return CorrectionTarget{}, errCorrectionNotSHA
+	}
+	t := CorrectionTarget{SHA: sha, Raw: v}
+	if sel == "" {
+		if strings.IndexByte(v, '#') >= 0 {
+			return CorrectionTarget{}, errCorrectionSelector // "sha#"
+		}
+		return t, nil
+	}
+	if sel[0] == '0' {
+		return CorrectionTarget{}, errCorrectionSelector
+	}
+	n := 0
+	for i := 0; i < len(sel); i++ {
+		if !isDigit(sel[i]) {
+			return CorrectionTarget{}, errCorrectionSelector
+		}
+		n = n*10 + int(sel[i]-'0')
+		if n > limitUnitSelector {
+			return CorrectionTarget{}, errCorrectionSelector
+		}
+	}
+	t.UnitSelector = n
+	return t, nil
+}
+
+// limitUnitSelector bounds a correction's unit selector. No commit has more
+// units than limits.unitsPerMessage permits, and that limit is configurable
+// only upward within reason; a selector past this bound is a typo, not a unit.
+const limitUnitSelector = 1 << 20
 
 // parseReleaseAs parses a Release-As value: an exact semver, a hold, or a
 // resume (§8.6). All three are package-level; there is no bump form.

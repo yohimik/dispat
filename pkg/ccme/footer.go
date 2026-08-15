@@ -17,6 +17,11 @@ const (
 	FooterChannel               = "Channel"
 	FooterReleaseAs             = "Release-As"
 	FooterReverts               = "Reverts"
+	// FooterEdits and FooterDeletes are the correction footers of §7.4: an
+	// ordinary unit carrying one restates or discards the pending records it
+	// names.
+	FooterEdits   = "Edits"
+	FooterDeletes = "Deletes"
 )
 
 // footerBreakingHyphen is the hyphenated alias of BREAKING CHANGE, accepted by
@@ -27,9 +32,9 @@ const footerBreakingHyphen = "BREAKING-CHANGE"
 // Every key here is matched case-insensitively but not hyphen-insensitively:
 // "propagate-depth" matches, "PropagateDepth" does not.
 //
-// It is a slice rather than a map because it has nine entries and lookups
-// must be case-insensitive: an ASCII fold-compare over nine short strings is
-// faster than lowercasing the key, and unlike a map lookup it allocates
+// It is a slice rather than a map because it has eleven entries and lookups
+// must be case-insensitive: an ASCII fold-compare over eleven short strings
+// is faster than lowercasing the key, and unlike a map lookup it allocates
 // nothing.
 var footerRegistry = [...]struct{ key, canonical string }{
 	{"Propagate", FooterPropagate},
@@ -41,6 +46,8 @@ var footerRegistry = [...]struct{ key, canonical string }{
 	{"Channel", FooterChannel},
 	{"Release-As", FooterReleaseAs},
 	{"Reverts", FooterReverts},
+	{"Edits", FooterEdits},
+	{"Deletes", FooterDeletes},
 }
 
 // keyResolution is what lookupFooterKey reports about a written footer key.
