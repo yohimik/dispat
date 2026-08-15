@@ -120,7 +120,7 @@ dispat stands on the shoulders of two things:
 ## Where to go
 
 - **[dispat](./services/dispat)**: the CLI itself. A terminal tour, the key features and the full documentation
-  (getting started, a cookbook of real setups, concepts, CLI, configuration, commit messages, script environment,
+  (getting started, an example per package manager, concepts, CLI, configuration, commit messages, script environment,
   architecture, coverage).
 - **[ccme](./pkg/ccme)**: dispat's Conventional Commits extension as a standalone Go parser, with the vendored
   specification, the two-axis propagation grammar, performance notes and fuzzing.
