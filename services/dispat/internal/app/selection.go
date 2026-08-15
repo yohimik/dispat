@@ -201,6 +201,23 @@ func withConsumers(pl *plan.Plan, selected []string) []string {
 	return out
 }
 
+// ChangedSelection answers `if --changed`: the packages the window covers,
+// under exactly the rule every sweeping command selects by — the release
+// window, or what --since addresses, narrowed by the filter and expanded by
+// --consumers. The condition is then simply "is that selection non-empty",
+// so a gate and the run it guards can never disagree about what changed.
+//
+// The plan is the quiet step-command plan: diagnostics logged, no graph,
+// a fatal plan refused — a gate may run many times in one pipeline, and it
+// asks a question rather than printing a report.
+func (a *App) ChangedSelection(ctx context.Context, opts WindowOptions) ([]string, error) {
+	pl, err := a.stepPlan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.coveredPackages(ctx, pl, opts)
+}
+
 // sincePackages resolves --since onto package names: every package for
 // SinceAll, otherwise the packages the commits in rev..HEAD address under the
 // planner's own scope semantics — a written scope-set is authoritative, and
