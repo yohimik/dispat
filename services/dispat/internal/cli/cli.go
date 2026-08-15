@@ -360,9 +360,10 @@ func manifestScopeHint(allowNone bool) string {
 // `dispat writer` and `dispat autowriter` spell the same way and differ over
 // only in which files they apply it to.
 type writeRequest struct {
-	version string
-	edits   []writer.Edit
-	links   []writer.Link
+	version   string
+	edits     []writer.Edit
+	links     []writer.Link
+	dropLinks bool
 }
 
 // parseWriteRequest reads the three flags into one request. A malformed spec
@@ -379,12 +380,13 @@ func parseWriteRequest(cmd string, o *options, usage func(string), log zerolog.L
 		return writeRequest{}, false
 	}
 	derived := cmd == cmdAutowriter && (*o.wrSetLocal || *o.wrLinkLocal || *o.wrUnlinkLocal)
-	if *o.wrSetVersion == "" && len(edits) == 0 && len(links) == 0 && !derived {
+	drop := cmd == cmdWriter && *o.wrDropLinks
+	if *o.wrSetVersion == "" && len(edits) == 0 && len(links) == 0 && !derived && !drop {
 		log.Error().Msgf("%s needs something to write: --set-version, --set or --link", cmd)
 		usage(cmd)
 		return writeRequest{}, false
 	}
-	return writeRequest{version: *o.wrSetVersion, edits: edits, links: links}, true
+	return writeRequest{version: *o.wrSetVersion, edits: edits, links: links, dropLinks: drop}, true
 }
 
 // orDefault answers with fallback when the flag was left at its empty

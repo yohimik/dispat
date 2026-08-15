@@ -23,6 +23,8 @@ import (
 
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
+
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
 // ScanOptions is one `dispat scanner` invocation.
@@ -45,6 +47,24 @@ type ScanOptions struct {
 	Log zerolog.Logger
 	// Scanner reads the manifests; nil means the filesystem scanner.
 	Scanner scanner.Scanner
+	// Writer enumerates link directives for the verify gates; nil means the
+	// filesystem writer.
+	Writer writer.Writer
+	// VerifyUnlinked fails the command when any scanned manifest still
+	// carries a local-link directive: exactly what --link-local can inject,
+	// nothing wider.
+	VerifyUnlinked bool
+	// VerifyLinked fails the command when no scanned manifest carries one,
+	// which is how a pipeline proves its link step actually landed. It is
+	// asked of the selection as a whole: a single manifest with no workspace
+	// dependencies legitimately carries no directive.
+	VerifyLinked bool
+	// ForbidRanges fails the command for every declared dependency range
+	// matching one of these patterns (literal text, * as a wildcard).
+	ForbidRanges []string
+	// RequireRanges fails the command for every pattern here that no
+	// declared dependency range matches. Each pattern is asked on its own.
+	RequireRanges []string
 }
 
 // WriteOptions is one `dispat writer` invocation.
@@ -60,6 +80,9 @@ type WriteOptions struct {
 	// Links point dependencies at local folders, or remove the redirect when
 	// their Path is empty.
 	Links []writer.Link
+	// DropLinks removes every local-link directive each manifest carries,
+	// without being told the dependencies' names.
+	DropLinks bool
 	// Strict turns an edit the manifest does not declare into a failed
 	// command. Skipped edits never do: they are the normal state of a
 	// healthy manifest.
@@ -189,12 +212,89 @@ func ScanManifests(ctx context.Context, opts ScanOptions) error {
 		fmt.Fprintf(out, "%d manifest(s), %d dependency declaration(s)\n", len(mans), deps)
 	}
 
+	gateErr := verifyScan(opts, dir, mans)
 	if opts.Strict && len(failed) > 0 {
 		err := fmt.Errorf("%d manifest(s) failed to parse", len(failed))
 		opts.Log.Error().Err(err).Msg("scan is not clean")
-		return err
+		return errors.Join(err, gateErr)
 	}
-	return nil
+	return gateErr
+}
+
+// verifyScan runs the scanner command's gates over what the scan found. Each
+// finding is its own error event carrying a diagnostic code, so a pipeline
+// asserts on the code and a reader sees every offender rather than only the
+// count that failed the run.
+func verifyScan(opts ScanOptions, dir string, mans []scanner.Manifest) error {
+	var errs []error
+	if opts.VerifyUnlinked || opts.VerifyLinked {
+		w := opts.Writer
+		if w == nil {
+			w = writer.New()
+		}
+		present := 0
+		for _, m := range mans {
+			if !writer.SupportsLink(m.Path) {
+				continue
+			}
+			links, err := w.Links(filepath.Join(dir, filepath.FromSlash(m.Path)))
+			if err != nil {
+				opts.Log.Error().Err(err).Str("manifest", m.Path).Msg("cannot read the link directives")
+				errs = append(errs, err)
+				continue
+			}
+			present += len(links)
+			if !opts.VerifyUnlinked {
+				continue
+			}
+			for _, l := range links {
+				opts.Log.Error().Str("code", plan.CodeLinkPresent).
+					Str("manifest", m.Path).Str("dependency", l.Name).Str("path", l.Path).
+					Msg("local link present")
+			}
+		}
+		if opts.VerifyUnlinked && present > 0 {
+			errs = append(errs, fmt.Errorf("%d local link(s) present", present))
+		}
+		if opts.VerifyLinked && present == 0 {
+			opts.Log.Error().Str("code", plan.CodeLinkAbsent).Msg("no local link present")
+			errs = append(errs, errors.New("no local link present"))
+		}
+	}
+	for _, pattern := range opts.ForbidRanges {
+		matched := 0
+		for _, m := range mans {
+			for _, d := range m.Deps {
+				if !plan.GlobMatch(pattern, d.Range) {
+					continue
+				}
+				matched++
+				opts.Log.Error().Str("code", plan.CodeRangeForbidden).
+					Str("manifest", m.Path).Str("dependency", d.Name).
+					Str("range", d.Range).Str("pattern", pattern).
+					Msg("forbidden range")
+			}
+		}
+		if matched > 0 {
+			errs = append(errs, fmt.Errorf("%d range(s) match %q", matched, pattern))
+		}
+	}
+	for _, pattern := range opts.RequireRanges {
+		found := false
+		for _, m := range mans {
+			for _, d := range m.Deps {
+				if plan.GlobMatch(pattern, d.Range) {
+					found = true
+				}
+			}
+		}
+		if !found {
+			opts.Log.Error().Str("code", plan.CodeRangeMissing).Str("pattern", pattern).
+				Msg("required range missing")
+			errs = append(errs, fmt.Errorf("no declared range matches %q", pattern))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // printManifest writes one manifest's listing entry: a title line, then one
@@ -271,7 +371,10 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 		applied, skipped, missing int
 	)
 	out := listing(opts.Out)
-	edit := manifestEdit{Version: opts.Version, Edits: opts.Edits, Links: opts.Links, Writer: opts.Writer}
+	edit := manifestEdit{
+		Version: opts.Version, Edits: opts.Edits, Links: opts.Links,
+		DropLinks: opts.DropLinks, Writer: opts.Writer,
+	}
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -327,6 +430,8 @@ type manifestEdit struct {
 	// Links point dependencies at local folders, or remove the redirect
 	// when their Path is empty.
 	Links []writer.Link
+	// DropLinks removes every local-link directive the manifest carries.
+	DropLinks bool
 	// Writer applies the edits; nil means the filesystem writer.
 	Writer writer.Writer
 }
@@ -334,7 +439,7 @@ type manifestEdit struct {
 // empty reports an edit set with nothing in it, which is what makes a manifest
 // not worth opening at all.
 func (e manifestEdit) empty() bool {
-	return e.Version == "" && len(e.Edits) == 0 && len(e.Links) == 0
+	return e.Version == "" && len(e.Edits) == 0 && len(e.Links) == 0 && !e.DropLinks
 }
 
 // apply writes one manifest's share of the invocation. The rewrite runs before
@@ -360,6 +465,16 @@ func (e manifestEdit) apply(path string) (writer.Result, writer.LinkResult, erro
 		if linkRes, err = w.Relink(path, e.Links); err != nil {
 			return res, linkRes, err
 		}
+	}
+	if e.DropLinks {
+		dropped, err := w.DropLinks(path)
+		if err != nil {
+			return res, linkRes, err
+		}
+		linkRes.Path = dropped.Path
+		linkRes.Applied = append(linkRes.Applied, dropped.Applied...)
+		linkRes.Missing = append(linkRes.Missing, dropped.Missing...)
+		linkRes.Skipped = append(linkRes.Skipped, dropped.Skipped...)
 	}
 	return res, linkRes, nil
 }

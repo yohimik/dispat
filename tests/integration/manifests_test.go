@@ -409,3 +409,117 @@ func TestManifestsReplacerWordKeepsItsScript(t *testing.T) {
 	require.Equal(t, 0, script.Code, "stderr:\n%s", script.Stderr)
 	assert.Contains(t, script.Stdout, "the script ran", "the two-word spelling still reaches the script")
 }
+
+// TestManifestsScannerVerifyGates: the two link gates, each a separate flag in
+// one direction. A clean tree passes --verify-unlinked and fails
+// --verify-linked; a tree carrying a go.mod replace (block form, which a
+// line-based grep would miss) does the opposite. A dependency declared with a
+// file: range is a declaration rather than an injected directive, so the gate
+// leaves it alone. Asking for both gates at once is a usage error.
+func TestManifestsScannerVerifyGates(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("packages/web/package.json", webPackageJSON)
+	r.WriteFile("go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n")
+
+	clean := r.Command("scanner", "--log-format", "json", "--verify-unlinked")
+	assert.Equal(t, 0, clean.Code, "stderr:\n%s", clean.Stderr)
+
+	linked := r.Command("scanner", "--log-format", "json", "--verify-linked")
+	assert.Equal(t, 1, linked.Code, "a clean tree fails the inverse gate")
+	absent := findEvent(t, linked.Events, "no local link present")
+	assert.Equal(t, "E216", absent.Code())
+
+	r.WriteFile("go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n\nreplace (\n\texample.com/dep => ../dep\n)\n")
+	dirty := r.Command("scanner", "--log-format", "json", "--verify-unlinked")
+	assert.Equal(t, 1, dirty.Code, "a surviving link fails the gate")
+	present := findEvent(t, dirty.Events, "local link present")
+	assert.Equal(t, "E215", present.Code())
+	assert.Equal(t, "go.mod", present.Str("manifest"))
+	assert.Equal(t, "example.com/dep", present.Str("dependency"))
+	assert.Equal(t, "../dep", present.Str("path"))
+	assert.Equal(t, 0, r.Command("scanner", "--log-format", "json", "--verify-linked").Code,
+		"the same tree passes the inverse gate")
+
+	assert.Equal(t, 2, r.Command("scanner", "--verify-unlinked", "--verify-linked").Code,
+		"the two gates assert opposite states and cannot be asked together")
+}
+
+// TestManifestsWriterDropLinks: --drop-links sweeps every directive out of the
+// named manifests without being told the names, across formats, and the
+// verify gate confirms the result.
+func TestManifestsWriterDropLinks(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n\nreplace example.com/dep => ../dep\n")
+	r.WriteFile("Cargo.toml", "[package]\nname = \"acme\"\n\n[dependencies]\ncore = \"1.0\"\n\n[patch.crates-io]\ncore = { path = \"../core\" }\n")
+	r.WriteFile("pubspec.yaml", "name: acme\ndependencies:\n  core: ^1.0.0\n\ndependency_overrides:\n  core:\n    path: ../core\n")
+
+	res := r.Command("writer", "--log-format", "json", "--drop-links",
+		"go.mod", "Cargo.toml", "pubspec.yaml")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	summary := findEvent(t, res.Events, "write complete")
+	assert.Equal(t, float64(3), summary["applied"], "one drop per manifest: %v", summary)
+
+	verify := r.Command("scanner", "--verify-unlinked")
+	assert.Equal(t, 0, verify.Code, "after the sweep the gate passes")
+
+	again := r.Command("writer", "--drop-links", "go.mod", "Cargo.toml", "pubspec.yaml")
+	assert.Equal(t, 0, again.Code, "a second sweep has nothing to do and says so quietly")
+
+	assert.Equal(t, 2, r.Command("writer", "--drop-links", "--link", "core=../core", "go.mod").Code,
+		"placing and sweeping redirects in one invocation is a usage error")
+}
+
+// TestManifestsWriterLinkDropVerifyCycle: the whole bracket through the
+// commands alone. A link is placed, --verify-linked proves it landed, the
+// sweep removes it, --verify-unlinked proves it is gone.
+func TestManifestsWriterLinkDropVerifyCycle(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n")
+
+	require.Equal(t, 0, r.Command("writer", "--link", "example.com/dep=../dep", "go.mod").Code)
+	assert.Equal(t, 0, r.Command("scanner", "--verify-linked").Code, "the link landed")
+	require.Equal(t, 0, r.Command("writer", "--drop-links", "go.mod").Code)
+	assert.Equal(t, 0, r.Command("scanner", "--verify-unlinked").Code, "the link is gone")
+}
+
+// TestManifestsScannerRangeGates: the range gates are independent of the link
+// gates and of each other. --forbid-range fails for every matching declared
+// range; --require-range fails when nothing matches; the same pattern in both
+// is a usage error; a tree carrying links but no forbidden ranges passes the
+// range gate while failing the link gate.
+func TestManifestsScannerRangeGates(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("packages/web/package.json", `{
+  "name": "@acme/web",
+  "version": "1.0.0",
+  "dependencies": { "@acme/core": "workspace:*", "left-pad": "^1.0.0" }
+}
+`)
+
+	forbid := r.Command("scanner", "--log-format", "json", "--forbid-range", "workspace:*")
+	assert.Equal(t, 1, forbid.Code, "a workspace range on the way out fails the gate")
+	hit := findEvent(t, forbid.Events, "forbidden range")
+	assert.Equal(t, "E217", hit.Code())
+	assert.Equal(t, "@acme/core", hit.Str("dependency"))
+	assert.Equal(t, "workspace:*", hit.Str("pattern"))
+
+	assert.Equal(t, 0, r.Command("scanner", "--require-range", "workspace:*").Code,
+		"the same tree is exactly what the dev-state gate wants")
+
+	require.Equal(t, 0, r.Command("writer", "--set", "@acme/core=^1.1.0", "packages/web/package.json").Code)
+	assert.Equal(t, 0, r.Command("scanner", "--forbid-range", "workspace:*").Code,
+		"after the rewrite the forbid gate passes")
+	missing := r.Command("scanner", "--log-format", "json", "--require-range", "workspace:*")
+	assert.Equal(t, 1, missing.Code)
+	gone := findEvent(t, missing.Events, "required range missing")
+	assert.Equal(t, "E218", gone.Code())
+
+	// Links and ranges are unrelated checks: a linked go.mod fails the link
+	// gate while both range gates keep their own answers.
+	r.WriteFile("go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n\nreplace example.com/dep => ../dep\n")
+	assert.Equal(t, 0, r.Command("scanner", "--forbid-range", "workspace:*").Code)
+	assert.Equal(t, 1, r.Command("scanner", "--verify-unlinked").Code)
+
+	assert.Equal(t, 2, r.Command("scanner", "--forbid-range", "workspace:*", "--require-range", "workspace:*").Code,
+		"one pattern cannot be forbidden and required at once")
+}

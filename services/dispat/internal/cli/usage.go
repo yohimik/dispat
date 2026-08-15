@@ -357,8 +357,19 @@ returns. Needs no config file and no git repository.`,
 		short: "print what a folder's manifests declare",
 		long: `Print what the folder's manifests declare: its identity, its ecosystem
 and every dependency with its declared range. Without a folder, --root is
-scanned. Needs no config file and no git repository.`,
-		flags: []string{"root-only", "strict"},
+scanned. Needs no config file and no git repository.
+
+Four gates turn the scan into a CI check, each failing with exit 1 and one
+error event per finding. --verify-unlinked fails when any manifest still
+carries a local-link directive, exactly what --link-local can inject;
+--verify-linked is its inverse, failing when no manifest carries one.
+--forbid-range fails for every declared range matching its pattern
+(--forbid-range 'workspace:*' before publishing); --require-range fails
+when nothing matches. The link gates and the range gates are unrelated
+checks and combine freely, except that one flag and its inverse cannot be
+asked together.`,
+		flags: []string{"root-only", "verify-unlinked", "verify-linked",
+			"forbid-range", "require-range", "strict"},
 	},
 	{
 		name:  cmdWriter,
@@ -366,9 +377,10 @@ scanned. Needs no config file and no git repository.`,
 		short: "edit manifests in place, preserving their formatting",
 		long: `Edit the named manifests in place, preserving their formatting:
 --set-version rewrites the manifest's own version, --set sets a
-dependency's declared range, --link points one at a local folder.
-Needs no config file and no git repository.`,
-		flags: []string{"set-version", "set", "link", "strict"},
+dependency's declared range, --link points one at a local folder, and
+--drop-links removes every local-link directive a manifest carries
+without being told the names. Needs no config file and no git repository.`,
+		flags: []string{"set-version", "set", "link", "drop-links", "strict"},
 	},
 	{
 		name:  cmdReplacer,

@@ -116,6 +116,31 @@ func (r *runner) validateFlags() (int, bool) {
 		r.usage(cmd)
 		return 2, true
 	}
+	if cmd == cmdScanner {
+		if *r.o.scVerifyUnlinked && *r.o.scVerifyLinked {
+			// The gates assert opposite states of the same tree; both at once
+			// can never pass.
+			r.boot.Error().Msg("--verify-unlinked and --verify-linked ask for opposite things; pick one")
+			r.usage(cmd)
+			return 2, true
+		}
+		for _, forbid := range *r.o.scForbidRange {
+			for _, require := range *r.o.scRequireRange {
+				if forbid == require {
+					r.boot.Error().Str("pattern", forbid).
+						Msg("the same pattern cannot be forbidden and required at once")
+					r.usage(cmd)
+					return 2, true
+				}
+			}
+		}
+	}
+	if cmd == cmdWriter && *r.o.wrDropLinks && len(*r.o.wrLink) > 0 {
+		// One invocation cannot both place redirects and sweep them all away.
+		r.boot.Error().Msg("--drop-links and --link ask for opposite things; pick one")
+		r.usage(cmd)
+		return 2, true
+	}
 	if cmd == cmdSelfUpdate && *r.o.suRollback {
 		// A rollback downloads nothing, so every flag that chooses something
 		// to download contradicts it.
@@ -312,6 +337,8 @@ func (r *runner) runManifests() int {
 	case cmdScanner:
 		if app.ScanManifests(ctx, app.ScanOptions{
 			Root: *r.o.root, Dir: r.inv.dir, RootOnly: *r.o.scanRootOnly, Strict: *r.o.strict,
+			VerifyUnlinked: *r.o.scVerifyUnlinked, VerifyLinked: *r.o.scVerifyLinked,
+			ForbidRanges: *r.o.scForbidRange, RequireRanges: *r.o.scRequireRange,
 			JSON: *r.o.logFormat == "json", Out: r.stdout, Log: log,
 		}) != nil {
 			return 1
@@ -336,8 +363,9 @@ func (r *runner) runManifests() int {
 	default:
 		if app.WriteManifests(ctx, app.WriteOptions{
 			Root: *r.o.root, Paths: r.inv.paths, Version: r.write.version,
-			Edits: r.write.edits, Links: r.write.links, Strict: *r.o.strict,
-			JSON: *r.o.logFormat == "json", Out: r.stdout, Log: log,
+			Edits: r.write.edits, Links: r.write.links, DropLinks: r.write.dropLinks,
+			Strict: *r.o.strict,
+			JSON:   *r.o.logFormat == "json", Out: r.stdout, Log: log,
 		}) != nil {
 			return 1
 		}

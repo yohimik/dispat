@@ -73,9 +73,12 @@ type options struct {
 
 	// scanner, writer, replacer
 	scanRootOnly                           *bool
+	scVerifyUnlinked, scVerifyLinked       *bool
+	scForbidRange, scRequireRange          *[]string
 	wrSetVersion                           *string
 	wrSet, wrLink                          *[]string
 	wrSetLocal, wrLinkLocal, wrUnlinkLocal *bool
+	wrDropLinks                            *bool
 	rpReplace                              *[]string
 	rpFiles                                *[]string
 	strict                                 *bool
@@ -197,6 +200,14 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"run the script in this folder: a path, or pkg:<name>, space:<name>, root or cwd; without it the script runs where the invocation stands (a folder actually called root or cwd is written ./root)")
 	o.scanRootOnly = fs.Bool("root-only", false,
 		"read only the manifests sitting directly in the folder, without descending")
+	o.scVerifyUnlinked = fs.Bool("verify-unlinked", false,
+		"scanner: fail when any manifest still carries a local-link directive, exactly what --link-local can inject (a go.mod replace, a Cargo patch, a uv source, a pubspec override, an npm file: override)")
+	o.scVerifyLinked = fs.Bool("verify-linked", false,
+		"scanner: fail when no manifest in the selection carries a local-link directive, proving a link step actually landed")
+	o.scForbidRange = fs.StringArray("forbid-range", nil,
+		"scanner: fail for every declared dependency range matching this pattern, literal text with * as a wildcard (repeatable)")
+	o.scRequireRange = fs.StringArray("require-range", nil,
+		"scanner: fail when no declared dependency range matches this pattern; each pattern is asked on its own (repeatable)")
 	o.wrSetVersion = fs.String("set-version", "",
 		"rewrite each manifest's own version field to this version")
 	o.wrSet = fs.StringArray("set", nil,
@@ -209,6 +220,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"point every declared workspace dependency at the provider's folder; remove them again with --unlink-local before publishing")
 	o.wrUnlinkLocal = fs.Bool("unlink-local", false,
 		"remove the local folder redirect from every declared workspace dependency")
+	o.wrDropLinks = fs.Bool("drop-links", false,
+		"writer: remove every local-link directive the named manifests carry, no names needed")
 	o.rpReplace = fs.StringArray("replace", nil,
 		"replace literal text in the named files, find=>write (repeatable, applied in order)")
 	o.rpFiles = fs.StringArray("files", nil,

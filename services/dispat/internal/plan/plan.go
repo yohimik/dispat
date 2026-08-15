@@ -295,6 +295,30 @@ const (
 	// remote, and a later push sends it.
 	CodePushFailed = "E214"
 
+	// --- the manifest-command gates ---
+	//
+	// E215 onward: `dispat scanner`'s verification gates. They continue the
+	// range above because they are dispat's own codes too, but they behave
+	// differently: a gate exists to stop a pipeline, so each of these fails
+	// its command outright.
+
+	// CodeLinkPresent marks a local-link directive --verify-unlinked found
+	// still in place: a go.mod filesystem replace, a Cargo [patch.crates-io]
+	// or uv [tool.uv.sources] path entry, a pubspec dependency_overrides path
+	// or an npm file:/link: override. Exactly the directives --link-local can
+	// inject, which is the gate's whole scope.
+	CodeLinkPresent = "E215"
+	// CodeLinkAbsent marks a selection --verify-linked found no directive in:
+	// the link step this gate proves ran either did not run or wrote nothing.
+	CodeLinkAbsent = "E216"
+	// CodeRangeForbidden marks a declared dependency range --forbid-range
+	// matched, `workspace:*` on the way to a registry being the canonical
+	// case.
+	CodeRangeForbidden = "E217"
+	// CodeRangeMissing marks a --require-range pattern no declared dependency
+	// range matched: the tree was supposed to be in a state it is not in.
+	CodeRangeMissing = "E218"
+
 	// --- release outcomes, repository-scoped (§16) ---
 
 	// CodeBadPrereleaseTag rejects an existing prerelease tag whose counter is

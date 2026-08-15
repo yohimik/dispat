@@ -490,6 +490,7 @@ ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserve
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
 | `E210`-`E214`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
+| `E215`-`E218`          | The [scanner command's gates](../cookbook/editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 
 All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features
 are. `W192`, `W197` and `W203`, the auto-versioning narrations, are the specification's own §9.4/§12.4 codes.

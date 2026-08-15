@@ -150,6 +150,56 @@ services/api/go.mod
 Only formats with a redirect of their own can do this: `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml` and
 `pubspec.yaml`. On any other manifest the request is reported as skipped and the file is left alone.
 
+### Sweeping every redirect away
+
+`--drop-links` removes every local-link directive the named manifests carry, and you do not have to know the
+dependencies' names to ask for it. That is its point: the step that has to clean up after a build does not always know
+what the build linked.
+
+```console
+$ dispat writer go.mod Cargo.toml --drop-links
+go.mod
+  applied  replace  github.com/acme/core  (removed)
+Cargo.toml
+  applied  patch  core  (removed)
+```
+
+A manifest carrying no directive is left alone and the command still succeeds, so the sweep is safe to run
+unconditionally. `--link` and `--drop-links` ask for opposite things and cannot share an invocation.
+
+### Verifying the tree
+
+Four scanner flags turn the same scan into a CI gate. Each failure is reported as one error event per finding, with a
+diagnostic code a pipeline can assert on, and the command exits `1`.
+
+`--verify-unlinked` fails when any manifest still carries a local-link directive (code `E215`). Its scope is exactly
+what `--link-local` can inject: a `go.mod` filesystem `replace` in any spelling, including the parenthesised block a
+line-based grep misses, a Cargo `[patch.crates-io]` or uv `[tool.uv.sources]` path entry, a pubspec
+`dependency_overrides` path, and an npm `file:` or `link:` override. A dependency *declared* with a local path is not
+a link and does not trip the gate; declarations are the manifest's own business.
+
+`--verify-linked` is the same gate pointed the other way: it fails when no manifest in the selection carries a
+directive (code `E216`). After a link step, it proves the step actually landed. The question is asked of the selection
+as a whole, because a single manifest with no workspace dependencies legitimately carries nothing.
+
+```console
+$ dispat writer go.mod --drop-links && dispat scanner --verify-unlinked
+```
+
+`--forbid-range` and `--require-range` gate declared dependency ranges instead, and have nothing to do with links.
+Both take a literal pattern with `*` as a wildcard and repeat freely. Forbid fails for every declared range that
+matches (code `E217`); require fails when nothing matches its pattern (code `E218`). The canonical use is a pnpm
+workspace: `--forbid-range 'workspace:*'` proves no placeholder range is about to reach a registry, and
+`--require-range 'workspace:*'` proves a checkout is back in its development state.
+
+```console
+$ dispat scanner packages --forbid-range 'workspace:*'
+ERR forbidden range  manifest=web/package.json dependency=@acme/core range=workspace:* code=E217
+```
+
+The link gates and the range gates answer unrelated questions, so they combine freely; only a gate and its own
+inverse cannot be asked together.
+
 ### Applied, skipped and missing
 
 Each edit ends in exactly one of three states, and telling them apart is the whole point of the report.
@@ -280,5 +330,6 @@ the folder name really do differ.
 ## Exit codes
 
 `0` when everything asked for was done. `1` for a folder that cannot be read, a manifest no writer covers, a failed
-write, or a `--strict` run with a parse failure or a missing edit. `2` for a command line that does not make sense: no
-manifest named, nothing to write, or a malformed `--set`.
+write, a verify or range gate that found something, or a `--strict` run with a parse failure or a missing edit. `2`
+for a command line that does not make sense: no manifest named, nothing to write, a malformed `--set`, or a gate asked
+together with its own inverse.
