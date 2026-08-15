@@ -72,34 +72,71 @@ type DeclaredDep struct {
 	LocalPath string
 }
 
+// Ecosystem names the package manager or platform family a manifest belongs
+// to. Several formats can share one: every NuGet list is "nuget", and a
+// Podfile and a podspec are both "cocoapods".
+type Ecosystem string
+
 // Ecosystems the built-in parsers recognise. The names are spelled after the
 // manifest format rather than the platform that ships it: Info.plist is Apple
 // bundle metadata on macOS and tvOS as much as on iOS, and a Gradle build
 // script is not exclusively Android.
 const (
-	EcosystemNpm       = "npm"       // package.json
-	EcosystemGoMod     = "gomod"     // go.mod
-	EcosystemCargo     = "cargo"     // Cargo.toml
-	EcosystemPython    = "python"    // pyproject.toml (PEP 621 and Poetry)
-	EcosystemComposer  = "composer"  // composer.json
-	EcosystemMaven     = "maven"     // pom.xml
-	EcosystemNuGet     = "nuget"     // *.csproj, *.nuspec, packages.config
-	EcosystemPub       = "pub"       // pubspec.yaml
-	EcosystemPlist     = "plist"     // Info.plist
-	EcosystemCocoaPods = "cocoapods" // Podfile, *.podspec
-	EcosystemXcode     = "xcode"     // project.pbxproj
-	EcosystemAndroid   = "android"   // AndroidManifest.xml
-	EcosystemGradle    = "gradle"    // libs.versions.toml, build.gradle(.kts)
-	EcosystemRubyGems  = "rubygems"  // Gemfile, *.gemspec
-	EcosystemDocker    = "docker"    // Dockerfile, compose.yaml
+	EcosystemNpm       Ecosystem = "npm"       // package.json
+	EcosystemGoMod     Ecosystem = "gomod"     // go.mod
+	EcosystemCargo     Ecosystem = "cargo"     // Cargo.toml
+	EcosystemPython    Ecosystem = "python"    // pyproject.toml (PEP 621 and Poetry)
+	EcosystemComposer  Ecosystem = "composer"  // composer.json
+	EcosystemMaven     Ecosystem = "maven"     // pom.xml
+	EcosystemNuGet     Ecosystem = "nuget"     // *.csproj, *.nuspec, packages.config
+	EcosystemPub       Ecosystem = "pub"       // pubspec.yaml
+	EcosystemPlist     Ecosystem = "plist"     // Info.plist
+	EcosystemCocoaPods Ecosystem = "cocoapods" // Podfile, *.podspec
+	EcosystemXcode     Ecosystem = "xcode"     // project.pbxproj
+	EcosystemAndroid   Ecosystem = "android"   // AndroidManifest.xml
+	EcosystemGradle    Ecosystem = "gradle"    // libs.versions.toml, build.gradle(.kts)
+	EcosystemRubyGems  Ecosystem = "rubygems"  // Gemfile, *.gemspec
+	EcosystemDocker    Ecosystem = "docker"    // Dockerfile, compose.yaml
 )
+
+// ecosystems maps each format onto the ecosystem its manifests report. It is
+// the explicit spelling of what every parser sets, and the fence test walks it
+// against manifest.Formats so a format can never arrive without one.
+var ecosystems = map[manifest.Format]Ecosystem{
+	manifest.FormatNpm:             EcosystemNpm,
+	manifest.FormatGoMod:           EcosystemGoMod,
+	manifest.FormatCargo:           EcosystemCargo,
+	manifest.FormatPyProject:       EcosystemPython,
+	manifest.FormatRequirements:    EcosystemPython,
+	manifest.FormatComposer:        EcosystemComposer,
+	manifest.FormatMaven:           EcosystemMaven,
+	manifest.FormatMSBuildProject:  EcosystemNuGet,
+	manifest.FormatNuSpec:          EcosystemNuGet,
+	manifest.FormatPackagesProps:   EcosystemNuGet,
+	manifest.FormatPackagesConfig:  EcosystemNuGet,
+	manifest.FormatPubspec:         EcosystemPub,
+	manifest.FormatPlist:           EcosystemPlist,
+	manifest.FormatAndroidManifest: EcosystemAndroid,
+	manifest.FormatGradleCatalog:   EcosystemGradle,
+	manifest.FormatGradleBuild:     EcosystemGradle,
+	manifest.FormatXcodeProject:    EcosystemXcode,
+	manifest.FormatPodfile:         EcosystemCocoaPods,
+	manifest.FormatPodspec:         EcosystemCocoaPods,
+	manifest.FormatGemfile:         EcosystemRubyGems,
+	manifest.FormatGemspec:         EcosystemRubyGems,
+	manifest.FormatDockerfile:      EcosystemDocker,
+	manifest.FormatCompose:         EcosystemDocker,
+}
+
+// EcosystemOf reports the ecosystem a format's manifests belong to.
+func EcosystemOf(f manifest.Format) Ecosystem { return ecosystems[f] }
 
 // Manifest is one parsed manifest file.
 type Manifest struct {
 	// Path of the manifest file relative to the scanned folder, using slashes.
 	Path string
 	// Ecosystem the manifest belongs to: one of the Ecosystem* constants.
-	Ecosystem string
+	Ecosystem Ecosystem
 	// Name is the package's declared name; empty when the ecosystem has no
 	// name field or the manifest omits it.
 	Name string

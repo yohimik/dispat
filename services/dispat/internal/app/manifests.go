@@ -211,7 +211,7 @@ func printManifest(out io.Writer, m scanner.Manifest) {
 // manifestTitle is a manifest's one-line identity: where it is, what it is,
 // and what it calls itself.
 func manifestTitle(m scanner.Manifest) string {
-	title := m.Path + "  " + m.Ecosystem
+	title := m.Path + "  " + string(m.Ecosystem)
 	switch {
 	case m.Name != "" && m.Version != "":
 		title += "  " + m.Name + "@" + m.Version
@@ -236,7 +236,7 @@ func logManifest(log zerolog.Logger, m scanner.Manifest) {
 	}
 	ev := log.Info().
 		Str("path", m.Path).
-		Str("ecosystem", m.Ecosystem).
+		Str("ecosystem", string(m.Ecosystem)).
 		Bool("root", m.Root)
 	if m.Name != "" {
 		ev = ev.Str("name", m.Name)

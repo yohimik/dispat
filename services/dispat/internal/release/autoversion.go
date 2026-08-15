@@ -329,7 +329,7 @@ func lastNameSegment(name string) string {
 // caret/tilde so the keywords all pin (==X.Y.Z), and a Docker tag is a plain
 // label with no range syntax at all, so the keywords all write the bare
 // version; a {version} template or a verbatim literal always passes through.
-func RangeText(policy, version, ecosystem string) string {
+func RangeText(policy, version string, ecosystem scanner.Ecosystem) string {
 	switch ecosystem {
 	case scanner.EcosystemGoMod:
 		return "v" + version

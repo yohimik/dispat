@@ -473,3 +473,19 @@ func TestEveryFormatHasAParser(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryFormatHasAnEcosystem(t *testing.T) {
+	// The ecosystems map is the explicit spelling of what every parser sets;
+	// a format arriving without one would report an empty ecosystem to every
+	// consumer switching on the name.
+	for _, f := range manifest.Formats {
+		if eco, ok := ecosystems[f]; !ok || eco == "" {
+			t.Errorf("format %q has no ecosystem", f)
+		}
+	}
+	for f := range ecosystems {
+		if !slices.Contains(manifest.Formats, f) {
+			t.Errorf("ecosystem mapped for %q, which pkg/manifest does not list", f)
+		}
+	}
+}
