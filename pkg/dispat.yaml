@@ -14,12 +14,12 @@ scripts:
   # all`), so each Go space defines what vetting means for its modules and the
   # workflow never has to enumerate them.
   vet: go vet ./...
-  # Through go-test.sh so the run leaves a machine-readable log beside its
-  # coverage profile: the documentation site's coverage and test-results
+  # Through `testreport test` so the run leaves a machine-readable log beside
+  # its coverage profile: the documentation site's coverage and test-results
   # pages are built from the pair, rather than from numbers typed by hand.
   # The log is named after the package, as the profile already is.
   tests: >-
-    sh ../../scripts/go-test.sh "$DISPAT_PACKAGE" --
+    go run github.com/yohimik/dispat/tools/testreport test "$DISPAT_PACKAGE" --
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
 flow:
   beforePublish: [changelog, commit]

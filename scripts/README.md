@@ -1,21 +1,20 @@
 # Release scripts
 
-The shell scripts behind this repository's release stages and CI checks that carry enough logic to deserve a file of
-their own. Anything smaller lives directly in the dispat configuration as a script entry: `push-badge` and
+The two shell scripts behind this repository's release stages and CI checks that carry enough logic to deserve a file
+of their own. Everything smaller lives directly in the dispat configuration as a script entry (`push-badge` and
 `refresh-bootstrap` in the root [`dispat.yaml`](../dispat.yaml), `deploy-docs` in
-[`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), and the link bracket in
-[`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml). Since the config split, each script entry sits beside
-the code it configures: the root file holds what every space shares, each space carries a `<space>/dispat.yaml`, and
-the two packages with exceptions of their own carry a package file. Package scripts run **inside the releasing
-package's folder**, which is why paths here are reached as `../../`; root scripts run at the repository root.
-Everything they need arrives in the environment: the
+[`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), the link bracket in
+[`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml)), and the test-run record lives in the Go tooling
+(`testreport test` in [`tools/testreport`](../tools/testreport)). Since the config split, each script entry sits
+beside the code it configures: the root file holds what every space shares, each space carries a `<space>/dispat.yaml`,
+and the two packages with exceptions of their own carry a package file. Package scripts run **inside the releasing
+package's folder**; root scripts run at the repository root. Everything they need arrives in the environment: the
 [`DISPAT_*` variables](https://yohimik.github.io/dispat/reference/environment) a stage is given, plus whatever CI
 exports.
 
 | Script                                     | Called from                                            | Reads                                   | Produces |
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
 | [`coverage-badge.sh`](./coverage-badge.sh) | `coverage-badge` in the root `dispat.yaml`             | `coverage/*.out`, `GITHUB_STEP_SUMMARY` | The merged coverage profiles and the badge JSON in `coverage/`. |
-| [`go-test.sh`](./go-test.sh)               | every Go `tests` script                                | its arguments                           | The test run itself, plus `coverage/testlog/<name>.json` for the report. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
 
 There is no build script here, and no docs-version script either, on purpose. The builds happen inside Docker: the
@@ -32,22 +31,23 @@ Do not run `go work sync` or `go mod tidy` while the link bracket is in place: b
 local redirect makes redundant, and unlinking needs them back. That is what `--sync-lock=false` is for, and the `lint`
 job in [tests.yml](../.github/workflows/tests.yml) checks for both leaks on every commit.
 
-## The test and report scripts
+## The test and report tooling
 
-[`go-test.sh`](./go-test.sh) is how every Go `tests` script invokes `go test`:
+Every Go `tests` script invokes `go test` through [`tools/testreport`](../tools/testreport):
 
 ```sh
-sh scripts/go-test.sh <log-name> -- <go test args...>
+go run github.com/yohimik/dispat/tools/testreport test <log-name> -- <go test args...>
 ```
 
 It runs the tests with `-json`, keeps the stream as `coverage/testlog/<log-name>.json`, and prints a human summary in
 its place — with the full output of anything that failed, so nothing is lost to the machine format. The exit status is
 the test run's own. The log name is the report's id for that invocation and is chosen to match the coverage profile
-the same script writes (`ccme`, `dispat`, `integration`); a name ending in `-race` marks the race-detector pass.
+the same invocation writes (`ccme`, `dispat`, `integration`); a name ending in `-race` marks the race-detector pass.
 
 [`coverage-badge.sh`](./coverage-badge.sh) merges the profiles that run leaves in `coverage/` and writes the badge
-JSON, and the `test-report` root script turns the same profiles and logs into `packages/docs/data/report.json`, which
-is where the documentation site's [coverage](https://yohimik.github.io/dispat/internals/coverage) and
+JSON, and the `test-report` root script (`testreport build`) turns the same profiles and logs into
+`packages/docs/data/report.json`, which is where the documentation site's
+[coverage](https://yohimik.github.io/dispat/internals/coverage) and
 [test results](https://yohimik.github.io/dispat/internals/test-results) pages get their numbers. Both run through
 `dispat exec` from the [Release workflow](../.github/workflows/release.yml) and nowhere else: only a `--since all` run
 produces a complete profile set, so a total from a windowed run would be a number about whichever packages happened to

@@ -13,6 +13,7 @@ import (
 )
 
 const usage = `usage:
+  testreport test <log-name> -- <go test args...>               run go test -json, keep the log, print a summary
   testreport build  [-coverage dir] [-out file] [-commit sha]   build the report from a full test run
   testreport render <log>                                       summarise one go test -json log
 `
@@ -24,6 +25,14 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "test":
+		// The exit code is the test run's own rather than a flat 1, so the
+		// gates driving this stay transparent to what go test reported.
+		code, err := goTest(os.Args[2:])
+		if err != nil {
+			logf(levelError, "%v", err)
+		}
+		os.Exit(code)
 	case "build":
 		err = build(os.Args[2:])
 	case "render":
@@ -149,14 +158,14 @@ func readCoverage(dir string) (Coverage, error) {
 }
 
 // readSuite folds every `go test -json` log in the folder into the report. The
-// log's file name is its id, which is what scripts/go-test.sh was given.
+// log's file name is its id, which is what `testreport test` was given.
 func readSuite(dir string) (Suite, error) {
 	entries, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		return Suite{}, err
 	}
 	if len(entries) == 0 {
-		return Suite{}, fmt.Errorf("no test logs in %s: the `tests` scripts run through scripts/go-test.sh, which writes them", dir)
+		return Suite{}, fmt.Errorf("no test logs in %s: the `tests` scripts run through `testreport test`, which writes them", dir)
 	}
 	sort.Strings(entries)
 	var suite Suite
@@ -212,8 +221,12 @@ func render(args []string) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("render takes one log file")
 	}
-	name := fs.Arg(0)
+	return summarise(fs.Arg(0))
+}
 
+// summarise is render's body, shared with `test`: the human summary of one
+// log, with the output of everything that failed printed first.
+func summarise(name string) error {
 	f, err := os.Open(name)
 	if err != nil {
 		return err

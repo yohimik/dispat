@@ -62,7 +62,7 @@ scripts:
     # build, which is still ahead of anything being published.
     - dispat exec verify-unlinked --for pkg:dispat
   tests:unit: >-
-    sh ../../scripts/go-test.sh dispat --
+    go run github.com/yohimik/dispat/tools/testreport test dispat --
     ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
   # The black-box suite of exactly this binary, so it belongs to this
   # package rather than to a space of its own. DISPAT_COVERDIR makes
@@ -74,9 +74,9 @@ scripts:
   tests:integration: |
     export DISPAT_COVERDIR="$PWD/../../coverage/covdata"
     rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
-    sh ../../scripts/go-test.sh integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
+    go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
     go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
-    sh ../../scripts/go-test.sh integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
+    go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
   tests:
     - dispat exec tests:unit --for pkg:dispat
     - dispat exec tests:integration --for pkg:dispat

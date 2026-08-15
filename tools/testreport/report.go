@@ -71,13 +71,13 @@ type Suite struct {
 // Group is one invocation: the `tests` script of one package, or one of the
 // integration suite's two passes.
 type Group struct {
-	// ID is the log's name, chosen by whoever called scripts/go-test.sh.
+	// ID is the log's name, chosen by whoever called `testreport test`.
 	ID string `json:"id"`
 	// Path is the module the invocation tested, derived from the import paths
 	// in the log rather than from the ID.
 	Path string `json:"path"`
 	// Race marks the pass that ran under the race detector, by the `-race`
-	// suffix scripts/go-test.sh documents.
+	// suffix `testreport test` documents.
 	Race bool `json:"race"`
 	Counts
 }

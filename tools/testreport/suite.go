@@ -9,7 +9,7 @@ import (
 )
 
 // raceSuffix marks the log of a pass run under the race detector. The
-// convention is scripts/go-test.sh's, and this is the only place that reads
+// convention is `testreport test`'s, and this is the only place that reads
 // it.
 const raceSuffix = "-race"
 

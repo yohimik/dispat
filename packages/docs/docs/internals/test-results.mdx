@@ -13,7 +13,7 @@ What dispat's test suite did, as opposed to [what it reached](./coverage.mdx).
 <SuiteTable />
 
 Each row is one `go test` invocation: the `tests` script of one package, run through
-[`scripts/go-test.sh`](https://github.com/yohimik/dispat/blob/main/scripts/go-test.sh), which keeps the run's
+[`testreport test`](https://github.com/yohimik/dispat/blob/main/tools/testreport), which keeps the run's
 `go test -json` stream for exactly this. `tests` and `fuzz` count test *functions*, never subtests. A suite that counts
 every `t.Run` as a test reports a number several times the one it can defend, so the subtests are counted beside them
 instead.
