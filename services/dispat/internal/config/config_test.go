@@ -1305,6 +1305,61 @@ func TestDiscoverUnknownProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
 }
 
+// TestDiscoverNoneProviderRejected: a package of a versioning-none space is
+// never released, so a releasable package cannot depend on it, whichever
+// level declares the edge. The reverse direction and a none-to-none edge are
+// ordinary edges.
+func TestDiscoverNoneProviderRejected(t *testing.T) {
+	base := func() File {
+		cfg := minimalConfig()
+		cfg.Spaces["tools"] = SpaceConfig{
+			Path: "tls", Versioning: VersioningNone,
+			Flow: &SpaceFlowConfig{Build: []string{"build"}},
+		}
+		return cfg
+	}
+	dirs := []string{"pkgs/core", "tls/smoke", "tls/probe"}
+	discover := func(t *testing.T, cfg File) error {
+		t.Helper()
+		root := writeModelRepo(t, cfg, dirs...)
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		_, _, err = Discover(loaded, root)
+		return err
+	}
+
+	cfg := base()
+	cfg.Dependencies = []DependencyConfig{{Consumer: "core", Provider: "smoke"}}
+	err := discover(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `package "core" cannot depend on "smoke"`)
+	assert.Contains(t, err.Error(), `versioning "none" is never released`)
+
+	cfg = base()
+	tools := cfg.Spaces["tools"]
+	tools.Dependencies = []DependencyConfig{{Consumer: "core", Provider: "smoke"}}
+	cfg.Spaces["tools"] = tools
+	err = discover(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `spaces["tools"]`, "the space-level declaration is named")
+	assert.Contains(t, err.Error(), `cannot depend on "smoke"`)
+
+	cfg = base()
+	cfg.Packages = map[string]PackageConfig{"core": {Dependencies: models.Providers("smoke")}}
+	err = discover(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `packages["core"]`, "the package-level declaration is named")
+	assert.Contains(t, err.Error(), `cannot depend on "smoke"`)
+
+	cfg = base()
+	cfg.Dependencies = []DependencyConfig{
+		{Consumer: "probe", Provider: "smoke"},
+		{Consumer: "smoke", Provider: "core"},
+	}
+	require.NoError(t, discover(t, cfg),
+		"a none consumer may follow anything: another none package or a releasable provider")
+}
+
 func TestLoadParserDefaults(t *testing.T) {
 	// No parser object: the resolved config is the zero ccme.Config, which
 	// ccme documents as the specification defaults — the parser dispat always

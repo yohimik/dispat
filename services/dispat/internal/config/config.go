@@ -1344,8 +1344,12 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		return nil, nil, err
 	}
 	owner := make(map[string]bool, len(pkgs))
+	unversioned := make(map[string]bool)
 	for _, p := range pkgs {
 		owner[p.Name] = true
+		if p.Space != nil && !p.Space.Versioning.Releasable() {
+			unversioned[p.Name] = true
+		}
 	}
 
 	deps := make([]model.Dependency, 0, len(declared))
@@ -1355,6 +1359,11 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 		}
 		if !owner[d.Provider] {
 			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
+		}
+		if unversioned[d.Provider] && !unversioned[d.Consumer] {
+			return nil, nil, fmt.Errorf(
+				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
+				d.Source.Label(), d.Consumer, d.Provider)
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {

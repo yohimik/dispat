@@ -115,8 +115,12 @@ func (a *App) detectEdges(scanned []scannedPackage) ([]detectedEdge, map[string]
 	hasManifest := make(map[string]bool, len(scanned))
 	byDir := make(map[string]string, len(scanned))   // cleaned package dir -> name
 	owners := make([]scanner.Owner, 0, len(scanned)) // every package, named or not
+	unversioned := make(map[string]bool)
 	for _, s := range scanned {
 		byDir[filepath.Clean(s.pkg.Dir)] = s.pkg.Name
+		if s.pkg.Space != nil && !s.pkg.Space.Versioning.Releasable() {
+			unversioned[s.pkg.Name] = true
+		}
 		// Every package is an owner, because one whose manifests declare no
 		// name may still have been told what it is called. It only joins the
 		// scan of declarations when it has manifests to declare with.
@@ -147,6 +151,13 @@ func (a *App) detectEdges(scanned []scannedPackage) ([]detectedEdge, map[string]
 					provider = scanner.ResolveLocalDir(byDir, s.pkg.Dir, m.Path, d.LocalPath)
 				}
 				if provider == "" || provider == s.pkg.Name {
+					continue
+				}
+				// An edge Discover would refuse is not worth suggesting: a
+				// releasable package cannot follow a versioning-none provider.
+				if unversioned[provider] && !unversioned[s.pkg.Name] {
+					a.log.Debug().Str("package", s.pkg.Name).Str("provider", provider).
+						Msg("manifest edge skipped: the provider has versioning \"none\"")
 					continue
 				}
 				rng := d.Range
