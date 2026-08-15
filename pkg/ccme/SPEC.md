@@ -754,19 +754,25 @@ well-formed sha that is unknown, unreachable, or not a proper ancestor is `E210`
 a target unit that is a control unit is `E212`. Each is unit-scoped: the offending unit contributes nothing, and
 other units still apply.
 
-**Scopes must agree.** A correction claims to restate or discard a record, and a record is a claim about specific
-packages, so the two scopes are reconciled rather than combined:
+**Scopes must be contained, and corrections apply per package.** A correction claims to restate or discard a record,
+and a record is a claim about specific packages, so the two scopes are reconciled rather than combined:
 
-* A correction unit with **no scope-set** and a sha target takes the target unit's resolved package set as its own.
-  This is the recommended form: a correction commit is typically empty, so the file-derived fallback of §6.2 would
-  resolve to nothing, and the target already says which packages are meant.
-* A correction unit **with a scope-set** and a sha target is legal exactly when its resolved package set equals the
-  target unit's; anything else is `E213`. Permitting the sets to differ would let a correction silently narrow or
-  widen someone else's record. Restating the matching scope is not an error; it is how an author makes the
-  correction's reach visible in the message.
-* The wildcard has no target scope to agree with. `Deletes: *` and `Edits: *` take the correction unit's resolved
-  scope-set as their reach, defaulting to `*`: the scope-set selects whether the whole workspace's pending records
-  are cleared or only the named packages'.
+* A correction unit with **no scope-set** takes the union of its sha targets' resolved package sets as its own. This
+  is the recommended form: a correction commit is typically empty, so the file-derived fallback of §6.2 would resolve
+  to nothing, and the targets already say which packages are meant. A unit whose only target is the wildcard defaults
+  to `*`.
+* A correction unit **with a scope-set** is legal exactly when its resolved package set is a **subset** of each sha
+  target's resolved set; a package outside a target's set is `E213`. Narrowing is deliberate and legal: it is how a
+  record scoped `(*)` is corrected for some of its packages only. The correction then applies exactly to the packages
+  it names, and the target's record survives untouched for the rest. Widening is what `E213` forbids, because a
+  correction may not extend someone else's record to packages it never claimed.
+* The wildcard has no target scope to be contained in. `Deletes: *` and `Edits: *` take the correction unit's
+  resolved scope-set as their reach, defaulting to `*`: the scope-set selects whether the whole workspace's pending
+  records are cleared or only the named packages'.
+
+A partial correction is therefore ordinary, not an edge case: `chore(core): x` carrying `Deletes: <sha>` against a
+target scoped `(*)` discards that record for `core` alone, and a partial `Edits` restates it for the named packages
+while the original stands for the others. Every rule in this section is evaluated per `(package, record)` pair.
 
 **`Deletes` discards the record.** Each named target unit is treated as if it had failed to parse (§16): it
 contributes no direct bump, no propagation on either axis, no channel, and no changelog entry, for every package
@@ -786,6 +792,32 @@ same type, breaking marker, and description as its target changes nothing and is
 applies; within one commit, the last unit applies. The rule and its rationale are those of §8.6, and `W210` reports
 each superseded correction. A `Deletes` followed by a newer `Edits` of the same target therefore ends with the
 restatement in force: the sequence is read positionally, and each correction supersedes the last.
+
+**A discarded correction is void.** A correction unit is an ordinary unit, so it can itself be the target of a later
+correction, and one rule decides every such nesting: corrections apply newest first, and a correction whose own
+record has been discarded for a package by an already-applied correction is **void for that
+package**: none of its effects apply there, exactly as if the unit had failed to parse. Each voiding is reported as
+`W215`. The consequences, each of which follows from the rule rather than from a case of its own:
+
+* **`Deletes` of an `Edits` un-edits.** Deleting the correction discards its restatement record and voids its
+  discard of the original, so the original record returns, provided it is still undischarged. This is the undo of a
+  mistaken correction.
+* **`Deletes` of a `Deletes` restores.** The newer delete voids the older one, so the older one's target returns.
+  Chains of any depth resolve the same way, newest first; targets are proper ancestors, so a chain cannot cycle and
+  one pass settles it.
+* **`Edits` of a correction replaces its record and voids its effect.** The older correction's target returns, and
+  the new unit restates the *correction's own record*, not the correction's target. To restate the original again,
+  target the original: a newer `Edits` of the same target supersedes the older one directly (`W210`), and is almost
+  always what the author means.
+* **A discarded revert suppresses nothing.** The same rule applied to §7.3: when a revert unit's record is discarded
+  for a package, its changelog suppression (`W212`) is void for that package, and the reverted entry returns.
+* **The wildcard composes consistently.** A `Deletes: *` that discards a pending correction voids it, restoring its
+  targets, and then discards those targets too where they fall inside the wildcard's scope and reach. The net effect
+  is the expected one: nothing pending survives in the cleared scope.
+
+The application order is well-founded: every target is a proper ancestor of its correction, and corrections apply
+newest first, so by the time a correction applies, everything that could void it already has. The result is a single
+deterministic pass, whatever the nesting depth.
 
 **Corrections compose with the rest of the algorithm without special cases.** Cancellation, holds, propagation,
 channel resolution, and versioning all run on the corrected stream (§13.4b). A cancel whose barrier covers a target
@@ -2093,35 +2125,41 @@ applyCorrections(tuples, units):
             if t is a control unit:       raise E212
             targets.append((t, f.kind))                # kind: edit or delete
 
-    # ---- reconcile scopes (§7.4.2) ----
+    # ---- reconcile scopes (§7.4.2): containment, not equality ----
         shaSets = { resolve(t) : (t, _) in targets, t != WILDCARD }
         if u has no scope-set:
-            if shaSets is empty:      S = resolve('*')          # wildcard-only unit
-            else if |shaSets| == 1:   S = the one member        # inherited from the target
-            else:                     raise E213                # targets disagree
+            if shaSets is empty:  S = resolve('*')     # wildcard-only unit
+            else:                 S = union(shaSets)   # inherited from the targets
         else:
             S = resolve(u.scopeSet)
-            if some member of shaSets != S:   raise E213
+            for T in shaSets:
+                if S is not a subset of T:  raise E213 # widening someone else's record
         u.effectiveScope = S                           # replaces §6 resolution for u
 
     # ---- apply, newest commit first, last unit first (§8.6 order) ----
+    # dropped[(P, C, i)] records every discarded (package, record) pair; a
+    # correction whose own record is in it for P is void for P (§7.4.2, W215).
     for u in corr in §11.6 precedence order:
+        live = { P in u.effectiveScope : (P, commitOf(u), u.index) not in dropped }
+        for P in u.effectiveScope - live:              warn W215              # void for P
+        if live is empty:                              continue               # fully void
         for (t, kind) in u.targets:
             if t == WILDCARD:
-                for P in u.effectiveScope:
+                for P in live:
                     drop every tuple (P, C, i, x) where C is a proper
                     ancestor of commitOf(u) and not superseded(P, C, i)
                 if nothing was dropped for any P:      warn W209
                 continue
-            for P in resolve(t):
+            for P in live ∩ resolve(t):
                 if commitOf(t) not in W(P):            warn W209; continue   # discharged
-                if (t) already corrected by a newer u': warn W210; continue
-                drop the tuple (P, commitOf(t), t.index, t)
+                if (t) already corrected by a newer u'
+                   for P:                              warn W210; continue
+                drop the tuple (P, commitOf(t), t.index, t)                  # -> dropped
             if kind == edit:
-                mark u as the restatement of t          # changelog linkage, §13.10
+                mark u as the restatement of t for those P                   # §13.10
                 if u.type == t.type and u.breaking == t.breaking
                    and u.description == t.description:  warn W211
-    return tuples
+    return tuples minus dropped
 ```
 
 Notes, all normative:
@@ -2130,6 +2168,9 @@ Notes, all normative:
   `u.effectiveScope` exactly as a scope-set of that value would have entered it.
 * `superseded(P, C, i)` is the newest-wins rule: a record already claimed by a newer correction is not re-dropped,
   and the older correction reports `W210`.
+* Voiding needs no restoration pass. A correction can only be voided by a newer correction, and newer corrections
+  apply first, so a void correction is skipped before it drops anything (`W215`). "Restoring" a nested target is
+  therefore nothing more than never having dropped it, which is what makes the single pass sufficient (§7.4.2).
 * Discharge is tested against the target's window per package, which is what confines corrections to unreleased work
   (§13.4a) and what makes them idempotent: after the package releases, the same correction is a `W209` no-op.
 * Corrections precede §13.5, so a cancel barrier covering a corrected record discards the corrected form, and a
@@ -2756,8 +2797,8 @@ an opt-in.
 Configuration MUST NOT be able to change:
 
 * the meaning of `cancel`, or the ancestor-or-self rule (§10.3);
-* the correction rules of §7.4: the strict-ancestor reach, the scope-agreement requirement, and the confinement of
-  corrections to undischarged work;
+* the correction rules of §7.4: the strict-ancestor reach, scope containment, the voiding of a discarded correction,
+  and the confinement of corrections to undischarged work;
 * the `max()` combination rule (§9.1);
 * the requirement that tags are the sole state store (§12.4);
 * the non-suppressibility of `W155`, `W156`, `W172`, `W193`, `W194`, `W202`, `W208`, and `W209` (§17.1);
@@ -2993,8 +3034,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | #   | Case                                                                     | Resolution                                                                                                                                                                                            |
 |-----|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 111 | `Edits: <sha>` where every affected package has released the target      | No-op, `W209` (non-suppressible). The carrying unit still contributes its own record normally (§7.4.2).                                                                                               |
-| 112 | Correction unit with no scope-set, in an empty commit                    | Takes the target unit's resolved package set; the file-derived fallback of §6.2 does not apply (§7.4.2).                                                                                              |
-| 113 | Correction unit whose scope-set resolves differently from the target's   | `E213`; the unit contributes nothing.                                                                                                                                                                 |
+| 112 | Correction unit with no scope-set, in an empty commit                    | Takes the union of its targets' resolved package sets; the file-derived fallback of §6.2 does not apply (§7.4.2).                                                                                     |
+| 113 | Correction whose scope-set reaches outside the target's resolved set     | `E213`; the unit contributes nothing. A correction may narrow a record, never widen it (§7.4.2).                                                                                                      |
 | 114 | Bare `<sha>` naming a multi-unit commit                                  | `E211`. Name the unit: `<sha>#2`.                                                                                                                                                                     |
 | 115 | `chore(core): x` + `Deletes: *`                                          | Every pending record for `core` is discarded; `chore` maps to `none`, so nothing replaces them. The pure-deletion form.                                                                               |
 | 116 | `Deletes: T`, then a newer commit `Edits: T`                             | The restatement is in force: the newest correction of a target wins, and the superseded delete reports `W210` (§7.4.2).                                                                               |
@@ -3007,6 +3048,13 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 123 | `Deletes: T` where `T` propagated to dependents                          | The propagated contributions fall with the record: dependents whose windows still hold `T` are no longer reached by it (§13.4b).                                                                       |
 | 124 | `feat!` and a `revert` of it in one window, `Reverts` well-formed        | Bump stays `major` (§7.3); both changelog entries are suppressed, `W212`.                                                                                                                             |
 | 125 | `Reverts: not-a-sha` / `Reverts:` naming an unreachable commit           | `W214` at parse / `W213` from the engine; the footer is informational, the revert releases and bumps normally (§7.3).                                                                                 |
+| 126 | `chore(core): x` + `Deletes: T` where `T` is scoped `(*)`                | Partial deletion: `T`'s record is discarded for `core` alone and stands for every other package (§7.4.2).                                                                                             |
+| 127 | `fix(core): y` + `Edits: T` where `T` is scoped `(*)`                    | Partial restatement: `core`'s ledger carries the `fix`, the other packages keep `T`'s original record.                                                                                                |
+| 128 | `Deletes: U` where `U` carries `Edits: T`                                | `U` is void (`W215`): its restatement record is discarded and its discard of `T` never applies, so `T`'s record returns. The undo of a mistaken correction (§7.4.2).                                   |
+| 129 | `Deletes: X` where `X` carries `Deletes: T`                              | `X` is void (`W215`), so `T`'s record returns. Chains of any depth resolve newest first; ancestry makes cycles impossible.                                                                             |
+| 130 | `Edits: U` where `U` is itself a correction                              | `U`'s record is restated and `U` is void, so `U`'s target returns. To restate the original again, target the original: a newer `Edits` of the same target supersedes directly (`W210`).                |
+| 131 | `Deletes: R` where `R` is a revert unit suppressing entries via `W212`   | `R`'s record is discarded and its changelog suppression is void: the reverted entry returns (§7.4.2, §7.3).                                                                                            |
+| 132 | Partial delete of a correction's own record, then the correction's turn  | Void only for the deleted packages (`W215` per package); the correction still applies for the rest (§13.4b).                                                                                           |
 
 ---
 
@@ -3083,7 +3131,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `E210` | A correction targets a commit that is unknown, unreachable, or not a proper ancestor of the correction's own commit (§7.4.2).                                                                             |
 | `E211` | A correction's unit selector is out of range, or a bare sha names a multi-unit commit (§7.4.1).                                                                                                           |
 | `E212` | A correction targets a control unit (§7.4.2).                                                                                                                                                             |
-| `E213` | A correction's resolved scope-set differs from its target's, or its sha targets resolve to differing sets while the unit carries no scope-set (§7.4.2, §13.4b).                                           |
+| `E213` | A correction's resolved scope-set is not a subset of a sha target's: it would widen the record to packages the target never claimed (§7.4.2, §13.4b). Narrowing is legal, and is how a record is corrected partially. |
 
 ### Warnings
 
@@ -3142,6 +3190,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `W212` | A revert suppressed its target's changelog entry, and its own, for a package whose window still held both (§7.3).                                                                                                                                                                                          |
 | `W213` | A `Reverts` value names a commit that is not an ancestor-or-self of the revert; the footer is informational for this unit (§7.3).                                                                                                                                                                          |
 | `W214` | A `Reverts` value is not a well-formed commit sha; the footer is informational for this unit (§7.3).                                                                                                                                                                                                       |
+| `W215` | A correction is void for a package: its own record there was discarded by a newer correction, so none of its effects apply for that package (§7.4.2, §13.4b).                                                                                                                                              |
 
 ---
 
@@ -3168,8 +3217,9 @@ An implementation conforms to CCME 1.0.0 if and only if it:
 11. Publishes per §19: dependency-first order, tag-after-publish, dependents blocked on failure, ranges reconciled
     against current versions.
 12. Produces the plan of §13 exactly, whatever internal representation or optimisation it uses (§13.11).
-13. Applies corrections per §7.4 and §13.4b (strict-ancestor reach, scope agreement, newest-wins precedence,
-    confinement to undischarged work), and suppresses reverted changelog entries per §7.3.
+13. Applies corrections per §7.4 and §13.4b (strict-ancestor reach, scope containment, newest-wins precedence,
+    voiding of discarded corrections, confinement to undischarged work), and suppresses reverted changelog entries
+    per §7.3.
 
 An implementation that computes correct plans but publishes them in an arbitrary order does **not** conform. The
 guarantees of §13.7c are joint properties of the computation and the publish protocol; either alone is insufficient,
@@ -4753,6 +4803,31 @@ scope-set (§7.4.2).
 
 → `core` releases at `max(minor, patch)` = `1.5.0` (§7.3), and its changelog carries neither `A`'s entry nor `B`'s;
 `W212` accounts for both.
+
+**Vector 118**: partial correction. `A` is `feat(*): platform bump`; `B`: `chore(core): drop it for core` +
+`Deletes: <A>`.
+
+→ `A`'s record is discarded for `core` alone. `cli`, `ui`, `api`, `docs-site` and `@acme/theme` keep their pending
+`minor` from `A` and release normally; `core` does not release. A scope-set inside the target's set narrows, and
+only a package outside it is `E213` (§7.4.2).
+
+**Vector 119**: undo of a correction. `A`: `feat(core)!: rewrite internals`; `B`: `fix(core): rewrite internals` +
+`Edits: <A>`; `C`: `chore(core): restore the original` + `Deletes: <B>`.
+
+→ `B` is void (`W215`): its `fix` record is discarded and its discard of `A` never applies, so `core` releases
+`2.0.0` with `A`'s original record, exactly as if `B` had never landed.
+
+**Vector 120**: nested deletes. `A`: `feat(core): x`; `B`: `chore(core): drop it` + `Deletes: <A>`; `C`:
+`chore(core): restore it` + `Deletes: <B>`.
+
+→ `B` is void (`W215`), so `A`'s record stands and `core` releases `1.5.0`. A delete of a delete restores.
+
+**Vector 121**: editing a correction. History of vector 119, but `C` is `docs(core): note the rewrite` +
+`Edits: <B>`.
+
+→ `B` is void: `A`'s record returns, and `C`'s `docs` record stands as the restatement of `B`'s. `core` releases
+`2.0.0`, because `A`'s `major` is back in the window and `docs` maps to `none`. An author who wanted to fix the
+restatement should have written `Edits: <A>` again, which supersedes `B` directly (`W210`, vector 114).
 
 ---
 

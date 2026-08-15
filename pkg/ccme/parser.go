@@ -71,7 +71,7 @@
 // invalid UTF-8 in the message itself, and E130, E153, E156, E157, E182, E185,
 // E191, E195, E196, E210, E211, E212, E213, W130, W131, W134, W135, W153,
 // W154, W158, W160, W170, W171, W172, W185, W186, W190, W192, W209, W210,
-// W211, W212 and W213 belong to the release engine. E154 is enforced for the
+// W211, W212, W213 and W215 belong to the release engine. E154 is enforced for the
 // cases that are decidable from the message alone, and the correction footers
 // of §7.4 are shape-validated here (E151, E173, W214) while their targets are
 // resolved by the engine (§13.4b).
