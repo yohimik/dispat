@@ -1,11 +1,10 @@
 # Recovering from a failed run
 
-What to do when a release run fails partway: nothing. The scenario every release tool has to answer for is a run of
-several packages failing in the middle, and dispat's answer is that the same command, run again, finishes exactly what
-the first run still owed.
+What to do when a release run fails partway: nothing but re-running it. This is the scenario every release tool has to
+answer for, and dispat's answer is that the same command, run again, finishes exactly what the first run still owed.
 
-The scenario every release tool has to answer for: a run of several packages fails in the middle. Here
-`core` and its consumer `app` release together; `app`'s tests break its build after `core` already published.
+Here is the whole story on a real run. `core` and its consumer `app` release together, and `app`'s tests break its
+build after `core` already published.
 
 ```console
 $ git commit -m "feat(core)^: new API, reaching the app"
