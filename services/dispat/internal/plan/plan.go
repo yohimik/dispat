@@ -608,8 +608,27 @@ type Release struct {
 	// create a release and which files to attach.
 	Outputs []Output
 
+	// Corrects names, per unit, the records that unit restates: the short shas
+	// of its `Edits` targets, suffixed "#n" where the target commit carried
+	// several units. §13.10 requires the plan to mark corrected entries, and
+	// the changelog renders the mark beside the restatement.
+	Corrects map[*ccme.Unit][]string
+	// SuppressedNotes marks units whose changelog entry a revert took with it
+	// (§7.3). The unit stays in Units and still counts toward the bump: the
+	// work happened and was undone, and the version has to carry both halves.
+	// Only the notes omit it, which NotesUnits is where that happens.
+	SuppressedNotes map[*ccme.Unit]bool
+
 	Diagnostics []Diagnostic
 }
+
+// UnitCorrects returns the records the unit restates, empty for an ordinary
+// unit (§7.4, §13.10).
+func (r *Release) UnitCorrects(u *ccme.Unit) []string { return r.Corrects[u] }
+
+// UnitSuppressed reports a unit whose changelog entry a revert suppressed
+// (§7.3).
+func (r *Release) UnitSuppressed(u *ccme.Unit) bool { return r.SuppressedNotes[u] }
 
 // GitHubExport is one of the outputs with a consumer inside dispat: a package
 // that exports it gets a GitHub release (when the recorder is enabled), with
@@ -728,11 +747,26 @@ func (r *Release) Changed() bool {
 // is every prerelease's changes collected into the one entry readers of the
 // stable line will actually see. The bump and version are always computed
 // over the whole window either way (§11.4); only the notes narrow.
+// A revert and the unit it reverted leave the notes together (§7.3): the two
+// cancel out, so documenting either would describe work the release does not
+// contain. Both still count toward the bump, which is why the filter lives
+// here and not in Units.
 func (r *Release) NotesUnits() []*ccme.Unit {
+	units := r.Units
 	if r.Next.IsPrerelease() {
-		return r.FreshUnits
+		units = r.FreshUnits
 	}
-	return r.Units
+	if len(r.SuppressedNotes) == 0 {
+		return units
+	}
+	out := make([]*ccme.Unit, 0, len(units))
+	for _, u := range units {
+		if r.SuppressedNotes[u] {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // NoChanges reports whether the release carries no content of its own — no
@@ -2016,6 +2050,12 @@ func (cp *computation) finalise() {
 		}
 		rel.Bump = ccme.MaxBump(rel.OwnBump, rel.PropagatedBump)
 		rel.Held = cp.held[name]
+		// §13.10: the plan marks its corrected and suppressed entries. Both
+		// maps are keyed by unit, and rel.Units holds pointers into the same
+		// parsed messages, so the marks travel with the units to every
+		// consumer of the release.
+		rel.Corrects = cp.corrects[name]
+		rel.SuppressedNotes = cp.noteDrops[name]
 		rel.Channel = cp.channel[name]
 		if rel.Channel == "" {
 			rel.Channel = rel.BaselineChannel

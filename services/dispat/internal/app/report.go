@@ -103,6 +103,16 @@ func (a *App) printGraph(pl *plan.Plan) {
 			Str("reason", rel.Reason()).
 			Int("ownCommits", len(rel.Units)).
 			Strs("dueToProviders", rel.DueTo)
+		// §13.10 requires the plan to mark its corrected and suppressed
+		// entries. Both are invisible in the numbers above: a restated record
+		// looks like an ordinary one, and a suppressed entry looks like a
+		// commit that never happened.
+		if n := len(rel.Corrects); n > 0 {
+			ev = ev.Int("corrected", n)
+		}
+		if n := len(rel.SuppressedNotes); n > 0 {
+			ev = ev.Int("suppressedNotes", n)
+		}
 
 		switch {
 		case rel.Held:

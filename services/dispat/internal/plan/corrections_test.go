@@ -463,6 +463,41 @@ func TestCorrectionOfPrereleasedWorkIsANoop(t *testing.T) {
 	assert.Equal(t, ccme.BumpMajor, p.Releases["core"].Bump, "the published record still counts")
 }
 
+func TestCorrectionMarksTheRestatementOnThePlan(t *testing.T) {
+	// §13.10: the plan MUST mark corrected entries. The mark is per package,
+	// because a partial correction restates a record for some of its packages
+	// and leaves the original standing for the rest.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(*)!: the original"},
+		commit{sha: shaB, message: "fix(core): the restatement\n\nEdits: " + shaA},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	require.Len(t, core.Units, 1)
+	assert.Equal(t, []string{shaA}, core.UnitCorrects(core.Units[0]), "the restatement names what it replaces")
+
+	utils := p.Releases["utils"]
+	require.Len(t, utils.Units, 1)
+	assert.Empty(t, utils.UnitCorrects(utils.Units[0]), "utils kept the original, which corrects nothing")
+}
+
+func TestCorrectionMarksTheSelectorOfAMultiUnitTarget(t *testing.T) {
+	// A bare sha would not say which of the target's records the entry
+	// replaces, so the mark carries the selector the author had to write.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: one\n\n---\n\nfeat(utils)!: two"},
+		commit{sha: shaB, message: "fix(utils): smaller than that\n\nEdits: " + shaA + "#2"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	utils := p.Releases["utils"]
+	require.Len(t, utils.Units, 1)
+	assert.Equal(t, []string{shaA + "#2"}, utils.UnitCorrects(utils.Units[0]))
+}
+
 func TestCorrectionsAreTraced(t *testing.T) {
 	// A wrong plan is the hardest thing to debug about a release, and a
 	// correction is invisible in the output: the record it discarded simply is

@@ -138,7 +138,7 @@ func RenderSections(rel *plan.Release, f Format) string {
 		var lines []string
 		for _, c := range rel.NotesUnits() {
 			if c.Bump == kind {
-				lines = append(lines, "- "+c.Header.Description+"\n"+c.Body)
+				lines = append(lines, "- "+c.Header.Description+correctionNote(rel, c)+"\n"+c.Body)
 			}
 		}
 		if len(lines) > 0 {
@@ -166,6 +166,21 @@ func RenderSections(rel *plan.Release, f Format) string {
 		parts = append(parts, "### "+f.DependenciesTitle+"\n\n"+strings.Join(lines, "\n")+"\n")
 	}
 	return strings.Join(parts, "\n")
+}
+
+// correctionNote annotates a restatement with the records it replaces.
+//
+// §7.4.2 asks for the restatement to be rendered once, as the carrying unit's
+// entry, and allows naming what it corrects. Naming it is what keeps the
+// changelog honest: the entry describes work whose original record said
+// something else, and a reader chasing the commit behind a line would
+// otherwise land on a message that does not match it.
+func correctionNote(rel *plan.Release, u *ccme.Unit) string {
+	targets := rel.UnitCorrects(u)
+	if len(targets) == 0 {
+		return ""
+	}
+	return " (corrects " + strings.Join(targets, ", ") + ")"
 }
 
 // RenderBody assembles the body of one entry: the configured header lines,

@@ -99,6 +99,35 @@ func TestRenderSectionsEmpty(t *testing.T) {
 	assert.Equal(t, "## core@2.0.0 (2026-07-26)\n", RenderEntry(rel, testDate, Format{}))
 }
 
+func TestRenderSectionsMarksARestatement(t *testing.T) {
+	// §13.10 requires corrected entries to be marked, and §7.4.2 asks for the
+	// restatement to be rendered once, as the carrying unit's entry. Naming
+	// what it corrects is what stops a reader chasing the line to a commit
+	// message that says something else entirely.
+	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
+	restated := rel.Units[1]
+	rel.Corrects = map[*ccme.Unit][]string{restated: {"4f2a1c9abcde", "bd41f0e12345#2"}}
+
+	out := RenderSections(rel, Format{})
+
+	assert.Contains(t, out, "- close leak (corrects 4f2a1c9abcde, bd41f0e12345#2)")
+	assert.Contains(t, out, "- add streaming\n", "an ordinary entry carries no annotation")
+}
+
+func TestRenderSectionsOmitsSuppressedEntries(t *testing.T) {
+	// §7.3: a revert and the unit it reverted leave the notes together, while
+	// both still count toward the bump. The renderer reads NotesUnits, so the
+	// omission has to reach it without the section logic knowing about reverts.
+	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
+	rel.SuppressedNotes = map[*ccme.Unit]bool{rel.Units[0]: true}
+
+	out := RenderSections(rel, Format{})
+
+	assert.NotContains(t, out, "add streaming", "the suppressed entry is gone")
+	assert.NotContains(t, out, "### Features", "and so is the section it was alone in")
+	assert.Contains(t, out, "- close leak", "its siblings are untouched")
+}
+
 func TestRecordCreatesAndPrepends(t *testing.T) {
 	dir := t.TempDir()
 	w := &FileWriter{Now: func() time.Time { return testDate }}
