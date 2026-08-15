@@ -473,6 +473,9 @@ non-empty description.
 * Zero spaces or two or more spaces after the colon → `E120`. Lenient mode accepts a *missing* space with `W121`; two or
   more spaces remain `E120`, because the intended description cannot be recovered from them.
 * Empty description → `E121`.
+* A header that ends at the colon is `E121`, not `E120`: normalisation (§4.1) strips trailing whitespace, so `feat: `
+  arrives at the parser as `feat:`, and the finding is the absent description rather than a malformed separator
+  (vector 19). The zero-space case of `E120` is therefore a colon followed by a non-space character.
 * The description is the remainder of the line; it MAY contain further colons (`feat(api): fix: nested` has description
   `fix: nested`).
 * The description SHOULD be imperative mood and SHOULD NOT end with a period. Neither is enforced.
@@ -2816,7 +2819,7 @@ attempted, and a dependent a caret reached but could not oblige. The complete no
 | `E102` | Whitespace inside a scope-set other than after a comma.                                                                                                                                                   |
 | `E103` | Unbalanced or nested parentheses.                                                                                                                                                                         |
 | `E104` | Empty scope-set `()`.                                                                                                                                                                                     |
-| `E110` | Duplicate inline directive sigil (including `^` with `^^`, a third caret, a second `%%`, a third percent sign, a second `++`, and a third plus).                                                               |
+| `E110` | Duplicate inline directive sigil (including a second `%`, a second `+`, `^` with `^^`, a third caret, a second `%%`, a third percent sign, a second `++`, and a third plus).                                   |
 | `E111` | Unknown inline directive value, or an empty value after a sigil other than `^` and `^^`. Includes a malformed channel transition: more than one `>`, `inherit` or `none` on either side, `*` as a `<to>`. |
 | `E112` | Inline and footer set the same key to different values.                                                                                                                                                   |
 | `E113` | `^^` combined with an explicit `+N` where `N` is not `all`.                                                                                                                                               |
@@ -3605,7 +3608,8 @@ well-formed input: for every byte string, a pattern here matches if and only if 
 `latest`, scope-term semantics, and the saturation of out-of-range depths.
 
 Where a pattern and §20 appear to disagree, §20 is wrong or the pattern is wrong; neither is licensed to be laxer than
-the other, and the depth patterns below are the case that has historically drifted.
+the other. The depth patterns below are where the two formulations most easily diverge, so they deserve particular
+care when either side is changed.
 
 All patterns are PCRE, anchored, and free of nested quantifiers, so they cannot backtrack catastrophically.
 
@@ -4486,7 +4490,7 @@ from-channel    = "*" / "stable" / channel-name   ; "*" is any prerelease, never
 to-channel      = "stable" / channel-name         ; "*" is NOT a to-channel
 channel-name    = LOWER *( LOWER / DIGIT / "-" )  ; ">" is excluded by construction
 
-description     = 1*( %x20-FF )              ; no LF
+description     = %x21-FF *( %x20-FF )      ; no LF; never begins with a space (§5.5)
 
 body            = *( TEXT LF )               ; free form, paragraphs separated by LF LF
 
