@@ -565,13 +565,40 @@ func validateRecordObjects(clLabel, ghLabel string, cl *ChangelogConfig, gh *Git
 		if err := validateEntryLines(clLabel, "fileTitle", cl.FileTitle); err != nil {
 			return err
 		}
+		// The file title is written once and matched against on the next
+		// release, so a title that varies by channel would be prepended again
+		// every time the channel moved.
+		for i, l := range cl.FileTitle {
+			if len(l.Channels) > 0 {
+				return fmt.Errorf("%s: fileTitle[%d]: channels is not allowed here: the title is written once "+
+					"and matched on the next release, so it must not vary from one release to the next", clLabel, i)
+			}
+		}
+		if err := validateChannels(clLabel, cl.Channels); err != nil {
+			return err
+		}
 		if err := validateEntryFormat(clLabel, cl.EntryFormatConfig); err != nil {
 			return err
 		}
 	}
 	if gh != nil {
+		if err := validateChannels(ghLabel, gh.Channels); err != nil {
+			return err
+		}
 		if err := validateEntryFormat(ghLabel, gh.EntryFormatConfig); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateChannels refuses a channel restriction naming nothing. Which names
+// exist is a property of the repository's tags rather than of the config, so a
+// name dispat has never seen is accepted and simply never matches.
+func validateChannels(label string, channels []string) error {
+	for _, ch := range channels {
+		if strings.TrimSpace(ch) == "" {
+			return fmt.Errorf("%s: channels must not contain an empty name", label)
 		}
 	}
 	return nil
@@ -592,6 +619,9 @@ func validateEntryLines(label, key string, lines []EntryLine) error {
 		if len(l.Line) == 0 {
 			return fmt.Errorf("%s: %s[%d]: line is required: an entry with nothing to write writes nothing",
 				label, key, i)
+		}
+		if err := validateChannels(fmt.Sprintf("%s: %s[%d]", label, key, i), l.Channels); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -38,22 +38,24 @@ func TestEnabledDefaults(t *testing.T) {
 	if (&CommitConfig{Push: true}).PushEnabled() {
 		t.Error("push without commit is inert")
 	}
-	if !(&ChangelogConfig{}).PrereleaseEnabled() {
-		t.Error("a prerelease gets a changelog entry by default")
+	if len((&ChangelogConfig{}).RecordChannels()) != 0 {
+		t.Error("every release gets a changelog entry by default")
 	}
-	if (&ChangelogConfig{Prerelease: Bool(false)}).PrereleaseEnabled() {
-		t.Error("the changelog can hold prereleases back")
+	if got := (&ChangelogConfig{Channels: []string{"stable"}}).RecordChannels(); len(got) != 1 ||
+		got[0] != "stable" {
+		t.Error("the changelog can name the channels it records on")
 	}
-	if !(&GitHubConfig{}).PrereleaseEnabled() {
-		t.Error("a prerelease gets a github release by default")
+	if len((&GitHubConfig{}).RecordChannels()) != 0 {
+		t.Error("every release gets a github release by default")
 	}
-	if (&GitHubConfig{Prerelease: Bool(false)}).PrereleaseEnabled() {
-		t.Error("github releases can hold prereleases back")
+	if got := (&GitHubConfig{Channels: []string{"beta"}}).RecordChannels(); len(got) != 1 ||
+		got[0] != "beta" {
+		t.Error("github releases can name the channels they are created on")
 	}
 	var nilChangelog *ChangelogConfig
 	var nilGitHub *GitHubConfig
-	if !nilChangelog.PrereleaseEnabled() || !nilGitHub.PrereleaseEnabled() {
-		t.Error("an absent object means every default, prereleases included")
+	if nilChangelog.RecordChannels() != nil || nilGitHub.RecordChannels() != nil {
+		t.Error("an absent object means every default, every channel included")
 	}
 	if !(&CommitConfig{}).VerifyEnabled() {
 		t.Error("push verification defaults to enabled")

@@ -314,6 +314,12 @@ type EntryLine struct {
 	Package []string `mapstructure:"package" json:"package,omitempty"`
 	Space   []string `mapstructure:"space" json:"space,omitempty"`
 	Group   []string `mapstructure:"group" json:"group,omitempty"`
+	// Channels restricts which releases the line is written for: "stable",
+	// "*" for any prerelease channel, or a channel name such as "beta",
+	// matched case-insensitively. An empty list writes the line for every
+	// release. It is not allowed on a changelog's fileTitle, which is written
+	// once and must not vary from one release to the next.
+	Channels []string `mapstructure:"channels" json:"channels,omitempty"`
 }
 
 // EntryFormatConfig customises how a release entry is rendered; shared by the
@@ -350,11 +356,16 @@ type ChangelogConfig struct {
 	// written once and matched against on the next release, so it must not
 	// contain anything that varies from one release to the next.
 	FileTitle []EntryLine `mapstructure:"fileTitle" json:"fileTitle,omitempty"`
-	// Prerelease writes an entry for a prerelease version too (default true).
-	// Setting it false keeps the file a record of stable releases alone: the
-	// betas of a version leave nothing behind, and the graduation to stable
-	// writes the one entry covering the whole window.
-	Prerelease        *bool `mapstructure:"prerelease" json:"prerelease,omitempty"`
+	// Channels restricts which releases get an entry: "stable", "*" for any
+	// prerelease channel, or a channel name such as "beta", matched
+	// case-insensitively. An empty list writes an entry for every release.
+	//
+	// ["stable"] keeps the file a record of stable releases alone: the betas
+	// of a version leave nothing behind, and the graduation to stable writes
+	// the one entry covering the whole window. A package under a space that
+	// restricts the channels opts back in with ["stable", "*"], which the two
+	// values together cover.
+	Channels          []string `mapstructure:"channels" json:"channels,omitempty"`
 	EntryFormatConfig `mapstructure:",squash"`
 }
 
@@ -362,10 +373,13 @@ type ChangelogConfig struct {
 // is nil-safe: an absent changelog object means all defaults.
 func (c *ChangelogConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
 
-// PrereleaseEnabled reports whether a prerelease version gets a changelog
-// entry (default true). Nil-safe.
-func (c *ChangelogConfig) PrereleaseEnabled() bool {
-	return c == nil || c.Prerelease == nil || *c.Prerelease
+// RecordChannels are the channels the changelog records on, empty meaning
+// every release. Nil-safe.
+func (c *ChangelogConfig) RecordChannels() []string {
+	if c == nil {
+		return nil
+	}
+	return c.Channels
 }
 
 // GitHubConfig customises (or disables) GitHub release creation.
@@ -379,11 +393,15 @@ type GitHubConfig struct {
 	// when no script exported DISPAT_EXPORT_GITHUB (the export then only adds
 	// assets). Default false: the export stays the per-package opt-in.
 	AllPackages *bool `mapstructure:"allPackages" json:"allPackages,omitempty"`
-	// Prerelease creates a release for a prerelease version too (default
-	// true; GitHub receives it flagged as a prerelease). Setting it false
-	// keeps the repository's releases page a list of stable releases alone,
-	// while the betas are still tagged and still published by the flow.
-	Prerelease        *bool `mapstructure:"prerelease" json:"prerelease,omitempty"`
+	// Channels restricts which releases get a GitHub release: "stable", "*"
+	// for any prerelease channel, or a channel name such as "beta", matched
+	// case-insensitively. An empty list creates a release for every release.
+	//
+	// ["stable"] keeps the repository's releases page a list of stable
+	// releases alone, while the betas are still tagged and still published by
+	// the flow. This chooses which releases are created; the prerelease flag
+	// GitHub shows on a created release always follows the version itself.
+	Channels          []string `mapstructure:"channels" json:"channels,omitempty"`
 	EntryFormatConfig `mapstructure:",squash"`
 }
 
@@ -391,10 +409,13 @@ type GitHubConfig struct {
 // requires a resolvable repository and token at runtime). Nil-safe.
 func (c *GitHubConfig) IsEnabled() bool { return c == nil || c.Enabled == nil || *c.Enabled }
 
-// PrereleaseEnabled reports whether a prerelease version gets a GitHub
-// release (default true). Nil-safe.
-func (c *GitHubConfig) PrereleaseEnabled() bool {
-	return c == nil || c.Prerelease == nil || *c.Prerelease
+// RecordChannels are the channels GitHub releases are created on, empty
+// meaning every release. Nil-safe.
+func (c *GitHubConfig) RecordChannels() []string {
+	if c == nil {
+		return nil
+	}
+	return c.Channels
 }
 
 // AllPackagesEnabled reports whether every published package gets a GitHub

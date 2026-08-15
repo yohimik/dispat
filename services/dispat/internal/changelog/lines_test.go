@@ -79,6 +79,60 @@ func TestRenderLinesFilters(t *testing.T) {
 	}
 }
 
+// TestRenderLinesChannelFilter: the one filter that asks about the release
+// rather than the package. A line reaches the prereleases alone, the stables
+// alone, or one named channel, and no filter still reaches everything.
+func TestRenderLinesChannelFilter(t *testing.T) {
+	cases := []struct {
+		name     string
+		next     ccme.Version
+		channels []string
+		wants    bool
+	}{
+		{"no filter on a stable release", ccme.Version{Major: 2}, nil, true},
+		{"no filter on a prerelease", ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}}, nil, true},
+		{"stable on a stable release", ccme.Version{Major: 2}, []string{"stable"}, true},
+		{"stable on a prerelease", ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}},
+			[]string{"stable"}, false},
+		{"any prerelease on a beta", ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}},
+			[]string{"*"}, true},
+		{"any prerelease on a stable release", ccme.Version{Major: 2}, []string{"*"}, false},
+		{"a named channel on its own", ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}},
+			[]string{"beta"}, true},
+		{"a named channel on another", ccme.Version{Major: 2, Prerelease: []string{"rc", "1"}},
+			[]string{"beta"}, false},
+		{"stable and a name together", ccme.Version{Major: 2}, []string{"stable", "beta"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rel := testRelease("/tmp/x", tc.next)
+			out := RenderLines([]model.EntryLine{{Line: []string{"x"}, Channels: tc.channels}}, rel, nil)
+			if tc.wants {
+				assert.Equal(t, "x\n", out)
+			} else {
+				assert.Empty(t, out)
+			}
+		})
+	}
+}
+
+// TestRenderLinesChannelCombinesWithPackageFilters: channels is one filter
+// among the others, so a line carrying both is written only where both hold.
+func TestRenderLinesChannelCombinesWithPackageFilters(t *testing.T) {
+	beta := testRelease("/tmp/x", ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}})
+	stable := testRelease("/tmp/x", ccme.Version{Major: 2})
+	line := model.EntryLine{Line: []string{"x"}, Package: []string{"core"}, Channels: []string{"*"}}
+
+	assert.Equal(t, "x\n", RenderLines([]model.EntryLine{line}, beta, nil),
+		"the package and the channel both match")
+	assert.Empty(t, RenderLines([]model.EntryLine{line}, stable, nil),
+		"the package matches and the channel does not")
+
+	beta.Pkg.Name = "other"
+	assert.Empty(t, RenderLines([]model.EntryLine{line}, beta, nil),
+		"the channel matches and the package does not")
+}
+
 // TestRenderLinesIndependentPackageHasNoGroup: a package whose space versions
 // independently shares its version with nothing, so it belongs to no group and
 // a group filter cannot select it. Its space still can.

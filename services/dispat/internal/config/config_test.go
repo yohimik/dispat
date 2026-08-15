@@ -1882,6 +1882,88 @@ func TestLoadRecordLineWithoutLineIsRefused(t *testing.T) {
 	}
 }
 
+// TestLoadRecordLineChannels: a line's channels take the same scalar-or-list
+// shape every other filter does, and reach the resolved package policy.
+func TestLoadRecordLineChannels(t *testing.T) {
+	raw := rawRecordConfig(map[string]any{
+		"header": []any{map[string]any{"line": "beta only", "channels": "*"}},
+		"footer": []any{map[string]any{"line": "named", "channels": []any{"beta", "rc"}}},
+	})
+	root := writeRawRepo(t, raw, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, []EntryLine{{Line: []string{"beta only"}, Channels: []string{"*"}}}, cfg.Changelog.Header)
+
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+	assert.Equal(t, []model.EntryLine{{Line: []string{"beta only"}, Channels: []string{"*"}}},
+		core.Changelog.Format.Header, "the filter reaches the package's own policy")
+	assert.Equal(t, []string{"beta", "rc"}, core.Changelog.Format.Footer[0].Channels)
+}
+
+// TestLoadRecordChannelsGateTheRecords: the channels an object records on land
+// on the resolved policy, and a package override states the whole list rather
+// than adding to the one it inherited.
+func TestLoadRecordChannelsGateTheRecords(t *testing.T) {
+	raw := rawRecordConfig(map[string]any{"channels": []any{"stable"}})
+	raw["github"] = map[string]any{"channels": "beta"}
+	raw["packages"] = map[string]any{
+		"core": map[string]any{"changelog": map[string]any{"channels": []any{"stable", "*"}}},
+	}
+	root := writeRawRepo(t, raw, "pkgs/core")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+
+	pkgs, _, err := Discover(cfg, root)
+	require.NoError(t, err)
+	core := packagesByName(pkgs)["core"]
+	assert.Equal(t, []string{"stable", "*"}, core.Changelog.Channels,
+		"the nearest layer states the whole restriction, which is how a package opts back in")
+	assert.True(t, core.Changelog.Records("beta"), "and both values together admit every release")
+	assert.Equal(t, []string{"beta"}, core.GitHub.Channels, "a scalar is the one-name list")
+	assert.False(t, core.GitHub.Records("stable"))
+}
+
+// TestLoadRecordChannelsRefusals: a restriction naming nothing is a mistake,
+// and a file title that varies by channel would be prepended again every time
+// the channel moved, so it is refused where it is written.
+func TestLoadRecordChannelsRefusals(t *testing.T) {
+	cases := []struct {
+		name, want string
+		raw        func() map[string]any
+	}{
+		{"an empty name in a line", "changelog: footer[0]: channels must not contain an empty name",
+			func() map[string]any {
+				return rawRecordConfig(map[string]any{
+					"footer": []any{map[string]any{"line": "x", "channels": []any{"beta", " "}}}})
+			}},
+		{"an empty name on the object", "changelog: channels must not contain an empty name",
+			func() map[string]any {
+				return rawRecordConfig(map[string]any{"channels": []any{""}})
+			}},
+		{"an empty name on github", "github: channels must not contain an empty name",
+			func() map[string]any {
+				raw := rawRecordConfig(nil)
+				raw["github"] = map[string]any{"channels": []any{" "}}
+				return raw
+			}},
+		{"channels on a file title", "changelog: fileTitle[0]: channels is not allowed here",
+			func() map[string]any {
+				return rawRecordConfig(map[string]any{
+					"fileTitle": []any{map[string]any{"line": "# Changelog", "channels": "stable"}}})
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeRawRepo(t, tc.raw(), "pkgs/core")
+			_, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 // TestLoadRecordLineUnknownKeyIsRefused: a typo inside a line object is an
 // unknown key like any other.
 func TestLoadRecordLineUnknownKeyIsRefused(t *testing.T) {

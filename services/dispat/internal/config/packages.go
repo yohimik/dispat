@@ -693,8 +693,8 @@ func overlayChangelog(base, over *ChangelogConfig) *ChangelogConfig {
 	if over.Enabled != nil {
 		out.Enabled = over.Enabled
 	}
-	if over.Prerelease != nil {
-		out.Prerelease = over.Prerelease
+	if len(over.Channels) > 0 {
+		out.Channels = over.Channels
 	}
 	if over.File != "" {
 		out.File = over.File
@@ -711,8 +711,8 @@ func overlayGitHub(base, over *GitHubConfig) *GitHubConfig {
 	if over.Enabled != nil {
 		out.Enabled = over.Enabled
 	}
-	if over.Prerelease != nil {
-		out.Prerelease = over.Prerelease
+	if len(over.Channels) > 0 {
+		out.Channels = over.Channels
 	}
 	if over.Owner != "" {
 		out.Owner = over.Owner
@@ -771,7 +771,13 @@ func entryLines(lines []EntryLine) []model.EntryLine {
 	}
 	out := make([]model.EntryLine, len(lines))
 	for i, l := range lines {
-		out[i] = model.EntryLine{Line: l.Line, Package: l.Package, Space: l.Space, Group: l.Group}
+		out[i] = model.EntryLine{
+			Line:     l.Line,
+			Package:  l.Package,
+			Space:    l.Space,
+			Group:    l.Group,
+			Channels: l.Channels,
+		}
 	}
 	return out
 }
@@ -784,11 +790,11 @@ func changelogSpec(cc *ChangelogConfig) model.ChangelogSpec {
 		cc = &ChangelogConfig{}
 	}
 	return model.ChangelogSpec{
-		Enabled:    cc.IsEnabled(),
-		Prerelease: cc.PrereleaseEnabled(),
-		File:       cc.File,
-		FileTitle:  entryLines(cc.FileTitle),
-		Format:     recordFormat(cc.EntryFormatConfig),
+		Enabled:   cc.IsEnabled(),
+		Channels:  cc.RecordChannels(),
+		File:      cc.File,
+		FileTitle: entryLines(cc.FileTitle),
+		Format:    recordFormat(cc.EntryFormatConfig),
 	}
 }
 
@@ -800,7 +806,7 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 	}
 	return model.GitHubSpec{
 		Enabled:     gc.IsEnabled(),
-		Prerelease:  gc.PrereleaseEnabled(),
+		Channels:    gc.RecordChannels(),
 		AllPackages: gc.AllPackagesEnabled(),
 		Owner:       gc.Owner,
 		Repo:        gc.Repo,

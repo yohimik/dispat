@@ -71,31 +71,67 @@ func TestDepKindString(t *testing.T) {
 	assert.Equal(t, "peerDependencies", KindPeerDependencies.String())
 }
 
-// TestRecordSpecsHoldPrereleasesBack pins the two-part gate both recorders
-// read: the policy must be enabled, and a prerelease must not be held back.
-// The specs answer identically, which is what lets the changelog and the
-// GitHub release be configured the same way.
-func TestRecordSpecsHoldPrereleasesBack(t *testing.T) {
+// TestChannelsAdmit pins the vocabulary every channel restriction is read
+// with: nothing named admits everything, "stable" is the stable line, "*" is
+// any prerelease channel and nothing else, and a name is a name.
+func TestChannelsAdmit(t *testing.T) {
 	cases := []struct {
-		name       string
-		enabled    bool
-		prerelease bool
-		isPre      bool
-		want       bool
+		name     string
+		channels []string
+		channel  string
+		want     bool
 	}{
-		{"stable, all on", true, true, false, true},
-		{"prerelease, all on", true, true, true, true},
-		{"stable, prereleases held back", true, false, false, true},
-		{"prerelease, prereleases held back", true, false, true, false},
-		{"disabled outright", false, true, false, false},
-		{"disabled beats the prerelease flag", false, true, true, false},
+		{"nothing named admits a stable release", nil, "stable", true},
+		{"nothing named admits a prerelease", nil, "beta", true},
+		{"an empty list is nothing named", []string{}, "beta", true},
+		{"stable admits the stable line", []string{"stable"}, "stable", true},
+		{"stable holds a prerelease back", []string{"stable"}, "beta", false},
+		{"the wildcard admits any prerelease", []string{"*"}, "beta", true},
+		{"the wildcard admits another prerelease", []string{"*"}, "rc", true},
+		{"the wildcard is not the stable line", []string{"*"}, "stable", false},
+		{"a name admits its own channel", []string{"beta"}, "beta", true},
+		{"a name admits no other", []string{"beta"}, "rc", false},
+		{"a name is matched however it is spelled", []string{"BeTa"}, "beta", true},
+		{"a name does not admit the stable line", []string{"beta"}, "stable", false},
+		{"several names admit any of them", []string{"beta", "rc"}, "rc", true},
+		{"stable and the wildcard together admit everything", []string{"stable", "*"}, "beta", true},
+		{"stable and the wildcard admit the stable line too", []string{"stable", "*"}, "stable", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cl := ChangelogSpec{Enabled: c.enabled, Prerelease: c.prerelease}
-			gh := GitHubSpec{Enabled: c.enabled, Prerelease: c.prerelease}
-			assert.Equal(t, c.want, cl.Records(c.isPre))
-			assert.Equal(t, c.want, gh.Records(c.isPre), "both specs answer alike")
+			assert.Equal(t, c.want, ChannelsAdmit(c.channels, c.channel))
+		})
+	}
+}
+
+// TestRecordSpecsGateOnChannels pins the two-part gate both recorders read:
+// the policy must be enabled, and the release's channel must be one it records
+// on. The specs answer identically, which is what lets the changelog and the
+// GitHub release be configured the same way.
+func TestRecordSpecsGateOnChannels(t *testing.T) {
+	cases := []struct {
+		name     string
+		enabled  bool
+		channels []string
+		channel  string
+		want     bool
+	}{
+		{"every channel, a stable release", true, nil, "stable", true},
+		{"every channel, a prerelease", true, nil, "beta", true},
+		{"stables only, a stable release", true, []string{"stable"}, "stable", true},
+		{"stables only, a prerelease", true, []string{"stable"}, "beta", false},
+		{"one named channel", true, []string{"beta"}, "beta", true},
+		{"one named channel, another arrives", true, []string{"beta"}, "rc", false},
+		{"prereleases only, a stable release", true, []string{"*"}, "stable", false},
+		{"disabled outright", false, nil, "stable", false},
+		{"disabled beats the channels", false, []string{"stable"}, "stable", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cl := ChangelogSpec{Enabled: c.enabled, Channels: c.channels}
+			gh := GitHubSpec{Enabled: c.enabled, Channels: c.channels}
+			assert.Equal(t, c.want, cl.Records(c.channel))
+			assert.Equal(t, c.want, gh.Records(c.channel), "both specs answer alike")
 		})
 	}
 }
@@ -141,7 +177,7 @@ func TestPackageVersionGroupName(t *testing.T) {
 // change it — the entry format included, since it shapes every body sent.
 func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
 	base := GitHubSpec{
-		Enabled: true, Prerelease: true, Owner: "acme", Repo: "mono",
+		Enabled: true, Owner: "acme", Repo: "mono",
 		APIURL: "https://api.github.com", TokenEnv: "GITHUB_TOKEN",
 		Format: RecordFormat{
 			FeaturesTitle: "Features",
@@ -152,7 +188,7 @@ func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
 
 	cases := map[string]func(s *GitHubSpec){
 		"enabled":     func(s *GitHubSpec) { s.Enabled = false },
-		"prerelease":  func(s *GitHubSpec) { s.Prerelease = false },
+		"channels":    func(s *GitHubSpec) { s.Channels = []string{"stable"} },
 		"allPackages": func(s *GitHubSpec) { s.AllPackages = true },
 		"owner":       func(s *GitHubSpec) { s.Owner = "other" },
 		"repo":        func(s *GitHubSpec) { s.Repo = "other" },
@@ -167,6 +203,10 @@ func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
 		},
 		"header length": func(s *GitHubSpec) { s.Format.Header = nil },
 		"footer":        func(s *GitHubSpec) { s.Format.Footer = []EntryLine{{Line: []string{"a"}}} },
+		"a line's channels": func(s *GitHubSpec) {
+			s.Format.Header = []EntryLine{{Line: []string{"a"}, Package: []string{"core"},
+				Channels: []string{"beta"}}}
+		},
 	}
 	for name, change := range cases {
 		other := base

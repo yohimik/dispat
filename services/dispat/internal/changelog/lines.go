@@ -84,10 +84,14 @@ func RenderLines(lines []model.EntryLine, rel *plan.Release, look Lookup) string
 	return b.String()
 }
 
-// applies reports whether a line is written for the release's package. Every
-// filter that is set must match (a line filtered by space *and* group belongs
-// to packages in both), while the values within one filter are alternatives.
-// A line with no filters belongs to every package.
+// applies reports whether a line is written for this release. Every filter that
+// is set must match (a line filtered by space *and* group belongs to packages
+// in both), while the values within one filter are alternatives. A line with no
+// filters belongs to every release of every package.
+//
+// The channels filter is the one that asks about the release rather than the
+// package: it is how a line reaches the betas alone, the stables alone, or one
+// named prerelease channel.
 func applies(l model.EntryLine, rel *plan.Release) bool {
 	pkg := rel.Pkg
 	space, group := "", ""
@@ -96,7 +100,8 @@ func applies(l model.EntryLine, rel *plan.Release) bool {
 	}
 	return matchesAny(l.Package, pkg.Name) &&
 		matchesAny(l.Space, space) &&
-		matchesAny(l.Group, group)
+		matchesAny(l.Group, group) &&
+		model.ChannelsAdmit(l.Channels, rel.Channel)
 }
 
 // matchesAny reports whether value matches one of the patterns, with no

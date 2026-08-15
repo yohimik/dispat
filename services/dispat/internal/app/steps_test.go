@@ -167,7 +167,7 @@ func TestReadExportReadsTheStageEnvironment(t *testing.T) {
 // unset flag leaves the package's own value alone.
 func TestGitHubSpecOverridesBeatTheConfiguredPolicy(t *testing.T) {
 	a, _, _ := stepApp(t)
-	base := model.GitHubSpec{Enabled: true, Prerelease: true,
+	base := model.GitHubSpec{Enabled: true,
 		Owner: "acme", Repo: "mono", APIURL: "https://ghe.acme/api/v3", TokenEnv: "ACME_TOKEN"}
 
 	assert.Equal(t, base, a.githubSpec(base, GitHubOptions{}), "no flags change nothing")

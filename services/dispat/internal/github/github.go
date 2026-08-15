@@ -26,16 +26,17 @@ import (
 )
 
 // LogSkip explains why a resolved policy created no release, so the run's
-// dispatcher and the standalone github command word it the same way. A
-// policy switched off is ordinary configuration and stays at debug level; a
-// prerelease held back is a release-shaped decision the operator should see.
+// dispatcher and the standalone github command word it the same way. A policy
+// switched off is ordinary configuration and stays at debug level; a release
+// held back by the channels it records on is a release-shaped decision the
+// operator should see, named by its channel.
 func LogSkip(log zerolog.Logger, spec model.GitHubSpec, rel *plan.Release) {
 	if !spec.Enabled {
 		log.Debug().Str("package", rel.Pkg.Name).Msg("github release disabled by config")
 		return
 	}
-	log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
-		Msg("github release skipped: github.prerelease is false")
+	log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).Str("channel", rel.Channel).
+		Msg("github release skipped: the release's channel is not in github.channels")
 }
 
 // DefaultAPIURL is the public GitHub REST API endpoint.

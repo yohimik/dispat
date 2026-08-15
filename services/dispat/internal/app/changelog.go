@@ -58,7 +58,7 @@ func (w *changelogWork) resolve(_ context.Context, rel *plan.Release) (task, err
 		return nil, nil
 	}
 	spec := rel.Pkg.Changelog
-	if !spec.Records(rel.IsPrerelease()) {
+	if !spec.Records(rel.Channel) {
 		changelog.LogSkip(w.app.log, spec, rel)
 		return nil, nil
 	}

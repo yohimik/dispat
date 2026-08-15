@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yohimik/dispat/pkg/ccme"
 	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/ignore"
 )
@@ -381,6 +382,9 @@ type EntryLine struct {
 	Package []string
 	Space   []string
 	Group   []string
+	// Channels restricts the line to the releases whose channel they admit;
+	// empty means every release.
+	Channels []string
 }
 
 // RecordFormat customises how a release entry renders — the resolved
@@ -401,24 +405,46 @@ type RecordFormat struct {
 	Footer []EntryLine
 }
 
+// ChannelsAdmit reports whether a channel restriction admits a release on
+// channel. An empty restriction admits every release. "stable" is the stable
+// line and "*" any prerelease channel; anything else is a channel name,
+// compared the case-insensitive way channel names are compared everywhere.
+func ChannelsAdmit(channels []string, channel string) bool {
+	if len(channels) == 0 {
+		return true
+	}
+	for _, c := range channels {
+		if c == ccme.ChannelAnyPrerelease {
+			if channel != ccme.ChannelStable {
+				return true
+			}
+			continue
+		}
+		if strings.EqualFold(c, channel) {
+			return true
+		}
+	}
+	return false
+}
+
 // ChangelogSpec is a package's resolved changelog policy.
 type ChangelogSpec struct {
 	Enabled bool
-	// Prerelease writes an entry for a prerelease version too; false keeps
-	// the file a record of stable releases alone.
-	Prerelease bool
-	File       string // empty means the writer default (CHANGELOG.md)
+	// Channels restricts which releases get an entry; empty means every
+	// release. ["stable"] keeps the file a record of stable releases alone.
+	Channels []string
+	File     string // empty means the writer default (CHANGELOG.md)
 	// FileTitle heads the file; an empty list means the writer default.
 	FileTitle []EntryLine
 	Format    RecordFormat
 }
 
-// Records reports whether a release on this policy is written at all:
-// enabled, and — when the version is a prerelease — not held back by the
-// prerelease opt-out. The caller passes the release's own answer rather than
-// the release, so the domain model stays free of the planner's types.
-func (s ChangelogSpec) Records(isPrerelease bool) bool {
-	return s.Enabled && (s.Prerelease || !isPrerelease)
+// Records reports whether a release on this policy is written at all: enabled,
+// and on a channel the policy admits. The caller passes the release's resolved
+// channel rather than the release, so the domain model stays free of the
+// planner's types.
+func (s ChangelogSpec) Records(channel string) bool {
+	return s.Enabled && ChannelsAdmit(s.Channels, channel)
 }
 
 // GitHubSpec is a package's resolved GitHub-release policy. Owner/Repo may
@@ -426,9 +452,10 @@ func (s ChangelogSpec) Records(isPrerelease bool) bool {
 // releaser resolution, which is where "unresolvable" is an outcome.
 type GitHubSpec struct {
 	Enabled bool
-	// Prerelease creates a release for a prerelease version too; false keeps
-	// the releases page a list of stable releases alone.
-	Prerelease bool
+	// Channels restricts which releases are created; empty means every
+	// release. ["stable"] keeps the releases page a list of stable releases
+	// alone, while the prereleases are still tagged and still published.
+	Channels []string
 	// AllPackages creates a release for every published package, even without
 	// the DISPAT_EXPORT_GITHUB export (which then only adds assets).
 	AllPackages bool
@@ -441,8 +468,8 @@ type GitHubSpec struct {
 
 // Records reports whether a release on this policy is created at all, the
 // GitHub counterpart of ChangelogSpec.Records.
-func (s GitHubSpec) Records(isPrerelease bool) bool {
-	return s.Enabled && (s.Prerelease || !isPrerelease)
+func (s GitHubSpec) Records(channel string) bool {
+	return s.Enabled && ChannelsAdmit(s.Channels, channel)
 }
 
 // Key identifies the releaser a policy needs: two packages whose specs share
@@ -455,7 +482,7 @@ func (s GitHubSpec) Records(isPrerelease bool) bool {
 // contain, so no two distinct policies can encode alike.
 func (s GitHubSpec) Key() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%t\x00%t\x00%t\x00%q\x00%q\x00%q\x00%q", s.Enabled, s.Prerelease, s.AllPackages,
+	fmt.Fprintf(&b, "%t\x00%q\x00%t\x00%q\x00%q\x00%q\x00%q", s.Enabled, s.Channels, s.AllPackages,
 		s.Owner, s.Repo, s.APIURL, s.TokenEnv)
 	s.Format.writeKey(&b)
 	return b.String()
@@ -472,7 +499,7 @@ func (f RecordFormat) writeKey(b *strings.Builder) {
 func writeLinesKey(b *strings.Builder, lines []EntryLine) {
 	fmt.Fprintf(b, "\x00%d", len(lines))
 	for _, l := range lines {
-		fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q", l.Line, l.Package, l.Space, l.Group)
+		fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q", l.Line, l.Package, l.Space, l.Group, l.Channels)
 	}
 }
 

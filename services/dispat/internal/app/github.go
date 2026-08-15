@@ -80,7 +80,7 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 		return nil, nil
 	}
 	spec := w.app.githubSpec(rel.Pkg.GitHub, w.opts)
-	if !spec.Records(rel.IsPrerelease()) {
+	if !spec.Records(rel.Channel) {
 		github.LogSkip(w.app.log, spec, rel)
 		return nil, nil
 	}

@@ -285,7 +285,7 @@ type ghDispatch struct {
 // pass through — the per-publish recorder and the finalize phase — so the
 // prerelease opt-out is checked here rather than at each caller.
 func (d *ghDispatch) Record(ctx context.Context, rel *plan.Release) error {
-	if spec := rel.Pkg.GitHub; !spec.Records(rel.IsPrerelease()) {
+	if spec := rel.Pkg.GitHub; !spec.Records(rel.Channel) {
 		github.LogSkip(d.log, spec, rel)
 		return nil
 	}

@@ -80,7 +80,7 @@ type Dispatcher struct {
 // records nothing.
 func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 	spec := rel.Pkg.Changelog
-	if !spec.Records(rel.IsPrerelease()) {
+	if !spec.Records(rel.Channel) {
 		LogSkip(d.Log, spec, rel)
 		return nil
 	}
@@ -91,15 +91,15 @@ func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 // LogSkip explains why a policy wrote nothing, so the two callers that ask
 // spec.Records — the dispatcher and the standalone changelog command — agree
 // on the wording. A file switched off outright is ordinary configuration and
-// stays at debug level; a prerelease held back is a release-shaped decision
-// the operator should see.
+// stays at debug level; a release held back by the channels it records on is a
+// release-shaped decision the operator should see, named by its channel.
 func LogSkip(log zerolog.Logger, spec model.ChangelogSpec, rel *plan.Release) {
 	if !spec.Enabled {
 		log.Debug().Str("package", rel.Pkg.Name).Msg("changelog file disabled by config")
 		return
 	}
-	log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
-		Msg("changelog entry skipped: changelog.prerelease is false")
+	log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).Str("channel", rel.Channel).
+		Msg("changelog entry skipped: the release's channel is not in changelog.channels")
 }
 
 // HasEntry reports whether content already carries the release entry for tag:

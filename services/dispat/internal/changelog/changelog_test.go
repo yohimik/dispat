@@ -27,9 +27,16 @@ func testUnit(typ string, bump ccme.Bump, description string) *ccme.Unit {
 }
 
 func testRelease(dir string, next ccme.Version) *plan.Release {
+	// The channel the planner would have resolved: what the version says it
+	// is, so a release built here answers the record policies as a real one.
+	channel := ccme.ChannelStable
+	if next.IsPrerelease() {
+		channel = next.Prerelease[0]
+	}
 	return &plan.Release{
-		Pkg:  &model.Package{Name: "core", Dir: dir, Space: &model.Space{Name: "libs"}},
-		Next: next,
+		Pkg:     &model.Package{Name: "core", Dir: dir, Space: &model.Space{Name: "libs"}},
+		Next:    next,
+		Channel: channel,
 		Units: []*ccme.Unit{
 			testUnit("feat", ccme.BumpMinor, "add streaming"),
 			testUnit("fix", ccme.BumpPatch, "close leak"),
@@ -195,14 +202,14 @@ func TestDispatcherRoutesPerPackagePolicy(t *testing.T) {
 	assert.Empty(t, entries, "a disabled package records nothing")
 }
 
-// TestDispatcherHoldsPrereleasesBack: with changelog.prerelease off, the
-// betas of a version leave no entry behind and the graduation to stable
-// writes the one entry covering them.
-func TestDispatcherHoldsPrereleasesBack(t *testing.T) {
+// TestDispatcherRecordsOnlyTheChannelsConfigured: with the file recording on
+// the stable channel alone, the betas of a version leave no entry behind and
+// the graduation to stable writes the one entry covering them.
+func TestDispatcherRecordsOnlyTheChannelsConfigured(t *testing.T) {
 	dir := t.TempDir()
 	d := &Dispatcher{Now: func() time.Time { return testDate }}
 	ctx := context.Background()
-	spec := model.ChangelogSpec{Enabled: true, Prerelease: false}
+	spec := model.ChangelogSpec{Enabled: true, Channels: []string{"stable"}}
 
 	beta := testRelease(dir, ccme.Version{Major: 2, Prerelease: []string{"beta", "1"}})
 	beta.Pkg.Changelog = spec
