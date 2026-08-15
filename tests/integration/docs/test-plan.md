@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Thirty goals across thirty-one test files, one file each except goal 21, which the two shell helpers split between
+Thirty-one goals across thirty-two test files, one file each except goal 21, which the two shell helpers split between
 `if_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
 in, so a reader looking for "how does a plan get computed" or "which command does what" lands in one place.
 
@@ -160,6 +160,16 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     is not a race dispat can win by being careful, so it refuses to enter it: the first to push the lock tag releases,
     the second is told to come back later, and the tag is gone by the time either exits.
 
+### Correcting the record
+
+31. **Corrections and reverted changelogs** (`corrections_test.go`): a release record is written in a commit message,
+    and a commit message cannot be rewritten once it is pushed. `Edits` restates a named record and `Deletes`
+    discards it, both reaching only work no package has released yet. The claims a release depends on: the corrected
+    record decides the version and the changelog, a correction of released work is a visible no-op nothing can hide,
+    the newest correction of a target wins, a correction narrows a record but never widens it, and a correction of a
+    correction undoes it. `Reverts` closes the file: it takes a reverted entry and its revert out of the changelog
+    while both still count toward the bump.
+
 ### Where areas deliberately meet
 
 Five subjects are asserted from more than one goal, on purpose, because a property and the feature that carries it
@@ -277,6 +287,9 @@ tests/integration/
   the guards
   guard_test.go             goal 29
   lock_test.go              goal 30
+
+  correcting the record
+  corrections_test.go       goal 31
 
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
@@ -860,6 +873,27 @@ these tests ask for it back.
 | `TestReleaseLockAppliesOnlyToRelease`      | `status`, `preview`, `run`, `changelog`, `autoversion`, `commit` and `scanner` take no lock, which is why they still work in a repository with no remote.                                                                                  |
 | `TestReleaseLockIsNotAReleaseTag`          | The lock is on HEAD while the plan is computed, so a `{version}` tag format, the broadest there is, still reads 0.1.0 as the baseline and releases 0.2.0.                                                                                |
 | `TestReleaseLockNotTakenWhenNothingToRelease` | `--require-release` is the one case where the plan decides whether the run happens at all, so it is answered before the lock rather than after it: a run that will publish nothing must not put the tag on the remote, and must not make a real release queue behind it, only to find it had nothing to do. |
+
+### Goal 31: corrections and reverted changelogs (`corrections_test.go`)
+
+Every scenario names its target the way an operator does, with `git rev-parse HEAD` after the commit it means, so the
+footers under test carry real shas rather than fixtures. Most run in a two-package repository with no edge between
+the packages, which is what makes "the correction reached exactly this far" assertable: the second package is the
+control.
+
+| Test                                                    | Claim proven                                                                                                                                                                                                                                       |
+|---------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestCorrectionEditRestatesTheRecordBeforeRelease`      | The specification's worked example end to end: a commit misclassified as a breaking feature is restated as a fix before anything ships, so the package releases a patch rather than a major, the changelog carries the restatement and names what it corrects, the mistake is documented nowhere, and the next run converges. |
+| `TestCorrectionAfterReleaseIsAVisibleNoop`              | Once the target has shipped its record is published history: the correction does nothing, W209 reports it against the right package, and the carrying unit still releases on its own account. `--quiet-parser` cannot hide W209, which is what makes it non-suppressible in practice rather than only in the registry. |
+| `TestCorrectionPrecedenceAndVoiding`                    | Two corrections of one target resolve newest-first, with W210 on the loser and the restatement deciding the bump; then a delete of a correction voids it (W215), which un-does the correction and brings the original record back. |
+| `TestCorrectionScopeIsContainedNotCombined`             | Narrowing and widening in one flow: a correction scoped to one package restates a record scoped `(*)` for that package while the record stands for the other, and a correction naming a package its target never claimed is E213 with the target untouched. |
+| `TestCorrectionWildcardClearsAScope`                    | `Deletes: *` on a `chore` discards every pending record for the scope it names, releases nothing in its place, and leaves the package outside that scope releasing normally.                                                                       |
+| `TestCorrectionTargetsMustResolve`                      | The three unit-scoped errors through the binary: a sha that is not an earlier commit (E210), a bare sha naming a commit that carries two units (E211), and a correction aimed at a `cancel` barrier (E212).                                        |
+| `TestCorrectionDiscardsWhatTheRecordPropagated`         | A deleted record takes its propagated contributions with it: the consumer that would have been carried along by the caret has no reason to release at all.                                                                                          |
+| `TestCorrectionRidesAVersioningGroupOnlyWhenARecordSurvives` | Discarding the record that was a versioning group's only cause stops the whole group, rather than leaving its members riding (W234) a version nothing asked for.                                                                              |
+| `TestRevertTakesBothEntriesOutOfTheChangelog`           | The revert trap and its changelog half together: the bump keeps the reverted commit's major, because consumers may have seen it already, while the changelog loses both entries because the release contains neither the change nor its removal (W212). The run converges. |
+| `TestRevertWithAnUnreachableTargetStaysInformational`   | The two degraded forms: a well-formed sha naming no reachable commit is W213 and the revert releases and is documented as usual, and a value that is not a sha at all is the parser's W214 with no second code from dispat.                        |
+| `TestRevertSuppressionIsVoidedByACorrection`            | Discarding a revert's record voids its changelog suppression, so the entry it hid returns and there is no W212 left to report. The §7.4 voiding rule applied to §7.3.                                                                              |
 
 ## Regression fences
 
