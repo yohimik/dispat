@@ -59,6 +59,42 @@ YAML config can pull in a JSON fragment and the other way around.
 An empty file is an error. A `$ref` says "the value is over there", so a file with nothing in it is almost always a
 mistake rather than an intention.
 
+## Merging several files
+
+A `$ref` can name a list of files instead of one. Dispat reads them in the order they are written and combines them
+into a single value. This is how a block that several places need is written once and adjusted where it has to be:
+
+```yaml
+# dispat.yaml
+scripts:
+  $ref:
+    - ./cfg/scripts-common.yaml
+    - ./cfg/scripts-local.yaml
+```
+
+Objects merge key by key, and the last file to write a key is the one that wins. In the example above,
+`cfg/scripts-local.yaml` needs to hold only the scripts it changes; everything else comes from the common file.
+
+Lists are joined end to end, which is what makes this useful for the record lines around a changelog entry or a GitHub
+release:
+
+```yaml
+changelog:
+  footer:
+    $ref:
+      - ./cfg/footer-common.yaml   # the lines every repository writes
+      - ./cfg/footer-extra.yaml    # the ones this one adds
+```
+
+The files have to agree on what they hold. Every file of one `$ref` must hold an object, or every file must hold a
+list; a single value cannot be merged with anything. Mixing them is an error naming both files and what each of them
+holds. A list naming no files at all is an error too, and a list naming one file means exactly what naming that file
+directly means.
+
+Keys written beside the reference still win over the merged result, the same way they win over a single file. The
+merge itself is not a deep merge: a key an object holds replaces that key whole, exactly as
+[overriding](#overriding-part-of-a-fragment) does.
+
 ## References inside references
 
 A referenced file may hold references of its own, resolved against its own folder. There is no limit worth thinking
@@ -112,9 +148,11 @@ the same way.
 lives in a fragment, the fragment is what gets rewritten, the reference in the root config stays as it is, and the
 backup copy sits beside the file that changed.
 
-The one thing it will not do is write a key that is composed from a fragment *and* the keys beside the reference,
-because there are two files it could go in and no reason to prefer one. Dispat refuses and tells you to write that key
-beside the `$ref`, or to leave the reference as the whole value.
+The one thing it will not do is write a key that comes from more than one file at once. That happens two ways: a key
+composed from a fragment *and* the keys beside the reference, and a key merged from a `$ref` naming several files. In
+both cases there is more than one file the new value could go in and no reason to prefer one, so dispat refuses and
+says what to change. For a composed key, write it beside the `$ref` or leave the reference as the whole value; for a
+merged one, write it beside the `$ref` or point the reference at a single file.
 
 ## Seeing what was read
 

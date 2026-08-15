@@ -336,10 +336,18 @@ changelog:
   releaseName: ""
   # header and footer are written inside every entry, above the sections and
   # after them. An element is a line, an array of lines, or an object whose
-  # package/space/group globs decide which packages get it.
+  # package/space/group globs decide which packages get it, and whose channels
+  # decide which releases do: "stable", "*" for any prerelease, or a channel
+  # name such as beta. Unset reaches every package and every release.
   footer:
     - line: "Published from the acme monorepo."
       space: libs
+    - line: "This is a test build. Do not depend on it."
+      channels: ["*"]
+  # channels also restricts the entries themselves. Unset writes one for every
+  # release; ["stable"] keeps the file a history of the stable line, the betas
+  # leaving nothing behind and the graduation writing the entry covering them.
+  # channels: [stable]
 
 # Optional finalize phase (disabled by default): one release commit capturing
 # changelog/manifest changes of all published packages (tags then point at
@@ -405,3 +413,8 @@ github:
   releaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}"   # default: the tag
   footer:
     - "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"
+  # Which releases reach the releases page. Unset creates one for every
+  # release; ["stable"] keeps the page a list of stable releases while the
+  # prereleases are still tagged and published. A created release is flagged
+  # as a prerelease whenever the version is one, whatever this says.
+  # channels: [stable]

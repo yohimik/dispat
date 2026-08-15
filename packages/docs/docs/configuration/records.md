@@ -26,7 +26,7 @@ repository.
 | Key       | Default        | Description                                   |
 |-----------|----------------|-----------------------------------------------|
 | `enabled`    | `true`         | Write a changelog file per published package.                                          |
-| `prerelease` | `true`         | Write an entry for a prerelease version too; see [Holding prereleases back](#holding-prereleases-back). |
+| `channels`   | every release  | Which releases get an entry; see [Choosing the channels that record](#choosing-the-channels-that-record). |
 | `file`       | `CHANGELOG.md` | File name inside the package folder.                                                   |
 | `fileTitle`  | `# Changelog`  | Heads the file, above every entry. Takes the [line shapes](#your-own-words-around-an-entry) `header` and `footer` take, so it can be several lines and can differ per package. |
 | *format*     |                | All entry format options above.                                                        |
@@ -55,7 +55,7 @@ lands inside the release commit, and the release stage's own recorder finds it a
 |------------|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs).                                                                                                                                                |
 | `allPackages`  | `false`                  | Create a release for every published package, even when no script exported `DISPAT_EXPORT_GITHUB`; the export then only adds assets. Default: the export is the per-package opt-in. |
-| `prerelease` | `true`                    | Create a release for a prerelease version too (flagged as a prerelease on GitHub); see [Holding prereleases back](#holding-prereleases-back).                                                                                        |
+| `channels` | every release             | Which releases get a GitHub release; see [Choosing the channels that record](#choosing-the-channels-that-record). A created release is flagged as a prerelease on GitHub whenever the version is one, whatever this says.             |
 | `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                      |
 | `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                       |
 | `apiUrl`   | `https://api.github.com`  | REST endpoint; set for GitHub Enterprise.                                                                                                                                                                                                                              |
@@ -168,6 +168,39 @@ Three optional filters narrow an object to part of the workspace:
 Each takes one name or an array of names, and matches the same way the `--package`, `--space` and `--group` flags do:
 case-insensitively, with `*` standing for any run of characters.
 
+### Choosing which releases a line reaches
+
+A fourth filter, `channels`, asks about the release rather than the package. It is how a line goes into the
+prereleases and stays out of the stable entry, or the other way around:
+
+```json title="dispat.json"
+{
+  "changelog": {
+    "header": [
+      { "line": "This is a test build. Do not depend on it.", "channels": "*" }
+    ],
+    "footer": [
+      { "line": "Supported until the next major.", "channels": "stable" }
+    ]
+  }
+}
+```
+
+It takes one value or an array of them, matched case-insensitively:
+
+| Value      | Reaches                                                                                             |
+|------------|-------------------------------------------------------------------------------------------------------|
+| `stable`   | Stable releases.                                                                                    |
+| `*`        | Every prerelease, whatever its channel is called, and no stable release.                            |
+| a name     | The named [channel](../concepts.md#prereleases-and-channels) alone, such as `beta` or `rc`.         |
+
+A line with no `channels` reaches every release, as it always has. `channels` combines with the package filters the
+same way the others do: a line naming a package and a channel is written where both hold.
+
+It does not apply to `fileTitle`, which is written once at the top of the file and matched against on the next
+release. A title that changed with the channel would be written again every time the channel moved, so dispat refuses
+it in the config rather than producing a file with several titles.
+
 ```json title="dispat.json"
 {
   "changelog": {
@@ -240,24 +273,48 @@ Two things worth knowing:
   against on the next release so it is not duplicated. A title holding `${DISPAT_TAG}` looks different every time, the
   match fails, and the old title stays behind in the file. Package and space names are safe; versions and tags are not.
 
-## Holding prereleases back
+## Choosing the channels that record
 
 Both records write on every channel by default: a `1.3.0-beta.0` earns a changelog entry and a GitHub release just
-like a stable version does. `prerelease: false` on either object stops that for the version it applies to, and it is
-one of the fields a package may [override](./packages.md), so the choice can be per package.
+like a stable version does. `channels` names the ones that do, on either object, and it is one of the fields a package
+may [override](./packages.md), so the choice can be per package.
+
+The most common setting keeps the changelog a history of the stable line:
 
 ```json title="dispat.json"
 {
-  "changelog": { "prerelease": false },
-  "github": { "prerelease": false }
+  "changelog": { "channels": ["stable"] },
+  "github": { "channels": ["stable"] }
 }
 ```
 
-Nothing else about the prerelease changes. It is still planned, still built, still published and still tagged; the
-flow does not notice. Only the records are held: the betas of a version leave nothing behind, and the
+It takes the same values a line's [`channels`](#choosing-which-releases-a-line-reaches) does: `stable`, `*` for every
+prerelease, or a channel name such as `beta`. Naming nothing at all is the default, every release. So
+`["stable", "beta"]` records the stable line and the betas while an rc leaves nothing behind, and `["*"]` is the
+opposite of the example above.
+
+Nothing else about a held-back release changes. It is still planned, still built, still published and still tagged;
+the flow does not notice. Only the records are held: the betas of a version leave nothing behind, and the
 **graduation** to stable writes the one entry and creates the one release covering the whole train, under the
-[release-notes windowing](#changelog) that already collects it. A repository whose changelog is meant to read as the
-history of its stable releases, with the beta traffic staying in the tags, wants exactly this.
+[release-notes windowing](#changelog) that already collects it. Each skipped record is reported at info level with
+the channel it was on, so a run says what it held back and why.
+
+Because a list states the whole restriction rather than adding to an inherited one, a package under a restricted
+workspace opts back in by naming both halves:
+
+```json title="dispat.json"
+{
+  "changelog": { "channels": ["stable"] },
+  "packages": {
+    "core": { "changelog": { "channels": ["stable", "*"] } }
+  }
+}
+```
+
+Every package records its stable releases only; `core` records everything.
+
+On GitHub this decides which releases are **created**. Whether a created release is marked as a prerelease is decided
+by the version itself and is not configurable: a `1.3.0-beta.0` that gets a release always gets a prerelease one.
 
 ## `commit`
 
