@@ -17,9 +17,12 @@ Detection still reads every package's manifests whichever way you narrow: the wo
 declared dependency onto a provider, so an edge onto a package outside the selection stays recognised rather than
 being proposed for removal.
 
-**What it reads.** Every package folder is scanned for manifests: `package.json`, `go.mod`, `Cargo.toml`,
-`pyproject.toml` (PEP 621 and Poetry), `composer.json`, `pom.xml`, `*.csproj`, `pubspec.yaml`, `requirements*.txt`,
-`Dockerfile` and `compose.yaml`.
+**What it reads.** Every package folder is scanned for manifests — the same fifteen families `dispat scanner` reads:
+npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.toml`, requirements files), Composer
+(`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj` and the flat lists), pub (`pubspec.yaml`), Ruby (`Gemfile`,
+`*.gemspec`), CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple bundles (`Info.plist`), Android
+(`AndroidManifest.xml`), Gradle (`libs.versions.toml`, `build.gradle(.kts)`) and Docker (`Dockerfile`,
+`compose.yaml`).
 
 **How a dependency becomes an edge.** A declaration matches a workspace package by manifest name first (Python names are
 PEP 503-normalised, Maven names are `groupId:artifactId`, Docker names are image repositories such as
