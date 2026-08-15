@@ -108,11 +108,10 @@ caches, and only then deleting the plugin.
 The `docs` package is released by dispat like any other, with a `keep: true` dependency on `dispat` so the site is
 rebuilt after the CLI it documents:
 
-| Stage     | Script                                                             | What it does                                                                             |
-|-----------|--------------------------------------------------------------------|------------------------------------------------------------------------------------------|
-| `version` | [`scripts/cut-docs-version.sh`](../../scripts/cut-docs-version.sh) | Freezes a `versioned_docs` snapshot, once per **stable minor**; prereleases are skipped. |
-| `build`   | `pnpm install --frozen-lockfile && pnpm run build`                 | The production build, into `build/`.                                                     |
-| `publish` | [`scripts/deploy-docs.sh`](../../scripts/deploy-docs.sh)           | Force-pushes `build/` to an orphan `gh-pages` branch. Refuses to run outside CI.         |
+| Stage     | Script                                                   | What it does                                                                             |
+|-----------|----------------------------------------------------------|------------------------------------------------------------------------------------------|
+| `build`   | the `build` script in [`dispat.yaml`](./dispat.yaml)     | The containerised production build via [`Dockerfile`](./Dockerfile), exported back into the package folder. On the way it freezes a `versioned_docs` snapshot, once per **stable minor** (the `DOCS_VERSION` build arg; prereleases cut nothing). |
+| `publish` | [`scripts/deploy-docs.sh`](../../scripts/deploy-docs.sh) | Force-pushes `build/` to an orphan `gh-pages` branch. Refuses to run outside CI.         |
 
 Tags are `packages/docs/v<version>`. `versioned_docs/`, `versioned_sidebars/` and `versions.json` are **source**, not
 build output: a script writes them once and they are edited by hand afterwards, so they are tracked (see

@@ -5,7 +5,7 @@
 #   wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 #
 # One script for every Unix: the release binaries are static (CGO_ENABLED=0, see
-# scripts/build-dispat.sh), so there is nothing to compile and nothing to link
+# services/dispat/Dockerfile), so there is nothing to compile and nothing to link
 # against, and the only tools this needs are the ones every base image already
 # has: a POSIX shell and either curl or wget.
 #

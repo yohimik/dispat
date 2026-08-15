@@ -24,8 +24,9 @@
 #
 # They look like build output because a script generates them, but they are
 # source: the frozen copy of the docs as they stood at 1.0, 1.1, ... written
-# once by `docusaurus docs:version` (scripts/cut-docs-version.sh, run from the
-# docs package's version stage) and then edited by hand like any other page.
+# once by `docusaurus docs:version` (inside the Dockerfile build, when the
+# DOCS_VERSION build arg names a minor to freeze) and then edited by hand like
+# any other page.
 # Ignoring them means every CI build silently rebuilds the site with the
 # current docs under every version's URL.
 

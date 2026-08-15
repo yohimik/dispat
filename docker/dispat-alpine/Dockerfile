@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # The small dispat image. The release binaries are static (CGO_ENABLED=0, see
-# scripts/build-dispat.sh), so musl costs nothing here.
+# services/dispat/Dockerfile), so musl costs nothing here.
 #
 # The fetch stage is kept even though Alpine has busybox wget and could run the
 # installer in place: it keeps the four images identical in shape, and it leaves

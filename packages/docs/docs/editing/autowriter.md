@@ -165,8 +165,9 @@ a binary resolves its workspace dependencies from the versions `go.mod` pins,
 and those are only as fresh as the last release that bumped them. So a provider
 changed without a version bump ships as its published copy, even though every
 test in CI ran your working tree. Bracketing the build closes the gap. dispat's own
-[`build-dispat.sh`](https://github.com/yohimik/dispat/blob/main/scripts/build-dispat.sh)
-is exactly this:
+[`build` script](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.yaml)
+is exactly this bracket, opened and closed inside the stage with `flow.onFail`
+running the unlink as the net. As a standalone script, the same shape is:
 
 ```sh
 link() { dispat autowriter --package dispat --since all --sync-lock=false "$@"; }
