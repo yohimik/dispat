@@ -1759,8 +1759,8 @@ leaving it — and nowhere in between. See §9.3 for the full rules and §24 D.4
 
 * `<version>` MUST be a valid SemVer 2.0.0 version, with no `v` prefix.
 * `<package>` MUST equal a workspace package name byte-for-byte.
-* **Parse at the last `%`.** Package names may contain `%` (`@acme/ui@1.2.3`); versions never do. Splitting at the first
-  `%` is a conformance failure.
+* **Parse at the last `@`.** Package names may contain `@` (`@acme/ui@1.2.3`); versions never do. Splitting at the first
+  `@` is a conformance failure.
 * Tags whose left part is not a known package are ignored silently (they are someone else's tags).
 * Tags whose right part is not valid SemVer are ignored with `W190`.
 * Build metadata (`1.2.3+sha.abc`) is permitted in tags, ignored for precedence per SemVer, and MUST NOT be carried into
@@ -1780,7 +1780,7 @@ configuration.
 
 ### 12.3 Baselines
 
-For package `P`, over reachable tags `P%*`:
+For package `P`, over reachable tags `P@*`:
 
 * `baseline(P)` = the highest by SemVer precedence.
 * `stableBaseline(P)` = the highest with no prerelease component.
@@ -2357,7 +2357,7 @@ are easy to miss and hard to diagnose:
   for that, which suppresses file-derived resolution without touching the graph.
 
 The output is a release plan: package, baseline, next version, channel, contributing units, and for each package the
-reason (`direct`, `propagated from X`, `channel from X` where the package has no bump of its own, or `catch-up from X%V`
+reason (`direct`, `propagated from X`, `channel from X` where the package has no bump of its own, or `catch-up from X@V`
 where `X` is not itself in this plan). Where the channel differs from the baseline's, the plan MUST show both — the
 transition a reader needs to see is `beta → stable`, not the word `stable` alone. Packages whose only reason is catch-up
 MUST be marked as such (`W193`) and MUST carry the origin's **published** version, so that a reviewer can see at a
@@ -2709,8 +2709,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 65  | Tag with build metadata `pkg@1.2.3+abc`                                | Accepted; metadata ignored and not carried forward.                                                                                                       |
 | 66  | Two tags with the same version on different commits                    | `E191`.                                                                                                                                                   |
 | 67  | Tag `pkg@1.2.3` where `pkg` is unknown                                 | Ignored silently.                                                                                                                                         |
-| 68  | Tag `pkg%not-semver`                                                   | Ignored, `W190`.                                                                                                                                          |
-| 69  | `@acme/ui@1.2.3` split at first `%`                                    | Conformance failure; MUST split at last `%`.                                                                                                              |
+| 68  | Tag `pkg@not-semver`                                                   | Ignored, `W190`.                                                                                                                                          |
+| 69  | `@acme/ui@1.2.3` split at first `@`                                    | Conformance failure; MUST split at last `@`.                                                                                                              |
 | 70  | Manifest version disagrees with baseline                               | `W192`; tags win.                                                                                                                                         |
 | 71  | `Release-As` lower than baseline                                       | `E153`.                                                                                                                                                   |
 | 72  | `Release-As` exact on a multi-package scope                            | `E154`.                                                                                                                                                   |
@@ -3573,7 +3573,7 @@ sentence appended after trailers. It produces `W151` and the paragraph is body.
 
 ```
 parseTag(ref):
-    at = lastIndexOf(ref, '%')
+    at = lastIndexOf(ref, '@')
     if at <= 0 or at == len(ref) - 1: return NONE
     name = ref[0..at]
     ver  = ref[at+1..]
@@ -3761,8 +3761,8 @@ Sections B.4 and B.5 override these tags locally where stated.
 | 3    | `feat(core,cli): x`                      | scopes `[core, cli]`                                                                     |
 | 4    | `feat(core, cli): x`                     | scopes `[core, cli]` — space after comma allowed                                         |
 | 5    | `feat(core ,cli): x`                     | `E102`                                                                                   |
-| 6    | `feat(@acme/theme): x`                   | scopes `[%acme/theme]` — `%` inside parens is literal                                    |
-| 7    | `feat(@acme/theme)%beta: x`              | scopes `[%acme/theme]`, channel `beta`                                                   |
+| 6    | `feat(@acme/theme): x`                   | scopes `[@acme/theme]` — `@` inside parens is literal                                    |
+| 7    | `feat(@acme/theme)%beta: x`              | scopes `[@acme/theme]`, channel `beta`                                                   |
 | 8    | `feat(*,-docs-site): x`                  | all packages except `docs-site`                                                          |
 | 9    | `feat(.,-ui): x`                         | derived set minus `ui`                                                                   |
 | 10   | `feat(core)^minor+2: x`                  | propagate `minor`, depth `2`                                                             |
@@ -3857,7 +3857,7 @@ fix(core): a
 
 fix(cli): b
 
-Signed-off-by: A <a%example.com>
+Signed-off-by: A <a@example.com>
 ```
 
 → two units; the trailer is message-level and ignored (§4.5).
@@ -3867,7 +3867,7 @@ Signed-off-by: A <a%example.com>
 ```
 cancel(core): reset release state
 
-Signed-off-by: A <a%example.com>
+Signed-off-by: A <a@example.com>
 ```
 
 → Valid. The trailer is message-level (§4.5) and exempt from `E171`.
@@ -4021,10 +4021,10 @@ as in #48.
 | 58 | `core@1.4.2`                     | `core`, `1.4.2`                                                                  |
 | 59 | `@acme/theme@1.0.0`              | `@acme/theme`, `1.0.0`                                                           |
 | 60 | `@acme/theme@1.0.0-rc.1+build.5` | `@acme/theme`, `1.0.0-rc.1`, metadata ignored                                    |
-| 61 | `core%v1.4.2`                    | ignored, `W190`                                                                  |
+| 61 | `core@v1.4.2`                    | ignored, `W190`                                                                  |
 | 62 | `unknown@1.0.0`                  | ignored silently                                                                 |
 | 63 | `core@1.4`                       | ignored, `W190`                                                                  |
-| 64 | `release-2024`                   | ignored (no `%`)                                                                 |
+| 64 | `release-2024`                   | ignored (no `@`)                                                                 |
 | 65 | `core@1.5.0-beta3`               | `E182` on use as a prerelease baseline — repository-scoped: the run aborts (§16) |
 
 ### B.7 Partial failure and catch-up
@@ -4069,7 +4069,7 @@ the originating source set in every run (§9.2).
 **Vector 69** — publish order. Plan contains every released package.
 
 → `core`, `api`, `cli`, `ui`, `@acme/theme`, `docs-site`. Dependencies precede dependents; ready sets are ordered
-byte-wise by name, and `@acme/theme` precedes `docs-site` because `%` (0x40) sorts below `d` (§19.2). `docs-site`
+byte-wise by name, and `@acme/theme` precedes `docs-site` because `@` (0x40) sorts below `d` (§19.2). `docs-site`
 takes its place in the order like any other package — its private registry does not remove it (§13.10a). Any
 implementation emitting `ui` before `core`, or `@acme/theme` before `ui`, fails conformance (`E197`).
 
