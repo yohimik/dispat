@@ -131,7 +131,7 @@ func TestScanManifestsJSONEvents(t *testing.T) {
 	root := manifestRepo(t, map[string]string{"package.json": webPackageJSON})
 	var out bytes.Buffer
 	require.NoError(t, ScanManifests(context.Background(), ScanOptions{
-		Root: root, JSON: true, Out: &out, Log: zerolog.New(&out),
+		Root: root, JSON: true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 
 	evs := events(t, out.String())
@@ -173,7 +173,7 @@ func TestScanManifestsJSONCarriesTheOptionalFields(t *testing.T) {
 	})
 	var out bytes.Buffer
 	require.NoError(t, ScanManifests(context.Background(), ScanOptions{
-		Root: root, JSON: true, Out: &out, Log: zerolog.New(&out),
+		Root: root, JSON: true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 	evs := events(t, out.String())
 	require.Len(t, evs, 2)
@@ -384,7 +384,7 @@ func TestWriteManifestsReportsMissingAndStrict(t *testing.T) {
 			Root:   root,
 			Paths:  []string{"package.json"},
 			Edits:  []writer.Edit{{Name: "nowhere", Kind: manifest.KindDependencies, Range: "1.0.0"}},
-			Strict: strict, Out: &out, Log: zerolog.New(&out),
+			Strict: strict, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 		})
 		assert.Contains(t, out.String(), "missing  dependencies  nowhere  1.0.0")
 		assert.Contains(t, out.String(), "0 applied, 0 skipped, 1 missing")
@@ -511,7 +511,7 @@ func TestWriteManifestsJSONEvents(t *testing.T) {
 			{Name: "nowhere", Kind: manifest.KindDevDependencies, Range: "1.0.0"},
 		},
 		Version: "1.3.0",
-		JSON:    true, Out: &out, Log: zerolog.New(&out),
+		JSON:    true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 
 	evs := events(t, out.String())
@@ -547,7 +547,7 @@ func TestWriteManifestsJSONCarriesTheLinks(t *testing.T) {
 			{Name: "github.com/acme/core", Path: "../core"},
 			{Name: "github.com/acme/gone"}, // a removal with nothing to remove
 		},
-		JSON: true, Out: &out, Log: zerolog.New(&out),
+		JSON: true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 
 	evs := events(t, out.String())
@@ -573,7 +573,7 @@ func TestWriteManifestsSaysWhenNothingChanged(t *testing.T) {
 		Root:  root,
 		Paths: []string{"package.json"},
 		Edits: []writer.Edit{{Name: "@acme/core", Kind: manifest.KindDependencies, Range: "^1.2.0"}},
-		JSON:  true, Out: &out, Log: zerolog.New(&out),
+		JSON:  true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 	evs := events(t, out.String())
 	require.Len(t, evs, 2)
@@ -701,7 +701,7 @@ func TestReplaceFilesJSONEvents(t *testing.T) {
 			{Find: "absent", Write: "x"},
 			{Find: "keep", Write: "keep"},
 		},
-		JSON: true, Out: &out, Log: zerolog.New(&out),
+		JSON: true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 
 	evs := events(t, out.String())
@@ -727,7 +727,7 @@ func TestReplaceFilesSaysWhenNothingChanged(t *testing.T) {
 	require.NoError(t, ReplaceFiles(context.Background(), ReplaceOptions{
 		Root: root, Paths: []string{"notes.txt"},
 		Replacements: []writer.Replacement{{Find: "1.0.0", Write: "1.1.0"}},
-		JSON:         true, Out: &out, Log: zerolog.New(&out),
+		JSON:         true, Out: &out, Log: zerolog.New(&out).Level(zerolog.InfoLevel),
 	}))
 	evs := events(t, out.String())
 	require.Len(t, evs, 2)

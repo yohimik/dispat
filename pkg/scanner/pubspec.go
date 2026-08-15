@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"fmt"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -43,6 +44,7 @@ func parsePubspec(rel string, data []byte) (Manifest, error) {
 	applyPubOverrides(&m, raw.Overrides)
 	m.Deps = dedupeDeps(m.Deps)
 	sortDeps(m.Deps)
+	sort.Strings(m.Dropped)
 	return m, nil
 }
 
@@ -104,6 +106,7 @@ func pubDeps(m *Manifest, table map[string]any, kind Kind) {
 				dep.LocalPath = p
 			}
 		default:
+			m.Dropped = append(m.Dropped, "dependency "+name+": unreadable value shape")
 			continue
 		}
 		m.Deps = append(m.Deps, dep)

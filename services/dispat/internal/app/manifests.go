@@ -150,6 +150,7 @@ func ScanManifests(ctx context.Context, opts ScanOptions) error {
 	if sc == nil {
 		sc = scanner.New()
 	}
+	opts.Log.Debug().Str("dir", dir).Bool("rootOnly", opts.RootOnly).Msg("scanning")
 
 	var mans []scanner.Manifest
 	if opts.RootOnly {
@@ -169,10 +170,16 @@ func ScanManifests(ctx context.Context, opts ScanOptions) error {
 	deps := 0
 	for _, m := range mans {
 		deps += len(m.Deps)
+		for _, entry := range m.Dropped {
+			opts.Log.Debug().Str("manifest", m.Path).Str("entry", entry).
+				Msg("declaration dropped")
+		}
 		if opts.JSON {
 			logManifest(opts.Log, m)
 			continue
 		}
+		opts.Log.Debug().Str("manifest", m.Path).Str("ecosystem", string(m.Ecosystem)).
+			Int("dependencies", len(m.Deps)).Msg("manifest read")
 		printManifest(out, m)
 	}
 	if opts.JSON {
@@ -247,6 +254,9 @@ func logManifest(log zerolog.Logger, m scanner.Manifest) {
 	if m.BuildNumber != "" {
 		ev = ev.Str("buildNumber", m.BuildNumber)
 	}
+	if len(m.Dropped) > 0 {
+		ev = ev.Strs("dropped", m.Dropped)
+	}
 	ev.Interface("deps", deps).Msg("manifest")
 }
 
@@ -267,6 +277,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
+		opts.Log.Debug().Str("manifest", rel).Msg("editing manifest")
 		res, linkRes, err := edit.apply(path)
 		if err != nil {
 			opts.Log.Error().Err(err).Str("manifest", rel).Msg("manifest edit failed")
@@ -379,6 +390,7 @@ func ReplaceFiles(ctx context.Context, opts ReplaceOptions) error {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
+		opts.Log.Debug().Str("file", rel).Msg("replacing in file")
 		res, err := w.Replace(path, opts.Replacements)
 		if err != nil {
 			opts.Log.Error().Err(err).Str("file", rel).Msg("replace failed")

@@ -163,6 +163,14 @@ type Manifest struct {
 	// transitively still has to be pointed at a local folder from here. A
 	// requirement listed in Deps never appears here as well.
 	Indirect []DeclaredDep
+	// Dropped are the entries the manifest declared but the parser could not
+	// coerce into a dependency, one line each ("service db: not a mapping"),
+	// sorted for deterministic output. They are not errors: the manifest
+	// parsed, and the caller decides whether the drops are worth reporting.
+	// The shapes a format reads selectively by design (a Gradle line built by
+	// code, a platform-specific Poetry constraint list) are not dropped
+	// entries; those live in each reader's documented limits.
+	Dropped []string
 	// Root reports that the manifest sits directly in the scanned folder
 	// rather than in a sub-folder.
 	Root bool

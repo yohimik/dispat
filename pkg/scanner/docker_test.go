@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -222,6 +223,16 @@ volumes:
 	// key outside the services block is not a service's.
 	if len(m.Deps) != 0 {
 		t.Errorf("Deps = %+v, want none", m.Deps)
+	}
+	// Each of the three is a declared service the parser could not read, and
+	// the manifest says so, in name order.
+	want := []string{
+		"service empty: not a mapping",
+		"service listy: not a mapping",
+		"service scalar: not a mapping",
+	}
+	if !slices.Equal(m.Dropped, want) {
+		t.Errorf("Dropped = %+v, want %+v", m.Dropped, want)
 	}
 }
 

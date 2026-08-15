@@ -116,6 +116,33 @@ func TestManifestsScannerJSONEvents(t *testing.T) {
 	assert.Equal(t, float64(0), summary["failed"])
 }
 
+// TestManifestsScannerDebugEventsAndDroppedEntries: --log-level debug narrates
+// the scan (where it starts, what each manifest held) and a declared entry the
+// parser could not read surfaces in the manifest event's dropped array. At the
+// default level the narration stays out of the stream.
+func TestManifestsScannerDebugEventsAndDroppedEntries(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("compose.yaml", "services:\n  broken:\n  api:\n    build: .\n    image: ghcr.io/acme/api:1.0.0\n")
+
+	res := r.Command("scanner", "--log-format", "json", "--log-level", "debug")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	scanning := findEvent(t, res.Events, "scanning")
+	assert.Equal(t, "debug", scanning.Str("level"))
+	dropped := findEvent(t, res.Events, "declaration dropped")
+	assert.Equal(t, "compose.yaml", dropped.Str("manifest"))
+	assert.Equal(t, "service broken: not a mapping", dropped.Str("entry"))
+	ev := findEvent(t, res.Events, "manifest")
+	entries, ok := ev["dropped"].([]any)
+	require.True(t, ok, "the manifest event names what it dropped: %v", ev)
+	assert.Equal(t, []any{"service broken: not a mapping"}, entries)
+
+	res = r.Command("scanner", "--log-format", "json")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	for _, e := range res.Events {
+		assert.NotEqual(t, "scanning", e.Str("message"), "debug narration stays out of the default level")
+	}
+}
+
 // TestManifestsScannerStrictGatesBrokenManifests: the partial-result contract
 // reaching the exit code. A manifest that fails to parse is reported while the
 // healthy ones are still listed and the command succeeds; --strict is the CI

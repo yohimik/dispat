@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"sort"
+
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -44,6 +46,7 @@ func parseCargo(rel string, data []byte) (Manifest, error) {
 	// change still forces the consumer to rebuild.
 	cargoDeps(&m, KindDependencies, raw.BuildDependencies)
 	sortDeps(m.Deps)
+	sort.Strings(m.Dropped)
 	return m, nil
 }
 
@@ -68,6 +71,7 @@ func cargoDeps(m *Manifest, kind Kind, table map[string]any) {
 			// An unrecognised value shape (a bool, a number) drops this entry alone,
 			// matching how the python and pubspec parsers treat the same situation: one
 			// odd declaration must not void a manifest.
+			m.Dropped = append(m.Dropped, "dependency "+name+": unreadable value shape")
 			continue
 		}
 		m.Deps = append(m.Deps, dep)

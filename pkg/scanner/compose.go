@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"sort"
+
 	"github.com/yohimik/dispat/pkg/manifest"
 	"gopkg.in/yaml.v3"
 )
@@ -40,7 +42,10 @@ func parseCompose(rel string, data []byte) (Manifest, error) {
 	for name, value := range raw.Services {
 		body, ok := value.(map[string]any)
 		if !ok {
-			continue // a null service, or one written as a list: nothing to read
+			// A null service, or one written as a list: a declared service
+			// with nothing readable in it, said so rather than swallowed.
+			m.Dropped = append(m.Dropped, "service "+name+": not a mapping")
+			continue
 		}
 		image, _ := body["image"].(string)
 		_, builds := body["build"]
@@ -62,5 +67,6 @@ func parseCompose(rel string, data []byte) (Manifest, error) {
 	}
 	m.Deps = dedupeDeps(m.Deps)
 	sortDeps(m.Deps)
+	sort.Strings(m.Dropped)
 	return m, nil
 }
