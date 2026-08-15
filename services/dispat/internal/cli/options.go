@@ -75,7 +75,7 @@ type options struct {
 	scanRootOnly                           *bool
 	scVerifyUnlinked, scVerifyLinked       *bool
 	scForbidRange, scRequireRange          *[]string
-	wrSetVersion                           *string
+	wrSetVersion, wrSetBuild               *string
 	wrSet, wrLink                          *[]string
 	wrSetLocal, wrLinkLocal, wrUnlinkLocal *bool
 	wrDropLinks                            *bool
@@ -210,6 +210,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"scanner: fail when no declared dependency range matches this pattern; each pattern is asked on its own (repeatable)")
 	o.wrSetVersion = fs.String("set-version", "",
 		"rewrite each manifest's own version field to this version")
+	o.wrSetBuild = fs.String("set-build", "",
+		"writer: write each manifest's build counter (CFBundleVersion, android:versionCode, CURRENT_PROJECT_VERSION, Gradle versionCode, a pubspec version's + suffix)")
 	o.wrSet = fs.StringArray("set", nil,
 		"set one dependency's declared range, [kind:]name=range (repeatable)")
 	o.wrLink = fs.StringArray("link", nil,

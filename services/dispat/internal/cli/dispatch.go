@@ -363,6 +363,7 @@ func (r *runner) runManifests() int {
 	default:
 		if app.WriteManifests(ctx, app.WriteOptions{
 			Root: *r.o.root, Paths: r.inv.paths, Version: r.write.version,
+			Build: r.write.build,
 			Edits: r.write.edits, Links: r.write.links, DropLinks: r.write.dropLinks,
 			Strict: *r.o.strict,
 			JSON:   *r.o.logFormat == "json", Out: r.stdout, Log: log,

@@ -75,6 +75,9 @@ type WriteOptions struct {
 	Paths []string
 	// Version, when set, rewrites each manifest's own version field.
 	Version string
+	// Build, when set, writes each manifest's build counter where its format
+	// keeps one.
+	Build string
 	// Edits set declared dependency ranges.
 	Edits []writer.Edit
 	// Links point dependencies at local folders, or remove the redirect when
@@ -372,7 +375,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 	)
 	out := listing(opts.Out)
 	edit := manifestEdit{
-		Version: opts.Version, Edits: opts.Edits, Links: opts.Links,
+		Version: opts.Version, Build: opts.Build, Edits: opts.Edits, Links: opts.Links,
 		DropLinks: opts.DropLinks, Writer: opts.Writer,
 	}
 	for _, rel := range opts.Paths {
@@ -425,6 +428,8 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 type manifestEdit struct {
 	// Version, when set, rewrites the manifest's own version field.
 	Version string
+	// Build, when set, writes the manifest's build counter.
+	Build string
 	// Edits set declared dependency ranges.
 	Edits []writer.Edit
 	// Links point dependencies at local folders, or remove the redirect
@@ -439,7 +444,7 @@ type manifestEdit struct {
 // empty reports an edit set with nothing in it, which is what makes a manifest
 // not worth opening at all.
 func (e manifestEdit) empty() bool {
-	return e.Version == "" && len(e.Edits) == 0 && len(e.Links) == 0 && !e.DropLinks
+	return e.Version == "" && e.Build == "" && len(e.Edits) == 0 && len(e.Links) == 0 && !e.DropLinks
 }
 
 // apply writes one manifest's share of the invocation. The rewrite runs before
@@ -460,6 +465,13 @@ func (e manifestEdit) apply(path string) (writer.Result, writer.LinkResult, erro
 		if res, err = w.Rewrite(path, e.Version, e.Edits); err != nil {
 			return res, linkRes, err
 		}
+	}
+	if e.Build != "" {
+		built, err := w.SetBuild(path, e.Build)
+		if err != nil {
+			return res, linkRes, err
+		}
+		res.BuildWritten = built.BuildWritten
 	}
 	if len(e.Links) > 0 {
 		if linkRes, err = w.Relink(path, e.Links); err != nil {
@@ -613,6 +625,9 @@ func printWrite(out io.Writer, rel string, res writer.Result, linkRes writer.Lin
 	if res.VersionWritten {
 		fmt.Fprintf(out, "  version written\n")
 	}
+	if res.BuildWritten {
+		fmt.Fprintf(out, "  build number written\n")
+	}
 	for _, group := range []struct {
 		outcome string
 		edits   []writer.Edit
@@ -641,7 +656,7 @@ func printWrite(out io.Writer, rel string, res writer.Result, linkRes writer.Lin
 
 // logWrite emits one manifest's result as a structured event.
 func logWrite(log zerolog.Logger, rel string, res writer.Result, linkRes writer.LinkResult) {
-	changed := res.VersionWritten || len(res.Applied) > 0 || len(linkRes.Applied) > 0
+	changed := res.VersionWritten || res.BuildWritten || len(res.Applied) > 0 || len(linkRes.Applied) > 0
 	msg := "manifest unchanged"
 	if changed {
 		msg = "manifest updated"
@@ -649,6 +664,7 @@ func logWrite(log zerolog.Logger, rel string, res writer.Result, linkRes writer.
 	log.Info().
 		Str("path", rel).
 		Bool("versionWritten", res.VersionWritten).
+		Bool("buildWritten", res.BuildWritten).
 		Interface("edits", outcomeView[editView]{
 			Applied: editViews(res.Applied),
 			Skipped: editViews(res.Skipped),

@@ -200,6 +200,24 @@ ERR forbidden range  manifest=web/package.json dependency=@acme/core range=works
 The link gates and the range gates answer unrelated questions, so they combine freely; only a gate and its own
 inverse cannot be asked together.
 
+### Writing the build counter
+
+The mobile formats keep a build counter beside their version: `CFBundleVersion` in an Info.plist,
+`android:versionCode` in an Android manifest, `CURRENT_PROJECT_VERSION` in an Xcode project, `versionCode` in a Gradle
+build script, and the `+` suffix a pubspec version carries (`1.2.3+4`). Version writes never touch them, because a
+counter is not a version: it moves once per build, whatever the release plans. `--set-build` is the write that moves
+it.
+
+```console
+$ dispat writer --set-build "$GITHUB_RUN_NUMBER" ios/Info.plist android/app/build.gradle pubspec.yaml
+```
+
+A counter the file does not declare is left undeclared; the pubspec suffix is the one exception, appended to the
+version it annotates, because that is where pub keeps it. A plist counter deferring to a build setting like
+`$(CURRENT_PROJECT_VERSION)` is an indirection to keep, so it is skipped the same way version writes skip
+`$(MARKETING_VERSION)`. Android and Gradle counters must be integers, and a value that is not one is refused before
+the file is touched.
+
 ### Applied, skipped and missing
 
 Each edit ends in exactly one of three states, and telling them apart is the whole point of the report.

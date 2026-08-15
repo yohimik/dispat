@@ -38,7 +38,7 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	s, current, ok, err := plistVersionSpan(sp.bytes())
+	s, current, ok, err := plistStringSpan(sp.bytes(), plistKeyVersion)
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
@@ -55,11 +55,11 @@ func rewritePlist(path, version string, edits []Edit) (Result, error) {
 	return res, sp.commit(verifyXML)
 }
 
-// plistVersionSpan locates the byte span of the marketing version's <string>
-// content and decodes its current text. Only the root dictionary is searched:
-// a real Info.plist nests dictionaries and arrays carrying <key> elements of
-// their own, and splicing one of those would rewrite the wrong value.
-func plistVersionSpan(data []byte) (s span, text string, found bool, err error) {
+// plistStringSpan locates the byte span of the named key's <string> content
+// and decodes its current text. Only the root dictionary is searched: a real
+// Info.plist nests dictionaries and arrays carrying <key> elements of their
+// own, and splicing one of those would rewrite the wrong value.
+func plistStringSpan(data []byte, key string) (s span, text string, found bool, err error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	inDict, err := plistSeekRootDict(dec)
 	if err != nil || !inDict {
@@ -86,11 +86,11 @@ func plistVersionSpan(data []byte) (s span, text string, found bool, err error) 
 			}
 			continue
 		}
-		var key string
-		if err := dec.DecodeElement(&key, &start); err != nil {
+		var name string
+		if err := dec.DecodeElement(&name, &start); err != nil {
 			return span{}, "", false, err
 		}
-		wanted := strings.TrimSpace(key) == plistKeyVersion
+		wanted := strings.TrimSpace(name) == key
 		value, err := plistNextValue(dec, data)
 		if err != nil {
 			return span{}, "", false, err

@@ -34,7 +34,7 @@ func rewriteAndroidManifest(path, version string, edits []Edit) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	s, current, ok, err := androidVersionNameSpan(sp.bytes())
+	s, current, ok, err := androidAttrSpan(sp.bytes(), androidVersionNameAttr)
 	if err != nil {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
@@ -52,7 +52,7 @@ func rewriteAndroidManifest(path, version string, edits []Edit) (Result, error) 
 // root element is considered, and the raw-byte search is confined to that one
 // start tag, so the word appearing anywhere else in the document (in a
 // comment, in an attribute of some nested element) cannot be hit.
-func androidVersionNameSpan(data []byte) (s span, text string, found bool, err error) {
+func androidAttrSpan(data []byte, name string) (s span, text string, found bool, err error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		prev := dec.InputOffset()
@@ -71,12 +71,12 @@ func androidVersionNameSpan(data []byte) (s span, text string, found bool, err e
 			return span{}, "", false, nil // not an Android manifest
 		}
 		for _, attr := range start.Attr {
-			if attr.Name.Local != androidVersionNameAttr {
+			if attr.Name.Local != name {
 				continue
 			}
 			// The window is the whole token, leading whitespace included; the
 			// element's own bytes end at the decoder's new position.
-			s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, androidVersionNameAttr)
+			s, ok := attrValueSpan(data[prev:dec.InputOffset()], prev, name)
 			if !ok {
 				return span{}, "", false, nil
 			}

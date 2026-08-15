@@ -29,8 +29,10 @@
 // rewritten beside it would name a version nothing uses.
 //
 // Build numbers (CFBundleVersion, android:versionCode,
-// CURRENT_PROJECT_VERSION) are deliberately not written: they are monotonic
-// counters rather than semantic versions.
+// CURRENT_PROJECT_VERSION, Gradle's versionCode, a pubspec version's +
+// suffix) are never touched by Rewrite: they are monotonic counters rather
+// than semantic versions, and the two move for different reasons. Writing one
+// is its own decision, and SetBuild is that decision's entry point.
 //
 // Relink is the other half of the package. Where Rewrite changes the version
 // text a manifest declares, Relink manages the directive that points a
@@ -94,6 +96,10 @@ type Result struct {
 	// VersionWritten reports that the manifest's own version field was
 	// rewritten.
 	VersionWritten bool
+	// BuildWritten reports that SetBuild changed the manifest's build
+	// counter. Rewrite never sets it, the same way SetBuild never touches a
+	// version.
+	BuildWritten bool
 }
 
 // ErrUnsupportedManifest marks a path no writer covers; test with errors.Is.
@@ -226,6 +232,7 @@ type Writer interface {
 	Replace(path string, reps []Replacement) (ReplaceResult, error)
 	Links(path string) ([]Link, error)
 	DropLinks(path string) (LinkResult, error)
+	SetBuild(path, build string) (Result, error)
 }
 
 // fsWriter is the Writer whose writes land on the filesystem.
@@ -252,4 +259,8 @@ func (fsWriter) Links(path string) ([]Link, error) {
 
 func (fsWriter) DropLinks(path string) (LinkResult, error) {
 	return DropLinks(path)
+}
+
+func (fsWriter) SetBuild(path, build string) (Result, error) {
+	return SetBuild(path, build)
 }

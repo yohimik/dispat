@@ -523,3 +523,50 @@ func TestManifestsScannerRangeGates(t *testing.T) {
 	assert.Equal(t, 2, r.Command("scanner", "--forbid-range", "workspace:*", "--require-range", "workspace:*").Code,
 		"one pattern cannot be forbidden and required at once")
 }
+
+// TestManifestsWriterSetBuild: --set-build writes the counter each mobile
+// format keeps, and only the counter; versions stay untouched. The pubspec
+// spelling is the + suffix on the version scalar.
+func TestManifestsWriterSetBuild(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("Info.plist", "<plist><dict>\n<key>CFBundleShortVersionString</key><string>1.2.0</string>\n<key>CFBundleVersion</key><string>41</string>\n</dict></plist>")
+	r.WriteFile("AndroidManifest.xml", `<manifest package="com.acme.app" android:versionName="1.2.0" android:versionCode="41"/>`)
+	r.WriteFile("build.gradle", "android {\n  defaultConfig {\n    versionCode 41\n    versionName \"1.2.0\"\n  }\n}\n")
+	r.WriteFile("pubspec.yaml", "name: acme\nversion: 1.2.0\n")
+
+	res := r.Command("writer", "--log-format", "json", "--set-build", "42",
+		"Info.plist", "AndroidManifest.xml", "build.gradle", "pubspec.yaml")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	updated := 0
+	for _, e := range res.Events {
+		if e.Str("message") == "manifest updated" {
+			updated++
+			assert.Equal(t, true, e["buildWritten"], "the event says what moved: %v", e)
+			assert.Equal(t, false, e["versionWritten"], "the version is not --set-build's to touch: %v", e)
+		}
+	}
+	assert.Equal(t, 4, updated)
+
+	for file, want := range map[string]string{
+		"Info.plist":          "<key>CFBundleVersion</key><string>42</string>",
+		"AndroidManifest.xml": `android:versionCode="42"`,
+		"build.gradle":        "versionCode 42",
+		"pubspec.yaml":        "version: 1.2.0+42",
+	} {
+		data, err := os.ReadFile(r.Path(file))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), want, file)
+		assert.Contains(t, string(data), "1.2.0", "%s keeps its version", file)
+	}
+
+	scan := r.Command("scanner", "--log-format", "json", "--root-only")
+	require.Equal(t, 0, scan.Code)
+	for _, e := range scan.Events {
+		if e.Str("message") == "manifest" && e.Str("path") == "pubspec.yaml" {
+			assert.Equal(t, "42", e.Str("buildNumber"), "the scanner reads the counter back")
+		}
+	}
+
+	failed := r.Command("writer", "--set-build", "banana", "AndroidManifest.xml")
+	assert.Equal(t, 1, failed.Code, "a word where an integer is required is refused")
+}

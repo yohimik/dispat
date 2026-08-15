@@ -361,6 +361,7 @@ func manifestScopeHint(allowNone bool) string {
 // only in which files they apply it to.
 type writeRequest struct {
 	version   string
+	build     string
 	edits     []writer.Edit
 	links     []writer.Link
 	dropLinks bool
@@ -381,12 +382,16 @@ func parseWriteRequest(cmd string, o *options, usage func(string), log zerolog.L
 	}
 	derived := cmd == cmdAutowriter && (*o.wrSetLocal || *o.wrLinkLocal || *o.wrUnlinkLocal)
 	drop := cmd == cmdWriter && *o.wrDropLinks
-	if *o.wrSetVersion == "" && len(edits) == 0 && len(links) == 0 && !derived && !drop {
+	build := ""
+	if cmd == cmdWriter {
+		build = *o.wrSetBuild
+	}
+	if *o.wrSetVersion == "" && build == "" && len(edits) == 0 && len(links) == 0 && !derived && !drop {
 		log.Error().Msgf("%s needs something to write: --set-version, --set or --link", cmd)
 		usage(cmd)
 		return writeRequest{}, false
 	}
-	return writeRequest{version: *o.wrSetVersion, edits: edits, links: links, dropLinks: drop}, true
+	return writeRequest{version: *o.wrSetVersion, build: build, edits: edits, links: links, dropLinks: drop}, true
 }
 
 // orDefault answers with fallback when the flag was left at its empty

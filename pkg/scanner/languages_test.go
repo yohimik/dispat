@@ -215,6 +215,21 @@ dependency_overrides:
 	}
 }
 
+func TestPubspecBuildSuffix(t *testing.T) {
+	// `1.2.3+4` is pub's spelling of a build counter. The version keeps the
+	// full declared string; the counter is reported beside it the way the
+	// mobile formats report theirs.
+	dir := t.TempDir()
+	write(t, dir, "pubspec.yaml", "name: acme_app\nversion: 2.1.0+7\n")
+	m := scanOne(t, dir)
+	if m.Version != "2.1.0+7" {
+		t.Errorf("Version = %q, want the full declared string", m.Version)
+	}
+	if m.BuildNumber != "7" {
+		t.Errorf("BuildNumber = %q, want %q", m.BuildNumber, "7")
+	}
+}
+
 func TestRequirementsFile(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "requirements.txt", `# runtime deps

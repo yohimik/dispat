@@ -3,6 +3,7 @@ package scanner
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,6 +39,12 @@ func parsePubspec(rel string, data []byte) (Manifest, error) {
 		Name:      yamlScalar(raw.Name),
 		Version:   yamlScalar(raw.Version),
 		Root:      isRoot(rel),
+	}
+	// The + suffix is how pub spells a build counter (`1.2.3+4`). Version
+	// keeps the full declared string, since that is what the file says; the
+	// counter is reported beside it the way the mobile formats report theirs.
+	if plus := strings.IndexByte(m.Version, '+'); plus >= 0 {
+		m.BuildNumber = m.Version[plus+1:]
 	}
 	pubDeps(&m, raw.Dependencies, KindDependencies)
 	pubDeps(&m, raw.DevDependencies, KindDevDependencies)

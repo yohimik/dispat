@@ -144,7 +144,7 @@ func TestPlistNextValueSkipsEveryNonStringType(t *testing.T) {
   <key>d</key><dict><key>CFBundleShortVersionString</key><string>9.9</string></dict>
   <key>CFBundleShortVersionString</key><string>1.0</string>
 </dict></plist>`
-	s, text, found, err := plistVersionSpan([]byte(src))
+	s, text, found, err := plistStringSpan([]byte(src), plistKeyVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestPlistVersionSpanMalformedInput(t *testing.T) {
 		`<plist><dict><key>a</key>`, // dangling key, not the wanted one
 		`not xml at all`,            // no elements
 	} {
-		if _, _, found, _ := plistVersionSpan([]byte(src)); found {
+		if _, _, found, _ := plistStringSpan([]byte(src), plistKeyVersion); found {
 			t.Errorf("%q should not yield a span", src)
 		}
 	}
@@ -300,7 +300,7 @@ func TestMavenCoordJoins(t *testing.T) {
 func TestPBXVerifyCatchesDamage(t *testing.T) {
 	before := "{\n\tMARKETING_VERSION = 1.0;\n}\n"
 	// The happy path: one assignment, one value, balance intact.
-	if err := pbxVerify([]byte(before), []byte("{\n\tMARKETING_VERSION = 2.0;\n}\n"), "2.0", 1); err != nil {
+	if err := pbxVerify([]byte(before), []byte("{\n\tMARKETING_VERSION = 2.0;\n}\n"), pbxKeyVersion, "2.0", 1); err != nil {
 		t.Errorf("a clean rewrite must verify: %v", err)
 	}
 	for _, tc := range []struct {
@@ -312,7 +312,7 @@ func TestPBXVerifyCatchesDamage(t *testing.T) {
 		{"assignment lost", "{\n}\n", "2.0", 1},
 		{"assignment gained", "{\n\tMARKETING_VERSION = 2.0;\n\tMARKETING_VERSION = 2.0;\n}\n", "2.0", 1},
 	} {
-		if err := pbxVerify([]byte(before), []byte(tc.after), tc.version, tc.count); err == nil {
+		if err := pbxVerify([]byte(before), []byte(tc.after), pbxKeyVersion, tc.version, tc.count); err == nil {
 			t.Errorf("%s should fail verification", tc.name)
 		}
 	}

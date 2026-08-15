@@ -291,6 +291,9 @@ func (f failingWriter) Links(string) ([]writer.Link, error) {
 func (f failingWriter) DropLinks(string) (writer.LinkResult, error) {
 	return writer.LinkResult{}, f.err
 }
+func (f failingWriter) SetBuild(string, string) (writer.Result, error) {
+	return writer.Result{}, f.err
+}
 
 func TestWriteManifestsUsesTheInjectedWriter(t *testing.T) {
 	// The command reaches the disk only through its Writer: with a refusing

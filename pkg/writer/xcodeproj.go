@@ -58,14 +58,14 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 	sp.setLines(lines)
 	res.VersionWritten = true
 	return res, sp.commit(func(out []byte) error {
-		return pbxVerify(sp.bytes(), out, version, before)
+		return pbxVerify(sp.bytes(), out, pbxKeyVersion, version, before)
 	})
 }
 
 // pbxVerify checks the invariants that stand in for re-parsing: the structural
 // punctuation is untouched, and every assignment the locator found before
 // still parses and now reads the intended version.
-func pbxVerify(before, after []byte, version string, count int) error {
+func pbxVerify(before, after []byte, key, version string, count int) error {
 	was, now := countTokens(before), countTokens(after)
 	for i, token := range structuralTokens {
 		if was[i] != now[i] {
@@ -74,17 +74,17 @@ func pbxVerify(before, after []byte, version string, count int) error {
 	}
 	seen := 0
 	for _, line := range strings.Split(string(after), "\n") {
-		key, value, _, ok := pbxSetting(line)
-		if !ok || key != pbxKeyVersion {
+		k, value, _, ok := pbxSetting(line)
+		if !ok || k != key {
 			continue
 		}
 		seen++
 		if value != version {
-			return fmt.Errorf("rewrite left %s reading %q", pbxKeyVersion, value)
+			return fmt.Errorf("rewrite left %s reading %q", key, value)
 		}
 	}
 	if seen != count {
-		return fmt.Errorf("rewrite changed the number of %s assignments (%d -> %d)", pbxKeyVersion, count, seen)
+		return fmt.Errorf("rewrite changed the number of %s assignments (%d -> %d)", key, count, seen)
 	}
 	return nil
 }

@@ -377,10 +377,11 @@ asked together.`,
 		short: "edit manifests in place, preserving their formatting",
 		long: `Edit the named manifests in place, preserving their formatting:
 --set-version rewrites the manifest's own version, --set sets a
-dependency's declared range, --link points one at a local folder, and
+dependency's declared range, --link points one at a local folder,
 --drop-links removes every local-link directive a manifest carries
-without being told the names. Needs no config file and no git repository.`,
-		flags: []string{"set-version", "set", "link", "drop-links", "strict"},
+without being told the names, and --set-build writes the build counter
+where the format keeps one. Needs no config file and no git repository.`,
+		flags: []string{"set-version", "set-build", "set", "link", "drop-links", "strict"},
 	},
 	{
 		name:  cmdReplacer,
