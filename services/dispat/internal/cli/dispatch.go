@@ -52,6 +52,16 @@ type runner struct {
 	execOpts   app.ExecOptions
 	ifBranches []app.Branch
 	ifIn       *app.Location
+	ifFile     *fileTest
+}
+
+// fileTest is an if invocation whose leading condition is --file or --dir. The
+// path is kept rather than answered in the flag phase because a relative path
+// resolves where the chosen script runs, and that folder may take an --in, or
+// even a configuration, to know.
+type fileTest struct {
+	path    string
+	wantDir bool
 }
 
 // usage prints one command's help on the error stream.
@@ -182,22 +192,28 @@ func (r *runner) validateFlags() (int, bool) {
 }
 
 // runIf performs the `if` command, which reads no config file and starts no
-// update check: a condition is about the environment, not about the
-// repository it is standing in, and this is glue that may run dozens of times
-// in one script, where a GitHub request per call and a notice on stdout would
-// both be wrong.
+// update check: a condition is about the environment or the filesystem, not
+// about the repository it is standing in, and this is glue that may run dozens
+// of times in one script, where a GitHub request per call and a notice on
+// stdout would both be wrong.
 //
-// --in is the one thing that can change that, and only when it names something
-// a configuration defines. A path or cwd is a folder the command line already
-// spelled in full, so it is resolved here and the command runs with nothing
-// read; pkg:, space: and root have to be looked up, so the phase defers and
-// runConfigured performs the command once the file is loaded. Asking where a
-// package is costs finding out, and asking nothing still costs nothing.
+// Two things can change that, and both are opt-in. An --in naming something a
+// configuration defines (pkg:, space:, root) has to be looked up, and
+// --changed asks about the repository itself, so either makes the phase defer
+// and runConfigured performs the command once the file is loaded. A path or
+// cwd is a folder the command line already spelled in full, and a file test is
+// answered by the filesystem alone, so everything else still runs with nothing
+// read. Asking about the repository costs finding out, and asking nothing
+// still costs nothing.
 func (r *runner) runIf() (int, bool) {
 	if r.inv.cmd != cmdIf {
 		return 0, false
 	}
-	branches, ok := parseBranches(r.inv.cond, r.o, r.usage, r.boot)
+	lead, code := r.ifLeadCondition()
+	if code != 0 {
+		return code, true
+	}
+	branches, ok := parseBranches(lead, r.o, r.usage, r.boot)
 	if !ok {
 		return 2, true
 	}
@@ -207,7 +223,7 @@ func (r *runner) runIf() (int, bool) {
 	}
 	r.ifBranches = branches
 	r.ifIn = in
-	if in != nil && in.Deferred() {
+	if *r.o.ifChanged || (in != nil && in.Deferred()) {
 		return 0, false
 	}
 	dir := *r.o.root
@@ -223,15 +239,87 @@ func (r *runner) runIf() (int, bool) {
 	return r.runIfIn(dir), true
 }
 
+// ifLeadCondition validates the flags that can carry if's leading condition
+// and builds it. Exactly one source may speak — the positional condition,
+// --changed, --file or --dir — because two answers to "what does the first
+// --then guard" would leave one of them silently ignored. The non-zero exit
+// code reports a refusal, already logged.
+//
+// --changed and the file tests return a placeholder resolved false: the real
+// answer takes a folder, or a whole configuration, that this phase does not
+// have yet. The placeholder keeps the chain's shape, so the pairing checks
+// still run before anything is read.
+func (r *runner) ifLeadCondition() (app.Condition, int) {
+	sources := 0
+	for _, set := range []bool{r.inv.condSet, *r.o.ifChanged, r.fs.Changed("file"), r.fs.Changed("dir")} {
+		if set {
+			sources++
+		}
+	}
+	if sources == 0 {
+		r.boot.Error().Msg("if requires a condition: NAME, !NAME, NAME=value, NAME!=value, NAME~glob, NAME!~glob, --changed, or a file test (--file/-f, --dir/-d)")
+		r.usage(cmdIf)
+		return app.Condition{}, 2
+	}
+	if sources > 1 {
+		r.boot.Error().Msg("if takes one leading condition; pick one of the positional condition, --changed, --file and --dir")
+		r.usage(cmdIf)
+		return app.Condition{}, 2
+	}
+	if !*r.o.ifChanged {
+		// The window flags describe the --changed selection; beside any other
+		// condition they would be silently ignored, which is how a gate that
+		// never fires gets written.
+		for _, name := range []string{"package", "space", "group", "since", "consumers"} {
+			if r.fs.Changed(name) {
+				r.boot.Error().Msgf("--%s narrows the --changed selection and means nothing without --changed", name)
+				r.usage(cmdIf)
+				return app.Condition{}, 2
+			}
+		}
+	}
+	switch {
+	case r.inv.condSet:
+		c, err := app.ParseCondition(r.inv.cond)
+		if err != nil {
+			r.boot.Error().Err(err).Msg("invalid condition")
+			return app.Condition{}, 2
+		}
+		return c, 0
+	case *r.o.ifChanged:
+		return app.ResolvedCondition("--changed", false), 0
+	}
+	path, wantDir, flag := *r.o.clFile, false, "--file"
+	if r.fs.Changed("dir") {
+		path, wantDir, flag = *r.o.ifDir, true, "--dir"
+	}
+	if path == "" {
+		r.boot.Error().Msgf("%s names no path", flag)
+		r.usage(cmdIf)
+		return app.Condition{}, 2
+	}
+	r.ifFile = &fileTest{path: path, wantDir: wantDir}
+	return app.ResolvedCondition(flag+" "+path, false), 0
+}
+
 // runIfIn performs `if` in the resolved folder. Both callers reach the command
-// through here, so the options it runs with are written once.
+// through here, so the options it runs with are written once — including the
+// file tests, which wait for this moment because dir is what a relative path
+// resolves against.
 func (r *runner) runIfIn(dir string) int {
+	log := r.logger()
+	if r.ifFile != nil {
+		cond := app.FileCondition(dir, r.ifFile.path, r.ifFile.wantDir)
+		r.ifBranches[0].Cond = cond
+		log.Debug().Str("condition", cond.Spec).Str("dir", dir).
+			Bool("held", cond.Match(os.Getenv)).Msg("file condition evaluated")
+	}
 	ctx, stop := signalCtx()
 	defer stop()
 	code, err := app.RunIf(ctx, app.IfOptions{
 		Branches: r.ifBranches, Else: *r.o.ifElse, OnFailure: *r.o.onFailure,
 		Lookup: os.Getenv, Dir: dir,
-		Stdout: r.stdout, Stderr: r.stderr, Log: r.logger(),
+		Stdout: r.stdout, Stderr: r.stderr, Log: log,
 	})
 	if err != nil {
 		return 1
@@ -435,12 +523,33 @@ func (r *runner) runConfigured() int {
 		return code
 	}
 	if r.inv.cmd == cmdIf {
-		// Only an --in naming a package, a space or the root gets this far;
-		// every other `if` already ran without reading any of this.
-		dir, err := app.New(resolvedRoot, cfg, log).ResolveDir(*r.ifIn, *r.o.root)
-		if err != nil {
-			log.Error().Err(err).Msg("invalid --in")
-			return 1
+		// Only --changed, or an --in naming a package, a space or the root,
+		// gets this far; every other `if` already ran without reading any of
+		// this. The block must stay above the update check below: no `if` path
+		// may cost a GitHub request, however much else it asked for.
+		a := app.New(resolvedRoot, cfg, log)
+		dir := *r.o.root
+		if r.ifIn != nil {
+			var err error
+			if dir, err = a.ResolveDir(*r.ifIn, *r.o.root); err != nil {
+				log.Error().Err(err).Msg("invalid --in")
+				return 1
+			}
+		}
+		if *r.o.ifChanged {
+			ctx, stop := signalCtx()
+			defer stop()
+			sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
+				Groups: *r.o.groupFilter, Dir: *r.o.root}
+			names, err := a.ChangedSelection(ctx, app.WindowOptions{
+				Filter: sel, Since: *r.o.since, Consumers: *r.o.consumers})
+			if err != nil {
+				log.Error().Err(err).Msg("cannot evaluate --changed")
+				return 1
+			}
+			r.ifBranches[0].Cond = app.ResolvedCondition("--changed", len(names) > 0)
+			log.Debug().Strs("packages", names).Bool("held", len(names) > 0).
+				Msg("changed selection resolved")
 		}
 		return r.runIfIn(dir)
 	}

@@ -111,15 +111,17 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			hasNot: []string{"--set-version"},
 		},
 		"if, which would otherwise fail arity first": {
-			args: []string{"if", "--help"}, usage: "usage: dispat if <cond> [flags]",
+			args: []string{"if", "--help"}, usage: "usage: dispat if <cond> | --changed | -f <path> | -d <path> [flags]",
 			// --in is shared with exec: both helpers run one script, and both
-			// can be told where.
-			has: []string{"--then", "--elif", "--else", "--on-failure", "--in"},
-			// A helper that selects no packages must not offer the selection
-			// flags, nor the other helper's subject flags. `--env` is spelled
-			// with its argument, so the global `--env-file` does not answer
-			// for it.
-			hasNot: []string{"--package", "--for ", "--script-from", "--env string", "--tag"},
+			// can be told where. The selection and window flags are here too,
+			// because they describe the --changed condition.
+			has: []string{"--then", "--elif", "--else", "--on-failure", "--in",
+				"--changed", "--file", "--dir", "--package", "--since", "--consumers"},
+			// The other helper's subject flags must not leak in, nor a sweep's
+			// --on-error: if runs one script, so nothing depends on it. `--env`
+			// is spelled with its argument, so the global `--env-file` does not
+			// answer for it.
+			hasNot: []string{"--for ", "--script-from", "--env string", "--tag", "--on-error"},
 		},
 		"exec": {
 			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [-- args...] [flags]",
@@ -562,6 +564,19 @@ func TestShellHelperUsageErrors(t *testing.T) {
 		"if with more then than elif":               {"if", "CI", "--then", "a", "--then", "b"},
 		"if with a malformed leading condition":     {"if", "MY-VAR", "--then", "a"},
 		"if with a malformed elif":                  {"if", "CI", "--then", "a", "--elif", "=x", "--then", "b"},
+		"if with an empty leading condition":        {"if", "", "--then", "a"},
+		"if with a condition and --changed":         {"if", "CI", "--changed", "--then", "a"},
+		"if with a condition and a file test":       {"if", "CI", "-f", "x", "--then", "a"},
+		"if with --changed and a file test":         {"if", "--changed", "-f", "x", "--then", "a"},
+		"if with both file tests":                   {"if", "-f", "x", "-d", "y", "--then", "a"},
+		"if with an empty --file":                   {"if", "--file", "", "--then", "a"},
+		"if with an empty --dir":                    {"if", "-d", "", "--then", "a"},
+		"if with --package but no --changed":        {"if", "CI", "-p", "core", "--then", "a"},
+		"if with --space but no --changed":          {"if", "CI", "-s", "libs", "--then", "a"},
+		"if with --group but no --changed":          {"if", "CI", "-g", "core", "--then", "a"},
+		"if with --since but no --changed":          {"if", "-f", "x", "--since", "HEAD~1", "--then", "a"},
+		"if with --consumers but no --changed":      {"if", "CI", "--consumers", "--then", "a"},
+		"if with --changed and no then":             {"if", "--changed"},
 		"exec without a script":                     {"exec"},
 		"exec with two scripts":                     {"exec", "build", "extra"},
 		"exec naming two subjects":                  {"exec", "build", "--for-package", "core", "--for-space", "libs"},
@@ -618,4 +633,42 @@ func TestIfNeedsNoConfigOrGit(t *testing.T) {
 	stderr.Reset()
 	code = Run([]string{"if", "DISPAT_ABSENT_MARKER", "--then", "exit 9", "--root", root}, &stdout, &stderr)
 	assert.Equal(t, 0, code, "nothing matched and there is no else, so nothing ran")
+}
+
+// TestIfFileConditionsNeedNoConfigOrGit: a file test is about the filesystem,
+// which the command can ask without a config file or a git repository, exactly
+// like an environment condition.
+func TestIfFileConditionsNeedNoConfigOrGit(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "report.json"), []byte("{}"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "build"), 0o755))
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"if", "-f", "report.json", "--then", "exit 0", "--else", "exit 9",
+		"--root", root}, &stdout, &stderr)
+	assert.Equal(t, 0, code, "stderr: %s", stderr.String())
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"if", "-d", "build", "--then", "exit 0", "--else", "exit 9",
+		"--root", root}, &stdout, &stderr)
+	assert.Equal(t, 0, code, "stderr: %s", stderr.String())
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"if", "-f", "ghost.json", "--then", "exit 9", "--else", "exit 0",
+		"--root", root}, &stdout, &stderr)
+	assert.Equal(t, 0, code, "a missing path is false, so the else branch answers")
+}
+
+// TestIfChangedReadsTheConfig: --changed asks about the repository, which is
+// the one condition that costs a config read — in a bare folder it fails on
+// exactly that, where every other condition would have run.
+func TestIfChangedReadsTheConfig(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"if", "--changed", "--then", "exit 0", "--root", root}, &stdout, &stderr)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "config file not found",
+		"--changed defers to the configured phase, so this is a config failure")
 }

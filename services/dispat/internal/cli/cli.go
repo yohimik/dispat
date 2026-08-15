@@ -185,12 +185,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // invocation is the parsed command line: which command runs and its
 // positional arguments.
 type invocation struct {
-	cmd    string
-	script string   // run and exec: the script name
-	cond   string   // if: the leading condition
-	dir    string   // scanner: the optional folder to scan
-	paths  []string // writer and replacer: the files to edit
-	args   []string // run and exec: what followed `--`, for the script
+	cmd     string
+	script  string   // run and exec: the script name
+	cond    string   // if: the leading condition
+	condSet bool     // if: a positional condition was given, even an empty one
+	dir     string   // scanner: the optional folder to scan
+	paths   []string // writer and replacer: the files to edit
+	args    []string // run and exec: what followed `--`, for the script
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
@@ -245,12 +246,17 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		}
 		inv.script = rest[1]
 	case cmdIf:
-		if len(rest) != 2 {
-			log.Error().Msg("if requires exactly one argument: the condition (NAME, !NAME, NAME=value, NAME!=value, NAME~glob or NAME!~glob)")
+		// Zero arguments is legal here because the leading condition may come
+		// from a flag instead (--changed, --file, --dir); whether one source
+		// actually spoke is the if phase's own check.
+		if len(rest) > 2 {
+			log.Error().Strs("args", rest[2:]).Msg("if takes at most one argument: the condition (or none, with --changed, --file or --dir)")
 			usage(inv.cmd)
 			return inv, true
 		}
-		inv.cond = rest[1]
+		if len(rest) == 2 {
+			inv.cond, inv.condSet = rest[1], true
+		}
 	case cmdExec:
 		if len(rest) != 2 {
 			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for-package or --for-space; pass arguments to the script after `--`)")

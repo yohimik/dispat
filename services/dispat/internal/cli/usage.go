@@ -64,8 +64,9 @@ var windowFlags = append([]string{"since", "consumers", "on-error"}, selectionFl
 
 // ifFlags and execFlags are the two shell helpers' own, --on-failure and --in
 // aside: both take those two, so they are added to each entry rather than
-// living here.
-var ifFlags = []string{"then", "elif", "else"}
+// living here. if also takes the window flags --since and --consumers and the
+// selection, which all describe its --changed condition.
+var ifFlags = []string{"then", "elif", "else", "changed", "file", "dir"}
 
 var execFlags = []string{"for", "fallback", "script-from", "env"}
 
@@ -281,19 +282,27 @@ suggestions to those packages.`,
 		flags: append([]string{"write", "interactive", "check"}, selectionFlags...),
 	},
 	{
-		name:  cmdIf,
-		args:  "<cond>",
-		short: "run one of several scripts, chosen by an environment condition",
-		long: `Run one of several shell scripts, chosen by a condition on the
-environment. The leading condition takes the first --then, each --elif takes
-the next, and --else runs when none of them held. The first condition that
-holds wins and the rest are skipped, so a chain of --elif is a switch and
---else is its default case.
+		name:     cmdIf,
+		args:     "[cond]",
+		argsLong: "<cond> | --changed | -f <path> | -d <path>",
+		short:    "run one of several scripts, chosen by a condition",
+		long: `Run one of several shell scripts, chosen by a condition. The leading
+condition takes the first --then, each --elif takes the next, and --else runs
+when none of them held. The first condition that holds wins and the rest are
+skipped, so a chain of --elif is a switch and --else is its default case.
 
-A condition is NAME (set and non-empty), !NAME (unset or empty), NAME=value,
-NAME!=value, NAME~glob or NAME!~glob. The scripts are shell text, not script
-names: this is the shell's own if/elif/else, spelled to fit on one line inside
-a configured script.
+The leading condition is one of three kinds. A positional condition asks the
+environment: NAME (set and non-empty), !NAME (unset or empty), NAME=value,
+NAME!=value, NAME~glob or NAME!~glob. --file/-f <path> and --dir/-d <path> ask
+the filesystem: the path exists and is a regular file, or a folder; a path
+that is absent or the wrong kind is false, never an error, and a relative
+path resolves where the chosen script runs. --changed asks the repository:
+it holds when changed packages are selected, under the same rule dispat run
+covers packages by, so --since picks the window (the release window without
+it, 'all' for every package), --package/--space/--group narrow it and
+--consumers expands it downstream. Every --elif is an environment condition.
+The scripts are shell text, not script names: this is the shell's own
+if/elif/else, spelled to fit on one line inside a configured script.
 
 The chosen script's exit code becomes the command's, so it stays transparent
 in a pipeline, and --on-failure replaces that code with its own. Nothing
@@ -302,8 +311,9 @@ matching with no --else runs nothing and exits 0.
 --in runs the chosen script somewhere else: a folder path, or pkg:<name>,
 space:<name>, root or cwd. Needs no config file and no git repository, unless
 --in names a package, a space or the root, which only a configuration can
-point at.`,
-		flags: append(append([]string{}, ifFlags...), helperFlags...),
+point at, or --changed asks about the repository itself.`,
+		flags: append(append(append([]string{}, ifFlags...),
+			"since", "consumers"), append(append([]string{}, selectionFlags...), helperFlags...)...),
 	},
 	{
 		name:     cmdExec,

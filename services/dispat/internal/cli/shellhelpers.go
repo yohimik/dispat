@@ -12,14 +12,16 @@ import (
 // invocation never first costs a config load.
 
 // parseBranches builds the if/elif/else chain from the leading condition and
-// the repeatable flags.
+// the repeatable flags. The leading condition arrives already built, because
+// only the caller knows which of its sources spoke: a positional spec, or a
+// flag the environment cannot answer (--changed, --file, --dir).
 //
 // The pairing is positional: pflag's StringArray keeps each flag's values in
 // the order they were given, so the leading condition takes the first --then
 // and each --elif takes the next. A count that cannot pair is the one thing
 // checked before anything is indexed, because an off-by-one here would run the
 // wrong branch rather than fail.
-func parseBranches(cond string, o *options, usage func(string), log zerolog.Logger) ([]app.Branch, bool) {
+func parseBranches(lead app.Condition, o *options, usage func(string), log zerolog.Logger) ([]app.Branch, bool) {
 	thens, elifs := *o.ifThen, *o.ifElif
 	if len(thens) == 0 {
 		log.Error().Msg("if needs at least one --then: the script the condition runs")
@@ -33,13 +35,14 @@ func parseBranches(cond string, o *options, usage func(string), log zerolog.Logg
 		return nil, false
 	}
 	branches := make([]app.Branch, 0, len(thens))
-	for i, spec := range append([]string{cond}, elifs...) {
+	branches = append(branches, app.Branch{Cond: lead, Script: thens[0]})
+	for i, spec := range elifs {
 		c, err := app.ParseCondition(spec)
 		if err != nil {
 			log.Error().Err(err).Msg("invalid condition")
 			return nil, false
 		}
-		branches = append(branches, app.Branch{Cond: c, Script: thens[i]})
+		branches = append(branches, app.Branch{Cond: c, Script: thens[i+1]})
 	}
 	return branches, true
 }

@@ -65,6 +65,8 @@ type options struct {
 	// if
 	ifThen, ifElif *[]string
 	ifElse         *string
+	ifChanged      *bool
+	ifDir          *string
 
 	// exec
 	execFor, execScriptFrom, execEnv *string
@@ -165,8 +167,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override the github.tokenEnv variable the token is read from")
 	o.ghTarget = fs.String("target", "",
 		"create the tag at this commit or branch (target_commitish); only safe once the commit is on the remote")
-	o.clFile = fs.String("file", "",
-		"override the changelog.file name")
+	o.clFile = fs.StringP("file", "f", "",
+		"changelog: override the changelog.file name; if: the leading condition holds when this path exists and is a regular file")
 	o.clFileTitle = fs.String("file-title", "",
 		"override the changelog.fileTitle with this single line")
 	o.clDateFormat = fs.String("date-format", "",
@@ -193,6 +195,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"another condition, tried when every earlier one was false; repeatable, each needing its own --then")
 	o.ifElse = fs.String("else", "",
 		"the script to run when no condition held; without it, nothing matching runs nothing and exits 0")
+	o.ifChanged = fs.Bool("changed", false,
+		"if: the leading condition holds when changed packages are selected (the release window, or what --since addresses), narrowed by --package/--space/--group and expanded by --consumers")
+	o.ifDir = fs.StringP("dir", "d", "",
+		"if: the leading condition holds when this path exists and is a folder; a relative path resolves where the chosen script runs, after --in")
 	o.execFor = fs.String("for", "",
 		"run the script of this level, in its environment: pkg:<name>, space:<name>, root or cwd (the package or space the invocation stands in); one exact name, no globs")
 	o.execFallback = fs.Bool("fallback", false,
