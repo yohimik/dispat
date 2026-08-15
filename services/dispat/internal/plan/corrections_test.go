@@ -498,6 +498,118 @@ func TestCorrectionMarksTheSelectorOfAMultiUnitTarget(t *testing.T) {
 	assert.Equal(t, []string{shaA + "#2"}, utils.UnitCorrects(utils.Units[0]))
 }
 
+// ---------------------------------------------------------------------------
+// §7.3 — reverted changelog entries
+// ---------------------------------------------------------------------------
+
+// notesOf renders what the release's changelog entry will actually say.
+func notesOf(rel *Release) []string {
+	out := make([]string, 0, len(rel.NotesUnits()))
+	for _, u := range rel.NotesUnits() {
+		out = append(out, u.Header.Type+": "+u.Header.Description)
+	}
+	return out
+}
+
+func TestRevertSuppressesBothEntriesButNotTheBump(t *testing.T) {
+	// Vector 124 and the revert trap of §7.3 in one scenario. The bump stays
+	// major, because consumers may already have seen the feature in a
+	// prerelease; the changelog loses both entries, because the release
+	// contains neither the change nor its removal.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: a bad idea"},
+		commit{sha: shaB, message: "revert(core): a bad idea\n\nReverts: " + shaA},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.Equal(t, ccme.BumpMajor, core.Bump, "max() over the window still sees the feat!")
+	assertVersion(t, v(2, 0, 0), core.Next)
+	assert.Len(t, core.Units, 2, "both units still count toward the bump")
+	assert.Empty(t, notesOf(core), "and neither one is documented")
+	assert.True(t, hasCode(p, CodeRevertSuppressed), "the plan accounts for the absent entries: %v", codes(p))
+}
+
+func TestRevertOfReleasedWorkSuppressesNothing(t *testing.T) {
+	// §7.3: once the reverted commit has released, its changelog entry is
+	// published history. The revert's own entry then appears normally, because
+	// removing something readers have already been told about is news.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: a bad idea"},
+		commit{sha: shaB, message: "revert(core): a bad idea\n\nReverts: " + shaA},
+	).tag("core", "2.0.0", shaA).tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.Equal(t, []string{"revert: a bad idea"}, notesOf(core))
+	assert.False(t, hasCode(p, CodeRevertSuppressed), "nothing was suppressed: %v", codes(p))
+}
+
+func TestRevertNamingAnUnreachableCommitIsInformational(t *testing.T) {
+	// Vector 125, the engine's half. A well-formed sha naming a commit that is
+	// not an ancestor-or-self of the revert is W213, and the revert releases
+	// and bumps as it would have anyway. The malformed half is the parser's
+	// W214, which dispat must not report a second time.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core): a feature"},
+		commit{sha: shaB, message: "revert(core): something\n\nReverts: fedcba9"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.True(t, hasCode(p, CodeRevertNonAncestor), "codes: %v", codes(p))
+	assert.Equal(t, ccme.BumpMinor, core.Bump)
+	assert.Contains(t, notesOf(core), "revert: something", "the revert is documented as usual")
+}
+
+func TestRevertWithAMalformedTargetIsLeftToTheParser(t *testing.T) {
+	// The parser reports W214 for a value that is not a sha at all. Resolving
+	// it here would report the same mistake twice under two codes.
+	git := newFakeGit(
+		commit{sha: shaA, message: "revert(core): something\n\nReverts: not-a-sha"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	assert.Contains(t, codes(p), "W214", "the parser's diagnostic stands: %v", codes(p))
+	assert.False(t, hasCode(p, CodeRevertNonAncestor), "and dispat adds nothing: %v", codes(p))
+}
+
+func TestRevertSuppressionIsVoidedByACorrection(t *testing.T) {
+	// Case 131: discarding a revert's record voids its changelog suppression,
+	// so the reverted entry returns. The rule is §7.4.2's, applied to §7.3, and
+	// it falls out of running the corrections pass first.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(core)!: a bad idea"},
+		commit{sha: shaB, message: "revert(core): a bad idea\n\nReverts: " + shaA},
+		commit{sha: shaC, message: "chore(core): drop the revert record\n\nDeletes: " + shaB},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	core := p.Releases["core"]
+	assert.Equal(t, []string{"feat: a bad idea"}, notesOf(core), "the reverted entry is back")
+	assert.False(t, hasCode(p, CodeRevertSuppressed), "there is no suppression left to report: %v", codes(p))
+}
+
+func TestRevertSuppressionIsPerPackage(t *testing.T) {
+	// The suppression is a per-package question, like everything else in
+	// §13.4a: a package that has released the reverted commit keeps its entry.
+	git := newFakeGit(
+		commit{sha: shaA, message: "feat(*): a bad idea"},
+		commit{sha: shaB, message: "revert(*): a bad idea\n\nReverts: " + shaA},
+	).tag("core", "1.0.0", "").tag("utils", "1.1.0", shaA).tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	assert.Empty(t, notesOf(p.Releases["core"]), "core still had both records pending")
+	assert.Equal(t, []string{"revert: a bad idea"}, notesOf(p.Releases["utils"]),
+		"utils published the feature, so only the revert is news")
+}
+
 func TestCorrectionsAreTraced(t *testing.T) {
 	// A wrong plan is the hardest thing to debug about a release, and a
 	// correction is invisible in the output: the record it discarded simply is

@@ -603,6 +603,137 @@ func (cp *computation) commitDrops() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// §7.3 reverted changelog entries
+// ---------------------------------------------------------------------------
+
+// suppressRevertedNotes implements the changelog half of §7.3.
+//
+// For the *bump*, `Reverts:` is informational: a feat! and a revert of it in one
+// window still take the package to a major, because consumers may already have
+// seen the feature in a prerelease and quietly downgrading would be worse. For
+// the *changelog* it is not informational at all. The release contains neither
+// the change nor its removal, so documenting either would describe work that is
+// not there, and both entries go.
+//
+// It runs after §13.4b, which is what makes a discarded revert suppress
+// nothing (§7.4.2): a correction that discarded the revert's record has already
+// removed the package from the revert's scope, so the loop below never reaches
+// it and the reverted entry returns.
+func (cp *computation) suppressRevertedNotes() {
+	trace := cp.log.Trace().Enabled()
+	suppressed := 0
+
+	for _, rec := range cp.commits {
+		for pos, u := range rec.units {
+			for _, raw := range u.Directives.Reverts {
+				if !isTargetSHA(raw) {
+					continue // W214 at parse; the footer stays informational
+				}
+				suppressed += cp.suppressOneRevert(rec, pos, u, raw, trace)
+			}
+		}
+	}
+
+	if suppressed > 0 {
+		cp.log.Debug().Int("entries", suppressed).Msg("plan: reverted entries suppressed")
+	}
+}
+
+// suppressOneRevert handles one well-formed Reverts value and returns how many
+// entries it took out of the notes.
+func (cp *computation) suppressOneRevert(rec *commitRec, pos int, u *ccme.Unit, raw string, trace bool) int {
+	full, ok := cp.resolveRevertTarget(raw)
+	// Ancestor-or-self, where a correction demands a proper ancestor: a revert
+	// is a claim about code, and a commit may carry the inverse diff of
+	// something in the same commit.
+	if !ok || !cp.ancestorOrSelf(full, rec.key) {
+		cp.warn(CodeRevertNonAncestor, joinSorted(rec.scope[pos]), rec.key, fmt.Sprintf(
+			"Reverts: %s names no commit reachable from this one; the footer is informational (§7.3)", raw))
+		return 0
+	}
+	target := cp.byKey[full]
+	if target == nil {
+		return 0 // released, so its entry is published history (§7.3)
+	}
+
+	n := 0
+	for _, name := range sortedKeys(rec.scope[pos]) {
+		if !cp.pending(name, rec.key) || !cp.pending(name, full) {
+			continue
+		}
+		var hit bool
+		for tpos, tu := range target.units {
+			if tu.IsControl() || !target.scope[tpos][name] {
+				continue
+			}
+			cp.suppressNote(name, tu)
+			hit = true
+			n++
+		}
+		if !hit {
+			continue
+		}
+		// The revert's own entry goes with the entry it reverted: a changelog
+		// carrying "revert X" with no X in it describes a removal the release
+		// does not contain either.
+		cp.suppressNote(name, u)
+		n++
+		cp.warn(CodeRevertSuppressed, name, rec.key, fmt.Sprintf(
+			"revert and the entries of %s leave the changelog together; both still count toward the bump (§7.3)",
+			shortKey(full)))
+		if trace {
+			cp.log.Trace().
+				Str("package", name).
+				Str("revert", shortKey(rec.key)).
+				Str("target", shortKey(full)).
+				Msg("plan: reverted entries suppressed")
+		}
+	}
+	return n
+}
+
+func (cp *computation) suppressNote(pkg string, u *ccme.Unit) {
+	if cp.noteDrops[pkg] == nil {
+		cp.noteDrops[pkg] = make(map[*ccme.Unit]bool)
+	}
+	cp.noteDrops[pkg][u] = true
+}
+
+// resolveRevertTarget resolves a Reverts value without raising E210: an
+// unresolvable target is one of §7.3's two degraded forms, not an error, and
+// the caller reports it as W213.
+func (cp *computation) resolveRevertTarget(sha string) (string, bool) {
+	if _, ok := cp.byKey[sha]; ok {
+		return sha, true
+	}
+	if full, ok := cp.shaCache[sha]; ok {
+		return full, full != ""
+	}
+	full, ok := cp.lookupSHA(sha)
+	if cp.shaCache == nil {
+		cp.shaCache = make(map[string]string)
+	}
+	cp.shaCache[sha] = full
+	return full, ok
+}
+
+// isTargetSHA is the sha shape of §7.4.1, which §7.3 shares: 7 to 64 lowercase
+// hexadecimal characters. A `Reverts` value that fails it is W214 at parse and
+// informational here, so dispat must not report it a second time.
+func isTargetSHA(s string) bool {
+	if len(s) < 7 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // pending reports that a package's window still holds a commit and that the
 // commit is undischarged: not published under a prerelease of the package's
 // current train, and not behind a cancel barrier.

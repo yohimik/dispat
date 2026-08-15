@@ -1259,10 +1259,11 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	if err := cp.parseAndResolve(); err != nil { // §13.4
 		return nil, err
 	}
-	cp.collectCancels()   // §13.5
-	cp.applyCorrections() // §13.4b, on the stream every phase below reads
-	cp.resolveHolds()     // §13.6a
-	cp.directBumps()      // §13.6
+	cp.collectCancels()        // §13.5
+	cp.applyCorrections()      // §13.4b, on the stream every phase below reads
+	cp.suppressRevertedNotes() // §7.3, on the corrected stream
+	cp.resolveHolds()          // §13.6a
+	cp.directBumps()           // §13.6
 	if err := cp.ancestryFailed(); err != nil {
 		return nil, err
 	}

@@ -1445,6 +1445,29 @@ func TestRunReleaseNotesEnvironment(t *testing.T) {
 		"mkPlan's own-change unit is a patch fix")
 }
 
+func TestRunReleaseNotesEnvironmentOmitsSuppressedEntries(t *testing.T) {
+	// The notes variables and the changelog read the same seam, so a revert
+	// that took two entries out of the entry (§7.3) has to take them out of
+	// here too. A release script that announces "add streaming" for a release
+	// whose changelog does not mention it is exactly the split this prevents.
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	rel := p.Releases["a"]
+	rel.Units = []*ccme.Unit{
+		{Header: ccme.Header{Type: "feat", Description: "add streaming"}, Bump: ccme.BumpMinor, Valid: true},
+		{Header: ccme.Header{Type: "revert", Description: "add streaming"}, Bump: ccme.BumpPatch, Valid: true},
+		{Header: ccme.Header{Type: "fix", Description: "close a leak"}, Bump: ccme.BumpPatch, Valid: true},
+	}
+	rel.SuppressedNotes = map[*ccme.Unit]bool{rel.Units[0]: true, rel.Units[1]: true}
+	rel.Pkg.Space.AnnounceScript = []string{"announce"}
+	r := &fakeRunner{}
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
+	env := r.envs["announce a"]
+	assert.Equal(t, "", envValue(t, env, "DISPAT_FEATURES"), "the reverted feature is not announced")
+	assert.Equal(t, "close a leak", envValue(t, env, "DISPAT_FIXES"), "its siblings are")
+}
+
 func TestRunOnFailScript(t *testing.T) {
 	// onFail fires once when the package fails, after the status settles,
 	// with the failure specifics in the environment — and its own failure
