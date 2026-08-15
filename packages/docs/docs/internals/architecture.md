@@ -152,7 +152,7 @@ does not propagate onward, so a failed publish can never enlarge what a commit r
 for a space with its own mode, or the declared `versionGroups` entry the space or package joined, so a group may span
 spaces. A mode carries one number, its *shared depth*: how many leading version components the group holds equal, 3 for
 `fixed`, 2 for `fixedMajorMinor`, 1 for `fixedMajor`, 0 for `independent`. The group's depth is the deepest any member
-declares, since sharing more implies sharing the prefix, and a disagreement is reported as `W213`.
+declares, since sharing more implies sharing the prefix, and a disagreement is reported as `W237`.
 
 Each group is versioned as one virtual package, after the per-package pipeline has produced bumps, channels and pins.
 The group aggregates what the version computation reads: the baselines of *every* member (held ones included, so the
@@ -172,10 +172,10 @@ member's local `Release-As` is never measured against the group's aggregate.
 When the group does not engage, every member goes through the ordinary per-member `versionOne`, and an alignment pass
 then keeps the invariant. A member releasing below the group's prefix adopts it, which is how a sparse member's first
 change lands it on the shared part. And a non-sparse member with nothing pending whose baseline lags is released at the
-prefix with `W210`.
+prefix with `W234`.
 
 Assignment is where sparseness shows, and the mode is each member's own, so a joined group can mix them. A plain mode
-releases every non-held member at the group version, marking members with no cause of their own as rides: `W210`,
+releases every non-held member at the group version, marking members with no cause of their own as rides: `W234`,
 non-suppressible, with a "no changes" changelog entry naming the shared part. A sparse mode assigns the group version
 only to members with a cause of their own. Scope resolution is untouched either way, so each member keeps its *own*
 units for changelog and release notes.
@@ -391,11 +391,11 @@ that lost part of its record never looks green in CI.
 
 | Code | What failed |
 |-------|--------------------------------------------------|
-| `E210` | A release tag could not be created |
-| `E211` | A release tag already exists at a different commit |
-| `E212` | A release record (changelog entry, GitHub release) could not be written |
-| `E213` | The release commit could not be made |
-| `E214` | The push failed |
+| `E220` | A release tag could not be created |
+| `E221` | A release tag already exists at a different commit |
+| `E222` | A release record (changelog entry, GitHub release) could not be written |
+| `E223` | The release commit could not be made |
+| `E224` | The push failed |
 
 The reason none of these fails the package is that failing it would be a lie with consequences. The package *is*
 published, so marking it failed would do three wrong things. It would revert the package folder, throwing away the
@@ -409,7 +409,7 @@ For the same reason nothing stops at the first failure. A changelog that could n
 too; one package's tag failing says nothing about the next package's; a failed push must not withhold the GitHub
 releases that document the same work. Each step runs, each failure is recorded, and the exit code adds them up.
 
-`E211` is the one case that also declines to act. A tag already sitting at another commit is left exactly where it is
+`E221` is the one case that also declines to act. A tag already sitting at another commit is left exactly where it is
 rather than moved onto this release, because it is a record some earlier run made. With
 [force](../configuration/records.md#force) on, a tag moved here would be carried over the copy on the remote, turning
 one local mistake into everyone's.
@@ -429,7 +429,7 @@ Interfaces decouple every side effect, keeping the planner and executor unit-tes
 `ReleaseRecorder` is the extension point for publishing release data anywhere: both current implementations render the
 same changelog sections (shared `changelog.Format`, zero-value fields fall back to defaults) and differ only in the
 destination, a file prepend vs. a REST call. Recorders run in order after each successful publish; a recorder error is
-a critical (`E212`) and the remaining recorders and the tag still follow.
+a critical (`E222`) and the remaining recorders and the tag still follow.
 
 Other choices:
 
@@ -478,18 +478,18 @@ emitted. What each of those six means for somebody looking at one, and what to d
 [When there is no plan](../reference/plan-errors.md).
 
 In the other direction, twenty codes are dispat's own, outside the specification's registry, attached to features the
-specification predates or does not have. They are numbered from `W210` and `E210` upward, clear of the registry (which
-ends at `W208` and `E200`) and of `W195`/`W196`, which the specification reserves for the audit features above.
+specification predates or does not have. They are numbered from `W220` and `E220` upward, clear of the registry (which
+ends at `W215` and `E213`) and of `W195`/`W196`, which the specification reserves for the audit features above.
 
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
-| `W210`-`W213`          | [Versioning groups](../reference/releasing/versioning.md): a ride, and the three conflicts a shared version can produce |
+| `W234`-`W237`          | [Versioning groups](../reference/releasing/versioning.md): a ride, and the three conflicts a shared version can produce |
 | `W220`-`W222`, `W225` | Manifest-derived: an ambiguous manifest name, a rewritten dependency with no configured edge, a replace rule that matched nothing, one package's manifests declaring different versions for it |
 | `W223`, `W224`, `W226` | A record that is already there: a release tag, a GitHub release, a changelog entry. What makes the [step commands](../reference/releasing/steps.md) re-runnable |
 | `W230`, `W231`         | [Releasing part of the graph](../reference/releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
-| `E210`-`E214`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
+| `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../cookbook/editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 
 All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features

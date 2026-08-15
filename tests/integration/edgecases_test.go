@@ -116,7 +116,7 @@ func TestEdgePinPrereleaseMovesAWholeGroup(t *testing.T) {
 	assert.True(t, r.HasTag("a@1.1.0-rc.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@1.1.0-rc.0"), "the group runs one train; tags: %v", r.TagList())
 	assert.False(t, r.HasTag("a@1.1.0"), "nothing graduates here")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"), "b rides the pin")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"), "b rides the pin")
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ func TestEdgeGroupNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
 	assert.True(t, r.HasTag("a@1.2.1"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("newbie@1.2.1"),
 		"the newcomer joins at the group's version, not at 0.0.1; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "newbie"), "the ride is explained")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "newbie"), "the ride is explained")
 	assert.False(t, harness.HasCode(res.Events, "W233"),
 		"a newcomer has no version to disagree about; stdout:\n%s", res.Stdout)
 
@@ -398,7 +398,7 @@ func TestEdgeGroupMemberOnAnotherMajorIsReported(t *testing.T) {
 
 // TestEdgeGroupMinorSpreadIsNotReported is the negative that keeps W233 worth
 // reading. Members apart by a minor are the ordinary state a failed ride
-// leaves behind, and the catch-up already has W210 to explain it: warning
+// leaves behind, and the catch-up already has W234 to explain it: warning
 // again here would put the code on almost every run of almost every group and
 // train everyone to ignore it.
 func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
@@ -417,7 +417,7 @@ func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
 
 	assert.True(t, r.HasTag("a@1.2.1"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("laggard@1.2.1"), "the laggard is caught up; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "laggard"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "laggard"))
 	assert.False(t, harness.HasCode(res.Events, "W233"),
 		"below the major this is ordinary catch-up; stdout:\n%s", res.Stdout)
 }
@@ -551,7 +551,7 @@ func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 // would be untidy: the folder holds the versions the published artefacts were
 // built from, and restoring it would leave the working tree describing
 // versions that are already out under different numbers, with no run able to
-// tell afterwards. So E213 is recorded, the tag is still written, and the
+// tell afterwards. So E223 is recorded, the tag is still written, and the
 // folder is left exactly as the release made it, revertOnFail or not.
 func TestEdgeRevertOnFailNeverReachesAFailedCommit(t *testing.T) {
 	r := harness.New(t)
@@ -568,7 +568,7 @@ func TestEdgeRevertOnFailNeverReachesAFailedCommit(t *testing.T) {
 
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing its commit must not exit green\nstdout:\n%s", res.Stdout)
-	require.True(t, harness.HasCode(res.Events, "E213"),
+	require.True(t, harness.HasCode(res.Events, "E223"),
 		"the commit failure is reported under its own code, events:\n%s", res.Stdout)
 
 	assert.Contains(t, res.Stdout, `"status":"published"`,

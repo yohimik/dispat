@@ -312,7 +312,7 @@ Two things `force` deliberately does not do:
 
 - **The branch is never force pushed**, under either setting. A rejected branch push means someone else pushed while
   the run was working, and the answer to that is to look, not to overwrite their commits.
-- **A release tag found at a different commit is left alone.** That is reported as `E211` and the tag is not written at
+- **A release tag found at a different commit is left alone.** That is reported as `E221` and the tag is not written at
   all, because it is a record some earlier run made, and a tag moved here would then be force pushed over the copy on
   the remote, turning one local mistake into everyone's. Force means "do not fail because the ref exists", not
   "overwrite whatever is there".

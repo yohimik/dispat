@@ -158,10 +158,10 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing its tag must not exit green")
 
-	// Published, and the log says both halves of the truth. E210 is
+	// Published, and the log says both halves of the truth. E220 is
 	// CodeTagFailed; this module cannot import the CLI's internals, so the code
 	// travels as the literal CI would match on.
-	assert.True(t, harness.HasCode(res.Events, "E210"),
+	assert.True(t, harness.HasCode(res.Events, "E220"),
 		"the failure is reported under its own code, events:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, `"status":"published"`)
 	assert.NotContains(t, res.Stdout, `"status":"failed"`,
@@ -183,7 +183,7 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 // record of anything. With force on — the default — the write simply
 // succeeds and the tag names this release.
 //
-// A tag dispat *can* see at a different commit is still left alone (E211).
+// A tag dispat *can* see at a different commit is still left alone (E221).
 // Force means "do not fail because the ref exists", not "overwrite whatever
 // is there".
 func TestRecordsForceRewritesAnUnreachableTag(t *testing.T) {
@@ -205,7 +205,7 @@ func TestRecordsForceRewritesAnUnreachableTag(t *testing.T) {
 
 // TestRecordsTagAtAnotherCommitIsLeftAlone: the sharper half of the same
 // rule. Here dispat can see the existing tag and can tell it is at the wrong
-// commit, which is reported under its own code (E211) — and the tag is left
+// commit, which is reported under its own code (E221) — and the tag is left
 // where it is rather than moved, because a tag that moved here would be
 // force-pushed over the copy on the remote, turning one local mistake into
 // everyone's.
@@ -226,7 +226,7 @@ func TestRecordsTagAtAnotherCommitIsLeftAlone(t *testing.T) {
 
 	res := r.Command("commit", "--tag", "--tag-name", "core@9.9.9", "--package", "core")
 	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "E211"), "events:\n%s", res.Stdout)
+	assert.True(t, harness.HasCode(res.Events, "E221"), "events:\n%s", res.Stdout)
 
 	assert.Equal(t, "someone else's tag",
 		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@9.9.9"),
@@ -458,7 +458,7 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the push itself still fails\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "E214"),
+	assert.True(t, harness.HasCode(res.Events, "E224"),
 		"the push failure is reported under its own code, events:\n%s", res.Stdout)
 	assert.True(t, r.HasTag("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
 	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
@@ -1162,7 +1162,7 @@ func TestRecordsGithubReleaseAttachments(t *testing.T) {
 // the artefact is out and nothing dispat does afterwards can take it back. So
 // none of them fails a package or stops the run. Each is recorded under its
 // own code, the run finishes what else it owed, and the exit code says
-// something went wrong. E210 and E211, the two tagging failures, are covered
+// something went wrong. E220 and E221, the two tagging failures, are covered
 // above; these are the remaining three, plus the alias-tag warning that
 // deliberately is *not* one of them.
 
@@ -1186,7 +1186,7 @@ func TestRecordsCommitFailureStillTags(t *testing.T) {
 
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing its commit must not exit green\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "E213"),
+	assert.True(t, harness.HasCode(res.Events, "E223"),
 		"the commit failure is reported under its own code, events:\n%s", res.Stdout)
 
 	// Published, not failed: the artefact is out.
@@ -1205,7 +1205,7 @@ func TestRecordsCommitFailureStillTags(t *testing.T) {
 // fix.
 //
 // What this pins is the split: the package stays published, the run carries
-// on, the failure is reported as E212, and the exit code is non-zero. The
+// on, the failure is reported as E222, and the exit code is non-zero. The
 // release tag — the record that actually decides what the next run sees —
 // is written regardless, because a missing changelog entry is a thing to go
 // and add, not a reason to re-publish.
@@ -1223,7 +1223,7 @@ func TestRecordsChangelogFailureIsCriticalNotFailure(t *testing.T) {
 
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing a record must not exit green\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "E212"),
+	assert.True(t, harness.HasCode(res.Events, "E222"),
 		"the record failure is reported under its own code, events:\n%s", res.Stdout)
 
 	assert.Contains(t, res.Stdout, `"status":"published"`)

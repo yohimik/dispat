@@ -1736,7 +1736,7 @@ func TestDiagnosticCodesAreDocumented(t *testing.T) {
 			continue
 		}
 		seen[code] = true
-		// Either named outright or covered by a range like "`W210`-`W213`".
+		// Either named outright or covered by a range like "`W234`-`W237`".
 		if strings.Contains(string(page), code) || coveredByDocRange(string(page), code) {
 			continue
 		}
@@ -1745,7 +1745,7 @@ func TestDiagnosticCodesAreDocumented(t *testing.T) {
 	require.NotEmpty(t, seen, "the scan must find dispat's own codes at all")
 }
 
-// coveredByDocRange reports whether the page lists a range "`W210`-`W213`"
+// coveredByDocRange reports whether the page lists a range "`W234`-`W237`"
 // that contains the code.
 func coveredByDocRange(page, code string) bool {
 	for _, m := range regexp.MustCompile("`([EW])([0-9]{3})`-`([EW])([0-9]{3})`").FindAllStringSubmatch(page, -1) {

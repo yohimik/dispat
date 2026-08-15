@@ -19,7 +19,7 @@ package plan
 // A versioning group is the softer case, and the difference is deliberate.
 // Releasing part of a group leaves its shared version briefly untrue, but
 // nothing is published out of order and the next run rides the members left
-// behind up to the group's version (W210) with no operator involved. So a split
+// behind up to the group's version (W234) with no operator involved. So a split
 // group releases and says so, where a broken order stays put.
 
 // Withheld is one selected package the release order cannot reach in this run.

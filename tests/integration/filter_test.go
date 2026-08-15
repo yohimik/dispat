@@ -483,7 +483,7 @@ func TestFilterReleaseStrictRefusesBeforeAnythingRuns(t *testing.T) {
 // TestFilterReleaseSplitsAVersioningGroup: a versioning group is not an
 // ordering constraint, so a selection that takes part of one releases and says
 // so (W231). The group's shared version is untrue until the next run, which
-// rides the members left behind up to it (W210) with nothing for an operator
+// rides the members left behind up to it (W234) with nothing for an operator
 // to do. --strict is how a repository opts out of ever being in that state.
 func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 	r := harness.New(t)
@@ -508,7 +508,7 @@ func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 	// The next run puts the group back on one version: two releases at the
 	// group's version and one rides along to meet it.
 	res = r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "one"), "one rides to rejoin the group")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "one"), "one rides to rejoin the group")
 	assert.ElementsMatch(t, []string{"one@0.1.0", "one@0.2.0", "two@0.2.0"}, r.TagList())
 }
 

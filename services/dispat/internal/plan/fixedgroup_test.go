@@ -141,7 +141,7 @@ func TestFixedMajorBreakingMovesTheWholeGroup(t *testing.T) {
 				"the diagnostic must name what is actually shared")
 		}
 	}
-	assert.True(t, found, "the ride must be explained by W210: %v", p.Diagnostics)
+	assert.True(t, found, "the ride must be explained by W234: %v", p.Diagnostics)
 }
 
 func TestFixedMajorSparseLeavesTheUnchangedMemberBehind(t *testing.T) {
@@ -348,7 +348,7 @@ func TestFixedMajorPinBelowTheMajorMovesOnlyItsPackage(t *testing.T) {
 func TestFixedMajorLocalPinsDoNotCompete(t *testing.T) {
 	// Two pins, both inside the group's major. Neither asks for anything of
 	// the group's, so both apply to their own package and there is no
-	// conflict to report: a W211 here would tell the operator that half their
+	// conflict to report: a W235 here would tell the operator that half their
 	// intent was overridden when nothing was.
 	git := newFakeGit(
 		commit{sha: "c1", message: "release(a): a's own\n\nRelease-As: 1.5.0\n"},
@@ -381,7 +381,7 @@ func TestFixedMajorGroupPinWinsOverALocalOne(t *testing.T) {
 func TestFixedMajorLocalChannelsDoNotConflict(t *testing.T) {
 	// Two prerelease trains below the shared major belong to their own
 	// packages. The group is not moving, so nobody's channel was overridden
-	// and W212 must stay silent.
+	// and W236 must stay silent.
 	git := newFakeGit(
 		commit{sha: "c1", message: "fix(a)%beta: a wants beta\n---\nfix(b)%rc: b wants rc"},
 	).tag("a", "1.2.3", "").tag("b", "1.4.0", "")
@@ -397,7 +397,7 @@ func TestFixedMajorLocalChannelsDoNotConflict(t *testing.T) {
 func TestFixedMajorDivergentChannelsConflictWhenTheGroupMoves(t *testing.T) {
 	// The same two channels, now carried by a bump that reaches the shared
 	// major: the group takes everyone onto one channel, so one member was
-	// overridden and W212 is exactly right.
+	// overridden and W236 is exactly right.
 	git := newFakeGit(
 		commit{sha: "c1", message: "feat(a)%beta!: a wants beta\n---\nfeat(b)%rc!: b wants rc"},
 	).tag("a", "1.2.3", "").tag("b", "1.4.0", "")
@@ -423,7 +423,7 @@ func TestFixedMajorDivergentChannelsConflictWhenTheGroupMoves(t *testing.T) {
 func TestMixedDepthGroupVersionsAtTheDeepest(t *testing.T) {
 	// A fixedMajor package and a fixedMajorMinor package in one group: the
 	// deeper declaration wins, because holding the major and minor equal also
-	// holds the major equal, and W213 explains the sharing the shallower
+	// holds the major equal, and W237 explains the sharing the shallower
 	// member never asked for.
 	git := newFakeGit(
 		commit{sha: "c1", message: "feat(a): a minor"},

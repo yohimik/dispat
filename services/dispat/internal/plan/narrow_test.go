@@ -138,7 +138,7 @@ func TestNarrowIgnoresSelectedPackagesThatAreNotReleasing(t *testing.T) {
 
 func TestNarrowReportsAVersioningGroupItSplits(t *testing.T) {
 	// A shared version is the group's promise, and releasing part of the group
-	// suspends it until the next run rides the rest up (W210). That is a
+	// suspends it until the next run rides the rest up (W234). That is a
 	// warning, not a refusal: nothing is published out of order.
 	libs := &model.Space{Name: "libs", Versioning: model.VersioningFixed}
 	p := chainPlan(map[string]*model.Space{"a": libs, "b": libs, "c": libs})

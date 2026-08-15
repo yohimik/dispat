@@ -131,7 +131,7 @@ func TestSummarizeReportsCriticals(t *testing.T) {
 	pl := reportPlan()
 	results := map[string]*release.Result{
 		"changed": {Name: "changed", Status: release.StatusPublished,
-			Critical: []error{errors.New("E210: tagging failed: tag refused")},
+			Critical: []error{errors.New("E220: tagging failed: tag refused")},
 			From:     ccme.Version{Major: 1}, To: ccme.Version{Major: 1, Minor: 1}},
 	}
 

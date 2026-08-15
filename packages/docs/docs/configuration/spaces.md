@@ -230,9 +230,9 @@ The joining rules:
 - The *depth* is the group's, not the member's, because there is one shared version to compute. Members asking for
   different depths (a `fixedMajor` package inside a `fixedMajorMinor` group, reachable by overriding one package's
   `versioning` without changing its group) resolve to the deepest any of them asked for, since sharing the major and
-  minor also shares the major. The resolution is reported as `W213`.
+  minor also shares the major. The resolution is reported as `W237`.
 
-Group diagnostics (`W210` rides, `W211` competing pins, `W212` channel conflicts, `W213` mixed depths) name the group;
+Group diagnostics (`W234` rides, `W235` competing pins, `W236` channel conflicts, `W237` mixed depths) name the group;
 the synthetic package they are raised against is `group:<name>`.
 
 ## `scripts` and `dispat run`

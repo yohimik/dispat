@@ -18,7 +18,7 @@ held is nothing to wait for.
 
 A [versioning group](../reference/releasing/versioning.md) is the softer case: a selection that takes only part of one releases and warns
 (`W231`). Nothing goes out of order, and the members left behind are ridden up to the group's version by the next run
-(`W210`), so the split is temporary and needs no operator. Naming the group itself, `dispat release -g platform`,
+(`W234`), so the split is temporary and needs no operator. Naming the group itself, `dispat release -g platform`,
 takes every member at once and so can never split it.
 
 `--strict` refuses both, before anything is built, published or tagged: either the selection goes out as written or

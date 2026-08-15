@@ -109,7 +109,7 @@ it. So under `fixed` the space versions as one package: any change releases ever
 (computed over the space's highest baseline with the max bump), the space runs a single prerelease train, and an exact
 `Release-As` on one member pins the space. Under `fixedMajor` the same is true of a breaking change, while a fix or a
 feature moves only its own package, along with its own train and its own pins. A member released with nothing of its own
-gets one "no changes" changelog entry naming what is shared, labelled `W210` in the plan; under a plain mode a member
+gets one "no changes" changelog entry naming what is shared, labelled `W234` in the plan; under a plain mode a member
 left behind (a failed ride) is re-aligned on the next run. Commit and file scopes keep exactly one job in every shared
 mode: deciding which changelog entries (and GitHub release notes) each package receives.
 
@@ -118,11 +118,11 @@ Two commits under each mode, for a space of `a` and `b`, both at `1.0.0`, where 
 | Mode                    | `feat(a)` gives `b`                         | `feat(a)!` gives `b`                        |
 |-------------------------|---------------------------------------------|---------------------------------------------|
 | `independent`           | stays `1.0.0`, not released                 | stays `1.0.0`, not released                 |
-| `fixed`                 | `1.1.0`, a "no changes" release (W210)      | `2.0.0`, a "no changes" release (W210)      |
+| `fixed`                 | `1.1.0`, a "no changes" release (W234)      | `2.0.0`, a "no changes" release (W234)      |
 | `fixedSparse`           | stays `1.0.0` until its own next change     | stays `1.0.0` until its own next change     |
-| `fixedMajorMinor`       | `1.1.0`, a "no changes" release (W210)      | `2.0.0`, a "no changes" release (W210)      |
+| `fixedMajorMinor`       | `1.1.0`, a "no changes" release (W234)      | `2.0.0`, a "no changes" release (W234)      |
 | `fixedMajorMinorSparse` | stays `1.0.0` until its own next change     | stays `1.0.0` until its own next change     |
-| `fixedMajor`            | stays `1.0.0`: a minor is not shared        | `2.0.0`, a "no changes" release (W210)      |
+| `fixedMajor`            | stays `1.0.0`: a minor is not shared        | `2.0.0`, a "no changes" release (W234)      |
 | `fixedMajorSparse`      | stays `1.0.0`: a minor is not shared        | stays `1.0.0` until its own next change     |
 
 `a` releases `1.1.0` and `2.0.0` in every row. The walkthrough, with worked examples and the rules for groups that span

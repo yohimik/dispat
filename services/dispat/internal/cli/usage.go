@@ -233,7 +233,7 @@ plus the commit.include paths, the message rendered per commit.messageFormat.
 --tag also creates the annotated release tag at the resulting commit, and
 --push pushes the branch and, with --tag, the tags. A tag that already
 exists at that commit is skipped (W223); one at a different commit is left
-alone and reported (E211). Tags are written and pushed with force by default,
+alone and reported (E221). Tags are written and pushed with force by default,
 so a ref the remote already carries is replaced rather than skipped forever;
 --no-force turns that off for this invocation. The branch is never force
 pushed. --tag-name names the tag instead of

@@ -162,7 +162,7 @@ Three things are worth knowing about joining:
 * Setting `versioning` on a single package overrides its space's without leaving the space's group. That is how you
   opt one package out entirely (`"versioning": "independent"`), and also how a group can end up with members asking to
   share different amounts. When that happens the group uses the deepest sharing any member asked for, because sharing
-  the major and minor also shares the major, and reports it as `W213`.
+  the major and minor also shares the major, and reports it as `W237`.
 
 The full reference for all of this is under
 [versioning groups](../../configuration/spaces.md#versioning-groups).
@@ -176,9 +176,9 @@ published.
 Two cases follow from that, and they behave differently:
 
 * **A package with no version yet.** Nothing to disagree about. It joins at whatever version the group computes next
-  and its first release is that version, not `0.0.1`. The `W210` line on it is the whole story.
+  and its first release is that version, not `0.0.1`. The `W234` line on it is the whole story.
 * **A package already at a version of its own.** The higher of the two decides. If the newcomer is behind, it is
-  caught up to the group on the next run (`W210` again). If it is ahead, *the group moves up to meet it*.
+  caught up to the group on the next run (`W234` again). If it is ahead, *the group moves up to meet it*.
 
 That second half is the one to watch, because it runs in the direction you cannot undo. A package tagged `9.0.0` by
 hand, joining a group sitting on `1.x`, takes every member of that group to `9.x` on the very next release, and
@@ -193,7 +193,7 @@ WRN members of versioning group "platform" are on different major versions: core
 It is a warning rather than an error because every one of those versions is genuinely published, so there is no other
 correct plan. If it is not what you meant, fix it before the release: correct the newcomer's tag, or keep it out of
 the group until its version lines up. Members apart by only a minor or a patch are not reported, because that is the
-ordinary state a failed ride leaves behind and `W210` already covers it.
+ordinary state a failed ride leaves behind and `W234` already covers it.
 
 ### Joining with a versioning of its own
 
@@ -236,7 +236,7 @@ INF done published=1 failed=0 skipped=0 unchanged=1
 ```
 
 Sparseness excuses trailing the group, not deciding it. A sparse member sitting *below* the group's major draws no
-`W233`, because that is the mode working as designed and `W210` catches it up the moment it has something to release. A
+`W233`, because that is the mode working as designed and `W234` catches it up the moment it has something to release. A
 sparse member *holding* the group's major is named like any other, because at that point it is not staying out of the
 way, it is choosing where everybody lands.
 
@@ -284,13 +284,13 @@ already on, so it pins that one package and leaves the rest untouched.
 
 | Code   | Meaning                                                                                                        |
 |--------|----------------------------------------------------------------------------------------------------------------|
-| `W210` | A package was released with nothing of its own, to keep the group together. Also raised when a package that fell behind is caught up to the shared part. |
-| `W211` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
-| `W212` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
-| `W213` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
+| `W234` | A package was released with nothing of its own, to keep the group together. Also raised when a package that fell behind is caught up to the shared part. |
+| `W235` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
+| `W236` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
+| `W237` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
 | `W233` | Members are on different major versions, so the newest one is about to take the rest of the group to its major. It names the member that decided, including a sparse one, which may not be a member that releases. |
 
-`W210` cannot be suppressed. Nothing in the commit log explains why that package is in the plan, so the warning is the
+`W234` cannot be suppressed. Nothing in the commit log explains why that package is in the plan, so the warning is the
 only place a reader can find out.
 
 Two convergence properties hold under every mode, and are worth checking if something looks wrong. A group whose

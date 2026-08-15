@@ -128,25 +128,32 @@ const (
 	// releases on a channel the dependent can resolve (§9.3a).
 	// Non-suppressible.
 	CodeBumpSuppressed = "W208"
+	// --- versioning groups (see fixedgroup.go) ---
+	//
+	// W23x, alongside the selection codes below: a versioning group is a
+	// dispat configuration rather than a specification concept, and §16's
+	// registry runs to W215, so the group's diagnostics carry dispat's own
+	// numbers.
+
 	// CodeFixedAlign marks a release whose only cause is fixed versioning:
 	// the package has no changes of its own and rides along to keep every
 	// member of its versioning group on the shared version.
 	// Non-suppressible: like W193 and W202 it explains a presence in the plan
 	// that the commit log alone cannot account for.
-	CodeFixedAlign = "W210"
+	CodeFixedAlign = "W234"
 	// CodeFixedPinConflict reports two exact Release-As pins competing for
 	// one versioning group's shared version; the newest won.
-	CodeFixedPinConflict = "W211"
+	CodeFixedPinConflict = "W235"
 	// CodeFixedChannelConflict reports members of a versioning group
 	// resolving to different channels; the group can only move as one, so a
 	// deterministic winner is picked.
-	CodeFixedChannelConflict = "W212"
+	CodeFixedChannelConflict = "W236"
 	// CodeFixedDepthConflict reports members of a versioning group that share
 	// different parts of the version — a `fixed` space joined by a
 	// `fixedMajor` package. The group versions on the deepest part any member
 	// asks for, which satisfies all of them, and the warning is what explains
 	// the sharing none of the shallower members declared.
-	CodeFixedDepthConflict = "W213"
+	CodeFixedDepthConflict = "W237"
 
 	// --- release outcomes (§13.7a, §13.9) ---
 
@@ -232,7 +239,7 @@ const (
 	CodeSelectionWithheld = "W230"
 	// CodeSelectionSplit marks a selection that releases part of a versioning
 	// group. The members left behind keep their old version until the next run
-	// rides them up to the group's (W210), so the group's shared version is
+	// rides them up to the group's (W234), so the group's shared version is
 	// briefly untrue — deliberate, and worth saying out loud.
 	CodeSelectionSplit = "W231"
 	// CodeAliasTagFailed marks an alias tag that could not be written. The
@@ -250,16 +257,17 @@ const (
 	// published, so the group is released and the outlier is named.
 	//
 	// Members with no baseline at all are not a spread — a package joining a
-	// group has no major to disagree with, and W210 already reports its ride.
+	// group has no major to disagree with, and W234 already reports its ride.
 	// Sparse members are exempt too: staying behind until they change is what
 	// a sparse mode is for.
 	CodeFixedMajorSpread = "W233"
 
 	// --- after the point of no return ---
 	//
-	// E21x, above the E1xx/E200 range §16's registry defines, for the same
-	// reason the W2xx codes sit where they do: these are dispat's own, and the
-	// specification has nothing to say about them.
+	// E22x, above the E1xx/E200 range §16's registry defines and clear of the
+	// correction errors it ends at (E213), for the same reason the W23x codes
+	// sit where they do: these are dispat's own, and the specification has
+	// nothing to say about them.
 	//
 	// Every one of these marks work that failed *after* something irreversible
 	// already happened — a package published to its registry, a release commit
@@ -275,25 +283,25 @@ const (
 	// records the version, so the next run reads the package as never released
 	// and would release the same version again. Worth fixing by hand before
 	// the next run.
-	CodeTagFailed = "E210"
+	CodeTagFailed = "E220"
 	// CodeTagAtOtherCommit marks a release tag that already exists at a commit
 	// that is not this release's. The tag is left exactly where it is: moving
 	// it would rewrite a record another run made, and force-pushing the moved
 	// tag would spread the mistake to the remote.
-	CodeTagAtOtherCommit = "E211"
+	CodeTagAtOtherCommit = "E221"
 	// CodeRecordFailed marks a release record — a changelog entry, a GitHub
 	// release — that could not be written after its package published. The
 	// other recorders still run: a changelog failure is no reason to skip the
 	// GitHub release too.
-	CodeRecordFailed = "E212"
+	CodeRecordFailed = "E222"
 	// CodeCommitFailed marks a failed release commit. Tagging still follows:
 	// the tags then point where the packages' exported commits or HEAD say,
 	// which is where they would have pointed anyway.
-	CodeCommitFailed = "E213"
+	CodeCommitFailed = "E223"
 	// CodePushFailed marks a failed push. The commit and the tags exist
 	// locally, so the release is recorded; what is missing is the copy on the
 	// remote, and a later push sends it.
-	CodePushFailed = "E214"
+	CodePushFailed = "E224"
 
 	// --- the manifest-command gates ---
 	//
@@ -519,7 +527,7 @@ type Release struct {
 	// (§13.9, W202).
 	ChannelOnly bool
 	// FixedRide marks a release whose only cause is the space's fixed
-	// versioning (W210): the package has no changes of its own and releases
+	// versioning (W234): the package has no changes of its own and releases
 	// solely to stay on the space's shared version. Its changelog receives a
 	// single "no changes" entry.
 	FixedRide bool
@@ -2268,7 +2276,7 @@ func (cp *computation) reportChannelOnly() {
 		}
 		// A pinned release is explained by its footer, not by its channel,
 		// even when the pinned version happens to move it between lines; a
-		// fixed-versioning ride is already explained by W210.
+		// fixed-versioning ride is already explained by W234.
 		if rel.Bump != ccme.BumpNone || rel.Pinned || rel.FixedRide || !rel.ChannelChanged() {
 			continue
 		}

@@ -38,7 +38,7 @@ func computeFixed(t *testing.T, mode model.Versioning, git *fakeGit) *Plan {
 
 func TestFixedChangeReleasesWholeSpace(t *testing.T) {
 	// One feat scoped to a alone releases a AND b at one shared version; the
-	// independent c is untouched. b's ride is labelled (W210) and renders a
+	// independent c is untouched. b's ride is labelled (W234) and renders a
 	// "no changes" entry (NoChanges), because nothing in its own history
 	// explains its presence in the plan.
 	git := newFakeGit(
@@ -63,7 +63,7 @@ func TestFixedChangeReleasesWholeSpace(t *testing.T) {
 			found = true
 		}
 	}
-	assert.True(t, found, "the ride must be explained by W210: %v", p.Diagnostics)
+	assert.True(t, found, "the ride must be explained by W234: %v", p.Diagnostics)
 
 	assert.False(t, c.Releasing(), "an independent space must not be dragged along")
 }
@@ -169,7 +169,7 @@ func TestFixedConvergesWhenNothingPending(t *testing.T) {
 }
 
 func TestFixedRideIsNotACatchUp(t *testing.T) {
-	// A ride must be reported as W210, never as W193: it has no provider it
+	// A ride must be reported as W234, never as W193: it has no provider it
 	// is behind, and labelling it a catch-up would tell the operator to look
 	// for one.
 	git := newFakeGit(
@@ -320,7 +320,7 @@ func TestFixedGroupRepositoryScopedPinErrorAbortsTheGroup(t *testing.T) {
 }
 
 func TestFixedGroupDiagnosticsNameGroup(t *testing.T) {
-	// Competing pins inside one group warn as W211 against the group's
+	// Competing pins inside one group warn as W235 against the group's
 	// synthetic package name, so the diagnostic names what actually holds the
 	// single version.
 	git := newFakeGit(
@@ -446,7 +446,7 @@ func TestFixedNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
 	assertVersion(t, v(1, 2, 1), a.Next)
 	assertVersion(t, v(1, 2, 1), b.Next, "at the group's version, not at 0.0.1")
 	assert.False(t, b.HasBaseline, "it really has never published")
-	assert.True(t, b.FixedRide, "W210 explains the ride")
+	assert.True(t, b.FixedRide, "W234 explains the ride")
 	assert.False(t, hasCode(p, CodeFixedMajorSpread), "no W233 for a newcomer, got %v", codes(p))
 }
 
@@ -480,7 +480,7 @@ func TestFixedMemberOnAnotherMajorIsReported(t *testing.T) {
 func TestFixedMinorSpreadIsNotReported(t *testing.T) {
 	// The negative that keeps W233 worth reading: members apart by a minor or
 	// a patch are the ordinary mid-catch-up state a failed ride leaves behind,
-	// and W210 already accounts for it. Only a major spread is warned about.
+	// and W234 already accounts for it. Only a major spread is warned about.
 	git := newFakeGit(
 		commit{sha: "c1", message: "fix(a): tweak"},
 	).tag("a", "1.2.0", "").tag("b", "1.0.0", "")

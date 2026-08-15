@@ -88,7 +88,7 @@ per-field rules follow from what each object means:
   `versioning: independent` to opt out of its space's group, or `versionGroup: <name>` to join another). Setting both in
   one layer is a contradiction and is rejected. Setting `versioning` to another *shared* mode does not leave
   the space's group: the package keeps its membership and asks to share a different amount, which the group resolves to
-  the deepest any member asked for (`W213`). Overriding to a *sparse* mode changes only when the package releases, not
+  the deepest any member asked for (`W237`). Overriding to a *sparse* mode changes only when the package releases, not
   whether its version counts: the group's next version is computed from every member's published version either way,
   so a sparse member's tag can still decide where the rest of the group lands. See
   [joining with a versioning of its own](../reference/releasing/versioning.md#joining-with-a-versioning-of-its-own).

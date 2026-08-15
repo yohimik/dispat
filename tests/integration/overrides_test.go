@@ -191,7 +191,7 @@ func TestOverridesDispatexclude(t *testing.T) {
 
 // TestOverridesVersionGroupSpansSpaces: a declared versionGroups group joined
 // by two spaces versions as one — a change in one space rides the other
-// space's package to the same version (W210) — and converges once aligned.
+// space's package to the same version (W234) — and converges once aligned.
 func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
@@ -212,8 +212,8 @@ func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
 
 	assert.True(t, r.HasTag("lib1@0.1.0"))
 	assert.True(t, r.HasTag("app1@0.1.0"), "the other space's member rides to the group version: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "app1"),
-		"the ride must be explained by W210")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+		"the ride must be explained by W234")
 
 	// Convergence: aligned members release nothing on a second run.
 	r.ReleaseOK()
@@ -244,7 +244,7 @@ func TestOverridesVersionGroupSharesOnlyTheMajor(t *testing.T) {
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app1@"), "a minor must not cross the group; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W210"), "no ride below the shared major")
+	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride below the shared major")
 
 	// A breaking change reaches the shared major and moves both spaces.
 	r.CommitEmpty("feat(lib1)!: a breaking change")
@@ -252,7 +252,7 @@ func TestOverridesVersionGroupSharesOnlyTheMajor(t *testing.T) {
 	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("app1@1.0.0"),
 		"the other space's member joins the shared major; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "app1"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"))
 
 	r.ReleaseOK()
 	assert.Len(t, r.TagList(), 3, "converged")

@@ -35,7 +35,7 @@ func spacesConfig(buildScript string, spaces map[string]models.SpaceConfig) mode
 
 // TestVersioningFixedSpaceLifecycle walks a fixed space (a, b) next to an
 // independent space (app) through four runs: a change to one member releases
-// both at one version with the ride labelled W210 and a "no changes"
+// both at one version with the ride labelled W234 and a "no changes"
 // changelog entry; a converged re-run releases nothing; a change to the
 // *other* member rides the first one back; and the independent space never
 // moves with any of it.
@@ -55,8 +55,8 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.0"), "the ride shares the version; tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app@"), "the independent space must not move")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"),
-		"the ride must be explained by W210")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"),
+		"the ride must be explained by W234")
 
 	aLog, err := os.ReadFile(r.Path("packages", "a", "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	res = r.ReleaseOK()
 	assert.True(t, r.HasTag("a@0.1.1"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.1"), "tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "a"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "a"))
 	aLog, err = os.ReadFile(r.Path("packages", "a", "CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(aLog), "No changes: a version bump", "this time a carries the bump-only entry")
@@ -101,12 +101,12 @@ func TestVersioningFixedSparseLifecycle(t *testing.T) {
 	r.SeedPackage("packages", "x")
 	r.SeedPackage("packages", "y")
 
-	// Run 1: only the changed member releases; no ride, no W210.
+	// Run 1: only the changed member releases; no ride, no W234.
 	r.Commit("feat(x): only x changes")
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("x@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"), "sparse: the unchanged member stays put")
-	assert.False(t, harness.HasCode(res.Events, "W210"), "no ride in sparse mode")
+	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride in sparse mode")
 
 	// Run 2: converged.
 	r.ReleaseOK()
@@ -186,7 +186,7 @@ func TestVersioningFixedRideFailureThenAlignmentCatchUp(t *testing.T) {
 	assert.True(t, r.HasTag("b@0.1.0"),
 		"the laggard must align to the space's published version; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("a@"), "a must not be re-released by the catch-up")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
 
 	r.ReleaseOK()
 	assert.Equal(t, 2, len(r.TagList()), "aligned: nothing further to do")
@@ -236,7 +236,7 @@ func TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain(t *testing.T) {
 		"the laggard joins the train rather than jumping past it; tags: %v", r.TagList())
 	assert.False(t, r.HasTag("b@0.1.0"), "and must not land on a stable version nobody published")
 	assert.Equal(t, 2, r.TagCount("a@"), "a must not be re-released by the catch-up")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"),
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"),
 		"the ride is explained, events:\n%s", res.Stdout)
 
 	// Run 4: graduation takes both members off the train together, which only
@@ -311,7 +311,7 @@ func TestVersioningFixedHoldAndResume(t *testing.T) {
 	assert.True(t, r.HasTag("b@0.1.0"),
 		"the resumed member aligns to the space's published version; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("a@"), "a must not move for b's resume")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
 }
 
 // TestVersioningFixedExactPinMovesTheSpace: an exact Release-As naming one
@@ -357,11 +357,11 @@ func TestVersioningFixedSpaceExecutesEveryMemberScript(t *testing.T) {
 
 // TestVersioningFixedConflictResolutions pins the two fixed-space conflict
 // warnings. Competing exact pins: the space has one shared version, so the
-// newest pin wins and W211 says so. Divergent channels: the space moves as
-// one, so a deterministic winner is picked and W212 says so — the warning is
+// newest pin wins and W235 says so. Divergent channels: the space moves as
+// one, so a deterministic winner is picked and W236 says so — the warning is
 // the operator's only sign that half their intent was overridden.
 func TestVersioningFixedConflictResolutions(t *testing.T) {
-	t.Run("W211_competing_pins", func(t *testing.T) {
+	t.Run("W235_competing_pins", func(t *testing.T) {
 		r := harness.New(t)
 		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
 			"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
@@ -373,14 +373,14 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 		r.CommitEmpty("release(b): pin b, later\n\nRelease-As: 0.9.0\n")
 
 		res := r.ReleaseOK()
-		assert.True(t, harness.HasCode(res.Events, "W211"),
+		assert.True(t, harness.HasCode(res.Events, "W235"),
 			"competing pins in one fixed space must be reported")
 		assert.True(t, r.HasTag("a@0.9.0"), "the newest pin moves the space: %v", r.TagList())
 		assert.True(t, r.HasTag("b@0.9.0"), "tags: %v", r.TagList())
 		assert.False(t, r.HasTag("a@0.5.0"), "the losing pin must not also release")
 	})
 
-	t.Run("W212_divergent_channels", func(t *testing.T) {
+	t.Run("W236_divergent_channels", func(t *testing.T) {
 		r := harness.New(t)
 		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
 			"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
@@ -390,7 +390,7 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 		r.Commit("feat(a)%beta: a wants beta\n---\nfeat(b)%rc: b wants rc")
 
 		res := r.ReleaseOK()
-		assert.True(t, harness.HasCode(res.Events, "W212"),
+		assert.True(t, harness.HasCode(res.Events, "W236"),
 			"divergent member channels must be reported")
 		tags := r.TagList()
 		require.Len(t, tags, 2, "both members release once: %v", tags)
@@ -407,7 +407,7 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 // TestVersioningFixedMajorLifecycle walks a fixedMajor space through six runs.
 // Patches and minors are each package's own, so they move nobody else; a
 // breaking change moves the whole group to one major, riding the unchanged
-// member (W210) with a changelog entry naming what is actually shared; the
+// member (W234) with a changelog entry naming what is actually shared; the
 // group then converges and is free to diverge again below the major.
 func TestVersioningFixedMajorLifecycle(t *testing.T) {
 	r := harness.New(t)
@@ -430,7 +430,7 @@ func TestVersioningFixedMajorLifecycle(t *testing.T) {
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("a@0.1.1"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("b@"), "a patch must not move the group")
-	assert.False(t, harness.HasCode(res.Events, "W210"), "no ride below the shared major")
+	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride below the shared major")
 
 	// Run 3: a minor is below it too — the two members diverge legitimately.
 	r.CommitEmpty("feat(b): b's own minor")
@@ -444,8 +444,8 @@ func TestVersioningFixedMajorLifecycle(t *testing.T) {
 	res = r.ReleaseOK()
 	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@1.0.0"), "the group shares one major; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"),
-		"the ride must be explained by W210")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"),
+		"the ride must be explained by W234")
 	assert.Zero(t, r.TagCount("app@"), "the independent space must not move")
 
 	bLog, err := os.ReadFile(r.Path("packages", "b", "CHANGELOG.md"))
@@ -489,7 +489,7 @@ func TestVersioningFixedMajorSparseLifecycle(t *testing.T) {
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("x@1.0.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"), "sparse: an unchanged member never rides")
-	assert.False(t, harness.HasCode(res.Events, "W210"), "no ride in a sparse mode")
+	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride in a sparse mode")
 
 	// Run 3: y's first change joins it to the shared major.
 	r.CommitEmpty("fix(y): y catches its first change")
@@ -531,7 +531,7 @@ func TestVersioningFixedMajorMinorLifecycle(t *testing.T) {
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.0"), "the group shares the minor; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
 
 	bLog, err := os.ReadFile(r.Path("packages", "b", "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -565,7 +565,7 @@ func TestVersioningFixedMajorMinorSparseLifecycle(t *testing.T) {
 	res := r.ReleaseOK()
 	assert.True(t, r.HasTag("x@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"))
-	assert.False(t, harness.HasCode(res.Events, "W210"))
+	assert.False(t, harness.HasCode(res.Events, "W234"))
 
 	// Run 2: y's own patch joins it to the shared major and minor.
 	r.CommitEmpty("fix(y): y catches its first change")
@@ -771,7 +771,7 @@ func TestVersioningFixedMajorRideFailureThenAlignment(t *testing.T) {
 	assert.True(t, r.HasTag("b@1.0.0"),
 		"the laggard catches up to the shared major; tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("a@"), "a must not be re-released by the catch-up; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "b"))
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
 
 	before := len(r.TagList())
 	r.ReleaseOK()
@@ -799,7 +799,7 @@ func TestVersioningPartialRideExecutesEveryMemberScript(t *testing.T) {
 // TestVersioningMixedDepthGroupUsesTheDeepest: a package may override its
 // space's versioning without leaving the space's group, which is how one
 // group ends up with members sharing different parts of the version. The
-// deepest declaration wins — it satisfies every member at once — and W213 is
+// deepest declaration wins — it satisfies every member at once — and W237 is
 // what explains the sharing the shallower member never asked for.
 func TestVersioningMixedDepthGroupUsesTheDeepest(t *testing.T) {
 	r := harness.New(t)
@@ -815,7 +815,7 @@ func TestVersioningMixedDepthGroupUsesTheDeepest(t *testing.T) {
 
 	r.Commit("feat(a): a minor only the deeper mode shares")
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCode(res.Events, "W213"),
+	assert.True(t, harness.HasCode(res.Events, "W237"),
 		"the mixed depth must be reported: %s", res.Stdout)
 	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("b@0.1.0"),

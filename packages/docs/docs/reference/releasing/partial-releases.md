@@ -78,7 +78,7 @@ WRN selection releases part of a versioning group; the rest catches up on the ne
 
 Nothing here is published out of order, so this is a warning rather than a refusal. The group's shared version is
 briefly untrue: `one` is at 0.2.0 and `two` is still at 0.1.0. The next full release puts that right on its own,
-because a member that has fallen behind its group is released to catch up (that is the `W210` ride you may already
+because a member that has fallen behind its group is released to catch up (that is the `W234` ride you may already
 have seen). You do not have to do anything.
 
 If your repository would rather never be in that state, you have two options. Name the group instead of its members,

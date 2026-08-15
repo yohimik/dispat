@@ -96,7 +96,7 @@ func (cp *computation) fixedGroups() map[string][]string {
 // of its members declares. A mode is each member's own — a group joined from
 // two spaces may mix them — and the deepest declaration satisfies all of them
 // at once, since holding the major and minor equal also holds the major equal.
-// Members that disagree are reported (W211-style: deterministic winner, one
+// Members that disagree are reported (W235-style: deterministic winner, one
 // warning) rather than resolved silently, because nothing in the commit log
 // explains the extra sharing.
 func (cp *computation) groupDepth(g *Release, groupName string, members []string) int {
@@ -152,7 +152,7 @@ func groupMoves(g *Release, d int) bool {
 //
 // Assignment is where sparseness shows, and it is each member's own: a plain
 // mode releases every non-held member at the group version, marking members
-// with no cause of their own as FixedRide (W210); a sparse mode assigns the
+// with no cause of their own as FixedRide (W234); a sparse mode assigns the
 // group version only to members with a cause of their own and leaves the rest
 // at their previous versions.
 //
@@ -194,7 +194,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 
 	// Only now is a divergent channel a conflict. The group is about to take
 	// every member onto one channel, so the members that asked for another one
-	// have been overridden, which is what W212 reports. Had the group stayed
+	// have been overridden, which is what W236 reports. Had the group stayed
 	// put, each member would have kept the channel it asked for and there
 	// would have been nothing to report.
 	if len(channelCands) > 1 {
@@ -238,7 +238,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 // The group versions from its newest member, so whoever is furthest ahead
 // decides where everybody lands. Across a patch or a minor that is ordinary:
 // a failed ride leaves a laggard behind and the next run catches it up, which
-// W210 already explains. Across a *major* it is almost always a mistake, and
+// W234 already explains. Across a *major* it is almost always a mistake, and
 // an expensive one: a package tagged 9.0.0 by hand next to a group on 1.x
 // takes every member to 9.x, and §19.1 forbids moving the tags back.
 //
@@ -358,7 +358,7 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 // holds one shared prefix, so E154's "an exact version can name only one" is
 // satisfied by construction here; packages outside the group that the same pin
 // scoped still go through their own applyPin and its guards. Competing group
-// pins warn (W211) and the newest wins.
+// pins warn (W235) and the newest wins.
 func (cp *computation) fixedGroupPin(g *Release, groupName string, members []string, depth int) (pin, bool) {
 	var groupPin pin
 	pinnedVersions := make(map[string]bool)

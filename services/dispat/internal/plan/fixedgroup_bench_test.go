@@ -83,5 +83,5 @@ func TestGroupPathScalesWithTheMembers(t *testing.T) {
 	for _, rel := range p.Releases {
 		assertVersion(t, v(2, 0, 0), rel.Next)
 	}
-	assert.Equal(t, 199, len(p.Diagnostics), "one W210 per rider, none for the package that changed")
+	assert.Equal(t, 199, len(p.Diagnostics), "one W234 per rider, none for the package that changed")
 }
