@@ -481,7 +481,7 @@ func TestReleaseLockNotTakenWhenNothingToRelease(t *testing.T) {
 	bare := r.AddBareRemote()
 
 	res := releaseLocked(r, "--require-release")
-	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	require.Equal(t, 3, res.Code, "stdout:\n%s", res.Stdout)
 	assert.NoFileExists(t, r.Path("lock.probe"),
 		"the run stopped before beforeAll, which only runs once the lock is held")
 	assertLockCleared(t, r, bare)

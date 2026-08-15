@@ -596,7 +596,7 @@ func TestFilterRequireReleaseCountsOnlyWhatShips(t *testing.T) {
 		"the selection releases core, so the gate is open")
 
 	res := r.Status("-p", "web", "--require-release")
-	assert.Equal(t, 1, res.Code, "web waits for core, so this run would ship nothing")
+	assert.Equal(t, 3, res.Code, "web waits for core, so this run would ship nothing")
 	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
 		"the refusal still explains itself")
 	assert.Equal(t, "⊘ withheld until its providers release",
