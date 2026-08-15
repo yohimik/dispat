@@ -5,5 +5,8 @@ isBuildWaitingPublish: true
 autoVersion:
   enabled: true
   syncLock: [go-mod-tidy]
+# See the pkg space's vet: the lint gate's sweep, defined per Go space.
+scripts:
+  vet: go vet ./...
 flow:
   beforePublish: [changelog, commit, github]

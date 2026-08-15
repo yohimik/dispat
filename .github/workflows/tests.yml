@@ -24,12 +24,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
           cache: true
+
+      # TEMPORARY BOOTSTRAP until 1.0.0: the committed driver, as in the jobs
+      # below.
+      - name: Put the bootstrap dispat on PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
 
       - name: gofmt
         run: |
@@ -38,24 +45,22 @@ jobs:
             echo "gofmt needs to run on:"; echo "$out"; exit 1
           fi
 
+      # One name swept across the monorepo instead of a module list to keep in
+      # step by hand: each Go space defines what `vet` means for its packages,
+      # and a new module in a space is vetted without touching this file.
       - name: go vet
+        run: dispat run vet --since all
+
+      # `tools` and `tests/integration` are repository tooling rather than
+      # dispat packages: they sit in no space, so the sweep above never reaches
+      # them and they would otherwise be the modules in the workspace nothing
+      # gates. The tools suite is seconds long and belongs here, beside the
+      # other checks that are about the repository rather than what it ships.
+      - name: Repository tooling
         run: |
-          go vet -C pkg/ccme ./...
-          go vet -C pkg/manifest ./...
-          go vet -C pkg/models ./...
-          go vet -C pkg/scanner ./...
-          go vet -C pkg/writer ./...
-          go vet -C services/dispat ./...
           go vet -C tests/integration ./...
           go vet -C tools ./...
-
-      # `tools` is repository tooling rather than a dispat package: it sits in
-      # no space, so `dispat run tests` never selects it and it would otherwise
-      # be the one module in the workspace nothing gates. Its own suite is
-      # seconds long and belongs here, beside the other checks that are about
-      # the repository rather than about what it ships.
-      - name: Repository tooling
-        run: go test -C tools ./... -count=1
+          go test -C tools ./... -count=1
 
       # The two ways a `--link-local` bracket leaks. The dispat package's
       # verify-unlinked script checks both before its build reports success;
