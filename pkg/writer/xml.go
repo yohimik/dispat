@@ -37,11 +37,11 @@ func verifyXML(out []byte) error {
 	return nil
 }
 
-// xmlEscape renders text as XML character data. The standard escaper writes
-// into a buffer that cannot fail, so there is no error worth returning here
-// and no caller has to carry one.
+// xmlEscape renders text as XML character data.
 func xmlEscape(text string) []byte {
 	var escaped bytes.Buffer
+	// EscapeText only fails when its Writer does, and a bytes.Buffer never
+	// does, so the discarded error is unreachable rather than ignored.
 	_ = xml.EscapeText(&escaped, []byte(text))
 	return escaped.Bytes()
 }

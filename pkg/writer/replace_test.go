@@ -8,26 +8,6 @@ import (
 	"testing"
 )
 
-// seedText writes one text file and returns its path.
-func seedText(t *testing.T, name, content string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-// readText reads a file back as a string.
-func readText(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
 // repNames renders a result's replacements as "find=>write" for comparison.
 func repNames(reps []Replacement) string {
 	parts := make([]string, 0, len(reps))
@@ -38,7 +18,7 @@ func repNames(reps []Replacement) string {
 }
 
 func TestReplaceReplacesEveryOccurrence(t *testing.T) {
-	path := seedText(t, "README.md", "acme-core:1.2.3 and again acme-core:1.2.3\nplus acme-core:1.2.3\n")
+	path := seed(t, "README.md", "acme-core:1.2.3 and again acme-core:1.2.3\nplus acme-core:1.2.3\n")
 	res, err := Replace(path, []Replacement{{Find: "acme-core:1.2.3", Write: "acme-core:1.3.0"}})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +30,7 @@ func TestReplaceReplacesEveryOccurrence(t *testing.T) {
 		t.Errorf("Applied = %q", got)
 	}
 	want := "acme-core:1.3.0 and again acme-core:1.3.0\nplus acme-core:1.3.0\n"
-	if got := readText(t, path); got != want {
+	if got := read(t, path); got != want {
 		t.Errorf("file = %q, want %q", got, want)
 	}
 	if res.Path != path {
@@ -61,7 +41,7 @@ func TestReplaceReplacesEveryOccurrence(t *testing.T) {
 func TestReplaceAppliesInOrderOverTheLast(t *testing.T) {
 	// The second replacement sees what the first wrote, which is the
 	// documented chaining and the reason the caller picks the order.
-	path := seedText(t, "notes.txt", "one\n")
+	path := seed(t, "notes.txt", "one\n")
 	res, err := Replace(path, []Replacement{
 		{Find: "one", Write: "two"},
 		{Find: "two", Write: "three"},
@@ -69,7 +49,7 @@ func TestReplaceAppliesInOrderOverTheLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := readText(t, path); got != "three\n" {
+	if got := read(t, path); got != "three\n" {
 		t.Errorf("file = %q, want %q", got, "three\n")
 	}
 	if len(res.Applied) != 2 {
@@ -78,7 +58,7 @@ func TestReplaceAppliesInOrderOverTheLast(t *testing.T) {
 }
 
 func TestReplaceSplitsMissingSkippedAndApplied(t *testing.T) {
-	path := seedText(t, "Dockerfile", "FROM acme/base:1.0.0\n")
+	path := seed(t, "Dockerfile", "FROM acme/base:1.0.0\n")
 	res, err := Replace(path, []Replacement{
 		{Find: "acme/base:1.0.0", Write: "acme/base:1.1.0"},
 		{Find: "acme/other:1.0.0", Write: "acme/other:1.1.0"},
@@ -102,17 +82,17 @@ func TestReplaceSplitsMissingSkippedAndApplied(t *testing.T) {
 }
 
 func TestReplaceAnEmptyWriteDeletes(t *testing.T) {
-	path := seedText(t, "list.txt", "keep DROPME keep\n")
+	path := seed(t, "list.txt", "keep DROPME keep\n")
 	if _, err := Replace(path, []Replacement{{Find: " DROPME", Write: ""}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readText(t, path); got != "keep keep\n" {
+	if got := read(t, path); got != "keep keep\n" {
 		t.Errorf("file = %q", got)
 	}
 }
 
 func TestReplaceLeavesAnUnchangedFileAlone(t *testing.T) {
-	path := seedText(t, "notes.txt", "nothing to do here\n")
+	path := seed(t, "notes.txt", "nothing to do here\n")
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +116,7 @@ func TestReplaceLeavesAnUnchangedFileAlone(t *testing.T) {
 }
 
 func TestReplacePreservesPermissions(t *testing.T) {
-	path := seedText(t, "script.sh", "VERSION=1.0.0\n")
+	path := seed(t, "script.sh", "VERSION=1.0.0\n")
 	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -153,24 +133,24 @@ func TestReplacePreservesPermissions(t *testing.T) {
 }
 
 func TestReplaceRefusesAnEmptyFind(t *testing.T) {
-	path := seedText(t, "notes.txt", "x\n")
+	path := seed(t, "notes.txt", "x\n")
 	_, err := Replace(path, []Replacement{{Find: "x", Write: "y"}, {Find: "", Write: "z"}})
 	if !errors.Is(err, ErrEmptyFind) {
 		t.Fatalf("got %v, want ErrEmptyFind", err)
 	}
 	// The whole call is refused before anything is written.
-	if got := readText(t, path); got != "x\n" {
+	if got := read(t, path); got != "x\n" {
 		t.Errorf("file = %q, want it untouched", got)
 	}
 }
 
 func TestReplaceRefusesABinaryFile(t *testing.T) {
-	path := seedText(t, "blob.bin", "prefix\x00 1.0.0 suffix")
+	path := seed(t, "blob.bin", "prefix\x00 1.0.0 suffix")
 	_, err := Replace(path, []Replacement{{Find: "1.0.0", Write: "1.1.0"}})
 	if !errors.Is(err, ErrBinaryFile) {
 		t.Fatalf("got %v, want ErrBinaryFile", err)
 	}
-	if got := readText(t, path); !strings.Contains(got, "1.0.0") {
+	if got := read(t, path); !strings.Contains(got, "1.0.0") {
 		t.Errorf("file = %q, want it untouched", got)
 	}
 }
@@ -178,17 +158,17 @@ func TestReplaceRefusesABinaryFile(t *testing.T) {
 func TestReplaceAcceptsANULBeyondTheSniff(t *testing.T) {
 	// The sniff looks at the head alone, the way git and grep do, so a text
 	// file with one stray byte far into it is still text.
-	path := seedText(t, "long.txt", "1.0.0\n"+strings.Repeat("a", binarySniff)+"\x00")
+	path := seed(t, "long.txt", "1.0.0\n"+strings.Repeat("a", binarySniff)+"\x00")
 	if _, err := Replace(path, []Replacement{{Find: "1.0.0", Write: "1.1.0"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readText(t, path); !strings.HasPrefix(got, "1.1.0\n") {
+	if got := read(t, path); !strings.HasPrefix(got, "1.1.0\n") {
 		t.Errorf("file = %q", got[:8])
 	}
 }
 
 func TestReplaceRefusesAnOversizedFile(t *testing.T) {
-	path := seedText(t, "huge.txt", "1.0.0\n")
+	path := seed(t, "huge.txt", "1.0.0\n")
 	if err := os.Truncate(path, maxManifestBytes+1); err != nil {
 		t.Skipf("cannot make a sparse file here: %v", err)
 	}
@@ -233,7 +213,7 @@ func TestReplaceBytesIgnoresAnEmptyFind(t *testing.T) {
 // purpose but which stand between a bug and a corrupted manifest.
 
 func TestSplicerRefusesOverlappingPatches(t *testing.T) {
-	path := seedText(t, "notes.txt", "0123456789")
+	path := seed(t, "notes.txt", "0123456789")
 	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
@@ -244,13 +224,13 @@ func TestSplicerRefusesOverlappingPatches(t *testing.T) {
 	if !errors.Is(err, errOverlappingPatches) {
 		t.Fatalf("got %v, want errOverlappingPatches", err)
 	}
-	if got := readText(t, path); got != "0123456789" {
+	if got := read(t, path); got != "0123456789" {
 		t.Errorf("a refused commit wrote %q", got)
 	}
 }
 
 func TestSplicerRefusesSpansOnARegeneratedFile(t *testing.T) {
-	path := seedText(t, "notes.txt", "0123456789")
+	path := seed(t, "notes.txt", "0123456789")
 	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +240,7 @@ func TestSplicerRefusesSpansOnARegeneratedFile(t *testing.T) {
 	if err := sp.commit(nil); !errors.Is(err, errMixedEdits) {
 		t.Fatalf("got %v, want errMixedEdits", err)
 	}
-	if got := readText(t, path); got != "0123456789" {
+	if got := read(t, path); got != "0123456789" {
 		t.Errorf("a refused commit wrote %q", got)
 	}
 }
@@ -268,7 +248,7 @@ func TestSplicerRefusesSpansOnARegeneratedFile(t *testing.T) {
 func TestSplicerAppliesPatchesInOffsetOrder(t *testing.T) {
 	// Queued out of order and of different widths, so a splice that used stale
 	// offsets would land visibly wrong.
-	path := seedText(t, "notes.txt", "aaa bbb ccc")
+	path := seed(t, "notes.txt", "aaa bbb ccc")
 	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
@@ -279,13 +259,13 @@ func TestSplicerAppliesPatchesInOffsetOrder(t *testing.T) {
 	if err := sp.commit(nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := readText(t, path); got != "A BB CCCCC" {
+	if got := read(t, path); got != "A BB CCCCC" {
 		t.Errorf("file = %q, want %q", got, "A BB CCCCC")
 	}
 }
 
 func TestSplicerLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
-	path := seedText(t, "notes.txt", "before")
+	path := seed(t, "notes.txt", "before")
 	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
@@ -295,13 +275,13 @@ func TestSplicerLeavesTheFileAloneWhenVerifyFails(t *testing.T) {
 	if err := sp.commit(func([]byte) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("got %v, want the verifier's error", err)
 	}
-	if got := readText(t, path); got != "before" {
+	if got := read(t, path); got != "before" {
 		t.Errorf("file = %q, want it untouched", got)
 	}
 }
 
 func TestSplicerAtAndTextReadTheFileAsFound(t *testing.T) {
-	path := seedText(t, "notes.txt", "hello world")
+	path := seed(t, "notes.txt", "hello world")
 	sp, err := openSplicer(path)
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +298,7 @@ func TestSplicerAtAndTextReadTheFileAsFound(t *testing.T) {
 }
 
 func TestOpenSplicerRefusesAnOversizedFile(t *testing.T) {
-	path := seedText(t, "huge.txt", "x")
+	path := seed(t, "huge.txt", "x")
 	if err := os.Truncate(path, maxManifestBytes+1); err != nil {
 		t.Skipf("cannot make a sparse file here: %v", err)
 	}

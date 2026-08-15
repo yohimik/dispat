@@ -12,17 +12,39 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/yohimik/dispat/pkg/manifest"
 )
 
-// everyWriterName is one file name per supported format, the same list
-// TestEveryScannedEcosystemHasAWriter fences, minus the spellings that only
-// repeat a format already named (pubspec.yml, the F# and VB project files).
+// everyWriterName is one file name per supported format, minus the spellings
+// that only repeat a format already named (pubspec.yml, the F# and VB project
+// files). TestEveryWriterNameCoversEveryFormat fences it against
+// manifest.Formats, so a format gaining a writer without joining this suite
+// fails loudly instead of silently going untested.
 var everyWriterName = []string{
 	"package.json", "go.mod", "requirements.txt", "Cargo.toml", "pyproject.toml",
 	"composer.json", "pom.xml", "App.csproj", "pubspec.yaml", "Info.plist",
 	"AndroidManifest.xml", "libs.versions.toml", "project.pbxproj", "Podfile",
 	"Alamofire.podspec", "build.gradle", "build.gradle.kts", "Gemfile",
 	"acme.gemspec", "Acme.nuspec", "Directory.Packages.props", "packages.config",
+	"Dockerfile", "compose.yaml",
+}
+
+func TestEveryWriterNameCoversEveryFormat(t *testing.T) {
+	covered := map[manifest.Format]bool{}
+	for _, name := range everyWriterName {
+		f, ok := manifest.FormatOf(name)
+		if !ok {
+			t.Errorf("%s: names no format", name)
+			continue
+		}
+		covered[f] = true
+	}
+	for _, f := range manifest.Formats {
+		if !covered[f] {
+			t.Errorf("format %q is missing from the robustness suite", f)
+		}
+	}
 }
 
 func TestRewriteReportsAnUnreadableManifest(t *testing.T) {
@@ -69,6 +91,11 @@ var malformed = map[string]string{
 	"packages.config":          "<packages>",
 	"AndroidManifest.xml":      `<manifest android:versionName="1.0">`,
 	"Info.plist":               "<plist><dict><key>CFBundleShortVersionString</key>",
+	// The Docker formats have no entry here: the Dockerfile and compose
+	// writers read any byte sequence line by line and re-run their own reader
+	// over the result instead of parsing up front, so there is no cheap
+	// "does not parse" refusal to trigger. Their unreadable-file path is
+	// covered through everyWriterName above.
 }
 
 func TestRewriteRefusesAManifestThatDoesNotParse(t *testing.T) {
