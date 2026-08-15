@@ -182,14 +182,15 @@ spaces:
           unlink: dispat autowriter --package dispat --since all --sync-lock=false --unlink-local
           # The two ways the bracket leaks, both of which only fail for whoever
           # consumes the published module, long after the tag exists. The
-          # second is the quieter one: `go work sync` — and anything else that
-          # reconciles the workspace while the links are in place — drops the
-          # go.sum entries the redirects made redundant.
+          # first is the scanner's own gate, which reads the replace directives
+          # the way go.mod means them (a parenthesised block included) instead
+          # of grepping for one spelling. The second is the quieter leak:
+          # `go work sync` — and anything else that reconciles the workspace
+          # while the links are in place — drops the go.sum entries the
+          # redirects made redundant, and that is a toolchain fact no manifest
+          # scan can see, so it stays a grep.
           verify-unlinked: |
-            if grep -q '^replace github.com/yohimik/dispat' go.mod; then
-              echo "a local link survived the build" >&2
-              exit 1
-            fi
+            dispat scanner --root-only --verify-unlinked || exit 1
             for m in ccme manifest models scanner writer; do
               if ! grep -q "^github.com/yohimik/dispat/pkg/$m " go.sum; then
                 echo "go.sum lost its entry for pkg/$m" >&2
