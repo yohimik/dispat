@@ -1,24 +1,31 @@
 # Configuration file reference
 
-One file at the monorepo root describes everything dispat does; `dispat init` writes a starter one, and
-[Getting started](../getting-started.md) walks through a first configuration.
+One file at the monorepo root describes everything dispat does. `dispat init` writes a starter one, and
+[Getting started](../getting-started.md) walks through a first configuration. This page documents the top level and is
+the one home of the resolution rules below; the CLI and packages pages link back here.
 
-The format is inferred from the file extension: JSON, YAML and TOML are the three dispat reads. With no `--config` flag the file is
-**discovered**: the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml` that exists in the root is used
-(the names [`dispat init`](../cli/init.md) writes under its formats). When the root has none, dispat ascends the parent
-directories. A found file only ends the ascent when it declares `spaces` or `packages`, because a package folder's own
-[in-folder config file](./packages.md#in-folder-configuration-files) is an override, not a root. When no candidate
-exists anywhere, the run fails with an error naming every name it tried. An explicitly passed `--config` is used as-is,
-with no fallback, so a typo there fails loudly instead of silently loading a different file. Unknown keys are rejected
-as typo protection; [`custom`](./custom.md) is the one place to put keys dispat does not know. Keys are matched
-case-insensitively and map keys are lowercased, so script and space names are effectively case-insensitive. The
-[`env`](./env.md) objects are the exception, because environment variable names are case-sensitive: their keys keep
-the spelling you write. Any value may also be a [`$ref`](./refs.md) naming another file, which is how a long
-configuration is split across several; the referenced file's content becomes the value, and everything on this page
-holds for the result. This page is the one home of these resolution rules; the CLI and packages pages link back
-here.
+**The format** is inferred from the file extension. JSON, YAML and TOML are the three dispat reads.
 
-This page covers the top level; the larger objects have their own pages:
+**Finding the file.** With no `--config` flag, dispat uses the first of `dispat.json`, `dispat.yaml`, `dispat.yml` or
+`dispat.toml` that exists in the root, which are the names [`dispat init`](../cli/init.md) writes under its formats.
+When the root has none, dispat ascends the parent directories, and a file it finds there only ends the ascent when it
+declares `spaces` or `packages`, because a package folder's own
+[in-folder config file](./packages.md#in-folder-configuration-files) is an override rather than a root. When no
+candidate exists anywhere, the run fails with an error naming every name it tried. An explicit `--config` is used
+as-is, with no fallback, so a typo there fails loudly instead of quietly loading a different file.
+
+**Unknown keys are rejected**, as typo protection. [`custom`](./custom.md) is the one place to put keys dispat does not
+know.
+
+**Case.** Keys are matched case-insensitively and map keys are lowercased, so script and space names are effectively
+case-insensitive. The [`env`](./env.md) objects are the exception, because environment variable names are
+case-sensitive: their keys keep the spelling you write.
+
+**Splitting the file.** Any value may be a [`$ref`](./refs.md) naming another file, which is how a long configuration
+is spread across several. The referenced file's content becomes the value, and everything on this page holds for the
+result.
+
+The larger objects have their own pages:
 
 | Page                                  | Covers                                                                                                                                      |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|

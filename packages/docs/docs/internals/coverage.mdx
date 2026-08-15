@@ -10,8 +10,9 @@ Every number on this page is measured rather than written. Each module's own tes
 `go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
 contributes one more: its harness builds the real dispat binary with `-cover` when `DISPAT_COVERDIR` is set and points
 every invocation's `GOCOVERDIR` there, so the flows only that suite exercises (the app/cli composition, the finalize
-phase, the commands, signal handling) count too. The profiles are merged block by block — a block compiled by two test
-binaries is one block, covered if either reached it — and the merged total becomes the badge on the repository README.
+phase, the commands, signal handling) count too. The profiles are then merged block by block, where a block compiled by
+two test binaries counts once and is covered if either reached it, and the merged total becomes the badge on the
+repository README.
 
 The badge and this page are therefore the same number, taken from the same run: the one that gated the release which
 published this site.
@@ -41,8 +42,8 @@ go run github.com/yohimik/dispat/tools/testreport build   # writes packages/docs
 ```
 
 `--since all` is not optional. A run selected by a `--since` window tests part of the monorepo, so a total from it
-would be a number about whichever packages happened to change — which is why the badge is computed by the release
-workflow and not by the per-commit test workflow.
+would be a number about whichever packages happened to change. That is why the badge is computed by the release
+workflow rather than by the per-commit test workflow.
 
 Rebuilding this site with `packages/docs/data/report.json` in place is what puts the figures back on the page; without
 one, the prose stays and the tables are left out.

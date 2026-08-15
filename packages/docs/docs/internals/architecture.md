@@ -1,6 +1,10 @@
 # Architecture
 
-`§N.N` references throughout this page point into the conventional-commits specification the parser implements,
+How dispat is built: the modules it is assembled from, the algorithms behind the plan, the execution model, and the
+design decisions that shape both. This page is for reading the source, or for understanding why a behaviour is the way
+it is.
+
+`§N.N` references throughout point into the conventional-commits specification the parser implements,
 [`pkg/ccme/SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md).
 
 ## Runtime steps
@@ -42,7 +46,7 @@ as a release tag.
    applies to it. `preview` computes the plan quietly (diagnostics, no graph), prints the pending release notes (every
    pending package's in publish order, under the same filter), and stops. `scanner` and `writer` also
    answer before any config is loaded, for the same reason as `init`. They are the `pkg/scanner` and `pkg/writer`
-   libraries exposed directly (see [Manifest tools](../cookbook/editing/manifests.md)), reading nothing but the paths named on
+   libraries exposed directly (see [Manifest tools](../editing/manifests.md)), reading nothing but the paths named on
    the command line. A monorepo root, a plan and a git history are all beside the point.
 2. Resolve the config file (in `--root`, or ascending its parent directories, the config's own directory becoming the
    effective monorepo root; a folder's `.dispatexclude` chooses between the candidate names). A file declaring `spaces`
@@ -480,7 +484,7 @@ registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`,
 emitted. That includes the codes the registry leaves to the engine rather than to the parser: `E210`-`E213` and
 `W209`-`W215`, which resolve an `Edits` or `Deletes` target against history and report what the correction did, are
 raised here (see [Correcting a record](../reference/corrections.md)). What each of those six means for somebody
-looking at one, and what to do about it, is in [When there is no plan](../reference/plan-errors.md).
+looking at one, and what to do about it, is in [Diagnostic codes](../reference/plan-errors.md).
 
 In the other direction, twenty-four codes are dispat's own, outside the specification's registry, attached to features
 the specification predates or does not have. They are numbered from `W220` and `E215` upward, clear of the registry
@@ -495,7 +499,7 @@ the specification predates or does not have. They are numbered from `W220` and `
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
-| `E215`-`E218`          | The [scanner command's gates](../cookbook/editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
+| `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 
 All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features
 are. `W192`, `W197` and `W203`, the auto-versioning narrations, are the specification's own §9.4/§12.4 codes.

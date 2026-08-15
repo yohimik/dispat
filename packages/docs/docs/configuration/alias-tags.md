@@ -84,6 +84,12 @@ get it.
 Now `v1` only ever follows stable releases. A prerelease still gets its own exact alias if one is configured, so
 `uses: yohimik/dispat@v1.5.0-rc.1` works for anyone testing it, while `v1` stays where it was.
 
+`channels` takes the same values everywhere it appears in the configuration file. Naming nothing selects every release,
+`stable` selects the stable line, `*` selects any prerelease, and a bare name such as `beta` selects that one channel,
+matched without regard to case. The other two places it appears are
+[which channels record](./records.md#choosing-the-channels-that-record) and
+[which releases a changelog line reaches](./records.md#choosing-which-releases-a-line-reaches).
+
 ## Aliases are never read back
 
 dispat finds a package's history by listing the tags its `tagFormat` matches. Aliases are written and never read, so

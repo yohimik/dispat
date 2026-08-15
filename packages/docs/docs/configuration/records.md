@@ -62,15 +62,18 @@ lands inside the release commit, and the release stage's own recorder finds it a
 | `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                                                                                                                                                                                                                |
 | *format*   |                           | All entry format options above. The release body contains the sections, with `header` and `footer` around them; the `## pkg@version (date)` header line used in changelog files is omitted, since GitHub shows the release's name and its own date, so `dateFormat` has no effect here. `releaseName` sets the release's name, which otherwise is the tag. |
 
-The release is **opt-in per package and per run**: it is created exactly when one of the package's scripts exported
-[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs); a published package without the export is skipped (with an
-info-level notice), so a script decides at run time which packages get a GitHub release. The release is named after the
-tag (`pkg@1.3.0`); its body is the rendered changelog sections, under the same
-[release-notes windowing](#changelog): a prerelease's release documents only its own changeset, a graduation the whole
-train. When `enabled` but no repository or token can be resolved at runtime, GitHub releases are skipped with a warning
-instead of failing the run. A configuration that *does* resolve is **verified against the API before any release work
-starts** (`GET /repos/{owner}/{repo}`), with the release commit enabled or disabled alike, so misconfigured credentials
-fail the run before anything is built.
+The release is **opt-in per package and per run**. It is created exactly when one of the package's scripts exported
+[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs), and a published package without the export is
+skipped with an info-level notice. So a script decides at run time which packages get a GitHub release.
+
+The release is named after the tag (`pkg@1.3.0`), and its body is the rendered changelog sections under the same
+[release-notes windowing](#changelog): a prerelease's release documents only its own changeset, and a graduation the
+whole train.
+
+Credentials are handled in two steps. When `enabled` but no repository or token can be resolved at runtime, GitHub
+releases are skipped with a warning rather than failing the run. A configuration that *does* resolve is **verified
+against the API before any release work starts** (`GET /repos/{owner}/{repo}`), whether the release commit is enabled
+or not, so misconfigured credentials fail the run before anything is built.
 
 **Which commit the release points at.** A GitHub release hangs off its tag, and GitHub resolves the tag by name on the
 *remote*: if the tag already exists there when the release is created, the release attaches to exactly the commit it
@@ -334,14 +337,19 @@ publish succeeds and points at the commit the run released from: `HEAD` of the c
 run since nothing is committed. Whatever the release changed on disk (changelog files, version-script manifest edits) is
 left in the worktree, and pushing the tags is left to CI (`git push origin --tags`).
 
-When **enabled**, the run instead finishes with a *finalize phase*. All published packages' folders are staged and
-committed in a single commit, and the release tags are created **on that commit** instead of during each publish. The
-commit carries changelog files, version-script manifest changes, and any `include` paths that exist. Add build outputs
-to your `.gitignore` or they get committed too. A package whose scripts exported [`PACKAGE_<KEY>`](../reference/environment.md#script-outputs) is
-the exception: its tag is excluded from the release commit and created at the exported commit hash instead. If nothing
-changed on disk (e.g. changelogs disabled), no empty commit is created but tags are still placed. GitHub releases move
-to the end of the run and document the release commit in their body; what the GitHub side does in each mode is described
-under [`github`](#github).
+When **enabled**, the run instead finishes with a *finalize phase*. Every published package's folder is staged and
+committed in a single commit, and the release tags are created **on that commit** rather than during each publish.
+
+The commit carries changelog files, version-script manifest changes and any `include` paths that exist. Add build
+outputs to your `.gitignore` or they get committed too. If nothing changed on disk, because changelogs are disabled for
+instance, no empty commit is created but the tags are still placed.
+
+One package is an exception. A package whose scripts exported
+[`PACKAGE_<KEY>`](../reference/environment.md#script-outputs) has its tag excluded from the release commit and created
+at the exported commit hash instead.
+
+GitHub releases move to the end of the run and document the release commit in their body. What the GitHub side does in
+each mode is described under [`github`](#github).
 
 Pushing pushes the branch first and the run's tags after it. It
 requires a checked-out branch (not a detached HEAD; use `actions/checkout` with a `ref`). When `push` is enabled, remote

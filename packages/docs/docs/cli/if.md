@@ -1,9 +1,11 @@
 # The if command
 
-Everything dispat runs is a shell command. Stages, hooks and `run` scripts are
-all strings handed to `/bin/sh -c`, which works well until a script needs to do
-one of two ordinary things: branch on a variable, or call another script you
-already wrote.
+`dispat if <condition>` chooses between shell scripts by testing an environment variable, so a stage can branch
+without depending on the shell it is running under. It plans no release and sweeps no packages.
+
+It exists because everything dispat runs is a shell command. Stages, hooks and `run` scripts are all strings handed to
+`/bin/sh -c`, which works well until a script needs to do one of two ordinary things: branch on a variable, or call
+another script you already wrote.
 
 Two small commands cover those.
 

@@ -1,16 +1,26 @@
 # Getting started
 
-From zero to a releasing monorepo: install the binary, write one config file, name packages in your commits, and wire
-the release into CI.
+Set up monorepo release automation in four steps: install the binary, write one config file, name packages in your
+commits, and wire the release into CI. Nothing below assumes a particular language.
 
 dispat is built for polyglot monorepos. A package is a folder and a stage is a shell command, so it does not care
 whether a package is npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS or Android. They all go in the same
-dependency graph and release in the same run. Nothing below assumes a particular language.
+dependency graph and release in the same run.
+
+If you want the shape of it before the detail, this is the whole path:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
+dispat init             # a starter dispat.json
+dispat compute --write  # read the manifests: the dependency graph and the current versions
+dispat status           # the plan, with nothing touched
+dispat                  # release
+```
 
 ## Install
 
 The install script downloads the release binary for your platform, checks it against the checksum GitHub published,
-and puts it on your `PATH`.
+and puts it on your `PATH`. There is no runtime to install first.
 
 On Linux and macOS, with either curl or wget:
 
@@ -28,7 +38,7 @@ On Windows, in PowerShell:
 irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 ```
 
-It takes options if you want them: a version to pin, somewhere else to install.
+It takes options if you want them: a version to pin, or somewhere else to install.
 
 ```sh title="Pin a version"
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh -s -- --version 1.2.3
@@ -58,18 +68,20 @@ go install github.com/yohimik/dispat/services/dispat@latest
 or download one of the prebuilt binaries for Linux, macOS and Windows, on Intel and on ARM, attached to every
 [GitHub release](https://github.com/yohimik/dispat/releases), and put it on your `PATH` yourself.
 
-In CI you usually want neither: GitHub Actions has [a composite action](./reference/ci.md#the-github-action), and every other
-system can use [the container images](./reference/ci.md#the-container-images) or the install script above.
+In CI you usually want neither: GitHub Actions has [a composite action](./reference/ci.md#the-github-action), and every
+other system can use [the container images](./reference/ci.md#the-container-images) or the install script above.
 
-A downloaded binary keeps itself current: `dispat self-update` replaces it with the latest release and keeps the old
-one beside it for a week in case you want it back. Every command mentions a newer release on its way out, so you find
-out without going looking. See [Updating dispat](./reference/self-update.md).
+A downloaded binary keeps itself current. `dispat self-update` replaces it with the latest release and keeps the old
+one beside it for a week in case you want it back, and every command mentions a newer release on its way out, so you
+find out without going looking. See [Updating dispat](./reference/self-update.md).
 
 ## First configuration
 
-Create `dispat.json` at your monorepo root; `dispat init` writes a starter one (`--format yaml` / `--format toml`
-for the other formats). No flag is needed afterwards: every command finds the first of `dispat.json`, `dispat.yaml`,
-`dispat.yml`, `dispat.toml` that exists (`--config` names a different file explicitly). Minimal example:
+Create `dispat.json` at your monorepo root. `dispat init` writes a starter one, with `--format yaml` or
+`--format toml` for the other formats. No flag is needed afterwards: every command finds the first of `dispat.json`,
+`dispat.yaml`, `dispat.yml` or `dispat.toml` that exists, and `--config` names a different file explicitly.
+
+Here is a complete, working configuration:
 
 ```json
 {
@@ -89,10 +101,12 @@ for the other formats). No flag is needed afterwards: every command finds the fi
 }
 ```
 
-Every direct sub-folder of `packages/libs` is now a package named after its folder (a
-[`.dispatexclude`](./configuration/spaces.md#dispatexclude) file in the space folder can exempt some). A space can also be
-configured, and its packages adjusted, from a [config file in its own folder](./configuration/spaces.md#the-space-configuration-file). Declare relations
-between packages under `dependencies` so bumps propagate and ordering is enforced:
+Every direct sub-folder of `packages/libs` is now a package named after its folder. A
+[`.dispatexclude`](./configuration/spaces.md#dispatexclude) file in the space folder can exempt some, and a space can
+also be configured, and its packages adjusted, from a
+[config file in its own folder](./configuration/spaces.md#the-space-configuration-file).
+
+Declare relations between packages under `dependencies` so bumps propagate and publish order is enforced:
 
 ```json
 {
@@ -102,25 +116,24 @@ between packages under `dependencies` so bumps propagate and ordering is enforce
 }
 ```
 
-That is a complete, working configuration.
-
-If the repository you are pointing it at is not brand new, run [`dispat compute`](./cli/compute.md) once
-before anything else. It reads the packages' manifests and offers you two things the config would otherwise need by
-hand: the `dependencies` edges between them, and an `initials` entry for every package already at a version, so the
-first release continues from where the manifests are instead of starting again at `0.0.1`. Nothing is written until you
-add `--write`. The [adoption recipe](./cookbook/recipes.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
+If the repository you are pointing it at is not brand new, run [`dispat compute`](./cli/compute.md) once before
+anything else. It reads the packages' manifests and offers two things the config would otherwise need by hand: the
+`dependencies` edges between them, and an `initials` entry for every package already at a version, so the first release
+continues from where the manifests are instead of starting again at `0.0.1`. Nothing is written until you add
+`--write`. The [adoption recipe](./examples/adopting.md#adopt-dispat-in-a-repository-that-already-ships-versions) walks
 through a real one.
 
 Everything else is optional and layered on top:
 
-- concurrency budgets, tag formats, log settings: the [top-level options](./configuration/README.md);
-- build/publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](./configuration/spaces.md);
+- concurrency budgets, tag formats and log settings: the [top-level options](./configuration/README.md);
+- build and publish ordering, hooks, login, `scripts` and `dispat run`: [spaces](./configuration/spaces.md);
 - packages that must share a version, or a major: [shared versions](./reference/releasing/versioning.md);
-- changelogs, GitHub releases, the release commit: [release records](./configuration/records.md);
-- commit-message policies and parser tweaks: [parsing options](./configuration/parser.md).
+- changelogs, GitHub releases and the release commit: [release records](./configuration/records.md);
+- commit-message policies and parser settings: [parsing options](./configuration/parser.md).
 
-[`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json) and [`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml) show every option in
-one annotated file.
+[`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json) and
+[`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml) show every
+option in one annotated file.
 
 ## Commit convention
 
@@ -132,8 +145,8 @@ feat(core): add streaming        # minor, core only
 feat(core)!: drop the old API    # major, core only
 ```
 
-**Reaching consumers is opt-in.** A plain `feat(core):` releases `core` and nothing else. Add a caret to say how far the
-change reaches:
+**Reaching consumers is opt-in.** A plain `feat(core):` releases `core` and nothing else. Add a caret to say how far
+the change reaches:
 
 ```
 feat(core)^: add streaming       # core + its direct consumers
@@ -146,7 +159,7 @@ Consumers reached this way take a `patch` unless the commit says otherwise, and 
 demand more. If you are coming from a tool where propagation was automatic, this is the one habit to change: without a
 caret, dependants are not bumped.
 
-A few more forms worth knowing early; the full reference is in
+A few more forms are worth knowing early, and the full reference is in
 [Commit messages](./reference/commits.md):
 
 ```
@@ -160,7 +173,7 @@ cancel(app): drop pending work   # discard app's unreleased metadata
 ```
 
 A commit whose scope names no known package is an error by default, because a typo would otherwise silently drop a
-release. Scopes that are deliberately not packages (like `release`) go in `nonPackageScopes`.
+release. Scopes that are deliberately not packages, such as `release`, go in `nonPackageScopes`.
 
 ## Commands
 
@@ -228,10 +241,12 @@ Four things in a plan cannot be explained by reading the commit log alone, so di
 | **held**         | The package accumulated a bump but `Release-As: none` is withholding it. Carries the version it would have. |
 | **blocked**      | The package was planned and never attempted, because a dependency failed to publish.                        |
 
-A caret that reached a consumer and could not oblige it (a stable consumer of a prerelease) is reported too, so a
-directive that looks like it should have released something and did not is visible rather than silent.
+A caret that reached a consumer and could not oblige it, such as a stable consumer of a prerelease, is reported too, so
+a directive that looks like it should have released something and did not is visible rather than silent.
 
-## Running in CI (GitHub Actions example)
+## Running in CI
+
+This is a complete GitHub Actions job:
 
 ```yaml
 jobs:
@@ -251,22 +266,22 @@ jobs:
       - run: git push origin --tags   # publish the tags dispat created
 ```
 
-[dispat in CI](./reference/ci.md) covers the action's inputs, the container images for every other CI system, and what a job
-needs beyond this.
+[dispat in CI](./reference/ci.md) covers the action's inputs, the container images for every other CI system, and what
+a job needs beyond this.
 
-Notes:
+Four things about that job are worth knowing:
 
 - `fetch-depth: 0` matters. The planner reads tags and commit ranges, so it needs full history. A shallow clone is
   detected and refused (error `E196`) rather than silently planned over.
-- By default dispat creates tags locally; push them after a successful run, as above. Alternatively enable the
-  [release commit](./configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then creates
-  one commit carrying the changelogs and manifest changes, places the tags on it and pushes everything
-  itself. [GitHub releases](./configuration/records.md#github) are created for every published package whose scripts
-  exported `DISPAT_EXPORT_GITHUB`, with the export's file paths attached as assets; see
+- By default dispat creates tags locally, so push them after a successful run as above. Alternatively enable the
+  [release commit](./configuration/records.md#commit) (`"commit": {"enabled": true, "push": true}`): dispat then
+  creates one commit carrying the changelogs and manifest changes, places the tags on it and pushes everything itself.
+  [GitHub releases](./configuration/records.md#github) are created for every published package whose scripts exported
+  `DISPAT_EXPORT_GITHUB`, with the export's file paths attached as assets; see
   [script outputs](./reference/environment.md#script-outputs) for the export mechanism.
 - Two releases at once are refused rather than raced. Before it plans anything, a run claims the repository by pushing
-  a `dispat-release-lock` tag to your remote; if the name is already taken the push is rejected and the run stops
-  having done nothing. The tag is given back on every way out, a failed package and a Ctrl-C included. So a second job
+  a `dispat-release-lock` tag to your remote, and if the name is already taken the push is rejected and the run stops
+  having done nothing. The tag is given back on every way out, a failed package and a Ctrl-C included, so a second job
   triggered while the first is still going is told to come back later instead of publishing the same versions twice.
   See [The release lock](./reference/releasing/release-lock.md).
 - The exit code is non-zero when any package fails, so the job fails visibly while unaffected packages still released.

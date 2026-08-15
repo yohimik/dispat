@@ -1,12 +1,12 @@
-# When there is no plan
+# Diagnostic codes
 
-Everything dispat does starts from a plan: which packages changed, what their next versions are, and in what order.
-When the plan cannot be computed, or can be computed but is not trustworthy, nothing runs at all. That is deliberate.
-A release is a set of irreversible writes to registries, so the moment to refuse is before the first one, not halfway
-through.
+Every code dispat can report, and what to do about each one. Everything dispat does starts from a plan: which packages
+changed, what their next versions are, and in what order. When the plan cannot be computed, or can be computed but is
+not trustworthy, nothing runs at all. That is deliberate, because a release is a set of irreversible writes to
+registries, so the moment to refuse is before the first one rather than halfway through.
 
-This page is about a run that never got started. For a run that *did* start and then something went wrong, see
-[Recovering from a failed run](../cookbook/recipes.md#recovering-from-a-failed-run) and
+This page is mostly about a run that never got started. For a run that *did* start and then something went wrong, see
+[Recovering from a failed run](./releasing/recovery.md) and
 [What to do when something fails](./releasing/steps.md#what-to-do-when-something-fails).
 
 **Start with `dispat status`.** It computes exactly the same plan a release does and prints the same diagnostics, but

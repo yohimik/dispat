@@ -19,16 +19,21 @@ It covers its packages one at a time, since a repository has one index and one H
 ## The selection it shares
 
 `dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
-steps to custom flows: a stage script can run a step at the moment the flow needs it, and the release stage later
-finds the work done and skips it. All four share the run command's [selection](./run.md#choosing-the-packages) *and* its
-window: with no terms they cover every releasing package in dependency order, `--package`, `--space`, `--group` or the
-invocation folder narrows that, `--since` replaces the window, `--consumers` expands it downstream, and `--on-error`
-decides what a failed package does to its dependents. A term matching no package is an error; a *selected* package
-that is not releasing is a logged no-op, so a flow never fails over a converged or held package. That also means a
+steps to custom flows. A stage script can run a step at the moment the flow needs it, and the release stage later
+finds the work done and skips it.
+
+All four share the run command's [selection](./run.md#choosing-the-packages) *and* its window. With no terms they cover
+every releasing package in dependency order. `--package`, `--space`, `--group` or the invocation folder narrows that,
+`--since` replaces the window, `--consumers` expands it downstream, and `--on-error` decides what a failed package does
+to its dependents.
+
+Two rules about what a selection may contain. A term matching no package is an error. A *selected* package that is not
+releasing is a logged no-op, so a flow never fails over a converged or held package. That second rule is also why a
 step run after `dispat commit --tag` covers nothing until `--since all` puts the tagged package back on the table.
-The four command words are reserved: like every command name, each wins
-the `dispat <script>` shorthand over a [script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so
-`dispat commit` is always the command. Spelling it out as `dispat run commit` still reaches the script.
+
+The four command words are reserved. Like every command name, each wins the `dispat <script>` shorthand over a
+[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so `dispat commit` is always the command.
+Spelling it out as `dispat run commit` still reaches the script.
 
 Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
 [flags table](#flags).

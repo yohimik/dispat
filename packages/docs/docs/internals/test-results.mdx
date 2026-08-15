@@ -14,13 +14,13 @@ What dispat's test suite did, as opposed to [what it reached](./coverage.mdx).
 
 Each row is one `go test` invocation: the `tests` script of one package, run through
 [`scripts/go-test.sh`](https://github.com/yohimik/dispat/blob/main/scripts/go-test.sh), which keeps the run's
-`go test -json` stream for exactly this. `tests` and `fuzz` count test *functions*, never subtests — a suite that
-counts every `t.Run` as a test reports a number several times the one it can defend, so the subtests are counted
-beside them instead.
+`go test -json` stream for exactly this. `tests` and `fuzz` count test *functions*, never subtests. A suite that counts
+every `t.Run` as a test reports a number several times the one it can defend, so the subtests are counted beside them
+instead.
 
 The integration suite appears twice: once instrumented for coverage, once under the race detector. CI runs it that way
-too, rather than with `-count`. The totals above count it once — the race pass is the same tests again, and adding it
-in would claim several hundred tests this repository does not have.
+too, rather than with `-count`. The totals above count it once, because the race pass is the same tests again and
+adding it in would claim several hundred tests this repository does not have.
 
 ## The two layers
 
@@ -51,7 +51,7 @@ Repeated runs (`go test ./... -count 5`) are the manual stability check.
 
 One test file per goal, in the order the
 [test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md#goals) numbers them. The
-plan carries the claim-by-claim matrix — a row per test, saying which goal it proves; this is the summary.
+plan carries the claim-by-claim matrix, a row per test saying which goal it proves; this page is the summary.
 
 | File | Area |
 |------|------|

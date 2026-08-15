@@ -72,19 +72,26 @@ and compute will leave it alone. Without a git repository the baselines are skip
 the edges are computed as usual.
 
 **How changes are applied.** Nothing is written by default. The listing puts the edges first and the baselines after
-them, by package name. `--write` applies every suggestion, `--interactive` asks `y`/`N` per suggestion on stdin. Each
-change is applied to the file that holds the declaration: additions go into the root config's top-level
-`dependencies` object under their consumer, unless that consumer already declares its providers in a
-`packages.<name>.dependencies` entry or its own in-folder file, in which case the addition joins them there. A removal
-and a kind correction edit the declaring source in place, and a baseline goes into the root config's `initials` map. Everything one
-file receives is written in a single pass, so a run that changes two of its keys still leaves one backup. Every edited
-file is first copied to `<name>.backup` (untracked files worth a `.gitignore` entry; overwritten on every applying
-run), and each write is atomic. A TOML file is not rewritten in place: `--write` prints a paste-ready block for it and
-fails instead. A key kept in a [referenced file](../configuration/refs.md) is written in that file, at the key it
-holds there, so the `$ref` survives the write and the backup sits beside the file that changed; a key composed from a
-reference *and* the keys written beside it belongs to two files at once, and `--write` refuses it rather than
-choosing one. `--check` overrides both apply modes: it writes nothing and exits `1` when any suggestion exists across
-any source, which is the CI gate for a config lagging the manifests.
+them, by package name. `--write` applies every suggestion, and `--interactive` asks `y`/`N` per suggestion on stdin.
+
+Each change is applied to the file that holds the declaration. An addition goes into the root config's top-level
+`dependencies` object under its consumer, unless that consumer already declares its providers in a
+`packages.<name>.dependencies` entry or in its own in-folder file, in which case the addition joins them there. A
+removal and a kind correction edit the declaring source in place, and a baseline goes into the root config's
+`initials` map.
+
+Every write is guarded. Everything one file receives is written in a single pass, so a run that changes two of its keys
+still leaves one backup. Every edited file is first copied to `<name>.backup`, which is untracked and worth a
+`.gitignore` entry and is overwritten on every applying run, and each write is atomic.
+
+Two cases are refused rather than guessed at. A TOML file is not rewritten in place, so `--write` prints a paste-ready
+block for it and fails. And a key composed from both a [referenced file](../configuration/refs.md) *and* the keys
+written beside it belongs to two files at once, so `--write` refuses it rather than choosing one. A key kept wholly in
+a referenced file is written in that file, at the key it holds there, so the `$ref` survives the write and the backup
+sits beside the file that changed.
+
+`--check` overrides both apply modes. It writes nothing and exits `1` when any suggestion exists across any source,
+which is the CI gate for a config lagging the manifests.
 
 ## Flags
 

@@ -1,15 +1,17 @@
 # Script environment variables
 
-Every script receives, on top of the parent environment (which the [`.env` file](../configuration/dotenv.md) fills in
-where nothing else set a name), any
-[static `env` variables the configuration sets](../configuration/env.md), and then the variables below
-(the same variables also expand in
-[record text](../configuration/records.md#variables-in-record-text), so a changelog footer and a publish script name a
-release the same way).
+Every `DISPAT_*` variable a stage script receives, and what each one holds. A script sees three layers, in this order:
+
+1. the parent environment, which the [`.env` file](../configuration/dotenv.md) fills in where nothing else set a name;
+2. any [static `env` variables the configuration sets](../configuration/env.md);
+3. the variables in the table below, computed from the release plan.
 
 The order matters when a name appears twice. The static variables are placed first, so a computed `DISPAT_*` variable
-always wins, and a static value referring to one (`custom_$DISPAT_VERSION`) is expanded against the values in this
-table before the script starts.
+always wins, and a static value referring to one, such as `custom_$DISPAT_VERSION`, is expanded against the values in
+this table before the script starts.
+
+The same variables expand in [record text](../configuration/records.md#variables-in-record-text), so a changelog footer
+and a publish script name a release the same way.
 
 These variables come from the release plan, so ordinarily a release is what produces them.
 [`dispat exec --env both`](../cli/exec.md#what-the-script-gets) computes the same plan on demand, which is how a
@@ -166,14 +168,19 @@ echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.tgz $PWD/dist/SHA256SUMS" >> "$DISPAT_O
 
 Outputs accumulate across the package's pipeline into one store. Every later script and hook of the package receives
 each export as `DISPAT_OUTPUT_<NAME>`, and that includes the outcome scripts `onFail` and `onSkip`, so a notifier can
-report with them. Two more variables come along: `DISPAT_OUTPUTS` lists the exported names, space-separated and set but
-empty when nothing was exported, and `DISPAT_OUTPUT_SOURCE_<NAME>` names the script each export came from, as
-`<package>:<stage>` (`core:build`, `base:run:lint`) or `<space>:login` for the login. Hooks export exactly like stage
-scripts: a `beforeBuild` export reaches the build, the publish and everything after. The **login script's**
-exports are space-scoped: they reach every package of the space from its publish stage (the stage that waits for the
-login) onward. In [`dispat run`](../configuration/spaces.md#scripts-and-dispat-run) outputs additionally carry across
-packages, from a provider's script to its consumers'; in a release run they stay within the package (a consumer's
-release scripts read a provider's new version from the `DISPAT_UPDATED_*` listing, not the provider's outputs).
+report with them.
+
+Two more variables come along. `DISPAT_OUTPUTS` lists the exported names, space-separated, and is set but empty when
+nothing was exported. `DISPAT_OUTPUT_SOURCE_<NAME>` names the script each export came from, as `<package>:<stage>`
+(`core:build`, `base:run:lint`) or `<space>:login` for the login.
+
+How far an export travels depends on which script made it. Hooks export exactly like stage scripts, so a `beforeBuild`
+export reaches the build, the publish and everything after. The **login script's** exports are space-scoped, reaching
+every package of the space from its publish stage, the one that waits for the login, onward. In
+[`dispat run`](../configuration/spaces.md#scripts-and-dispat-run) outputs additionally carry across packages, from a
+provider's script to its consumers'. In a release run they stay within the package, because a consumer's release
+scripts read a provider's new version from the `DISPAT_UPDATED_*` listing rather than from the provider's outputs.
+
 Re-exporting a name overrides its earlier value and source, like a shell re-assignment.
 
 The name must be a valid environment variable name; other `DISPAT_`-prefixed names are reserved (an export cannot shadow
@@ -182,16 +189,19 @@ sequence that fails still surrenders whatever it exported before failing, which 
 gets to see it.
 
 One export is a directive to the [GitHub recorder](../configuration/records.md#github): **`DISPAT_EXPORT_GITHUB`**. A
-package whose scripts exported it gets a GitHub release; a package that never exported it is skipped by the recorder.
-Its value is a whitespace-separated list of absolute paths to existing files (`$PWD` inside a script resolves to the
-package folder, which makes absolute paths easy), each uploaded as an asset of the release, named after the file; an
-empty value creates the release with no assets. An invalid entry (a relative path, a missing file, a directory) is
-skipped with a warning while the release and the sound entries go through. Unlike ordinary outputs the export travels to
-later scripts under its full name, so appending is
+package whose scripts exported it gets a GitHub release, and a package that never exported it is skipped by the
+recorder.
+
+Its value is a whitespace-separated list of absolute paths to existing files, each uploaded as an asset of the release
+and named after the file. `$PWD` inside a script resolves to the package folder, which makes absolute paths easy. An
+empty value creates the release with no assets, and an invalid entry, meaning a relative path, a missing file or a
+directory, is skipped with a warning while the release and the sound entries go through.
+
+Unlike ordinary outputs, this export travels to later scripts under its full name, so appending to it reads
 `echo "DISPAT_EXPORT_GITHUB=$DISPAT_EXPORT_GITHUB $PWD/more.tgz" >> "$DISPAT_OUTPUT"`, and it does not appear in
 `DISPAT_OUTPUTS`. Because it reaches later scripts as a plain environment variable, the
-[`dispat github`](../cli/github.md) step command run from one of them reads the same opt-in and the same
-asset list out of its own environment.
+[`dispat github`](../cli/github.md) step command run from one of them reads the same opt-in and the same asset list out
+of its own environment.
 
 The other export with a consumer inside dispat is **`PACKAGE_<KEY>`**, where `<KEY>` is the exporting package's own key
 under the [scheme above](#workspace-data). A release script that exports `PACKAGE_<KEY>=<commitHash>` pins the package's

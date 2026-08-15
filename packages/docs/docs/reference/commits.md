@@ -1,7 +1,11 @@
 # Commit message reference
 
-Messages are parsed by [`pkg/ccme`](https://github.com/yohimik/dispat/tree/main/pkg/ccme). A message holds one or more **units** separated by a line of
-`---`; each has its own header, body and footers.
+The commit message format dispat reads release intent from: a strict superset of Conventional Commits that adds the
+monorepo dimension. Writing a message in this format is how you say which packages a change releases, how far it
+reaches, and which channel it lands on.
+
+Messages are parsed by [`pkg/ccme`](../go/ccme.md). A message holds one or more **units** separated by a line of
+`---`, each with its own header, body and footers.
 
 ```
 <type>[(<scope-set>)][<directives>][!]: <description>

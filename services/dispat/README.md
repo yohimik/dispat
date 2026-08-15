@@ -57,65 +57,65 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 
 ## Key features
 
-- **Releases the graph, not a list.** Consumer/provider ordering, parallel builds and publishes with separate
-  concurrency budgets, and `isBuildWaitingPublish` for ecosystems (like Docker) where a consumer can only build after
-  its provider is published.
-- **Blast radius written in the commit.** `feat(core):` releases `core` alone; `^` reaches direct consumers, `^^`
-  the transitive closure, `+N` exactly N edges. Nothing is released on a guess.
-- **Self-healing runs.** Failures don't stop the world and are never lost: a broken package skips only its true
-  dependants while the rest keeps releasing, and the next run catches the skipped ones up at the exact version they were
-  owed. No state files, no double releases, no repair scripts: re-running *is* the recovery.
-- **Release control from commits.** `%beta` starts a prerelease train and `%beta>stable` graduates it;
-  `Release-As: none` holds a package and `Release-As: auto` resumes it; `Release-As: 2.0.0` pins an exact version and
-  `cancel(pkg)` discards pending work. It is all written in commits, so release decisions are reviewed and versioned
-  like code. [Details](https://yohimik.github.io/dispat/reference/commits#release-control).
+- **Releases the graph, not a list.** Consumer and provider ordering, parallel builds and publishes with separate
+  concurrency budgets, and `isBuildWaitingPublish` for the ecosystems, Docker among them, where a consumer can only
+  build once its provider is published.
+- **Blast radius written in the commit.** `feat(core):` releases `core` alone, `^` reaches its direct consumers, `^^`
+  the transitive closure, and `+N` exactly N edges. Nothing is released on a guess.
+- **Self-healing runs.** A failure does not stop the world and is never lost. A broken package skips only its true
+  dependants while everything else keeps releasing, and the next run catches the skipped ones up at the exact version
+  they were owed. No state files, no double releases and no repair scripts: re-running *is* the recovery.
+- **Release control from commits.** `%beta` starts a prerelease train and `%beta>stable` graduates it,
+  `Release-As: none` holds a package and `Release-As: auto` resumes it, `Release-As: 2.0.0` pins an exact version and
+  `cancel(pkg)` discards pending work. It is written in commits, so release decisions are reviewed and versioned like
+  code. [Details](https://yohimik.github.io/dispat/reference/commits#release-control).
 - **Polyglot by construction: any language, any registry, any tooling.** Stages are shell commands fed a rich
-  [`DISPAT_*` environment](https://yohimik.github.io/dispat/reference/environment), scripts pass values to each other through `$DISPAT_OUTPUT`, and
-  release state lives in git tags, so every build system, CI and caching layer works from inside a script unchanged.
-  dispat reads and rewrites fifteen manifest families: npm, Go, Cargo, Python, Composer, Maven, the .NET
-  project/nuspec family, Dart, Ruby, Dockerfiles and compose files, and the mobile platforms (Info.plist,
-  project.pbxproj, Podfile and .podspec on iOS; AndroidManifest.xml, Gradle build scripts and version catalogs on
-  Android). `dispat compute` derives the dependency graph, and the baseline each package starts from, out of the
-  packages' own manifests, so adopting dispat in a repository that already ships versions takes one command. An
-  `autoVersion` space has dispat rewrite its manifests natively at the version stage; native rewriting of *dependency
-  ranges* covers `package.json` and `go.mod`, and other ecosystems reconcile theirs from a `flow.version` script.
+  [`DISPAT_*` environment](https://yohimik.github.io/dispat/reference/environment), scripts pass values to each other
+  through `$DISPAT_OUTPUT`, and release state lives in git tags, so every build system, CI and caching layer works from
+  inside a script unchanged. dispat reads and rewrites fifteen manifest families: npm, Go, Cargo, Python, Composer,
+  Maven, the .NET project and nuspec family, Dart, Ruby, Dockerfiles and compose files, and the mobile platforms
+  (Info.plist, project.pbxproj, Podfile and .podspec on iOS; AndroidManifest.xml, Gradle build scripts and version
+  catalogs on Android). `dispat compute` derives both the dependency graph and each package's starting version from
+  those manifests, so adopting dispat in a repository that already ships versions takes one command. An `autoVersion`
+  space has dispat rewrite its manifests natively at the version stage; native rewriting of *dependency ranges* covers
+  `package.json` and `go.mod`, and other ecosystems reconcile theirs from a `flow.version` script.
 - **No task cache, because there is nothing to cache.** Tools that cache task results have to run the task, hash its
   inputs, decide whether the hit is valid, and give you a way to clear the cache when it is not. dispat skips a
   different way: it works out which packages changed from git history and tags, and an unchanged package is not in the
-  plan at all, so its scripts never start. There is no cache directory, no state file, no daemon and no cache to go
-  stale. The upside is that dispat composes with the caching you already have instead of replacing it: BuildKit layers,
-  an Nx, Turborepo or Bazel cache, ccache, the Gradle build cache all keep working inside the stage, and none of them
-  can change which versions are computed, what publishes in which order, or what gets tagged.
+  plan at all, so its scripts never start. There is no cache directory, no state file, no daemon and nothing to go
+  stale. The upside is that dispat composes with the caching you already have instead of replacing it. BuildKit layers,
+  an Nx, Turborepo or Bazel cache, ccache and the Gradle build cache all keep working inside the stage, and none of
+  them can change which versions are computed, what publishes in which order, or what gets tagged.
 - **A release is a distributed transaction, and is treated as one.** Publishing a graph means irreversible writes
   across independent services (an npm registry, a Docker registry, GitHub) with no rollback to fall back on. Each
-  package's leg commits by durably recording its completion: the annotated git tag, written only after the publish
-  succeeded. There are no state files and no registry queries, so nothing can drift from what actually happened, and
-  recovery is deterministic replay — the plan is a pure function of history, graph and configuration, so a re-run
+  package's leg commits by durably recording its own completion: the annotated git tag, written only once the publish
+  succeeded. There are no state files and no registry queries, so nothing can drift from what actually happened.
+  Recovery is deterministic replay, because the plan is a pure function of history, graph and configuration: a re-run
   recomputes the same transaction and executes only the legs whose record is missing.
   [Details](https://yohimik.github.io/dispat/internals/architecture).
 - **Release records built in, safe by design.** Per-package changelogs, annotated tags, GitHub releases and an optional
-  release commit plus push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
-  verified before any work, and nothing is ever published against an unpublished dependency. Two releases of one
+  release commit and push, all customisable per package. `dispat status` dry-runs the whole plan, credentials are
+  verified before any work starts, and nothing is ever published against an unpublished dependency. Two releases of one
   repository at once are refused rather than raced: a run claims the repository with a
   [release lock](https://yohimik.github.io/dispat/reference/releasing/release-lock) before it plans anything.
-- **Release part of the monorepo when you need to.** `dispat release --package core` (or `--space libs`, or
-  `--group platform` for a whole version group, or just the folder you are standing in) releases a subset at exactly
-  the versions a full release would have given it. Publish
-  order still rules: a package whose provider is releasing and unselected waits for the next run instead of shipping
-  ahead of it, and `--strict` refuses a selection that cannot go out cleanly before anything is built.
+- **Release part of the monorepo when you need to.** `dispat release --package core`, or `--space libs`, or
+  `--group platform` for a whole version group, or just the folder you are standing in, releases a subset at exactly
+  the versions a full release would have given it. Publish order still rules: a package whose provider is releasing and
+  unselected waits for the next run instead of shipping ahead of it, and `--strict` refuses a selection that cannot go
+  out cleanly before anything is built.
   [Details](https://yohimik.github.io/dispat/reference/releasing/partial-releases). `--require-release` is the other
   half, for CI: it exits `1` when the selection would publish nothing, so a deploy stage cannot pass on an empty plan.
 - **Edit every package at once.** `dispat autowriter` applies one manifest edit across every package the plan selects,
-  finding each package's manifests itself: bump a shared dependency everywhere, or derive the edits from the workspace
-  with `--set-local` and `--link-local`. `dispat autoreplacer` does the same for literal text, so hand-written
-  coordinates in READMEs, badges and install snippets follow a release too. Both take the same selection flags as
-  `dispat run`, and `dispat scanner`, `dispat writer` and `dispat replacer` expose the same libraries for one folder or
-  one file, needing no config and no git repository.
-  [Details](https://yohimik.github.io/dispat/cookbook/editing/autowriter).
-- **Every release step is also a command.** `dispat changelog`, `autoversion`, `commit` and `github` run one thing the
-  release normally does, at the moment your own flow needs it, and the release stage then finds the work done and skips
-  it. `dispat if` branches on an environment variable and `dispat exec` runs one declared script once, so a custom
-  pipeline can be assembled from the same pieces without giving up the ordering.
+  finding each package's manifests itself, so you can bump a shared dependency everywhere or derive the edits from the
+  workspace with `--set-local` and `--link-local`. `dispat autoreplacer` does the same for literal text, so
+  hand-written coordinates in READMEs, badges and install snippets follow a release too. Both take the same selection
+  flags as `dispat run`, and `dispat scanner`, `dispat writer` and `dispat replacer` expose the same libraries for one
+  folder or one file, needing no config and no git repository.
+  [Details](https://yohimik.github.io/dispat/editing/autowriter).
+- **Every release step is also a command.** `dispat changelog`, `autoversion`, `commit` and `github` each run one thing
+  the release normally does, at the moment your own flow needs it, and the release stage then finds the work done and
+  skips it. `dispat if` branches on an environment variable and `dispat exec` runs one declared script once, so a
+  custom pipeline can be assembled from the same pieces without giving up the ordering.
   [Details](https://yohimik.github.io/dispat/reference/releasing/steps).
 
 ## Documentation
@@ -126,12 +126,12 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 |------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [Getting started](https://yohimik.github.io/dispat/getting-started)                                  | Install, first config, commit convention, commands, CI setup.                                                                                                                              |
 | [Concepts](https://yohimik.github.io/dispat/concepts)                                                | The mental model: baselines, propagation, trains, catch-up, the pipeline.                                                                                                                  |
-| [Cookbook](https://yohimik.github.io/dispat/cookbook)                                                | Worked examples rather than reference: the recipes below, plus editing the monorepo.                                                                                                       |
-| [Recipes](https://yohimik.github.io/dispat/cookbook/recipes)                                         | Ready-made setups with real terminal output: npm, Docker, Android, failure recovery, beta channels.                                                                                        |
-| [Manifest tools](https://yohimik.github.io/dispat/cookbook/editing/manifests)                        | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                                                                                                          |
-| [Editing across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autowriter)          | `dispat autowriter`: one manifest edit applied to every package the plan selects, or edits derived from the workspace.                                                                     |
-| [Replacing across the monorepo](https://yohimik.github.io/dispat/cookbook/editing/autoreplacer) | `dispat autoreplacer`: literal text replaced in every package the plan selects.                                                                                                          |
-| [The replacer](https://yohimik.github.io/dispat/cookbook/editing/replacer)                           | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.                                                                                              |
+| [Examples](https://yohimik.github.io/dispat/examples)                                                | A complete setup per package manager, each with real terminal output: npm, pnpm, Docker, Android, the mixed graph, adoption.                                                               |
+| [Manifest tools](https://yohimik.github.io/dispat/editing/manifests)                        | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                                                                                                          |
+| [Editing across the monorepo](https://yohimik.github.io/dispat/editing/autowriter)          | `dispat autowriter`: one manifest edit applied to every package the plan selects, or edits derived from the workspace.                                                                     |
+| [Replacing across the monorepo](https://yohimik.github.io/dispat/editing/autoreplacer) | `dispat autoreplacer`: literal text replaced in every package the plan selects.                                                                                                          |
+| [The replacer](https://yohimik.github.io/dispat/editing/replacer)                           | `dispat replacer` and `autoVersion.replace`: literal text for the versions no manifest holds.                                                                                              |
+| [API reference](https://yohimik.github.io/dispat/api)                                                | The three surfaces dispat exposes: the command line, the configuration file, and the Go packages.                                                                                          |
 | [CLI](https://yohimik.github.io/dispat/cli)                                                          | Every command, flag and exit code.                                                                                                                                                         |
 | [dispat if](https://yohimik.github.io/dispat/cli/if)                                                 | Branching on a variable inside a configured script.                                                                                                                                        |
 | [dispat exec](https://yohimik.github.io/dispat/cli/exec)                                             | Running one declared script on its own.                                                                                                                                                    |
@@ -144,21 +144,28 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started), 
 | [Alias tags](https://yohimik.github.io/dispat/configuration/alias-tags)                              | Extra moving tags beside the release tag, and why an alias is never read back as a baseline.                                                                                               |
 | [Release records](https://yohimik.github.io/dispat/configuration/records)                            | Changelogs, GitHub releases, your own header and footer lines, the channels each record reaches, the release commit.                                                                       |
 | [Commit parsing options](https://yohimik.github.io/dispat/configuration/parser)                      | `commitErrors`, `nonPackageScopes`, the `parser` object, quieting the parser's diagnostics.                                                                                                |
-| [dependencies](https://yohimik.github.io/dispat/configuration/dependencies)                          | Declaring the consumer/provider relations the graph orders releases by, and the three levels one can be written at.                                                                                     |
+| [dependencies](https://yohimik.github.io/dispat/configuration/dependencies)                          | Declaring the consumer and provider relations the graph orders releases by, and the three levels one can be written at.                                                                                     |
 | [autoVersion](https://yohimik.github.io/dispat/configuration/autoversion)                            | Native manifest rewriting at the version stage: the parsing and replacing strategies, the write policy, and `syncLock`.                                                                    |
 | [Script sequences](https://yohimik.github.io/dispat/configuration/scripts)                           | `scripts` as named commands, one or several per name, how a `flow` name resolves package first, and what runs when.                                                                        |
 | [Run-level hooks](https://yohimik.github.io/dispat/configuration/run-hooks)                          | The seven hooks that observe the whole run rather than one package, where they execute, and why the step commands fire none of them.                                                       |
 | [Static env](https://yohimik.github.io/dispat/configuration/env)                                     | The `env` objects that add fixed variables to every script, and how the levels layer.                                                                                                      |
 | [custom](https://yohimik.github.io/dispat/configuration/custom)                                      | The free-form object dispat carries without ever reading it, for your own tooling.                                                                                                         |
+| [Go packages](https://yohimik.github.io/dispat/go)                                                   | The five modules dispat is built from, each importable on its own.                                                                                                                         |
+| [ccme](https://yohimik.github.io/dispat/go/ccme)                                                     | The commit parser as a library: entry points, configuration, diagnostics, bulk parsing.                                                                                                    |
+| [scanner](https://yohimik.github.io/dispat/go/scanner)                                               | The manifest reader as a library: what it reads, what comes back, the partial-result contract.                                                                                             |
+| [writer](https://yohimik.github.io/dispat/go/writer)                                                 | The manifest writer as a library: rewriting, replacing, relinking and build counters.                                                                                                      |
 | [Commit messages](https://yohimik.github.io/dispat/reference/commits)                                | Scope sets, directives, footers, channels, release control.                                                                                                                                |
 | [Correcting a record](https://yohimik.github.io/dispat/reference/corrections)                        | `Edits` and `Deletes`: restating or discarding a release record a pushed commit message got wrong, and what a revert does to the changelog.                                                 |
 | [Script environment](https://yohimik.github.io/dispat/reference/environment)                         | Every `DISPAT_*` variable, the listings, script outputs.                                                                                                                                   |
 | [Shared versions](https://yohimik.github.io/dispat/reference/releasing/versioning)                   | Packages that hold part of their version in common: the seven modes, what moves a group, sparse behaviour, versioning groups.                                                              |
 | [Release steps](https://yohimik.github.io/dispat/reference/releasing/steps)                          | The step commands from scratch: what they are for, why they are safe to repeat, and a worked flow.                                                                                         |
 | [Partial releases](https://yohimik.github.io/dispat/reference/releasing/partial-releases)            | Releasing part of the monorepo: the selection flags on `release` and `status`, why the order can hold a package back, and `--strict`.                                                      |
+| [Prerelease branches](https://yohimik.github.io/dispat/reference/releasing/prerelease-branches)      | A stable main and a beta branch: the train, the rc promotion, and exactly what merging to main does.                                                                                       |
 | [The release lock](https://yohimik.github.io/dispat/reference/releasing/release-lock)                | Why two releases at once are refused rather than raced, and how to clear a lock a killed run left behind.                                                                                  |
-| [When there is no plan](https://yohimik.github.io/dispat/reference/plan-errors)                      | A run that refused to start: the three ways it stops, every error that aborts a plan, and what to do about each.                                                                           |
+| [Recovering from a failed run](https://yohimik.github.io/dispat/reference/releasing/recovery)        | A run that failed in the middle, and the re-run that finishes exactly what it still owed.                                                                                                  |
+| [Diagnostic codes](https://yohimik.github.io/dispat/reference/plan-errors)                           | Every code dispat can report: the three ways a run refuses to start, each error that aborts a plan, and what to do about it.                                                                |
 | [dispat in CI](https://yohimik.github.io/dispat/reference/ci)                                        | The GitHub Action, the container images, the install script: getting dispat onto a runner, and gating a pipeline on the plan with `--require-release`.                                      |
+| [Pipeline patterns](https://yohimik.github.io/dispat/reference/pipelines)                            | Testing only what a commit changed, the local-link bracket, and the gated release pipeline with `-p`/`-s`/`-g` passed from CI.                                                              |
 | [Updating dispat](https://yohimik.github.io/dispat/reference/self-update)                            | `dispat self-update`: how the binary replaces itself, the backup and the rollback, the update notice.                                                                                      |
 | [Architecture](https://yohimik.github.io/dispat/internals/architecture)                              | Modules, algorithms, execution model, design decisions, testing.                                                                                                                           |
 | [Test coverage](https://yohimik.github.io/dispat/internals/coverage)                                 | What the suite reaches, per package, measured by the release that published the page.                                                                                                      |
@@ -180,21 +187,21 @@ what the tests reach is in [test coverage](https://yohimik.github.io/dispat/inte
 [test results](https://yohimik.github.io/dispat/internals/test-results), and the claim-by-claim matrix behind the
 integration suite is its [test plan](../../tests/integration/docs/test-plan.md).
 
-## Next: 1.1.0
+## On the roadmap
 
-**Not in 1.0.0.** This is what the next release is being built around, written down so the shape of it is not a
-surprise. Nothing described here exists yet, and nothing in 1.0.0 depends on it.
+Written down so the shape of it is not a surprise. Nothing described here exists yet, and nothing in the first release
+depends on it.
 
 **Managing the tools a release needs.** Today every stage script assumes its tools are already on the machine, so
-getting them there is somebody else's problem: a CI setup step, a Dockerfile layer, a package manager, or a `curl`
-line at the top of a script. That is the one part of a release pipeline dispat currently has no opinion about, and it
-is where "works on my machine" tends to survive.
+getting them there is somebody else's problem: a CI setup step, a Dockerfile layer, a package manager, or a `curl` line
+at the top of a script. That is the one part of a release pipeline dispat has no opinion about, and it is where "works
+on my machine" tends to survive.
 
-1.1.0 will let a repository declare the CLI tools its stages need and have dispat fetch them, from a **GitHub
-release** or from a **URL you provide**, pinned to the version the config names. The machinery already exists: this is
-what [`dispat self-update`](https://yohimik.github.io/dispat/cli/self-update) does for dispat's own binary today,
-including resolving a release, checking the download against the published checksum, and putting the result somewhere
-the next command can find it. Pointing that at other tools is the feature.
+The plan is to let a repository declare the CLI tools its stages need and have dispat fetch them, from a **GitHub
+release** or from a **URL you provide**, pinned to the version the config names. The machinery already exists, since
+that is what [`dispat self-update`](https://yohimik.github.io/dispat/cli/self-update) does for dispat's own binary
+today: resolving a release, checking the download against the published checksum, and putting the result somewhere the
+next command can find it. Pointing it at other tools is the feature.
 
 ## Community
 

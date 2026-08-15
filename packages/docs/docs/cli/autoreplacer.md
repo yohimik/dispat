@@ -13,7 +13,7 @@ this run releases.
 The packages carrying these coordinates are usually the consumers of what just changed, and the window covers only what
 the commits touched, so `--consumers` is what reaches them. `--strict` fails on a `--replace` that matched nothing in any
 covered package. The whole command is in
-[Replacing text across the monorepo](../cookbook/editing/autoreplacer.md).
+[Replacing text across the monorepo](../editing/autoreplacer.md).
 
 ## Flags
 
@@ -27,7 +27,7 @@ Beside the [global flags](./README.md#global-flags):
 | `--since`             |             | The same seven commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
 | `--consumers`         |             | The same seven commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
 | `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
-| `--replace`               |             | `replacer` and `autoreplacer`: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](../cookbook/editing/replacer.md). |
+| `--replace`               |             | `replacer` and `autoreplacer`: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](../editing/replacer.md). |
 | `--files`             |             | `autoreplacer` only: which files of each covered package to rewrite, as globs relative to its folder; repeatable. |
 | `--only-updated`      |             | `autoreplacer`: narrows the fan-out to the providers this run releases. |
 | `--strict`            |             | Turns a tolerated finding into a failure. `autoreplacer`: a `--replace` that matched nothing in any covered package. |

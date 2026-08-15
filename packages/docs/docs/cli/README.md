@@ -1,5 +1,8 @@
 # CLI reference
 
+Every dispat command, with its flags and its exit codes. `dispat` on its own releases; every other command either
+narrows that release or performs one of its steps by itself.
+
 ```
 dispat [command] [flags]
 ```
@@ -62,9 +65,13 @@ command name is the [run shorthand](./run.md), so `dispat lint --help` prints ru
 
 ## Exit codes
 
-Exit codes: `0` success (including "nothing changed"), `1` configuration/planning error, a refused release (see
-[`commitErrors`](../configuration/parser.md#commiterrors) and the [release lock](./release.md#the-release-lock)), at least one
-package failed, a step that failed after its release was already out, or an interrupted run, `2` bad command line.
+There are three:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success, which includes a run where nothing had changed. |
+| `1` | A configuration or planning error, a refused release (see [`commitErrors`](../configuration/parser.md#commiterrors) and the [release lock](./release.md#the-release-lock)), at least one package that failed, a step that failed after its release was already out, or an interrupted run. |
+| `2` | A bad command line. |
 
 A release is refused only *before* any of it happens. Once the first build script runs, nothing aborts the run: a
 package can fail and its consumers can be skipped behind it, but every other package still releases and the finalize

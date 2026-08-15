@@ -95,17 +95,21 @@ nor its hooks run.
 
 ### `flow.login`
 
-Authentication (`npm login`, `docker login`, ...) is a property of the space, not of any one package, so the login runs
-**once per space and run**: the space's first publish triggers it, every other publish of the space waits until it
-finishes, and it is never re-run within the run. Two spaces referencing the same script still log in once each (n
-spaces, n logins), because credentials and registries belong to the space. A failing login fails the publish of every
-package in the space (none of them could have succeeded without it); other spaces are unaffected. The login runs in the
-space folder (the parent of every member package), so a script reading a local file sees the same folder on every run,
-and gets the space-scoped environment:
-`DISPAT_SPACE`, `DISPAT_STAGE=login`, the [workspace listing](../reference/environment.md#workspace-data) and `DISPAT_OUTPUT`. No
-package variables, since which package's publish triggered it is a scheduling accident. What it
-[exports](../reference/environment.md#script-outputs) is space-scoped too: every package of the space receives the login's exports
-from its publish stage onward, sourced `<space>:login`.
+Authentication (`npm login`, `docker login` and the like) is a property of the space rather than of any one package, so
+the login runs **once per space and run**. The space's first publish triggers it, every other publish of the space
+waits until it finishes, and it is never re-run within the run. Two spaces referencing the same script still log in
+once each, because credentials and registries belong to the space.
+
+A failing login fails the publish of every package in the space, since none of them could have succeeded without it.
+Other spaces are unaffected.
+
+The login runs in the space folder, the parent of every member package, so a script reading a local file sees the same
+folder on every run. It gets the space-scoped environment: `DISPAT_SPACE`, `DISPAT_STAGE=login`, the
+[workspace listing](../reference/environment.md#workspace-data) and `DISPAT_OUTPUT`. There are no package variables,
+because which package's publish triggered it is a scheduling accident.
+
+What it [exports](../reference/environment.md#script-outputs) is space-scoped too: every package of the space receives
+the login's exports from its publish stage onward, sourced `<space>:login`.
 
 ### `flow.announce`
 
@@ -299,7 +303,7 @@ A space can configure its own packages, keyed by folder name:
       "flow": { "build": "build", "publish": "publish" },
       "packages": {
         "core": { "revertOnFail": true },
-        "legacy": { "flow": { "build": "build-legacy" } }
+        "reports": { "flow": { "build": "build-reports" } }
       }
     }
   }

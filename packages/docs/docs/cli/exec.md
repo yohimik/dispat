@@ -1,9 +1,11 @@
 # The exec command
 
-Everything dispat runs is a shell command. Stages, hooks and `run` scripts are
-all strings handed to `/bin/sh -c`, which works well until a script needs to do
-one of two ordinary things: branch on a variable, or call another script you
-already wrote.
+`dispat exec <script>` runs one declared script once, in the environment of a package, a space or the folder you are
+standing in. It plans no release and sweeps no packages.
+
+It exists because everything dispat runs is a shell command. Stages, hooks and `run` scripts are all strings handed to
+`/bin/sh -c`, which works well until a script needs to do one of two ordinary things: branch on a variable, or call
+another script you already wrote.
 
 Two small commands cover those.
 

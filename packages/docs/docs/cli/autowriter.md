@@ -27,7 +27,7 @@ redundant, and unlinking needs them back.
 
 A covered package with no manifest anything can write is a no-op; a selection in which none of them has one is an
 error. The whole command, with worked examples, is in
-[Editing across the monorepo](../cookbook/editing/autowriter.md).
+[Editing across the monorepo](../editing/autowriter.md).
 
 ## Flags
 
@@ -51,4 +51,4 @@ Beside the [global flags](./README.md#global-flags):
 | `--manifests`         | from config | `autoversion` and `autowriter`: which of a package's manifests are rewritten, `root` (the ones in the package folder) or `all` (every manifest under it). `autoversion` also takes `none`, which turns its parsing strategy off. |
 | `--only-updated`      |             | `autoversion` and `autowriter`: rewrite only the declarations naming a package this run updates, leaving a range that had fallen behind a provider released earlier as it is. |
 | `--sync-lock`         | `true`      | `autoversion` and `autowriter`: run the syncLock scripts for packages whose manifests changed; `--sync-lock=false` skips them. |
-| `--strict`            |             | Turns a tolerated finding into a failure. `autowriter`: an edit that matched no manifest anywhere; see [Editing across the monorepo](../cookbook/editing/autowriter.md#applied-skipped-and-missing-across-many-packages). |
+| `--strict`            |             | Turns a tolerated finding into a failure. `autowriter`: an edit that matched no manifest anywhere; see [Editing across the monorepo](../editing/autowriter.md#applied-skipped-and-missing-across-many-packages). |
