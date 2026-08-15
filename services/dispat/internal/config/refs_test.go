@@ -542,6 +542,33 @@ func TestRefListCycleNamesThePathThatClosedIt(t *testing.T) {
 		filepath.Join(dir, "second.json")+" (deeper) -> "+path)
 }
 
+// TestRefListMergesFilesThatSplitFurther: a file a list names may be split
+// itself. Each is resolved whole before it is merged, so a fragment's own
+// references are followed against its own folder and a shared sub-fragment
+// used by two of them is read for each, as it is anywhere else.
+func TestRefListMergesFilesThatSplitFurther(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "cfg/base.json", `{"libs": {"path": "pkgs", "flow": {"$ref": "./flow.yaml"}}}`)
+	writeFile(t, dir, "cfg/extra.json", `{"apps": {"path": "apps", "flow": {"$ref": "./flow.yaml"}}}`)
+	writeFile(t, dir, "cfg/flow.yaml", "build:\n  - build\n")
+	path := writeFile(t, dir, "dispat.json", `{
+		"scripts": {"build": "echo b"},
+		"spaces": {"$ref": ["./cfg/base.json", "./cfg/extra.json"]}
+	}`)
+
+	cfg, err := Load(path, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"build"}, cfg.Spaces["libs"].Flow.Build)
+	assert.Equal(t, []string{"build"}, cfg.Spaces["apps"].Flow.Build)
+	assert.Equal(t, []string{
+		path,
+		filepath.Join(dir, "cfg", "base.json"),
+		filepath.Join(dir, "cfg", "flow.yaml"),
+		filepath.Join(dir, "cfg", "extra.json"),
+		filepath.Join(dir, "cfg", "flow.yaml"),
+	}, cfg.SourceFiles, "each fragment is resolved whole before the next is read")
+}
+
 // TestRefListResolvesEachAgainstItsOwnFolder: the files of one reference may
 // live in different folders, and each is resolved against the file that named
 // it, as every reference is.

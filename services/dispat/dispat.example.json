@@ -195,6 +195,10 @@
       {
         "line": "Published from the acme monorepo.",
         "space": "libs"
+      },
+      {
+        "line": "This is a test build. Do not depend on it.",
+        "channels": ["*"]
       }
     ]
   },
