@@ -1,5 +1,7 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.10 (2026-08-16)
+
 ## pkg/models/v1.0.0-rc.9 (2026-08-16)
 
 ### Fixes
