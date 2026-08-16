@@ -76,6 +76,7 @@ const sidebars: SidebarsConfig = {
     },
     {type: 'doc', id: 'reference/corrections', label: 'Correcting a record'},
     {type: 'doc', id: 'reference/self-update', label: 'Updating dispat'},
+    {type: 'doc', id: 'faq', label: 'FAQ'},
     {
       type: 'category',
       label: 'Internals',
