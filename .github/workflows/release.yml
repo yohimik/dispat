@@ -24,13 +24,15 @@ on:
 permissions:
   contents: read
 
-# The driving dispat comes from the composite action: the previous published
-# release driving the next one, which is the ordinary constraint of
-# self-hosting — configuration this repository uses must already exist in the
-# release before it. Pinned while only prereleases exist; drop the pin once
-# 1.0.0 is out.
+# The composite action installs the previous published release as a
+# bootstrap only; right after it, every job builds dispat from the checkout
+# and puts that build first on PATH. Everything that follows — the status
+# gate, the suite, the release and its record-writing stage scripts — runs
+# the checkout's own dispat, so the driver can never lag the configuration
+# or the records it writes. Pinned while only prereleases exist; drop the
+# pin once 1.0.0 is out.
 env:
-  DISPAT_PIN: 1.0.0-rc.4
+  DISPAT_PIN: 1.0.0-rc.5
 
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;
@@ -51,10 +53,24 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.26'
+          cache: true
+
       - name: Set up dispat
         uses: ./
         with:
           version: ${{ env.DISPAT_PIN }}
+
+      # The bootstrap-then-fresh pair (see the workflow's env comment): the
+      # gate's answer must come from the same dispat that would perform the
+      # release, not from the release before it.
+      - name: Build dispat from the checkout
+        run: |
+          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # `status` computes the plan and prints it without building, tagging or
       # writing anything. --require-release answers with exit 3 when the plan
@@ -97,12 +113,16 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # The installed dispat is only the driver; the suite builds and tests
-      # the checkout's own dispat regardless.
       - name: Set up dispat
         uses: ./
         with:
           version: ${{ env.DISPAT_PIN }}
+
+      # The bootstrap-then-fresh pair, as in the plan job.
+      - name: Build dispat from the checkout
+        run: |
+          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -223,6 +243,15 @@ jobs:
         uses: ./
         with:
           version: ${{ env.DISPAT_PIN }}
+
+      # The bootstrap-then-fresh pair, as in the plan job. Here it is what
+      # writes the records: the changelogs, the commits, the tags and the
+      # GitHub releases of this run come from the checkout being released,
+      # not from the release before it.
+      - name: Build dispat from the checkout
+        run: |
+          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The test report from the job that gated this one, put where the docs
       # package's build expects it. Deliberately not tolerant of a missing

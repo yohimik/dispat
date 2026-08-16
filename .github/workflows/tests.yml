@@ -17,12 +17,13 @@ on:
 permissions:
   contents: read
 
-# The driving dispat comes from the composite action, pinned while only
-# prereleases exist; an unpinned install resolves the latest stable. Drop the
-# pin once 1.0.0 is out. The installed dispat is only the driver: the suite
-# builds and tests the checkout's own dispat regardless.
+# The composite action installs the previous published release as a
+# bootstrap only; right after it, every job builds dispat from the checkout
+# and puts that build first on PATH, so every gate is driven by the same
+# dispat the changes describe. Pinned while only prereleases exist; drop the
+# pin once 1.0.0 is out.
 env:
-  DISPAT_PIN: 1.0.0-rc.4
+  DISPAT_PIN: 1.0.0-rc.5
 
 jobs:
   lint:
@@ -44,6 +45,12 @@ jobs:
         uses: ./
         with:
           version: ${{ env.DISPAT_PIN }}
+
+      # The bootstrap-then-fresh pair (see the workflow's env comment).
+      - name: Build dispat from the checkout
+        run: |
+          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The negated grep fails the step exactly when gofmt lists a file, and
       # the list itself is the message.
@@ -97,6 +104,12 @@ jobs:
         uses: ./
         with:
           version: ${{ env.DISPAT_PIN }}
+
+      # The bootstrap-then-fresh pair (see the workflow's env comment).
+      - name: Build dispat from the checkout
+        run: |
+          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -160,6 +173,12 @@ jobs:
         uses: ./
         with:
           version: ${{ env.DISPAT_PIN }}
+
+      # The bootstrap-then-fresh pair (see the workflow's env comment).
+      - name: Build dispat from the checkout
+        run: |
+          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # No link bracket here, unlike the test job: every package this gate
       # reaches builds inside a container from a context copied out of the

@@ -28,7 +28,7 @@ permissions:
 # One place to bump per rc; drop the pin for the empty default once 1.0.0 is
 # out — that is the path most callers take.
 env:
-  DISPAT_PIN: 1.0.0-rc.4
+  DISPAT_PIN: 1.0.0-rc.5
 
 jobs:
   action:
