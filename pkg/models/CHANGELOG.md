@@ -1,5 +1,9 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.17 (2026-08-16)
+
+No changes: a version bump to keep the versioning group on one major and minor version.
+
 ## pkg/models/v1.0.0-rc.16 (2026-08-16)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
