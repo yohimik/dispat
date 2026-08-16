@@ -104,6 +104,9 @@ func TestStepsWiredIntoAPublishLeg(t *testing.T) {
 	// the artifact its build wrote (the docs slice's shape) and the tag.
 	webTagged := strings.TrimSpace(r.Git("rev-list", "-1", "web@0.1.0"))
 	assert.Equal(t, head, webTagged, "the finalize-recorded tag points at the release commit")
+	subject := strings.TrimSpace(r.Git("log", "-1", "--format=%s", "HEAD"))
+	assert.Equal(t, "chore(release): web@0.1.0", subject,
+		"the release commit names only the release it records; core's record is core's own commit")
 	assert.Equal(t, "0.1.0", strings.TrimSpace(r.Git("show", "web@0.1.0:services/web/slice.txt")),
 		"the build's tracked artifact is inside the commit the tag points at")
 

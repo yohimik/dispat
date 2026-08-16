@@ -118,18 +118,33 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	for _, name := range pl.Order {
 		if r, ok := results[name]; ok && r.Status == release.StatusPublished {
 			rel := pl.Releases[name]
-			pkgs = append(pkgs, name)
-			tags = append(tags, rel.TagName())
 			pushTags = append(pushTags, rel.TagName())
 			for _, alias := range rel.AliasTags() {
 				pushTags = append(pushTags, alias.Name)
 			}
 			dirs = append(dirs, rel.Pkg.Dir)
 			rels = append(rels, rel)
+			// The commit message names the releases this commit records. A
+			// package whose scripts exported PACKAGE_<KEY> made its own
+			// commit already — its record is that commit, and naming it here
+			// would claim a release the leg's commit already claims.
+			if rel.ExportedCommit() == "" {
+				pkgs = append(pkgs, name)
+				tags = append(tags, rel.TagName())
+			}
 		}
 	}
-	if len(pkgs) == 0 {
+	if len(rels) == 0 {
 		return
+	}
+	if len(pkgs) == 0 {
+		// Every published package recorded itself; whatever this commit still
+		// carries (shared include files, stray artifacts) belongs to the run
+		// as a whole, so the message names the run's releases.
+		for _, rel := range rels {
+			pkgs = append(pkgs, rel.Pkg.Name)
+			tags = append(tags, rel.TagName())
+		}
 	}
 	dirs = a.appendIncludeDirs(dirs, a.cfg.Commit.Include)
 
