@@ -30,10 +30,31 @@ scripts:
     docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
   tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q
   push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
+  # The Docker Hub repository description, from the README.docker.md beside
+  # each image. The Hub does not read it from the pushed image, so it is
+  # PATCHed through the API after the publish; jq builds both JSON bodies so
+  # no credential or readme byte ever meets shell quoting. curl and jq are
+  # preinstalled on the ubuntu runners the release runs on. Guarded to CI like
+  # every other script that writes something public.
+  push-readme: |
+    set -eu
+    dispat if 'CI!=true' --then 'echo "refusing to update the Docker Hub readme outside CI (set CI=true to override)" >&2; exit 1'
+    : "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required to update the Docker Hub readme}"
+    : "${DOCKERHUB_TOKEN:?DOCKERHUB_TOKEN is required to update the Docker Hub readme}"
+    token=$(jq -n --arg u "$DOCKERHUB_USERNAME" --arg p "$DOCKERHUB_TOKEN" '{username: $u, password: $p}' \
+      | curl -fsS -H "Content-Type: application/json" -d @- https://hub.docker.com/v2/users/login/ \
+      | jq -r .token)
+    jq -n --rawfile d README.docker.md '{full_description: $d}' \
+      | curl -fsS -X PATCH "https://hub.docker.com/v2/repositories/yohimik/${DISPAT_PACKAGE}/" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer ${token}" -d @- > /dev/null
+    echo "updated the Docker Hub readme for yohimik/${DISPAT_PACKAGE}"
 flow:
   login: docker-login
   build: build
   publish: push-image
+  # After a successful publish, warn-only: the images are out either way, and
+  # a Hub API hiccup must not fail a release that already shipped.
+  postPublish: push-readme
   beforePublish: [changelog, commit]
 packages:
   dispat-ubuntu:
