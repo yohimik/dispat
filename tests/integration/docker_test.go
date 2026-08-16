@@ -73,7 +73,7 @@ func TestDockerReleaseReconcilesTagsAndCompose(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages", Flow: buildPublish(),
+		Path: models.PathList{"packages"}, Flow: buildPublish(),
 		// The default range policy is a caret, and a tag is a plain label, so
 		// what lands is a bare version — no registry can resolve a range.
 		// "root" is that default spelled out, because an empty block is pruned

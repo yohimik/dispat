@@ -360,9 +360,9 @@ func (a *App) locationDir(loc Location, dir string) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("unknown space %q", loc.name)
 		}
-		// The same join discovery uses for a space's folder, so a space means
-		// one folder whoever is asking.
-		return filepath.Join(a.root, filepath.FromSlash(sc.Path)), nil
+		// The same join discovery uses for a space's primary folder — the
+		// first configured path — so a space means one folder whoever asks.
+		return filepath.Join(a.root, filepath.FromSlash(sc.Path.First())), nil
 	case kindRoot:
 		return a.root, nil
 	}

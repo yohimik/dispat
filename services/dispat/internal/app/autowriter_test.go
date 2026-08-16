@@ -42,7 +42,7 @@ func arRepo(t *testing.T) (*App, *plan.Plan, *bytes.Buffer) {
 		`{"name": "@acme/web", "version": "1.0.0", "dependencies": {"@acme/core": "^1.0.0", "left-pad": "^1.0.0"}}`)
 
 	buf := &bytes.Buffer{}
-	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: "packages"}}, BuildConcurrency: 2}
+	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: config.PathList{"packages"}}}, BuildConcurrency: 2}
 	return New(root, cfg, zerolog.New(buf)), pl, buf
 }
 

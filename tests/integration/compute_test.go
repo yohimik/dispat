@@ -117,7 +117,7 @@ func TestComputeAmbiguousNameReportsW220(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {echoBuild}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{Build: []string{"build"}}},
+		"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{Build: []string{"build"}}},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")
@@ -142,7 +142,7 @@ func TestComputeEditsSpaceLayerDeclarations(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Packages: map[string]models.PackageConfig{
 			"web": {Dependencies: models.Providers("ghost")},
 		}},
 	}

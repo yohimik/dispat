@@ -68,7 +68,7 @@ func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["step-changelog"] = models.Script{r.DispatCommand("changelog")}
 	cfg.Scripts["step-commit"] = models.Script{r.DispatCommand("commit", "--tag")}
-	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: &models.SpaceFlowConfig{
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"},
 		BeforePublish: []string{"step-changelog", "step-commit"},
 	}}
@@ -155,7 +155,7 @@ func TestStandaloneAutoversionReconcilesAndSyncLocks(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["mark-lock"] = models.Script{"echo locked >> ../../lock.log"}
-	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"mark-lock"}}}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -272,7 +272,7 @@ func TestStandaloneAutoversionFlagOverridesExistingBlock(t *testing.T) {
 	// policy changes for the invocation.
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{}}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -345,7 +345,7 @@ func TestStandaloneGithubPublishesFromAStageScript(t *testing.T) {
 		"publish":  {"echo publishing"},
 		"announce": {"dispat github"},
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
 	// The run's own recorder stays off, so every release seen here came from
 	// the step command inside the stage.

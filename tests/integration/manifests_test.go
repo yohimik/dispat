@@ -286,7 +286,7 @@ func TestManifestsCommandWordsKeepTheirScripts(t *testing.T) {
 		"publish": {"echo publishing"},
 	}
 	f.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	r.WriteConfigModel(f)
 	r.SeedPackage("packages", "core")
@@ -391,7 +391,7 @@ func TestManifestsReplacerWordKeepsItsScript(t *testing.T) {
 		"publish":  {"echo publishing"},
 	}
 	f.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	r.WriteConfigModel(f)
 	r.SeedPackage("packages", "core")

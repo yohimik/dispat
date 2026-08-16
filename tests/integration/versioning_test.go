@@ -42,8 +42,8 @@ func spacesConfig(buildScript string, spaces map[string]models.SpaceConfig) mode
 func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
-		"apps": {Path: "apps", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"apps": {Path: models.PathList{"apps"}, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -96,7 +96,7 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 func TestVersioningFixedSparseLifecycle(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedSparse, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedSparse, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "x")
 	r.SeedPackage("packages", "y")
@@ -136,7 +136,7 @@ func TestVersioningFixedSparseLifecycle(t *testing.T) {
 func TestVersioningFixedSharedPrereleaseTrain(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -169,7 +169,7 @@ func TestVersioningFixedSharedPrereleaseTrain(t *testing.T) {
 func TestVersioningFixedRideFailureThenAlignmentCatchUp(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(failIfMarker, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -209,7 +209,7 @@ func TestVersioningFixedRideFailureThenAlignmentCatchUp(t *testing.T) {
 func TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(failIfMarker, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -267,8 +267,8 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 		"sync":    {"env | grep '^DISPAT_' | sort > " + envFile},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"core": {Path: "core", Flow: buildPublish()},
-		"ui": {Path: "ui", Versioning: models.VersioningFixed, Flow: &models.SpaceFlowConfig{
+		"core": {Path: models.PathList{"core"}, Flow: buildPublish()},
+		"ui": {Path: models.PathList{"ui"}, Versioning: models.VersioningFixed, Flow: &models.SpaceFlowConfig{
 			Version: []string{"sync"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "widgets", Provider: "core"}}
@@ -296,7 +296,7 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 func TestVersioningFixedHoldAndResume(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -321,7 +321,7 @@ func TestVersioningFixedHoldAndResume(t *testing.T) {
 func TestVersioningFixedExactPinMovesTheSpace(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -345,7 +345,7 @@ func TestVersioningFixedExactPinMovesTheSpace(t *testing.T) {
 func TestVersioningFixedSpaceExecutesEveryMemberScript(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(markerBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -364,7 +364,7 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 	t.Run("W235_competing_pins", func(t *testing.T) {
 		r := harness.New(t)
 		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-			"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+			"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 		}))
 		r.SeedPackage("packages", "a")
 		r.SeedPackage("packages", "b")
@@ -383,7 +383,7 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 	t.Run("W236_divergent_channels", func(t *testing.T) {
 		r := harness.New(t)
 		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-			"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+			"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 		}))
 		r.SeedPackage("packages", "a")
 		r.SeedPackage("packages", "b")
@@ -412,8 +412,8 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 func TestVersioningFixedMajorLifecycle(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
-		"apps": {Path: "apps", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+		"apps": {Path: models.PathList{"apps"}, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -473,7 +473,7 @@ func TestVersioningFixedMajorLifecycle(t *testing.T) {
 func TestVersioningFixedMajorSparseLifecycle(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajorSparse, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajorSparse, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "x")
 	r.SeedPackage("packages", "y")
@@ -509,7 +509,7 @@ func TestVersioningFixedMajorSparseLifecycle(t *testing.T) {
 func TestVersioningFixedMajorMinorLifecycle(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajorMinor, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajorMinor, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -555,7 +555,7 @@ func TestVersioningFixedMajorMinorLifecycle(t *testing.T) {
 func TestVersioningFixedMajorMinorSparseLifecycle(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajorMinorSparse, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajorMinorSparse, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "x")
 	r.SeedPackage("packages", "y")
@@ -598,13 +598,13 @@ func TestVersioningFixedMajorMinorSparseLifecycle(t *testing.T) {
 func TestVersioningAllModesSideBySide(t *testing.T) {
 	r := harness.New(t)
 	spaces := map[string]models.SpaceConfig{
-		"fx":  {Path: "fx", Versioning: models.VersioningFixed, Flow: buildPublish()},
-		"fxs": {Path: "fxs", Versioning: models.VersioningFixedSparse, Flow: buildPublish()},
-		"mm":  {Path: "mm", Versioning: models.VersioningFixedMajorMinor, Flow: buildPublish()},
-		"mms": {Path: "mms", Versioning: models.VersioningFixedMajorMinorSparse, Flow: buildPublish()},
-		"mj":  {Path: "mj", Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
-		"mjs": {Path: "mjs", Versioning: models.VersioningFixedMajorSparse, Flow: buildPublish()},
-		"ind": {Path: "ind", Flow: buildPublish()},
+		"fx":  {Path: models.PathList{"fx"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"fxs": {Path: models.PathList{"fxs"}, Versioning: models.VersioningFixedSparse, Flow: buildPublish()},
+		"mm":  {Path: models.PathList{"mm"}, Versioning: models.VersioningFixedMajorMinor, Flow: buildPublish()},
+		"mms": {Path: models.PathList{"mms"}, Versioning: models.VersioningFixedMajorMinorSparse, Flow: buildPublish()},
+		"mj":  {Path: models.PathList{"mj"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+		"mjs": {Path: models.PathList{"mjs"}, Versioning: models.VersioningFixedMajorSparse, Flow: buildPublish()},
+		"ind": {Path: models.PathList{"ind"}, Flow: buildPublish()},
 	}
 	r.WriteConfigModel(spacesConfig(echoBuild, spaces))
 	for space := range spaces {
@@ -674,7 +674,7 @@ func TestVersioningAllModesSideBySide(t *testing.T) {
 func TestVersioningFixedMajorSharedTrain(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -716,7 +716,7 @@ func TestVersioningFixedMajorSharedTrain(t *testing.T) {
 func TestVersioningPartialPinScope(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -750,7 +750,7 @@ func TestVersioningPartialPinScope(t *testing.T) {
 func TestVersioningFixedMajorRideFailureThenAlignment(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(failIfMarker, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -784,7 +784,7 @@ func TestVersioningFixedMajorRideFailureThenAlignment(t *testing.T) {
 func TestVersioningPartialRideExecutesEveryMemberScript(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(markerBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -804,7 +804,7 @@ func TestVersioningPartialRideExecutesEveryMemberScript(t *testing.T) {
 func TestVersioningMixedDepthGroupUsesTheDeepest(t *testing.T) {
 	r := harness.New(t)
 	cfg := spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixedMajorMinor, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajorMinor, Flow: buildPublish()},
 	})
 	cfg.Packages = map[string]models.PackageConfig{
 		"b": {Versioning: models.VersioningFixedMajor},

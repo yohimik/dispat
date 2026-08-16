@@ -44,8 +44,8 @@ func TestHooksLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 	}
 	withLogin := &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"spaceA": {Path: "packages/a", Flow: withLogin},
-		"spaceB": {Path: "packages/b", Flow: withLogin},
+		"spaceA": {Path: models.PathList{"packages/a"}, Flow: withLogin},
+		"spaceB": {Path: models.PathList{"packages/b"}, Flow: withLogin},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages/a", "a1")
@@ -98,7 +98,7 @@ func TestHooksLoginRunsInTheSpaceFolder(t *testing.T) {
 		"login":   {"pwd > login-cwd.txt"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages/libs", Flow: &models.SpaceFlowConfig{
+		"libs": {Path: models.PathList{"packages/libs"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"login"}}},
 	}
 	r.WriteConfigModel(cfg)
@@ -161,9 +161,9 @@ func TestHooksLoginFailureIsolatedToItsSpace(t *testing.T) {
 		"good-login": {"echo ok"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"broken": {Path: "packages/broken", Flow: &models.SpaceFlowConfig{
+		"broken": {Path: models.PathList{"packages/broken"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"bad-login"}}},
-		"fine": {Path: "packages/fine", Flow: &models.SpaceFlowConfig{
+		"fine": {Path: models.PathList{"packages/fine"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"}, Login: []string{"good-login"}}},
 	}
 	r.WriteConfigModel(cfg)
@@ -199,7 +199,7 @@ func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 		"record-skip": {`env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 			Build:   []string{"build"},
 			Publish: []string{"publish"},
 			OnFail:  []string{"boom", "record-fail"},
@@ -262,9 +262,9 @@ func TestHooksRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 		"publish":      {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"provider": {Path: "packages/provider", Flow: &models.SpaceFlowConfig{
+		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"fail-publish"}}},
-		"consumer": {Path: "packages/consumer", RevertOnFail: models.Bool(true), Flow: &models.SpaceFlowConfig{
+		"consumer": {Path: models.PathList{"packages/consumer"}, RevertOnFail: models.Bool(true), Flow: &models.SpaceFlowConfig{
 			Version: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
@@ -304,7 +304,7 @@ func TestHooksScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 		"record-fail": {`env | grep '^DISPAT_OUTPUT' | sort > "../../onfail-$DISPAT_PACKAGE.env"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 			BeforeBuild: []string{"hook-export"},
 			Build:       []string{"build"},
 			Publish:     []string{"publish"},
@@ -479,7 +479,7 @@ func TestHooksAllStageHooksFireInOrder(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = hookLog()
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: hookFlow()}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: hookFlow()}}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -512,7 +512,7 @@ func TestHooksStageHookAuthoritySplit(t *testing.T) {
 			"build": {echoBuild}, "publish": {"echo publishing"},
 			"boom": {"exit 1"},
 		}
-		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"},
 			PostPublish: []string{"boom"}, BeforeAnnounce: []string{"boom"},
 			Announce: []string{"boom"}, PostAnnounce: []string{"boom"},
@@ -533,7 +533,7 @@ func TestHooksStageHookAuthoritySplit(t *testing.T) {
 			"build": {echoBuild}, "publish": {"echo publishing"},
 			"boom": {"exit 1"}, "onfail": {"echo onFail:$DISPAT_FAILED_STAGE >> ../../hooks.log"},
 		}
-		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"build"}, Publish: []string{"publish"},
 			PostBuild: []string{"boom"}, OnFail: []string{"onfail"},
 		}}}

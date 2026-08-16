@@ -36,8 +36,8 @@ func levelsConfig() models.File {
 		"publish-app": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages"},
-		"apps": {Path: "services"},
+		"libs": {Path: models.PathList{"packages"}},
+		"apps": {Path: models.PathList{"services"}},
 	}
 	cfg.Flow = buildPublish()
 	return cfg
@@ -49,7 +49,7 @@ func levelsConfig() models.File {
 func TestLevelsRootFlowReachesEverySpace(t *testing.T) {
 	r := harness.New(t)
 	cfg := levelsConfig()
-	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages",
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"},
 		Flow: &models.SpaceFlowConfig{Build: []string{"build-libs"}}}
 	cfg.Packages = map[string]models.PackageConfig{
 		"core": {Flow: &models.SpaceFlowConfig{Build: []string{"build-core"}}},
@@ -79,7 +79,7 @@ func TestLevelsRootBooleansAreThreeState(t *testing.T) {
 	cfg.Scripts["fail"] = models.Script{"exit 1"}
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Flow = &models.SpaceFlowConfig{Build: []string{"mutate"}, Publish: []string{"fail"}}
-	cfg.Spaces["apps"] = models.SpaceConfig{Path: "services", RevertOnFail: models.Bool(false)}
+	cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"services"}, RevertOnFail: models.Bool(false)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("services", "app")
@@ -103,7 +103,7 @@ func TestLevelsRootVersioningAppliesPerSpace(t *testing.T) {
 	r := harness.New(t)
 	cfg := levelsConfig()
 	cfg.Versioning = models.VersioningFixed
-	cfg.Spaces["apps"] = models.SpaceConfig{Path: "services", Versioning: models.VersioningIndependent}
+	cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"services"}, Versioning: models.VersioningIndependent}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "utils")
@@ -149,7 +149,7 @@ func TestLevelsSpaceRecordsAndSrc(t *testing.T) {
 	r := harness.New(t)
 	cfg := levelsConfig()
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true), File: "ROOT.md"}
-	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages",
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"},
 		Changelog: &models.ChangelogConfig{File: "LIBS.md"}, Src: "src"}
 	cfg.Packages = map[string]models.PackageConfig{
 		"utils": {Changelog: &models.ChangelogConfig{File: "UTILS.md"}},

@@ -52,7 +52,7 @@ func execConfig() models.File {
 	cfg.Env = map[string]string{"MSG": "from-root", "ROOT_ONLY": "root"}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
-			Path:    "packages",
+			Path:    models.PathList{"packages"},
 			Scripts: map[string]models.Script{"which": {"echo level=space"}},
 			Env:     map[string]string{"MSG": "from-space"},
 			Packages: map[string]models.PackageConfig{
@@ -191,7 +191,7 @@ func TestExecRunsWhereItIsTold(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{"where": {"pwd"}}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "api")
@@ -245,7 +245,7 @@ func TestExecOnFailureRunsInTheSameFolder(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{"boom": {"pwd; exit 7"}}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 
@@ -377,7 +377,7 @@ func TestExecPropagatesTheExitCode(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{"boom": {"exit 7"}}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 
@@ -400,7 +400,7 @@ func TestExecComposesInsideARunScript(t *testing.T) {
 		"announce": {`echo announcing $DISPAT_PACKAGE at $DISPAT_VERSION`},
 		"ci":       {r.DispatCommand("exec", "announce")},
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first release")
@@ -474,7 +474,7 @@ func TestExecForwardsArgumentsAfterTheDash(t *testing.T) {
 		// Ends in one program, which is what the appended arguments reach.
 		"boom": {`sh -c 'printf "RAN[%s]\n" "$@"; exit 7' _`},
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 

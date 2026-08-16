@@ -160,7 +160,7 @@ func TestIfReadsTheConfigOnlyForAnInWithANameInIt(t *testing.T) {
 	r := harness.New(t)
 	r.SeedPackage("packages", "core")
 	cfg := harness.BaseFile(2)
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 
 	res := r.Command("if", "!ABSENT", "--then", "pwd", "--in", "pkg:core")
@@ -261,7 +261,7 @@ func TestIfFileConditionResolvesWhereTheScriptRuns(t *testing.T) {
 	// An --in naming a package still costs exactly what it costs alone: the
 	// config read pays for the name, not for the file test.
 	cfg := harness.BaseFile()
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	res = r.Command("if", "-f", "main.txt", "--then", "cat main.txt", "--else", "echo no",

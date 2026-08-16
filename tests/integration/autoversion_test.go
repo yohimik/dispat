@@ -32,7 +32,7 @@ func TestAutoVersionReleaseRewritesManifests(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["locksync"] = models.Script{"cp package.json lock-snapshot.json"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages",
+		Path: models.PathList{"packages"},
 		Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			Match:    []string{"workspace:*"},
@@ -81,7 +81,7 @@ func TestAutoVersionSyncLockSerialised(t *testing.T) {
 	cfg := libsConfig(echoBuild, 4)
 	cfg.Scripts["locksync"] = models.Script{r.TsmarkScript("synclock.log", "$DISPAT_PACKAGE", 120*time.Millisecond)}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages",
+		Path: models.PathList{"packages"},
 		Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			SyncLock: []string{"locksync"},
@@ -115,7 +115,7 @@ func TestAutoVersionDiagnosticsAndCommitInclude(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["locksync"] = models.Script{`echo "lock for $DISPAT_PACKAGE@$DISPAT_NEW_VERSION" >> ../../package-lock.json`}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages",
+		Path: models.PathList{"packages"},
 		Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			SyncLock: []string{"locksync"},
@@ -170,7 +170,7 @@ func TestAutoVersionReplaceStrategy(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages",
+		Path: models.PathList{"packages"},
 		Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			Manifests: "none",
@@ -227,7 +227,7 @@ func TestAutoVersionReplaceRuleMatchedNothing(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages",
+		Path: models.PathList{"packages"},
 		Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			Manifests: "none",
@@ -254,7 +254,7 @@ func TestAutoVersionManifestNamesMakeAnEdgeVisible(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages", Flow: buildPublish(),
+		Path: models.PathList{"packages"}, Flow: buildPublish(),
 		// Maven declares exact versions, so the range policy says so; a bare
 		// {} block would be pruned by the loader as absent anyway.
 		AutoVersion: &models.AutoVersionConfig{Range: "exact"},
@@ -305,7 +305,7 @@ func TestAutoVersionSyncLockOnly(t *testing.T) {
 	cfg := libsConfig(echoBuild, 4)
 	cfg.Scripts["locksync"] = models.Script{r.TsmarkScript("synclock.log", "$DISPAT_PACKAGE", 120*time.Millisecond)}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages",
+		Path: models.PathList{"packages"},
 		Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			Manifests: "none",
@@ -338,7 +338,7 @@ func TestAutoVersionSyncLockOnlyStandalone(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["mark-lock"] = models.Script{"echo locked >> ../../lock.log"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages", Flow: buildPublish(),
+		Path: models.PathList{"packages"}, Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{Manifests: "none", SyncLock: []string{"mark-lock"}},
 	}
 	r.WriteConfigModel(cfg)
@@ -364,7 +364,7 @@ func TestAutoVersionPolicyFlagsStillRunSyncLock(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["mark-lock"] = models.Script{"echo locked >> ../../lock.log"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages", Flow: buildPublish(),
+		Path: models.PathList{"packages"}, Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"mark-lock"}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
@@ -392,7 +392,7 @@ func TestAutoVersionNoReplaceFlag(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages", Flow: buildPublish(),
+		Path: models.PathList{"packages"}, Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{
 			Replace: []models.AutoVersionReplaceConfig{
 				{Files: []string{"README.md"}, Find: "core@{previous}", Write: "core@{version}"},
@@ -429,7 +429,7 @@ func TestAutoVersionManifestsNoneFlag(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path: "packages", Flow: buildPublish(),
+		Path: models.PathList{"packages"}, Flow: buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{Enabled: models.Bool(true)},
 	}
 	r.WriteConfigModel(cfg)

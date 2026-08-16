@@ -33,11 +33,11 @@ func (a *App) discoveredWorkspace(pkgs []*model.Package) filter.Workspace {
 	return filter.Workspace{Packages: pkgs, Spaces: a.spacePaths(), Groups: a.groupNames(), Root: a.root}
 }
 
-// spacePaths maps every configured space onto its folder. A standalone package
-// has no entry here by construction — it belongs to no space, which is what
-// makes --package the only way to name one.
-func (a *App) spacePaths() map[string]string {
-	paths := make(map[string]string, len(a.cfg.Spaces))
+// spacePaths maps every configured space onto its folders. A standalone
+// package has no entry here by construction — it belongs to no space, which
+// is what makes --package the only way to name one.
+func (a *App) spacePaths() map[string][]string {
+	paths := make(map[string][]string, len(a.cfg.Spaces))
 	for name, sc := range a.cfg.Spaces {
 		paths[name] = sc.Path
 	}

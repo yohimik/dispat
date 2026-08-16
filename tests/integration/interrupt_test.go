@@ -84,7 +84,7 @@ func TestInterruptGracefulShutdown(t *testing.T) {
 func TestInterruptStopsARunCommand(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	cfg.Spaces["libs"] = models.SpaceConfig{Path: "packages", Flow: buildPublish(),
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
 		Scripts: map[string]models.Script{"mark": {r.TsmarkScript("run.tsmark", "$DISPAT_PACKAGE", 1500*time.Millisecond)}}}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "b", Provider: "a"}}
 	r.WriteConfigModel(cfg)

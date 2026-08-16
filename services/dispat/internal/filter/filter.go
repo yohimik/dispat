@@ -65,10 +65,10 @@ type Workspace struct {
 	// in: the plan's dependency order for the commands that have a plan,
 	// discovery order for compute.
 	Packages []*model.Package
-	// Spaces maps every configured space onto its root-relative folder. A
-	// standalone package has no entry here by construction, which is exactly
-	// why only --package reaches it.
-	Spaces map[string]string
+	// Spaces maps every configured space onto its root-relative folders — one
+	// or several, in declaration order. A standalone package has no entry
+	// here by construction, which is exactly why only --package reaches it.
+	Spaces map[string][]string
 	// Groups are the declared versionGroups names. Membership is not listed:
 	// a package carries its own group, so the groups a term can match are
 	// these plus the ones the packages themselves name — a space that
@@ -228,14 +228,17 @@ func Locate(dir string, ws Workspace) Location {
 		}
 	}
 	for _, name := range sortedKeys(ws.Spaces) {
-		spaceDir := absClean(filepath.Join(ws.Root, filepath.FromSlash(ws.Spaces[name])))
-		if spaceDir == root {
-			// A space rooted at the monorepo root would make standing at the
-			// top a narrowing, silently changing what a bare command covers.
-			continue
-		}
-		if under(target, spaceDir) && len(spaceDir) > bestLen {
-			best, bestLen = Location{Space: name}, len(spaceDir)
+		for _, path := range ws.Spaces[name] {
+			spaceDir := absClean(filepath.Join(ws.Root, filepath.FromSlash(path)))
+			if spaceDir == root {
+				// A space rooted at the monorepo root would make standing at
+				// the top a narrowing, silently changing what a bare command
+				// covers.
+				continue
+			}
+			if under(target, spaceDir) && len(spaceDir) > bestLen {
+				best, bestLen = Location{Space: name}, len(spaceDir)
+			}
 		}
 	}
 	return best
@@ -299,15 +302,17 @@ func foldSet(names []string) map[string]bool {
 }
 
 // spaceOf reports which configured space a package belongs to, by folder
-// parenthood: discovery makes every space package a direct sub-folder of its
-// space's path. The package's own Space.Name cannot answer this — a standalone
-// package carries a synthetic space named after itself, and that name is free
-// to collide with a configured space's.
+// parenthood: discovery makes every space package a direct sub-folder of one
+// of its space's paths. The package's own Space.Name cannot answer this — a
+// standalone package carries a synthetic space named after itself, and that
+// name is free to collide with a configured space's.
 func spaceOf(pkg *model.Package, ws Workspace) string {
 	parent := filepath.Dir(absClean(pkg.Dir))
 	for _, name := range sortedKeys(ws.Spaces) {
-		if parent == absClean(filepath.Join(ws.Root, filepath.FromSlash(ws.Spaces[name]))) {
-			return name
+		for _, path := range ws.Spaces[name] {
+			if parent == absClean(filepath.Join(ws.Root, filepath.FromSlash(path))) {
+				return name
+			}
 		}
 	}
 	return ""
@@ -448,7 +453,7 @@ func sortedMatches(term string, candidates []string) []string {
 }
 
 // sortedKeys keeps map iteration out of every message and every match.
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

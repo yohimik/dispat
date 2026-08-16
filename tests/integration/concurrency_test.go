@@ -45,7 +45,7 @@ func budgetRepo(t *testing.T, b budgets) *harness.Repo {
 		"publish": {r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", b.PublishSleep)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	r.WriteConfigModel(cfg)
 	return r
@@ -115,7 +115,7 @@ func TestConcurrencyIndependentPickedUpConcurrentlyDependantAwaited(t *testing.T
 		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "downstream", Provider: "a"},

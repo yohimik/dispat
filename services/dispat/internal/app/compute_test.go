@@ -32,7 +32,7 @@ func computeRepo(t *testing.T, cfg config.File, log zerolog.Logger) (string, str
 	t.Helper()
 	root := t.TempDir()
 	for _, s := range cfg.Spaces {
-		require.NoError(t, os.MkdirAll(filepath.Join(root, s.Path), 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, s.Path.First()), 0o755))
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
@@ -57,7 +57,7 @@ func libsConfig(deps ...config.DependencyConfig) config.File {
 	return config.File{
 		Scripts: map[string]config.Script{"build": {"true"}},
 		Spaces: map[string]config.SpaceConfig{
-			"libs": {Path: "packages", Flow: &config.SpaceFlowConfig{Build: []string{"build"}}},
+			"libs": {Path: config.PathList{"packages"}, Flow: &config.SpaceFlowConfig{Build: []string{"build"}}},
 		},
 		Dependencies: deps,
 	}

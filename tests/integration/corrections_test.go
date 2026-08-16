@@ -274,7 +274,7 @@ func TestCorrectionRidesAVersioningGroupOnlyWhenARecordSurvives(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Versioning: "fixed"},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Versioning: "fixed"},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")

@@ -41,8 +41,8 @@ func loadError(res harness.RunResult) string {
 // one build/publish script pair.
 func noneConfig(buildScript string) models.File {
 	return spacesConfig(buildScript, map[string]models.SpaceConfig{
-		"libs":  {Path: "packages", Flow: buildPublish()},
-		"tools": {Path: "tools", Versioning: models.VersioningNone, Flow: buildPublish()},
+		"libs":  {Path: models.PathList{"packages"}, Flow: buildPublish()},
+		"tools": {Path: models.PathList{"tools"}, Versioning: models.VersioningNone, Flow: buildPublish()},
 	})
 }
 
@@ -147,7 +147,7 @@ func TestVersioningNoneProviderEdgeRejected(t *testing.T) {
 	// The allowed directions load and release.
 	cfg = noneConfig(echoBuild)
 	cfg.Spaces["tools"] = models.SpaceConfig{
-		Path: "tools", Versioning: models.VersioningNone, Flow: buildPublish(),
+		Path: models.PathList{"tools"}, Versioning: models.VersioningNone, Flow: buildPublish(),
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "smoke", Provider: "core"},
@@ -263,7 +263,7 @@ func TestVersioningNoneReleaseOnlySettingsInert(t *testing.T) {
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"tools": {
-			Path:       "tools",
+			Path:       models.PathList{"tools"},
 			Versioning: models.VersioningNone,
 			TagFormat:  "tool-{package}-v{version}",
 			Flow:       buildPublish(),

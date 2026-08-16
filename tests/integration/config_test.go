@@ -153,7 +153,7 @@ func TestConfigFusedPrereleaseTagFormatRoundTrips(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.TagFormat = "{name}@v{version}-{channel}{counter}"
-	cfg.Spaces["apps"] = models.SpaceConfig{Path: "apps", Flow: buildPublish(),
+	cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"apps"}, Flow: buildPublish(),
 		TagFormat: "{name}@{version}"}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -476,7 +476,7 @@ func TestConfigSpaceLayerRejections(t *testing.T) {
 			setup: func(r *harness.Repo) {
 				cfg := libsConfig(echoBuild, 1)
 				cfg.Spaces = map[string]models.SpaceConfig{
-					"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+					"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Packages: map[string]models.PackageConfig{
 						"core": {Path: "elsewhere"},
 					}},
 				}
@@ -519,7 +519,7 @@ func TestConfigSpaceLayerRejections(t *testing.T) {
 			setup: func(r *harness.Repo) {
 				cfg := libsConfig(echoBuild, 1)
 				cfg.Spaces = map[string]models.SpaceConfig{
-					"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+					"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Packages: map[string]models.PackageConfig{
 						"ghost": {TagFormat: "v{version}"},
 					}},
 				}

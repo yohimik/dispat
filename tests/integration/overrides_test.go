@@ -48,7 +48,7 @@ func TestOverridesFlowBuildPerPackage(t *testing.T) {
 		"publish":   {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"core": {Flow: &models.SpaceFlowConfig{Build: []string{"alt-build"}}},
@@ -87,9 +87,9 @@ func TestOverridesFlowScriptResolvesPerPackage(t *testing.T) {
 	}
 	cfg.Scripts = map[string]models.Script{"build": {stamp("file")}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(),
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(),
 			Scripts: map[string]models.Script{"build": {stamp("space")}}},
-		"apps": {Path: "apps", Flow: buildPublish()},
+		"apps": {Path: models.PathList{"apps"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"core": {Scripts: map[string]models.Script{"build": {stamp("package")}}},
@@ -119,7 +119,7 @@ func TestOverridesFlowScriptSuppliedByEveryPackage(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"core":  {Scripts: map[string]models.Script{"build": {"echo core-build >> ../../build.log"}}},
@@ -200,8 +200,8 @@ func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
 		"platform": {Versioning: models.VersioningFixed},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), VersionGroup: "platform"},
-		"svc":  {Path: "services", Flow: buildPublish(), VersionGroup: "platform"},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), VersionGroup: "platform"},
+		"svc":  {Path: models.PathList{"services"}, Flow: buildPublish(), VersionGroup: "platform"},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "lib1")
@@ -232,8 +232,8 @@ func TestOverridesVersionGroupSharesOnlyTheMajor(t *testing.T) {
 		"platform": {Versioning: models.VersioningFixedMajor},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), VersionGroup: "platform"},
-		"svc":  {Path: "services", Flow: buildPublish(), VersionGroup: "platform"},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), VersionGroup: "platform"},
+		"svc":  {Path: models.PathList{"services"}, Flow: buildPublish(), VersionGroup: "platform"},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "lib1")
@@ -280,7 +280,7 @@ func TestOverridesPerPackageRecords(t *testing.T) {
 		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"core": {Changelog: &models.ChangelogConfig{File: "HISTORY.md"}},
@@ -316,7 +316,7 @@ func TestOverridesPackageConcurrencyWeight(t *testing.T) {
 		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"pkg0": {Concurrency: []int{2}},
@@ -432,7 +432,7 @@ func TestOverridesSpacePackagesEntry(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Packages: map[string]models.PackageConfig{
 			"core": {TagFormat: "space-entry-{name}@{version}"},
 		}},
 	}
@@ -460,8 +460,8 @@ func TestOverridesSpaceFile(t *testing.T) {
 		"publish":    {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
-		"svc":  {Path: "services", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
+		"svc":  {Path: models.PathList{"services"}, Flow: buildPublish()},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -491,7 +491,7 @@ func TestOverridesLadderNearestWins(t *testing.T) {
 	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
-			Path:      "packages",
+			Path:      models.PathList{"packages"},
 			Flow:      buildPublish(),
 			TagFormat: "s1-{name}@{version}",
 			Packages: map[string]models.PackageConfig{
@@ -538,7 +538,7 @@ func TestOverridesSpaceLayerDependencies(t *testing.T) {
 		Propagation: &models.ParserPropagationConfig{Depth: "all"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Packages: map[string]models.PackageConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Packages: map[string]models.PackageConfig{
 			"mid": {Dependencies: models.Providers("core")},
 		}},
 	}

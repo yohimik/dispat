@@ -255,7 +255,7 @@ func TestAutoWriterSyncLock(t *testing.T) {
 	cfg := libsConfig(echoBuild, 2)
 	cfg.Scripts["locksync"] = models.Script{"cp package.json lock-snapshot.json"}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path:        "packages",
+		Path:        models.PathList{"packages"},
 		Flow:        buildPublish(),
 		AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"locksync"}},
 	}

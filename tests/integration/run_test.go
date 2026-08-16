@@ -37,12 +37,12 @@ func runConfig() models.File {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Scripts: map[string]models.Script{
 			"lint":   {"echo $DISPAT_PACKAGE >> ../../run.log"},
 			"record": {`env | grep '^DISPAT_' | sort > run-env.txt`},
 			"fail":   {`[ "$DISPAT_PACKAGE" != "core" ] && echo $DISPAT_PACKAGE >> ../../run.log`},
 		}},
-		"tools": {Path: "tools", Flow: buildPublish()},
+		"tools": {Path: models.PathList{"tools"}, Flow: buildPublish()},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	return cfg
@@ -154,7 +154,7 @@ func TestRunUnknownScriptFails(t *testing.T) {
 func TestRunWhenDiscoveryItselfFails(t *testing.T) {
 	r := harness.New(t)
 	cfg := runConfig()
-	cfg.Spaces["ghosts"] = models.SpaceConfig{Path: "nowhere", Flow: buildPublish()}
+	cfg.Spaces["ghosts"] = models.SpaceConfig{Path: models.PathList{"nowhere"}, Flow: buildPublish()}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "app")
@@ -324,7 +324,7 @@ func TestRunConcurrencyBudget(t *testing.T) {
 		cfg := harness.BaseFile(1)
 		cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 		cfg.Spaces = map[string]models.SpaceConfig{
-			"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+			"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Scripts: map[string]models.Script{
 				"mark": {r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 200*time.Millisecond)},
 			}},
 		}
@@ -375,7 +375,7 @@ func TestRunInFixedSpaceIncludesRides(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish(),
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish(),
 			Scripts: map[string]models.Script{"lint": {"echo $DISPAT_PACKAGE >> ../../run.log"}}},
 	}
 	r.WriteConfigModel(cfg)
@@ -399,7 +399,7 @@ func TestRunGraphOrderingUnderConcurrency(t *testing.T) {
 	cfg := harness.BaseFile(3)
 	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Scripts: map[string]models.Script{
 			"mark": {r.TsmarkScript("run.log", "$DISPAT_PACKAGE", 150*time.Millisecond)},
 		}},
 	}
@@ -443,8 +443,8 @@ func TestRunCarriesOutputsAcrossPackages(t *testing.T) {
 		` echo "DISPAT_OUTPUT_FROM_BASE=hello-from-base" >> "$DISPAT_OUTPUT";` +
 		` else echo "$DISPAT_PACKAGE sees $DISPAT_OUTPUT_FROM_BASE from $DISPAT_OUTPUT_SOURCE_FROM_BASE" >> ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"outer":  {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{"carry": {carry}}},
-		"middle": {Path: "middle", Flow: buildPublish()}, // no run scripts: a silent carrier
+		"outer":  {Path: models.PathList{"packages"}, Flow: buildPublish(), Scripts: map[string]models.Script{"carry": {carry}}},
+		"middle": {Path: models.PathList{"middle"}, Flow: buildPublish()}, // no run scripts: a silent carrier
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "mid", Provider: "base"},
@@ -475,7 +475,7 @@ func TestRunCarriesOutputsFromAFailedProvider(t *testing.T) {
 		` echo "MARK=exported-before-failing" >> "$DISPAT_OUTPUT"; exit 1;` +
 		` else echo "app sees $DISPAT_OUTPUT_MARK" > ../../carry.txt; fi`
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{"failcarry": {failCarry}}},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Scripts: map[string]models.Script{"failcarry": {failCarry}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -500,9 +500,9 @@ func TestRunFilterNarrowsToANamedPackage(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(),
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(),
 			Scripts: map[string]models.Script{"lint": {`echo "$DISPAT_PACKAGE" >> ../../lint.log`}}},
-		"apps": {Path: "apps", Flow: buildPublish()}, // defines no lint
+		"apps": {Path: models.PathList{"apps"}, Flow: buildPublish()}, // defines no lint
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "a")

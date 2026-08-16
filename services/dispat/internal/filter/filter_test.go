@@ -50,7 +50,7 @@ func fixture(t *testing.T) Workspace {
 			pkg("deep", "apps/group/deep", nil),
 			pkg("tool", "tools/tool", toolShared),
 		},
-		Spaces: map[string]string{"libs": "packages", "apps": "apps"},
+		Spaces: map[string][]string{"libs": {"packages"}, "apps": {"apps"}},
 		Groups: []string{"shared"},
 	}
 }
@@ -261,7 +261,7 @@ func TestResolveGroupWithNoPackagesIsAnError(t *testing.T) {
 
 func TestResolveSpaceWithNoPackagesIsAnError(t *testing.T) {
 	ws := fixture(t)
-	ws.Spaces["empty"] = "empty"
+	ws.Spaces["empty"] = []string{"empty"}
 	_, err := Resolve(Filter{Spaces: []string{"empty"}}, ws)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `--space "empty" matches no package (space "empty" holds none)`)
@@ -347,7 +347,7 @@ func TestLocateSkipsAPackageRootedAtTheMonorepoRoot(t *testing.T) {
 
 func TestResolveInferenceSkipsASpaceRootedAtTheMonorepoRoot(t *testing.T) {
 	ws := fixture(t)
-	ws.Spaces["top"] = "."
+	ws.Spaces["top"] = []string{"."}
 	// A package sitting directly under the root is the space's.
 	ws.Packages = append(ws.Packages,
 		&model.Package{Name: "rooted", Dir: filepath.Join(ws.Root, "rooted")})
@@ -378,7 +378,7 @@ func TestResolveReservesNoTerm(t *testing.T) {
 	ws := Workspace{
 		Root:     root,
 		Packages: []*model.Package{{Name: "all", Dir: filepath.Join(root, "packages", "all")}},
-		Spaces:   map[string]string{"all": "packages"},
+		Spaces:   map[string][]string{"all": {"packages"}},
 	}
 	res, err := Resolve(Filter{Packages: []string{"all"}}, ws)
 	require.NoError(t, err)
@@ -395,7 +395,7 @@ func TestResolveMatchesRelativePathsAgainstAbsoluteOnes(t *testing.T) {
 	ws := Workspace{
 		Root:     ".",
 		Packages: []*model.Package{{Name: "core", Dir: filepath.Join("packages", "core")}},
-		Spaces:   map[string]string{"libs": "packages"},
+		Spaces:   map[string][]string{"libs": {"packages"}},
 	}
 	res, err := Resolve(Filter{Dir: filepath.Join("packages", "core")}, ws)
 	require.NoError(t, err)

@@ -42,7 +42,7 @@ func layeredConfig() *config.File {
 		Env:     map[string]string{"MSG": "from-root", "ROOT_ONLY": "yes"},
 		Spaces: map[string]config.SpaceConfig{
 			"libs": {
-				Path: "packages",
+				Path: config.PathList{"packages"},
 				// Flow is what config.Load fills in; a config built by hand
 				// states it, as every other discovery test here does.
 				Flow:    &config.SpaceFlowConfig{},

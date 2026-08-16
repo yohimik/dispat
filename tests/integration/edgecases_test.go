@@ -100,7 +100,7 @@ func TestEdgePinPrereleaseBelowTheBumpIsStillRefused(t *testing.T) {
 func TestEdgePinPrereleaseMovesAWholeGroup(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "b")
@@ -140,7 +140,7 @@ func TestEdgeAutoVersionSyncsWithoutPropagation(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
-			Path:        "packages",
+			Path:        models.PathList{"packages"},
 			Flow:        buildPublish(),
 			AutoVersion: &models.AutoVersionConfig{Match: []string{"^*"}},
 		},
@@ -189,7 +189,7 @@ func TestEdgeAutoReplaceSyncsWithoutPropagation(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
-			Path: "packages",
+			Path: models.PathList{"packages"},
 			Flow: buildPublish(),
 			AutoVersion: &models.AutoVersionConfig{
 				Manifests: "none",
@@ -247,9 +247,9 @@ func TestEdgeVersionScriptSeesEveryUpdatedProvider(t *testing.T) {
 		"stamp": {`echo "$DISPAT_PACKAGE:$DISPAT_UPDATED_PACKAGES" >> ../../version.log`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"scripted": {Path: "scripted", Flow: &models.SpaceFlowConfig{
+		"scripted": {Path: models.PathList{"scripted"}, Flow: &models.SpaceFlowConfig{
 			Version: []string{"stamp"}, Build: []string{"build"}, Publish: []string{"publish"}}},
-		"native": {Path: "native", Flow: buildPublish(),
+		"native": {Path: models.PathList{"native"}, Flow: buildPublish(),
 			AutoVersion: &models.AutoVersionConfig{Match: []string{"^*"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
@@ -343,7 +343,7 @@ func TestEdgeChangelogRecordsEveryUpdatedProvider(t *testing.T) {
 func TestEdgeGroupNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.Commit("chore: seed a")
@@ -378,7 +378,7 @@ func TestEdgeGroupNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
 func TestEdgeGroupMemberOnAnotherMajorIsReported(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "stray")
@@ -404,7 +404,7 @@ func TestEdgeGroupMemberOnAnotherMajorIsReported(t *testing.T) {
 func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	}))
 	r.SeedPackage("packages", "a")
 	r.SeedPackage("packages", "laggard")
@@ -432,7 +432,7 @@ func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
 func TestEdgeGroupSparseMemberDecidingTheMajorIsReported(t *testing.T) {
 	r := harness.New(t)
 	cfg := spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: models.VersioningFixed, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
 	})
 	// A package overriding its space's versioning stays in the space's group,
 	// which is the route a group ends up holding members in different modes.
@@ -483,9 +483,9 @@ func TestEdgeRevertOnFailStopsAtThePublish(t *testing.T) {
 	}
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"good": {Path: "packages/good", Flow: &models.SpaceFlowConfig{
+		"good": {Path: models.PathList{"packages/good"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"mutate"}, Publish: []string{"publish"}}},
-		"bad": {Path: "packages/bad", Flow: &models.SpaceFlowConfig{
+		"bad": {Path: models.PathList{"packages/bad"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"mutate-then-fail"}, Publish: []string{"publish"}}},
 	}
 	r.WriteConfigModel(cfg)
@@ -521,7 +521,7 @@ func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 	// The root says yes; the space stays silent and inherits it.
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 			Build: []string{"mutate"}, Publish: []string{"fail"}}},
 	}
 	// ...and one package says no, against the root's yes.

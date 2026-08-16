@@ -123,18 +123,21 @@ type AliasTag struct {
 
 type Space struct {
 	Name string
-	// Path of the space folder, relative to the monorepo root. Every direct
-	// sub-folder is a package, unless a .dispatexclude file in the space
-	// folder excludes it.
+	// Path of the space's primary folder — the first configured path —
+	// relative to the monorepo root. A space may spread over several folders;
+	// every direct sub-folder of each is a package, unless a .dispatexclude
+	// file in that folder excludes it. The full list lives in the
+	// configuration; the domain carries only the primary, because that is
+	// the one folder space-level behaviour anchors to.
 	Path string
-	// Dir is the same folder resolved against the monorepo root: where the
-	// space's own scripts run. The login is the one script that belongs to
-	// the space rather than to a package, so it needs a folder no member's
-	// location can decide — see the login gate in internal/release.
+	// Dir is the primary folder resolved against the monorepo root: where
+	// the space's own scripts run. The login is the one script that belongs
+	// to the space rather than to a package, so it needs a folder no
+	// member's location can decide — see the login gate in internal/release.
 	//
 	// A standalone package is its own space, so its Dir is its package
 	// folder. That is what makes this field worth carrying: the parent of a
-	// member is the space folder for a space package and one level too high
+	// member is a space folder for a space package and one level too high
 	// for a standalone one, so it cannot be derived from a package.
 	Dir string
 	// Versioning is how versions relate across the space's packages; the zero

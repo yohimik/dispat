@@ -25,7 +25,7 @@ import (
 // at services/ — so a cross-space edge has somewhere to cross to.
 func twoSpaceConfig() models.File {
 	cfg := libsConfig(markerBuild, 1)
-	cfg.Spaces["apps"] = models.SpaceConfig{Path: "services", Flow: buildPublish()}
+	cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"services"}, Flow: buildPublish()}
 	return cfg
 }
 

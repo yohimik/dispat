@@ -68,7 +68,7 @@ func sweepApp(t *testing.T, budget int) (*App, *plan.Plan) {
 	root := t.TempDir()
 	// b consumes a, c consumes b, d is independent.
 	pl := runPlan(root, []string{"a", "b", "c", "d"}, map[string][]string{"b": {"a"}, "c": {"b"}})
-	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: "libs"}},
+	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: config.PathList{"libs"}}},
 		BuildConcurrency: budget}
 	return New(root, cfg, zerolog.Nop()), pl
 }

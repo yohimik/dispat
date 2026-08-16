@@ -27,7 +27,7 @@ func stepApp(t *testing.T) (*App, *plan.Plan, *bytes.Buffer) {
 		pl.Releases[n].Pinned = true
 	}
 	buf := &bytes.Buffer{}
-	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: "libs"}}}
+	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: config.PathList{"libs"}}}}
 	return New(root, cfg, zerolog.New(buf)), pl, buf
 }
 

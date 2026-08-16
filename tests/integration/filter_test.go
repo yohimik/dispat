@@ -60,10 +60,10 @@ func filterRepo(t *testing.T) *harness.Repo {
 		"stamp":   {`echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/stamp.log"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish(), Scripts: map[string]models.Script{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Scripts: map[string]models.Script{
 			"lint": {`echo "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/lint.log"`},
 		}},
-		"apps": {Path: "apps", Flow: buildPublish()},
+		"apps": {Path: models.PathList{"apps"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"deep": {Path: "apps/group/deep", Flow: buildPublish()},
@@ -106,9 +106,9 @@ func groupRepo(t *testing.T) *harness.Repo {
 		"shared": {Versioning: "fixed"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs":   {Path: "packages", VersionGroup: "shared", Flow: buildPublish()},
-		"apps":   {Path: "apps", Versioning: "fixed", Flow: buildPublish()},
-		"extras": {Path: "extras", Flow: buildPublish()},
+		"libs":   {Path: models.PathList{"packages"}, VersionGroup: "shared", Flow: buildPublish()},
+		"apps":   {Path: models.PathList{"apps"}, Versioning: "fixed", Flow: buildPublish()},
+		"extras": {Path: models.PathList{"extras"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"tool": {Path: "tools/tool", VersionGroup: "shared", Flow: buildPublish()},
@@ -489,7 +489,7 @@ func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Versioning: "fixed", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Versioning: "fixed", Flow: buildPublish()},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "one")

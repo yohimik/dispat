@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -204,6 +205,19 @@ func (a *App) planOptions() (plan.Options, error) {
 func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency) {
 	if !a.log.Debug().Enabled() {
 		return
+	}
+	names := make([]string, 0, len(a.cfg.Spaces))
+	for name := range a.cfg.Spaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		sc := a.cfg.Spaces[name]
+		ev := a.log.Debug().Str("space", name).Strs("paths", sc.Path)
+		if sc.Versioning != "" {
+			ev = ev.Str("versioning", sc.Versioning)
+		}
+		ev.Msg("space resolved")
 	}
 	for _, p := range pkgs {
 		ev := a.log.Debug().Str("package", p.Name).Str("scope", p.ScopeDir())

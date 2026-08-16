@@ -67,7 +67,7 @@ func TestPackagesStandalonePath(t *testing.T) {
 		"publish":   {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
 	}
 	cfg.Packages = map[string]models.PackageConfig{
 		"cli": {Path: "tools/cli", Flow: &models.SpaceFlowConfig{

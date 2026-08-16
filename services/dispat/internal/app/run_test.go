@@ -34,7 +34,7 @@ func runPlan(root string, names []string, providers map[string][]string) *plan.P
 
 // runApp is an App over runPlan's shape: one "libs" space, nothing executed.
 func runApp(root string) *App {
-	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: "libs"}}}
+	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: config.PathList{"libs"}}}}
 	return New(root, cfg, zerolog.Nop())
 }
 

@@ -561,7 +561,7 @@ func TestRecordsGitHubAllPackages(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {"echo building"}, "publish": {"echo publishing"}}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: buildPublish()}}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()}}
 	cfg.GitHub = &models.GitHubConfig{
 		Enabled: models.Bool(true), AllPackages: models.Bool(true),
 		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
@@ -756,8 +756,8 @@ func TestRecordsLineFiltersSelectPackages(t *testing.T) {
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: "packages/libs", Flow: buildPublish(), Versioning: "fixed"},
-		"apps": {Path: "packages/apps", Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages/libs"}, Flow: buildPublish(), Versioning: "fixed"},
+		"apps": {Path: models.PathList{"packages/apps"}, Flow: buildPublish()},
 	}
 	cfg.Changelog = &models.ChangelogConfig{
 		EntryFormatConfig: models.EntryFormatConfig{
@@ -971,7 +971,7 @@ func TestRecordsAliasTags(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path:      "packages",
+		Path:      models.PathList{"packages"},
 		Flow:      buildPublish(),
 		TagFormat: "packages/{name}/v{version}",
 		AliasTags: []models.AliasTagConfig{
@@ -1043,7 +1043,7 @@ func githubConfig(apiURL string) models.File {
 		"build":   {"echo building"},
 		"publish": {`echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`},
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}}}}
 	cfg.GitHub = &models.GitHubConfig{
 		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
@@ -1126,7 +1126,7 @@ func TestRecordsGithubReleaseAttachments(t *testing.T) {
 		"publish":  {`echo "publish: $DISPAT_OUTPUTS / $DISPAT_EXPORT_GITHUB" > ../../publish-env.txt`},
 		"announce": {`echo "announce: $DISPAT_OUTPUT_BUILD_FLAVOUR" > ../../announce-env.txt`},
 	}
-	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
 	r.WriteConfigModel(cfg)
 	t.Setenv("DISPAT_IT_TOKEN", "tkn")
@@ -1255,7 +1255,7 @@ func TestRecordsAliasTagFailureIsOnlyAWarning(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Commit = &models.CommitConfig{Force: models.Bool(false)}
 	cfg.Spaces["libs"] = models.SpaceConfig{
-		Path:      "packages",
+		Path:      models.PathList{"packages"},
 		Flow:      buildPublish(),
 		AliasTags: []models.AliasTagConfig{{Format: "v{version}"}},
 	}
