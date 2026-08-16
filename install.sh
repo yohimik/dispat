@@ -275,9 +275,33 @@ if [ "$OS" = "$HOST_OS" ] && [ "$ARCH" = "$HOST_ARCH" ]; then
 	DISPAT_UPDATE_CHECK=0 "$TARGET" --version >&2 || die "the installed binary does not run"
 fi
 
+# The PATH story, both halves of it. A directory missing from PATH gets the
+# one-off export and the line that makes it permanent, aimed at the profile
+# the user's shell actually reads. A directory already on PATH can still lose
+# to an older dispat installed somewhere earlier, which looks exactly like
+# the new version failing to install — so that shadowing is said out loud.
+case "${SHELL:-}" in
+*/zsh) PROFILE="\$HOME/.zshrc" ;;
+*/bash) PROFILE="\$HOME/.bashrc" ;;
+*) PROFILE="\$HOME/.profile" ;;
+esac
 case ":${PATH}:" in
-*":${BIN_DIR}:"*) ;;
-*) log "note: ${BIN_DIR} is not on PATH. Add it with: export PATH=\"${BIN_DIR}:\$PATH\"" ;;
+*":${BIN_DIR}:"*)
+	if [ "$OS" = "$HOST_OS" ] && [ "$ARCH" = "$HOST_ARCH" ]; then
+		FOUND=$(command -v dispat 2>/dev/null || true)
+		if [ -n "$FOUND" ] && [ "$FOUND" != "$TARGET" ]; then
+			log "warning: ${FOUND} comes earlier on PATH and shadows ${TARGET}."
+			log "  \`dispat --version\` will keep answering with the old binary; remove it or reorder PATH:"
+			log "  rm \"${FOUND}\"    # or move ${BIN_DIR} ahead in ${PROFILE}"
+		fi
+	fi
+	;;
+*)
+	log "note: ${BIN_DIR} is not on PATH."
+	log "  this shell only:  export PATH=\"${BIN_DIR}:\$PATH\""
+	log "  permanently:      echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ${PROFILE}"
+	log "  then open a new shell (or \`source ${PROFILE}\`)."
+	;;
 esac
 
 printf '%s\n' "$VERSION"

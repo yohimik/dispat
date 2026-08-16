@@ -59,6 +59,28 @@ irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 -OutFile i
 .\install.ps1 -Version 1.2.3
 ```
 
+### Putting dispat on your PATH permanently
+
+The script installs to `/usr/local/bin` when it is writable, which is already on `PATH` on most systems, and to
+`~/.local/bin` otherwise. A plain `export PATH=...` lasts only for the shell it runs in, so if the script printed the
+PATH note, append the line to your shell's own profile once and open a new terminal:
+
+```sh title="zsh (the macOS default)"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+```sh title="bash"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+```powershell title="Windows, for your user account"
+[Environment]::SetEnvironmentVariable('Path', "$env:LOCALAPPDATA\dispat\bin;" + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
+```
+
+If `dispat --version` still answers with an older version after an install, an older binary earlier on `PATH` is
+shadowing the new one; the install script warns about this. `which -a dispat` (or `Get-Command dispat` on Windows)
+lists every copy in `PATH` order, so remove the stale one or reorder the directories in your profile.
+
 Two other ways, if they suit you better:
 
 ```sh

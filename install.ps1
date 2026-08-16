@@ -158,8 +158,21 @@ try {
     $env:DISPAT_UPDATE_CHECK = $updateCheck
 }
 
+# The PATH story, both halves of it: a directory missing from PATH gets the
+# one-off assignment and the line that makes it permanent; a directory already
+# on PATH can still lose to an older dispat installed somewhere earlier, which
+# looks exactly like the new version failing to install.
 if (($env:PATH -split ';') -notcontains $BinDir) {
-    Write-Information "note: $BinDir is not on PATH. Add it with: `$env:PATH = `"$BinDir;`$env:PATH`"" -InformationAction Continue
+    Write-Information "note: $BinDir is not on PATH." -InformationAction Continue
+    Write-Information "  this session only:  `$env:PATH = `"$BinDir;`$env:PATH`"" -InformationAction Continue
+    Write-Information "  permanently:        [Environment]::SetEnvironmentVariable('Path', `"$BinDir;`" + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')" -InformationAction Continue
+    Write-Information "  then open a new terminal." -InformationAction Continue
+} else {
+    $found = (Get-Command dispat -ErrorAction SilentlyContinue).Source
+    if ($found -and $found -ne $target) {
+        Write-Information "warning: $found comes earlier on PATH and shadows $target." -InformationAction Continue
+        Write-Information "  ``dispat --version`` will keep answering with the old binary; remove it or reorder PATH." -InformationAction Continue
+    }
 }
 
 # The output contract: the version alone on stdout.
