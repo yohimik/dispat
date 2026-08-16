@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/manifest/v1.0.0-rc.2 (2026-08-16)
+
+### Fixes
+
+- dependencies update
+
+
 ## pkg/manifest/v1.0.0-rc.1 (2026-08-16)
 
 ### Breaking Changes
