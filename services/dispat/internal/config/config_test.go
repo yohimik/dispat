@@ -41,9 +41,9 @@ func validConfig() File {
 	return File{
 		Scripts: map[string]Script{"build": {"echo build"}, "publish": {"echo publish"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "packages/libs", IsBuildWaitingPublish: models.Bool(true), RevertOnFail: models.Bool(true),
+			"libs": {Path: PathList{"packages/libs"}, IsBuildWaitingPublish: models.Bool(true), RevertOnFail: models.Bool(true),
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
-			"apps": {Path: "packages/apps",
+			"apps": {Path: PathList{"packages/apps"},
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 		},
 		Dependencies: []DependencyConfig{{Consumer: "app", Provider: "core"}},
@@ -60,7 +60,7 @@ func minimalConfig() File {
 	return File{
 		Scripts: map[string]Script{"build": {"echo b"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
+			"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
 		Run: &RunConfig{},
 	}
@@ -276,8 +276,8 @@ func TestLoadTagFormatPerSpace(t *testing.T) {
 		Scripts:   map[string]Script{"build": {"echo b"}},
 		TagFormat: "{name}@v{version}",
 		Spaces: map[string]SpaceConfig{
-			"libs":     {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
-			"services": {Path: "svc", Flow: &SpaceFlowConfig{Build: []string{"build"}}, TagFormat: "services/{name}@v{version}"},
+			"libs":     {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{Build: []string{"build"}}},
+			"services": {Path: PathList{"svc"}, Flow: &SpaceFlowConfig{Build: []string{"build"}}, TagFormat: "services/{name}@v{version}"},
 		},
 	}
 	root := writeModelRepo(t, cfg, "pkgs/core", "svc/api")
@@ -362,7 +362,7 @@ func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]Script{"buildAll": {"echo b"}, "publishAll": {"echo p"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{
+			"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{
 				Build: []string{"buildAll"}, Publish: []string{"publishAll"}}},
 		},
 	}
@@ -381,7 +381,7 @@ func TestLoadOptionalScripts(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]Script{"sync": {"npm install"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Version: []string{"sync"}}},
+			"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{Version: []string{"sync"}}},
 		},
 	}
 	root := writeModelRepo(t, cfg, "pkgs/core")
@@ -539,7 +539,7 @@ func TestLoadErrors(t *testing.T) {
 		}, "itself"},
 		{"missing space path", func(c *File) {
 			withLibs(c, func(s *SpaceConfig) {
-				s.Path = ""
+				s.Path = nil
 			})
 		}, "path is required"},
 		{"autoVersion bad manifests", func(c *File) {
@@ -763,7 +763,7 @@ func TestLoadLoginAndHookScripts(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]Script{"auth": {"npm login"}, "hook": {"echo hook"}, "build": {"echo build"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{
+			"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{
 				Build:          []string{"build"},
 				Login:          []string{"auth"},
 				Announce:       []string{"hook", "build"},
@@ -807,7 +807,7 @@ func TestLoadRunHooks(t *testing.T) {
 	cfg := File{
 		Scripts: map[string]Script{"build": {"echo b"}, "notify": {"echo notify"}, "lint": {"echo lint"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
+			"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 		},
 		Run: &RunConfig{
 			BeforeAll:    []string{"lint"},
@@ -1191,7 +1191,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 	t.Run("defined only in another space", func(t *testing.T) {
 		cfg := minimalConfig()
 		withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Publish = []string{"ship"} })
-		cfg.Spaces["apps"] = SpaceConfig{Path: "apps", Flow: &SpaceFlowConfig{},
+		cfg.Spaces["apps"] = SpaceConfig{Path: PathList{"apps"}, Flow: &SpaceFlowConfig{},
 			Scripts: map[string]Script{"ship": {"echo shipping"}}}
 		root := writeModelRepo(t, cfg, "pkgs/core", "apps/web")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -1272,7 +1272,7 @@ func TestSyncLockResolvesThroughThePackageScope(t *testing.T) {
 func TestDiscoverMissingSpaceFolder(t *testing.T) {
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Path = "does/not/exist"
+		s.Path = PathList{"does/not/exist"}
 	})
 	root := writeModelRepo(t, cfg)
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -1313,7 +1313,7 @@ func TestDiscoverNoneProviderRejected(t *testing.T) {
 	base := func() File {
 		cfg := minimalConfig()
 		cfg.Spaces["tools"] = SpaceConfig{
-			Path: "tls", Versioning: VersioningNone,
+			Path: PathList{"tls"}, Versioning: VersioningNone,
 			Flow: &SpaceFlowConfig{Build: []string{"build"}},
 		}
 		return cfg
@@ -1657,6 +1657,80 @@ func TestResolveFileSkipsSpaceConfig(t *testing.T) {
 	}
 }
 
+// TestLoadSpacePathForms: `path` accepts a scalar and a list, and the scalar
+// form survives a comma — the decode hook lifts it before WeaklyTypedInput's
+// comma-splitting string-to-slice conversion can shred it.
+func TestLoadSpacePathForms(t *testing.T) {
+	cfg := minimalConfig()
+	loaded, err := loadModel(t, cfg, "pkgs/core")
+	require.NoError(t, err)
+	assert.Equal(t, PathList{"pkgs"}, loaded.Spaces["libs"].Path, "the scalar form is a one-element list")
+
+	withLibs(&cfg, func(s *SpaceConfig) { s.Path = PathList{"pkgs", "more"} })
+	loaded, err = loadModel(t, cfg, "pkgs/core", "more/extra")
+	require.NoError(t, err)
+	assert.Equal(t, PathList{"pkgs", "more"}, loaded.Spaces["libs"].Path)
+
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs,more", "flow": map[string]any{"build": []string{"build"}}},
+		},
+	}, "pkgs,more/core")
+	loaded, err = Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, PathList{"pkgs,more"}, loaded.Spaces["libs"].Path,
+		"a comma inside a scalar path is part of the folder name, not a separator")
+}
+
+// TestSpacePathValidation: every refusal of the folder list, each naming what
+// is wrong with which entry.
+func TestSpacePathValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path PathList
+		want string
+	}{
+		{"empty list", PathList{}, "path is required"},
+		{"empty element", PathList{"pkgs", ""}, "path[1] must not be empty"},
+		{"absolute", PathList{"/abs"}, "must be a repository-relative path"},
+		{"escapes the root", PathList{"../out"}, "escapes the repository root"},
+		{"duplicate", PathList{"pkgs", "pkgs"}, "declared more than once"},
+		{"duplicate after clean", PathList{"pkgs", "pkgs/inner/.."}, "declared more than once"},
+		{"nested", PathList{"pkgs", "pkgs/inner"}, "overlap (one contains the other)"},
+		{"root next to another", PathList{".", "pkgs"}, "overlap (one contains the other)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			withLibs(&cfg, func(s *SpaceConfig) { s.Path = tc.path })
+			_, err := loadModel(t, cfg, "pkgs/core")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, err.Error(), `space "libs"`)
+		})
+	}
+}
+
+// TestResolveFileSecondPathOwnsItsFolder: config-file resolution recognises a
+// space folder through the list form of `path` — from any listed folder, not
+// only the first — so a space file there is a layer rather than a nested
+// monorepo root of its own.
+func TestResolveFileSecondPathOwnsItsFolder(t *testing.T) {
+	cfg := minimalConfig()
+	withLibs(&cfg, func(s *SpaceConfig) { s.Path = PathList{"pkgs", "more"} })
+	root := writeModelRepo(t, cfg, "pkgs/core", "more/extra")
+	writeSpaceFile(t, root, "more", SpaceFile{
+		Packages: map[string]PackageConfig{"extra": {TagFormat: "v{version}"}},
+	})
+
+	for _, from := range []string{"more", "more/extra"} {
+		path, resolvedRoot, err := ResolveFile(filepath.Join(root, from), "dispat.json", false)
+		require.NoError(t, err, from)
+		assert.Equal(t, filepath.Join(root, "dispat.json"), path, from)
+		assert.Equal(t, root, resolvedRoot, from)
+	}
+}
+
 // TestResolveFilePackagesOnlyRoot: a repository whose only config declares
 // packages and no spaces is its own root — nothing above claims its folder —
 // so the ascent stops there, from inside it as well.
@@ -1863,7 +1937,7 @@ func TestDiscoverPackagesIsRepeatable(t *testing.T) {
 
 	assert.Equal(t, "file-{version}", packagesByName(second)["utils"].Space.TagFormat)
 	assert.Equal(t, "entry-{version}", packagesByName(second)["core"].Space.TagFormat)
-	assert.Equal(t, "packages/libs", loaded.Spaces["libs"].Path)
+	assert.Equal(t, PathList{"packages/libs"}, loaded.Spaces["libs"].Path)
 	assert.Empty(t, loaded.Spaces["libs"].TagFormat, "the loaded config keeps saying what the file said")
 	require.Len(t, second, len(first))
 	for i := range first {

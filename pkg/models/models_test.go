@@ -124,8 +124,8 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	}
 
 	// Spaces resolve by name the same way, for the same viper reason.
-	sfile := File{Spaces: map[string]SpaceConfig{"libs": {Path: "packages"}}}
-	if s, ok := sfile.Space("LIBS"); !ok || s.Path != "packages" {
+	sfile := File{Spaces: map[string]SpaceConfig{"libs": {Path: PathList{"packages"}}}}
+	if s, ok := sfile.Space("LIBS"); !ok || s.Path.First() != "packages" {
 		t.Errorf("Space(LIBS) = %+v, %v", s, ok)
 	}
 	if _, ok := sfile.Space("apps"); ok {
@@ -151,13 +151,53 @@ func TestDefaultNonPackageScopes(t *testing.T) {
 	}
 }
 
+func TestPathListRoundTrip(t *testing.T) {
+	// One folder marshals back to the scalar form the author most likely
+	// wrote, several stay a list, and both shapes unmarshal.
+	one, err := json.Marshal(PathList{"packages"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(one) != `"packages"` {
+		t.Errorf("a single path marshals as a scalar, got %s", one)
+	}
+	two, err := json.Marshal(PathList{"packages", "more"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(two) != `["packages","more"]` {
+		t.Errorf("several paths marshal as a list, got %s", two)
+	}
+
+	for raw, want := range map[string]int{`"packages"`: 1, `["packages","more"]`: 2, `[]`: 0} {
+		var p PathList
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			t.Fatalf("unmarshal %s: %v", raw, err)
+		}
+		if len(p) != want {
+			t.Errorf("unmarshal %s: got %v", raw, p)
+		}
+	}
+	var p PathList
+	if err := json.Unmarshal([]byte(`7`), &p); err == nil {
+		t.Error("a number is neither shape and must fail")
+	}
+
+	if got := (PathList{"a", "b"}).First(); got != "a" {
+		t.Errorf("First() = %q", got)
+	}
+	if got := (PathList{}).First(); got != "" {
+		t.Errorf("First() of an empty list = %q", got)
+	}
+}
+
 func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	// The json tags mirror the mapstructure keys, so a marshalled model is a
 	// loadable dispat.json; resolved fields never leak into the file.
 	f := File{
 		Scripts: map[string]Script{"build": {"make"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "packages", Versioning: VersioningFixed,
+			"libs": {Path: PathList{"packages"}, Versioning: VersioningFixed,
 				Flow:    &SpaceFlowConfig{Build: []string{"build"}},
 				Scripts: map[string]Script{"lint": {"make lint"}}},
 		},
@@ -201,7 +241,7 @@ func TestPackageConfigRoundTrip(t *testing.T) {
 	f := File{
 		VersionGroups: map[string]VersionGroupConfig{"core": {Versioning: VersioningFixed}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: "packages"},
+			"libs": {Path: PathList{"packages"}},
 		},
 		Packages: map[string]PackageConfig{
 			"app": {
@@ -361,7 +401,7 @@ func TestEnvAndCustomRoundTrip(t *testing.T) {
 		Run:    &RunConfig{AllowBranch: []string{"main", "release/*"}},
 		Spaces: map[string]SpaceConfig{
 			"libs": {
-				Path:   "packages",
+				Path:   PathList{"packages"},
 				Env:    map[string]string{"SHARED": "space"},
 				Custom: map[string]any{"owner": "libs-team"},
 			},

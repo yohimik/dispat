@@ -413,6 +413,54 @@ func TestVersionGroupPartialModes(t *testing.T) {
 	assert.Equal(t, model.VersioningFixedMajorMinorSparse, byName["app"].Space.Versioning)
 }
 
+// TestDiscoverMultiPathSpace: a space listing several folders discovers the
+// packages of every one, reads a space file from each (later folders
+// overriding earlier), anchors every member's space behaviour at the first
+// folder, and refuses one package name appearing under two of its folders.
+func TestDiscoverMultiPathSpace(t *testing.T) {
+	cfg := minimalConfig()
+	withLibs(&cfg, func(s *SpaceConfig) { s.Path = PathList{"pkgs", "more"} })
+	root := writeModelRepo(t, cfg, "pkgs/core", "more/extra")
+	writeSpaceFile(t, root, "pkgs", SpaceFile{TagFormat: "one-{name}@v{version}"})
+	writeSpaceFile(t, root, "more", SpaceFile{TagFormat: "two-{name}@v{version}"})
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	require.Contains(t, byName, "core")
+	require.Contains(t, byName, "extra", "the second folder's packages are the space's too")
+
+	assert.Equal(t, filepath.Join(root, "pkgs", "core"), byName["core"].Dir)
+	assert.Equal(t, filepath.Join(root, "more", "extra"), byName["extra"].Dir)
+	assert.Equal(t, filepath.Join(root, "pkgs"), byName["extra"].Space.Dir,
+		"the primary folder anchors the space wherever the member lives")
+	assert.Equal(t, "two-{name}@v{version}", string(byName["core"].Space.TagFormat),
+		"space files merge in path order, the later one over the earlier")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkgs", "dup"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "more", "dup"), 0o755))
+	_, err = discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `package "dup" exists in two folders of space "libs" (pkgs and more)`)
+}
+
+// TestDiscoverMultiPathExcludePerFolder: a .dispatexclude excludes folders of
+// the space folder it sits in, and only that one.
+func TestDiscoverMultiPathExcludePerFolder(t *testing.T) {
+	cfg := minimalConfig()
+	withLibs(&cfg, func(s *SpaceConfig) { s.Path = PathList{"pkgs", "more"} })
+	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/skip", "more/extra", "more/tmp")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "more", DispatexcludeName), []byte("tmp\n"), 0o644))
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	assert.Contains(t, byName, "core")
+	assert.Contains(t, byName, "skip", "the exclude of one folder does not reach another")
+	assert.Contains(t, byName, "extra")
+	assert.NotContains(t, byName, "tmp")
+}
+
 // TestVersioningNoneGroups: none shares nothing, so it cannot declare a
 // group, cannot be joined as one, and cannot sit next to a versionGroup
 // reference on the same layer.
@@ -754,7 +802,7 @@ func TestDiscoverUnvalidatedGroupRef(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkgs/core"), 0o755))
 	cfg := &File{Spaces: map[string]SpaceConfig{
-		"libs": {Path: "pkgs", Flow: &SpaceFlowConfig{}, VersionGroup: "nope"},
+		"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{}, VersionGroup: "nope"},
 	}}
 	_, _, err := DiscoverPackages(cfg, root)
 	require.Error(t, err)
@@ -1685,7 +1733,7 @@ func TestSpaceLayerDependencies(t *testing.T) {
 func TestSpaceFileAtTheRepositoryRoot(t *testing.T) {
 	cfg := minimalConfig()
 	cfg.Spaces = map[string]SpaceConfig{
-		"all": {Path: ".", Flow: &SpaceFlowConfig{Build: []string{"build"}}},
+		"all": {Path: PathList{"."}, Flow: &SpaceFlowConfig{Build: []string{"build"}}},
 	}
 	root := writeModelRepo(t, cfg, "core")
 	pkgs, err := discoverPackages(t, root)
@@ -2360,8 +2408,8 @@ func TestRootDefaultsReachEverySpace(t *testing.T) {
 	cfg.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true)}
 	// The spaces say nothing at all, so everything they have comes from above.
 	cfg.Spaces = map[string]SpaceConfig{
-		"libs": {Path: "packages/libs"},
-		"apps": {Path: "packages/apps"},
+		"libs": {Path: PathList{"packages/libs"}},
+		"apps": {Path: PathList{"packages/apps"}},
 	}
 	cfg.Packages = map[string]PackageConfig{"tool": {Path: "tools/tool"}}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
@@ -2397,8 +2445,8 @@ func TestRootDefaultsAreOverriddenAtEveryLevel(t *testing.T) {
 	cfg.Versioning = "fixed"
 	cfg.Spaces = map[string]SpaceConfig{
 		// The space overrides one flow entry and keeps the rest.
-		"libs": {Path: "packages/libs", Flow: &SpaceFlowConfig{Build: []string{"build-libs"}}},
-		"apps": {Path: "packages/apps", Versioning: "independent", RevertOnFail: models.Bool(false)},
+		"libs": {Path: PathList{"packages/libs"}, Flow: &SpaceFlowConfig{Build: []string{"build-libs"}}},
+		"apps": {Path: PathList{"packages/apps"}, Versioning: "independent", RevertOnFail: models.Bool(false)},
 	}
 	cfg.Packages = map[string]PackageConfig{
 		"core": {Flow: &SpaceFlowConfig{Build: []string{"build-core"}}, RevertOnFail: models.Bool(false)},

@@ -132,7 +132,7 @@ func TestRefReplacesTheValue(t *testing.T) {
 
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path)
+	assert.Equal(t, PathList{"pkgs"}, cfg.Spaces["libs"].Path)
 	assert.Equal(t, []string{"build"}, cfg.Spaces["libs"].Flow.Build, "an object through two files")
 	assert.Equal(t, []string{"/bin/bash", "-c"}, cfg.Shell, "a referenced list")
 	assert.Equal(t, "{name}-{version}", cfg.TagFormat, "a referenced single value")
@@ -227,7 +227,7 @@ func TestRefSiblingKeysOverride(t *testing.T) {
 	assert.Equal(t, "fixed", cfg.Spaces["libs"].Versioning, "the fragment as it is")
 	assert.Equal(t, "independent", cfg.Spaces["apps"].Versioning,
 		"the sibling wins, however the two files spell the key, and may be a reference itself")
-	assert.Equal(t, "pkgs", cfg.Spaces["apps"].Path, "everything it did not override survives")
+	assert.Equal(t, PathList{"pkgs"}, cfg.Spaces["apps"].Path, "everything it did not override survives")
 }
 
 // TestRefSiblingsNeedAnObject: keys beside a reference override the object it
@@ -259,7 +259,7 @@ func TestRefTheDocumentItself(t *testing.T) {
 
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path)
+	assert.Equal(t, PathList{"pkgs"}, cfg.Spaces["libs"].Path)
 }
 
 // TestRefInsideCustom: `custom` is free-form data dispat never reads, and a
@@ -487,7 +487,7 @@ func TestRefListSiblingKeysOverrideTheMerge(t *testing.T) {
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "fixed", cfg.Spaces["libs"].Versioning, "the sibling outranks every file the $ref named")
-	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path, "everything it did not override survives the merge")
+	assert.Equal(t, PathList{"pkgs"}, cfg.Spaces["libs"].Path, "everything it did not override survives the merge")
 
 	list := writeFile(t, dir, "dispat.yaml", `{"shell": {"$ref": ["./one.json", "./two.json"], "extra": 1}}`)
 	_, err = Load(list, nil)
@@ -584,8 +584,8 @@ func TestRefListResolvesEachAgainstItsOwnFolder(t *testing.T) {
 
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "pkgs", cfg.Spaces["libs"].Path)
-	assert.Equal(t, "apps", cfg.Spaces["apps"].Path)
+	assert.Equal(t, PathList{"pkgs"}, cfg.Spaces["libs"].Path)
+	assert.Equal(t, PathList{"apps"}, cfg.Spaces["apps"].Path)
 }
 
 // TestRefKeepsPathsRepositoryRelative: a reference moves text, not meaning. A

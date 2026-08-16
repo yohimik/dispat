@@ -495,16 +495,6 @@ var boundFlags = map[string]string{
 	"logFormat":   "log-format",
 }
 
-// lookupString reads a string field of a parsed node, case-insensitively.
-func lookupString(node map[string]any, key string) (string, bool) {
-	v, ok := lookupFold(node, key)
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	return s, ok
-}
-
 // cloneTree copies a parsed tree, deeply.
 func cloneTree(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))

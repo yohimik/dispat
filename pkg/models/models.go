@@ -18,6 +18,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -547,10 +548,51 @@ type VersionGroupConfig struct {
 	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
 }
 
+// PathList is a space's `path` key: one folder or a list of folders, each
+// relative to the repository root and each holding packages of the space.
+// The first entry is the space's primary folder — the login script runs
+// there, and `dispat exec --in <space>` resolves there. It marshals a single
+// folder back to the scalar form, so a config written from the model reads
+// the way most authors write it.
+type PathList []string
+
+// First returns the primary folder: the first configured path, or "" for an
+// empty list.
+func (p PathList) First() string {
+	if len(p) == 0 {
+		return ""
+	}
+	return p[0]
+}
+
+// MarshalJSON renders one folder as a bare string and several as an array,
+// mirroring the two shapes UnmarshalJSON accepts.
+func (p PathList) MarshalJSON() ([]byte, error) {
+	if len(p) == 1 {
+		return json.Marshal(p[0])
+	}
+	return json.Marshal([]string(p))
+}
+
+// UnmarshalJSON accepts the scalar and the array form.
+func (p *PathList) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*p = PathList{s}
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(data, &list); err != nil {
+		return err
+	}
+	*p = PathList(list)
+	return nil
+}
+
 // SpaceConfig is the raw configuration of one space. Everything the space
 // runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
-	Path string `mapstructure:"path" json:"path,omitempty"`
+	Path PathList `mapstructure:"path" json:"path,omitempty"`
 	// The scalar booleans are pointers for the same reason SpaceFile's and
 	// PackageConfig's are: the root file now states defaults for them, and a
 	// space that cannot say "false" could not override a root "true".

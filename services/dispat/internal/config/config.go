@@ -41,6 +41,7 @@ type (
 	CommitConfig             = public.CommitConfig
 	SpaceConfig              = public.SpaceConfig
 	SpaceFile                = public.SpaceFile
+	PathList                 = public.PathList
 	SpaceFlowConfig          = public.SpaceFlowConfig
 	PackageConfig            = public.PackageConfig
 	VersionGroupConfig       = public.VersionGroupConfig
@@ -453,13 +454,24 @@ func ownsSpaceFolder(root map[string]any, rootDir, dir string) bool {
 		if !ok {
 			continue
 		}
-		p, ok := lookupString(fields, "path")
-		if !ok || p == "" {
+		// The raw shape mirrors PathList: a scalar folder or a list of them,
+		// and any of a space's folders owns the file found inside it.
+		rawPath, ok := lookupFold(fields, "path")
+		if !ok {
 			continue
 		}
-		info, err := os.Stat(filepath.Join(rootDir, filepath.FromSlash(p)))
-		if err == nil && os.SameFile(info, target) {
-			return true
+		paths, ok := stringList(rawPath)
+		if !ok {
+			continue
+		}
+		for _, p := range paths {
+			if p == "" {
+				continue
+			}
+			info, err := os.Stat(filepath.Join(rootDir, filepath.FromSlash(p)))
+			if err == nil && os.SameFile(info, target) {
+				return true
+			}
 		}
 	}
 	return false
@@ -652,6 +664,24 @@ var scriptType = reflect.TypeOf(public.Script(nil))
 // reports it against the key the user actually wrote.
 func scriptFormHook(_, to reflect.Type, data any) (any, error) {
 	if to != scriptType {
+		return data, nil
+	}
+	if s, ok := data.(string); ok {
+		return []string{s}, nil
+	}
+	return data, nil
+}
+
+// pathListType is the decode target the path hook watches for: a space's
+// `path`, one folder or a list of them.
+var pathListType = reflect.TypeOf(public.PathList(nil))
+
+// pathFormHook lifts a path written as a scalar into the one-element list
+// PathList defines it to be, for the same reason scriptFormHook exists:
+// WeaklyTypedInput's string-to-slice conversion splits on commas, and a
+// folder name may legitimately carry one.
+func pathFormHook(_, to reflect.Type, data any) (any, error) {
+	if to != pathListType {
 		return data, nil
 	}
 	if s, ok := data.(string); ok {
@@ -1048,8 +1078,8 @@ func validateSpace(name string, s SpaceConfig) (SpaceConfig, error) {
 // same checks validate a package's merged override config ("space "libs":
 // package "core"") — an override is space-shaped and held to space rules.
 func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
-	if s.Path == "" {
-		return s, fmt.Errorf("%s: path is required", label)
+	if err := validateSpacePath(label, s.Path); err != nil {
+		return s, err
 	}
 	if err := validateAliasTags(label+": aliasTags", s.AliasTags); err != nil {
 		return s, err
@@ -1087,6 +1117,49 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 		return s, err
 	}
 	return s, nil
+}
+
+// validateSpacePath checks a space's folder list: at least one folder, each
+// one repository-relative, no folder twice, and no folder inside another —
+// nested folders would make a package belong to the space through two paths
+// at once. The repository root itself (".") stays legal, as it always was for
+// a single-folder space, and the overlap rule then simply forbids listing
+// anything next to it.
+func validateSpacePath(label string, paths public.PathList) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("%s: path is required", label)
+	}
+	cleaned := make([]string, len(paths))
+	for i, p := range paths {
+		if p == "" {
+			return fmt.Errorf("%s: path[%d] must not be empty", label, i)
+		}
+		if filepath.IsAbs(p) {
+			return fmt.Errorf("%s: path %q must be a repository-relative path", label, p)
+		}
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(p)))
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("%s: path %q escapes the repository root", label, p)
+		}
+		cleaned[i] = clean
+	}
+	for i, a := range cleaned {
+		for _, b := range cleaned[:i] {
+			if a == b {
+				return fmt.Errorf("%s: path %q is declared more than once", label, paths[i])
+			}
+			inner, outer := a, b
+			if len(inner) < len(outer) {
+				inner, outer = outer, inner
+			}
+			if outer == "." || strings.HasPrefix(inner, outer+"/") {
+				return fmt.Errorf(
+					"%s: paths %q and %q overlap (one contains the other), so a folder would belong to the space twice",
+					label, b, a)
+			}
+		}
+	}
+	return nil
 }
 
 // validateAutoVersion checks an autoVersion object's own values under the
@@ -1653,7 +1726,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 	}
 	return &model.Space{
 		Name: spaceName,
-		Path: sc.Path,
+		Path: sc.Path.First(),
 		Dir:  dir,
 		// The env layers merge key by key, most local last. sc arrives already
 		// carrying the space plus any package override layers — the same

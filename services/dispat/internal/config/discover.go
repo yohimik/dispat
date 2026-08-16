@@ -52,10 +52,14 @@ type onlyCheck struct {
 // every package of the space that adds no layer of its own.
 type spaceScan struct {
 	name string
-	dir  string
+	// dirs are the space's folders, one per configured path, in declaration
+	// order; dirs[0] is the primary folder model.Space.Dir points at.
+	dirs []string
 	sc   SpaceConfig
-	file SpaceFile
-	src  string // where the space folder's own config file was read from
+	// files and srcs hold every space config file found in the folders above,
+	// in path order — the order their overrides were merged in.
+	files []SpaceFile
+	srcs  []string
 
 	base      *model.Space
 	baseScope scriptScope
@@ -64,7 +68,10 @@ type spaceScan struct {
 	// scope, so its references are the same question with the same answer.
 	baseRefsChecked bool
 
-	chain                      ignore.Chain
+	// chains carry the space-level ignore patterns compiled once per folder,
+	// each anchored at its own dir so relative patterns match under every
+	// path, not only the first.
+	chains                     []ignore.Chain
 	changelog                  model.ChangelogSpec
 	github                     model.GitHubSpec
 	buildWeight, publishWeight int
@@ -98,58 +105,76 @@ func newDiscovery(c *File, root string) (*discovery, error) {
 }
 
 // resolveSpace settles one space's configuration: the root file's defaults,
-// then the space entry over them, then the space folder's own config file,
-// which is the layer between the entry and anything said about one package.
+// then the space entry over them, then each of the space's folders' own
+// config files in path order, which together are the layer between the entry
+// and anything said about one package.
 func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 	sc := spaceBase(d.c, d.c.Spaces[sn])
-	dir := filepath.Join(d.root, sc.Path)
+	dirs := make([]string, len(sc.Path))
+	for i, p := range sc.Path {
+		dirs[i] = filepath.Join(d.root, filepath.FromSlash(p))
+	}
 
 	// A space rooted at the repository itself has no space-file layer: the
 	// file in that folder is the root config, and merging it into itself
-	// would be reading one statement twice.
-	var spaceFile SpaceFile
-	var spaceSrc string
-	if !sameDir(dir, d.root) {
-		var err error
-		if spaceFile, spaceSrc, err = loadSpaceFile(dir); err != nil {
+	// would be reading one statement twice. With several folders, each may
+	// carry a file; they merge in path order, a later file over an earlier.
+	var files []SpaceFile
+	var srcs []string
+	for _, dir := range dirs {
+		if sameDir(dir, d.root) {
+			continue
+		}
+		spaceFile, spaceSrc, err := loadSpaceFile(dir)
+		if err != nil {
 			return nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
-	}
-	if spaceSrc != "" {
+		if spaceSrc == "" {
+			continue
+		}
 		label := fmt.Sprintf("space %q (%s)", sn, spaceSrc)
 		sc = mergePackageOverride(sc, spaceOverride(spaceFile))
-		var err error
 		if sc, err = validateSpaceAs(label, sc); err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
 		if err := validateSpacePackages(label+": packages", spaceFile.Packages); err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
+		files = append(files, spaceFile)
+		srcs = append(srcs, spaceSrc)
 	}
 	d.spaceConfigs[sn] = sc
 
-	if err := d.collectSpaceDeps(sn, spaceFile, spaceSrc); err != nil {
+	if err := d.collectSpaceDeps(sn, files, srcs); err != nil {
 		return nil, err
 	}
 
 	// The space's level speaks once, whether it was written in the root
-	// file's space entry, in the space folder's own config file, or in a
-	// .dispatignore next to them.
-	spacePatterns := append(append([]string{}, d.c.Spaces[sn].Ignore...), spaceFile.Ignore...)
-	spaceIgnore, err := ignoreLayer(dir, spacePatterns)
-	if err != nil {
-		return nil, fmt.Errorf("config: space %q: %w", sn, err)
+	// file's space entry, in a space folder's own config file, or in a
+	// .dispatignore next to them — but its patterns anchor per folder, so
+	// each dir compiles its own copy of the one layer.
+	spacePatterns := append([]string{}, d.c.Spaces[sn].Ignore...)
+	for _, f := range files {
+		spacePatterns = append(spacePatterns, f.Ignore...)
+	}
+	chains := make([]ignore.Chain, len(dirs))
+	for i, dir := range dirs {
+		spaceIgnore, err := ignoreLayer(dir, spacePatterns)
+		if err != nil {
+			return nil, fmt.Errorf("config: space %q: %w", sn, err)
+		}
+		chains[i] = appendLayer(d.baseIgnore, spaceIgnore)
 	}
 	buildWeight, publishWeight := packageWeights(sc.Concurrency)
 	baseScope := packageScope(d.c, sc)
-	base, err := buildSpace(d.c, baseScope, fmt.Sprintf("space %q", sn), sn, dir, sc)
+	base, err := buildSpace(d.c, baseScope, fmt.Sprintf("space %q", sn), sn, dirs[0], sc)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return &spaceScan{
-		name: sn, dir: dir, sc: sc, file: spaceFile, src: spaceSrc,
+		name: sn, dirs: dirs, sc: sc, files: files, srcs: srcs,
 		base: base, baseScope: baseScope,
-		chain:         appendLayer(d.baseIgnore, spaceIgnore),
+		chains:        chains,
 		changelog:     changelogSpec(sc.Changelog),
 		github:        githubSpec(sc.GitHub),
 		buildWeight:   buildWeight,
@@ -160,21 +185,25 @@ func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 }
 
 // collectSpaceDeps takes in the space's own edges, before its packages': the
-// root file's space entry first, then the space folder's file, each labelled
-// with where it was written. Whether they touch this space needs the packages
-// of every space and is checked once discovery is done.
-func (d *discovery) collectSpaceDeps(sn string, spaceFile SpaceFile, spaceSrc string) error {
+// root file's space entry first, then each space folder's file in path
+// order, every declaration labelled with where it was written. Whether they
+// touch this space needs the packages of every space and is checked once
+// discovery is done.
+func (d *discovery) collectSpaceDeps(sn string, files []SpaceFile, srcs []string) error {
 	if err := validateObjectDeps(fmt.Sprintf("spaces[%q]: dependencies", sn), d.c.Spaces[sn].Dependencies); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	d.declared = collectObjectDeps(d.declared, d.c.Spaces[sn].Dependencies,
 		DepSource{Space: sn, KeyPath: []string{"spaces", sn, "dependencies"}})
-	if len(spaceFile.Dependencies) > 0 {
-		if err := validateObjectDeps(spaceSrc+": dependencies", spaceFile.Dependencies); err != nil {
+	for i, f := range files {
+		if len(f.Dependencies) == 0 {
+			continue
+		}
+		if err := validateObjectDeps(srcs[i]+": dependencies", f.Dependencies); err != nil {
 			return fmt.Errorf("config: space %q: %w", sn, err)
 		}
-		d.declared = collectObjectDeps(d.declared, spaceFile.Dependencies,
-			DepSource{Space: sn, File: spaceSrc, KeyPath: []string{"dependencies"}})
+		d.declared = collectObjectDeps(d.declared, f.Dependencies,
+			DepSource{Space: sn, File: srcs[i], KeyPath: []string{"dependencies"}})
 	}
 	return nil
 }
@@ -187,35 +216,48 @@ func (d *discovery) scanSpace(sn string) error {
 	if err != nil {
 		return err
 	}
-	exclude, err := loadExclude(s.dir)
-	if err != nil {
-		return fmt.Errorf("config: space %q: %s: %w", sn, DispatexcludeName, err)
-	}
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
-		return fmt.Errorf("config: space %q: %w", sn, err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		name := e.Name()
-		if excludedName(exclude, name) {
-			s.excluded = append(s.excluded, excludedDir{sn, name})
-			continue
-		}
-		if prev, dup := d.owner[name]; dup {
-			return fmt.Errorf(
-				"config: package %q exists in both space %q and space %q; package names must be unique",
-				name, prev, sn)
-		}
-		d.owner[name] = sn
-		pkg, err := d.spacePackage(s, name)
+	// Which configured path each package came from, for the collision message
+	// two folders of one space would otherwise leave to the cross-space one.
+	foundIn := make(map[string]string)
+	for pi, dir := range s.dirs {
+		exclude, err := loadExclude(dir)
 		if err != nil {
-			return err
+			return fmt.Errorf("config: space %q: %s: %w", sn, DispatexcludeName, err)
 		}
-		d.pkgs = append(d.pkgs, pkg)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("config: space %q: %w", sn, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			name := e.Name()
+			if excludedName(exclude, name) {
+				s.excluded = append(s.excluded, excludedDir{sn, name})
+				continue
+			}
+			if prevPath, dup := foundIn[name]; dup {
+				return fmt.Errorf(
+					"config: package %q exists in two folders of space %q (%s and %s); package names must be unique",
+					name, sn, prevPath, s.sc.Path[pi])
+			}
+			if prev, dup := d.owner[name]; dup {
+				return fmt.Errorf(
+					"config: package %q exists in both space %q and space %q; package names must be unique",
+					name, prev, sn)
+			}
+			d.owner[name] = sn
+			foundIn[name] = s.sc.Path[pi]
+			pkg, err := d.spacePackage(s, pi, name)
+			if err != nil {
+				return err
+			}
+			d.pkgs = append(d.pkgs, pkg)
+		}
 	}
+	// The key checks run only once every folder is scanned, so an entry
+	// matching a folder of a later path is not called missing by an earlier.
 	if err := (keyCheck{
 		label:    fmt.Sprintf("spaces[%q]: packages", sn),
 		entries:  s.sc.Packages,
@@ -225,14 +267,16 @@ func (d *discovery) scanSpace(sn string) error {
 	}).run(); err != nil {
 		return err
 	}
-	if err := (keyCheck{
-		label:    fmt.Sprintf("%s: packages", s.src),
-		entries:  s.file.Packages,
-		consumed: s.fileConsumed,
-		ignored:  s.excluded,
-		missing:  fmt.Sprintf("matches no folder of space %q", sn),
-	}).run(); err != nil {
-		return err
+	for i, f := range s.files {
+		if err := (keyCheck{
+			label:    fmt.Sprintf("%s: packages", s.srcs[i]),
+			entries:  f.Packages,
+			consumed: s.fileConsumed,
+			ignored:  s.excluded,
+			missing:  fmt.Sprintf("matches no folder of space %q", sn),
+		}).run(); err != nil {
+			return err
+		}
 	}
 	d.excluded = append(d.excluded, s.excluded...)
 	return nil
@@ -240,10 +284,11 @@ func (d *discovery) scanSpace(sn string) error {
 
 // spacePackage builds one package of a space: the space's own answers when
 // nothing overrides them, and a derived Space of its own when something does.
-func (d *discovery) spacePackage(s *spaceScan, name string) (*model.Package, error) {
+// pi is the index of the space path the package's folder was found under.
+func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Package, error) {
 	pkg := &model.Package{
 		Name:          name,
-		Dir:           filepath.Join(s.dir, name),
+		Dir:           filepath.Join(s.dirs[pi], name),
 		Space:         s.base,
 		BuildWeight:   s.buildWeight,
 		PublishWeight: s.publishWeight,
@@ -257,7 +302,7 @@ func (d *discovery) spacePackage(s *spaceScan, name string) (*model.Package, err
 		return nil, err
 	}
 	if len(layers) == 0 {
-		if pkg.Ignore, err = packageIgnore(s.chain, pkg.Dir, nil); err != nil {
+		if pkg.Ignore, err = packageIgnore(s.chains[pi], pkg.Dir, nil); err != nil {
 			return nil, fmt.Errorf("config: %s: %w", label, err)
 		}
 		if !s.baseRefsChecked {
@@ -283,14 +328,14 @@ func (d *discovery) spacePackage(s *spaceScan, name string) (*model.Package, err
 	if err := scope.checkSpaceRefs(label, merged); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	if pkg.Space, err = buildSpace(d.c, scope, label, s.name, s.dir, merged); err != nil {
+	if pkg.Space, err = buildSpace(d.c, scope, label, s.name, s.dirs[0], merged); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	if autoVersioned {
 		d.onlyChecks = append(d.onlyChecks, onlyCheck{label, merged.AutoVersion})
 	}
 	applyMerged(pkg, merged, ex)
-	if pkg.Ignore, err = packageIgnore(s.chain, pkg.Dir, ex.ignore); err != nil {
+	if pkg.Ignore, err = packageIgnore(s.chains[pi], pkg.Dir, ex.ignore); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", label, err)
 	}
 	return pkg, nil
@@ -317,10 +362,14 @@ func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]over
 		layers = append(layers, overrideLayer{spacePO, label + ": the space's packages entry",
 			DepSource{KeyPath: []string{"spaces", s.name, "packages", key, "dependencies"}}})
 	}
-	if filePO, ok := s.file.Package(name); ok {
+	for i, f := range s.files {
+		filePO, ok := f.Package(name)
+		if !ok {
+			continue
+		}
 		s.fileConsumed[key] = append(s.fileConsumed[key], name)
-		layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s: packages entry)", label, s.src),
-			DepSource{File: s.src, KeyPath: []string{"packages", key, "dependencies"}}})
+		layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s: packages entry)", label, s.srcs[i]),
+			DepSource{File: s.srcs[i], KeyPath: []string{"packages", key, "dependencies"}}})
 	}
 	folderPO, folderSrc, err := loadPackageFile(dir)
 	if err != nil {
@@ -390,9 +439,9 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 			DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}})
 	}
 	// A standalone package is its own space, so it starts from the same root
-	// defaults every space does, with its path filled in.
+	// defaults every space does, with its path filled in — always exactly one.
 	base := rootDefaults(d.c)
-	base.Path = po.Path
+	base.Path = PathList{po.Path}
 	if base.Flow == nil {
 		base.Flow = &SpaceFlowConfig{}
 	}
