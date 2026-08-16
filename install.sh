@@ -171,11 +171,25 @@ if [ -z "$VERSION" ]; then
 	# Highest, not most recent: a patch cut on an older line comes back first
 	# and would otherwise look like an upgrade to everyone on the newer one.
 	# Prereleases drop out on the "-" test, which needs no JSON structure:
-	# a stable version has no hyphen in it.
+	# a stable version has no hyphen in it. Three pages mirrors the walk
+	# internal/selfupdate makes: one release run cuts a release per package,
+	# so the newest stable of this one can sit past the first page.
+	TAGS=""
+	PAGE=1
+	while [ "$PAGE" -le 3 ]; do
+		BODY=$(get "${API_URL}/repos/${OWNER}/${REPO}/releases?per_page=100&page=${PAGE}") || break
+		PAGE_TAGS=$(printf '%s' "$BODY" | json_fields |
+			sed -n 's|^"tag_name":"\(.*\)"$|\1|p')
+		# A page with no tags at all is the end of the listing; a page whose
+		# tags all belong to other packages still asks for the next one.
+		[ -n "$PAGE_TAGS" ] || break
+		TAGS="${TAGS}${PAGE_TAGS}
+"
+		PAGE=$((PAGE + 1))
+	done
 	VERSION=$(
-		get "${API_URL}/repos/${OWNER}/${REPO}/releases?per_page=100" |
-			json_fields |
-			sed -n "s|^\"tag_name\":\"${TAG_PREFIX}\([0-9][0-9.]*\)\"\$|\1|p" |
+		printf '%s' "$TAGS" |
+			sed -n "s|^${TAG_PREFIX}\([0-9][0-9.]*\)\$|\1|p" |
 			sort -t. -k1,1n -k2,2n -k3,3n |
 			tail -n 1
 	)

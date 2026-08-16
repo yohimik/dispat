@@ -70,7 +70,15 @@ if ($Version) {
 
 if (-not $Version) {
     Write-Information 'resolving the latest stable release...' -InformationAction Continue
-    $releases = Invoke-RestMethod -Uri "$ApiUrl/repos/$Owner/$Repo/releases?per_page=100" -Headers $headers
+    # Three pages mirrors the walk internal/selfupdate makes: one release run
+    # cuts a release per package, so the newest stable of this one can sit past
+    # the first page. An empty page is the end of the listing.
+    $releases = @()
+    for ($page = 1; $page -le 3; $page++) {
+        $batch = @(Invoke-RestMethod -Uri "$ApiUrl/repos/$Owner/$Repo/releases?per_page=100&page=$page" -Headers $headers)
+        if ($batch.Count -eq 0) { break }
+        $releases += $batch
+    }
     # Highest, not most recent: a patch cut on an older line comes back first and
     # would otherwise look like an upgrade to everyone on the newer one. A stable
     # version has no hyphen, which is the whole of the prerelease filter.
@@ -117,7 +125,10 @@ $tmp = "$target.download"
 
 Write-Information "downloading $asset $Version..." -InformationAction Continue
 try {
-    Invoke-WebRequest -Uri "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset" -OutFile $tmp -Headers $headers
+    # No headers on the download itself, like install.sh: the asset is public,
+    # and the redirect to the storage host rejects the API's Authorization
+    # header on Windows PowerShell 5.1, which forwards it across redirects.
+    Invoke-WebRequest -Uri "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset" -OutFile $tmp
 
     # GitHub reports a "digest" per asset, which is what internal/selfupdate
     # checks too. Older GitHub Enterprise versions do not send one.
@@ -137,8 +148,15 @@ try {
 }
 Write-Information "installed $target" -InformationAction Continue
 
+# Restored after the smoke test, because under `irm | iex` this process is the
+# user's own shell session, not a script of its own.
+$updateCheck = $env:DISPAT_UPDATE_CHECK
 $env:DISPAT_UPDATE_CHECK = '0'
-& $target --version | Write-Information -InformationAction Continue
+try {
+    & $target --version | Write-Information -InformationAction Continue
+} finally {
+    $env:DISPAT_UPDATE_CHECK = $updateCheck
+}
 
 if (($env:PATH -split ';') -notcontains $BinDir) {
     Write-Information "note: $BinDir is not on PATH. Add it with: `$env:PATH = `"$BinDir;`$env:PATH`"" -InformationAction Continue
