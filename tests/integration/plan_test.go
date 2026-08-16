@@ -366,6 +366,39 @@ func TestPlanPropagatedGraduationTransitionGraduatesTheTrain(t *testing.T) {
 	assert.Equal(t, before, len(r.TagList()))
 }
 
+// TestPlanTrainCatchUpStaysACatchUp: the catch-up scan on a prerelease train.
+// app's own feature is published train history (beta.0), core released the
+// propagating fix in a run whose app leg failed, and the healing run's whole
+// fresh cause is that already-published propagation. W193 and the catch-up
+// verdict must survive the train-wide own bump — before 1.0.0 the published
+// feature hid them and the plan read "changed / propagated" instead.
+func TestPlanTrainCatchUpStaysACatchUp(t *testing.T) {
+	r := linkedRepo(t, "core", "app", failIfMarker)
+	r.Commit("feat(core): bootstrap\n\n---\n\nfeat(app): bootstrap")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("app@0.1.0"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("feat(app)%beta: app boards a train")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("app@0.2.0-beta.0"), "tags: %v", r.TagList())
+
+	r.WriteFile("packages/app/FAIL", "break app's leg")
+	r.CommitEmpty("fix(core)^: repair, propagating")
+	res := r.Release()
+	assert.NotEqual(t, 0, res.Code, "app's leg must fail")
+	require.True(t, r.HasTag("core@0.1.1"), "core published; tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("app@0.2.0-beta.1"), "app did not")
+
+	r.Remove("packages/app/FAIL")
+	res = r.ReleaseOK()
+	require.True(t, r.HasTag("app@0.2.0-beta.1"), "the train heals; tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W193", "app"),
+		"discharging core's published work is a catch-up, train or not: %s", res.Stdout)
+	line := harness.GraphLine(res.Events, "app")
+	assert.Contains(t, line.Str("message"), "catch-up", "the verdict marker: %s", res.Stdout)
+	assert.Equal(t, "catch-up from core", line.Str("reason"))
+}
+
 // TestPlanChannelOnlyReleaseAndEntryPatch: a release directive that only
 // moves the channel is still a release (§13.9) — W202 explains its presence
 // in the plan — and entering a prerelease channel with nothing pending takes

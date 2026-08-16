@@ -379,3 +379,94 @@ func TestRevertSuppressionIsVoidedByACorrectionThroughTheBinary(t *testing.T) {
 	assert.Contains(t, changelogOf(t, r, "core"), "a good idea after all",
 		"the entry the revert hid is back")
 }
+
+// ---------------------------------------------------------------------------
+// Corrections meeting a prerelease train: a correction reaches only pending
+// work, and on a train "pending" means "not yet shipped by any prerelease" —
+// the seam none of the stable-line scenarios above can exercise.
+// ---------------------------------------------------------------------------
+
+// TestCorrectionEditOfPublishedTrainWorkIsANoOp: a unit an earlier prerelease
+// of the same train already shipped is published history even while the train
+// is still open. Editing it is the same visible no-op as editing stable
+// history (W209), and it does not re-admit the shipped work: with no fresh
+// cause, the train does not advance.
+func TestCorrectionEditOfPublishedTrainWorkIsANoOp(t *testing.T) {
+	r := correctionsRepo(t)
+	r.Commit("feat(core)%beta: board the train\n\n---\n\nfeat(utils): bootstrap")
+	shipped := r.Git("rev-parse", "HEAD")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	r.Commit("chore(release): record the changelog")
+
+	// The bootstrap commit carries two units, so the target needs its unit
+	// address (§7.4.1) — a bare sha is E211.
+	r.CommitEmpty("fix(core): too late, beta.0 shipped it\n\nEdits: " + shipped + "#1")
+	res := r.ReleaseOK()
+
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W209", "core"),
+		"the operator has to see the correction did not take: %s", res.Stdout)
+	assert.True(t, r.HasTag("core@0.1.0-beta.1"),
+		"the carrying fix still releases on its own account; tags: %v", r.TagList())
+	log := changelogOf(t, r, "core")
+	assert.NotContains(t, entryOf(t, log, "core@0.1.0-beta.1"), "board the train",
+		"the shipped record is not re-rendered by the correction")
+}
+
+// TestCorrectionDeleteStopsATrainAdvance: a versioning group rides only while
+// a record survives, mid-train as much as on the stable line. Discarding the
+// only fresh cause leaves the train exactly where the last prerelease put it:
+// no member releases, no ride, no counter movement.
+func TestCorrectionDeleteStopsATrainAdvance(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), Versioning: "fixed"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core)%beta: board the train\n\n---\n\nfeat(utils): bootstrap")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("utils@0.1.0-beta.0"), "the group rides the train; tags: %v", r.TagList())
+	r.Commit("chore(release): record the changelog")
+
+	r.WriteFile("packages/core/main.txt", "the train's only fresh cause\n")
+	r.Commit("feat(core)%beta: the next step")
+	cause := r.Git("rev-parse", "HEAD")
+	r.CommitEmpty("chore(core): drop it\n\nDeletes: " + cause)
+	res := r.ReleaseOK()
+
+	assert.Equal(t, 1, r.TagCount("core@"), "the train does not advance; tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("utils@"), "no member rides a step nothing caused; tags: %v", r.TagList())
+	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride to explain: %s", res.Stdout)
+}
+
+// TestRevertPairOnATrainRendersCancelLine: a feature and its revert land
+// inside one train step. Both leave the notes (§7.3) while both still count
+// toward the train's target, so the prerelease releases with an entry that
+// says the work cancelled out — never an empty body.
+func TestRevertPairOnATrainRendersCancelLine(t *testing.T) {
+	r := correctionsRepo(t)
+	r.Commit("feat(core)%beta: board the train\n\n---\n\nfeat(utils): bootstrap")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	r.Commit("chore(release): record the changelog")
+
+	r.WriteFile("packages/core/main.txt", "a bad idea\n")
+	r.Commit("feat(core)!: a bad idea")
+	bad := r.Git("rev-parse", "HEAD")
+	r.WriteFile("packages/core/main.txt", "")
+	r.Commit("revert(core): a bad idea\n\nReverts: " + bad)
+	res := r.ReleaseOK()
+
+	require.True(t, r.HasTag("core@1.0.0-beta.0"),
+		"the reverted major still counts toward the train's target (§7.3); tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W212", "core"),
+		"the plan accounts for the absent entries: %s", res.Stdout)
+	entry := entryOf(t, changelogOf(t, r, "core"), "core@1.0.0-beta.0")
+	assert.NotContains(t, entry, "a bad idea", "neither entry is documented")
+	assert.Contains(t, entry, "No changes: the pending work and its reverts cancel out.",
+		"the body says why there is nothing to read")
+}

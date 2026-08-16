@@ -2251,7 +2251,10 @@ func (cp *computation) computeVersion(rel *Release) {
 		// computation: applyBump over the stable baseline, no suffix (§11.5).
 		next := rel.Current.Bumped(rel.Bump)
 		if rel.BaselineChannel != ccme.ChannelStable && versionLess(next, rel.Baseline.Core()) {
-			// Only reachable from hand-edited tags (§11.5).
+			// Reachable from hand-edited tags, and from a train an exact
+			// Release-As raised above what the window computes (§11.5): the
+			// pin's effect lives in the baseline tag, not in the window, so
+			// the graduation must be pinned too.
 			cp.pkgErr(rel, CodeGraduateNoIncrease,
 				fmt.Sprintf("graduating to %s would go backwards from the %s baseline %s",
 					next.String(), rel.BaselineChannel, rel.Baseline.String()))

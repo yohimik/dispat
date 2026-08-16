@@ -186,7 +186,9 @@ func TestGroupFilterPartialMode(t *testing.T) {
 // TestVersionGroupDivergentTagFormats: a version group shares the version,
 // not its spelling. Each member renders the shared version through its own
 // space's tagFormat, and that is defined behavior, not a conflict: no
-// diagnostic beyond the ride's own W234.
+// diagnostic beyond the ride's own W234 — on the stable line and along a
+// whole prerelease train, whose baselines each member reads back out of its
+// own spelling.
 func TestVersionGroupDivergentTagFormats(t *testing.T) {
 	cfg := groupConfig(models.VersioningFixed)
 	libs := cfg.Spaces["libs"]
@@ -204,4 +206,155 @@ func TestVersionGroupDivergentTagFormats(t *testing.T) {
 
 	r.ReleaseOK()
 	assert.Len(t, r.TagList(), 2, "converged")
+
+	// The same freedom holds on a train: two spellings of every prerelease,
+	// one shared counter, one graduation.
+	r.CommitEmpty("feat(lib1)%rc: board the train")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1-v0.2.0-rc.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@0.2.0-rc.0"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(lib1)%rc: more on the train")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1-v0.2.0-rc.1"), "each member reads its own spelling back; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@0.2.0-rc.1"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(lib1)%rc>stable: graduate")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1-v0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@0.2.0"), "tags: %v", r.TagList())
+	r.ReleaseOK()
+	assert.Len(t, r.TagList(), 8, "converged after the train")
+}
+
+// TestVersionGroupExactPinMidTrain: an exact Release-As naming one member
+// while the group is mid-train moves the whole group onto the pinned version
+// — one shared version admits no private jump. Graduating such a train then
+// takes two facts of the spec together: §11.5 computes the graduation from
+// the stable baseline and the window alone, so after a raising pin the naive
+// graduation is refused as backwards (E185, repository-scoped), and the
+// operator's way out is pinning the graduation itself — Release-As: auto
+// resumes holds, not this.
+func TestVersionGroupExactPinMidTrain(t *testing.T) {
+	r := seedGroupRepo(t, groupConfig(models.VersioningFixed))
+	r.Commit("feat(lib1)%rc: board the train")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("lib1@0.1.0-rc.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("app1@0.1.0-rc.0"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("release(lib1): jump the train\n\nRelease-As: 1.0.0-rc.0")
+	res := r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@1.0.0-rc.0"), "the pin moves the train; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@1.0.0-rc.0"), "and the whole group with it; tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+		"the ride is explained: %s", res.Stdout)
+
+	// A plain graduation computes 0.1.0 off the stable baseline, which sits
+	// below the train the pin raised: E185, and nothing releases.
+	r.CommitEmpty("fix(lib1)%rc>stable: graduate")
+	blocked := r.Release()
+	assert.NotEqual(t, 0, blocked.Code, "a backwards graduation is repository-scoped")
+	assert.True(t, harness.HasCode(blocked.Events, "E185"), "out: %s", blocked.Stdout)
+	assert.Equal(t, 2, r.TagCount("lib1@"), "nothing released; tags: %v", r.TagList())
+
+	// The remedy the diagnostic reference names: pin the graduation.
+	r.CommitEmpty("release(lib1)%rc>stable: graduate at the pin\n\nRelease-As: 1.0.0")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@1.0.0"), "the train graduates where the pin put it; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@1.0.0"), "tags: %v", r.TagList())
+
+	r.ReleaseOK()
+	assert.Equal(t, 3, r.TagCount("lib1@"), "converged: %v", r.TagList())
+}
+
+// TestVersionGroupSparseMemberPin: under a sparse mode a pin moves the shared
+// version without back-filling it — the untouched member stays where it is,
+// and when it finally changes it joins at the group's next version above the
+// pin, skipping everything it sat out.
+func TestVersionGroupSparseMemberPin(t *testing.T) {
+	r := seedGroupRepo(t, groupConfig(models.VersioningFixedSparse))
+	r.Commit("feat(lib1): begin")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("app1@"), "sparse: nothing rides")
+
+	r.CommitEmpty("release(lib1): jump\n\nRelease-As: 1.0.0")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("app1@"), "a pin does not back-fill a sparse member; tags: %v", r.TagList())
+
+	r.CommitEmpty("feat(app1): the laggard changes at last")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("app1@1.1.0"),
+		"the member joins above the pin, skipping what it sat out; tags: %v", r.TagList())
+	assert.Equal(t, 2, r.TagCount("lib1@"), "the pinned member sat this one out")
+}
+
+// TestVersionGroupNoneMemberIsScriptOnly: the polyglot-monorepo shape — a
+// package whose folder sits in a group-joined space but which itself does not
+// version (versioning "none"). The override supersedes the membership, so the
+// package leaves the group as script-only: the group moves without it, it is
+// never tagged, and its scripts still run.
+func TestVersionGroupNoneMemberIsScriptOnly(t *testing.T) {
+	cfg := groupConfig(models.VersioningFixed)
+	cfg.Scripts["build"] = models.Script{markerBuild}
+	cfg.Packages = map[string]models.PackageConfig{
+		"app1": {Versioning: models.VersioningNone},
+	}
+	r := seedGroupRepo(t, cfg)
+	r.Commit("feat(lib1): moves the group\n---\nfeat(app1): script-only work")
+
+	res := r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("app1@"), "a none package is never tagged; tags: %v", r.TagList())
+	line := harness.GraphLine(res.Events, "app1")
+	assert.Contains(t, line.Str("message"), "script-only",
+		"the graph names what the package is: %s", res.Stdout)
+	assert.Equal(t, 1, buildRuns(r), "a release builds only the versioned member")
+
+	// The none package's work still runs — through the run window, which
+	// carries a changed none package whether or not anything is releasing.
+	r.RunScriptOK("build")
+	assert.Equal(t, 2, buildRuns(r), "the run window carries the script-only member")
+
+	r.ReleaseOK()
+	assert.Len(t, r.TagList(), 1, "converged")
+}
+
+// TestVersionGroupMixedDepthTrain: mixed shared depth is the implicit space
+// group's shape (a package override on a declared group's member leaves the
+// group instead — see TestVersionGroupMemberOverrideLeavesTheGroup). A member
+// declaring fixedMajorMinor inside a fixedMajor space is resolved to the
+// deepest declaration with W237 — and the resolution holds while a prerelease
+// train runs, which is when a depth disagreement would otherwise split the
+// shared counter.
+func TestVersionGroupMixedDepthTrain(t *testing.T) {
+	r := harness.New(t)
+	cfg := spacesConfig(echoBuild, map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
+	})
+	cfg.Packages = map[string]models.PackageConfig{
+		"app1": {Versioning: models.VersioningFixedMajorMinor},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "lib1")
+	r.SeedPackage("packages", "app1")
+	r.Commit("feat(lib1)%rc: a minor only the deeper mode shares")
+
+	res := r.ReleaseOK()
+	assert.True(t, harness.HasCode(res.Events, "W237"),
+		"the mixed depth must be reported: %s", res.Stdout)
+	assert.True(t, r.HasTag("lib1@0.1.0-rc.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@0.1.0-rc.0"),
+		"the deepest depth shares the minor, so the train carries both; tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(lib1)%rc: more on the train")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@0.1.0-rc.1"), "one shared counter; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@0.1.0-rc.1"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(lib1)%rc>stable: graduate")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app1@0.1.0"), "the whole group graduates; tags: %v", r.TagList())
 }

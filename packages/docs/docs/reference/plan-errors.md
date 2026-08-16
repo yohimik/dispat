@@ -65,7 +65,7 @@ whatever `commitErrors` says, because the alternative is releasing something inc
 | `E191` | Two tags parse to the same version of one package but point at different commits, so the baseline is ambiguous. | Decide which one is the release and delete the other, locally and on the remote. Usually a hand-made tag colliding with a real one. |
 | `E200` | The dependency graph has a cycle; the message names the edges. | Break the cycle in [`dependencies`](../configuration/dependencies.md). If the manifests really do depend on each other in a loop, the packages need splitting; no ordering exists for a cycle. |
 | `E195` | A computed version is not greater than the baseline it must exceed. | Almost always a hand-edited or hand-deleted tag, or a `Release-As` that shipped and left the baseline ahead. See below. |
-| `E185` | Graduating a prerelease would go backwards from the baseline it is graduating from. | Reachable only from hand-edited tags. Pin the intended version with `Release-As`, or restore the tag that was removed. |
+| `E185` | Graduating a prerelease would go backwards from the baseline it is graduating from. | Reachable from hand-edited tags, and from a train an exact `Release-As` raised above what the pending window computes: the pin lives in the baseline tag, not in the window, so the graduation is computed without it. Pin the graduation with `Release-As` (`Release-As: auto` resumes holds, not this), or restore the tag that was removed. |
 | `E182` | A prerelease baseline has no numeric counter, so the train cannot be continued. | The tag was written by hand in a shape dispat cannot count from (`1.0.0-beta` rather than `1.0.0-beta.0`). Tag the next one explicitly with `Release-As`. |
 
 ### E195 in practice
