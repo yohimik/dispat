@@ -1,5 +1,11 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.15 (2026-08-16)
+
+### Dependencies
+
+- ccme: 1.0.0-rc.8 -> 1.0.0-rc.9
+
 ## pkg/models/v1.0.0-rc.14 (2026-08-16)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
