@@ -2453,7 +2453,10 @@ func (cp *computation) logReleases() {
 			Str("package", name).
 			Str("baseline", rel.Baseline.String()).
 			Bool("hasBaseline", rel.HasBaseline).
-			Int("window", len(cp.window[name])).
+			// The whole pending window since the stable baseline — on a train
+			// it spans commits earlier prereleases already shipped, so it is
+			// not "commits this release adds"; the name says so.
+			Int("windowSinceStable", len(cp.window[name])).
 			Str("bump", rel.Bump.String()).
 			Str("channel", rel.Channel).
 			Str("next", rel.Next.String()).
