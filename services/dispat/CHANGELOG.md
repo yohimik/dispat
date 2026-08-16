@@ -1,5 +1,20 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.12 (2026-08-16)
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.6 -> 1.0.0-rc.7
+- manifest: 1.0.0-rc.6 -> 1.0.0-rc.7
+- models: 1.0.0-rc.11 -> 1.0.0-rc.12
+- scanner: 1.0.0-rc.6 -> 1.0.0-rc.7
+- writer: 1.0.0-rc.6 -> 1.0.0-rc.7
+
 ## services/dispat/v1.0.0-rc.11 (2026-08-16)
 
 ### Features
