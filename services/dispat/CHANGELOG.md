@@ -1,5 +1,14 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.16 (2026-08-16)
+
+### Dependencies
+
+- writer: 1.0.0-rc.8 -> 1.0.0-rc.9
+- manifest: 1.0.0-rc.8 -> 1.0.0-rc.9
+- models: 1.0.0-rc.15 -> 1.0.0-rc.16
+- scanner: 1.0.0-rc.8 -> 1.0.0-rc.9
+
 ## services/dispat/v1.0.0-rc.15 (2026-08-16)
 
 ### Dependencies
