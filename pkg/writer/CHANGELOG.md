@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/writer/v1.0.0-rc.7 (2026-08-16)
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.6 -> 1.0.0-rc.7
+
 ## pkg/writer/v1.0.0-rc.6 (2026-08-16)
 
 ### Fixes
