@@ -1,5 +1,90 @@
 # Changelog
 
+## pkg/writer/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- restore the 1.0 rc train
+
+
+### Features
+
+- manifest writing settles for the stable line
+
+- finalize the workspace for 1.0.0
+
+- rewrite manifest versions preserving every other byte
+
+- write the build counters
+
+- list and drop the local links
+
+- export the Writer seam beside the scanner's
+
+- read and write Dockerfiles and compose files
+
+- add the zero-parsing Substitute API
+
+- npm, yarn and pnpm overrides with file: paths
+
+- replace a dependency with a local path
+
+- cargo sub-table dependency form
+
+- ruby, rust, c# and the nuget family
+
+- iOS and Android manifests
+
+- run consumers
+
+- shared manifest module, package readmes
+
+- compute auto version
+
+
+### Fixes
+
+- exercise depth-two propagation
+
+- exercise a fixed-group member release
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- nested dependencies update again again x2
+
+- retract the versions the proxy pinned elsewhere
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- carry the license in every module
+
+- a pubspec version write keeps the build counter
+
+- aim an npm link removal at the field that holds it
+
+- command flags are not images, duplicate edits resolve together
+
+- index toml tables once, single-pass verify
+
+- report unwritable declarations as skipped
+
+- pubspec nesting and msbuild property refs
+
+- scanner and writer freeze
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.10 -> 1.0.0
+
 ## pkg/writer/v1.0.0-rc.10 (2026-08-16)
 
 ### Features
