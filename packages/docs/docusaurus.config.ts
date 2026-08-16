@@ -101,7 +101,7 @@ const config: Config = {
         // that one is emitted verbatim, and the paths would 404.
         pwaHead: [
           {tagName: 'link', rel: 'manifest', href: '/manifest.json'},
-          {tagName: 'meta', name: 'theme-color', content: '#1b1b1d'},
+          {tagName: 'meta', name: 'theme-color', content: '#101713'},
           {tagName: 'meta', name: 'mobile-web-app-capable', content: 'yes'},
           {tagName: 'meta', name: 'apple-mobile-web-app-capable', content: 'yes'},
           {tagName: 'meta', name: 'apple-mobile-web-app-title', content: 'dispat'},

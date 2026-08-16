@@ -3,33 +3,37 @@
  * one primary colour and six shades around it, so the palette below is the
  * whole of the site's colouring.
  *
- * Muted pine: a deep green at hue 145, desaturated so the dark-mode accent
- * reads as sage rather than neon. The light shades carry text on white, where
- * the base holds 8.0:1; the dark shades carry text on the near-black
- * background, where the base holds 6.2:1. The weakest shade of the fourteen,
- * dark mode's darkest, still holds 4.6:1.
+ * Dark pine: a deep forest green at hue 147, anchored on #102c1b, which is the
+ * light ramp's darkest shade. The light shades carry text on white, where the
+ * base holds 10.8:1 and the weakest shade 7.5:1. Dark mode keeps a sage accent
+ * (an accent as dark as the anchor would vanish there) and instead carries the
+ * pine in its background: near-black tinted toward the anchor's hue. On it the
+ * base holds 7.0:1, and the weakest of the fourteen shades, dark mode's
+ * darkest on its surface colour, still holds 4.6:1.
  */
 :root {
-  --ifm-color-primary: #1d5c37;
-  --ifm-color-primary-dark: #1a5332;
-  --ifm-color-primary-darker: #194e2f;
-  --ifm-color-primary-darkest: #144027;
-  --ifm-color-primary-light: #20653d;
-  --ifm-color-primary-lighter: #216a3f;
-  --ifm-color-primary-lightest: #267848;
+  --ifm-color-primary: #17462c;
+  --ifm-color-primary-dark: #154028;
+  --ifm-color-primary-darker: #143d26;
+  --ifm-color-primary-darkest: #102c1b;
+  --ifm-color-primary-light: #194d30;
+  --ifm-color-primary-lighter: #1b5334;
+  --ifm-color-primary-lightest: #206040;
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(29, 92, 55, 0.1);
+  --docusaurus-highlighted-code-line-bg: rgba(23, 70, 44, 0.1);
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #67a982;
-  --ifm-color-primary-dark: #589c74;
-  --ifm-color-primary-darker: #54946e;
+  --ifm-color-primary: #6fae8a;
+  --ifm-color-primary-dark: #5ea27a;
+  --ifm-color-primary-darker: #55996f;
   --ifm-color-primary-darkest: #4f9269;
-  --ifm-color-primary-light: #78b390;
-  --ifm-color-primary-lighter: #81b897;
-  --ifm-color-primary-lightest: #9bc6ad;
-  --docusaurus-highlighted-code-line-bg: rgba(103, 169, 130, 0.12);
+  --ifm-color-primary-light: #79b592;
+  --ifm-color-primary-lighter: #84bc9b;
+  --ifm-color-primary-lightest: #8fc3a5;
+  --ifm-background-color: #101713;
+  --ifm-background-surface-color: #151d18;
+  --docusaurus-highlighted-code-line-bg: rgba(111, 174, 138, 0.12);
 }
 
 /*

@@ -9,8 +9,8 @@
   "scope": "/dispat/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#1b1b1d",
-  "theme_color": "#1b1b1d",
+  "background_color": "#101713",
+  "theme_color": "#101713",
   "categories": ["developer", "productivity"],
   "icons": [
     {
