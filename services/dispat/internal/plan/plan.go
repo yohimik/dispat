@@ -804,7 +804,12 @@ func (r *Release) NotesUnits() []*ccme.Unit {
 // versioning aligned. The changelog and the GitHub release render a single
 // "no changes" entry for it.
 func (r *Release) NoChanges() bool {
-	return r.FixedRide && len(r.Units) == 0 && len(r.DueTo) == 0
+	// NotesUnits rather than Units, mirroring what the entry renders: Units
+	// spans the whole prerelease train, so a riding member with any train
+	// history would fail this test and render an empty body instead of the
+	// ride line. Updates too: a ride that picks up a provider's movement has
+	// a dependencies section to show, which is not "no changes".
+	return r.FixedRide && len(r.NotesUnits()) == 0 && len(r.DueTo) == 0 && len(r.Updates) == 0
 }
 
 // SharedDepth is how many leading version components the package holds in

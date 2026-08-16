@@ -36,6 +36,27 @@ func computeFixed(t *testing.T, mode model.Versioning, git *fakeGit) *Plan {
 	return p
 }
 
+func TestRideOnATrainWithHistoryIsStillNoChanges(t *testing.T) {
+	// b rode the train's earlier prerelease carrying its own feat; the fresh
+	// cause of the next prerelease is a's work alone. Units spans the train,
+	// but the entry renders the fresh changeset, and the ride line with it:
+	// an rc that adds nothing of b's own must say "no changes", not render
+	// an empty body.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(b)%beta!: b's own start"},
+		commit{sha: "c2", message: "feat(a): a continues the train"},
+	).tag("a", "1.0.0-beta.0", "c1").tag("b", "1.0.0-beta.0", "c1")
+
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	b := p.Releases["b"]
+	require.True(t, b.Releasing(), "fixed: b rides the train")
+	assert.True(t, b.FixedRide)
+	assert.NotEmpty(t, b.Units, "the train history is still counted")
+	assert.Empty(t, b.NotesUnits(), "nothing fresh of b's own")
+	assert.True(t, b.NoChanges(), "an empty fresh changeset is a no-changes ride")
+}
+
 func TestFixedChangeReleasesWholeSpace(t *testing.T) {
 	// One feat scoped to a alone releases a AND b at one shared version; the
 	// independent c is untouched. b's ride is labelled (W234) and renders a
