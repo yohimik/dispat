@@ -105,6 +105,18 @@ packages:
       vet: go vet ./...
       build: go build ./...
 
+# The version of the dispat CLI its in-repo consumers take: the docker images
+# hand it to install.sh, and anything else that needs the CLI's version reads
+# the same name instead of deriving its own. It defaults to the version dispat
+# carries at the end of the current run — the planned version when dispat is
+# releasing, which is right because the images build only after it publishes,
+# and its released baseline otherwise, so a docs- or image-only release
+# installs the CLI that is actually out. The docker build gate overrides it
+# for the one case the default cannot cover (a planned version nobody
+# published yet); see the build script in docker/dispat.yaml.
+env:
+  DISPAT_CLI_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION}
+
 concurrency: [0, 1]
 
 changelog:
@@ -119,3 +131,31 @@ commit:
 github:
   enabled: true
   allPackages: true
+  # Every release body opens with where what shipped can be fetched and read,
+  # above the change sections. The lines interpolate the releasing package's
+  # own DISPAT_* variables, and the package/space filters write each block
+  # only for the releases it is about. The installer is fetched from this
+  # release's own v{version} alias tag, so a prerelease installs with the
+  # installer it shipped with.
+  header:
+    - package: [dispat]
+      line:
+        - "**Install this version:**"
+        - ""
+        - "```sh"
+        - "curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.sh | DISPAT_VERSION=${DISPAT_NEW_VERSION} sh"
+        - "```"
+        - ""
+        - "[Documentation](https://yohimik.github.io/dispat/) · [dispat in CI](https://yohimik.github.io/dispat/reference/ci) · [Container images](https://hub.docker.com/u/yohimik)"
+    - space: [docker]
+      line:
+        - "`docker pull yohimik/${DISPAT_PACKAGE}:${DISPAT_NEW_VERSION}` · [Docker Hub](https://hub.docker.com/r/yohimik/${DISPAT_PACKAGE}) · [The dispat images](https://yohimik.github.io/dispat/reference/ci#the-container-images)"
+    - space: [pkg]
+      line:
+        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/${DISPAT_PACKAGE}@v${DISPAT_NEW_VERSION}) · [Documentation](https://yohimik.github.io/dispat/)"
+    - package: [docs]
+      line:
+        - "[The documentation site](https://yohimik.github.io/dispat/) this release deploys."
+    - line:
+        - ""
+        - "---"
