@@ -1,5 +1,18 @@
 # Changelog
 
+## docker/dispat-ubuntu/v1.0.0-rc.6 (2026-08-16)
+
+### Fixes
+
+- nested dependencies update again
+
+- nested dependencies update
+
+
+### Dependencies
+
+- dispat: 1.0.0-rc.5 -> 1.0.0-rc.6
+
 ## docker/dispat-ubuntu/v1.0.0-rc.5 (2026-08-16)
 
 ### Fixes
