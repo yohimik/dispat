@@ -1,5 +1,16 @@
 # Changelog
 
+## docker/dispat-alpine/v1.0.0-rc.19 (2026-08-16)
+
+### Features
+
+- the alpine image tracks the stable CLI
+
+
+### Dependencies
+
+- dispat: 1.0.0-rc.18 -> 1.0.0-rc.19
+
 ## docker/dispat-alpine/v1.0.0-rc.18 (2026-08-16)
 
 ### Dependencies

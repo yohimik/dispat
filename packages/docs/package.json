@@ -1,6 +1,6 @@
 {
   "name": "dispat-docs",
-  "version": "1.0.0-rc.18",
+  "version": "1.0.0-rc.19",
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
