@@ -1,5 +1,22 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.6 (2026-08-16)
+
+### Fixes
+
+- nested dependencies update again
+
+- nested dependencies update
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.3 -> 1.0.0-rc.4
+- manifest: 1.0.0-rc.2 -> 1.0.0-rc.3
+- models: 1.0.0-rc.5 -> 1.0.0-rc.6
+- scanner: 1.0.0-rc.2 -> 1.0.0-rc.3
+- writer: 1.0.0-rc.2 -> 1.0.0-rc.3
+
 ## services/dispat/v1.0.0-rc.5 (2026-08-16)
 
 ### Fixes
