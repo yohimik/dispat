@@ -220,6 +220,11 @@ type Sequence struct {
 // Run executes the sequence's commands in order inside its directory.
 func (s Sequence) Run(ctx context.Context) error {
 	for _, command := range s.Commands {
+		// Announced before it runs, not only after it finished (the runner's
+		// own trace): a script that hangs forever must leave a record of what
+		// is hanging. The logger's own context already names the package and
+		// stage, so the command is the only field to add.
+		s.Log.Trace().Str("command", command).Msg("script starting")
 		err := func() error {
 			stdout := newLineWriter(s.Log, zerolog.InfoLevel)
 			stderr := newLineWriter(s.Log, zerolog.WarnLevel)

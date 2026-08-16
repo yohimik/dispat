@@ -425,7 +425,10 @@ type CLI struct {
 	// what comes out is the single most useful thing in a bug report about a
 	// release: which git commands ran, in which order, and which one failed.
 	// Trace rather than debug, because one run makes hundreds of these and
-	// debug is where the release's own story is told.
+	// debug is where the release's own story is told — except the mutating
+	// calls (commit, tag, push, the revert's checkout/clean), which are O(few)
+	// per run and are exactly what a debug reader needs between those story
+	// lines.
 	Log zerolog.Logger
 
 	// The ancestry DAG, loaded lazily by the first IsAncestor and shared by
@@ -438,6 +441,22 @@ type CLI struct {
 }
 
 var _ Git = (*CLI)(nil)
+
+// mutates reports whether a git invocation changes repository state — the
+// calls whose trace line rises to debug level. "tag --list" is the one
+// read-only spelling sharing a subcommand with a mutation.
+func mutates(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "push", "commit", "add", "checkout", "clean":
+		return true
+	case "tag":
+		return len(args) > 1 && args[1] != "--list"
+	}
+	return false
+}
 
 func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	base := []string{"-C", c.Dir}
@@ -460,7 +479,11 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	// a trace can be read as the sequence of git calls the run actually made.
 	// The arguments are the command's own, never the repository path or the
 	// identity flags, which are the same on every line and say nothing.
-	ev := c.Log.Trace().Strs("args", args).Dur("took", time.Since(started))
+	level := zerolog.TraceLevel
+	if mutates(args) {
+		level = zerolog.DebugLevel
+	}
+	ev := c.Log.WithLevel(level).Strs("args", args).Dur("took", time.Since(started))
 	if err != nil {
 		ev.Err(err).Str("stderr", strings.TrimSpace(stderr.String())).Msg("git failed")
 		return "", fmt.Errorf("git %s: %w: %s",
