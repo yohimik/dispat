@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/ccme/v1.0.0-rc.8 (2026-08-16)
+
+### Fixes
+
+- exercise a single independent package release
+
+
 ## pkg/ccme/v1.0.0-rc.7 (2026-08-16)
 
 ### Fixes
