@@ -30,6 +30,9 @@ scripts:
 # space's, then the ones above.
 spaces:
   libs:
+    # One folder, or a list of folders whose sub-folders all belong to this
+    # space: `path: [packages/libs, plugins/libs]`. The first folder is the
+    # primary one; the login script runs there.
     path: packages/libs
     # Consumers may only build after a provider from this space is published.
     isBuildWaitingPublish: true

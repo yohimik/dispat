@@ -1,16 +1,17 @@
 # Spaces
 
-A space is a group of packages sharing build/publish behaviour. Every direct sub-folder of the space's `path` is a
-package named after the folder, unless a [`.dispatexclude`](#dispatexclude) file in the space folder excludes it. A single
-package can depart from its space's configuration through a top-level [`packages` entry](./packages.md), so one-off
-exceptions do not require carving the package out into a space of its own. A package living outside every space is
-declared through a [standalone entry](./packages.md#standalone-packages-path).
+A space is a group of packages sharing build/publish behaviour. Its `path` names one folder or a list of folders;
+every direct sub-folder of every listed folder is a package named after it, unless a
+[`.dispatexclude`](#dispatexclude) file in that folder excludes it. A single package can depart from its space's
+configuration through a top-level [`packages` entry](./packages.md), so one-off exceptions do not require carving the
+package out into a space of its own. A package living outside every space is declared through a
+[standalone entry](./packages.md#standalone-packages-path).
 
 ## Space options
 
 | Key                     | Type                     | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 |-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`                  | string                   | yes        | Folder relative to the root. Every direct sub-folder is a package named after the folder (hidden folders are skipped, and [`.dispatexclude`](#dispatexclude) excludes more). Package names must be unique across all spaces.                                                                                                                                                              |
+| `path`                  | string or `[string, ...]` | yes        | One folder, or a list of folders, relative to the root. Every direct sub-folder of every listed folder is a package named after it (hidden folders are skipped, and [`.dispatexclude`](#dispatexclude) excludes more). Package names must be unique across all spaces and across the folders of one space; listed folders must not repeat or contain one another. The first folder is the space's primary one: the [login script](#flowlogin) runs there, and [`dispat exec --in space:`](../cli/exec.md) resolves there.                                                    |
 | `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
 | `revertOnFail`          | bool                     | no (false) | When `true`, all local changes inside the package folder are rolled back (tracked files restored from HEAD, untracked files removed) if the package fails at any stage, or is skipped after its version stage already modified files.                                                                                                                                                   |
 | `flow`                  | object                   | no         | What the space runs at which stage; see the table below.                                                                                                                                                                                                                                                                                                                                |
@@ -103,8 +104,8 @@ once each, because credentials and registries belong to the space.
 A failing login fails the publish of every package in the space, since none of them could have succeeded without it.
 Other spaces are unaffected.
 
-The login runs in the space folder, the parent of every member package, so a script reading a local file sees the same
-folder on every run. It gets the space-scoped environment: `DISPAT_SPACE`, `DISPAT_STAGE=login`, the
+The login runs in the space's primary folder, the first entry of its `path`, so a script reading a local file sees
+the same folder on every run, wherever the triggering package lives. It gets the space-scoped environment: `DISPAT_SPACE`, `DISPAT_STAGE=login`, the
 [workspace listing](../reference/environment.md#workspace-data) and `DISPAT_OUTPUT`. There are no package variables,
 because which package's publish triggered it is a scheduling accident.
 
@@ -340,7 +341,9 @@ must touch the space. See [Where an edge can be written](./dependencies.md#where
 
 A space folder may carry a dispat config file of its own, under the same names and formats the root config resolves
 through (`dispat.json`, `dispat.yaml`, `dispat.yml`, `dispat.toml`, first match wins). Its top-level object is the
-space: everything the root file's `spaces` entry could say about it, said again and nearer.
+space: everything the root file's `spaces` entry could say about it, said again and nearer. A space listing several
+folders may carry one in each; they load in the order the folders are listed, a later file overriding an earlier
+one's values under the same merge rules.
 
 ```json
 // packages/dispat.json
@@ -360,8 +363,8 @@ to exist in the root config, because that is where its `path` and its name live.
 
 Two keys are refused:
 
-- **`path`**, because the file sits in the space folder, so the folder it is in already is the path. A file able to
-  redefine it could point a space somewhere it is not.
+- **`path`**, because the file sits in a space folder, so the folders the space spans are already settled. A file
+  able to redefine them could point a space somewhere it is not.
 - **`spaces`**, because a file declaring spaces is a monorepo root of its own. A nested or vendored repository is left
   out of the root config rather than half-merged.
 

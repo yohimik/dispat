@@ -128,7 +128,7 @@ overrides a `true` above it.
 | `src`, `ignore` | yes | yes | yes |
 | `concurrency` | yes, as the budget | yes, as a weight | yes, as a weight |
 | `manifestNames` | no | no | yes |
-| `path` | no | yes, the space's own | yes, for a standalone package |
+| `path` | no | yes, the space's own folder or list of folders | yes, one folder, for a standalone package |
 
 How a level combines with the one below it depends on the setting:
 

@@ -49,6 +49,27 @@ The same entries can go in the root file instead, under the space rather than at
 Use whichever keeps the exception where you will look for it. When both name the same package, the nearer one wins; the
 full order is [the override ladder](../configuration/packages.md#the-override-ladder).
 
+## One space over several folders
+
+A space's `path` also takes a list, for the layout where packages that release the same way sit in different root
+folders. Every listed folder's direct sub-folders are packages of the one space, and each folder may carry its own
+space configuration file, later entries overriding earlier ones:
+
+```json title="dispat.json (root)"
+{
+  "scripts": { "build": "npm run build", "publish": "npm publish" },
+  "spaces": {
+    "libs": { "path": ["packages", "plugins"], "flow": { "build": "build", "publish": "publish" } },
+    "ops": { "path": "tools", "versioning": "none" }
+  }
+}
+```
+
+Here `packages/` and `plugins/` share one release configuration without either folder having to move, and `tools/`
+holds scripts-only packages that [never release](../reference/releasing/versioning.md#packages-that-never-release-none).
+The first listed folder is the space's primary one: the login script runs there, and `dispat exec --in space:libs`
+resolves there.
+
 ## Keeping a package's exceptions inside its folder
 
 One level further down, a package folder can carry a config file of its own. Its top-level object is exactly a package
