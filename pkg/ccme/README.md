@@ -363,4 +363,4 @@ Go 1.21 or later. No dependencies.
 
 ## Licence
 
-MIT. See [LICENSE](../../LICENSE.md).
+MIT. See [LICENSE](./LICENSE).

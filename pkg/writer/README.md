@@ -251,4 +251,4 @@ catalog before it is written) and the workspace's own `pkg/manifest`.
 
 ## Licence
 
-MIT. See [LICENSE](../../LICENSE.md).
+MIT. See [LICENSE](./LICENSE).

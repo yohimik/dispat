@@ -296,7 +296,7 @@ const config: Config = {
             {label: 'GitHub', href: GITHUB},
             {label: 'Discord', href: DISCORD},
             {label: 'Releases', href: `${GITHUB}/releases`},
-            {label: 'License', href: `${GITHUB}/blob/main/LICENSE.md`},
+            {label: 'License', href: `${GITHUB}/blob/main/LICENSE`},
           ],
         },
       ],

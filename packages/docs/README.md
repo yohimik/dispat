@@ -124,4 +124,4 @@ Node 20 or later (CI uses the version in `.nvmrc`) and pnpm, from the root `pack
 
 ## Licence
 
-MIT. See [LICENSE](../../LICENSE.md).
+MIT. See [LICENSE](../../LICENSE).

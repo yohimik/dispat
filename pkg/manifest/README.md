@@ -40,4 +40,4 @@ Go 1.25 or later.
 
 ## Licence
 
-MIT. See [LICENSE](../../LICENSE.md).
+MIT. See [LICENSE](./LICENSE).

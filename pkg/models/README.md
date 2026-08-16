@@ -51,4 +51,4 @@ own [`pkg/ccme`](../ccme) (for the resolved parser configuration type).
 
 ## Licence
 
-MIT. See [LICENSE](../../LICENSE.md).
+MIT. See [LICENSE](./LICENSE).

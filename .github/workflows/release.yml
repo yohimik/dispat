@@ -264,7 +264,13 @@ jobs:
     # Only when the CLI itself published. A run that released just the docs or
     # an image has no new version to install, no v{version} alias tag to check
     # out and no GitHub release carrying binaries.
-    if: needs.release.outputs.cli-released == 'true'
+    #
+    # !cancelled(), because a bare condition implies success(): the CLI's leg
+    # records itself mid-run, so a run that later failed on another package
+    # still published a CLI worth checking — the announce stage set
+    # cli-released before the failure, and skipping the check here would
+    # leave exactly the releases that most need verifying unverified.
+    if: ${{ !cancelled() && needs.release.outputs.cli-released == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
