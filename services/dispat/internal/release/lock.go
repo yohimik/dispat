@@ -102,7 +102,9 @@ func (l *Lock) Acquire(ctx context.Context) error {
 		return fmt.Errorf("pushing the release lock tag to %s: %w", l.Remote, err)
 	}
 	l.held = true
-	l.Log.Debug().Str("tag", LockTagName).Str("remote", l.Remote).Msg("release lock acquired")
+	// Info, not debug: "who holds the lock" is the first question of a stuck
+	// pipeline, and this is the line that answers it at the default level.
+	l.Log.Info().Str("tag", LockTagName).Str("remote", l.Remote).Msg("release lock acquired")
 	return nil
 }
 

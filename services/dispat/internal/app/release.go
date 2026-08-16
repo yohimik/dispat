@@ -57,6 +57,28 @@ type ReleaseOptions struct {
 // reached execution (a blocked plan, failed verification, a failed gating
 // hook).
 func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*release.Result, error) {
+	// The invocation, named before any work happens: an incident readback
+	// starts from "what run was this", and this line answers it at the
+	// default level. Selection fields appear only when a selection was in
+	// force, so an unfiltered run's line reads as one word of intent.
+	ev := a.log.Info().Str("root", a.root)
+	if len(opts.Filter.Packages) > 0 {
+		ev = ev.Strs("packages", opts.Filter.Packages)
+	}
+	if len(opts.Filter.Spaces) > 0 {
+		ev = ev.Strs("spaces", opts.Filter.Spaces)
+	}
+	if len(opts.Filter.Groups) > 0 {
+		ev = ev.Strs("groups", opts.Filter.Groups)
+	}
+	if opts.Strict {
+		ev = ev.Bool("strict", true)
+	}
+	if opts.RequireRelease {
+		ev = ev.Bool("requireRelease", true)
+	}
+	ev.Msg("release started")
+
 	// The lock comes before the plan, not before the publish: two runs that
 	// both got as far as planning have already read the same tags and decided
 	// on the same versions, and whichever of them notices second has wasted
