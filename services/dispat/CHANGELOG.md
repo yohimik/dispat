@@ -1,5 +1,20 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.19 (2026-08-16)
+
+### Features
+
+- the release engine is ready for the stable line
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.9 -> 1.0.0-rc.10
+- manifest: 1.0.0-rc.9 -> 1.0.0-rc.10
+- models: 1.0.0-rc.18 -> 1.0.0-rc.19
+- scanner: 1.0.0-rc.9 -> 1.0.0-rc.10
+- writer: 1.0.0-rc.9 -> 1.0.0-rc.10
+
 ## services/dispat/v1.0.0-rc.18 (2026-08-16)
 
 ### Dependencies
