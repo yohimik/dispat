@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 )
 
 // The starter configuration `dispat init` writes: the same minimal config in
@@ -83,7 +85,7 @@ func InitConfig(dir, format string) (string, error) {
 	if _, err := os.Stat(path); err == nil {
 		return "", fmt.Errorf("%s already exists, not overwriting", name)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := fsx.WriteFileAtomic(path, []byte(content), 0o644); err != nil {
 		return "", err
 	}
 	return name, nil
