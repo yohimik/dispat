@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Thirty-four goals across thirty-six test files, one file each except goal 21, which the two shell helpers split
+Thirty-five goals across thirty-seven test files, one file each except goal 21, which the two shell helpers split
 between `if_test.go`, `if_changed_test.go` and `exec_test.go`. They are grouped by what they are about rather than by the order they were written
 in, so a reader looking for "how does a plan get computed" or "which command does what" lands in one place.
 
@@ -46,6 +46,13 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     packages — including through a permanent local link — and is refused as a provider to any releasable package
     at config load. Also: the graph's script-only line, an inert `Release-As` reported as W238, inert release-only
     settings, and explicit `--package` selection answered out loud.
+35. **Spaces spanning several folders** (`spacepaths_test.go`): the list form of a space's `path`. Discovery and
+    release cover every listed folder's packages; each folder's space config file loads, merging in list order;
+    the first folder anchors the login and `exec --in`; config resolution from inside a later folder still finds
+    the root; `--space` and folder inference reach every folder; the list's refusals (duplicates, nesting)
+    surface through the binary; and a `none` space spanning two folders runs scripts in both without ever
+    tagging. Per-folder `.dispatexclude` and the package-name collision across folders are pinned by unit tests
+    in `internal/config`.
 
 ### Scheduling and execution
 
@@ -978,6 +985,17 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestVersioningNonePackageSelection`        | Naming a none package directly is answered by command: `release --package` says the package is never released and exits cleanly with nothing tagged; `run --package` runs the script.                             |
 | `TestVersioningNoneReleaseAsInert`          | A `Release-As` footer aimed at a none package moves nothing, is reported as W238, and leaves the rest of the run untouched.                                                                                       |
 | `TestVersioningNoneReleaseOnlySettingsInert` | Release-only settings on a none space (`tagFormat`, publish stages) load without error and never execute; the same build script still runs through `dispat run`.                                                 |
+
+### Goal 35: spaces spanning several folders (`spacepaths_test.go`)
+
+| Test                                    | Claim proven                                                                                                                                                                                                       |
+|-----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestSpacePathsMultiFolderLifecycle`    | Packages under every listed folder belong to the space: one release tags both, the login runs once and in the first folder, `exec --in space:` resolves the first folder, and a second run converges.               |
+| `TestSpacePathsSpaceFilesMergeInOrder`  | Every listed folder's space config file loads; a later file overrides an earlier one's env value, and a dependency edge declared in either file reaches the plan graph.                                             |
+| `TestSpacePathsRefusals`                | A folder listed twice and folders nesting one another are refused at load, each with its own message.                                                                                                               |
+| `TestSpacePathsAscentFromSecondPath`    | Config-file resolution from inside a later folder finds the monorepo root even when that folder's space file carries a `packages` map — the shape that would otherwise read as a nested monorepo root.               |
+| `TestSpacePathsFilterAndLocate`         | `--space` covers every folder's packages; standing in a later folder infers the space, and standing inside one of its packages narrows to that package.                                                             |
+| `TestSpacePathsNoneCombined`            | A versioning-none space spanning two folders runs scripts under both and never tags anything, while the releasable space next to it releases normally.                                                              |
 
 ## Regression fences
 
