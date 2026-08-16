@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.0.0-rc.12 (2026-08-16)
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+
+### Dependencies
+
+- dispat: 1.0.0-rc.11 -> 1.0.0-rc.12
+
 ## packages/docs/v1.0.0-rc.11 (2026-08-16)
 
 ### Dependencies
