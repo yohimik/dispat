@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.0.4 (2026-08-16)
+
+### Fixes
+
+- the faq reaches the 1.0 line
+
+
 ## packages/docs/v1.0.3 (2026-08-16)
 
 ### Fixes
