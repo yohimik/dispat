@@ -54,7 +54,7 @@ type App struct {
 // themselves, since that is a different question.
 func (a *App) packages() ([]*model.Package, error) {
 	a.pkgsOnce.Do(func() {
-		a.pkgs, _, a.pkgsErr = config.DiscoverPackages(a.cfg, a.root)
+		a.pkgs, _, _, a.pkgsErr = config.DiscoverPackages(a.cfg, a.root)
 	})
 	return a.pkgs, a.pkgsErr
 }
@@ -176,12 +176,12 @@ func (a *App) checkGit() error {
 // Compute, and for every other plan-package entry point that needs the same
 // workspace view (PackagesChangedSince).
 func (a *App) planOptions() (plan.Options, error) {
-	pkgs, deps, err := config.Discover(a.cfg, a.root)
+	pkgs, deps, excluded, err := config.Discover(a.cfg, a.root)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")
 		return plan.Options{}, err
 	}
-	a.logWorkspace(pkgs, deps)
+	a.logWorkspace(pkgs, deps, excluded)
 	return plan.Options{
 		Packages:         pkgs,
 		Dependencies:     deps,
@@ -202,9 +202,16 @@ func (a *App) planOptions() (plan.Options, error) {
 // debug. The per-edge lines are trace, because a large workspace has many
 // more edges than packages and the interesting one is usually a single edge
 // somebody is looking for.
-func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency) {
+func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency, excluded []config.ExcludedDir) {
 	if !a.log.Debug().Enabled() {
 		return
+	}
+	// The folders .dispatexclude dropped, said out loud: an excluded folder
+	// is otherwise mentioned nowhere, and "why is my package missing" is the
+	// question this line exists for.
+	for _, e := range excluded {
+		a.log.Debug().Str("space", e.Space).Str("folder", e.Name).
+			Msg("package folder excluded by " + config.DispatexcludeName)
 	}
 	names := make([]string, 0, len(a.cfg.Spaces))
 	for name := range a.cfg.Spaces {

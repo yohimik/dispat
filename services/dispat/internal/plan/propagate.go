@@ -62,6 +62,7 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 		origin[s] = s
 		queue = append(queue, target{name: s, from: s, level: 0})
 	}
+	tracing := cp.log.Trace().Enabled()
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -78,6 +79,11 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 			seen[e.to] = true
 			origin[e.to] = origin[cur.name]
 			next := target{name: e.to, from: origin[cur.name], level: cur.level + 1}
+			if tracing {
+				cp.log.Trace().Str("from", cur.name).Str("to", e.to).
+					Str("origin", next.from).Int("level", next.level).Str("kind", string(e.kind)).
+					Msg("plan: propagation edge")
+			}
 			out = append(out, next)
 			queue = append(queue, next)
 		}
@@ -271,10 +277,15 @@ func (cp *computation) resolveChannels() {
 	}
 
 	// ---- pass 2: read, once per package ----
+	tracing := cp.log.Trace().Enabled()
 	for _, p := range cp.pkgs {
 		base := cp.baselineChannel(p.Name)
 		if direct, ok := cp.directChannelFor(p.Name, cands[p.Name], base); ok {
 			cp.channel[p.Name] = direct
+			if tracing {
+				cp.log.Trace().Str("package", p.Name).Str("channel", direct).
+					Str("origin", "directive").Msg("plan: channel resolved")
+			}
 			continue
 		}
 		// A direct directive beats every propagated one regardless of age;
@@ -282,6 +293,10 @@ func (cp *computation) resolveChannels() {
 		if pick, ok := cp.proposed[p.Name]; ok {
 			cp.channel[p.Name] = pick.channel
 			cp.channelFrom[p.Name] = pick.provider
+			if tracing {
+				cp.log.Trace().Str("package", p.Name).Str("channel", pick.channel).
+					Str("origin", "propagated from "+pick.provider).Msg("plan: channel resolved")
+			}
 			continue
 		}
 		cp.channel[p.Name] = base
@@ -417,6 +432,11 @@ func (cp *computation) propagateBumps() {
 					Level:    t.level,
 					Bump:     prop.Bump,
 				})
+				if cp.log.Trace().Enabled() {
+					cp.log.Trace().Str("package", t.name).Str("from", t.from).
+						Int("level", t.level).Str("bump", prop.Bump.String()).
+						Str("commit", rec.key).Msg("plan: bump propagated")
+				}
 			}
 
 			if prop.scoped && len(walked) > 0 && reached == 0 {

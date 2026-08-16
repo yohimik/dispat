@@ -97,7 +97,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	// Packages only, deliberately without Discover's dependency validation: a
 	// stale edge naming a deleted package must reach diffEdges as a removal
 	// suggestion, not abort the one command able to fix it.
-	pkgs, declared, err := config.DiscoverPackages(a.cfg, a.root)
+	pkgs, declared, _, err := config.DiscoverPackages(a.cfg, a.root)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")
 		return 0, err

@@ -179,6 +179,12 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 			return // no correct plan exists; the run aborts, leave members untouched
 		}
 	}
+	if cp.log.Trace().Enabled() {
+		cp.log.Trace().Str("group", groupName).Strs("members", members).
+			Int("depth", depth).Str("target", g.Next.String()).
+			Bool("moves", g.Changed() && groupMoves(g, depth)).
+			Msg("plan: fixed group unified")
+	}
 
 	// The aggregate can also fail to move under the full depth: transitional
 	// states (heterogeneous member baselines) leave a member changed while the

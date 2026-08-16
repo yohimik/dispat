@@ -1007,18 +1007,23 @@ func TestRunNilTaggerDefersTagging(t *testing.T) {
 	// A nil Tagger (release-commit mode) publishes without tagging.
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	cl := &fakeChangelog{}
+	var logs bytes.Buffer
 	ex := &Executor{
 		BuildConcurrency:   1,
 		PublishConcurrency: 1,
 		Runner:             &fakeRunner{},
 		Tagger:             nil,
 		Recorders:          []ReleaseRecorder{cl},
-		Log:                zerolog.Nop(),
+		Log:                zerolog.New(&logs),
 	}
 	res := ex.Run(context.Background(), p)
 
 	require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 	assert.Equal(t, []string{"a"}, cl.entries, "recorders still run")
+	assert.Contains(t, logs.String(), "plannedTag",
+		"with no tag created yet, the published line must name the tag as planned, not as a fact")
+	assert.NotContains(t, logs.String(), `"tag"`,
+		"a tag field would state a tag that does not exist until the release commit")
 }
 
 func TestStatusString(t *testing.T) {

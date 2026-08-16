@@ -394,7 +394,7 @@ func TestComputeSuggestsRemovalOfStaleEndpoints(t *testing.T) {
 	assert.NotContains(t, out.String(), "gone -> app", "keep: true silences even a stale edge")
 
 	// The release path stays strict: Discover still refuses the stale edge.
-	_, _, err = config.Discover(a.cfg, root)
+	_, _, _, err = config.Discover(a.cfg, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
 }

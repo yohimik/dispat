@@ -87,8 +87,8 @@ func TestImagesInstallThroughTheScript(t *testing.T) {
 				"TARGETARCH is what makes a cross-built image install its own architecture")
 
 			compose := readRepoFile(t, filepath.Join("docker", pkg, "docker-compose.yml"))
-			assert.Contains(t, compose, "DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}",
-				"the CLI version an image installs is the workspace's, not the image's own")
+			assert.Contains(t, compose, "DISPAT_VERSION: ${INSTALL_DISPAT_VERSION:?}",
+				"the CLI version an image installs is the workspace's INSTALL_DISPAT_VERSION, not the image's own")
 			assert.Contains(t, compose, "image: docker.io/yohimik/"+pkg+":",
 				"the compose file is this package's manifest: its image line carries the name and version")
 			assert.NotContains(t, compose, "tags:",

@@ -67,6 +67,13 @@ func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *
 			delete(res.packages, name)
 		}
 	}
+	// The single most common question a plan raises is "why did commit X (not)
+	// count for package Y" — this line, at trace, is its answer.
+	if cp.log.Trace().Enabled() {
+		cp.log.Trace().Str("commit", rec.key).Str("scopes", scopes.String()).
+			Bool("derived", res.derived).Strs("packages", sortedKeys(res.packages)).
+			Msg("plan: scope resolved")
+	}
 	return res
 }
 
@@ -162,6 +169,7 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 		cp.prepareScopeDirs()
 	}
 	out := make(map[string]bool)
+	firstFile := make(map[string]string)
 	for _, file := range rec.commit.Files {
 		full := path.Clean(path.Join(cp.rootSlash(), filepath.ToSlash(file)))
 		var owner *scopeDir
@@ -177,7 +185,18 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 		if owner == nil || !owner.pkg.Counts(full) {
 			continue
 		}
+		if !out[owner.pkg.Name] {
+			firstFile[owner.pkg.Name] = file
+		}
 		out[owner.pkg.Name] = true
+	}
+	// One line per derived package, naming the file that put it there — the
+	// trace a "why is this package in the plan" question is answered from.
+	if cp.log.Trace().Enabled() {
+		for _, name := range sortedKeys(out) {
+			cp.log.Trace().Str("commit", rec.key).Str("package", name).
+				Str("file", firstFile[name]).Msg("plan: package derived from the commit's files")
+		}
 	}
 	rec.derivedSet = out
 	return out

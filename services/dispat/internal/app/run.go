@@ -142,7 +142,7 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 			return true
 		}
 	}
-	pkgs, _, err := config.DiscoverPackages(a.cfg, a.root)
+	pkgs, _, _, err := config.DiscoverPackages(a.cfg, a.root)
 	if err != nil {
 		return false
 	}

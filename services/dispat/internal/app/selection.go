@@ -76,6 +76,16 @@ func (a *App) narrow(pl *plan.Plan, f filter.Filter) (plan.Narrowing, error) {
 	n := pl.Narrow(sel.Names)
 	a.log.Info().Str("selection", sel.Description).Strs("releasing", n.Release).
 		Msg("release narrowed to the selection")
+	if a.log.Trace().Enabled() {
+		for _, w := range n.Withheld {
+			a.log.Trace().Str("package", w.Pkg).Strs("waitingFor", w.Waiting).
+				Msg("plan: narrowing withheld a package")
+		}
+		for _, g := range n.Split {
+			a.log.Trace().Str("group", g.Name).Strs("releasing", g.Releasing).
+				Strs("leftBehind", g.LeftBehind).Msg("plan: narrowing split a group")
+		}
+	}
 	// A selected none package vanishes from the narrowed plan by design;
 	// saying why beats a silent drop when someone names one directly.
 	for _, name := range sel.Names {

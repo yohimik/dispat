@@ -23,7 +23,7 @@ func envOf(t *testing.T, cfg File, pkg string, pkgDirs ...string) []string {
 	root := writeModelRepo(t, cfg, pkgDirs...)
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := Discover(loaded, root)
+	pkgs, _, _, err := Discover(loaded, root)
 	require.NoError(t, err)
 	for _, p := range pkgs {
 		if p.Name == pkg {
@@ -203,7 +203,7 @@ func TestEnvFromFolderConfigFiles(t *testing.T) {
 
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := Discover(loaded, root)
+	pkgs, _, _, err := Discover(loaded, root)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, []string{
@@ -238,7 +238,7 @@ func TestEnvRefusedAtEveryLayer(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err, "a package layer is validated during discovery")
-		_, _, err = Discover(loaded, root)
+		_, _, _, err = Discover(loaded, root)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "env: key \"DISPAT_TAG\"")
 	})

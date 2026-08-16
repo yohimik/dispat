@@ -951,6 +951,12 @@ func pathRefused(where string) string {
 // entry naming it can be told apart from an entry naming nothing at all.
 type excludedDir struct{ space, name string }
 
+// ExcludedDir names one folder a space's .dispatexclude dropped from
+// discovery. Discovery returns the list so the caller can say so at debug: a
+// package that silently vanishes from the workspace is the hardest absence to
+// diagnose, because nothing else ever mentions it again.
+type ExcludedDir struct{ Space, Name string }
+
 // keyCheck proves that every key of a `packages` map matched exactly one
 // folder. An unmatched key is the same class of typo as an unknown dependency
 // endpoint; a key matching two folders (names differing only by case) has no

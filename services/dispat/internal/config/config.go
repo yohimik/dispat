@@ -1411,10 +1411,10 @@ func sortedSpaceNames(c *File) []string {
 // edges merged from every declaration source. Every direct sub-folder of a
 // space is a package named after the folder; names must be unique across all
 // spaces.
-func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error) {
-	pkgs, declared, err := DiscoverPackages(c, root)
+func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []ExcludedDir, error) {
+	pkgs, declared, excluded, err := DiscoverPackages(c, root)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	owner := make(map[string]bool, len(pkgs))
 	unversioned := make(map[string]bool)
@@ -1428,23 +1428,23 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 	deps := make([]model.Dependency, 0, len(declared))
 	for _, d := range declared {
 		if !owner[d.Consumer] {
-			return nil, nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
+			return nil, nil, nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
 		}
 		if !owner[d.Provider] {
-			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
+			return nil, nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
 		}
 		if unversioned[d.Provider] && !unversioned[d.Consumer] {
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
 				d.Source.Label(), d.Consumer, d.Provider)
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {
-			return nil, nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
+			return nil, nil, nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
 		}
 		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
 	}
-	return pkgs, deps, nil
+	return pkgs, deps, excluded, nil
 }
 
 // DiscoverPackages is Discover without the dependency-list validation: the
@@ -1460,15 +1460,15 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, error
 // and a `packages` entry with a `path` becomes a standalone package outside
 // every space, validated here because the override layers need the folders
 // to exist.
-func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, error) {
+func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
 	d, err := newDiscovery(c, root)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	spaceNames := sortedSpaceNames(c) // deterministic discovery order
 	for _, sn := range spaceNames {
 		if err := d.scanSpace(sn); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	// The top-level map accounts for its keys against every folder discovered
@@ -1482,15 +1482,19 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 		missing:    "matches no package folder (a standalone package needs a path)",
 		standalone: true,
 	}).run(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := d.scanStandalone(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := d.checkAll(spaceNames); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return d.pkgs, d.declared, nil
+	excluded := make([]ExcludedDir, 0, len(d.excluded))
+	for _, e := range d.excluded {
+		excluded = append(excluded, ExcludedDir{Space: e.space, Name: e.name})
+	}
+	return d.pkgs, d.declared, excluded, nil
 }
 
 // checkSpaceDependencies holds every edge declared in a space's own

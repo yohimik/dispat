@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -1871,4 +1873,34 @@ func TestUpdatesNameEachProviderOnce(t *testing.T) {
 
 	require.Len(t, p.Releases["app"].Updates, 1, "got %+v", p.Releases["app"].Updates)
 	assert.Equal(t, "core", p.Releases["app"].Updates[0].Name)
+}
+
+// TestTraceNarratesTheDerivation: at trace level the planner says how it got
+// there — scope resolution, propagation edges, applied bumps, resolved
+// channels — the intermediates "why did commit X (not) count for package Y"
+// is answered from. Shape only: the events exist and name their subjects;
+// the exact wording stays free.
+func TestTraceNarratesTheDerivation(t *testing.T) {
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core)^: streaming", files: []string{"libs/core/a.go"}},
+		commit{sha: "c2", message: "fix: helpers", files: []string{"libs/utils/b.go"}},
+		commit{sha: "c3", message: "fix(app)%beta: flag", files: []string{"apps/app/c.go"}},
+	)
+	pkgs, deps := testPackages()
+
+	var buf bytes.Buffer
+	log := zerolog.New(&buf).Level(zerolog.TraceLevel)
+	_, err := Compute(context.Background(), git, Options{
+		Packages: pkgs, Dependencies: deps, Root: "/r", Log: log,
+	})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "plan: scope resolved")
+	assert.Contains(t, out, "plan: package derived from the commit's files",
+		"the scopeless c2 resolves through §6.2, naming the file")
+	assert.Contains(t, out, "plan: propagation edge")
+	assert.Contains(t, out, "plan: bump propagated")
+	assert.Contains(t, out, "plan: channel resolved")
+	assert.Contains(t, out, "plan: package resolved")
 }

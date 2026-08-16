@@ -34,7 +34,8 @@ func discoverAll(t *testing.T, root string) ([]*model.Package, []DeclaredDepende
 	t.Helper()
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	return DiscoverPackages(cfg, root)
+	pkgs, declared, _, err := DiscoverPackages(cfg, root)
+	return pkgs, declared, err
 }
 
 // packagesByName indexes discovery output for assertions.
@@ -461,6 +462,22 @@ func TestDiscoverMultiPathExcludePerFolder(t *testing.T) {
 	assert.NotContains(t, byName, "tmp")
 }
 
+// TestDiscoverReportsTheExcludedFolders: discovery hands the .dispatexclude
+// hits back to the caller — the debug line they become is the only mention an
+// excluded folder gets, and "why is my package missing" needs it.
+func TestDiscoverReportsTheExcludedFolders(t *testing.T) {
+	cfg := minimalConfig()
+	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/tmp")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pkgs", DispatexcludeName), []byte("tmp\n"), 0o644))
+
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, excluded, err := DiscoverPackages(loaded, root)
+	require.NoError(t, err)
+	assert.Contains(t, packagesByName(pkgs), "core")
+	assert.Equal(t, []ExcludedDir{{Space: "libs", Name: "tmp"}}, excluded)
+}
+
 // TestVersioningNoneGroups: none shares nothing, so it cannot declare a
 // group, cannot be joined as one, and cannot sit next to a versionGroup
 // reference on the same layer.
@@ -804,7 +821,7 @@ func TestDiscoverUnvalidatedGroupRef(t *testing.T) {
 	cfg := &File{Spaces: map[string]SpaceConfig{
 		"libs": {Path: PathList{"pkgs"}, Flow: &SpaceFlowConfig{}, VersionGroup: "nope"},
 	}}
-	_, _, err := DiscoverPackages(cfg, root)
+	_, _, _, err := DiscoverPackages(cfg, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matches no versionGroups entry and no space")
 }
@@ -1173,7 +1190,7 @@ func TestPackageDependenciesCollected(t *testing.T) {
 	// Discover validates the merged list like the root list.
 	cfgLoaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, err := Discover(cfgLoaded, root)
+	_, deps, _, err := Discover(cfgLoaded, root)
 	require.NoError(t, err)
 	assert.Len(t, deps, 4)
 }
@@ -1199,7 +1216,7 @@ func TestPackageDependenciesInvalid(t *testing.T) {
 	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, err = Discover(loaded, root)
+	_, _, _, err = Discover(loaded, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `packages["utils"]: dependencies[0]: unknown provider package "ghost"`)
 }
@@ -1274,7 +1291,7 @@ func TestPackageDependenciesCarryKindAndKeep(t *testing.T) {
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	_, declared, err := DiscoverPackages(cfg, root)
+	_, declared, _, err := DiscoverPackages(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, declared, 3)
 	for _, d := range declared {
@@ -1286,7 +1303,7 @@ func TestPackageDependenciesCarryKindAndKeep(t *testing.T) {
 		declared[2].DependencyConfig)
 
 	// And the kind reaches the graph, which is the whole point of carrying it.
-	_, deps, err := Discover(cfg, root)
+	_, deps, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, deps, 3)
 	assert.Equal(t, model.KindDevDependencies, deps[2].Kind)
@@ -1311,7 +1328,7 @@ func TestPackageDependenciesScalarAndSelfReference(t *testing.T) {
 	root := writeRawRepo(t, base("core"), "pkgs/core", "pkgs/web")
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, err := Discover(cfg, root)
+	_, deps, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "core", deps[0].Provider)
@@ -1319,7 +1336,7 @@ func TestPackageDependenciesScalarAndSelfReference(t *testing.T) {
 	root = writeRawRepo(t, base([]any{map[string]any{"provider": "web"}}), "pkgs/core", "pkgs/web")
 	cfg, err = Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, err = DiscoverPackages(cfg, root)
+	_, _, _, err = DiscoverPackages(cfg, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `package "web" cannot depend on itself`)
 }
@@ -1349,7 +1366,7 @@ func TestDependencyMapForm(t *testing.T) {
 	}, cfg.Dependencies, "consumers sorted, each consumer's providers in file order")
 
 	// And the whole graph is discoverable, which is what the form exists for.
-	_, deps, err := Discover(cfg, root)
+	_, deps, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	assert.Len(t, deps, 4)
 }
@@ -1370,7 +1387,7 @@ func TestDependencyMapFormMatchesPackageNamesCaseInsensitively(t *testing.T) {
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	_, deps, err := Discover(cfg, root)
+	_, deps, _, err := Discover(cfg, root)
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "Web", deps[0].Consumer, "the package's own spelling, not the folded key")
@@ -2142,7 +2159,7 @@ func TestAliasTagsResolveThroughTheLadder(t *testing.T) {
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := DiscoverPackages(loaded, root)
+	pkgs, _, _, err := DiscoverPackages(loaded, root)
 	require.NoError(t, err)
 
 	by := map[string]*model.Package{}
@@ -2178,7 +2195,7 @@ func TestAliasTagsEmptyListOptsOut(t *testing.T) {
 	}, "pkgs/core", "pkgs/utils")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, err := DiscoverPackages(loaded, root)
+	pkgs, _, _, err := DiscoverPackages(loaded, root)
 	require.NoError(t, err)
 
 	by := map[string]*model.Package{}
@@ -2212,7 +2229,7 @@ func TestAliasTagsMustNotBeReadableAsReleaseTags(t *testing.T) {
 		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, err = DiscoverPackages(loaded, root)
+		_, _, _, err = DiscoverPackages(loaded, root)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "would be read back as a release tag")
 	})
@@ -2228,7 +2245,7 @@ func TestAliasTagsMustNotBeReadableAsReleaseTags(t *testing.T) {
 		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, err = DiscoverPackages(loaded, root)
+		_, _, _, err = DiscoverPackages(loaded, root)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "would be read back as a release tag")
 	})
@@ -2242,7 +2259,7 @@ func TestAliasTagsMustNotBeReadableAsReleaseTags(t *testing.T) {
 		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, err = DiscoverPackages(loaded, root)
+		_, _, _, err = DiscoverPackages(loaded, root)
 		assert.NoError(t, err, "this is the shape the feature exists for")
 	})
 }
@@ -2258,7 +2275,7 @@ func TestAliasTagsTwoPackagesOneName(t *testing.T) {
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, err = DiscoverPackages(loaded, root)
+	_, _, _, err = DiscoverPackages(loaded, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "both write the alias tag")
 }
@@ -2291,7 +2308,7 @@ func TestSpaceDependencies(t *testing.T) {
 
 	cfgLoaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, err := Discover(cfgLoaded, root)
+	_, deps, _, err := Discover(cfgLoaded, root)
 	require.NoError(t, err)
 	assert.Len(t, deps, 2, "the edges reach the graph")
 }
@@ -2350,7 +2367,7 @@ func TestSpaceDependenciesMustTouchTheSpace(t *testing.T) {
 
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, err = Discover(loaded, root)
+		_, _, _, err = Discover(loaded, root)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `unknown consumer package "ghost"`)
 	})

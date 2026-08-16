@@ -797,7 +797,13 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	res.Status = StatusPublished
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 	tc.mu.Unlock()
-	tc.log.Info().Str("tag", rel.TagName()).Msg("published")
+	// In release-commit mode the tag does not exist yet — finalize creates it
+	// — so the line names it as planned rather than stating it as a fact.
+	if tc.Tagger != nil {
+		tc.log.Info().Str("tag", rel.TagName()).Msg("published")
+	} else {
+		tc.log.Info().Str("plannedTag", rel.TagName()).Msg("published, tag deferred to the release commit")
+	}
 
 	if ctx.Err() != nil {
 		// Interrupted: the release is out and recorded; observers stay silent.
