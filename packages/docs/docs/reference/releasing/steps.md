@@ -57,7 +57,9 @@ mid-run is not the run's plan: earlier legs' tags have landed, and the step's ow
 step would read back as published history. The [`DISPAT_*` environment](../environment.md) every stage script inherits
 carries the run's own answers, so `changelog`, `commit` and `github` read them back. With `DISPAT_PACKAGE`,
 `DISPAT_NEW_VERSION` and `DISPAT_TAG` present, the step narrows to that package (unless you passed a filter of your
-own), leaves the run's own tag out of its baseline reading, and holds its record to the run's version. A replan that
+own), leaves every tag the run has already written out of its baseline reading, so its plan reads the baselines the
+run itself started from, and holds its record to the run's version and to the run's provider movements, the
+`DISPAT_UPDATED_*` listing the record's dependencies section states. A replan that
 drifted anyway is corrected and reported as `W228`; a plan the step cannot align, because the package is missing from
 it or the run's version renders a different tag, is refused as `E219` with nothing written: a failed leg re-runs where
 a drifted record does not. `dispat github` additionally reads its attachment list from `DISPAT_EXPORT_GITHUB`, whether

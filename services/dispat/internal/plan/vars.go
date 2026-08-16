@@ -26,6 +26,25 @@ const (
 	TagEnvVar        = "DISPAT_TAG"
 )
 
+// UpdatedPackagesEnvVar and UpdatedEnvPrefix carry the run's live provider
+// updates into a package's scripts (internal/release renders them, one
+// DISPAT_UPDATED_<KEY>_* set per provider). The step commands' wiring reads
+// them back so a wired record states the run's provider movements rather
+// than a mid-run replan's; see the app's step wiring.
+const (
+	UpdatedPackagesEnvVar = "DISPAT_UPDATED_PACKAGES"
+	UpdatedEnvPrefix      = "DISPAT_UPDATED_"
+)
+
+// WorkspacePackagesEnvVar and WorkspaceEnvPrefix carry the workspace listing
+// the same way (internal/release renders it). The wiring reads the releasing
+// entries back to mask every tag the run has already written, so a mid-run
+// replan reads the same baselines the run itself started from.
+const (
+	WorkspacePackagesEnvVar = "DISPAT_WORKSPACE_PACKAGES"
+	WorkspaceEnvPrefix      = "DISPAT_WORKSPACE_"
+)
+
 // OutputEnvPrefix is what an exported script output is published under;
 // scripts may also spell the name with this prefix already attached in their
 // export line.

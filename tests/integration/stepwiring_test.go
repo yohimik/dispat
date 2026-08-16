@@ -174,6 +174,57 @@ func TestStepsDuplicatedCollapseIntoSkips(t *testing.T) {
 	assert.False(t, harness.HasCode(res.Events, "E219"))
 }
 
+// TestStepsWiredRecordTheRunsDependencies: the dependencies section of a
+// wired record states the run's provider movements. The consumer's changelog
+// step replans after the provider's tag has already landed; unmasked, that
+// tag reads as a foreign baseline — the provider drops out of the updates as
+// "already released", and a shared versioning group reports a floor one step
+// past where the run put it. The wiring masks the run's tags and aligns the
+// updates listing, so the record names the movement the run actually made.
+func TestStepsWiredRecordTheRunsDependencies(t *testing.T) {
+	r := harness.New(t)
+	bin, _ := harness.Build(t)
+	r.AddBareRemote()
+
+	cfg := harness.BaseFile(1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true,
+		Name: "steps-test", Email: "steps@example.com"}
+	cfg.VersionGroups = map[string]models.VersionGroupConfig{"lib": {Versioning: "fixed"}}
+	cfg.Scripts = map[string]models.Script{
+		"build":  {echoBuild},
+		"record": {bin + " changelog", bin + " commit --tag --push"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"core": {VersionGroup: "lib"},
+		"app":  {VersionGroup: "lib"},
+	}
+	cfg.Dependencies = models.Dependencies{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core,app): both move")
+
+	res := r.ReleaseOK()
+
+	// The group holds one version, so the provider's tag existing mid-run is
+	// exactly the floor the consumer's replan must not read.
+	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app@0.1.0"), "tags: %v", r.TagList())
+	changelog, err := os.ReadFile(r.Path("packages/app/CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(changelog), "- core: 0.0.0 -> 0.1.0",
+		"the consumer's entry names the provider's movement:\n%s", changelog)
+	assert.NotContains(t, string(changelog), "0.1.1",
+		"no version the run never released:\n%s", changelog)
+	assert.False(t, harness.HasCode(res.Events, "W228"),
+		"the masked replan reproduces the run, no drift to correct")
+	assert.False(t, harness.HasCode(res.Events, "E219"))
+}
+
 // TestStepsGithubBeforeCommitWarns: a github step ordered before the commit
 // step asks for a release of a tag nobody created yet — GitHub would invent
 // the tag at the default branch head — so the misordering is W229, said

@@ -145,14 +145,14 @@ func WorkspaceEnv(p *plan.Plan, log zerolog.Logger) []string {
 		}
 		taken[k] = e.Package
 		keys = append(keys, k)
-		pre := "DISPAT_WORKSPACE_" + k
+		pre := plan.WorkspaceEnvPrefix + k
 		out = append(out,
 			pre+"_NAME="+e.Package,
 			pre+"_VERSION="+e.Version,
 			pre+"_CHANNEL="+e.Channel,
 			pre+"_RELEASING="+boolEnv(e.Releasing))
 	}
-	return append(out, "DISPAT_WORKSPACE_PACKAGES="+strings.Join(keys, " "))
+	return append(out, plan.WorkspacePackagesEnvVar+"="+strings.Join(keys, " "))
 }
 
 // updatedEnv renders the live provider updates the same way, under
@@ -169,7 +169,7 @@ func updatedEnv(updates []providerUpdate) []string {
 		}
 		taken[k] = true
 		keys = append(keys, k)
-		pre := "DISPAT_UPDATED_" + k
+		pre := plan.UpdatedEnvPrefix + k
 		out = append(out,
 			pre+"_NAME="+u.Package,
 			pre+"_SPACE="+u.Space,
@@ -179,7 +179,7 @@ func updatedEnv(updates []providerUpdate) []string {
 	}
 	// Set even when empty: `for k in $DISPAT_UPDATED_PACKAGES` should iterate
 	// zero times, not read an unset variable.
-	return append(out, "DISPAT_UPDATED_PACKAGES="+strings.Join(keys, " "))
+	return append(out, plan.UpdatedPackagesEnvVar+"="+strings.Join(keys, " "))
 }
 
 // RunEnv builds the environment of the run-level hooks (postAll and the

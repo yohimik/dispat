@@ -20,7 +20,8 @@ import (
 // whatever environment the test process itself inherited.
 func clearRunEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{plan.PackageEnvVar, plan.TagEnvVar, plan.NewVersionEnvVar} {
+	for _, name := range []string{plan.PackageEnvVar, plan.TagEnvVar, plan.NewVersionEnvVar,
+		plan.UpdatedPackagesEnvVar, plan.WorkspacePackagesEnvVar} {
 		t.Setenv(name, "")
 		require.NoError(t, os.Unsetenv(name))
 	}
@@ -147,6 +148,129 @@ func TestAlignStepRefusesTheUnalignable(t *testing.T) {
 	// tagFormat changed mid-run, which no alignment can paper over.
 	err = a.alignStep(pl, &runEnv{pkg: "core", tag: "elsewhere@1.2.0", next: mustVersion(t, "1.2.0")})
 	require.Error(t, err)
+}
+
+// TestStepEnvReadsTheRunsUpdates: the DISPAT_UPDATED_* listing comes back as
+// the run's provider movements, in listing order, raw names from _NAME.
+func TestStepEnvReadsTheRunsUpdates(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "app", "app@1.2.0", "1.2.0")
+	t.Setenv(plan.UpdatedPackagesEnvVar, "CORE MY_LIB")
+	t.Setenv(plan.UpdatedEnvPrefix+"CORE_NAME", "core")
+	t.Setenv(plan.UpdatedEnvPrefix+"CORE_OLD_VERSION", "1.0.0")
+	t.Setenv(plan.UpdatedEnvPrefix+"CORE_NEW_VERSION", "1.1.0")
+	t.Setenv(plan.UpdatedEnvPrefix+"MY_LIB_NAME", "my.lib")
+	t.Setenv(plan.UpdatedEnvPrefix+"MY_LIB_OLD_VERSION", "2.0.0")
+	t.Setenv(plan.UpdatedEnvPrefix+"MY_LIB_NEW_VERSION", "2.0.1")
+
+	env, err := stepRunEnv()
+	require.NoError(t, err)
+	require.NotNil(t, env)
+	assert.True(t, env.updatesListed)
+	require.Len(t, env.updates, 2)
+	assert.Equal(t, "core", env.updates[0].Name)
+	assert.Equal(t, "1.0.0", env.updates[0].From.String())
+	assert.Equal(t, "1.1.0", env.updates[0].To.String())
+	assert.Equal(t, "my.lib", env.updates[1].Name)
+}
+
+// TestStepEnvEmptyListingIsStillAListing: an empty DISPAT_UPDATED_PACKAGES
+// says "no live updates" — distinguished from an environment that carries no
+// listing at all, which says nothing.
+func TestStepEnvEmptyListingIsStillAListing(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "app", "app@1.2.0", "1.2.0")
+	t.Setenv(plan.UpdatedPackagesEnvVar, "")
+
+	env, err := stepRunEnv()
+	require.NoError(t, err)
+	assert.True(t, env.updatesListed)
+	assert.Empty(t, env.updates)
+
+	require.NoError(t, os.Unsetenv(plan.UpdatedPackagesEnvVar))
+	env, err = stepRunEnv()
+	require.NoError(t, err)
+	assert.False(t, env.updatesListed)
+}
+
+// TestStepEnvRefusesAGarbageUpdateListing: a listing naming a key whose
+// variables do not describe an update is E219, the same rule as an
+// unparseable pinned version.
+func TestStepEnvRefusesAGarbageUpdateListing(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "app", "app@1.2.0", "1.2.0")
+	t.Setenv(plan.UpdatedPackagesEnvVar, "CORE")
+	t.Setenv(plan.UpdatedEnvPrefix+"CORE_NAME", "core")
+	t.Setenv(plan.UpdatedEnvPrefix+"CORE_OLD_VERSION", "not-a-version")
+	t.Setenv(plan.UpdatedEnvPrefix+"CORE_NEW_VERSION", "1.1.0")
+	var logs bytes.Buffer
+	a := New(t.TempDir(), &config.File{}, zerolog.New(&logs))
+	var w WindowOptions
+
+	_, err := a.wireStep(&w)
+	require.Error(t, err)
+	assert.Contains(t, logs.String(), plan.CodeStepUnalignable)
+}
+
+// TestStepEnvReadsTheReleasingWorkspace: the releasing entries of the
+// workspace listing come back for tag masking; an entry that does not parse
+// is skipped rather than fatal, and a non-releasing entry is not read.
+func TestStepEnvReadsTheReleasingWorkspace(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "app", "app@1.2.0", "1.2.0")
+	t.Setenv(plan.WorkspacePackagesEnvVar, "CORE UTILS BROKEN")
+	t.Setenv(plan.WorkspaceEnvPrefix+"CORE_NAME", "core")
+	t.Setenv(plan.WorkspaceEnvPrefix+"CORE_VERSION", "1.1.0")
+	t.Setenv(plan.WorkspaceEnvPrefix+"CORE_RELEASING", "true")
+	t.Setenv(plan.WorkspaceEnvPrefix+"UTILS_NAME", "utils")
+	t.Setenv(plan.WorkspaceEnvPrefix+"UTILS_VERSION", "0.3.0")
+	t.Setenv(plan.WorkspaceEnvPrefix+"UTILS_RELEASING", "false")
+	t.Setenv(plan.WorkspaceEnvPrefix+"BROKEN_NAME", "broken")
+	t.Setenv(plan.WorkspaceEnvPrefix+"BROKEN_VERSION", "not-a-version")
+	t.Setenv(plan.WorkspaceEnvPrefix+"BROKEN_RELEASING", "true")
+
+	env, err := stepRunEnv()
+	require.NoError(t, err)
+	require.Len(t, env.releasing, 1)
+	assert.Equal(t, "core", env.releasing[0].name)
+	assert.Equal(t, "1.1.0", env.releasing[0].version.String())
+}
+
+// TestAlignStepAlignsDriftedUpdates: the run's updates listing outranks the
+// replan's, the correction is W228, and a matching listing passes silently.
+func TestAlignStepAlignsDriftedUpdates(t *testing.T) {
+	var logs bytes.Buffer
+	a := New(t.TempDir(), &config.File{}, zerolog.New(&logs))
+	pl := stepEnvRelease(t, "app", "1.2.0")
+	pl.Releases["app"].Updates = []plan.ProviderUpdate{
+		{Name: "core", From: mustVersion(t, "1.1.0"), To: mustVersion(t, "1.2.0")}}
+	run := []plan.ProviderUpdate{
+		{Name: "core", From: mustVersion(t, "1.0.0"), To: mustVersion(t, "1.1.0")},
+		{Name: "utils", From: mustVersion(t, "0.2.0"), To: mustVersion(t, "0.3.0")}}
+	env := &runEnv{pkg: "app", tag: "app@1.2.0", next: mustVersion(t, "1.2.0"),
+		updates: run, updatesListed: true}
+
+	require.NoError(t, a.alignStep(pl, env))
+	assert.Contains(t, logs.String(), plan.CodeStepAligned)
+	assert.Equal(t, run, pl.Releases["app"].Updates)
+
+	logs.Reset()
+	require.NoError(t, a.alignStep(pl, env))
+	assert.NotContains(t, logs.String(), plan.CodeStepAligned, "an aligned listing stays silent")
+}
+
+// TestAlignStepWithoutAListingKeepsTheReplans: an environment carrying no
+// updates listing says nothing about them, and the replan's stand.
+func TestAlignStepWithoutAListingKeepsTheReplans(t *testing.T) {
+	a := New(t.TempDir(), &config.File{}, zerolog.Nop())
+	pl := stepEnvRelease(t, "app", "1.2.0")
+	planned := []plan.ProviderUpdate{
+		{Name: "core", From: mustVersion(t, "1.0.0"), To: mustVersion(t, "1.1.0")}}
+	pl.Releases["app"].Updates = planned
+	env := &runEnv{pkg: "app", tag: "app@1.2.0", next: mustVersion(t, "1.2.0")}
+
+	require.NoError(t, a.alignStep(pl, env))
+	assert.Equal(t, planned, pl.Releases["app"].Updates)
 }
 
 // TestReadExportPrefersTheOutputFile: an export appended to $DISPAT_OUTPUT in
