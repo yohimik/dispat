@@ -3,7 +3,7 @@
 # docker/dispat-ubuntu/docker-compose.yml carries the reasoning behind the shape.
 services:
   dispat:
-    image: docker.io/yohimik/dispat-debian:1.0.0-rc.7
+    image: docker.io/yohimik/dispat-debian:1.0.0-rc.8
     build:
       context: ../..
       dockerfile: docker/dispat-debian/Dockerfile

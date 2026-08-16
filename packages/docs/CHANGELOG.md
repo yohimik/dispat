@@ -1,5 +1,11 @@
 # Changelog
 
+## packages/docs/v1.0.0-rc.8 (2026-08-16)
+
+### Dependencies
+
+- dispat: 1.0.0-rc.7 -> 1.0.0-rc.8
+
 ## packages/docs/v1.0.0-rc.7 (2026-08-16)
 
 ### Dependencies
