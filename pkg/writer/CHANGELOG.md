@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/writer/v1.0.0-rc.8 (2026-08-16)
+
+### Fixes
+
+- exercise a fixed-group member release
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.7 -> 1.0.0-rc.8
+
 ## pkg/writer/v1.0.0-rc.7 (2026-08-16)
 
 ### Fixes
