@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/scanner/v1.0.0-rc.4 (2026-08-16)
+
+### Fixes
+
+- retract the versions the proxy pinned elsewhere
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.3 -> 1.0.0-rc.4
+
 ## pkg/scanner/v1.0.0-rc.3 (2026-08-16)
 
 ### Fixes
