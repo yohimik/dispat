@@ -9,8 +9,9 @@
 # adding one to the runtime image to use it once would be a permanent cost for a
 # build-time need.
 ARG UBUNTU_VERSION=24.04
+ARG FETCH_ALPINE_VERSION=3.24
 
-FROM alpine:3.24 AS fetch
+FROM alpine:${FETCH_ALPINE_VERSION} AS fetch
 ARG DISPAT_VERSION
 ARG TARGETARCH
 # busybox wget is enough for install.sh; the certificates are not in the base.

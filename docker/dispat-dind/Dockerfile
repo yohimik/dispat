@@ -7,8 +7,9 @@
 # of running dind stops working. It therefore also needs --privileged, or to be
 # used as a `services: docker:dind` companion; see docker/README.md.
 ARG DOCKER_VERSION=29-dind
+ARG FETCH_ALPINE_VERSION=3.24
 
-FROM alpine:3.24 AS fetch
+FROM alpine:${FETCH_ALPINE_VERSION} AS fetch
 ARG DISPAT_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache ca-certificates

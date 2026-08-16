@@ -4,8 +4,9 @@
 # standardise on Debian; see docker/dispat-ubuntu/Dockerfile for why the binary
 # is fetched in a stage of its own rather than copied in.
 ARG DEBIAN_VERSION=trixie-slim
+ARG FETCH_ALPINE_VERSION=3.24
 
-FROM alpine:3.24 AS fetch
+FROM alpine:${FETCH_ALPINE_VERSION} AS fetch
 ARG DISPAT_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache ca-certificates

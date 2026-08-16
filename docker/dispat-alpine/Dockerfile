@@ -8,7 +8,7 @@
 # install.sh out of the published filesystem.
 ARG ALPINE_VERSION=3.24
 
-FROM alpine:3.24 AS fetch
+FROM alpine:${ALPINE_VERSION} AS fetch
 ARG DISPAT_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache ca-certificates
