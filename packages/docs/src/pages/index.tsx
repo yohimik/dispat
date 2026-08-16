@@ -292,8 +292,12 @@ function Libraries(): React.ReactElement {
         </table>
         <p>
           The mobile formats also carry a build number beside their marketing version (<code>CFBundleVersion</code>,{' '}
-          <code>android:versionCode</code>, <code>CURRENT_PROJECT_VERSION</code>): the scanner reads it, and no writer
-          ever rewrites it. <Link to="/cli/compute">
+          <code>android:versionCode</code>, <code>CURRENT_PROJECT_VERSION</code>): the scanner reads it, no version
+          write ever moves it, and{' '}
+          <Link to="/cli/writer">
+            <code>--set-build</code>
+          </Link>{' '}
+          is the write that does. <Link to="/cli/compute">
             <code>dispat compute</code>
           </Link>{' '}
           derives a monorepo&apos;s dependency graph from these files, and{' '}
