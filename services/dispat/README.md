@@ -173,6 +173,17 @@ that is what [`dispat self-update`](https://yohimik.github.io/dispat/cli/self-up
 today: resolving a release, checking the download against the published checksum, and putting the result somewhere the
 next command can find it. Pointing it at other tools is the feature.
 
+## Who releases with dispat
+
+dispat's own monorepo is the reference deployment: every release of this repository is planned and published by the
+dispat built from the same checkout. The 1.0.0 release was one such run, eleven packages together: this CLI with six
+static binaries (Linux, macOS and Windows, on amd64 and arm64), five Go modules, four Docker images and the
+[documentation site](https://yohimik.github.io/dispat/), each with its own tag, changelog entry and GitHub release.
+The workflow behind it lives in the repository ([release.yml](../../.github/workflows/release.yml)) and follows the
+same shape the [CI reference](https://yohimik.github.io/dispat/reference/ci) documents for any repository.
+
+Releasing a project with dispat? Share it on the Discord below and it can be listed here.
+
 ## Community
 
 Have questions or issues? Want to share a project you release with dispat?
