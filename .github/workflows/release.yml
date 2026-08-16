@@ -24,6 +24,14 @@ on:
 permissions:
   contents: read
 
+# The driving dispat comes from the composite action: the previous published
+# release driving the next one, which is the ordinary constraint of
+# self-hosting — configuration this repository uses must already exist in the
+# release before it. Pinned while only prereleases exist; drop the pin once
+# 1.0.0 is out.
+env:
+  DISPAT_PIN: 1.0.0-rc.4
+
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;
 # queueing here means the second dispatch simply waits.
@@ -43,12 +51,10 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
-      # TEMPORARY BOOTSTRAP until 1.0.0: bin/dispat is the committed driver,
-      # refreshed by `dispat exec refresh-bootstrap`, so this gate needs no Go
-      # toolchain at all. Once a stable release exists this step becomes
-      # `uses: ./` and bin/dispat is deleted.
-      - name: Put the bootstrap dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Set up dispat
+        uses: ./
+        with:
+          version: ${{ env.DISPAT_PIN }}
 
       # `status` computes the plan and prints it without building, tagging or
       # writing anything. --require-release answers with exit 3 when the plan
@@ -91,11 +97,12 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # TEMPORARY BOOTSTRAP until 1.0.0: the committed driver, as in the plan
-      # job. The driver is only the driver; the suite builds and tests the
-      # checkout's own dispat regardless.
-      - name: Put the bootstrap dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+      # The installed dispat is only the driver; the suite builds and tests
+      # the checkout's own dispat regardless.
+      - name: Set up dispat
+        uses: ./
+        with:
+          version: ${{ env.DISPAT_PIN }}
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -212,19 +219,10 @@ jobs:
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Put the bootstrap dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
-
-      # This job alone rebuilds the driver from the checkout: it is about to
-      # write the changelogs, the release commit and the tags of the version
-      # being shipped, and a committed driver lagging the checkout would
-      # silently skip configuration the new version defines. The committed
-      # driver runs the containerised rebuild of its own file (the script
-      # renames over it, so the running binary is undisturbed) — at 1.0.0
-      # this becomes the composite action installing the previous published
-      # release.
-      - name: Rebuild the driver from the checkout
-        run: dispat exec refresh-bootstrap
+      - name: Set up dispat
+        uses: ./
+        with:
+          version: ${{ env.DISPAT_PIN }}
 
       # The test report from the job that gated this one, put where the docs
       # package's build expects it. Deliberately not tolerant of a missing

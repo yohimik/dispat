@@ -1,8 +1,8 @@
 # Release scripts
 
 The two shell scripts behind this repository's release stages and CI checks that carry enough logic to deserve a file
-of their own. Everything smaller lives directly in the dispat configuration as a script entry (`push-badge` and
-`refresh-bootstrap` in the root [`dispat.yaml`](../dispat.yaml), `deploy-docs` in
+of their own. Everything smaller lives directly in the dispat configuration as a script entry (`push-badge`
+in the root [`dispat.yaml`](../dispat.yaml), `deploy-docs` in
 [`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), the link bracket in
 [`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml), `push-readme` in
 [`docker/dispat.yaml`](../docker/dispat.yaml)), and the test-run record lives in the Go tooling
@@ -24,8 +24,7 @@ script in `services/dispat/dispat.yaml`, which brackets the build with `dispat a
 `--unlink-local` so the binaries carry this checkout rather than the `pkg/*` versions `go.mod` pins), the site and its
 per-minor version snapshot come out of the docs package's Dockerfile (the `DOCS_VERSION` build arg decides whether a
 snapshot is cut, and an empty one, which is what a prerelease gets, cuts nothing), and the images are
-[`docker compose` builds](../docker/README.md) driven from `docker/dispat.yaml`. The CI bootstrap driver `bin/dispat`
-is built inside Docker too, by `dispat exec refresh-bootstrap` (temporary until 1.0.0). Nothing is left for a host
+[`docker compose` builds](../docker/README.md) driven from `docker/dispat.yaml`. Nothing is left for a host
 shell to decide.
 
 Do not run `go work sync` or `go mod tidy` while the link bracket is in place: both delete the `go.sum` entries a

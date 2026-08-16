@@ -17,6 +17,13 @@ on:
 permissions:
   contents: read
 
+# The driving dispat comes from the composite action, pinned while only
+# prereleases exist; an unpinned install resolves the latest stable. Drop the
+# pin once 1.0.0 is out. The installed dispat is only the driver: the suite
+# builds and tests the checkout's own dispat regardless.
+env:
+  DISPAT_PIN: 1.0.0-rc.4
+
 jobs:
   lint:
     name: Format and vet
@@ -33,10 +40,10 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # TEMPORARY BOOTSTRAP until 1.0.0: the committed driver, as in the jobs
-      # below.
-      - name: Put the bootstrap dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Set up dispat
+        uses: ./
+        with:
+          version: ${{ env.DISPAT_PIN }}
 
       # The negated grep fails the step exactly when gofmt lists a file, and
       # the list itself is the message.
@@ -86,13 +93,10 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # TEMPORARY BOOTSTRAP until 1.0.0: bin/dispat is the committed driver,
-      # refreshed by `dispat exec refresh-bootstrap`, so no job builds the driver
-      # it is driven by. Once a stable release exists this step becomes
-      # `uses: ./` and bin/dispat is deleted. The driver is only the driver:
-      # the suite below builds and tests the checkout's own dispat regardless.
-      - name: Put the bootstrap dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Set up dispat
+        uses: ./
+        with:
+          version: ${{ env.DISPAT_PIN }}
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -152,10 +156,10 @@ jobs:
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      # TEMPORARY BOOTSTRAP until 1.0.0: the committed driver, as in the test
-      # job above.
-      - name: Put the bootstrap dispat on PATH
-        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Set up dispat
+        uses: ./
+        with:
+          version: ${{ env.DISPAT_PIN }}
 
       # No link bracket here, unlike the test job: every package this gate
       # reaches builds inside a container from a context copied out of the
