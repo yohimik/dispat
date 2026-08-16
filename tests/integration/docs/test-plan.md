@@ -43,7 +43,7 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
 34. **Versioning `none`** (`versioning_none_test.go`): the mode that leaves the release flow entirely. A `none`
     package is never versioned, tagged, changelogged or published, runs scripts from the default `dispat run`
     window whenever it has pending changes (it always does: nothing consumes its window), may depend on releasable
-    packages — including through a permanent local link — and is refused as a provider to any releasable package
+    packages (including through a permanent local link) and is refused as a provider to any releasable package
     at config load. Also: the graph's script-only line, an inert `Release-As` reported as W238, inert release-only
     settings, and explicit `--package` selection answered out loud.
 35. **Spaces spanning several folders** (`spacepaths_test.go`): the list form of a space's `path`. Discovery and
@@ -194,14 +194,14 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
 ### Composing the configuration, and choosing what records
 
 32. **References naming several files** (`multiref_test.go`): a `$ref` may name a list of files, read in order and
-    merged — objects key by key with the later file winning, lists end to end. What a split configuration must keep:
+    merged: objects key by key with the later file winning, lists end to end. What a split configuration must keep:
     every fragment on the traced record, environment variable case through the merge, the keys beside the reference
     outranking every file it named, and record lines from two fragments arriving as one list in order. The refusals
     are configuration errors, so they stop the run before a tag, a commit or a script: no files at all, a name that is
     not a file, files holding different kinds, a missing file, and a cycle closed by any of them. `compute --write`
     refuses a key merged from several files rather than choosing one to write to.
 33. **The channels a record reaches** (`channels_test.go`): `changelog.channels` and `github.channels` choose which
-    releases are recorded at all — the stable line, one named prerelease channel, or every prerelease — while the
+    releases are recorded at all (the stable line, one named prerelease channel, or every prerelease) while the
     releases themselves are still planned, tagged and published. A line inside an entry carries its own `channels`, so
     one footer says one thing on the betas and another on the stable release, with the sections between them
     unfiltered. The claims that keep it honest: a line's channels combine with its package filters, two policies
@@ -955,14 +955,14 @@ control.
 ### Goal 32: references naming several files (`multiref_test.go`)
 
 `$ref` is a shape the typed model deliberately cannot express, so these configs go through `WriteConfigRaw` on top of
-`rawSplitConfig()` — the raw spelling of `harness.BaseFile` plus the canonical one-space flow — exactly as the
+`rawSplitConfig()`, the raw spelling of `harness.BaseFile` plus the canonical one-space flow, exactly as the
 single-file reference scenarios in goal 10 do.
 
 | Test                                        | Claim proven                                                                                                                                                                                                       |
 |---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestMultiRefMergesObjectFragments`         | A shared fragment and the file that adjusts it become one object: the later file wins the key it shares, the key only the first file wrote survives, the merged script actually runs, and every file read is on the traced record. |
 | `TestMultiRefConcatenatesLineFragments`     | The case the feature exists for: a common block of record lines and the lines a repository adds arrive as one list, in the order the files are named, across two formats, and a merged line keeps the package filter it was written with. |
-| `TestMultiRefSiblingOverrideAndEnvCase`     | The keys beside a reference outrank every file it named, and an environment variable merged out of two fragments reaches a script spelled as its file spelled it — the thing a merge could plausibly lose, since the loader hands viper a lowercased copy of the tree. |
+| `TestMultiRefSiblingOverrideAndEnvCase`     | The keys beside a reference outrank every file it named, and an environment variable merged out of two fragments reaches a script spelled as its file spelled it, the thing a merge could plausibly lose, since the loader hands viper a lowercased copy of the tree. |
 | `TestMultiRefRefusals`                      | No files at all, a name that is not a file, files holding different kinds, and a missing file are each a configuration error that stops the run before a tag, a commit or a script.                                |
 | `TestMultiRefCycleNamesThePath`             | Every file a reference names is followed on its own, so a cycle closed by the second of them is refused naming the file that closed it, with nothing released.                                                      |
 | `TestMultiRefComputeWriteRefuses`           | A key merged from several files is held by no one of them, so `compute --write` refuses, names the ways out and leaves every file and backup exactly as it found them; a list naming one file is written through as the plain reference it is. |
@@ -978,7 +978,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestChannelsFilterRecordLines`          | A line carries its own channels, so one configured footer says one thing on the betas and another on the stable release, while the sections between the lines stay whatever the release carries; the GitHub body agrees with the changelog entry, since one entry format has one answer wherever it is rendered. |
 | `TestChannelsCombineWithPackageFilters`  | Channels is one filter among the others: a line naming a package and a channel is written only where both hold.                                                                                                     |
 | `TestChannelsKeepReleasersApart`         | Two packages whose GitHub policies differ only in a line's channels do not share a releaser, which is what keeps one package's entry format from rendering the other's body.                                        |
-| `TestChannelsValidationRefusals`         | A restriction naming nothing is refused where it is written, on a line and on the object alike, as is a file title that varied by channel — it is written once and matched on the next release. Nothing runs.       |
+| `TestChannelsValidationRefusals`         | A restriction naming nothing is refused where it is written, on a line and on the object alike, as is a file title that varied by channel: it is written once and matched on the next release. Nothing runs.       |
 | `TestChannelsPreviewShowsBothBodies`     | `dispat preview --changelog --github` prints both bodies under one header, labelled, each under its own entry format; a record the channels hold back says so instead of showing a body nothing would receive; and naming the changelog prints exactly what naming nothing prints. |
 | `TestChannelsAreReportedInTheSkipEvent`  | The skip is an info-level event carrying the package, the tag and the channel, so a flow can tell "held back by configuration" from "failed" without reading prose, while the release itself is still tagged.       |
 
@@ -986,7 +986,7 @@ claim, and a single run makes it without depending on anything between runs.
 
 | Test                                        | Claim proven                                                                                                                                                                                                     |
 |---------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `TestVersioningNoneLifecycle`               | A change touching a releasable and a none space releases only the former; the none package gets no tag and no changelog, its graph line reads script-only with no version transition, and a converged second run reports it script-only again with no catch-up noise — the state is permanent, not pending. |
+| `TestVersioningNoneLifecycle`               | A change touching a releasable and a none space releases only the former; the none package gets no tag and no changelog, its graph line reads script-only with no version transition, and a converged second run reports it script-only again with no catch-up noise: the state is permanent, not pending. |
 | `TestVersioningNoneRunDefaultWindow`        | The default `dispat run` window is the release plan plus every changed none package: the none package runs scripts while nothing is releasing and an unchanged released package does not, and a fresh change brings the releasable one back while the none one never left. |
 | `TestVersioningNoneProviderEdgeRejected`    | A releasable consumer of a none provider fails the config load, with the error naming the declaration that carries the edge (the root list and a space's own object produce different labels); a none consumer of anything, and a none-to-none edge, load and release normally. |
 | `TestVersioningNoneConsumerWithLocalLink`   | The state none packages exist for: `--link-local` over a none-only selection writes the link without the "must be removed before publishing" warning, the linked provider keeps releasing, and a `{version}` placeholder naming the none package is refused instead of expanding. |
@@ -1001,7 +1001,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestSpacePathsMultiFolderLifecycle`    | Packages under every listed folder belong to the space: one release tags both, the login runs once and in the first folder, `exec --in space:` resolves the first folder, and a second run converges.               |
 | `TestSpacePathsSpaceFilesMergeInOrder`  | Every listed folder's space config file loads; a later file overrides an earlier one's env value, and a dependency edge declared in either file reaches the plan graph.                                             |
 | `TestSpacePathsRefusals`                | A folder listed twice and folders nesting one another are refused at load, each with its own message.                                                                                                               |
-| `TestSpacePathsAscentFromSecondPath`    | Config-file resolution from inside a later folder finds the monorepo root even when that folder's space file carries a `packages` map — the shape that would otherwise read as a nested monorepo root.               |
+| `TestSpacePathsAscentFromSecondPath`    | Config-file resolution from inside a later folder finds the monorepo root even when that folder's space file carries a `packages` map, the shape that would otherwise read as a nested monorepo root.               |
 | `TestSpacePathsFilterAndLocate`         | `--space` covers every folder's packages; standing in a later folder infers the space, and standing inside one of its packages narrows to that package.                                                             |
 | `TestSpacePathsNoneCombined`            | A versioning-none space spanning two folders runs scripts under both and never tags anything, while the releasable space next to it releases normally.                                                              |
 
@@ -1019,7 +1019,7 @@ prerelease train, and the defined freedom of per-member tag spellings.
 | `TestVersionGroupPrereleaseTrain`           | A prerelease train runs across the whole declared group with one shared counter; graduation lands every member on the same stable version; divergent member channels while the group moves are W236.                 |
 | `TestVersionGroupRefusesNone`               | A declared group with versioning `none` is refused through the binary with the loader's own message, not just in config unit tests.                                                                                  |
 | `TestGroupFilterPartialMode`                | `--group` under `fixedMajor` selects the whole group, and the partial mode keeps meaning what it means inside the selection: a breaking change moves every member, a minor releases its member alone.                |
-| `TestVersionGroupDivergentTagFormats`       | A group shares the version, not its spelling: each member renders the shared version through its own `tagFormat`, with no diagnostic beyond the ride's own W234 — defined behavior, locked in.                       |
+| `TestVersionGroupDivergentTagFormats`       | A group shares the version, not its spelling: each member renders the shared version through its own `tagFormat`, with no diagnostic beyond the ride's own W234: defined behavior, locked in.                       |
 
 ## Regression fences
 

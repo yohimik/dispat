@@ -43,9 +43,9 @@ go test ./... -count 5           # stability check: repeated runs pass
 Nothing about how this suite is doing is written down here, because it would be a claim rather than a measurement.
 Every release runs the whole thing and publishes what it found with the site it releases:
 
-- **[test results](https://yohimik.github.io/dispat/internals/test-results)** — the counts, the timings, the race
+- **[test results](https://yohimik.github.io/dispat/internals/test-results)**: the counts, the timings, the race
   pass, and what each test file covers;
-- **[test coverage](https://yohimik.github.io/dispat/internals/coverage)** — the statements the whole workspace's
+- **[test coverage](https://yohimik.github.io/dispat/internals/coverage)**: the statements the whole workspace's
   tests reach, per package, this suite's instrumented binary included.
 
 The claim-by-claim matrix stays here, in the [test plan](./docs/test-plan.md), because it belongs beside the tests it

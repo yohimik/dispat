@@ -41,7 +41,7 @@ go run github.com/yohimik/dispat/tools/testreport test <log-name> -- <go test ar
 ```
 
 It runs the tests with `-json`, keeps the stream as `coverage/testlog/<log-name>.json`, and prints a human summary in
-its place — with the full output of anything that failed, so nothing is lost to the machine format. The exit status is
+its place, with the full output of anything that failed, so nothing is lost to the machine format. The exit status is
 the test run's own. The log name is the report's id for that invocation and is chosen to match the coverage profile
 the same invocation writes (`ccme`, `dispat`, `integration`); a name ending in `-race` marks the race-detector pass.
 
