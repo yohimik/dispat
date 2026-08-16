@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/manifest/v1.0.0-rc.10 (2026-08-16)
+
+### Features
+
+- manifest reading settles for the stable line
+
+
 ## pkg/manifest/v1.0.0-rc.9 (2026-08-16)
 
 No changes: a version bump to keep the versioning group on one version.
