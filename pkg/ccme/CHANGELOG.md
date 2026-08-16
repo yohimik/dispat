@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/ccme/v1.0.0-rc.10 (2026-08-16)
+
+### Features
+
+- the commit message engine reaches its stable surface
+
+
 ## pkg/ccme/v1.0.0-rc.9 (2026-08-16)
 
 ### Fixes
