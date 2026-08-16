@@ -189,74 +189,10 @@ func TestOverridesDispatexclude(t *testing.T) {
 		"the ignored folder's name is an unknown scope, like any non-package")
 }
 
-// TestOverridesVersionGroupSpansSpaces: a declared versionGroups group joined
-// by two spaces versions as one — a change in one space rides the other
-// space's package to the same version (W234) — and converges once aligned.
-func TestOverridesVersionGroupSpansSpaces(t *testing.T) {
-	r := harness.New(t)
-	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
-	cfg.VersionGroups = map[string]models.VersionGroupConfig{
-		"platform": {Versioning: models.VersioningFixed},
-	}
-	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), VersionGroup: "platform"},
-		"svc":  {Path: models.PathList{"services"}, Flow: buildPublish(), VersionGroup: "platform"},
-	}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "lib1")
-	r.SeedPackage("services", "app1")
-	r.Commit("feat(lib1): moves the whole group")
-
-	res := r.ReleaseOK()
-
-	assert.True(t, r.HasTag("lib1@0.1.0"))
-	assert.True(t, r.HasTag("app1@0.1.0"), "the other space's member rides to the group version: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
-		"the ride must be explained by W234")
-
-	// Convergence: aligned members release nothing on a second run.
-	r.ReleaseOK()
-	assert.Len(t, r.TagList(), 2)
-}
-
-// TestOverridesVersionGroupSharesOnlyTheMajor: a declared group may share a
-// part of the version rather than all of it. The same two spaces under
-// fixedMajor keep their own minors and patches, and come together only when a
-// breaking change reaches the part they do share.
-func TestOverridesVersionGroupSharesOnlyTheMajor(t *testing.T) {
-	r := harness.New(t)
-	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
-	cfg.VersionGroups = map[string]models.VersionGroupConfig{
-		"platform": {Versioning: models.VersioningFixedMajor},
-	}
-	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), VersionGroup: "platform"},
-		"svc":  {Path: models.PathList{"services"}, Flow: buildPublish(), VersionGroup: "platform"},
-	}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "lib1")
-	r.SeedPackage("services", "app1")
-
-	// A minor is below the shared major: it stays inside its own space.
-	r.Commit("feat(lib1): a minor of lib1's own")
-	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
-	assert.Zero(t, r.TagCount("app1@"), "a minor must not cross the group; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride below the shared major")
-
-	// A breaking change reaches the shared major and moves both spaces.
-	r.CommitEmpty("feat(lib1)!: a breaking change")
-	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@1.0.0"),
-		"the other space's member joins the shared major; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"))
-
-	r.ReleaseOK()
-	assert.Len(t, r.TagList(), 3, "converged")
-}
+// The declared-version-group scenarios that used to sit here duplicated the
+// versiongroups file's fixture and claims verbatim; the group lifecycle in
+// all its modes lives in versiongroups_test.go now, and this file keeps to
+// what the override ladder itself decides.
 
 // TestOverridesPerPackageRecords: the record policies resolve per package —
 // one package writes its changelog under an overridden file name while its

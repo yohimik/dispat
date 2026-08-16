@@ -53,11 +53,20 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     surface through the binary; and a `none` space spanning two folders runs scripts in both without ever
     tagging. Per-folder `.dispatexclude` and the package-name collision across folders are pinned by unit tests
     in `internal/config`.
-36. **Declared version groups across spaces** (`versiongroups_test.go`): the sparse and partial-sparse modes as
-    declared cross-space groups, the override ladder detaching a member that sets its own `versioning`, a shared
-    prerelease train with one counter and a W236 channel conflict, the versioning-`none` refusal through the
-    binary, `--group` selection under a partial mode, and divergent per-member `tagFormat` as defined behavior:
-    one shared version, each member spelling its tag its own way.
+36. **Declared version groups across spaces** (`versiongroups_test.go`): the full and partial lifecycles, the
+    sparse and partial-sparse modes as declared cross-space groups, the override ladder detaching a member that
+    sets its own `versioning`, a shared prerelease train with one counter and a W236 channel conflict, what exact
+    pins do to a group mid-train and to a sparse member, the mixed-depth resolution (W237) along a train, the
+    polyglot script-only member, the versioning-`none` refusal through the binary, `--group` selection under a
+    partial mode, and divergent per-member `tagFormat` as defined behavior: one shared version, each member
+    spelling its tag its own way.
+38. **The longitudinal fence** (`longitudinal_test.go`): one repository modelled on dispat's own shape — a
+    declared group across two spaces, a wired publish leg, a caret provider, alias tags, a remote and the GitHub
+    recorder — released through a whole rc-train lifecycle with every record and every status line asserted at
+    every step. The fence over the train-wide-versus-fresh seam that produced the pre-1.0.0 planner bugs.
+39. **A record entry is never empty** (`entrybodies_test.go`): the release shapes with nothing for their notes to
+    group — a pin, a channel transition, work its reverts cancel out — each state their cause in the changelog
+    entry and the GitHub body instead of rendering an empty record.
 
 ### Scheduling and execution
 
@@ -336,6 +345,10 @@ tests/integration/
   multiref_test.go          goal 32
   channels_test.go          goal 33
 
+  the sequences
+  longitudinal_test.go      goal 38
+  entrybodies_test.go       goal 39
+
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
                             can own)
@@ -380,6 +393,7 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestPlanExactPinGuards`                                  | E153 (not greater), E157 (major jump > 1), E154 (multi-package pin), each in an isolated repo so a rejected pin cannot collide with earlier tags.                                                                                                           |
 | `TestPlanRejectedPinFallsBackToTheComputedBump`           | A rejected pin has §16's unit-scoped blast radius: E156 fires, the bad unit contributes nothing, and the sibling `feat` still releases at its computed 0.1.0 (a regression fence; see Regression fences).                                                   |
 | `TestPlanConsumerFailureCatchesUpAfterProviderPublished`  | Consumer fails while provider publishes; the next run catches the consumer up at the owed version, labelled W193, provider not re-released; a third run converges.                                                                                          |
+| `TestPlanTrainCatchUpStaysACatchUp`                       | The same discharge on a prerelease train: the consumer's own feature is published train history, its whole fresh cause is the provider's already-published propagation, and W193 plus the catch-up verdict and reason survive the train-wide own bump.       |
 | `TestPlanProviderBuildFailureBlocksConsumerThenHeals`     | Provider fails to build; consumer is blocked (W194), never attempted; after the fix both release in one run, with neither W194 nor W193.                                                                                                                    |
 | `TestPlanCatchUpWholeHistoryForNeverReleasedConsumer`     | A package created *after* a provider's propagating commit still catches up on its first ever run; an untagged package's window is the whole history.                                                                                                        |
 | `TestPlanPrereleaseTrainWeirdCases`                       | `^%beta` cannot drag a stable consumer (W208); `^%beta++1` brings it onto the train; a multi-package direct transition graduates the whole train; the graduated train converges.                                                                            |
@@ -393,12 +407,11 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestVersioningFixedSpaceLifecycle`                  | Four runs over a fixed space next to an independent one: a change to either member releases both at one version (W234 on the rider, "no changes" changelog entry, no leaked notes), quiet runs converge, and the independent space never moves with any of it.            |
 | `TestVersioningFixedSparseLifecycle`                 | Sparse across four runs: only changed members release (no W234), an unchanged member keeps its version, its first change jumps it to the space version, and a joint change lands both on one shared next version.                                                         |
 | `TestVersioningFixedSharedPrereleaseTrain`           | A fixed space runs a *single* train: one member's `%beta` takes the whole space to `beta.0`, later work continues it to `beta.1` for both, one member's graduation ends it for both, and the graduated space converges.                                                   |
-| `TestVersioningFixedRideFailureThenAlignmentCatchUp` | A ride can fail like any release: the changed member publishes, the rider fails, and the next run aligns the rider at exactly the space's published version (W234) without re-releasing anyone; a third run converges.                                                    |
-| `TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain` | The same catch-up while the group is mid-prerelease-train, where a shared version, a train and a failed leg meet. The laggard joins the train at the position it was owed rather than jumping to a stable core the group never published, and the later graduation carries it off the train with everyone else, which is what proves it was on it. |
+| `TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain` | A ride can fail like any release, and this walks the catch-up where a shared version, a train and a failed leg meet: the changed member continues the train, the failed rider is not tagged, the healing run joins the laggard to the train at the position it was owed rather than jumping to a stable core the group never published, and the later graduation carries it off the train with everyone else, which is what proves it was on it. (The plain stable-line failure-then-alignment is runs 2-3 of this walk with the train stripped away; the selection-induced stable ride keeps its own fence in goal 20.) |
 | `TestVersioningCrossSpaceDependencyIntoFixedSpace`   | A caret from an independent provider into one fixed-space member: the member gets an ordinary DueTo release (version task, `DISPAT_UPDATED_*`), its space mate rides to the same version with no version task; edges stay package-scoped where versions are space-scoped. |
 | `TestVersioningFixedHoldAndResume`                   | `Release-As: none` on one member keeps only it back; the resume aligns it to the space's published version.                                                                                                                                                               |
 | `TestVersioningFixedExactPinMovesTheSpace`           | An exact pin naming one member moves the whole space to the pinned version; the pin guards (E153) keep applying to the shared version afterwards.                                                                                                                         |
-| `TestVersioningFixedSpaceExecutesEveryMemberScript`  | A ride is a full release at the execution level: build scripts run for the rider too.                                                                                                                                                                                     |
+| `TestVersioningRideExecutesEveryMemberScript`        | A ride is a full release at the execution level, under the full mode and the partial ones alike: build scripts run for the rider too.                                                                                                                                      |
 | `TestVersioningFixedConflictResolutions`             | The two fixed-space conflict warnings: competing exact pins resolve to the newest with W235 (the loser must not also release), and members resolving to different channels release as one channel with W236.                                                              |
 | `TestVersioningFixedMajorLifecycle`                  | Six runs over a `fixedMajor` space: a patch and a minor each move only their own package (no W234), a breaking change moves the whole group to one major with a ride whose changelog entry reads "on one major version" and carries no leaked notes, the group converges, and it diverges again below the major.  |
 | `TestVersioningFixedMajorSparseLifecycle`            | The sparse variant: the unchanged member never rides across a major bump (no W234), and its own next change joins it to the shared major at the start of its own line (`1.0.0`, not a continuation of `0.x`).                                                             |
@@ -408,7 +421,6 @@ ms) one to two orders of magnitude above process-launch jitter. The suite passes
 | `TestVersioningFixedMajorSharedTrain`                | A train belongs to whatever it moves: a breaking change on `%beta` takes the whole group to `beta.0`, later work continues it to `beta.1` for both, one member's graduation ends it for both, and a `%beta` on a *patch* afterwards stays inside the package that started it. |
 | `TestVersioningPartialPinScope`                      | An exact `Release-As` crossing the shared major moves the whole group; one inside the major releases its own package alone, collects no group-level guard (no E153) and drags nobody along.                                                                               |
 | `TestVersioningFixedMajorRideFailureThenAlignment`   | A partial-mode ride fails like any release, and the next run catches the laggard up to the group's shared major (W234) at the start of its own line, without re-releasing anyone; a further run converges.                                                                |
-| `TestVersioningPartialRideExecutesEveryMemberScript` | A ride under a partial mode is a full release at the execution level too: both members build.                                                                                                                                                                            |
 | `TestVersioningMixedDepthGroupUsesTheDeepest`        | A package overriding its space's `versioning` stays in the space's group with a different depth: the group versions at the deepest declaration (so the minor is shared) and W237 explains the sharing the shallower member never asked for.                               |
 
 ### Goal 3: repository-scoped fatal errors (`fatal_test.go`)
@@ -559,8 +571,6 @@ version only one versioning mode computes, a file only one `revertOnFail` settin
 | `TestOverridesFlowScriptSuppliedByEveryPackage` | A space's flow entry may name a script only its packages define, and the release runs each package's own; removing one package's entry fails the config with an error naming that package.                       |
 | `TestOverridesInFolderFileWins`              | The package folder's own dispat.json is the most local layer: its `tagFormat` beats the `packages` entry's, proven by the tag the release actually creates, while the sibling keeps the repository default.         |
 | `TestOverridesDispatexclude`                 | A folder listed in `.dispatexclude` is not a package: never released, and a commit scoping it draws the unknown-scope diagnostic (E130) like any non-package name.                                                   |
-| `TestOverridesVersionGroupSpansSpaces`       | A declared `versionGroups` group joined by two spaces versions as one: a change in one space rides the other space's package to the same version (W234 on the rider), and aligned members converge on the next run. |
-| `TestOverridesVersionGroupSharesOnlyTheMajor` | The same two spaces under a `fixedMajor` declaration: a minor stays inside its own space, and only a breaking change brings both spaces to one major (W234 on the rider), converging afterwards. |
 | `TestOverridesPerPackageRecords`             | Record policies resolve per package: one package writes its changelog under an overridden file name, its sibling disables both records, and the GitHub fake receives exactly the enabled package's release.         |
 | `TestOverridesPackageConcurrencyWeight`      | A package whose `concurrency` equals the build budget occupies it whole: its build overlaps no other build on the tsmark timeline while the ordinary packages stay free to overlap each other.                      |
 | `TestOverridesRunShorthandFromPackageFolder` | The config ascent walks past the package's own (spaces-less) override file to the monorepo root, so the run shorthand keeps working from inside a package folder that carries one.                                  |
@@ -952,6 +962,9 @@ control.
 | `TestRevertTakesBothEntriesOutOfTheChangelog`           | The revert trap and its changelog half together: the bump keeps the reverted commit's major, because consumers may have seen it already, while the changelog loses both entries because the release contains neither the change nor its removal (W212). The run converges. |
 | `TestRevertWithAnUnreachableTargetStaysInformational`   | The two degraded forms: a well-formed sha naming no reachable commit is W213 and the revert releases and is documented as usual, and a value that is not a sha at all is the parser's W214 with no second code from dispat.                        |
 | `TestRevertSuppressionIsVoidedByACorrectionThroughTheBinary`            | Discarding a revert's record voids its changelog suppression, so the entry it hid returns and there is no W212 left to report. The §7.4 voiding rule applied to §7.3.                                                                              |
+| `TestCorrectionEditOfPublishedTrainWorkIsANoOp`         | On a train "published" means "shipped by any prerelease": editing a unit `beta.0` carried is the same visible no-op as editing stable history (W209), the carrying fix still releases the next train step, and the shipped record is not re-rendered.  |
+| `TestCorrectionDeleteStopsATrainAdvance`                | A versioning group rides only while a record survives, mid-train too: discarding the only fresh cause leaves the train exactly where the last prerelease put it — no member releases, no W234, no counter movement.                                   |
+| `TestRevertPairOnATrainRendersCancelLine`               | A feature and its revert inside one train step: both leave the notes (W212) while both still count toward the train's target (§7.3), and the prerelease's entry says the work cancelled out instead of rendering an empty body.                       |
 
 ### Goal 32: references naming several files (`multiref_test.go`)
 
@@ -1008,9 +1021,9 @@ claim, and a single run makes it without depending on anything between runs.
 
 ### Goal 36: declared version groups across spaces (`versiongroups_test.go`)
 
-Goal 13 pins the declared-group lifecycles under `fixed` and `fixedMajor` (in `overrides_test.go`); this goal covers
-the sparse and partial-sparse modes across spaces, the group-membership edges of the override ladder, a shared
-prerelease train, and the defined freedom of per-member tag spellings.
+Everything a declared `versionGroups` group does across two spaces lives here: the full and partial lifecycles, the
+sparse modes, the group-membership edges of the override ladder, the shared prerelease train and what pins do to it,
+the polyglot script-only member, and the defined freedom of per-member tag spellings.
 
 | Test                                        | Claim proven                                                                                                                                                                                                        |
 |---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1019,8 +1032,12 @@ prerelease train, and the defined freedom of per-member tag spellings.
 | `TestVersionGroupMemberOverrideLeavesTheGroup` | Versioning and versionGroup are one ladder axis: a package-level `versioning` on a declared group's member supersedes the membership its space joined, so the package versions on its own line instead of riding. |
 | `TestVersionGroupPrereleaseTrain`           | A prerelease train runs across the whole declared group with one shared counter; graduation lands every member on the same stable version; divergent member channels while the group moves are W236.                 |
 | `TestVersionGroupRefusesNone`               | A declared group with versioning `none` is refused through the binary with the loader's own message, not just in config unit tests.                                                                                  |
-| `TestGroupFilterPartialMode`                | `--group` under `fixedMajor` selects the whole group, and the partial mode keeps meaning what it means inside the selection: a breaking change moves every member, a minor releases its member alone.                |
-| `TestVersionGroupDivergentTagFormats`       | A group shares the version, not its spelling: each member renders the shared version through its own `tagFormat`, with no diagnostic beyond the ride's own W234: defined behavior, locked in.                       |
+| `TestGroupFilterPartialMode`                | `--group` under `fixedMajor` selects the whole group, and the partial mode keeps meaning what it means inside the selection: a breaking change moves every member (W234 on the rider), a minor releases its member alone with no ride to explain, and the aligned group converges. |
+| `TestVersionGroupDivergentTagFormats`       | A group shares the version, not its spelling: each member renders the shared version through its own `tagFormat`, with no diagnostic beyond the ride's own W234 — on the stable line and along a whole train, each member reading its baselines back out of its own spelling. |
+| `TestVersionGroupExactPinMidTrain`          | An exact pin naming one member mid-train moves the whole group onto the pinned version. The naive graduation afterwards is E185 (the pin lives in the baseline tag, not the window) and nothing releases; pinning the graduation lands every member where the pin put the train, and the group converges. |
+| `TestVersionGroupSparseMemberPin`           | Under a sparse mode a pin moves the shared version without back-filling: the untouched member stays put, and its next change joins above the pin, skipping everything it sat out.                                    |
+| `TestVersionGroupNoneMemberIsScriptOnly`    | The polyglot shape: a `versioning: none` override on a package inside a group-joined space makes it script-only — never tagged, the group moves without it, the graph names it, and its work still runs through the run window. |
+| `TestVersionGroupMixedDepthTrain`           | Mixed shared depth (a member's `fixedMajorMinor` inside a `fixedMajor` space, the implicit-group shape) resolves to the deepest declaration with W237, and the resolution holds along a whole train: one shared counter, one graduation. |
 
 ### Goal 37: step commands wired into a running release (`stepwiring_test.go`)
 
@@ -1031,6 +1048,33 @@ prerelease train, and the defined freedom of per-member tag spellings.
 | `TestStepsDuplicatedCollapseIntoSkips` | A flow listing the record steps twice produces one record set: the second pass is W226/W223 skips, one changelog entry, one tag.                                                                                     |
 | `TestStepsWiredRecordTheRunsDependencies` | A wired record's dependencies section states the run's provider movements. The consumer's changelog step replans after the provider's tag landed and after their shared fixed group would read that tag as a floor; the masked replan reproduces the run (no W228), and the entry names the movement the run actually made, not a version it never released. |
 | `TestStepsGithubBeforeCommitWarns`  | A github step ordered before the commit step is the W229 smell, said before anything is created; one release is created at the run's tag, and the correctly placed second github step finds it and skips (W224).       |
+
+### Goal 38: the longitudinal fence (`longitudinal_test.go`)
+
+One repository modelled on dispat's own shape — a declared version group spanning two spaces, one member publishing
+through wired step commands, a caret provider outside the group, alias tags, a bare remote and the GitHub recorder —
+released through a whole prerelease-train lifecycle: stable baseline, `rc.0`, `rc.1`, `rc.2`, graduation, convergence.
+Every step asserts the durable records (tags, each changelog entry cut out and inspected on its own, each GitHub body)
+and the reported plan (graph verdicts, reasons, `ownCommits`, diagnostics), because the planner bugs that shipped
+before 1.0.0 all lived on the seam between train-wide accounting and fresh-changeset reporting, and only a sequence
+exercises that seam: a single release cannot tell the train's history from its changeset.
+
+| Test                                  | Claim proven                                                                                                                                                                                                              |
+|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestLongitudinalGroupTrainLifecycle` | The whole walk. Along the way: `ownCommits` counts the fresh changeset (through `status` itself, mid-train); a rider's entry is the ride line at every step it has no cause, and the dependencies section when a provider moved; `rc.1` does not repeat `rc.0`'s notes; the graduation's one entry collects the train's features, fixes *and* provider movement; the prerelease flag follows the channel on every GitHub release and no body is empty; the moving alias ignores the train and follows the graduation; the wired records never drift (no W228/E219) and nothing is ever a catch-up (no W193). |
+
+### Goal 39: a record entry is never empty (`entrybodies_test.go`)
+
+Three release shapes are admitted to the plan with nothing for their notes to group; each must state its cause in the
+changelog entry and the GitHub body alike, because an empty record reads as a broken write rather than a deliberate
+one. (The fourth no-content shape, the group ride, is asserted throughout goals 14, 36 and 38; the train-side revert
+pair is goal 31's `TestRevertPairOnATrainRendersCancelLine`.)
+
+| Test                                    | Claim proven                                                                                                                             |
+|-----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `TestEntryBodyOfAPinOnlyRelease`        | An exact `Release-As` with no pending bump releases with "No changes: a version set by Release-As." in both records.                     |
+| `TestEntryBodyOfAChannelOnlyRelease`    | A channel-only release (W202, entry-patch W204) names its transition: "No changes: a channel transition, stable -> rc."                  |
+| `TestEntryBodyOfACancelledOutRelease`   | A feature and its revert releasing the owed bump (W212) render "No changes: the pending work and its reverts cancel out." — never empty. |
 
 ## Regression fences
 
@@ -1047,6 +1091,13 @@ produced a plausible-looking but wrong plan, so a regression fails exactly one c
    Guarded by `TestPlanPropagatedGraduationTransitionGraduatesTheTrain` (and unit tests in `internal/plan`). The failure
    mode being fenced: dependants left on the train (W200/W206) by the exact form the configuration page documents for
    ending one.
+3. **Train-wide accounting must never leak into fresh-changeset reporting, and the graduation must widen back.** The
+   planner's accounting fields (`Units`, `OwnBump`, the window) span the whole prerelease train by design; everything
+   user-facing — `ownCommits`, `Reason()`, the catch-up scan, the entry bodies — reads the fresh subset, except the
+   graduation's one entry, which collects the whole train (its provider movement included). Every shipped planner bug
+   before 1.0.0 sat on one side of this seam or the other. Guarded end to end by
+   `TestLongitudinalGroupTrainLifecycle` (goal 38) and `TestPlanTrainCatchUpStaysACatchUp` (goal 1), with the unit
+   halves in `internal/plan` and `internal/changelog`.
 
 ## Bug fences
 

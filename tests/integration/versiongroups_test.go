@@ -166,21 +166,28 @@ func TestVersionGroupRefusesNone(t *testing.T) {
 
 // TestGroupFilterPartialMode: --group under a partial mode selects the whole
 // group, and the partial mode keeps meaning what it means inside the
-// selection — a breaking change moves every member, a minor of one member
-// releases that member alone.
+// selection — a breaking change moves every member (a ride, W234), a minor of
+// one member releases that member alone with no ride to explain, and the
+// aligned group converges.
 func TestGroupFilterPartialMode(t *testing.T) {
 	r := seedGroupRepo(t, groupConfig(models.VersioningFixedMajor))
 	r.Commit("feat(lib1)!: a breaking change")
 
-	r.ReleaseOK("--group", "platform")
+	res := r.ReleaseOK("--group", "platform")
 	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("app1@1.0.0"), "the shared major moves both spaces; tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+		"the ride is explained: %s", res.Stdout)
 
 	r.CommitEmpty("feat(lib1): a minor of lib1's own")
-	r.ReleaseOK("--group", "platform")
+	res = r.ReleaseOK("--group", "platform")
 	assert.True(t, r.HasTag("lib1@1.1.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("app1@"),
 		"below the shared major the members stay independent, --group or not")
+	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride below the shared major")
+
+	r.ReleaseOK("--group", "platform")
+	assert.Len(t, r.TagList(), 3, "converged")
 }
 
 // TestVersionGroupDivergentTagFormats: a version group shares the version,

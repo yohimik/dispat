@@ -161,36 +161,12 @@ func TestVersioningFixedSharedPrereleaseTrain(t *testing.T) {
 	assert.Equal(t, before, len(r.TagList()), "the graduated space converges")
 }
 
-// TestVersioningFixedRideFailureThenAlignmentCatchUp: a ride is a real
-// release and can fail like one. The changed member publishes; the rider's
-// build fails; the next run must catch the rider up at exactly the space's
-// published version (the alignment half of the fixed invariant), and a third
-// run converges.
-func TestVersioningFixedRideFailureThenAlignmentCatchUp(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(spacesConfig(failIfMarker, map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
-	}))
-	r.SeedPackage("packages", "a")
-	r.SeedPackage("packages", "b")
-	r.WriteFile("packages/b/FAIL", "x")
-	r.Commit("feat(a): a changes, b's ride is about to fail")
-
-	res := r.Release()
-	require.Equal(t, 1, res.Code, "the failed ride must fail the run\nstdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("a@0.1.0"), "the changed member still publishes; tags: %v", r.TagList())
-	assert.Zero(t, r.TagCount("b@"), "the failed ride must not be tagged")
-
-	r.Remove("packages/b/FAIL")
-	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("b@0.1.0"),
-		"the laggard must align to the space's published version; tags: %v", r.TagList())
-	assert.Equal(t, 1, r.TagCount("a@"), "a must not be re-released by the catch-up")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
-
-	r.ReleaseOK()
-	assert.Equal(t, 2, len(r.TagList()), "aligned: nothing further to do")
-}
+// A ride is a real release and can fail like one; the stable-line variant of
+// that catch-up (fail the ride, heal at the published version, converge) is
+// subsumed by the mid-train walk below, whose runs 2-3 exercise the same
+// alignment machinery with the harder claim about what the laggard aligns
+// to. The selection-induced stable-line ride keeps its own fence in
+// filter_test.go.
 
 // TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain: the same catch-up
 // while the group is on a prerelease train, which is where the three features
@@ -338,21 +314,34 @@ func TestVersioningFixedExactPinMovesTheSpace(t *testing.T) {
 	assert.Equal(t, 1, r.TagCount("b@"))
 }
 
-// TestVersioningFixedSpaceExecutesEveryMemberScript: a ride is a full
-// release at the execution level too — build and publish scripts run for the
-// riding member, not only for the changed one. (The changelog is what
-// distinguishes the two, not the pipeline.)
-func TestVersioningFixedSpaceExecutesEveryMemberScript(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(spacesConfig(markerBuild, map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
-	}))
-	r.SeedPackage("packages", "a")
-	r.SeedPackage("packages", "b")
-	r.Commit("feat(a): only a changes")
+// TestVersioningRideExecutesEveryMemberScript: a ride is a full release at
+// the execution level too — build and publish scripts run for the riding
+// member, not only for the changed one, under the full mode and the partial
+// ones alike. (The changelog is what distinguishes the two, not the
+// pipeline.)
+func TestVersioningRideExecutesEveryMemberScript(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mode   string
+		commit string
+		tag    string
+	}{
+		"fixed":      {models.VersioningFixed, "feat(a): only a changes", "b@0.1.0"},
+		"fixedMajor": {models.VersioningFixedMajor, "feat(a)!: only a changes, and it breaks", "b@1.0.0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			r.WriteConfigModel(spacesConfig(markerBuild, map[string]models.SpaceConfig{
+				"libs": {Path: models.PathList{"packages"}, Versioning: tc.mode, Flow: buildPublish()},
+			}))
+			r.SeedPackage("packages", "a")
+			r.SeedPackage("packages", "b")
+			r.Commit(tc.commit)
 
-	r.ReleaseOK()
-	assert.Equal(t, 2, buildRuns(r), "both members build: the ride is a real release")
+			r.ReleaseOK()
+			assert.True(t, r.HasTag(tc.tag), "the ride shares the version; tags: %v", r.TagList())
+			assert.Equal(t, 2, buildRuns(r), "both members build: the ride is a real release")
+		})
+	}
 }
 
 // TestVersioningFixedConflictResolutions pins the two fixed-space conflict
@@ -778,23 +767,8 @@ func TestVersioningFixedMajorRideFailureThenAlignment(t *testing.T) {
 	assert.Equal(t, before, len(r.TagList()), "aligned: nothing further to do")
 }
 
-// TestVersioningPartialRideExecutesEveryMemberScript: a ride under a partial
-// mode is a full release at the execution level too, exactly as it is under
-// fixed — the changelog is what distinguishes the two, not the pipeline.
-func TestVersioningPartialRideExecutesEveryMemberScript(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(spacesConfig(markerBuild, map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixedMajor, Flow: buildPublish()},
-	}))
-	r.SeedPackage("packages", "a")
-	r.SeedPackage("packages", "b")
-	r.Commit("feat(a)!: only a changes, and it breaks")
-
-	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0"), "tags: %v", r.TagList())
-	assert.Equal(t, 2, buildRuns(r), "both members build: the ride is a real release")
-}
+// (The partial-mode ride's script execution is covered beside the full
+// mode's, in TestVersioningRideExecutesEveryMemberScript above.)
 
 // TestVersioningMixedDepthGroupUsesTheDeepest: a package may override its
 // space's versioning without leaving the space's group, which is how one
