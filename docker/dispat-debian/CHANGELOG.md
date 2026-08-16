@@ -1,5 +1,11 @@
 # Changelog
 
+## docker/dispat-debian/v1.0.0-rc.18 (2026-08-16)
+
+### Dependencies
+
+- dispat: 1.0.0-rc.17 -> 1.0.0-rc.18
+
 ## docker/dispat-debian/v1.0.0-rc.17 (2026-08-16)
 
 ### Dependencies
