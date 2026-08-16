@@ -1,5 +1,14 @@
 # Getting started
 
+:::info dispat 1.0.0 is out
+
+The first stable release, cut by dispat itself in one run: eleven packages together. The CLI with six static
+binaries (Linux, macOS and Windows, on amd64 and arm64), five Go modules (`ccme`, `manifest`, `models`, `scanner`,
+`writer`), four Docker images (`alpine`, `debian`, `dind`, `ubuntu`) and this documentation site, each with its own
+tag, changelog entry and GitHub release, plus the moving `v1` alias for consumers that pin the major.
+
+:::
+
 Set up monorepo release automation in four steps: install the binary, write one config file, name packages in your
 commits, and wire the release into CI. Nothing below assumes a particular language.
 
