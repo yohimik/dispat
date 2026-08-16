@@ -53,6 +53,15 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 	if err := a.alignStep(pl, env); err != nil {
 		return err
 	}
+	if env != nil {
+		// Ordering smell, said out loud before anything is created: a release
+		// for a tag nobody made yet has GitHub invent the tag at the default
+		// branch head — the wrong commit, looking plausible.
+		if exists, terr := a.git.TagExists(ctx, env.tag); terr == nil && !exists {
+			a.log.Warn().Str("code", plan.CodeStepBeforeTag).Str("tag", env.tag).
+				Msg("github step before the run's tag exists; the commit step belongs first")
+		}
+	}
 	covered, err := a.coveredPackages(ctx, pl, opts.Window)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot create the github release")

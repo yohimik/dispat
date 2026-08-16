@@ -61,7 +61,10 @@ own), leaves the run's own tag out of its baseline reading, and holds its record
 drifted anyway is corrected and reported as `W228`; a plan the step cannot align — the package missing from it, or the
 run's version rendering a different tag — is refused as `E219` with nothing written, because a failed leg re-runs where
 a drifted record does not. `dispat github` additionally reads its attachment list from `DISPAT_EXPORT_GITHUB`, whether
-an earlier stage exported it into the environment or the same script just appended it to `$DISPAT_OUTPUT`.
+an earlier stage exported it into the environment or the same script just appended it to `$DISPAT_OUTPUT` — and warns
+(`W229`) when it runs before the run's tag exists, because a release for a tag nobody made yet has GitHub invent the
+tag at the default branch head: put the commit step first. Running a step twice in one flow stays what it always was:
+the second pass finds the work done and skips it (W226/W223/W224).
 
 ## Choosing what a step covers
 

@@ -9,6 +9,9 @@ package integration
 // it through the compiled binary.
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -130,4 +133,109 @@ func TestStepsWiredSurviveAPartialRun(t *testing.T) {
 	assert.True(t, r.HasTag("web@0.1.0"), "the consumer catches up; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("core@"), "the provider is not re-released: %v", r.TagList())
 	assert.False(t, harness.HasCode(res.Events, "E219"))
+}
+
+// TestStepsDuplicatedCollapseIntoSkips: a flow that lists the record steps
+// twice must produce one record set. The second pass finds the entry written
+// (W226) and the tag created (W223) and touches nothing — the idempotence
+// that makes step-composed flows safe to over-specify.
+func TestStepsDuplicatedCollapseIntoSkips(t *testing.T) {
+	r := harness.New(t)
+	bin, _ := harness.Build(t)
+	r.AddBareRemote()
+
+	cfg := harness.BaseFile(1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true,
+		Name: "steps-test", Email: "steps@example.com"}
+	cfg.Scripts = map[string]models.Script{
+		"build":  {echoBuild},
+		"record": {bin + " changelog", bin + " commit --tag --push", bin + " changelog", bin + " commit --tag --push"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): begin")
+
+	res := r.ReleaseOK()
+
+	assert.Equal(t, 1, r.TagCount("core@"), "one tag, however many commit steps ran: %v", r.TagList())
+	assert.True(t, harness.HasCode(res.Events, "W226"), "the second changelog step is a skip")
+	assert.True(t, harness.HasCode(res.Events, "W223"), "the second commit step's tag is a skip")
+	changelog, err := os.ReadFile(r.Path("packages/core/CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(changelog), "## core@0.1.0"),
+		"one entry, however many changelog steps ran:\n%s", changelog)
+	assert.False(t, harness.HasCode(res.Events, "E219"))
+}
+
+// TestStepsGithubBeforeCommitWarns: a github step ordered before the commit
+// step asks for a release of a tag nobody created yet — GitHub would invent
+// the tag at the default branch head — so the misordering is W229, said
+// before anything is created. The correctly ordered github step in the same
+// flow fires no such warning and finds its tag in place.
+func TestStepsGithubBeforeCommitWarns(t *testing.T) {
+	var creates []string
+	released := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/releases/tags/") {
+			tag := req.URL.Path[strings.LastIndex(req.URL.Path, "/tags/")+len("/tags/"):]
+			if released[tag] {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id": 1, "assets": []}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/releases") {
+			var body struct {
+				TagName string `json:"tag_name"`
+			}
+			_ = json.NewDecoder(req.Body).Decode(&body)
+			creates = append(creates, body.TagName)
+			released[body.TagName] = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 1}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := harness.New(t)
+	bin, _ := harness.Build(t)
+	r.AddBareRemote()
+
+	cfg := harness.BaseFile(1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true,
+		Name: "steps-test", Email: "steps@example.com"}
+	cfg.GitHub = &models.GitHubConfig{Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN"}
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	cfg.Scripts = map[string]models.Script{
+		"build": {echoBuild},
+		// Deliberately misordered: github before changelog and commit.
+		"record": {bin + " github", bin + " changelog", bin + " commit --tag --push", bin + " github"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): begin")
+
+	res := r.ReleaseOK()
+
+	// The steps' own events arrive nested inside the leg's log lines, so the
+	// codes are matched in the raw stream rather than as top-level events.
+	assert.Contains(t, res.Stdout, "W229",
+		"the github step before the commit step is a named smell")
+	assert.Contains(t, res.Stdout, "W224",
+		"the correctly placed second github step finds the release created and skips")
+	assert.Equal(t, []string{"core@0.1.0"}, creates, "one release created, at the run's tag")
+	assert.True(t, r.HasTag("core@0.1.0"))
 }

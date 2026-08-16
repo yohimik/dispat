@@ -299,6 +299,13 @@ const (
 	// than the run's. Nothing is written — a refusal here is a failed leg the
 	// operator re-runs, where a drifted record would be an incident.
 	CodeStepUnalignable = "E219"
+	// CodeStepBeforeTag marks a wired `dispat github` running before the
+	// run's tag exists: asked to release a tag nobody created, GitHub invents
+	// it at the default branch head — a plausible-looking release pinned to
+	// the wrong commit. The step proceeds (the flow may create the tag
+	// another way), but the ordering smell is said out loud: the commit step
+	// belongs before the github step.
+	CodeStepBeforeTag = "W229"
 
 	// --- releasing part of the graph (see narrow.go) ---
 	//

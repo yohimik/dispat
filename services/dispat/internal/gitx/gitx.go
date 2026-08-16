@@ -761,6 +761,19 @@ func (c *CLI) DeleteRemoteTag(ctx context.Context, remote, name string) error {
 	return err
 }
 
+// TagExists reports whether the named tag exists in this repository.
+func (c *CLI) TagExists(ctx context.Context, name string) (bool, error) {
+	_, err := c.run(ctx, "rev-parse", "-q", "--verify", "refs/tags/"+name)
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // RemoteTagMessage reads an annotated tag's message from the remote without
 // touching this clone's refs: the fetch lands the object in FETCH_HEAD only.
 // A lightweight tag has no message and comes back empty.
