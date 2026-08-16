@@ -13,3 +13,8 @@ require (
 	github.com/yohimik/dispat/pkg/manifest v1.0.0-rc.3
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )
+
+// The proxy and the checksum database hold a different copy of this version,
+// cached from a run that was rolled back before the tag was recreated; a
+// proxy-mediated fetch of it either fails verification or serves the old bytes.
+retract v1.0.0-rc.3
