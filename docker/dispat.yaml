@@ -30,7 +30,13 @@ scripts:
     fi
     docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
   tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q
-  push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml push
+  # `build --push`, not `push`: the images build multi-platform, and a
+  # multi-platform result lives in the buildx builder's cache rather than in
+  # the engine's image store, so a separate `compose push` finds no local tag
+  # to send ("tag does not exist"). Rebuilding here is the builder replaying
+  # its hot cache from the build stage; the push is the only new work, and it
+  # ships the manifest list with every tag the channel file adds.
+  push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml build --push
   # The Docker Hub repository description, from the README.docker.md beside
   # each image. The Hub does not read it from the pushed image, so it is
   # PATCHed through the API after the publish; jq builds both JSON bodies so
