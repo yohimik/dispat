@@ -11,9 +11,11 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
@@ -659,6 +661,52 @@ func TestIfFileConditionsNeedNoConfigOrGit(t *testing.T) {
 	code = Run([]string{"if", "-f", "ghost.json", "--then", "exit 9", "--else", "exit 0",
 		"--root", root}, &stdout, &stderr)
 	assert.Equal(t, 0, code, "a missing path is false, so the else branch answers")
+}
+
+// TestBootErrorsRespectTheLogFlags: every pre-config refusal — a config not
+// found, a usage error — goes through the bootstrap logger, and that logger
+// reads --log-format and --log-level like the configured one does. A CI
+// pipeline parsing JSON off the log must see the earliest failures as JSON
+// too, not as a pretty line it cannot read.
+func TestBootErrorsRespectTheLogFlags(t *testing.T) {
+	firstLine := func(s string) string {
+		for _, line := range strings.Split(s, "\n") {
+			if strings.TrimSpace(line) != "" {
+				return line
+			}
+		}
+		return ""
+	}
+
+	t.Run("config not found as json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"status", "--log-format", "json", "--root", t.TempDir()}, &stdout, &stderr)
+		assert.Equal(t, 1, code)
+		var event map[string]any
+		require.NoError(t, json.Unmarshal([]byte(firstLine(stderr.String())), &event),
+			"stderr must be JSON when asked: %s", stderr.String())
+		assert.Equal(t, "error", event["level"])
+		assert.Contains(t, event["message"], "config file not found")
+	})
+
+	t.Run("config not found stays pretty by default", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"status", "--root", t.TempDir()}, &stdout, &stderr)
+		assert.Equal(t, 1, code)
+		assert.Error(t, json.Unmarshal([]byte(firstLine(stderr.String())), &map[string]any{}),
+			"the default format is the console line, not JSON")
+		assert.Contains(t, stderr.String(), "config file not found")
+	})
+
+	t.Run("usage error as json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"exec", "--log-format", "json", "--root", t.TempDir()}, &stdout, &stderr)
+		assert.Equal(t, 2, code)
+		var event map[string]any
+		require.NoError(t, json.Unmarshal([]byte(firstLine(stderr.String())), &event),
+			"stderr must open with a JSON event: %s", stderr.String())
+		assert.Equal(t, "error", event["level"])
+	})
 }
 
 // TestIfChangedReadsTheConfig: --changed asks about the repository, which is

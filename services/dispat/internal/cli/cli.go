@@ -137,10 +137,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	r := &runner{
 		fs: fs, o: o, stdout: stdout, stderr: stderr,
 		checkCtx: checkCtx, update: &update,
-		// Config errors are reported with a bootstrap logger since the
-		// configured log level is not known yet.
-		boot: zerolog.New(zerolog.ConsoleWriter{Out: stderr, TimeFormat: "15:04:05"}).
-			With().Timestamp().Logger(),
+		// Pre-config refusals are reported with a bootstrap logger. The config
+		// file's own log settings are not known yet, but the flags are parsed,
+		// so --log-format and --log-level already speak: a CI pipeline reading
+		// JSON must see the config-not-found error as JSON too. The stream
+		// stays stderr — these are diagnostics, not command output.
+		boot: newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stderr),
 	}
 
 	// The environment files come before every phase below, because dispat's
@@ -259,7 +261,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		}
 	case cmdExec:
 		if len(rest) != 2 {
-			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for-package or --for-space; pass arguments to the script after `--`)")
+			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for pkg:<name>, space:<name>, root or cwd; pass arguments to the script after `--`)")
 			usage(inv.cmd)
 			return inv, true
 		}
