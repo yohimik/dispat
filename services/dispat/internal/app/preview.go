@@ -90,10 +90,11 @@ func (a *App) Preview(ctx context.Context, opts PreviewOptions) (PreviewResult, 
 // pending.
 func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
 	format := changelog.SpecFormat(rel.Pkg.Changelog.Format)
-	// Whether there is anything to preview is a question about the notes
-	// alone. A workspace-wide footer would otherwise give every unchanged
-	// package a body and put it in the preview.
-	if changelog.RenderSections(rel, format) == "" && !rel.Releasing() {
+	// Whether there is anything to preview is whether the package has a
+	// reason to release at all — the sections themselves never render empty,
+	// so they cannot be the gate. A workspace-wide footer would otherwise
+	// give every unchanged package a body and put it in the preview.
+	if !rel.Changed() && !rel.Releasing() {
 		return ""
 	}
 	// The changelog entry's header carries the tag and a date; a preview has

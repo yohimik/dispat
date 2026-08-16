@@ -125,11 +125,9 @@ func RenderSections(rel *plan.Release, f Format) string {
 	f = f.withDefaults()
 	// A shared-versioning ride has no content to group: one line states that
 	// the version moved and nothing else did, in the changelog and in the
-	// GitHub release alike. It names the part of the version the group holds
-	// in common, so a reader of a fixedMajor changelog is not told that the
-	// whole version is shared when only the major is.
+	// GitHub release alike.
 	if rel.NoChanges() {
-		return "No changes: a version bump to keep the versioning group on " + plan.SharedPartName(rel.SharedDepth()) + ".\n"
+		return noChangesLine(rel)
 	}
 	var parts []string
 	// NotesUnits, not Units: a prerelease's entry contains only its own
@@ -166,7 +164,35 @@ func RenderSections(rel *plan.Release, f Format) string {
 		}
 		parts = append(parts, "### "+f.DependenciesTitle+"\n\n"+strings.Join(lines, "\n")+"\n")
 	}
+	// Sections are never empty: a release can be admitted to the plan with
+	// nothing to group (a pin, a channel transition, work its reverts cancel
+	// out), and a record with an empty body reads as a broken write rather
+	// than a deliberate one. The line names the release's actual cause.
+	if len(parts) == 0 {
+		return noChangesLine(rel)
+	}
 	return strings.Join(parts, "\n")
+}
+
+// noChangesLine states why an entry carries no sections. The ride line names
+// the part of the version the group holds in common, so a reader of a
+// fixedMajor changelog is not told that the whole version is shared when only
+// the major is; the other causes are named in the order that best explains an
+// empty body — suppression explains missing sections even when commits exist,
+// a pin and a channel move explain a release that never had any.
+func noChangesLine(rel *plan.Release) string {
+	switch {
+	case rel.FixedRide:
+		return "No changes: a version bump to keep the versioning group on " + plan.SharedPartName(rel.SharedDepth()) + ".\n"
+	case len(rel.SuppressedNotes) > 0:
+		return "No changes: the pending work and its reverts cancel out.\n"
+	case rel.Pinned:
+		return "No changes: a version set by Release-As.\n"
+	case rel.ChannelChanged():
+		return "No changes: a channel transition, " + rel.ChannelTransition() + ".\n"
+	default:
+		return "No changes.\n"
+	}
 }
 
 // correctionNote annotates a restatement with the records it replaces.

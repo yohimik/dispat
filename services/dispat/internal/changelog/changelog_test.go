@@ -98,12 +98,15 @@ func TestRenderSections(t *testing.T) {
 }
 
 func TestRenderSectionsEmpty(t *testing.T) {
+	// A release carrying no cause the renderer can name still gets the plain
+	// fallback line: sections never render empty, whatever admitted the
+	// release to the plan.
 	rel := &plan.Release{
 		Pkg:  &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
 		Next: ccme.Version{Major: 2},
 	}
-	assert.Empty(t, RenderSections(rel, Format{}))
-	assert.Equal(t, "## core@2.0.0 (2026-07-26)\n", RenderEntry(rel, testDate, Format{}))
+	assert.Equal(t, "No changes.\n", RenderSections(rel, Format{}))
+	assert.Equal(t, "## core@2.0.0 (2026-07-26)\n\nNo changes.\n", RenderEntry(rel, testDate, Format{}))
 }
 
 func TestRenderSectionsMarksARestatement(t *testing.T) {
@@ -295,6 +298,64 @@ func TestRenderFixedRideNoChangesEntry(t *testing.T) {
 			assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\n"+line, RenderEntry(rel, testDate, Format{}))
 		})
 	}
+}
+
+func TestRenderSectionsNeverEmpty(t *testing.T) {
+	// Three release shapes reach the renderer with nothing to group and no
+	// ride flag: a pin with no pending work, a channel transition with no new
+	// work, and work its own reverts cancel out of the notes. Each must state
+	// its cause instead of rendering an empty entry body (and, through
+	// RenderBody, an empty GitHub release body).
+	base := func() *plan.Release {
+		return &plan.Release{
+			Pkg:  &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
+			Next: ccme.Version{Major: 2},
+		}
+	}
+
+	pinned := base()
+	pinned.Pinned = true
+	assert.Equal(t, "No changes: a version set by Release-As.\n",
+		RenderSections(pinned, Format{}))
+
+	moved := base()
+	moved.Channel, moved.BaselineChannel = "stable", "beta"
+	assert.Equal(t, "No changes: a channel transition, beta -> stable.\n",
+		RenderSections(moved, Format{}))
+
+	reverted := base()
+	units := []*ccme.Unit{
+		testUnit("feat", ccme.BumpMinor, "work later reverted"),
+		testUnit("revert", ccme.BumpMinor, "the revert"),
+	}
+	reverted.Units = units
+	reverted.SuppressedNotes = map[*ccme.Unit]bool{units[0]: true, units[1]: true}
+	sections := RenderSections(reverted, Format{})
+	assert.Equal(t, "No changes: the pending work and its reverts cancel out.\n", sections)
+
+	for _, rel := range []*plan.Release{pinned, moved, reverted} {
+		assert.NotEmpty(t, RenderBody(rel, Format{}, nil), "no body may render empty")
+	}
+}
+
+func TestRideWithProviderMovementIsNotNoChanges(t *testing.T) {
+	// The Updates clause of NoChanges: a ride that picks up a provider's
+	// movement has a dependencies section to show, which is not "no changes".
+	rel := &plan.Release{
+		Pkg:       &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs", Versioning: model.VersioningFixed}},
+		Next:      ccme.Version{Major: 1, Minor: 1},
+		FixedRide: true,
+		Updates: []plan.ProviderUpdate{{
+			Name: "utils",
+			From: ccme.Version{Major: 1, Minor: 1},
+			To:   ccme.Version{Major: 1, Minor: 2},
+		}},
+	}
+	assert.False(t, rel.NoChanges())
+	sections := RenderSections(rel, Format{})
+	assert.Contains(t, sections, "### Dependencies")
+	assert.Contains(t, sections, "- utils: 1.1.0 -> 1.2.0")
+	assert.NotContains(t, sections, "No changes")
 }
 
 func TestRenderFixedMemberWithOwnUnitsIsOrdinary(t *testing.T) {

@@ -283,14 +283,15 @@ func TestRenderBodyWithoutOptionalBlocks(t *testing.T) {
 }
 
 // TestRenderBodyWithoutSections: a release with nothing to group still writes
-// its configured blocks, and they are the whole body.
+// its configured blocks around the no-changes line — the sections block never
+// renders empty, so the body always says why there is nothing to read.
 func TestRenderBodyWithoutSections(t *testing.T) {
 	rel := &plan.Release{
 		Pkg:  &model.Package{Name: "core", Space: &model.Space{Name: "libs"}},
 		Next: ccme.Version{Major: 2},
 	}
 	out := RenderBody(rel, Format{Header: titleLines("header"), Footer: titleLines("footer")}, nil)
-	assert.Equal(t, "header\n\nfooter\n", out)
+	assert.Equal(t, "header\n\nNo changes.\n\nfooter\n", out)
 }
 
 // TestRenderBodyAroundASharedVersioningRide: the one-line "no changes" body a

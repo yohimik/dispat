@@ -44,6 +44,19 @@ the [GitHub release body](#github) and the
 [`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](../reference/environment.md#release-notes-data), and
 [`dispat preview`](../cli/preview.md) shows exactly what the next entry would contain.
 
+**An entry is never empty.** A release can be admitted to the plan with nothing for its notes to group: a version set
+by an exact `Release-As`, a channel transition carrying no new work, pending work its own reverts cancel out, or a
+[shared-versioning ride](../reference/releasing/versioning.md#the-changelog-entry-a-passenger-gets). Each of these
+renders a single line naming the cause instead of an empty body, in the changelog entry and the GitHub release body
+alike:
+
+```markdown
+No changes: a version set by Release-As.
+No changes: a channel transition, beta -> stable.
+No changes: the pending work and its reverts cancel out.
+No changes: a version bump to keep the versioning group on one version.
+```
+
 A changelog write is idempotent: a file that already carries the entry for the planned tag (a line starting
 `## <tag> (`) is left untouched and the skip is reported as `W226`. That is what makes the
 [`dispat changelog`](../cli/changelog.md) step command safe to run before the release: the entry it writes
