@@ -110,7 +110,7 @@ const config: Config = {
           {tagName: 'meta', name: 'apple-mobile-web-app-status-bar-style', content: 'black'},
           {tagName: 'link', rel: 'apple-touch-icon', href: '/img/apple-touch-icon.png'},
           {tagName: 'meta', name: 'msapplication-TileImage', content: '/img/icon-192.png'},
-          {tagName: 'meta', name: 'msapplication-TileColor', content: '#1b1b1d'},
+          {tagName: 'meta', name: 'msapplication-TileColor', content: '#101713'},
         ],
         // swRegister is left at its default: that file is what implements the
         // strategies above. reloadPopup is not an option at all in v3 -- it is
