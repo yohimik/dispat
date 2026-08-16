@@ -969,15 +969,34 @@ func (r *Release) Reason() string {
 			return "channel from " + r.ChannelFrom
 		}
 		return "channel " + r.ChannelTransition()
-	case r.OwnBump != ccme.BumpNone:
+	case r.freshOwnBump():
 		return "direct"
 	case len(r.DueTo) > 0:
 		return "propagated from " + strings.Join(r.DueTo, ", ")
+	case r.OwnBump != ccme.BumpNone:
+		// Own work the train already published: it keeps deciding the
+		// train's target, and with no fresh cause above it is also the only
+		// explanation left to give.
+		return "direct"
 	case r.Pinned:
 		return "pinned"
 	default:
 		return "unchanged"
 	}
+}
+
+// freshOwnBump reports whether the package's own pending changeset — the
+// units its baseline has not published — carries a bump. This is the
+// "direct" of a reason: own work the train has already shipped keeps
+// counting toward the target (OwnBump spans the train), but it does not
+// explain why the package is releasing again.
+func (r *Release) freshOwnBump() bool {
+	for _, u := range r.FreshUnits {
+		if u.Bump != ccme.BumpNone {
+			return true
+		}
+	}
+	return false
 }
 
 // Plan is the full release plan for the repository.

@@ -1622,6 +1622,25 @@ func TestPropagatedTrainWorkConverges(t *testing.T) {
 	assertVersion(t, pre(1, 3, 0, "beta", "1"), app2.Next)
 }
 
+func TestReasonSpeaksOfFreshWorkOnly(t *testing.T) {
+	// app's beta.0 already published its own feat; the fresh cause of beta.1
+	// is core's propagated fix alone. The train-wide OwnBump keeps deciding
+	// the target, but the reason names what actually forces this release:
+	// the propagation, not own work the train has already shipped.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(app): own work"},
+		commit{sha: "c2", message: "fix(core)^: repair"},
+	).tag("core", "1.4.0", "").
+		tag("app", "1.2.3", "").tag("app", "1.3.0-beta.0", "c1")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	assert.True(t, app.Changed())
+	assert.Equal(t, ccme.BumpMinor, app.OwnBump, "the published feat still decides the train's target")
+	assert.Equal(t, "propagated from core", app.Reason())
+}
+
 func TestRecordsSpeakInDirectProviders(t *testing.T) {
 	// A depth-all blast from lib reaches top two hops away. DueTo names the
 	// origin, because that answers why top releases; the dependencies
