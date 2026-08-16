@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/manifest/v1.0.0-rc.6 (2026-08-16)
+
+### Fixes
+
+- nested dependencies update againx2
+
+
 ## pkg/manifest/v1.0.0-rc.5 (2026-08-16)
 
 ## pkg/manifest/v1.0.0-rc.4 (2026-08-16)
