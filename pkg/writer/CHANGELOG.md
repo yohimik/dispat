@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/writer/v1.0.0-rc.9 (2026-08-16)
+
+### Fixes
+
+- exercise depth-two propagation
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.8 -> 1.0.0-rc.9
+
 ## pkg/writer/v1.0.0-rc.8 (2026-08-16)
 
 ### Fixes
