@@ -15,6 +15,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,7 +49,23 @@ const (
 	maxErrorBody = 64 << 10
 	// defaultTimeout is the request timeout of the default HTTP client.
 	defaultTimeout = 30 * time.Second
+	// uploadTimeoutFloor and uploadTimeoutPer scale an asset upload's own
+	// deadline with its size — a floor of a minute plus a second per 100 KiB —
+	// because one whole-request timeout sized for API calls would cut off any
+	// sizeable artifact on a slow link.
+	uploadTimeoutFloor = time.Minute
+	uploadTimeoutPer   = 100 << 10
+	// defaultRetries and defaultRetryDelay drive the transient-failure retry
+	// of the read-only calls: three attempts, backing off from half a second.
+	defaultRetries    = 3
+	defaultRetryDelay = 500 * time.Millisecond
+	// maxRetryAfter caps how long a Retry-After header can hold a run hostage.
+	maxRetryAfter = 30 * time.Second
 )
+
+// uploadClient carries no client-level timeout: an upload's deadline is the
+// per-call context timeout, sized to the asset.
+var uploadClient = &http.Client{}
 
 // Releaser creates a release named after the package tag via the GitHub REST
 // API (POST /repos/{owner}/{repo}/releases) — but only for packages whose
@@ -81,6 +98,12 @@ type Releaser struct {
 	// already exists on the remote (i.e. after a push) — GitHub rejects
 	// unknown SHAs.
 	TargetCommitish string
+
+	// retries and retryDelay override the transient-failure retry of the
+	// read-only calls; the zero values mean defaultRetries/defaultRetryDelay.
+	// Unexported: tests shrink the delay, nothing else has a reason to.
+	retries    int
+	retryDelay time.Duration
 }
 
 type releaseRequest struct {
@@ -125,16 +148,77 @@ type apiCall struct {
 	// which is exactly what the probe asked. do reports which one arrived.
 	TolerateStatus int
 	What           string
+	// Timeout, when non-zero, bounds this one call through its context
+	// instead of the client's own timeout — how an upload gets a deadline
+	// sized to its asset.
+	Timeout time.Duration
+	// Retryable marks a call safe to re-issue: transient failures (transport
+	// errors, 5xx, rate limits) are retried with backoff. Only the read-only
+	// calls set it — a create re-issued after an ambiguous failure could
+	// duplicate, and a half-done upload is the reconcile path's job.
+	Retryable bool
+}
+
+// retryableStatus reports a failure worth re-issuing a read-only call for: a
+// transport error (status 0), a server-side 5xx, or a rate limit.
+func retryableStatus(status int) bool {
+	switch status {
+	case 0, http.StatusTooManyRequests, http.StatusInternalServerError,
+		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 // do performs one authenticated API call and enforces the expected status.
 // The response body is returned (bounded) because a created release carries
 // the asset endpoint the caller needs, and so is the status, because a call
-// naming a TolerateStatus needs to know which of the two arrived.
+// naming a TolerateStatus needs to know which of the two arrived. A Retryable
+// call is re-issued on transient failures with exponential backoff, honoring
+// a Retry-After the server names (capped at maxRetryAfter).
 func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, int, error) {
+	attempts := 1
+	if call.Retryable {
+		if attempts = r.retries; attempts <= 0 {
+			attempts = defaultRetries
+		}
+	}
+	delay := r.retryDelay
+	if delay <= 0 {
+		delay = defaultRetryDelay
+	}
+	var data []byte
+	var status int
+	var retryAfter time.Duration
+	var err error
+	for attempt := 1; ; attempt++ {
+		data, status, retryAfter, err = r.once(ctx, call, attempt)
+		if err == nil || attempt == attempts || !retryableStatus(status) {
+			return data, status, err
+		}
+		wait := delay << (attempt - 1)
+		if retryAfter > wait {
+			wait = min(retryAfter, maxRetryAfter)
+		}
+		select {
+		case <-ctx.Done():
+			return data, status, err
+		case <-time.After(wait):
+		}
+	}
+}
+
+// once is one attempt of do: build, send, read, judge — and one debug line
+// per request, so a GitHub failure is diagnosable from the log alone.
+func (r *Releaser) once(ctx context.Context, call apiCall, attempt int) ([]byte, int, time.Duration, error) {
+	if call.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, call.Timeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, call.Method, call.URL, call.Body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("github: %w", err)
+		return nil, 0, 0, fmt.Errorf("github: %w", err)
 	}
 	if call.ContentLength > 0 {
 		req.ContentLength = call.ContentLength
@@ -147,25 +231,54 @@ func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, int, error) {
 
 	client := r.Client
 	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
+		// The default client's own timeout suits the API calls; a call that
+		// brought a deadline of its own (an upload) must not inherit it.
+		if client = uploadClient; call.Timeout == 0 {
+			client = &http.Client{Timeout: defaultTimeout}
+		}
 	}
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("github: %s: %w", call.What, err)
+		r.logCall(call, 0, attempt, start)
+		return nil, 0, 0, fmt.Errorf("github: %s: %w", call.What, err)
 	}
 	defer resp.Body.Close()
+	r.logCall(call, resp.StatusCode, attempt, start)
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
 	if err != nil {
 		// A truncated success body would corrupt what the caller parses out
 		// of it (a created release's upload URL), so it fails the call even
 		// when the status looked right.
-		return nil, resp.StatusCode, fmt.Errorf("github: %s: reading response: %w", call.What, err)
+		return nil, resp.StatusCode, 0, fmt.Errorf("github: %s: reading response: %w", call.What, err)
 	}
 	if resp.StatusCode != call.WantStatus && resp.StatusCode != call.TolerateStatus {
-		return nil, resp.StatusCode, fmt.Errorf("github: %s: unexpected status %s: %s",
+		return nil, resp.StatusCode, retryAfterOf(resp), fmt.Errorf("github: %s: unexpected status %s: %s",
 			call.What, resp.Status, strings.TrimSpace(string(data)))
 	}
-	return data, resp.StatusCode, nil
+	return data, resp.StatusCode, 0, nil
+}
+
+// logCall is the one debug line every request attempt leaves behind; status 0
+// stands for a transport error that produced no response.
+func (r *Releaser) logCall(call apiCall, status, attempt int, start time.Time) {
+	r.Log.Debug().Str("method", call.Method).Str("what", call.What).
+		Int("status", status).Int("attempt", attempt).
+		Dur("elapsed", time.Since(start)).Msg("github api call")
+}
+
+// retryAfterOf reads a Retry-After the server named in whole seconds; zero
+// when absent or unparseable.
+func retryAfterOf(resp *http.Response) time.Duration {
+	header := resp.Header.Get("Retry-After")
+	if header == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(header)
+	if err != nil || seconds < 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // Verify checks that the repository is reachable with the configured token
@@ -177,6 +290,7 @@ func (r *Releaser) Verify(ctx context.Context) error {
 		URL:        r.endpoint("/repos/" + r.Owner + "/" + r.Repo),
 		WantStatus: http.StatusOK,
 		What:       fmt.Sprintf("verifying %s/%s", r.Owner, r.Repo),
+		Retryable:  true,
 	})
 	return err
 }
@@ -202,15 +316,16 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	}
 	// A release the repository already carries is a skip, not a 422: the
 	// flow may have published it from an earlier stage with `dispat github`,
-	// or this may be a re-run after a later stage failed.
-	switch exists, err := r.exists(ctx, tag); {
+	// or this may be a re-run after a later stage failed. Its assets are
+	// still reconciled — a re-run is exactly how a half-uploaded set heals.
+	switch existing, err := r.lookup(ctx, tag); {
 	case err != nil:
 		return err
-	case exists:
+	case existing != nil:
 		r.Log.Warn().Str("code", plan.CodeGitHubReleaseExists).
 			Str("package", rel.Pkg.Name).Str("tag", tag).
 			Msg("github release already exists, skipped")
-		return nil
+		return r.reconcileAssets(ctx, existing, export, tag)
 	}
 
 	// One lookup for the whole release: the name and every configured line
@@ -260,31 +375,85 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	if err != nil {
 		return fmt.Errorf("github: release %s: %w", tag, err)
 	}
-	for _, p := range paths {
-		if err := r.uploadAsset(ctx, uploadURL, tag, p); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.uploadAll(ctx, uploadURL, tag, paths, nil)
 }
 
-// exists reports whether the repository already carries a release for tag
-// (GET /repos/{owner}/{repo}/releases/tags/{tag}). A 404 is the answer "no",
-// not a failure; anything else is a real error, because silently treating an
+// existingRelease is what a re-run needs to know about a release the
+// repository already carries: where assets go, and which ones arrived.
+type existingRelease struct {
+	UploadURL string `json:"upload_url"`
+	Assets    []struct {
+		Name  string `json:"name"`
+		State string `json:"state"`
+	} `json:"assets"`
+}
+
+// lookup fetches the release for tag (GET /repos/{owner}/{repo}/releases/
+// tags/{tag}), nil when there is none. A 404 is the answer "no", not a
+// failure; anything else is a real error, because silently treating an
 // unreadable repository as "no release yet" would turn a permissions problem
 // into a duplicate-release attempt.
-func (r *Releaser) exists(ctx context.Context, tag string) (bool, error) {
-	_, status, err := r.do(ctx, apiCall{
+func (r *Releaser) lookup(ctx context.Context, tag string) (*existingRelease, error) {
+	data, status, err := r.do(ctx, apiCall{
 		Method:         http.MethodGet,
 		URL:            r.endpoint("/repos/" + r.Owner + "/" + r.Repo + "/releases/tags/" + neturl.PathEscape(tag)),
 		WantStatus:     http.StatusOK,
 		TolerateStatus: http.StatusNotFound,
 		What:           "looking up release " + tag,
+		Retryable:      true,
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return status == http.StatusOK, nil
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	var release existingRelease
+	if err := json.Unmarshal(data, &release); err != nil {
+		return nil, fmt.Errorf("github: release %s: parsing lookup: %w", tag, err)
+	}
+	return &release, nil
+}
+
+// reconcileAssets uploads whatever an existing release is missing of the
+// exported files. Without it, a run cut off mid-upload would leave the
+// release under-recorded forever: the release itself is a skip on every
+// re-run, so this is the only path the missing assets have.
+func (r *Releaser) reconcileAssets(ctx context.Context, release *existingRelease, export, tag string) error {
+	paths := r.attachmentPaths(export, tag)
+	if len(paths) == 0 {
+		return nil
+	}
+	if release.UploadURL == "" {
+		return fmt.Errorf("github: release %s carries no upload_url, cannot attach assets", tag)
+	}
+	uploaded := make(map[string]bool, len(release.Assets))
+	for _, a := range release.Assets {
+		if a.State == "uploaded" {
+			uploaded[a.Name] = true
+		}
+	}
+	return r.uploadAll(ctx, stripURITemplate(release.UploadURL), tag, paths, uploaded)
+}
+
+// uploadAll attaches every path not already uploaded, and keeps going past a
+// failed one: each sound asset deserves its upload, and the failed ones are
+// exactly what the next re-run's reconcile picks up.
+func (r *Releaser) uploadAll(ctx context.Context, uploadURL, tag string, paths []string, uploaded map[string]bool) error {
+	var errs []error
+	for _, p := range paths {
+		if name := filepath.Base(p); uploaded[name] {
+			r.Log.Debug().Str("tag", tag).Str("asset", name).
+				Msg("github release asset already uploaded, skipped")
+			continue
+		}
+		if err := r.uploadAsset(ctx, uploadURL, tag, p); err != nil {
+			r.Log.Error().Str("tag", tag).Str("path", p).Err(err).
+				Msg("github release asset upload failed")
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // attachmentPaths resolves the plan.GitHubExport value: a whitespace-separated
@@ -325,10 +494,16 @@ func assetUploadURL(created []byte) (string, error) {
 	if release.UploadURL == "" {
 		return "", errors.New("created release carries no upload_url, cannot attach assets")
 	}
-	if i := strings.IndexByte(release.UploadURL, '{'); i >= 0 {
-		return release.UploadURL[:i], nil
+	return stripURITemplate(release.UploadURL), nil
+}
+
+// stripURITemplate cuts the {?name,label} suffix off an upload_url; GitHub
+// advertises the endpoint as an RFC 6570 template.
+func stripURITemplate(url string) string {
+	if i := strings.IndexByte(url, '{'); i >= 0 {
+		return url[:i]
 	}
-	return release.UploadURL, nil
+	return url
 }
 
 // uploadAsset attaches one file to a release through the endpoint the release
@@ -354,6 +529,13 @@ func (r *Releaser) uploadAsset(ctx context.Context, uploadURL, tag, path string)
 		ContentLength: fi.Size(),
 		WantStatus:    http.StatusCreated,
 		What:          fmt.Sprintf("uploading asset %s to release %s", name, tag),
+		Timeout:       uploadTimeout(fi.Size()),
 	})
 	return err
+}
+
+// uploadTimeout sizes an upload's deadline to its asset: the floor plus a
+// second per uploadTimeoutPer bytes.
+func uploadTimeout(size int64) time.Duration {
+	return uploadTimeoutFloor + time.Duration(size/uploadTimeoutPer)*time.Second
 }

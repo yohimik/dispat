@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -276,7 +277,8 @@ func TestRecordConnectionError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	srv.Close() // immediately closed: connection refused
 
-	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn"}
+	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn",
+		retryDelay: time.Millisecond}
 	assert.Error(t, rel.Record(context.Background(), testRelease()))
 }
 
@@ -577,4 +579,190 @@ func TestRecordExpandsAScriptOutput(t *testing.T) {
 	require.NoError(t, r.Record(context.Background(), rel))
 
 	assert.Contains(t, gotBody.Body, "image: acme/core:1.3.0")
+}
+
+// TestRecordReconcilesMissingAssets: a release the repository already carries
+// is a skip, but its assets are still reconciled — the exported files its
+// asset list is missing are uploaded, the ones it has are not re-sent. This
+// is the one path a run cut off mid-upload has back to a complete record.
+func TestRecordReconcilesMissingAssets(t *testing.T) {
+	dir := t.TempDir()
+	have := filepath.Join(dir, "a.bin")
+	missing := filepath.Join(dir, "b.bin")
+	require.NoError(t, os.WriteFile(have, []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(missing, []byte("b"), 0o644))
+
+	var uploads []string
+	var created int
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases/tags/"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id": 7, "upload_url": "` + srv.URL + `/uploads{?name,label}",
+				"assets": [{"name": "a.bin", "state": "uploaded"}]}`))
+		case r.URL.Path == "/uploads":
+			uploads = append(uploads, r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusCreated)
+		default:
+			created++
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Outputs = []plan.Output{{Name: plan.GitHubExport, Value: have + " " + missing}}
+
+	var logs strings.Builder
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Log: zerolog.New(&logs)}
+	require.NoError(t, r.Record(context.Background(), rel))
+
+	assert.Zero(t, created, "the release itself stays a skip")
+	assert.Equal(t, []string{"b.bin"}, uploads, "only the missing asset is uploaded")
+	assert.Contains(t, logs.String(), plan.CodeGitHubReleaseExists)
+}
+
+// TestVerifyRetriesTransientFailures: a read-only call re-issues itself past
+// transient server failures instead of turning a hiccup into a critical.
+func TestVerifyRetriesTransientFailures(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits++; hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		retryDelay: time.Millisecond}
+	require.NoError(t, r.Verify(context.Background()))
+	assert.Equal(t, 3, hits)
+}
+
+// TestVerifyGivesUpAfterItsAttempts: the retry is bounded; a persistent 503
+// still comes back as the error it is.
+func TestVerifyGivesUpAfterItsAttempts(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		retryDelay: time.Millisecond}
+	require.Error(t, r.Verify(context.Background()))
+	assert.Equal(t, defaultRetries, hits)
+}
+
+// TestVerifyDoesNotRetryAnAnswer: a 404 is an answer about the repository,
+// not a transient failure — one attempt, one error.
+func TestVerifyDoesNotRetryAnAnswer(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		retryDelay: time.Millisecond}
+	require.Error(t, r.Verify(context.Background()))
+	assert.Equal(t, 1, hits)
+}
+
+// TestVerifyHonorsRetryAfter: a rate-limited call waits at least what the
+// server named before its next attempt.
+func TestVerifyHonorsRetryAfter(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits++; hits == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		retryDelay: time.Millisecond}
+	start := time.Now()
+	require.NoError(t, r.Verify(context.Background()))
+	assert.Equal(t, 2, hits)
+	assert.GreaterOrEqual(t, time.Since(start), time.Second, "the named wait is honored over the backoff")
+}
+
+// TestCreateReleaseIsNotRetried: the create POST is not idempotent — an
+// ambiguous failure re-issued could duplicate the release, so it gets exactly
+// one attempt.
+func TestCreateReleaseIsNotRetried(t *testing.T) {
+	var creates int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
+		creates++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		retryDelay: time.Millisecond}
+	require.Error(t, r.Record(context.Background(), testRelease()))
+	assert.Equal(t, 1, creates)
+}
+
+// TestUploadContinuesPastAFailedAsset: one rejected asset must not cost the
+// ones behind it their upload — every sound asset is attempted, and the
+// failure still comes back as the error it is.
+func TestUploadContinuesPastAFailedAsset(t *testing.T) {
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "bad.bin")
+	good := filepath.Join(dir, "good.bin")
+	require.NoError(t, os.WriteFile(bad, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(good, []byte("y"), 0o644))
+
+	var uploads []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
+		if r.URL.Path == "/repos/acme/mono/releases" {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
+			return
+		}
+		name := r.URL.Query().Get("name")
+		uploads = append(uploads, name)
+		if name == "bad.bin" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"asset rejected"}`))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Outputs = []plan.Output{{Name: plan.GitHubExport, Value: bad + " " + good}}
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	err := r.Record(context.Background(), rel)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "asset rejected")
+	assert.Equal(t, []string{"bad.bin", "good.bin"}, uploads, "the sound asset is still uploaded")
+}
+
+// TestUploadTimeoutScalesWithTheAsset: the floor covers any small file, and a
+// large one buys itself the seconds its bytes need.
+func TestUploadTimeoutScalesWithTheAsset(t *testing.T) {
+	assert.Equal(t, time.Minute, uploadTimeout(0))
+	assert.Equal(t, time.Minute, uploadTimeout(100<<10-1))
+	assert.Equal(t, time.Minute+10*time.Second, uploadTimeout(10*(100<<10)))
 }
