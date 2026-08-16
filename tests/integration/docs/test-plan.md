@@ -1094,11 +1094,25 @@ produced a plausible-looking but wrong plan, so a regression fails exactly one c
    ending one.
 3. **Train-wide accounting must never leak into fresh-changeset reporting, and the graduation must widen back.** The
    planner's accounting fields (`Units`, `OwnBump`, the window) span the whole prerelease train by design; everything
-   user-facing — `ownCommits`, `Reason()`, the catch-up scan, the entry bodies — reads the fresh subset, except the
-   graduation's one entry, which collects the whole train (its provider movement included). Every shipped planner bug
-   before 1.0.0 sat on one side of this seam or the other. Guarded end to end by
+   user-facing — `ownCommits`, `Reason()`, the catch-up scan, the skip cascade, the entry bodies — reads the fresh
+   subset, except the graduation's one entry, which collects the whole train (its provider movement included). Every
+   shipped planner bug before 1.0.0 sat on one side of this seam or the other. Guarded end to end by
    `TestLongitudinalGroupTrainLifecycle` (goal 38) and `TestPlanTrainCatchUpStaysACatchUp` (goal 1), with the unit
    halves in `internal/plan` and `internal/changelog`.
+
+   Why six instances of one class survived earlier reviews, so the next reviewer does not repeat it:
+   * The seam is invisible off the train — `Units == FreshUnits` for every stable-line release — so no
+     single-release test can fail a train-wide read. Only a multi-release prerelease sequence distinguishes the two,
+     and before goal 38 none existed.
+   * Hand-built fixtures encoded the implementer's assumption: a `Release` with `Units` set and `FreshUnits` empty
+     passes whichever field the code reads. A stable-line fixture must set both to the same slice, as a real plan
+     does (the field comments in `plan.go` now say so).
+   * Reviews validated line coverage instead of behaviour against the documentation, which is the oracle: the
+     recovery reference showed `ownCommits=0` on a catch-up the whole time the code printed the train-wide count.
+   * Each found bug was fenced point-wise with a test for its own instance; nobody audited the seam for siblings.
+     A bug on a shared seam is a class, not an instance: grep every consumer of the fields involved before closing.
+   * No test modelled this repository's own topology (group x train x wired records x propagation); the first one
+     that did found the sixth instance within minutes of existing.
 
 ## Bug fences
 

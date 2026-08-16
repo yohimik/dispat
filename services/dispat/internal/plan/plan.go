@@ -574,6 +574,14 @@ type Release struct {
 	// two slices are equal; they differ only on a prerelease train, where
 	// Units spans the whole train (§11.4 recomputes the target over it) and
 	// FreshUnits is what the next prerelease actually adds.
+	//
+	// Because the two are equal off the train, a test or fixture that sets
+	// only Units proves nothing about which of them a reader uses — every
+	// pre-1.0.0 planner bug was a train-wide read passing exactly such
+	// tests. A hand-built stable-line Release must set both, as a real plan
+	// does, and anything user-facing reads the fresh side (NotesUnits,
+	// FreshOwnBump) unless it can say why the train-wide value is the right
+	// one.
 	FreshUnits []*ccme.Unit
 
 	DueTo   []string      // providers that forced (at least) part of the bump
