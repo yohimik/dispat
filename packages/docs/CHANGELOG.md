@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.0.0-rc.14 (2026-08-16)
+
+### Fixes
+
+- exercise a partial-mode member release mid-train
+
+
+### Dependencies
+
+- dispat: 1.0.0-rc.13 -> 1.0.0-rc.14
+
 ## packages/docs/v1.0.0-rc.13 (2026-08-16)
 
 ### Dependencies
