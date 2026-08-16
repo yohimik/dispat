@@ -1,5 +1,11 @@
 # Changelog
 
+## docker/dispat-alpine/v1.0.0-rc.11 (2026-08-16)
+
+### Dependencies
+
+- dispat: 1.0.0-rc.10 -> 1.0.0-rc.11
+
 ## docker/dispat-alpine/v1.0.0-rc.10 (2026-08-16)
 
 ### Dependencies
