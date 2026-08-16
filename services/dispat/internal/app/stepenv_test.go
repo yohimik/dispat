@@ -1,0 +1,190 @@
+package app
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
+)
+
+// clearRunEnv strips the wiring variables so a test starts outside any run,
+// whatever environment the test process itself inherited.
+func clearRunEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{plan.PackageEnvVar, plan.TagEnvVar, plan.NewVersionEnvVar} {
+		t.Setenv(name, "")
+		require.NoError(t, os.Unsetenv(name))
+	}
+}
+
+func wiredEnv(t *testing.T, pkg, tag, version string) {
+	t.Helper()
+	t.Setenv(plan.PackageEnvVar, pkg)
+	t.Setenv(plan.TagEnvVar, tag)
+	t.Setenv(plan.NewVersionEnvVar, version)
+}
+
+// TestWireStepOutsideARun: with no DISPAT_* wiring in the environment the
+// steps behave exactly as before — no scoping, no masking, no env.
+func TestWireStepOutsideARun(t *testing.T) {
+	clearRunEnv(t)
+	a := New(t.TempDir(), &config.File{}, zerolog.Nop())
+	var w WindowOptions
+
+	env, err := a.wireStep(&w)
+	require.NoError(t, err)
+	assert.Nil(t, env)
+	assert.Empty(t, a.ignoreTags)
+	assert.Empty(t, w.Filter.Packages)
+}
+
+// TestWireStepScopesAndMasks: inside a run the step narrows to the invoking
+// package and masks the run's own tag from baseline resolution.
+func TestWireStepScopesAndMasks(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "core", "core@1.2.0", "1.2.0")
+	a := New(t.TempDir(), &config.File{}, zerolog.Nop())
+	var w WindowOptions
+
+	env, err := a.wireStep(&w)
+	require.NoError(t, err)
+	require.NotNil(t, env)
+	assert.Equal(t, []string{"core@1.2.0"}, a.ignoreTags)
+	assert.Equal(t, []string{"core"}, w.Filter.Packages, "no filter of its own, so the run's package")
+}
+
+// TestWireStepKeepsAnExplicitFilter: a filter the invocation spelled itself
+// outranks the implicit narrowing; the mask still applies.
+func TestWireStepKeepsAnExplicitFilter(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "core", "core@1.2.0", "1.2.0")
+	a := New(t.TempDir(), &config.File{}, zerolog.Nop())
+	var w WindowOptions
+	w.Filter.Spaces = []string{"libs"}
+
+	env, err := a.wireStep(&w)
+	require.NoError(t, err)
+	require.NotNil(t, env)
+	assert.Empty(t, w.Filter.Packages, "the explicit space term stands")
+	assert.Equal(t, []string{"core@1.2.0"}, a.ignoreTags)
+}
+
+// TestWireStepRefusesAGarbageVersion: an environment that names a run but
+// pins an unparseable version is E219, not a silent unwired fallback.
+func TestWireStepRefusesAGarbageVersion(t *testing.T) {
+	clearRunEnv(t)
+	wiredEnv(t, "core", "core@1.2.0", "not-a-version")
+	var logs bytes.Buffer
+	a := New(t.TempDir(), &config.File{}, zerolog.New(&logs))
+	var w WindowOptions
+
+	_, err := a.wireStep(&w)
+	require.Error(t, err)
+	assert.Contains(t, logs.String(), plan.CodeStepUnalignable)
+}
+
+// stepEnvRelease builds the minimal plan alignStep reads: one package,
+// releasing at the given version.
+func stepEnvRelease(t *testing.T, name, version string) *plan.Plan {
+	t.Helper()
+	next, err := ccme.ParseVersion(version)
+	require.NoError(t, err)
+	rel := &plan.Release{
+		Pkg:  &model.Package{Name: name, Space: &model.Space{Name: "libs"}},
+		Next: next, Bump: ccme.BumpMinor, NewWork: true, Channel: channelOfVersion(next),
+	}
+	return &plan.Plan{Order: []string{name}, Releases: map[string]*plan.Release{name: rel}}
+}
+
+// TestAlignStepAgreement: a replan that matches the run passes through
+// silently, no correction, no warning.
+func TestAlignStepAgreement(t *testing.T) {
+	var logs bytes.Buffer
+	a := New(t.TempDir(), &config.File{}, zerolog.New(&logs))
+	pl := stepEnvRelease(t, "core", "1.2.0")
+	env := &runEnv{pkg: "core", tag: "core@1.2.0", next: mustVersion(t, "1.2.0")}
+
+	require.NoError(t, a.alignStep(pl, env))
+	assert.NotContains(t, logs.String(), plan.CodeStepAligned)
+}
+
+// TestAlignStepCorrectsDrift: the run's version outranks the replan's, the
+// correction is W228, and the aligned release renders the run's own tag.
+func TestAlignStepCorrectsDrift(t *testing.T) {
+	var logs bytes.Buffer
+	a := New(t.TempDir(), &config.File{}, zerolog.New(&logs))
+	pl := stepEnvRelease(t, "core", "1.3.0")
+	env := &runEnv{pkg: "core", tag: "core@1.2.0", next: mustVersion(t, "1.2.0")}
+
+	require.NoError(t, a.alignStep(pl, env))
+	assert.Contains(t, logs.String(), plan.CodeStepAligned)
+	assert.Equal(t, "1.2.0", pl.Releases["core"].Next.String())
+	assert.Equal(t, "core@1.2.0", pl.Releases["core"].TagName())
+}
+
+// TestAlignStepRefusesTheUnalignable: a run releasing a package the step's
+// plan does not, and a version rendering a foreign tag, are both E219 with
+// nothing written.
+func TestAlignStepRefusesTheUnalignable(t *testing.T) {
+	var logs bytes.Buffer
+	a := New(t.TempDir(), &config.File{}, zerolog.New(&logs))
+
+	pl := stepEnvRelease(t, "core", "1.2.0")
+	err := a.alignStep(pl, &runEnv{pkg: "ghost", tag: "ghost@1.0.0", next: mustVersion(t, "1.0.0")})
+	require.Error(t, err)
+	assert.Contains(t, logs.String(), plan.CodeStepUnalignable)
+
+	// The run's tag disagrees with what the aligned version renders: a
+	// tagFormat changed mid-run, which no alignment can paper over.
+	err = a.alignStep(pl, &runEnv{pkg: "core", tag: "elsewhere@1.2.0", next: mustVersion(t, "1.2.0")})
+	require.Error(t, err)
+}
+
+// TestReadExportPrefersTheOutputFile: an export appended to $DISPAT_OUTPUT in
+// the same script wins over the variable the stage inherited.
+func TestReadExportPrefersTheOutputFile(t *testing.T) {
+	clearRunEnv(t)
+	out := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, os.WriteFile(out,
+		[]byte("IMAGE=x\nDISPAT_EXPORT_GITHUB=/dist/a.tgz /dist/b.tgz\n"), 0o644))
+	t.Setenv(plan.GitHubExport, "/stale/old.tgz")
+	t.Setenv("DISPAT_OUTPUT", out)
+	t.Setenv(plan.PackageEnvVar, "core")
+
+	a := New(t.TempDir(), &config.File{}, zerolog.Nop())
+	e := a.readExport([]string{"core"})
+	assert.True(t, e.covers("core"))
+	assert.Equal(t, "/dist/a.tgz /dist/b.tgz", e.value, "the file's last word wins over the environment")
+}
+
+// TestReadExportDeduplicates: a path restated across the environment and the
+// output file, or within one export line, is one attachment.
+func TestReadExportDeduplicates(t *testing.T) {
+	clearRunEnv(t)
+	out := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, os.WriteFile(out,
+		[]byte("DISPAT_EXPORT_GITHUB=/dist/a.tgz /dist/b.tgz /dist/a.tgz\n"), 0o644))
+	t.Setenv(plan.GitHubExport, "/dist/a.tgz")
+	t.Setenv("DISPAT_OUTPUT", out)
+	t.Setenv(plan.PackageEnvVar, "core")
+
+	a := New(t.TempDir(), &config.File{}, zerolog.Nop())
+	e := a.readExport([]string{"core"})
+	assert.Equal(t, "/dist/a.tgz /dist/b.tgz", e.value, "one path, one attachment, whatever restated it")
+}
+
+func mustVersion(t *testing.T, s string) ccme.Version {
+	t.Helper()
+	v, err := ccme.ParseVersion(s)
+	require.NoError(t, err)
+	return v
+}

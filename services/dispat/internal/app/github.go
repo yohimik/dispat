@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // GitHubOptions selects what GitHub covers and where it publishes. The
@@ -40,8 +42,15 @@ type GitHubOptions struct {
 // files to attach) is read from there, and DISPAT_PACKAGE says which package
 // it belongs to.
 func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
+	env, err := a.wireStep(&opts.Window)
+	if err != nil {
+		return err
+	}
 	pl, err := a.stepPlan(ctx)
 	if err != nil {
+		return err
+	}
+	if err := a.alignStep(pl, env); err != nil {
 		return err
 	}
 	covered, err := a.coveredPackages(ctx, pl, opts.Window)
@@ -144,6 +153,22 @@ func (e stepExport) covers(name string) bool {
 	return e.present && (e.pkg == "" || e.pkg == name)
 }
 
+// dedupeFields drops repeated whitespace-separated entries, keeping first
+// occurrences in order: a path restated across the environment and the output
+// file is one attachment, not two upload attempts.
+func dedupeFields(value string) string {
+	fields := strings.Fields(value)
+	seen := make(map[string]bool, len(fields))
+	kept := fields[:0]
+	for _, f := range fields {
+		if !seen[f] {
+			seen[f] = true
+			kept = append(kept, f)
+		}
+	}
+	return strings.Join(kept, " ")
+}
+
 // readExport reads the opt-in out of the process environment. Inside a stage
 // script both variables are set, so the export belongs to that one package.
 // Outside one — a hand invocation exporting the variable itself —
@@ -156,7 +181,23 @@ func (e stepExport) covers(name string) bool {
 func (a *App) readExport(targets []string) stepExport {
 	value, present := os.LookupEnv(plan.GitHubExport)
 	e := stepExport{value: value, present: present, pkg: os.Getenv(plan.PackageEnvVar)}
-	if !present || e.pkg == "" {
+	// An export written to $DISPAT_OUTPUT earlier in the same script has not
+	// reached the environment yet — the run parses the file between stages —
+	// so the file is read too, and being the fresher record, its last word
+	// wins over the inherited variable. Winning means replacing: the two
+	// spellings of one export must not concatenate into a doubled attachment
+	// list, and the surviving list is deduplicated for the same reason.
+	if path := os.Getenv(release.OutputEnvVar); path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if v, ok := strings.CutPrefix(line, plan.GitHubExport+"="); ok {
+					e.value, e.present = strings.TrimSpace(v), true
+				}
+			}
+		}
+	}
+	e.value = dedupeFields(e.value)
+	if !e.present || e.pkg == "" {
 		return e
 	}
 	for _, name := range targets {

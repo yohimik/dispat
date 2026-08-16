@@ -50,8 +50,15 @@ type CommitOptions struct {
 // release stage script), each package's commit is exported as
 // PACKAGE_<KEY>=<sha>, pinning the outer run's tag and GitHub release to it.
 func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
+	env, err := a.wireStep(&opts.Window)
+	if err != nil {
+		return err
+	}
 	pl, err := a.stepPlan(ctx)
 	if err != nil {
+		return err
+	}
+	if err := a.alignStep(pl, env); err != nil {
 		return err
 	}
 	covered, err := a.coveredPackages(ctx, pl, opts.Window)

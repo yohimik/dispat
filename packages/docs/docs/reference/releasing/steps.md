@@ -52,6 +52,17 @@ commit, writes the tags and pushes without `run.beforeCommit` or `run.afterPush`
 bracket it yourself: `beforePublish: [notify-before, commit, notify-after]`. The
 [reasoning](../../configuration/run-hooks.md#they-belong-to-dispat-release) is on the hooks page.
 
+**Inside a run, they answer to the run.** A step invoked from a stage script or flow hook replans, and a fresh plan
+mid-run is not the run's plan: earlier legs' tags have landed, and the step's own leg may have created the very tag the
+step would read back as published history. The [`DISPAT_*` environment](../environment.md) every stage script inherits
+carries the run's own answers, so `changelog`, `commit` and `github` read them back. With `DISPAT_PACKAGE`,
+`DISPAT_NEW_VERSION` and `DISPAT_TAG` present, the step narrows to that package (unless you passed a filter of your
+own), leaves the run's own tag out of its baseline reading, and holds its record to the run's version. A replan that
+drifted anyway is corrected and reported as `W228`; a plan the step cannot align — the package missing from it, or the
+run's version rendering a different tag — is refused as `E219` with nothing written, because a failed leg re-runs where
+a drifted record does not. `dispat github` additionally reads its attachment list from `DISPAT_EXPORT_GITHUB`, whether
+an earlier stage exported it into the environment or the same script just appended it to `$DISPAT_OUTPUT`.
+
 ## Choosing what a step covers
 
 With no arguments, a step covers every package the plan is releasing, in dependency order. To narrow it, use the same

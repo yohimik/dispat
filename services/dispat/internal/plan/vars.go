@@ -18,6 +18,14 @@ import (
 // GitHubExport opt-in it finds there.
 const PackageEnvVar = "DISPAT_PACKAGE"
 
+// NewVersionEnvVar and TagEnvVar carry the run's planned version and tag for
+// the package a script runs for. The step commands' wiring reads them back to
+// hold a mid-run replan to the run's own answers; see the app's step wiring.
+const (
+	NewVersionEnvVar = "DISPAT_NEW_VERSION"
+	TagEnvVar        = "DISPAT_TAG"
+)
+
 // OutputEnvPrefix is what an exported script output is published under;
 // scripts may also spell the name with this prefix already attached in their
 // export line.
@@ -47,9 +55,9 @@ func (r *Release) Vars() []string {
 		"DISPAT_SPACE=" + r.Pkg.Space.Name,
 		"DISPAT_OLD_VERSION=" + r.Previous().String(),
 		"DISPAT_STABLE_BASELINE=" + r.Current.String(),
-		"DISPAT_NEW_VERSION=" + r.Next.String(),
+		NewVersionEnvVar + "=" + r.Next.String(),
 		"DISPAT_BUMP=" + r.Bump.String(),
-		"DISPAT_TAG=" + r.TagName(),
+		TagEnvVar + "=" + r.TagName(),
 		// Channel state (§11.1). A publish script needs the channel to choose
 		// a dist-tag; the old value is there so that a graduation is
 		// distinguishable from an ordinary release.

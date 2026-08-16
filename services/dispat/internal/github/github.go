@@ -438,15 +438,26 @@ func (r *Releaser) reconcileAssets(ctx context.Context, release *existingRelease
 
 // uploadAll attaches every path not already uploaded, and keeps going past a
 // failed one: each sound asset deserves its upload, and the failed ones are
-// exactly what the next re-run's reconcile picks up.
+// exactly what the next re-run's reconcile picks up. An asset name repeated
+// within one call — two paths sharing a base name, or one export restated —
+// is uploaded once and warned about, because the API would refuse the second
+// copy anyway and one warning reads better than one 422.
 func (r *Releaser) uploadAll(ctx context.Context, uploadURL, tag string, paths []string, uploaded map[string]bool) error {
 	var errs []error
+	sent := make(map[string]bool, len(paths))
 	for _, p := range paths {
-		if name := filepath.Base(p); uploaded[name] {
+		name := filepath.Base(p)
+		if uploaded[name] {
 			r.Log.Debug().Str("tag", tag).Str("asset", name).
 				Msg("github release asset already uploaded, skipped")
 			continue
 		}
+		if sent[name] {
+			r.Log.Warn().Str("tag", tag).Str("asset", name).Str("path", p).
+				Msg("github release asset name repeats in the export, skipped")
+			continue
+		}
+		sent[name] = true
 		if err := r.uploadAsset(ctx, uploadURL, tag, p); err != nil {
 			r.Log.Error().Str("tag", tag).Str("path", p).Err(err).
 				Msg("github release asset upload failed")

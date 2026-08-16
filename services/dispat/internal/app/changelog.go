@@ -30,8 +30,15 @@ type ChangelogOptions struct {
 // (W226), which is also what makes the release stage skip entries written
 // here.
 func (a *App) Changelog(ctx context.Context, opts ChangelogOptions) error {
+	env, err := a.wireStep(&opts.Window)
+	if err != nil {
+		return err
+	}
 	pl, err := a.stepPlan(ctx)
 	if err != nil {
+		return err
+	}
+	if err := a.alignStep(pl, env); err != nil {
 		return err
 	}
 	covered, err := a.coveredPackages(ctx, pl, opts.Window)

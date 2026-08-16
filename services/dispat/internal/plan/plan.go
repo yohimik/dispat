@@ -286,6 +286,19 @@ const (
 	// silently, a typo'd path means an artifact the release commit was
 	// supposed to carry never lands in it, so the miss is said out loud.
 	CodeCommitIncludeMissing = "W227"
+	// CodeStepAligned marks a step command whose own replan disagreed with the
+	// release run that invoked it: the run's DISPAT_* environment is the
+	// authority, so the step aligned its record to it and says so. The drift
+	// itself is ordinary — earlier legs' tags move what a fresh plan computes —
+	// which is exactly why the wiring exists (§13.8's records must be the
+	// run's own).
+	CodeStepAligned = "W228"
+	// CodeStepUnalignable marks a step command inside a run whose environment
+	// it cannot honor: the named package is not in its plan, the pinned
+	// version does not parse, or the aligned version renders a different tag
+	// than the run's. Nothing is written — a refusal here is a failed leg the
+	// operator re-runs, where a drifted record would be an incident.
+	CodeStepUnalignable = "E219"
 
 	// --- releasing part of the graph (see narrow.go) ---
 	//
@@ -1143,6 +1156,12 @@ type Options struct {
 	// many commits the window held, what the bump was before propagation
 	// touched it. These lines are those intermediates.
 	Log zerolog.Logger
+	// IgnoredTags are exact tag names left out of baseline resolution: the
+	// run's own not-yet-final tags. A step command re-planning from inside a
+	// running release must not read the tag its own leg just created back as
+	// published history — that would empty the window the record needs — so
+	// the environment wiring masks it here. See the app's step wiring.
+	IgnoredTags []string
 }
 
 type computation struct {
@@ -1153,6 +1172,8 @@ type computation struct {
 	initials map[string]ccme.Version
 	// nonPackage holds Options.NonPackageScopes as a set.
 	nonPackage map[string]bool
+	// ignoredTags is Options.IgnoredTags as a set; see that field.
+	ignoredTags map[string]bool
 
 	pkgs      []*model.Package
 	scopeDirs []scopeDir // prepared once; see prepareScopeDirs
@@ -1231,6 +1252,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		root:        opts.Root,
 		initials:    opts.Initials,
 		nonPackage:  make(map[string]bool, len(opts.NonPackageScopes)),
+		ignoredTags: make(map[string]bool, len(opts.IgnoredTags)),
 		pkgs:        pkgs,
 		byName:      make(map[string]*model.Package, len(pkgs)),
 		rel:         make(map[string]*Release, len(pkgs)),
@@ -1248,6 +1270,9 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
+	}
+	for _, t := range opts.IgnoredTags {
+		cp.ignoredTags[t] = true
 	}
 
 	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
@@ -1506,6 +1531,7 @@ func (cp *computation) loadTagsAndWindows() error {
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
 		}
+		tags = cp.withoutIgnoredTags(tags)
 
 		// §16 E191: two reachable tags parsing to the same version of this
 		// package (build metadata carries no precedence, so "1.2.3" and
@@ -2347,6 +2373,21 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 		}
 	}
 	return out
+}
+
+// withoutIgnoredTags drops the masked tag names from a package's tag listing
+// before baselines are read; see Options.IgnoredTags.
+func (cp *computation) withoutIgnoredTags(tags gitx.Tags) gitx.Tags {
+	if len(cp.ignoredTags) == 0 {
+		return tags
+	}
+	kept := tags[:0:0]
+	for _, t := range tags {
+		if !cp.ignoredTags[t.Name] {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 // logReleases traces what each package resolved to, once the plan is final.

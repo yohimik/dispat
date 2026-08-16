@@ -43,6 +43,10 @@ type App struct {
 	pkgsOnce sync.Once
 	pkgs     []*model.Package
 	pkgsErr  error
+
+	// ignoreTags are tag names masked from baseline resolution when this
+	// invocation is a step command wired to a running release; see stepenv.go.
+	ignoreTags []string
 }
 
 // packages is the discovered workspace, walked once per App.
@@ -190,6 +194,7 @@ func (a *App) planOptions() (plan.Options, error) {
 		NonPackageScopes: a.cfg.NonPackageScopes,
 		ParserConfig:     a.cfg.ResolvedParser,
 		Log:              a.log,
+		IgnoredTags:      a.ignoreTags,
 	}, nil
 }
 
