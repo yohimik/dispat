@@ -1216,6 +1216,7 @@ type computation struct {
 	parser *ccme.Parser
 
 	rel     map[string]*Release
+	tags    map[string]gitx.Tags       // package -> its tag listing, newest first
 	window  map[string]map[string]bool // package -> commit keys it has not released
 	commits []*commitRec               // newest first, deduplicated
 	byKey   map[string]*commitRec
@@ -1287,6 +1288,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		pkgs:        pkgs,
 		byName:      make(map[string]*model.Package, len(pkgs)),
 		rel:         make(map[string]*Release, len(pkgs)),
+		tags:        make(map[string]gitx.Tags, len(pkgs)),
 		window:      make(map[string]map[string]bool, len(pkgs)),
 		byKey:       make(map[string]*commitRec),
 		parents:     make(map[string][]string),
@@ -1563,6 +1565,11 @@ func (cp *computation) loadTagsAndWindows() error {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
 		}
 		tags = cp.withoutIgnoredTags(tags)
+		// Kept for the graduation's dependencies record: reconstructing what a
+		// consumer's last stable release shipped against is a question about
+		// the provider's tags, and the planner holds no other state between
+		// runs (versionAt).
+		cp.tags[p.Name] = tags
 
 		// §16 E191: two reachable tags parsing to the same version of this
 		// package (build metadata carries no precedence, so "1.2.3" and
@@ -2415,7 +2422,54 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			add(prov)
 		}
 	}
+	// A graduation's entry is what readers of the stable line actually see,
+	// so its dependencies section spans the same window as its notes:
+	// everything since the last stable release. A provider that moved during
+	// the train was documented piecewise by the prerelease entries, which
+	// those readers skip — without this widening the movement would reach no
+	// stable entry at all. From is reconstructed off the provider's tags
+	// (versionAt), because the planner keeps no state between runs, and it
+	// also rewrites the From of the entries added above: their fresh movement
+	// is a tail of the train-long one the graduation reports.
+	if rel.HasBaseline && rel.Baseline.IsPrerelease() && !rel.Next.IsPrerelease() {
+		for i := range out {
+			if from, ok := cp.versionAt(out[i].Name, rel.StableCommit); ok {
+				out[i].From = from
+			}
+		}
+		for _, prov := range provs {
+			pr := cp.rel[prov]
+			if pr == nil || seen[prov] {
+				continue
+			}
+			from, ok := cp.versionAt(prov, rel.StableCommit)
+			if !ok || from.String() == pr.Previous().String() {
+				continue
+			}
+			seen[prov] = true
+			out = append(out, ProviderUpdate{Name: prov, From: from, To: pr.Previous()})
+		}
+	}
 	return out
+}
+
+// versionAt is the package's newest published version as of the given commit:
+// the newest parsed tag pointing at an ancestor of it. False when the package
+// carried no tag there, or when the commit is unknown (a package never
+// released on the stable line has no stable commit to ask about).
+func (cp *computation) versionAt(pkg, commit string) (ccme.Version, bool) {
+	if commit == "" {
+		return ccme.Version{}, false
+	}
+	for _, t := range cp.tags[pkg] {
+		if !t.Parsed || t.Commit == "" {
+			continue
+		}
+		if cp.ancestorOrSelf(t.Commit, commit) {
+			return t.Version, true
+		}
+	}
+	return ccme.Version{}, false
 }
 
 // withoutIgnoredTags drops the masked tag names from a package's tag listing

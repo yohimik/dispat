@@ -38,7 +38,9 @@ changes, features, fixes) plus the provider-updates section. On the stable chann
 the package's last release. On a prerelease train each prerelease's entry contains **only its own changeset**, the
 commits the train's earlier prereleases have not already published, so `beta.1` does not repeat `beta.0`'s notes; the
 **graduation** then collects the whole train (everything since the last stable tag) into its one entry, which is what
-readers of the stable line actually see. The version is still computed over the whole train either way (a breaking
+readers of the stable line actually see. That includes the provider-updates section: a provider that moved while the
+train ran appears in the graduation's entry with its movement over the whole train, even when a prerelease entry
+already documented it piecewise. The version is still computed over the whole train either way (a breaking
 change shipped in `beta.0` keeps the graduation at the next major); only the notes narrow. The same windowing drives
 the [GitHub release body](#github) and the
 [`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](../reference/environment.md#release-notes-data), and

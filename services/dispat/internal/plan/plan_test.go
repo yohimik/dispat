@@ -1721,6 +1721,33 @@ func TestDeliveredBlastNamesOnlyTheFreshOrigin(t *testing.T) {
 		"the delivered minor still outweighs the fresh patch in the train's target")
 }
 
+func TestGraduationUpdatesSpanTheTrain(t *testing.T) {
+	// core's fix propagated onto app's train and beta.1 shipped it, so the
+	// blast is delivered and DueTo is rightly empty. But the graduation's
+	// entry is the one readers of the stable line actually see, so its
+	// dependencies section must still carry core's movement over the whole
+	// train — reconstructed from the tags, From at app's last stable release.
+	git := newFakeGit(
+		commit{sha: "c0", message: "chore: baseline"},
+		commit{sha: "c1", message: "feat(app)%beta: board the train"},
+		commit{sha: "c2", message: "fix(core)^: repair underneath"},
+		commit{sha: "c3", message: "release(app)%stable: graduate"},
+	).tag("core", "1.4.0", "c0").tag("core", "1.4.1", "c2").
+		tag("app", "1.2.3", "c0").
+		tag("app", "1.3.0-beta.0", "c1").tag("app", "1.3.0-beta.1", "c2")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	require.True(t, app.Changed(), "the direct directive graduates the train")
+	assertVersion(t, v(1, 3, 0), app.Next)
+	assert.Empty(t, app.DueTo, "the blast was delivered by beta.1 and is not re-reported")
+	require.Len(t, app.Updates, 1, "the stable entry still documents what moved underneath")
+	assert.Equal(t, "core", app.Updates[0].Name)
+	assert.Equal(t, "1.4.0", app.Updates[0].From.String(), "From is the version app's last stable release shipped against")
+	assert.Equal(t, "1.4.1", app.Updates[0].To.String())
+}
+
 func TestSpentCancelIsNotReported(t *testing.T) {
 	// The cancel did its work in an earlier run: it discarded core's pending
 	// feat, and core then released past it. The discard is invisible now (the
