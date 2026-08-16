@@ -1,5 +1,62 @@
 # Changelog
 
+## pkg/ccme/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- replace the channel sigil with percent
+
+
+### Features
+
+- the commit message engine reaches its stable surface
+
+- finalize the workspace for 1.0.0
+
+- parse Conventional Commits with the monorepo extension
+
+- partial corrections and voiding of nested corrections
+
+- parse the Edits and Deletes correction footers
+
+- specify the Edits and Deletes correction footers
+
+- refactor, tests, coverage
+
+- ccme
+
+
+### Fixes
+
+- exercise depth-one propagation from a provider
+
+- exercise a single independent package release
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- nested dependencies update again again
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- carry the license in every module
+
+- validate channel depth and forbid disabling parser bounds
+
+- restore @ in tag and email contexts of the spec
+
+- ccme and models API freeze
+
+- 1.0.0 blockers
+
+
 ## pkg/ccme/v1.0.0-rc.10 (2026-08-16)
 
 ### Features
