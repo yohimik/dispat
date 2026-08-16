@@ -23,12 +23,12 @@ on:
 permissions:
   contents: read
 
-# A version is pinned rather than left to resolve, because the resolution path
-# needs a stable release to find and this repository is still on its rc train.
-# One place to bump per rc; drop the pin for the empty default once 1.0.0 is
-# out — that is the path most callers take.
+# A version is pinned here — unlike the other workflows, which take the empty
+# default most callers take — because this workflow asserts that the action
+# installs exactly what it was told to, and that assertion needs a version it
+# can state up front.
 env:
-  DISPAT_PIN: 1.0.0-rc.5
+  DISPAT_PIN: 1.0.0
 
 jobs:
   action:

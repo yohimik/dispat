@@ -29,10 +29,9 @@ permissions:
 # and puts that build first on PATH. Everything that follows — the status
 # gate, the suite, the release and its record-writing stage scripts — runs
 # the checkout's own dispat, so the driver can never lag the configuration
-# or the records it writes. Pinned while only prereleases exist; drop the
-# pin once 1.0.0 is out.
+# or the records it writes. With 1.0.0 out, the
+# bootstrap resolves the latest stable release itself.
 env:
-  DISPAT_PIN: 1.0.0-rc.5
   # Our own modules are fetched directly from the repository, skipping the
   # proxy and the sum database: both lag fresh tags, and both are immutable,
   # so a tag ever recreated at different content (a rolled-back run) leaves
@@ -66,8 +65,6 @@ jobs:
 
       - name: Set up dispat
         uses: ./
-        with:
-          version: ${{ env.DISPAT_PIN }}
 
       # The bootstrap-then-fresh pair (see the workflow's env comment): the
       # gate's answer must come from the same dispat that would perform the
@@ -120,8 +117,6 @@ jobs:
 
       - name: Set up dispat
         uses: ./
-        with:
-          version: ${{ env.DISPAT_PIN }}
 
       # The bootstrap-then-fresh pair, as in the plan job.
       - name: Build dispat from the checkout
@@ -246,8 +241,6 @@ jobs:
 
       - name: Set up dispat
         uses: ./
-        with:
-          version: ${{ env.DISPAT_PIN }}
 
       # The bootstrap-then-fresh pair, as in the plan job. Here it is what
       # writes the records: the changelogs, the commits, the tags and the

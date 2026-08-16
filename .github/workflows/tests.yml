@@ -20,10 +20,9 @@ permissions:
 # The composite action installs the previous published release as a
 # bootstrap only; right after it, every job builds dispat from the checkout
 # and puts that build first on PATH, so every gate is driven by the same
-# dispat the changes describe. Pinned while only prereleases exist; drop the
-# pin once 1.0.0 is out.
+# dispat the changes describe. With 1.0.0 out, the
+# bootstrap resolves the latest stable release itself.
 env:
-  DISPAT_PIN: 1.0.0-rc.5
   # Our own modules come directly from the repository, skipping the proxy
   # and the sum database, exactly as in the release workflow: both lag
   # fresh tags, and a tag ever recreated at different content leaves the
@@ -48,8 +47,6 @@ jobs:
 
       - name: Set up dispat
         uses: ./
-        with:
-          version: ${{ env.DISPAT_PIN }}
 
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
@@ -107,8 +104,6 @@ jobs:
 
       - name: Set up dispat
         uses: ./
-        with:
-          version: ${{ env.DISPAT_PIN }}
 
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
@@ -176,8 +171,6 @@ jobs:
 
       - name: Set up dispat
         uses: ./
-        with:
-          version: ${{ env.DISPAT_PIN }}
 
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
