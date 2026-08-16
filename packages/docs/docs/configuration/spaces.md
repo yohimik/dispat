@@ -224,6 +224,10 @@ and
 `versioning` are mutually exclusive on the same space or package: a member cannot contradict its group. A declared group
 nobody joins is inert configuration, like a disabled block.
 
+A group shares the version, not its spelling: each member keeps its own [`tagFormat`](./versions.md#tagformat) and
+[alias tags](./alias-tags.md), so one group release may tag `lib1-v1.2.0` in one space and `app1@1.2.0` in
+another.
+
 The joining rules:
 
 - `versionGroup` is settable on a space (all its packages join) and on a single package (through a top-level

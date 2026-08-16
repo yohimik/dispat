@@ -58,6 +58,10 @@ below the shared part is the package's own, and nobody else hears about it.
 When the group does move, every member lands on the same version, and the parts below the shared one restart at zero.
 Under `fixedMajor` a group going to major 2 lands on `2.0.0`, not on each package's own patch count carried forward.
 
+A group shares the version, not its spelling. Each member renders the shared version through its own
+[`tagFormat`](../../configuration/versions.md#tagformat) and [alias tags](../../configuration/alias-tags.md),
+so `lib1-v1.2.0` and `app1@1.2.0` can be the same group release.
+
 ## A worked example
 
 A group of two packages, `core` and `ui`, with four commits arriving one after another. Only `core` ever changes.

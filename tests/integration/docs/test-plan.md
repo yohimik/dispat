@@ -53,6 +53,11 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
     surface through the binary; and a `none` space spanning two folders runs scripts in both without ever
     tagging. Per-folder `.dispatexclude` and the package-name collision across folders are pinned by unit tests
     in `internal/config`.
+36. **Declared version groups across spaces** (`versiongroups_test.go`): the sparse and partial-sparse modes as
+    declared cross-space groups, the override ladder detaching a member that sets its own `versioning`, a shared
+    prerelease train with one counter and a W236 channel conflict, the versioning-`none` refusal through the
+    binary, `--group` selection under a partial mode, and divergent per-member `tagFormat` as defined behavior:
+    one shared version, each member spelling its tag its own way.
 
 ### Scheduling and execution
 
@@ -298,6 +303,7 @@ tests/integration/
   overrides_test.go         goal 13
   packages_test.go          goal 14
   spacedeps_test.go         goal 15
+  versiongroups_test.go     goal 36
 
   the commands
   records_test.go           goal 16
@@ -998,6 +1004,22 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestSpacePathsAscentFromSecondPath`    | Config-file resolution from inside a later folder finds the monorepo root even when that folder's space file carries a `packages` map — the shape that would otherwise read as a nested monorepo root.               |
 | `TestSpacePathsFilterAndLocate`         | `--space` covers every folder's packages; standing in a later folder infers the space, and standing inside one of its packages narrows to that package.                                                             |
 | `TestSpacePathsNoneCombined`            | A versioning-none space spanning two folders runs scripts under both and never tags anything, while the releasable space next to it releases normally.                                                              |
+
+### Goal 36: declared version groups across spaces (`versiongroups_test.go`)
+
+Goal 13 pins the declared-group lifecycles under `fixed` and `fixedMajor` (in `overrides_test.go`); this goal covers
+the sparse and partial-sparse modes across spaces, the group-membership edges of the override ladder, a shared
+prerelease train, and the defined freedom of per-member tag spellings.
+
+| Test                                        | Claim proven                                                                                                                                                                                                        |
+|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestVersionGroupSparseAcrossSpaces`        | A declared `fixedSparse` group never back-fills: an untouched member in the other space does not ride (no W234), and when it finally changes it joins at the group's next version, skipping the ones it sat out.     |
+| `TestVersionGroupPartialSparseAcrossSpaces` | Under `fixedMajorMinorSparse` a patch stays inside its member, a minor moves the shared part without dragging the other space along, and the laggard joins at the shared part when it next changes.                  |
+| `TestVersionGroupMemberOverrideLeavesTheGroup` | Versioning and versionGroup are one ladder axis: a package-level `versioning` on a declared group's member supersedes the membership its space joined, so the package versions on its own line instead of riding. |
+| `TestVersionGroupPrereleaseTrain`           | A prerelease train runs across the whole declared group with one shared counter; graduation lands every member on the same stable version; divergent member channels while the group moves are W236.                 |
+| `TestVersionGroupRefusesNone`               | A declared group with versioning `none` is refused through the binary with the loader's own message, not just in config unit tests.                                                                                  |
+| `TestGroupFilterPartialMode`                | `--group` under `fixedMajor` selects the whole group, and the partial mode keeps meaning what it means inside the selection: a breaking change moves every member, a minor releases its member alone.                |
+| `TestVersionGroupDivergentTagFormats`       | A group shares the version, not its spelling: each member renders the shared version through its own `tagFormat`, with no diagnostic beyond the ride's own W234 — defined behavior, locked in.                       |
 
 ## Regression fences
 
