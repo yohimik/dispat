@@ -156,6 +156,29 @@ func TestReplaceStringListTOMLRefuses(t *testing.T) {
 	assert.Contains(t, snippet, "'util'")
 }
 
+func TestPrepareKeysWritesNothing(t *testing.T) {
+	// The prepare half renders and validates without touching the disk: a
+	// multi-file edit prepares every file first, so a refusal found late
+	// cannot leave the earlier files already rewritten.
+	src := "{\n  \"dependencies\": {}\n}\n"
+	path := writeConfigFile(t, "dispat.json", src)
+	p, err := PrepareKeys(path, []Edit{{KeyPath: []string{"dependencies"},
+		Value: Dependencies{{Consumer: "a", Provider: "b"}}}})
+	require.NoError(t, err)
+	assert.Equal(t, src, readFile(t, path), "prepare must not write")
+	assert.NoFileExists(t, path+BackupSuffix)
+
+	require.NoError(t, p.Commit())
+	assert.Contains(t, readFile(t, path), `"a"`)
+	assert.Equal(t, src, readFile(t, path+BackupSuffix), "the backup is the pre-edit bytes")
+
+	// A TOML refusal surfaces at prepare, before anything could be written.
+	toml := writeConfigFile(t, "dispat.toml", "[packages.core]\n")
+	_, err = PrepareKeys(toml, []Edit{{KeyPath: []string{"x"}, Value: 1}})
+	assert.ErrorIs(t, err, ErrTOMLEdit)
+	assert.NoFileExists(t, toml+BackupSuffix)
+}
+
 func TestReplaceDependenciesJSONAppendsMissingKey(t *testing.T) {
 	src := "{\n  \"scripts\": {\"b\": \"make\"}\n}\n"
 	path := writeConfigFile(t, "dispat.json", src)

@@ -301,13 +301,18 @@ func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []confi
 		}
 	}
 
-	edited := make([]string, 0, len(edits.order))
+	// Every file is rendered and validated before any is rewritten: a refusal
+	// discovered at the third file of three must not leave the first two
+	// already changed, because a config half-matching the suggestions matches
+	// neither the state the user had nor the one they asked for.
+	prepared := make([]*config.PreparedEdit, 0, len(edits.order))
+	displays := make([]string, 0, len(edits.order))
 	for _, target := range edits.order {
 		display := filepath.Base(cfgPath)
 		if target != cfgPath {
 			display = relPath(a.root, target)
 		}
-		err := config.ReplaceKeys(target, edits.byFile[target])
+		p, err := config.PrepareKeys(target, edits.byFile[target])
 		if errors.Is(err, config.ErrTOMLEdit) {
 			for _, e := range edits.byFile[target] {
 				if len(e.KeyPath) == 0 {
@@ -327,10 +332,25 @@ func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []confi
 			return err
 		}
 		if err != nil {
-			a.log.Error().Err(err).Msg("writing the config failed")
+			a.log.Error().Err(err).Msg("rendering the config edit failed")
 			return err
 		}
-		edited = append(edited, display)
+		prepared = append(prepared, p)
+		displays = append(displays, display)
+	}
+
+	edited := make([]string, 0, len(prepared))
+	for i, p := range prepared {
+		if err := p.Commit(); err != nil {
+			// Rendering was validated above, so this is the disk refusing the
+			// write; the files already rewritten are named so the user knows
+			// which ones changed and where their pre-edit copies sit.
+			a.log.Error().Err(err).Str("file", displays[i]).
+				Strs("alreadyRewritten", edited).Str("backupSuffix", config.BackupSuffix).
+				Msg("writing the config failed")
+			return err
+		}
+		edited = append(edited, displays[i])
 	}
 
 	fmt.Fprintf(out, "\napplied %d change(s) to %s (previous copies carry the %s suffix)\n",

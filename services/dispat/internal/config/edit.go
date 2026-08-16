@@ -75,19 +75,42 @@ func ReplaceStringList(path string, keyPath []string, items []string) error {
 // a key whose value is a `$ref` resolves to: the referenced file holds nothing
 // but that value, so there is no span to preserve around it.
 func ReplaceKeys(path string, edits []Edit) error {
+	p, err := PrepareKeys(path, edits)
+	if err != nil {
+		return err
+	}
+	return p.Commit()
+}
+
+// PreparedEdit is one file's fully rendered replacement, ready to commit.
+// Preparing every file before committing any is what keeps a multi-file edit
+// from stopping halfway through: a render failure in the last file must
+// surface before the first file is rewritten.
+type PreparedEdit struct {
+	Path string
+	data []byte      // the pre-edit bytes, saved as the backup
+	out  []byte      // the rendered replacement
+	mode os.FileMode // the file's own permissions, kept across the rewrite
+	noop bool        // the edit set changes nothing; Commit writes nothing
+}
+
+// PrepareKeys renders every edit against the file's current bytes without
+// writing anything — the validating half of ReplaceKeys.
+func PrepareKeys(path string, edits []Edit) (*PreparedEdit, error) {
+	p := &PreparedEdit{Path: path, noop: true}
 	if len(edits) == 0 {
-		return nil
+		return p, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	format := strings.ToLower(filepath.Ext(path))
 	out := data
 	for _, e := range edits {
 		switch {
 		case format == ".toml":
-			return ErrTOMLEdit
+			return nil, ErrTOMLEdit
 		case len(e.KeyPath) == 0:
 			out, err = renderDocument(format, out, e.Value)
 		case format == ".json":
@@ -95,26 +118,35 @@ func ReplaceKeys(path string, edits []Edit) error {
 		case format == ".yaml" || format == ".yml":
 			out, err = replaceValueYAML(out, e.KeyPath, e.Value)
 		default:
-			return fmt.Errorf("%s: unknown config format", path)
+			return nil, fmt.Errorf("%s: unknown config format", path)
 		}
 		if err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 	}
 	if bytes.Equal(out, data) {
-		return nil
+		return p, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	mode := info.Mode().Perm()
-	// The backup carries the config's own permissions: a 0600 config must not
-	// leak through a world-readable copy.
-	if err := os.WriteFile(path+BackupSuffix, data, mode); err != nil {
+	return &PreparedEdit{Path: path, data: data, out: out, mode: info.Mode().Perm()}, nil
+}
+
+// Commit writes the prepared replacement: the backup first, then the file.
+// Both writes are atomic — the backup exists for the moment something goes
+// wrong, which is exactly when a truncated half-written copy would be found
+// instead — and the backup carries the config's own permissions: a 0600
+// config must not leak through a world-readable copy.
+func (p *PreparedEdit) Commit() error {
+	if p.noop {
+		return nil
+	}
+	if err := fsx.WriteFileAtomic(p.Path+BackupSuffix, p.data, p.mode); err != nil {
 		return fmt.Errorf("saving backup: %w", err)
 	}
-	return fsx.WriteFileAtomic(path, out, mode)
+	return fsx.WriteFileAtomic(p.Path, p.out, p.mode)
 }
 
 // RenderDependenciesTOML renders the dependencies as a `dependencies` table
