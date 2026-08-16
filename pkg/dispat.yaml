@@ -21,8 +21,16 @@ scripts:
   tests: >-
     go run github.com/yohimik/dispat/tools/testreport test "$DISPAT_PACKAGE" --
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
+# Publishing a Go library IS the record: the changelog written, the folder
+# committed (its go.mod already rewritten to the released providers by
+# autoVersion), the tag created at that commit and pushed — which is what the
+# Go proxy serves and what a consumer gated on isBuildWaitingPublish fetches
+# in the same run. The steps run wired to the run's own DISPAT_* environment,
+# so they record exactly what this run planned, and the finalize phase later
+# finds the tag done (W223) and the entry written (W226) and skips both. The
+# GitHub release page joins at finalize, hung on the tag pushed here.
 flow:
-  beforePublish: [changelog, commit]
+  publish: [changelog, commit]
 packages:
   manifest:
     versionGroup: manifests

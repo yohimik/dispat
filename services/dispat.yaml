@@ -8,5 +8,10 @@ autoVersion:
 # See the pkg space's vet: the lint gate's sweep, defined per Go space.
 scripts:
   vet: go vet ./...
+# The CLI's publish is its records: changelog, the leg's commit with the tag
+# pushed (go.mod already pinning the pkg/* tags the earlier legs pushed), and
+# the GitHub release with the binaries attached — created here, mid-run,
+# because the image builds that follow install exactly that release. The steps
+# run wired to the run's DISPAT_* environment; finalize finds all of it done.
 flow:
-  beforePublish: [changelog, commit, github]
+  publish: [changelog, commit, github]

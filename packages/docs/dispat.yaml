@@ -41,7 +41,7 @@ scripts:
   # snapshot in a stage of its own ahead of the build. Cutting it here
   # means the site that ships is the one built *with* it, and the
   # tracked files it writes — versioned_docs, versioned_sidebars,
-  # versions.json — are staged by the `commit` in beforePublish along
+  # versions.json — are staged by the finalize release commit along
   # with everything else the release changed.
   #
   # A snapshot per minor, not per patch: 1.2.3 and 1.2.4 document the
@@ -72,7 +72,9 @@ scripts:
       --build-arg DOCS_VERSION="$DOCS_VERSION" \
       --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
       --output "type=local,dest=$PWD" ../..
+# No record steps: the docs package's changelog, tag and GitHub release are
+# the finalize phase's. The site deploy is the publish; the records follow at
+# the end of the run.
 flow:
   build: build
   publish: deploy-docs
-  beforePublish: [changelog, commit]

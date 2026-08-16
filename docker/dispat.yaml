@@ -49,6 +49,10 @@ scripts:
       | curl -fsS -X PATCH "https://hub.docker.com/v2/repositories/yohimik/${DISPAT_PACKAGE}/" \
         -H "Content-Type: application/json" -H "Authorization: Bearer ${token}" -d @- > /dev/null
     echo "updated the Docker Hub readme for yohimik/${DISPAT_PACKAGE}"
+# No record steps here: the images' changelogs, tags and GitHub release pages
+# are the finalize phase's, at the end of the run. Nothing downstream needs
+# them earlier — the images themselves install the CLI release the dispat
+# leg's publish already created.
 flow:
   login: docker-login
   build: build
@@ -56,7 +60,6 @@ flow:
   # After a successful publish, warn-only: the images are out either way, and
   # a Hub API hiccup must not fail a release that already shipped.
   postPublish: push-readme
-  beforePublish: [changelog, commit]
 packages:
   dispat-ubuntu:
     versionGroup: cli
