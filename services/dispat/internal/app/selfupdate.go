@@ -126,17 +126,31 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		opts.Log.Error().Err(err).Msg("self-update failed")
 		return false, err
 	}
-	exe, _ := selfupdate.Executable()
+	exe, exeErr := selfupdate.Executable()
+	if exeErr != nil {
+		// The install already succeeded through its own path resolution; only
+		// this report cannot say where the binary lives, and telling the user
+		// it was installed "at " nowhere would be a lie.
+		exe = ""
+		opts.Log.Warn().Err(exeErr).Msg("installed, but the binary's own path cannot be resolved")
+	}
 
 	if opts.JSON {
-		opts.Log.Info().Str("version", rel.Version.String()).Str("tag", rel.Tag).
-			Str("path", exe).Str("backup", backup).Msg("update installed")
+		ev := opts.Log.Info().Str("version", rel.Version.String()).Str("tag", rel.Tag)
+		if exe != "" {
+			ev = ev.Str("path", exe)
+		}
+		ev.Str("backup", backup).Msg("update installed")
 		return false, nil
 	}
-	fmt.Fprintf(opts.Out, "installed dispat %s at %s\n", rel.Version.String(), exe)
+	if exe != "" {
+		fmt.Fprintf(opts.Out, "installed dispat %s at %s\n", rel.Version.String(), exe)
+	} else {
+		fmt.Fprintf(opts.Out, "installed dispat %s\n", rel.Version.String())
+	}
 	fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", backup)
 	fmt.Fprintf(opts.Out, "put it back with \"dispat self-update --rollback\"\n")
-	if note := selfupdate.MacNote(opts.GOOS, exe); note != "" {
+	if note := selfupdate.MacNote(opts.GOOS, exe); exe != "" && note != "" {
 		fmt.Fprint(opts.Out, note)
 	}
 	return false, nil
