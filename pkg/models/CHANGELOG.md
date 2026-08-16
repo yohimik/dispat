@@ -1,5 +1,18 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.6 (2026-08-16)
+
+### Fixes
+
+- nested dependencies update again
+
+- nested dependencies update
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.3 -> 1.0.0-rc.4
+
 ## pkg/models/v1.0.0-rc.5 (2026-08-16)
 
 ### Fixes
