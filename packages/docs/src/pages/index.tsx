@@ -170,7 +170,7 @@ function Features(): React.ReactElement {
           each, read at build time. Adding a bullet there adds a card here. */}
       <div className={styles.features}>
         {cli.features.map((feature, i) => (
-          <div className={[styles.feature, i === cli.features.length - 1 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
+          <div className={[styles.feature, i === cli.features.length - 1 && cli.features.length % 2 !== 0 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
             <Heading as="h3" className={styles.featureTitle}>
               {feature.title}
             </Heading>
