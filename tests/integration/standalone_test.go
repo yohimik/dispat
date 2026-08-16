@@ -9,9 +9,11 @@ package integration
 // inside the tagged tree.
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -314,12 +316,33 @@ func TestStandaloneGithubPublishesFromAStageScript(t *testing.T) {
 	var mu sync.Mutex
 	var uploads []upload
 	var created [][]byte
+	// Created tags are remembered, exactly as githubFake remembers them: the
+	// wired step and the run's recorder both cover this release, and the
+	// second of them must find it already there (W224) the way it would on
+	// GitHub, with the uploaded assets listed so the reconcile pass sees them.
+	published := map[string]bool{}
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
+		if _, tag, isLookup := strings.Cut(req.URL.Path, "/releases/tags/"); isLookup && req.Method == http.MethodGet {
+			if decoded, err := url.PathUnescape(tag); err == nil {
+				tag = decoded
+			}
+			if !published[tag] {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			assets := make([]string, 0, len(uploads))
+			for _, u := range uploads {
+				assets = append(assets, `{"name": "`+u.name+`", "state": "uploaded"}`)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}", "assets": [` +
+				strings.Join(assets, ", ") + `]}`))
+			return
+		}
 		switch {
-		case githubTagProbe(w, req, nil):
 		case req.Method == http.MethodGet:
 			w.WriteHeader(http.StatusOK)
 		case req.URL.Path == "/uploads":
@@ -331,6 +354,10 @@ func TestStandaloneGithubPublishesFromAStageScript(t *testing.T) {
 			data, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
 			created = append(created, data)
+			var release ghRelease
+			if json.Unmarshal(data, &release) == nil && release.TagName != "" {
+				published[release.TagName] = true
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"upload_url": "` + srv.URL + `/uploads{?name,label}"}`))
 		}
@@ -342,8 +369,11 @@ func TestStandaloneGithubPublishesFromAStageScript(t *testing.T) {
 	cfg.Scripts = map[string]models.Script{
 		"build": {`echo binary-bytes > app.bin` +
 			` && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin" >> "$DISPAT_OUTPUT"`},
-		"publish":  {"echo publishing"},
-		"announce": {"dispat github"},
+		"publish": {"echo publishing"},
+		// Rendered through DispatCommand so the stage runs the binary under
+		// test: a bare `dispat` resolves through the caller's PATH, which in
+		// CI is the workflow's bootstrap driver rather than this build.
+		"announce": {r.DispatCommand("github")},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 		Build: []string{"build"}, Publish: []string{"publish"}, Announce: []string{"announce"}}}}
