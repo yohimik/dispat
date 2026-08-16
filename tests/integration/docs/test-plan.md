@@ -1026,7 +1026,7 @@ prerelease train, and the defined freedom of per-member tag spellings.
 
 | Test                                | Claim proven                                                                                                                                                                                                          |
 |-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `TestStepsWiredIntoAPublishLeg`     | A publish leg whose script is `dispat changelog` + `dispat commit --tag --push` records itself mid-run: the tag reaches the remote before the gated consumer builds, the tagged tree carries the step-written changelog, finalize finds the work done (W223/W226), no W228/E219 fires, and a second run converges. |
+| `TestStepsWiredIntoAPublishLeg`     | A publish leg whose script is `dispat changelog` + `dispat commit --tag --push` records itself mid-run: the tag reaches the remote before the gated consumer builds, the tagged tree carries the step-written changelog, finalize finds the work done (W223/W226), no W228/E219 fires, and a second run converges. A finalize-recorded package's tag lands on the release commit itself, one commit carrying both the tracked artifact its build wrote (the docs slice's shape) and the tag. |
 | `TestStepsWiredSurviveAPartialRun`  | After a run that released only the provider, the next run finds the provider's step-made records, does not re-release it, and catches the consumer up at the version it was owed.                                        |
 
 ## Regression fences

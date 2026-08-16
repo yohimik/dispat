@@ -41,7 +41,11 @@ func stepRepo(t *testing.T) (*harness.Repo, string) {
 		"record": {bin + " changelog", bin + " commit --tag --push"},
 		// The consumer's build gates on the provider's tag being fetchable:
 		// this line failing is the whole reason isBuildWaitingPublish exists.
-		"check-remote": {"git ls-remote --tags origin | grep -q \"$DISPAT_UPDATED_CORE_NEW_VERSION\" && echo remote-has-core >> ../../seen.log"},
+		// It also writes a tracked artifact into its own folder — the docs
+		// version slice's shape — which the finalize commit must carry, so
+		// the consumer's tag and the artifact land in one commit.
+		"check-remote": {"git ls-remote --tags origin | grep -q \"$DISPAT_UPDATED_CORE_NEW_VERSION\" && echo remote-has-core >> ../../seen.log",
+			"echo \"$DISPAT_NEW_VERSION\" > slice.txt"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages"},
@@ -91,6 +95,14 @@ func TestStepsWiredIntoAPublishLeg(t *testing.T) {
 	assert.NotEqual(t, tagged, head, "the release commit sits above the leg's tagged commit")
 	shown := r.Git("show", "core@0.1.0:packages/core/CHANGELOG.md")
 	assert.Contains(t, shown, "core@0.1.0", "the tagged tree carries the changelog the step wrote")
+
+	// A finalize-recorded package is the other half: no steps of its own, so
+	// its tag lands on the release commit itself — one commit carrying both
+	// the artifact its build wrote (the docs slice's shape) and the tag.
+	webTagged := strings.TrimSpace(r.Git("rev-list", "-1", "web@0.1.0"))
+	assert.Equal(t, head, webTagged, "the finalize-recorded tag points at the release commit")
+	assert.Equal(t, "0.1.0", strings.TrimSpace(r.Git("show", "web@0.1.0:services/web/slice.txt")),
+		"the build's tracked artifact is inside the commit the tag points at")
 
 	// Convergence: the records exist, so a second run releases nothing.
 	r.ReleaseOK()
