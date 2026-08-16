@@ -1,5 +1,37 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.11 (2026-08-16)
+
+### Features
+
+- the installers explain PATH permanence and shadowing
+
+- debug shows git mutations, trace shows starting scripts
+
+
+### Fixes
+
+- the skip cascade reads the fresh changeset, not the train
+
+- a graduation documents the train's provider movement
+
+- config edits prepare every file before writing any
+
+- self-update no longer claims an empty install path
+
+- a record entry is never empty
+
+- a catch-up on a train is still a catch-up
+
+- status counts the fresh changeset, not the train
+
+- a ride with train history still says no changes
+
+
+### Dependencies
+
+- models: 1.0.0-rc.10 -> 1.0.0-rc.11
+
 ## services/dispat/v1.0.0-rc.10 (2026-08-16)
 
 ### Fixes
