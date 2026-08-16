@@ -65,7 +65,9 @@ packages:
     versioning: none
     scripts:
       vet: go vet ./...
-      build: go build ./...
+      # Into a throwaway directory: `go build` writes a lone main package's
+      # binary into the working folder, where `testreport` is a directory.
+      build: go build -o "$(mktemp -d)" ./...
       # Through `testreport test` like every Go suite, so the repository
       # tooling's own runs land in the site's test-results page too.
       tests: go run github.com/yohimik/dispat/tools/testreport test tools -- ./... -count=1
@@ -80,7 +82,9 @@ packages:
     dependencies: [models]
     scripts:
       vet: go vet ./...
-      build: go build ./...
+      # The same throwaway target as the tools build, for the same reason:
+      # a compile gate must leave no artifact in the checkout.
+      build: go build -o "$(mktemp -d)" ./...
 
 # The version of the dispat CLI its in-repo consumers take: the docker images
 # hand it to install.sh, and anything else that needs the CLI's version reads
