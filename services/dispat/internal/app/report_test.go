@@ -102,6 +102,27 @@ func TestPrintGraph(t *testing.T) {
 	assert.Contains(t, out, `"scriptOnly":1`)
 }
 
+func TestPrintGraphCountsTheFreshChangeset(t *testing.T) {
+	// On a prerelease train Units spans every prerelease since the stable
+	// baseline; the graph's ownCommits answers "what does this release add",
+	// which is the fresh changeset the entry will render — beta.2 must not
+	// count the commits beta.0 and beta.1 already published.
+	a, buf := loggedApp(t)
+	units := []*ccme.Unit{{}, {}, {}}
+	rel := &plan.Release{
+		Pkg:        &model.Package{Name: "core", Dir: "core", Space: &model.Space{Name: "libs"}},
+		Current:    ccme.Version{Major: 1},
+		Bump:       ccme.BumpMinor,
+		OwnBump:    ccme.BumpMinor,
+		NewWork:    true,
+		Next:       ccme.Version{Major: 1, Minor: 1, Prerelease: []string{"beta", "2"}},
+		Units:      units,
+		FreshUnits: units[2:],
+	}
+	a.printGraph(&plan.Plan{Order: []string{"core"}, Releases: map[string]*plan.Release{"core": rel}})
+	assert.Contains(t, buf.String(), `"ownCommits":1`, "the train's history must not count")
+}
+
 func TestSummarize(t *testing.T) {
 	a, buf := loggedApp(t)
 	pl := reportPlan()

@@ -94,7 +94,7 @@ func (a *App) printGraph(pl *plan.Plan) {
 		// show and no hold to explain, only the scripts it exists to run.
 		if !rel.Releasable() {
 			scriptOnly++
-			ev.Int("ownCommits", len(rel.Units)).
+			ev.Int("ownCommits", len(rel.NotesUnits())).
 				Msg("∅ script-only (versioning: none)")
 			continue
 		}
@@ -105,11 +105,14 @@ func (a *App) printGraph(pl *plan.Plan) {
 		// §13.10: where the channel differs from the baseline's, the plan MUST
 		// show both — the transition a reader needs to see is "beta -> stable",
 		// not the word "stable" alone.
+		// NotesUnits, not Units: ownCommits answers "what does this release
+		// add", which is the changeset the entry will render — on a prerelease
+		// train Units spans every prerelease since the stable baseline.
 		ev = ev.Str("bump", rel.Bump.String()).
 			Str("version", rel.Previous().String()+" -> "+rel.Next.String()).
 			Str("channel", rel.ChannelTransition()).
 			Str("reason", rel.Reason()).
-			Int("ownCommits", len(rel.Units)).
+			Int("ownCommits", len(rel.NotesUnits())).
 			Strs("dueToProviders", rel.DueTo)
 		// §13.10 requires the plan to mark its corrected and suppressed
 		// entries. Both are invisible in the numbers above: a restated record
