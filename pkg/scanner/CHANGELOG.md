@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/scanner/v1.0.0-rc.6 (2026-08-16)
+
+### Fixes
+
+- nested dependencies update againx2
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.5 -> 1.0.0-rc.6
+
 ## pkg/scanner/v1.0.0-rc.5 (2026-08-16)
 
 ### Dependencies
