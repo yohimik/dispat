@@ -1,5 +1,16 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.13 (2026-08-16)
+
+### Fixes
+
+- exercise a group ride release
+
+
+### Dependencies
+
+- models: 1.0.0-rc.12 -> 1.0.0-rc.13
+
 ## services/dispat/v1.0.0-rc.12 (2026-08-16)
 
 ### Fixes
