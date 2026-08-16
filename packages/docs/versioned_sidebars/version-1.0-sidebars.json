@@ -150,6 +150,11 @@
       "label": "Updating dispat"
     },
     {
+      "type": "doc",
+      "id": "faq",
+      "label": "FAQ"
+    },
+    {
       "type": "category",
       "label": "Internals",
       "collapsed": true,
