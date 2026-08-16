@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.0.1 (2026-08-16)
+
+### Fixes
+
+- announce the stable release
+
+
 ## packages/docs/v1.0.0 (2026-08-16)
 
 ### Breaking Changes
