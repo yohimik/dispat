@@ -115,7 +115,7 @@ packages:
 # for the one case the default cannot cover (a planned version nobody
 # published yet); see the build script in docker/dispat.yaml.
 env:
-  DISPAT_CLI_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION}
+  INSTALL_DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION}
 
 concurrency: [0, 1]
 

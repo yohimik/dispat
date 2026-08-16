@@ -11,21 +11,22 @@ autoVersion:
 # which the CI gate reaches only when a docker package actually changed.
 scripts:
   docker-login: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-  # The compose files interpolate DISPAT_WORKSPACE_DISPAT_VERSION into the
-  # DISPAT_VERSION build arg, and the Dockerfiles hand it to install.sh.
-  # In a release that is right: the images build after the CLI published,
-  # so the version exists to download. In the CI build gate — `dispat run
-  # build`, where DISPAT_STAGE is "run:build" — it is the version being
-  # planned, which nobody has published yet, so install.sh would 404 on
-  # every gate run where the CLI has commits pending. The gate wants the
-  # newest version that exists instead; the question it answers is whether
-  # the image still builds.
+  # The compose files interpolate INSTALL_DISPAT_VERSION — the top-level env
+  # default, ${DISPAT_WORKSPACE_DISPAT_VERSION} — into the DISPAT_VERSION
+  # build arg, and the Dockerfiles hand it to install.sh. The default is right
+  # everywhere but one place: in a release the images build after the CLI
+  # published, and in a run where dispat is not releasing the workspace
+  # version is its published baseline. The exception is the CI build gate
+  # (`dispat run build`, DISPAT_STAGE "run:build") while dispat has commits
+  # pending: the workspace version is then a plan nobody published, install.sh
+  # would 404 on it, and the gate's question is only whether the image still
+  # builds — so that one case substitutes the newest version that exists.
   build: |
-    if [ "$DISPAT_STAGE" != "build" ]; then
+    if [ "$DISPAT_STAGE" != "build" ] && [ "$DISPAT_WORKSPACE_DISPAT_RELEASING" = "true" ]; then
       tag=$(git tag -l 'services/dispat/v*' --sort=-v:refname | head -n 1)
-      DISPAT_WORKSPACE_DISPAT_VERSION=${tag##*/v}
-      export DISPAT_WORKSPACE_DISPAT_VERSION
-      echo "gate: building against the published $DISPAT_WORKSPACE_DISPAT_VERSION"
+      INSTALL_DISPAT_VERSION=${tag##*/v}
+      export INSTALL_DISPAT_VERSION
+      echo "gate: dispat $DISPAT_WORKSPACE_DISPAT_VERSION is planned and unpublished; building against $INSTALL_DISPAT_VERSION"
     fi
     docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
   tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q

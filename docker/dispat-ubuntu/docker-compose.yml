@@ -25,6 +25,6 @@ services:
         # image-only patch ships the CLI that is already out. The workspace
         # listing carries exactly that number — the planned version while the
         # CLI is releasing in this run, its baseline otherwise.
-        DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}
+        DISPAT_VERSION: ${INSTALL_DISPAT_VERSION:?}
       labels:
-        io.dispat.cli.version: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}
+        io.dispat.cli.version: ${INSTALL_DISPAT_VERSION:?}

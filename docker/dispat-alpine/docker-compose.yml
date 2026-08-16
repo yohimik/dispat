@@ -11,6 +11,6 @@ services:
         - linux/amd64
         - linux/arm64
       args:
-        DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}
+        DISPAT_VERSION: ${INSTALL_DISPAT_VERSION:?}
       labels:
-        io.dispat.cli.version: ${DISPAT_WORKSPACE_DISPAT_VERSION:?}
+        io.dispat.cli.version: ${INSTALL_DISPAT_VERSION:?}
