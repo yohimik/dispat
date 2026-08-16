@@ -113,6 +113,16 @@ Note the asymmetry between including and excluding an unknown name. Including on
 is `W130`, a warning, because a scope that excludes a package somebody has since deleted or renamed is harmless and
 common. The include is the one that changes what ships.
 
+## A step command inside a run
+
+[Step commands](./releasing/steps.md#two-rules-that-make-them-safe) invoked from a stage script replan, and the
+replan must align to the run that invoked them. Two codes belong to that alignment.
+
+| Code | Means |
+|------|-------|
+| `E219` | The step cannot align to the run: the package is missing from its plan, or the run's version renders a different tag. Nothing is written, because a failed leg re-runs where a drifted record does not. |
+| `W229` | A wired `dispat github` ran before the run's tag existed. GitHub would invent the tag at the default branch head, so the commit step belongs first. |
+
 ## The plan is fine and nothing releases
 
 Not an error, and worth naming because it reads like one.

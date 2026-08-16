@@ -497,8 +497,8 @@ the specification predates or does not have. They are numbered from `W220` and `
 | `W223`, `W224`, `W226` | A record that is already there: a release tag, a GitHub release, a changelog entry. What makes the [step commands](../reference/releasing/steps.md) re-runnable |
 | `W227` | A `commit.include` path that names nothing on disk: the path is not staged, and the miss is reported so a typo cannot silently cost the release commit its artifact |
 | `W228` | A [step command](../reference/releasing/steps.md) invoked inside a run whose own replan drifted from the run's `DISPAT_*` environment: the record is aligned to the run and the correction is reported |
-| `E219` | A [step command](../reference/releasing/steps.md) inside a run it cannot align to — the package missing from its plan, or the run's version rendering a different tag. Nothing is written: a refused leg is re-runnable, a drifted record is not |
-| `W229` | A wired `dispat github` running before the run's tag exists: GitHub would invent the tag at the default branch head, so the ordering is reported — the commit step belongs first |
+| `E219` | A [step command](../reference/releasing/steps.md) inside a run it cannot align to, because the package is missing from its plan or the run's version renders a different tag. Nothing is written: a refused leg is re-runnable, a drifted record is not |
+| `W229` | A wired `dispat github` running before the run's tag exists: GitHub would invent the tag at the default branch head, so the ordering is reported. The commit step belongs first |
 | `W230`, `W231`         | [Releasing part of the graph](../reference/releasing/partial-releases.md): a package the publish order cannot reach yet, a selection splitting a versioning group |
 | `W232`                 | An [alias tag](../configuration/alias-tags.md) that could not be written |
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |

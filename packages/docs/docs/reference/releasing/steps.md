@@ -58,10 +58,10 @@ step would read back as published history. The [`DISPAT_*` environment](../envir
 carries the run's own answers, so `changelog`, `commit` and `github` read them back. With `DISPAT_PACKAGE`,
 `DISPAT_NEW_VERSION` and `DISPAT_TAG` present, the step narrows to that package (unless you passed a filter of your
 own), leaves the run's own tag out of its baseline reading, and holds its record to the run's version. A replan that
-drifted anyway is corrected and reported as `W228`; a plan the step cannot align — the package missing from it, or the
-run's version rendering a different tag — is refused as `E219` with nothing written, because a failed leg re-runs where
+drifted anyway is corrected and reported as `W228`; a plan the step cannot align, because the package is missing from
+it or the run's version renders a different tag, is refused as `E219` with nothing written: a failed leg re-runs where
 a drifted record does not. `dispat github` additionally reads its attachment list from `DISPAT_EXPORT_GITHUB`, whether
-an earlier stage exported it into the environment or the same script just appended it to `$DISPAT_OUTPUT` — and warns
+an earlier stage exported it into the environment or the same script just appended it to `$DISPAT_OUTPUT`. It warns
 (`W229`) when it runs before the run's tag exists, because a release for a tag nobody made yet has GitHub invent the
 tag at the default branch head: put the commit step first. Running a step twice in one flow stays what it always was:
 the second pass finds the work done and skips it (W226/W223/W224).
