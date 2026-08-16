@@ -4,7 +4,8 @@ The two shell scripts behind this repository's release stages and CI checks that
 of their own. Everything smaller lives directly in the dispat configuration as a script entry (`push-badge` and
 `refresh-bootstrap` in the root [`dispat.yaml`](../dispat.yaml), `deploy-docs` in
 [`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), the link bracket in
-[`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml)), and the test-run record lives in the Go tooling
+[`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml), `push-readme` in
+[`docker/dispat.yaml`](../docker/dispat.yaml)), and the test-run record lives in the Go tooling
 (`testreport test` in [`tools/testreport`](../tools/testreport)). Since the config split, each script entry sits
 beside the code it configures: the root file holds what every space shares, each space carries a `<space>/dispat.yaml`,
 and the two packages with exceptions of their own carry a package file. Package scripts run **inside the releasing
