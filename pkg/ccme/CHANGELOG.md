@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/ccme/v1.0.0-rc.9 (2026-08-16)
+
+### Fixes
+
+- exercise depth-one propagation from a provider
+
+
 ## pkg/ccme/v1.0.0-rc.8 (2026-08-16)
 
 ### Fixes
