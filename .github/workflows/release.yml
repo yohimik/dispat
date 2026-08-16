@@ -18,8 +18,11 @@ name: Release
 on:
   workflow_dispatch:
 
+# Read by default; the two jobs that push (the badge branch, the release
+# itself) widen to write on their own. The gate and the install check hold
+# no more than they use.
 permissions:
-  contents: write
+  contents: read
 
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;
@@ -36,7 +39,7 @@ jobs:
       releasing: ${{ steps.status.outputs.releasing }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
@@ -78,12 +81,12 @@ jobs:
       contents: write     # the badge branch
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26'
           cache: true
@@ -132,7 +135,7 @@ jobs:
         run: dispat exec coverage-badge
 
       - name: Upload merged coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage
           path: |
@@ -149,7 +152,7 @@ jobs:
         run: dispat exec test-report
 
       - name: Upload the test report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-report
           path: packages/docs/data/report.json
@@ -164,17 +167,19 @@ jobs:
     name: Run dispat, publish binaries
     needs: tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write     # commits, tags, GitHub releases, gh-pages
     outputs:
       cli-released: ${{ steps.dispat.outputs.cli-released }}
       cli-version: ${{ steps.dispat.outputs.cli-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26'
           cache: true
@@ -186,10 +191,10 @@ jobs:
       # packageManager in package.json, and must run before setup-node, whose
       # pnpm cache needs pnpm on PATH.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: packages/docs/.nvmrc
           cache: pnpm
@@ -200,12 +205,12 @@ jobs:
       # `docker compose build` keep its manifest list locally for the push that
       # follows; without it the build has nowhere to put the result.
       - name: Set up Docker
-        uses: docker/setup-docker-action@v4
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4 # v4.7.0
         with:
           daemon-config: |
             { "features": { "containerd-snapshotter": true } }
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Put the bootstrap dispat on PATH
         run: echo "$PWD/bin" >> "$GITHUB_PATH"
@@ -228,7 +233,7 @@ jobs:
       # The docs build refuses to produce a release site without it either —
       # see DOCS_REQUIRE_REPORT in packages/docs/dispat.yaml.
       - name: Fetch the test report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: test-report
           path: packages/docs/data
@@ -279,7 +284,7 @@ jobs:
     steps:
       # The tag the release just wrote, rather than main, so this tests exactly
       # what was published even if something else has landed since.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: v${{ needs.release.outputs.cli-version }}
 
