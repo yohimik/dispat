@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.19 (2026-08-16)
+
+### Features
+
+- the public configuration model is stable
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.9 -> 1.0.0-rc.10
+
 ## pkg/models/v1.0.0-rc.18 (2026-08-16)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
