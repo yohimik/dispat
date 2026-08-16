@@ -112,7 +112,7 @@ Writes the changelog entry each covered package is due, the same entry the relea
 the entry to be part of the release commit rather than left in your working tree afterwards.
 
 The flags let you override the [`changelog`](../../configuration/records.md#changelog) settings for one invocation:
-`--file`, `--title` and `--date-format`.
+`--file`, `--file-title`, `--date-format` and `--release-name`.
 
 In the log you will see one `changelog written` line per package, or a `W226` skip for a package whose entry was
 already there.

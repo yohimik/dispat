@@ -347,6 +347,35 @@ function Install(): React.ReactElement {
   );
 }
 
+// The repository README's `## Projects using dispat` list, read at build time
+// like every other README extraction. It sits right after Install on purpose:
+// a reader who just saw how to get the binary is deciding whether to trust it,
+// and "it releases itself, and a four-level docker chain" is the answer.
+function Projects(): React.ReactElement {
+  const {repository} = useReadme();
+
+  return (
+    <section className="container margin-bottom--xl">
+      <Heading as="h2" className={styles.sectionTitle}>
+        Projects using dispat
+      </Heading>
+      <p className={styles.sectionLead}>
+        The first monorepo dispat releases is its own: every tag, changelog, GitHub release and container image of this
+        project, and this documentation site, ship through a dispat run.
+      </p>
+      <div className={styles.features}>
+        {repository.users.map((user, i) => (
+          <div className={styles.feature} key={i}>
+            <p>
+              <Inlines tokens={user} />
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Reference(): React.ReactElement {
   return (
     <section className="container margin-bottom--xl">
@@ -444,6 +473,7 @@ export default function Home(): React.ReactElement {
         <Features />
         <Libraries />
         <Install />
+        <Projects />
         <Reference />
         <Inspiration />
         <Community />

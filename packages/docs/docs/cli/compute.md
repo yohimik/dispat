@@ -17,7 +17,7 @@ Detection still reads every package's manifests whichever way you narrow: the wo
 declared dependency onto a provider, so an edge onto a package outside the selection stays recognised rather than
 being proposed for removal.
 
-**What it reads.** Every package folder is scanned for manifests, the same fifteen families `dispat scanner` reads:
+**What it reads.** Every package folder is scanned for manifests, the same fifteen ecosystems `dispat scanner` reads:
 npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.toml`, requirements files), Composer
 (`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj` and the flat lists), pub (`pubspec.yaml`), Ruby (`Gemfile`,
 `*.gemspec`), CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple bundles (`Info.plist`), Android

@@ -13,7 +13,7 @@ Two small commands cover those.
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
-$ dispat exec build --for-package core
+$ dispat exec build --for pkg:core
 ```
 
 Neither one plans a release, sweeps your packages or touches the dependency

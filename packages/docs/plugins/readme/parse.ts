@@ -67,6 +67,11 @@ export function parseRepositoryReadme(src: string): RepositoryReadme {
     throw new Error(`${ROOT_README.path}: no opening paragraphs before the first code block`);
   }
 
+  // The projects section is a bare list: no intro paragraph to demand, no
+  // closing remark to look for — just the repositories themselves.
+  const usersWhere = `${ROOT_README.path}: "## Projects using dispat"`;
+  const users = firstList(section(blocks, 'Projects using dispat', ROOT_README.path), usersWhere);
+
   return {
     lead: inlines(lead, ROOT_README, 'the opening'),
     // The problems section ends on the paragraph that answers them; the
@@ -74,6 +79,7 @@ export function parseRepositoryReadme(src: string): RepositoryReadme {
     // remark to look for.
     problems: argument(blocks, ROOT_README, 'Why one more monorepo tool?', true),
     inspiration: argument(blocks, ROOT_README, 'Inspiration', false),
+    users: inlines(users.items, ROOT_README, '"## Projects using dispat"'),
   };
 }
 

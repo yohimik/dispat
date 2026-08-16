@@ -32,14 +32,20 @@
   --docusaurus-highlighted-code-line-bg: rgba(103, 169, 130, 0.12);
 }
 
+/*
+ * The footer's three columns spread across the row instead of clustering
+ * left. `wrap` matters: flex-wrap is not inherited, so `unset` would compute
+ * to nowrap and crush the columns into one unreadable line on a phone.
+ */
 .footer__links {
   display: flex;
   justify-content: space-between;
   max-width: 100%;
-  flex-wrap: unset;
+  flex-wrap: wrap;
 }
 
 .footer__col {
   --ifm-col-width: unset;
   width: unset;
+  min-width: 0;
 }

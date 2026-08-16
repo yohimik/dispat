@@ -42,6 +42,8 @@ export interface RepositoryReadme {
   problems: Argument;
   /** `## Inspiration`: what dispat descends from. */
   inspiration: Argument;
+  /** `## Projects using dispat`: the real repositories, dispat's own first. */
+  users: Inline[][];
 }
 
 /** What the landing page takes from the CLI README. */

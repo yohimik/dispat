@@ -186,7 +186,7 @@ export function SuiteSummary(): React.ReactElement | null {
     <>
       <p>
         The suite runs <strong>{count(totals.tests)} test functions</strong> and{' '}
-        <strong>{count(totals.fuzz)} fuzz targets</strong> — {count(totals.subtests)} subtests between them — across{' '}
+        <strong>{count(totals.fuzz)} fuzz targets</strong>, {count(totals.subtests)} subtests between them, across{' '}
         {count(totals.packages)} packages, in {duration(totals.elapsed)}.{' '}
         {outcome(totals)}
       </p>
