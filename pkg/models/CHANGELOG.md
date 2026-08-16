@@ -1,5 +1,90 @@
 # Changelog
 
+## pkg/models/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- drop the dependency edge array form
+
+- restore the 1.0 rc train
+
+
+### Features
+
+- the public configuration model is stable
+
+- finalize the workspace for 1.0.0
+
+- the dispat configuration schema as a Go module
+
+- accept a list of space paths
+
+- add versioning none mode
+
+- choose the channels lines and records reach
+
+- resolve $ref in config files
+
+- array of scripts, require release
+
+- an updateCheck option
+
+- a package src path that narrows change detection
+
+- prerelease opt-out for changelog and github records
+
+- fixedMajor and fixedMajorMinor versioning modes
+
+- space file model and .dispatignore over config names
+
+- declare manifest names per package
+
+- changelog, commit and autoversion commands
+
+- run consumers
+
+- package add
+
+- per-package overrides, version groups, dispatignore
+
+- shared manifest module, package readmes
+
+- compute auto version
+
+- export
+
+- versioning modes, run command, script outputs, parser config, public models
+
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- carry the license in every module
+
+- autoversion and compute correctness
+
+- ccme and models API freeze
+
+- graceful shutdown, ancestry cache, scheduler guard
+
+- 1.0.0 blockers
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.10 -> 1.0.0
+
 ## pkg/models/v1.0.0-rc.19 (2026-08-16)
 
 ### Features
