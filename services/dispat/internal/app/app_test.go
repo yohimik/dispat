@@ -72,6 +72,21 @@ func TestInitialVersionsMapping(t *testing.T) {
 	assert.Contains(t, buf.String(), "initials entry matches no discovered package")
 }
 
+func TestInitialVersionsRefuseACaseCollision(t *testing.T) {
+	// Two packages differing only in case make the lowercased initials key
+	// genuinely ambiguous: last-writer-wins would route the version by map
+	// iteration order, so the entry is dropped with the candidates named.
+	var buf bytes.Buffer
+	a := New(t.TempDir(), &config.File{
+		InitialVersions: map[string]ccme.Version{"core": {Major: 1}},
+	}, zerolog.New(&buf))
+
+	out := a.initialVersions([]*model.Package{{Name: "Core"}, {Name: "core"}})
+	assert.Empty(t, out, "an ambiguous initial reaches nobody")
+	assert.Contains(t, buf.String(), "ambiguous between case-colliding packages")
+	assert.Contains(t, buf.String(), "Core", "the warning names the candidates")
+}
+
 func TestRenderCommitMessage(t *testing.T) {
 	pkgs := []string{"core", "utils"}
 	tags := []string{"core@1.1.0", "utils@2.0.1"}

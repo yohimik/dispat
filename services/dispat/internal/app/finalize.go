@@ -224,14 +224,19 @@ func (a *App) reportPush(report gitx.PushReport, remote string) {
 // appendIncludeDirs appends the commit.include paths onto the staging list:
 // the shared artifacts regenerated outside every package folder (a workspace
 // lockfile a syncLock rewrote, say) belong in the same release commit as the
-// package folders. A configured path that does not exist is simply not
-// staged — `git add` would refuse an empty pathspec.
+// package folders. A configured path that does not exist is not staged —
+// `git add` would refuse an empty pathspec — and is warned about (W227),
+// because a typo'd path would otherwise cost the commit its artifact in
+// silence, on every release, until a human noticed the file missing.
 func (a *App) appendIncludeDirs(dirs []string, include []string) []string {
 	for _, p := range include {
 		full := filepath.Join(a.root, filepath.FromSlash(p))
-		if _, err := os.Stat(full); err == nil {
-			dirs = append(dirs, full)
+		if _, err := os.Stat(full); err != nil {
+			a.log.Warn().Str("code", plan.CodeCommitIncludeMissing).Str("path", p).
+				Msg("commit.include path does not exist, not staged")
+			continue
 		}
+		dirs = append(dirs, full)
 	}
 	return dirs
 }

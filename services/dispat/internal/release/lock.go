@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -95,6 +96,9 @@ func (l *Lock) Acquire(ctx context.Context) error {
 			l.Log.Debug().Err(derr).Str("tag", LockTagName).
 				Msg("could not remove the local lock tag after a failed push")
 		}
+		if holder := l.describeHolder(ctx); holder != "" {
+			return fmt.Errorf("pushing the release lock tag to %s (%s): %w", l.Remote, holder, err)
+		}
 		return fmt.Errorf("pushing the release lock tag to %s: %w", l.Remote, err)
 	}
 	l.held = true
@@ -128,6 +132,44 @@ func (l *Lock) Release(ctx context.Context) {
 		l.Log.Error().Err(err).Str("tag", LockTagName).
 			Msg("could not remove the local release lock tag")
 	}
+}
+
+// lockInspector is the optional capability behind the holder line in a
+// refusal: reading the remote lock tag's message. *gitx.CLI has it; the
+// narrower fakes in tests do not, and the refusal reads the same without it.
+type lockInspector interface {
+	RemoteTagMessage(ctx context.Context, remote, name string) (string, error)
+}
+
+// describeHolder turns the remote lock tag's message into "held for 3h12m by
+// host ci-7 pid 4242", or nothing when the message cannot be read or parsed.
+// The refusal is already correct without it; this is the difference between
+// "somebody holds the lock" and knowing whether that somebody is still alive.
+func (l *Lock) describeHolder(ctx context.Context) string {
+	insp, ok := l.Git.(lockInspector)
+	if !ok {
+		return ""
+	}
+	msg, err := insp.RemoteTagMessage(ctx, l.Remote, LockTagName)
+	if err != nil || msg == "" {
+		return ""
+	}
+	var host, pid string
+	var at time.Time
+	for _, line := range strings.Split(msg, "\n") {
+		switch {
+		case strings.HasPrefix(line, "host "):
+			host = strings.TrimPrefix(line, "host ")
+		case strings.HasPrefix(line, "pid "):
+			pid = strings.TrimPrefix(line, "pid ")
+		case strings.HasPrefix(line, "at "):
+			at, _ = time.Parse(time.RFC3339Nano, strings.TrimPrefix(line, "at "))
+		}
+	}
+	if host == "" || at.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf("held for %s by host %s pid %s", time.Since(at).Round(time.Second), host, pid)
 }
 
 // lockMessage is the body of the lock tag, and the reason two runs can never

@@ -910,3 +910,28 @@ func TestBehindRemoteNoRemote(t *testing.T) {
 	_, err := cli.BehindRemote(context.Background(), "origin", "main")
 	assert.Error(t, err, "an unreachable remote is an error, not a verdict")
 }
+
+func TestRemoteTagMessage(t *testing.T) {
+	// The reader behind the lock refusal's holder line: an annotated tag's
+	// message comes back from the remote without touching this clone's refs,
+	// and a missing tag is an error rather than an empty answer.
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	addBareRemote(t, root)
+
+	require.NoError(t, cli.CreateTag(ctx, "dispat-release-lock", "dispat release lock\n\nhost ci-7\npid 42\n", ""))
+	require.NoError(t, cli.PushTag(ctx, "origin", "dispat-release-lock"))
+	require.NoError(t, cli.DeleteTag(ctx, "dispat-release-lock"))
+
+	msg, err := cli.RemoteTagMessage(ctx, "origin", "dispat-release-lock")
+	require.NoError(t, err)
+	assert.Contains(t, msg, "host ci-7")
+	assert.Contains(t, msg, "pid 42")
+
+	out, gerr := exec.Command("git", "-C", root, "tag").Output()
+	require.NoError(t, gerr)
+	assert.NotContains(t, string(out), "dispat-release-lock", "the read leaves no local ref behind")
+
+	_, err = cli.RemoteTagMessage(ctx, "origin", "no-such-tag")
+	assert.Error(t, err)
+}

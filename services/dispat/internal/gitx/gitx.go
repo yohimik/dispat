@@ -761,6 +761,29 @@ func (c *CLI) DeleteRemoteTag(ctx context.Context, remote, name string) error {
 	return err
 }
 
+// RemoteTagMessage reads an annotated tag's message from the remote without
+// touching this clone's refs: the fetch lands the object in FETCH_HEAD only.
+// A lightweight tag has no message and comes back empty.
+func (c *CLI) RemoteTagMessage(ctx context.Context, remote, name string) (string, error) {
+	if _, err := c.run(ctx, "fetch", "--no-tags", remote, "refs/tags/"+name); err != nil {
+		return "", err
+	}
+	out, err := c.run(ctx, "cat-file", "-p", "FETCH_HEAD")
+	if err != nil {
+		return "", err
+	}
+	// An annotated tag prints its headers, a blank line, then the message; a
+	// peeled or lightweight ref prints a commit instead, which has no message
+	// of the tag's own to offer.
+	if !strings.HasPrefix(out, "object ") {
+		return "", nil
+	}
+	if i := strings.Index(out, "\n\n"); i >= 0 {
+		return out[i+2:], nil
+	}
+	return "", nil
+}
+
 // pathspec renders dir relative to the repo root, avoiding symlinked-tempdir
 // mismatches in git pathspecs.
 func (c *CLI) pathspec(dir string) string {

@@ -293,18 +293,32 @@ func (a *App) releaseBlocked(pl *plan.Plan) string {
 
 // initialVersions maps the configured initials onto discovered package names.
 // Viper lowercases map keys, so matching is case-insensitive; keys that match
-// no discovered package are warned about and ignored.
+// no discovered package are warned about and ignored. Two packages differing
+// only in case make a lowercased key genuinely ambiguous — last-writer-wins
+// would route the initial to whichever the map iteration favored — so their
+// entries are refused with the candidates named.
 func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 	if len(a.cfg.InitialVersions) == 0 {
 		return nil
 	}
 	byLower := make(map[string]string, len(pkgs)) // lowercase -> real name
+	collided := make(map[string][]string)
 	for _, p := range pkgs {
-		byLower[strings.ToLower(p.Name)] = p.Name
+		low := strings.ToLower(p.Name)
+		if prev, dup := byLower[low]; dup {
+			collided[low] = append(collided[low], prev, p.Name)
+		}
+		byLower[low] = p.Name
 	}
 	out := make(map[string]ccme.Version, len(a.cfg.InitialVersions))
 	for key, v := range a.cfg.InitialVersions {
-		if real, ok := byLower[strings.ToLower(key)]; ok {
+		low := strings.ToLower(key)
+		if names := collided[low]; len(names) > 0 {
+			a.log.Warn().Str("initial", key).Strs("candidates", names).
+				Msg("initials entry is ambiguous between case-colliding packages, ignoring")
+			continue
+		}
+		if real, ok := byLower[low]; ok {
 			out[real] = v
 		} else {
 			a.log.Warn().Str("package", key).Msg("initials entry matches no discovered package, ignoring")

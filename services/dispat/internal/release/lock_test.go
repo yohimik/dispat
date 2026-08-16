@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -186,4 +187,54 @@ func TestLockLocalDeleteFailureIsReported(t *testing.T) {
 	lock.Release(ctx)
 
 	assert.Contains(t, out.String(), "local release lock tag")
+}
+
+// inspectingLockGit is fakeLockGit plus the optional capability the holder
+// line rides on: reading the remote lock tag's message.
+type inspectingLockGit struct {
+	fakeLockGit
+	message string
+	msgErr  error
+}
+
+func (f *inspectingLockGit) RemoteTagMessage(context.Context, string, string) (string, error) {
+	f.record("readMessage")
+	return f.message, f.msgErr
+}
+
+// TestLockRefusalNamesTheHolder: with the remote tag's message readable, the
+// refusal says who holds the lock and for how long — the difference between
+// "come back later" and knowing the holder died an hour ago.
+func TestLockRefusalNamesTheHolder(t *testing.T) {
+	git := &inspectingLockGit{
+		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}},
+		message: "dispat release lock\n\nhost ci-7\npid 4242\nat " +
+			time.Now().UTC().Add(-3*time.Hour).Format(time.RFC3339Nano) + "\n",
+	}
+	lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&bytes.Buffer{})}
+
+	err := lock.Acquire(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "held for 3h0m", "the age comes from the tag's own timestamp")
+	assert.Contains(t, err.Error(), "host ci-7")
+	assert.Contains(t, err.Error(), "pid 4242")
+	assert.Contains(t, err.Error(), "already exists", "the git rejection still comes through")
+}
+
+// TestLockRefusalDegradesWithoutAMessage: an unreadable or unparseable tag
+// message costs nothing but the holder line.
+func TestLockRefusalDegradesWithoutAMessage(t *testing.T) {
+	for name, git := range map[string]LockGit{
+		"no capability": &fakeLockGit{failures: map[string]error{"push": errors.New("refused")}},
+		"read fails":    &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}}, msgErr: errors.New("no fetch")},
+		"not dispat's":  &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}}, message: "some other tag"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&bytes.Buffer{})}
+			err := lock.Acquire(context.Background())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "refused")
+			assert.NotContains(t, err.Error(), "held for")
+		})
+	}
 }

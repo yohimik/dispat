@@ -281,6 +281,11 @@ const (
 	// later stage failed. Creating it again is a 422 from the API, so the
 	// skip is what makes both re-runnable.
 	CodeGitHubReleaseExists = "W224"
+	// CodeCommitIncludeMissing marks a commit.include path that names nothing
+	// on disk. The path is simply not staged — `git add` would refuse it — but
+	// silently, a typo'd path means an artifact the release commit was
+	// supposed to carry never lands in it, so the miss is said out loud.
+	CodeCommitIncludeMissing = "W227"
 
 	// --- releasing part of the graph (see narrow.go) ---
 	//
