@@ -1,5 +1,46 @@
 # Changelog
 
+## pkg/manifest/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- restore the 1.0 rc train
+
+
+### Features
+
+- manifest reading settles for the stable line
+
+- finalize the workspace for 1.0.0
+
+- identify twenty-three manifest formats across fifteen ecosystems
+
+- read and write Dockerfiles and compose files
+
+- run consumers
+
+- shared manifest module, package readmes
+
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- carry the license in every module
+
+- command flags are not images, duplicate edits resolve together
+
+
 ## pkg/manifest/v1.0.0-rc.10 (2026-08-16)
 
 ### Features
