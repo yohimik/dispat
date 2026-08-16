@@ -70,7 +70,7 @@ func arRead(t *testing.T, r *harness.Repo, parts ...string) string {
 // window covers, and the file it writes is the fixture with exactly the edited
 // bytes changed. A second pass writes nothing at all, which is what makes the
 // command safe inside a flow that may run twice.
-func TestAutoWriterEditsEveryCoveredPackage(t *testing.T) {
+func TestAutoWriterEditsEveryCoveredPackageThroughTheBinary(t *testing.T) {
 	r := arRepo(t)
 
 	res := r.Command("autowriter", "--since", "all",
@@ -169,7 +169,7 @@ func TestAutoWriterManifestScope(t *testing.T) {
 
 // TestAutoWriterRedirects: --link points a dependency at a folder and
 // takes the redirect away again, across the selection.
-func TestAutoWriterRedirects(t *testing.T) {
+func TestAutoWriterRedirectsThroughTheBinary(t *testing.T) {
 	r := arRepo(t)
 
 	res := r.Command("autowriter", "--since", "all", "--link", "@acme/core=../core")

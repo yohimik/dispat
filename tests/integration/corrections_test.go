@@ -357,7 +357,7 @@ func TestRevertWithAnUnreachableTargetStaysInformational(t *testing.T) {
 // voids its changelog suppression, so the entry it hid comes back. This is the
 // §7.4 rule applied to §7.3, and the shape an operator reaches for after
 // reverting the wrong commit.
-func TestRevertSuppressionIsVoidedByACorrection(t *testing.T) {
+func TestRevertSuppressionIsVoidedByACorrectionThroughTheBinary(t *testing.T) {
 	r := correctionsRepo(t)
 	r.Commit("feat(core): bootstrap\n\n---\n\nfeat(utils): bootstrap")
 	r.ReleaseOK()

@@ -106,7 +106,7 @@ func TestSpaceDependenciesRefuseAnEdgeItDoesNotTouch(t *testing.T) {
 
 // TestSpaceFileDependencies: the space folder's own config file declares
 // edges too, and they add to what the root file's space entry says.
-func TestSpaceFileDependencies(t *testing.T) {
+func TestSpaceFileDependenciesThroughTheBinary(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	libs := cfg.Spaces["libs"]

@@ -78,7 +78,7 @@ func execRepo(t *testing.T) *harness.Repo {
 	return r
 }
 
-func TestExecResolvesTheSubjectsScript(t *testing.T) {
+func TestExecResolvesTheSubjectsScriptThroughTheBinary(t *testing.T) {
 	// One subject, one answer, and the folder the command runs in never enters
 	// into it. Without --fallback only the named level is read, so a name
 	// declared a level away is a reported mistake rather than text run quietly.
