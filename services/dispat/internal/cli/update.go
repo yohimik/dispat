@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 
@@ -35,6 +36,10 @@ type notice struct {
 	// status makes --version state the answer either way, rather than only
 	// when there is something to install.
 	status bool
+	// wait holds the command back for the answer, bounded by the check's own
+	// timeout. Only an environment that explicitly asked for the check gets
+	// this: whoever set the variable wants the answer, not a race against it.
+	wait bool
 }
 
 // startUpdateCheck begins the check, unless this invocation is one that would
@@ -46,20 +51,39 @@ func startUpdateCheck(ctx context.Context, o *options, fs *pflag.FlagSet, format
 	if build.Origin == selfupdate.OriginDev || format == "json" || !enabled || !envAllowsUpdateCheck() {
 		return notice{}
 	}
-	return notice{ch: selfupdate.Check(ctx, updateSource(o, fs), build)}
+	return notice{ch: selfupdate.Check(ctx, updateSource(o, fs), build), wait: envForcesUpdateCheck()}
 }
 
-// print writes the notice when the answer beat the command home.
+// print writes the notice when the answer beat the command home — or, when the
+// environment explicitly asked for the check, waits for it up to the check's
+// own timeout. A failed check sends nothing, so the wait is against the clock
+// rather than the channel alone.
 func (n notice) print(out io.Writer) {
+	if n.ch == nil {
+		return
+	}
+	if n.wait {
+		select {
+		case res := <-n.ch:
+			n.emit(out, res)
+		case <-time.After(selfupdate.CheckTimeout):
+		}
+		return
+	}
 	select {
 	case res := <-n.ch:
-		if n.status {
-			fmt.Fprint(out, selfupdate.Status(res, runtime.GOOS))
-			return
-		}
-		fmt.Fprint(out, selfupdate.Notice(res, runtime.GOOS))
+		n.emit(out, res)
 	default:
 	}
+}
+
+// emit renders the answer in the form this invocation asked for.
+func (n notice) emit(out io.Writer, res selfupdate.Result) {
+	if n.status {
+		fmt.Fprint(out, selfupdate.Status(res, runtime.GOOS))
+		return
+	}
+	fmt.Fprint(out, selfupdate.Notice(res, runtime.GOOS))
 }
 
 // envAllowsUpdateCheck reads the kill switch. Anything that parses as false
@@ -75,6 +99,20 @@ func envAllowsUpdateCheck() bool {
 		return true
 	}
 	return value
+}
+
+// envForcesUpdateCheck reads the same variable's other edge: explicitly set
+// and true. The default is a check nobody waits for — a suggestion is not
+// worth a millisecond of anyone's time — but a variable someone set to 1 is a
+// request for the answer, and racing the command against it would honor the
+// letter of the check while losing its point.
+func envForcesUpdateCheck() bool {
+	raw, ok := os.LookupEnv(updateCheckEnv)
+	if !ok {
+		return false
+	}
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	return err == nil && value
 }
 
 // updateSource is where dispat looks for dispat.

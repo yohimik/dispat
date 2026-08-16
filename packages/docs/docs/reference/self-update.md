@@ -172,6 +172,10 @@ That is a refusal to ask, not a refusal to print: with it set, no request is
 made at all. For the commands that read no config file, and for turning it off
 across a machine, set `DISPAT_UPDATE_CHECK=0` in the environment.
 
+The variable's other edge is a request: `DISPAT_UPDATE_CHECK=1` makes the
+command wait for the answer, up to the check's own two-second timeout, instead
+of printing it only when it arrives in time. Left unset, nothing ever waits.
+
 ## How you installed it matters
 
 `dispat --version` says which build you are running, because that decides how

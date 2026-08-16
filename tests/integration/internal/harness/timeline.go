@@ -112,17 +112,26 @@ func sweepMaxOverlap(ivs []Interval) int {
 	return peak
 }
 
-// bruteMaxOverlap recomputes the same quantity by pairwise counting — O(n²),
-// fine for the handful of intervals a test records. It is an independently
+// bruteMaxOverlap recomputes the same quantity by point-stabbing — O(n²),
+// fine for the handful of intervals a test records. The peak of in-flight
+// intervals is always attained at some interval's start, so it counts, at
+// each start, how many intervals contain that instant, under the same
+// boundary rule as the sweep: an interval ending exactly then has released
+// its slot, one starting exactly then holds one. It is an independently
 // written cross-check: the two implementations must agree before either is
 // trusted, so a tie-breaking bug in the sweep cannot quietly agree a real
 // scheduling defect out of existence.
+//
+// (The obvious pairwise formulation — count what overlaps each interval — is
+// wrong for this quantity: a long interval overlapped by two that never
+// overlap each other counts 3 without any instant holding 3, which is exactly
+// the shape a saturated budget produces when one task starts as another ends.)
 func bruteMaxOverlap(ivs []Interval) int {
 	peak := 0
 	for _, a := range ivs {
 		n := 0
 		for _, b := range ivs {
-			if a.Start.Before(b.End) && b.Start.Before(a.End) {
+			if !a.Start.Before(b.Start) && a.Start.Before(b.End) {
 				n++
 			}
 		}
