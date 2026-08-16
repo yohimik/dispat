@@ -410,8 +410,8 @@ func (cp *computation) propagateBumps() {
 				// question was settled when it shipped, its bump must keep
 				// counting toward the train's target, and re-warning W208
 				// about it would report a done deal as a suppression.
-				if !cp.containedInBaseline(t.name, rec.key) &&
-					!(anyStable || srcChan[cp.channel[t.name]]) {
+				published := cp.containedInBaseline(t.name, rec.key)
+				if !published && !(anyStable || srcChan[cp.channel[t.name]]) {
 					// §9.3a: a bump is a claim that the dependent has
 					// something new to pick up, and across a channel boundary
 					// that claim is false — the dependent goes on resolving
@@ -423,9 +423,16 @@ func (cp *computation) propagateBumps() {
 				}
 				rel := cp.rel[t.name]
 				rel.PropagatedBump = ccme.MaxBump(rel.PropagatedBump, prop.Bump)
-				if !cp.containedInBaseline(t.name, rec.key) {
-					rel.NewWork = true
+				if published {
+					// The bump keeps counting toward the train's target
+					// (§11.4 recomputes it over the whole train), but a
+					// delivered blast is not a reason this package releases
+					// again: out of Sources it stays clear of DueTo, the
+					// catch-up scan and the records, which would otherwise
+					// re-report it on every later plan until graduation.
+					continue
 				}
+				rel.NewWork = true
 				rel.Sources = append(rel.Sources, StaleSource{
 					Provider: t.from,
 					Commit:   rec.key,

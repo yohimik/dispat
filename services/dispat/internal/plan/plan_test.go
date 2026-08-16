@@ -1604,7 +1604,8 @@ func TestPropagatedTrainWorkConverges(t *testing.T) {
 	app := p.Releases["app"]
 	assert.False(t, app.Changed(), "published propagated work must not re-release the train")
 	assert.Equal(t, ccme.BumpMinor, app.PropagatedBump, "still computed for the window")
-	assert.Equal(t, []string{"core"}, app.DueTo)
+	assert.Empty(t, app.DueTo,
+		"a delivered blast keeps counting toward the train's target, but it is not a reason to release: reported once, in the release that shipped it")
 	assert.Empty(t, p.Releasing())
 
 	// A second propagated contribution after beta.0 is new work: the train
@@ -1619,6 +1620,64 @@ func TestPropagatedTrainWorkConverges(t *testing.T) {
 	app2 := p2.Releases["app"]
 	assert.True(t, app2.Changed(), "fresh propagated work releases the train")
 	assertVersion(t, pre(1, 3, 0, "beta", "1"), app2.Next)
+}
+
+func TestRecordsSpeakInDirectProviders(t *testing.T) {
+	// A depth-all blast from lib reaches top two hops away. DueTo names the
+	// origin, because that answers why top releases; the dependencies
+	// record does not, because top's manifests never mention lib — the
+	// movement top actually picks up is mid's, which the releasing half of
+	// Updates carries.
+	libs := &model.Space{Name: "libs"}
+	pkgs := []*model.Package{
+		{Name: "lib", Dir: "/r/lib", Space: libs},
+		{Name: "mid", Dir: "/r/mid", Space: libs},
+		{Name: "top", Dir: "/r/top", Space: libs},
+	}
+	deps := []model.Dependency{
+		{Consumer: "mid", Provider: "lib"},
+		{Consumer: "top", Provider: "mid"},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(lib)^^: deep repair"},
+	).tag("lib", "1.0.0", "").tag("mid", "1.0.0", "").tag("top", "1.0.0", "")
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+
+	top := p.Releases["top"]
+	assert.True(t, top.Changed(), "the blast reaches two hops")
+	assert.Equal(t, []string{"lib"}, top.DueTo, "the origin answers why")
+	names := make([]string, 0, len(top.Updates))
+	for _, u := range top.Updates {
+		names = append(names, u.Name)
+	}
+	assert.Equal(t, []string{"mid"}, names,
+		"the record names the direct provider whose movement top picks up")
+}
+
+func TestDeliveredBlastNamesOnlyTheFreshOrigin(t *testing.T) {
+	// The mixed shape: app's beta.0 already carried core's propagated minor,
+	// and utils' fresh propagated patch now continues the train. DueTo names
+	// utils alone — core's contribution still counts toward the train's
+	// target, but its blast was reported by the release that shipped it, and
+	// naming it again would put a provider that moved nothing into every
+	// later plan and record until graduation.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core)^minor: streaming"},
+		commit{sha: "c2", message: "fix(utils)^: repair"},
+	).tag("core", "1.4.0", "c1").tag("utils", "0.9.1", "").
+		tag("app", "1.2.3", "").tag("app", "1.3.0-beta.0", "c1")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	assert.True(t, app.Changed(), "the fresh blast releases the train")
+	assertVersion(t, pre(1, 3, 0, "beta", "1"), app.Next)
+	assert.Equal(t, []string{"utils"}, app.DueTo,
+		"only the origin the baseline has not answered yet")
+	assert.Equal(t, ccme.BumpMinor, app.PropagatedBump,
+		"the delivered minor still outweighs the fresh patch in the train's target")
 }
 
 func TestSpentCancelIsNotReported(t *testing.T) {

@@ -2355,6 +2355,10 @@ func (cp *computation) applyPin(rel *Release, p pin) {
 // (narrow.go's waitingOn compensates the same way for the same reason).
 func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpdate {
 	provs := cp.providers[name]
+	direct := make(map[string]bool, len(provs))
+	for _, prov := range provs {
+		direct[prov] = true
+	}
 	out := make([]ProviderUpdate, 0, len(rel.DueTo)+len(provs))
 	seen := make(map[string]bool, len(rel.DueTo)+len(provs))
 	add := func(prov string) {
@@ -2369,6 +2373,14 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 		out = append(out, ProviderUpdate{Name: prov, From: pr.Previous(), To: pr.Next})
 	}
 	for _, prov := range rel.DueTo {
+		// A blast origin hops away answers "why is this package releasing";
+		// the dependencies section speaks the package's own manifest
+		// language instead. The movement arrives through a direct provider,
+		// which the releasing half below names, so an indirect origin here
+		// would put a package the manifests never mention into the record.
+		if !direct[prov] {
+			continue
+		}
 		add(prov)
 	}
 	for _, prov := range provs {
