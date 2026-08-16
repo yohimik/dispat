@@ -1,5 +1,12 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.15 (2026-08-16)
+
+### Dependencies
+
+- ccme: 1.0.0-rc.8 -> 1.0.0-rc.9
+- models: 1.0.0-rc.14 -> 1.0.0-rc.15
+
 ## services/dispat/v1.0.0-rc.14 (2026-08-16)
 
 ### Dependencies
