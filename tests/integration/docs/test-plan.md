@@ -304,6 +304,7 @@ tests/integration/
   packages_test.go          goal 14
   spacedeps_test.go         goal 15
   versiongroups_test.go     goal 36
+  stepwiring_test.go        goal 37
 
   the commands
   records_test.go           goal 16
@@ -1020,6 +1021,13 @@ prerelease train, and the defined freedom of per-member tag spellings.
 | `TestVersionGroupRefusesNone`               | A declared group with versioning `none` is refused through the binary with the loader's own message, not just in config unit tests.                                                                                  |
 | `TestGroupFilterPartialMode`                | `--group` under `fixedMajor` selects the whole group, and the partial mode keeps meaning what it means inside the selection: a breaking change moves every member, a minor releases its member alone.                |
 | `TestVersionGroupDivergentTagFormats`       | A group shares the version, not its spelling: each member renders the shared version through its own `tagFormat`, with no diagnostic beyond the ride's own W234: defined behavior, locked in.                       |
+
+### Goal 37: step commands wired into a running release (`stepwiring_test.go`)
+
+| Test                                | Claim proven                                                                                                                                                                                                          |
+|-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestStepsWiredIntoAPublishLeg`     | A publish leg whose script is `dispat changelog` + `dispat commit --tag --push` records itself mid-run: the tag reaches the remote before the gated consumer builds, the tagged tree carries the step-written changelog, finalize finds the work done (W223/W226), no W228/E219 fires, and a second run converges. |
+| `TestStepsWiredSurviveAPartialRun`  | After a run that released only the provider, the next run finds the provider's step-made records, does not re-release it, and catches the consumer up at the version it was owed.                                        |
 
 ## Regression fences
 
