@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -331,6 +332,14 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("changelog: %w", err)
 	}
+	// A changelog that already exists keeps its own permissions across the
+	// rewrite; only a fresh file gets the default.
+	mode := os.FileMode(0o644)
+	if err == nil {
+		if info, statErr := os.Stat(path); statErr == nil {
+			mode = info.Mode().Perm()
+		}
+	}
 	if HasEntry(existing, rel.TagName()) {
 		// The entry was written earlier — by a `dispat changelog` step in the
 		// flow, or by a previous run. Writing again would duplicate it, so
@@ -347,7 +356,10 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	if body != "" {
 		content += "\n" + body
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	// The write replaces the whole file after the publish already happened; an
+	// interrupted plain write here would take the package's history with it,
+	// so it goes through the atomic replace.
+	if err := fsx.WriteFileAtomic(path, []byte(content), mode); err != nil {
 		return fmt.Errorf("changelog: %w", err)
 	}
 	return nil

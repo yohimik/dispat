@@ -154,6 +154,27 @@ func TestRecordCreatesAndPrepends(t *testing.T) {
 	require.NotEqual(t, -1, second, "missing 2.0.0 entry:\n%s", content)
 	assert.Less(t, first, second, "newest release must be at the top")
 	assert.Equal(t, 1, strings.Count(content, "# Changelog"), "header must not be duplicated")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "the atomic replace must leave no temp file beside the changelog")
+}
+
+// TestRecordKeepsTheFilesMode: the rewrite replaces the whole file, and a
+// changelog someone chmodded keeps its own permissions across it.
+func TestRecordKeepsTheFilesMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "CHANGELOG.md")
+	w := &FileWriter{Now: func() time.Time { return testDate }}
+	ctx := context.Background()
+
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+	require.NoError(t, os.Chmod(path, 0o600))
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2, Minor: 1})))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestRecordCustomFileAndTitle(t *testing.T) {
