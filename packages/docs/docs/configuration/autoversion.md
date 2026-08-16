@@ -33,6 +33,24 @@ by earlier runs, so an auto-versioning space runs a version task for **every** r
 providers are all quiet this run. Second, a rewriting failure fails the version stage, and
 `revertOnFail` rolls the half-edited folder back.
 
+### Picking up providers released without you
+
+The first consequence has a shape worth naming, because the paper trail differs from the ordinary case. When a
+provider releases alone, its consumers do not move: their manifests keep the old version until each consumer next
+releases for a reason of its own. That next release's version stage then reconciles the range to the provider's
+current released version, even though the provider releases nothing in that run and nothing propagated between them.
+The parsing strategy performs the pickup, because it resolves every declared provider against the plan; lock-file
+scripts under `syncLock` (an `npm install`, a `go mod tidy`) run afterwards and choose no versions, they only make the
+lock follow the manifest.
+
+The pickup is reported as `W197` in the run's log and is visible in the release commit's manifest diff, but it does
+not appear in the consumer's [changelog entry](./records.md#changelog): the dependencies section lists providers that
+forced the release or released beside it, and this provider did neither — its own release documented the change, and
+repeating it in every later consumer entry would date each entry by whatever its packages happened to lag on. A
+consumer that must not pick a provider up yet holds it with the `match` filter or an explicit
+[`dependencies` range](./dependencies.md). The same pickup runs standalone as
+[`dispat autoversion`](../cli/autoversion.md), which is the way to reconcile a lagging manifest without releasing.
+
 ## The options
 
 | Key                   | Type             | Default  | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |

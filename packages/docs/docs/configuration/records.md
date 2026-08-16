@@ -46,6 +46,11 @@ the [GitHub release body](#github) and the
 [`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](../reference/environment.md#release-notes-data), and
 [`dispat preview`](../cli/preview.md) shows exactly what the next entry would contain.
 
+The dependencies section lists the providers whose movement this release picks up because they forced it or released
+beside it. A range silently reconciled to a provider released in an *earlier* run is deliberately not listed: that is
+[the auto-version pickup](./autoversion.md#picking-up-providers-released-without-you), visible in the manifest diff
+and as `W197`, and documented by the provider's own release.
+
 **An entry is never empty.** A release can be admitted to the plan with nothing for its notes to group: a version set
 by an exact `Release-As`, a channel transition carrying no new work, pending work its own reverts cancel out, or a
 [shared-versioning ride](../reference/releasing/versioning.md#the-changelog-entry-a-passenger-gets). Each of these

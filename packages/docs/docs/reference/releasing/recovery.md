@@ -52,6 +52,12 @@ instead a *provider* fails, its consumers are skipped and reported with
 An interrupted run (Ctrl-C, a killed CI job) follows the same rule: packages whose publish completed keep their record,
 everything else is reported as `cancelled`, and the next run picks up exactly the remainder.
 
+Catch-up has a manifest half as well as a release half: a consumer that did not release beside its provider keeps its
+old range until its own next release, whose version stage reconciles the range to the provider's published version
+(`W197`). That pickup is
+[the auto-version reconciliation](../../configuration/autoversion.md#picking-up-providers-released-without-you), not a
+release of the provider's making.
+
 The properties that make this safe, and why no state file is involved, are in
 [Concepts](../../concepts.md#catch-up-failed-consumers-are-never-lost). What each diagnostic code means is in
 [Diagnostic codes](../plan-errors.md).
