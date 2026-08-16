@@ -1,5 +1,16 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.17 (2026-08-16)
+
+### Fixes
+
+- exercise propagation out of the group driver
+
+
+### Dependencies
+
+- models: 1.0.0-rc.16 -> 1.0.0-rc.17
+
 ## services/dispat/v1.0.0-rc.16 (2026-08-16)
 
 ### Dependencies
