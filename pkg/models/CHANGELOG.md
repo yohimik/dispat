@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.12 (2026-08-16)
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+
+### Dependencies
+
+- ccme: 1.0.0-rc.6 -> 1.0.0-rc.7
+
 ## pkg/models/v1.0.0-rc.11 (2026-08-16)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
