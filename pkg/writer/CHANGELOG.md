@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/writer/v1.0.0-rc.5 (2026-08-16)
+
+### Fixes
+
+- nested dependencies update again again x2
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.4 -> 1.0.0-rc.5
+
 ## pkg/writer/v1.0.0-rc.4 (2026-08-16)
 
 ### Fixes
