@@ -7,6 +7,10 @@
 - dependencies update
 
 
+### Dependencies
+
+- ccme: 1.0.0-rc.2 -> 1.0.0-rc.3
+
 ## pkg/models/v1.0.0-rc.4 (2026-08-16)
 
 ### Breaking Changes
