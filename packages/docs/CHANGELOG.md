@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.0.3 (2026-08-16)
+
+### Fixes
+
+- the questions the first users actually ask
+
+
 ## packages/docs/v1.0.2 (2026-08-16)
 
 ### Fixes
