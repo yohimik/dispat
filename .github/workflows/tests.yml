@@ -24,6 +24,11 @@ permissions:
 # pin once 1.0.0 is out.
 env:
   DISPAT_PIN: 1.0.0-rc.5
+  # Our own modules come directly from the repository, skipping the proxy
+  # and the sum database, exactly as in the release workflow: both lag
+  # fresh tags, and a tag ever recreated at different content leaves the
+  # proxy's first copy pinned for good.
+  GOPRIVATE: github.com/yohimik/dispat
 
 jobs:
   lint:

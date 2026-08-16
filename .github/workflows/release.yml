@@ -33,6 +33,11 @@ permissions:
 # pin once 1.0.0 is out.
 env:
   DISPAT_PIN: 1.0.0-rc.5
+  # Our own modules are fetched directly from the repository, skipping the
+  # proxy and the sum database: both lag fresh tags, and both are immutable,
+  # so a tag ever recreated at different content (a rolled-back run) leaves
+  # the proxy's first copy pinned for good and every checksum check failing.
+  GOPRIVATE: github.com/yohimik/dispat
 
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;
@@ -276,17 +281,12 @@ jobs:
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The syncLock `go mod tidy` and the module-mode binary builds must
-          # resolve the dependency tags this same run just pushed: fetch our
-          # own modules directly from the repository, skipping the proxy and
-          # the sum database, both of which lag fresh tags.
-          GOPRIVATE: github.com/yohimik/dispat
           # The docker space's login stage authenticates the image pushes.
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        # bin/ leads PATH so the nested `dispat changelog` / `dispat commit` /
-        # `dispat if` invocations inside the stage scripts resolve the same
-        # freshly built driver. The committer identity comes from
+        # The checkout's own build leads PATH, so the nested `dispat
+        # changelog` / `dispat commit` / `dispat if` invocations inside the
+        # stage scripts resolve it too. The committer identity comes from
         # commit.name/commit.email in dispat.yaml.
         run: dispat --log-format json
 
