@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/writer/v1.0.0-rc.10 (2026-08-16)
+
+### Features
+
+- manifest writing settles for the stable line
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.9 -> 1.0.0-rc.10
+
 ## pkg/writer/v1.0.0-rc.9 (2026-08-16)
 
 ### Fixes
