@@ -1,5 +1,11 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.14 (2026-08-16)
+
+### Dependencies
+
+- models: 1.0.0-rc.13 -> 1.0.0-rc.14
+
 ## services/dispat/v1.0.0-rc.13 (2026-08-16)
 
 ### Fixes
