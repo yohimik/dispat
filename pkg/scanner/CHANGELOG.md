@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/scanner/v1.0.0-rc.10 (2026-08-16)
+
+### Features
+
+- workspace scanning settles for the stable line
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.9 -> 1.0.0-rc.10
+
 ## pkg/scanner/v1.0.0-rc.9 (2026-08-16)
 
 ### Dependencies
