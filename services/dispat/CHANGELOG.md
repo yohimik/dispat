@@ -1,5 +1,21 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.8 (2026-08-16)
+
+### Fixes
+
+- the reason names what forces the release
+
+- a spent blast and a distant origin leave the records
+
+
+### Dependencies
+
+- writer: 1.0.0-rc.4 -> 1.0.0-rc.5
+- manifest: 1.0.0-rc.4 -> 1.0.0-rc.5
+- models: 1.0.0-rc.7 -> 1.0.0-rc.8
+- scanner: 1.0.0-rc.4 -> 1.0.0-rc.5
+
 ## services/dispat/v1.0.0-rc.7 (2026-08-16)
 
 ### Dependencies
