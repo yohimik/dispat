@@ -1641,6 +1641,28 @@ func TestReasonSpeaksOfFreshWorkOnly(t *testing.T) {
 	assert.Equal(t, "propagated from core", app.Reason())
 }
 
+func TestCatchUpOnATrainWithPublishedOwnWork(t *testing.T) {
+	// app's beta.0 already published its own feat, and core then released the
+	// propagating fix in a run whose app leg never happened. app's only fresh
+	// cause is core's already-published propagation — a textbook catch-up —
+	// and the own work the train already shipped must not hide it: OwnBump
+	// spans the train, but the catch-up scan reads the fresh changeset.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(app): own work"},
+		commit{sha: "c2", message: "fix(core)^: repair"},
+	).tag("core", "1.4.0", "").tag("core", "1.4.1", "c2").
+		tag("app", "1.2.3", "").tag("app", "1.3.0-beta.0", "c1")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	require.True(t, app.Changed(), "the published propagation still owes app a release")
+	assert.Equal(t, ccme.BumpMinor, app.OwnBump, "the published feat still decides the train's target")
+	assert.True(t, app.CatchUp, "the release must be labelled a catch-up")
+	assert.True(t, hasCode(p, CodeCatchUp), "W193, got %v", codes(p))
+	assert.Equal(t, "catch-up from core", app.Reason())
+}
+
 func TestRecordsSpeakInDirectProviders(t *testing.T) {
 	// A depth-all blast from lib reaches top two hops away. DueTo names the
 	// origin, because that answers why top releases; the dependencies

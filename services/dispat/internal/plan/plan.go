@@ -2481,7 +2481,12 @@ func (cp *computation) reportCatchUp() {
 
 	for _, name := range cp.order {
 		rel := cp.rel[name]
-		if rel == nil || !rel.Releasing() || rel.OwnBump != ccme.BumpNone {
+		// freshOwnBump, not OwnBump: own work the train already shipped keeps
+		// deciding the target, but it does not explain why the package is
+		// releasing again — a package whose only fresh cause is propagation
+		// from an already-published provider is a catch-up whatever its train
+		// history says.
+		if rel == nil || !rel.Releasing() || rel.freshOwnBump() {
 			continue
 		}
 		if len(rel.Sources) == 0 {
@@ -2528,6 +2533,10 @@ func (cp *computation) reportChannelOnly() {
 		// A pinned release is explained by its footer, not by its channel,
 		// even when the pinned version happens to move it between lines; a
 		// fixed-versioning ride is already explained by W234.
+		//
+		// Bump is deliberately train-wide here, unlike the catch-up scan's
+		// freshOwnBump: a graduation publishes the train's whole window, so
+		// any bump in it explains the release even when nothing is fresh.
 		if rel.Bump != ccme.BumpNone || rel.Pinned || rel.FixedRide || !rel.ChannelChanged() {
 			continue
 		}
