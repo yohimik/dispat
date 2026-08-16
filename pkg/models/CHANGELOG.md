@@ -17,6 +17,10 @@
 - carry the license in every module
 
 
+### Dependencies
+
+- ccme: 1.0.0-rc.1 -> 1.0.0-rc.2
+
 ## pkg/models/v1.0.0-rc.1 (2026-08-09)
 
 ### Features

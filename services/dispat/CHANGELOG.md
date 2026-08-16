@@ -33,7 +33,11 @@
 
 ### Dependencies
 
-- models: 1.0.0-rc.4 -> 1.0.0-rc.5
+- ccme: 1.0.0-rc.1 -> 1.0.0-rc.2
+- manifest: 1.0.0-rc.0 -> 1.0.0-rc.1
+- models: 1.0.0-rc.1 -> 1.0.0-rc.4
+- scanner: 1.0.0-rc.0 -> 1.0.0-rc.1
+- writer: 1.0.0-rc.0 -> 1.0.0-rc.1
 
 ## services/dispat/v1.0.0-rc.3 (2026-08-09)
 

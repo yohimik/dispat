@@ -21,7 +21,7 @@
 
 ### Dependencies
 
-- manifest: 1.0.0-rc.1 -> 1.0.0-rc.2
+- manifest: 1.0.0-rc.0 -> 1.0.0-rc.1
 
 ## pkg/writer/v1.0.0-rc.0 (2026-08-09)
 
