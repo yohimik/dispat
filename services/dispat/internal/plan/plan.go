@@ -974,7 +974,7 @@ func (r *Release) Reason() string {
 			return "channel from " + r.ChannelFrom
 		}
 		return "channel " + r.ChannelTransition()
-	case r.freshOwnBump():
+	case r.FreshOwnBump():
 		return "direct"
 	case len(r.DueTo) > 0:
 		return "propagated from " + strings.Join(r.DueTo, ", ")
@@ -990,12 +990,14 @@ func (r *Release) Reason() string {
 	}
 }
 
-// freshOwnBump reports whether the package's own pending changeset — the
+// FreshOwnBump reports whether the package's own pending changeset — the
 // units its baseline has not published — carries a bump. This is the
 // "direct" of a reason: own work the train has already shipped keeps
 // counting toward the target (OwnBump spans the train), but it does not
-// explain why the package is releasing again.
-func (r *Release) freshOwnBump() bool {
+// explain why the package is releasing again. Exported because the
+// executor's skip cascade asks the same question: whether the package has a
+// reason of its own for *this* release.
+func (r *Release) FreshOwnBump() bool {
 	for _, u := range r.FreshUnits {
 		if u.Bump != ccme.BumpNone {
 			return true
@@ -2546,7 +2548,7 @@ func (cp *computation) reportCatchUp() {
 		// releasing again — a package whose only fresh cause is propagation
 		// from an already-published provider is a catch-up whatever its train
 		// history says.
-		if rel == nil || !rel.Releasing() || rel.freshOwnBump() {
+		if rel == nil || !rel.Releasing() || rel.FreshOwnBump() {
 			continue
 		}
 		if len(rel.Sources) == 0 {

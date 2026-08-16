@@ -399,6 +399,44 @@ func TestPlanTrainCatchUpStaysACatchUp(t *testing.T) {
 	assert.Equal(t, "catch-up from core", line.Str("reason"))
 }
 
+// TestPlanFailedProviderSkipsTrainConsumer: the skip cascade on a train. The
+// consumer's own feature is published train history; its only fresh cause is
+// the failing provider's propagation, so the cascade must skip it — releasing
+// it would ship a prerelease whose entire content is a provider movement that
+// never published, recording a version that does not exist. The healing run
+// then releases both together as an ordinary propagation.
+func TestPlanFailedProviderSkipsTrainConsumer(t *testing.T) {
+	r := linkedRepo(t, "core", "app", failIfMarker)
+	r.Commit("feat(core): bootstrap\n\n---\n\nfeat(app): bootstrap")
+	r.ReleaseOK()
+	r.CommitEmpty("feat(app)%beta: app boards a train")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("app@0.2.0-beta.0"), "tags: %v", r.TagList())
+
+	r.WriteFile("packages/core/FAIL", "break the provider")
+	r.CommitEmpty("fix(core)^: repair, propagating")
+	res := r.Release()
+	assert.NotEqual(t, 0, res.Code, "the provider's failure fails the run")
+	assert.Zero(t, r.TagCount("core@0.1.1"), "core did not publish; tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("app@0.2.0"),
+		"the consumer must not release a movement that never published; tags: %v", r.TagList())
+	skipped := false
+	for _, e := range res.Events {
+		if e.Package() == "app" && e.Str("status") == "skipped" {
+			skipped = true
+		}
+	}
+	assert.True(t, skipped, "app is reported skipped, not released: %s", res.Stdout)
+
+	r.Remove("packages/core/FAIL")
+	res = r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("app@0.2.0-beta.1"), "tags: %v", r.TagList())
+	assert.False(t, harness.HasCode(res.Events, "W193"),
+		"provider and consumer release together: ordinary propagation, not a catch-up")
+	assert.Equal(t, "propagated from core", harness.GraphLine(res.Events, "app").Str("reason"))
+}
+
 // TestPlanChannelOnlyReleaseAndEntryPatch: a release directive that only
 // moves the channel is still a release (§13.9) — W202 explains its presence
 // in the plan — and entering a prerelease channel with nothing pending takes

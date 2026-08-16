@@ -935,3 +935,26 @@ func TestRemoteTagMessage(t *testing.T) {
 	_, err = cli.RemoteTagMessage(ctx, "origin", "no-such-tag")
 	assert.Error(t, err)
 }
+
+// TestMutates: which git invocations rise to debug level. The one read-only
+// spelling sharing a subcommand with a mutation is "tag --list".
+func TestMutates(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"push", "origin", "HEAD"}, true},
+		{[]string{"commit", "-m", "x"}, true},
+		{[]string{"add", "--", "a"}, true},
+		{[]string{"checkout", "--", "a"}, true},
+		{[]string{"clean", "-fd"}, true},
+		{[]string{"tag", "-a", "v1", "-m", "x"}, true},
+		{[]string{"tag", "-d", "v1"}, true},
+		{[]string{"tag", "--list", "--merged", "HEAD"}, false},
+		{[]string{"rev-parse", "HEAD"}, false},
+		{[]string{"ls-remote", "origin"}, false},
+		{nil, false},
+	} {
+		assert.Equalf(t, tc.want, mutates(tc.args), "mutates(%v)", tc.args)
+	}
+}

@@ -55,6 +55,8 @@ func avPlan(root string, space *model.Space, names ...string) *plan.Plan {
 				Bump:   ccme.BumpPatch, Valid: true,
 			}},
 		}
+		// A stable-line plan's fresh changeset is its whole changeset.
+		rel.FreshUnits = rel.Units
 		rel.Next = rel.Current.Bumped(rel.Bump)
 		p.Releases[n] = rel
 		p.Order = append(p.Order, n)
@@ -212,7 +214,7 @@ func TestAutoVersionCatchUpAndDriftDiagnostics(t *testing.T) {
 	p := avPlan(root, space, "core", "web")
 	// core is not releasing this run: baseline 1.0.0 from an earlier run.
 	core := p.Releases["core"]
-	core.OwnBump, core.Bump, core.NewWork, core.Units = ccme.BumpNone, ccme.BumpNone, false, nil
+	core.OwnBump, core.Bump, core.NewWork, core.Units, core.FreshUnits = ccme.BumpNone, ccme.BumpNone, false, nil, nil
 	core.Next = core.Current
 
 	var logBuf bytes.Buffer
@@ -681,7 +683,7 @@ func TestAutoVersionOnlyUpdatedLeavesTheCatchUpAlone(t *testing.T) {
 	// core is not releasing this run: its baseline comes from an earlier one.
 	// fillUpdates runs after that is set, so core stays out of web's Updates.
 	core := p.Releases["core"]
-	core.OwnBump, core.Bump, core.NewWork, core.Units = ccme.BumpNone, ccme.BumpNone, false, nil
+	core.OwnBump, core.Bump, core.NewWork, core.Units, core.FreshUnits = ccme.BumpNone, ccme.BumpNone, false, nil, nil
 	core.Next = core.Current
 	fillUpdates(p)
 

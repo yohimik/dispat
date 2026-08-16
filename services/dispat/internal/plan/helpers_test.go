@@ -301,6 +301,40 @@ func TestBaselineChannel(t *testing.T) {
 		"a package outside the plan reads as stable")
 }
 
+func TestVersionAt(t *testing.T) {
+	// The graduation's From reconstruction, branch by branch: an unparsed tag
+	// is skipped, a tag ahead of the asked-about commit is skipped, the
+	// newest at-or-behind parsed tag answers, and the two "no answer" shapes
+	// — no commit to ask about, no tag behind it — both report false.
+	git := newFakeGit(
+		commit{sha: "c0", message: "chore: base"},
+		commit{sha: "c1", message: "chore: later"},
+	)
+	cp := &computation{ctx: context.Background(), git: git, tags: map[string]gitx.Tags{
+		"core": {
+			{Name: "core@bogus", Commit: "c0"}, // unparsed: skipped
+			{Name: "core@1.1.0", Commit: "c1", Version: v(1, 1, 0), Parsed: true}, // ahead: skipped
+			{Name: "core@1.0.0", Commit: "c0", Version: v(1, 0, 0), Parsed: true},
+		},
+		"floating": {{Name: "floating@1.0.0", Version: v(1, 0, 0), Parsed: true}}, // no commit recorded
+	}}
+
+	got, ok := cp.versionAt("core", "c0")
+	require.True(t, ok)
+	assertVersion(t, v(1, 0, 0), got, "the newest tag at or behind the commit answers")
+
+	got, ok = cp.versionAt("core", "c1")
+	require.True(t, ok)
+	assertVersion(t, v(1, 1, 0), got)
+
+	_, ok = cp.versionAt("core", "")
+	assert.False(t, ok, "no commit to ask about")
+	_, ok = cp.versionAt("floating", "c1")
+	assert.False(t, ok, "a tag without a commit cannot answer")
+	_, ok = cp.versionAt("unknown", "c1")
+	assert.False(t, ok, "a package with no tags has no version anywhere")
+}
+
 func TestAncestryFailed(t *testing.T) {
 	cp := &computation{}
 	assert.NoError(t, cp.ancestryFailed())

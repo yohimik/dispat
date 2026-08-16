@@ -355,8 +355,9 @@ See [After the point of no return](#after-the-point-of-no-return) below.
 
 A failed script marks the package failed; nothing aborts the run. `Result.FailedStage` records
 where it failed (informational, shown in the summary). At the start of every task the package re-evaluates the skip
-rule: skip if some changed provider failed (at any stage) or was skipped AND the package has neither own commits nor a
-successfully published changed provider. A consumer's terminal outcome is deterministic in both modes: its publish
+rule: skip if some changed provider failed (at any stage) or was skipped AND the package has neither fresh own commits
+(a bump in the changeset its baseline has not published; on a prerelease train, own work an earlier prerelease shipped
+does not count), nor a channel change, nor a successfully published changed provider. A consumer's terminal outcome is deterministic in both modes: its publish
 always waits for its providers' publishes, so a provider's publish failure is guaranteed to be seen at the latest there.
 With `isBuildWaitingPublish: true` provider outcomes are already final before the consumer's version stage; with `false`
 the consumer may spend a version/build on a release that its publish then skips, the trade-off that flag opts into. The

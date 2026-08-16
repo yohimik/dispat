@@ -196,6 +196,10 @@ func mkPlan(spec planSpec) *plan.Plan {
 				Bump:   ccme.BumpPatch,
 				Valid:  true,
 			}}
+			// A stable-line plan's fresh changeset is its whole changeset;
+			// leaving FreshUnits empty would model a train that shipped the
+			// work already, which is not what these fixtures mean.
+			rel.FreshUnits = rel.Units
 		}
 		rel.Next = rel.Current.Bumped(bump)
 		p.Releases[n] = rel
@@ -1721,4 +1725,39 @@ func TestRunAliasTagFailureDoesNotDisturbTheRelease(t *testing.T) {
 	assert.Empty(t, res["a"].Critical, "an alias is not part of the release record")
 	assert.Equal(t, []string{"a@1.0.1"}, tg.tags, "the release tag was still written")
 	assert.Contains(t, buf.String(), plan.CodeAliasTagFailed)
+}
+
+// TestShouldSkipReadsTheFreshChangeset: the skip cascade asks whether the
+// package has a reason of its own for *this* release, which on a prerelease
+// train is the fresh changeset, not the train-wide OwnBump. A consumer whose
+// own work is all published train history and whose only fresh cause is the
+// failed provider's propagation must be skipped — releasing it would record
+// a provider movement that never published.
+func TestShouldSkipReadsTheFreshChangeset(t *testing.T) {
+	units := []*ccme.Unit{{Bump: ccme.BumpMinor, Valid: true}}
+	rel := &plan.Release{
+		Pkg:     &model.Package{Name: "app", Space: &model.Space{Name: "libs"}},
+		OwnBump: ccme.BumpMinor, // the train's history
+		Units:   units,
+		Next:    ccme.Version{Minor: 2, Prerelease: []string{"beta", "1"}},
+	}
+	p := &plan.Plan{
+		Releases:  map[string]*plan.Release{"app": rel},
+		Providers: map[string][]string{"app": {"core"}},
+	}
+	results := map[string]*Result{"core": {Status: StatusFailed}}
+
+	skip, prov := shouldSkip("app", p, results)
+	assert.True(t, skip, "published train work is not a reason to release beside a failed provider")
+	assert.Equal(t, "core", prov)
+
+	rel.FreshUnits = units // now the work is this release's own
+	skip, _ = shouldSkip("app", p, results)
+	assert.False(t, skip, "a fresh own bump is a reason a failed provider cannot invalidate")
+
+	rel.FreshUnits = nil
+	rel.BaselineChannel = "beta"
+	rel.Channel = "stable" // a graduation proceeds whatever the provider did
+	skip, _ = shouldSkip("app", p, results)
+	assert.False(t, skip)
 }

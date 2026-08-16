@@ -1004,10 +1004,14 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // of its changed providers failed (at any stage) or was skipped, and the
 // package has no release reason of its own. It returns the blocking provider.
 //
-// A "reason of its own" is a direct bump or a channel change: a package moving
-// between channels is being released for something a failed provider cannot
-// invalidate, so it proceeds. Providers whose outcome is still pending count
-// as neither; the check runs again before publish, when all provider publishes
+// A "reason of its own" is a *fresh* direct bump or a channel change: a
+// package moving between channels is being released for something a failed
+// provider cannot invalidate, so it proceeds. Fresh, not train-wide — own
+// work an earlier prerelease already shipped does not explain releasing
+// again, and without the failed provider's propagation such a package would
+// not be in the plan at all; releasing it would record a provider movement
+// that never published. Providers whose outcome is still pending count as
+// neither; the check runs again before publish, when all provider publishes
 // are final thanks to the task-graph edges.
 func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, string) {
 	rel := p.Releases[pkg]
@@ -1028,7 +1032,7 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, str
 	if badProvider == "" {
 		return false, ""
 	}
-	if rel.OwnBump != ccme.BumpNone || rel.ChannelChanged() || anyPublished {
+	if rel.FreshOwnBump() || rel.ChannelChanged() || anyPublished {
 		return false, ""
 	}
 	return true, badProvider
