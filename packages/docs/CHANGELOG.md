@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.0.2 (2026-08-16)
+
+### Fixes
+
+- projects using dispat carry the first stable run's numbers
+
+
 ## packages/docs/v1.0.1 (2026-08-16)
 
 ### Fixes
