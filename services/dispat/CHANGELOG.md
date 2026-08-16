@@ -1,5 +1,18 @@
 # Changelog
 
+## services/dispat/v1.0.0-rc.5 (2026-08-16)
+
+### Fixes
+
+- dependencies update
+
+- a wired record states the run's provider movements
+
+
+### Dependencies
+
+- models: 1.0.0-rc.5 -> 1.0.0-rc.6
+
 ## services/dispat/v1.0.0-rc.4 (2026-08-16)
 
 ### Breaking Changes
