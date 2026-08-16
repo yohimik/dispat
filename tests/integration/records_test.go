@@ -535,8 +535,11 @@ func TestRecordsCommitModeGithubFinalize(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.Equal(t, "chore(release): publish a, b as a@0.1.0, b@0.1.0",
-		r.Git("log", "-1", "--format=%s"), "messageFormat renders both placeholders")
+	// a exported PACKAGE_A, so its record is the exported commit rather than
+	// the release commit — the message names only what this commit records.
+	assert.Equal(t, "chore(release): publish b as b@0.1.0",
+		r.Git("log", "-1", "--format=%s"),
+		"messageFormat renders the placeholders for the releases this commit carries")
 
 	releases := decodeAll[ghRelease](t, bodies())
 	require.Len(t, releases, 1, "no export, no GitHub release: b must be skipped")
