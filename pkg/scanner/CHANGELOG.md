@@ -1,5 +1,70 @@
 # Changelog
 
+## pkg/scanner/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- restore the 1.0 rc train
+
+
+### Features
+
+- workspace scanning settles for the stable line
+
+- finalize the workspace for 1.0.0
+
+- read dependency manifests into one shape
+
+- report dropped declarations
+
+- read and write Dockerfiles and compose files
+
+- declare manifest names per package
+
+- ruby, rust, c# and the nuget family
+
+- iOS and Android manifests
+
+- run consumers
+
+- shared manifest module, package readmes
+
+- compute auto version
+
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- retract the versions the proxy pinned elsewhere
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- carry the license in every module
+
+- keep the partial-result contract and bound the read
+
+- step over an unreadable folder instead of ending the scan
+
+- scanner and writer freeze
+
+- autoversion and compute correctness
+
+- round 2 blockers
+
+
+### Dependencies
+
+- manifest: 1.0.0-rc.10 -> 1.0.0
+
 ## pkg/scanner/v1.0.0-rc.10 (2026-08-16)
 
 ### Features
