@@ -1,5 +1,7 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.8 (2026-08-16)
+
 ## pkg/models/v1.0.0-rc.7 (2026-08-16)
 
 ### Dependencies
