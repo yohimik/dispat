@@ -67,6 +67,11 @@ in, so a reader looking for "how does a plan get computed" or "which command doe
 39. **A record entry is never empty** (`entrybodies_test.go`): the release shapes with nothing for their notes to
     group — a pin, a channel transition, work its reverts cancel out — each state their cause in the changelog
     entry and the GitHub body instead of rendering an empty record.
+40. **The e2e smoke walk** (`smoke_test.go`): the live release-verification protocol as a test — a toy polyglot
+    monorepo (Go, npm, Docker; real manifests; a version group; edges in both ecosystems) released through six
+    cycles with the full status graph, the tags, every entry and every manifest byte asserted at each step, and
+    convergence proven between steps. Includes the reconciliation pickup (W197) and its deliberately silent
+    changelog.
 
 ### Scheduling and execution
 
@@ -348,6 +353,7 @@ tests/integration/
   the sequences
   longitudinal_test.go      goal 38
   entrybodies_test.go       goal 39
+  smoke_test.go             goal 40
 
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
@@ -1076,6 +1082,19 @@ pair is goal 31's `TestRevertPairOnATrainRendersCancelLine`.)
 | `TestEntryBodyOfAPinOnlyRelease`        | An exact `Release-As` with no pending bump releases with "No changes: a version set by Release-As." in both records.                     |
 | `TestEntryBodyOfAChannelOnlyRelease`    | A channel-only release (W202, entry-patch W204) names its transition: "No changes: a channel transition, stable -> rc."                  |
 | `TestEntryBodyOfACancelledOutRelease`   | A feature and its revert releasing the owed bump (W212) render "No changes: the pending work and its reverts cancel out." — never empty. |
+
+### Goal 40: the e2e smoke walk (`smoke_test.go`)
+
+The live pre-1.0.0 release verification protocol as a test: a toy polyglot monorepo — a Go library and CLI with real
+`go.mod` files, an npm package with a real `package.json`, a Docker image with a Dockerfile and a compose file, a
+`fixedMajorMinor` version group across the npm and docker spaces, and dependency edges in both ecosystems — walked
+through the release shapes a real workspace meets. Every cycle asserts the full status graph (each package's verdict,
+version transition and reason), the tags, the changelog entries and the exact manifest contents, and proves
+convergence before the next cycle.
+
+| Test                     | Claim proven                                                                                                                                                                                                     |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestSmokeReleaseCycles` | Six cycles in sequence: bootstrap (everything direct, every manifest written); a shared minor riding the image with its FROM and compose tags following; a provider releasing alone with the consumer's manifest deliberately left behind; the consumer's own next release performing the reconciliation pickup (W197, manifest moves, changelog deliberately silent); a caret propagating the provider's fix (manifest and dependencies section both move); and a whole rc train over the group — prerelease versions in the manifests, fresh-only rc entries, and a graduation whose entry documents the provider's movement over the whole train. |
 
 ## Regression fences
 
