@@ -78,6 +78,33 @@ spaces:
   docker:
     path: docker
 
+# The two workspace modules that are repository tooling rather than something
+# dispat ships: never versioned, never tagged, never published — but swept by
+# `dispat run vet`, `tests` and `build` like every real package, so the lint
+# and test gates need no hand-kept module list beside the sweep.
+packages:
+  tools:
+    path: tools
+    versioning: none
+    scripts:
+      vet: go vet ./...
+      build: go build ./...
+      # Through `testreport test` like every Go suite, so the repository
+      # tooling's own runs land in the site's test-results page too.
+      tests: go run github.com/yohimik/dispat/tools/testreport test tools -- ./... -count=1
+  integration:
+    path: tests/integration
+    versioning: none
+    # The module requires pkg/models; declared so `dispat compute --check`
+    # stays quiet about the derived edge. No `tests` script on purpose: the
+    # black-box suite is the dispat package's own gate (tests:integration in
+    # services/dispat/dispat.yaml), attributed there for coverage, and a
+    # second name for the same run would execute it twice per sweep.
+    dependencies: [models]
+    scripts:
+      vet: go vet ./...
+      build: go build ./...
+
 concurrency: [0, 1]
 
 changelog:

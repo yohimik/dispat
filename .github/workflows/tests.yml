@@ -45,20 +45,12 @@ jobs:
 
       # One name swept across the monorepo instead of a module list to keep in
       # step by hand: each Go space defines what `vet` means for its packages,
-      # and a new module in a space is vetted without touching this file.
+      # tools and tests/integration carry their own as script-only packages
+      # (versioning: none), and a new module is vetted without touching this
+      # file. Their tests are the ordinary sweeps' too, so nothing in the
+      # workspace goes ungated.
       - name: go vet
         run: dispat run vet --since all
-
-      # `tools` and `tests/integration` are repository tooling rather than
-      # dispat packages: they sit in no space, so the sweep above never reaches
-      # them and they would otherwise be the modules in the workspace nothing
-      # gates. The tools suite is seconds long and belongs here, beside the
-      # other checks that are about the repository rather than what it ships.
-      - name: Repository tooling
-        run: |
-          go vet -C tests/integration ./...
-          go vet -C tools ./...
-          go test -C tools ./... -count=1
 
       # The two ways a `--link-local` bracket leaks. The dispat package's
       # verify-unlinked script checks both before its build reports success;
