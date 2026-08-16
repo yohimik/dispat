@@ -163,6 +163,48 @@ func TestIfChangedInfersFromTheInvocationFolder(t *testing.T) {
 		"from the root, no folder narrows the answer")
 }
 
+func TestIfChangedInRunsElsewhere(t *testing.T) {
+	// --in picks where the chosen script runs; it never narrows the window.
+	// The two compose: the gate answers for the repository (or the filtered
+	// selection), and the branch runs in the named folder.
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.Commit("chore: scaffolding")
+	r.WriteFile("packages/core/feature.txt", "f")
+	r.Commit("feat(core): add a feature")
+
+	res := r.Command("if", "--changed", "--since", "HEAD~1", "--in", "pkg:web",
+		"--then", "pwd > here.txt", "--else", "echo gate-idle")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	here, err := os.ReadFile(r.Path("packages/web/here.txt"))
+	require.NoError(t, err, "core changed, so the gate held even though --in names web")
+	assert.Contains(t, string(here), "packages/web", "the branch ran in the folder --in named")
+}
+
+func TestIfChangedConsumersNeedsASelection(t *testing.T) {
+	// From the root with no terms, everything is selected, and expanding a
+	// selection of everything cannot change whether it is empty: --consumers
+	// would be a silent no-op, so it is refused. From inside a package folder
+	// the invocation narrows the selection and the same flags mean something,
+	// so there they are answered.
+	r := linkedRepo(t, "core", "web", echoBuild)
+	r.Commit("chore: scaffolding")
+	r.WriteFile("packages/core/feature.txt", "f")
+	r.Commit("feat(core): add a feature")
+
+	res := r.Command("if", "--changed", "--consumers", "--then", "true")
+	assert.Equal(t, 2, res.Code, "an unselectable --consumers is a usage error, not a silent no-op")
+	assert.Contains(t, res.Stdout+res.Stderr, "--consumers")
+
+	res = r.CommandAt("packages/web", "if", "--changed", "--since", "HEAD~1", "--consumers",
+		"--then", "echo gate-go", "--else", "echo gate-idle")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, "gate-go",
+		"invoked inside web, the folder is the selection and web's provider changed")
+}
+
 func TestIfChangedChainsWithElif(t *testing.T) {
 	// --changed leads the chain like any other condition: true, it wins even
 	// over a true --elif behind it; false, the elifs and the else get their

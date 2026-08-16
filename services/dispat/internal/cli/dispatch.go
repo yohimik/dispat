@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -537,6 +538,17 @@ func (r *runner) runConfigured() int {
 			}
 		}
 		if *r.o.ifChanged {
+			// The gate expands the window with consumers and then asks "is the
+			// selection among it" — so with everything selected, --consumers
+			// cannot change the answer: expanding a set never empties it and
+			// never fills an empty one. Refused only here, because whether the
+			// invocation folder narrows the selection needs the resolved root.
+			if *r.o.consumers && len(*r.o.pkgFilter)+len(*r.o.spaceFilter)+len(*r.o.groupFilter) == 0 &&
+				sameDir(*r.o.root, resolvedRoot) {
+				log.Error().Msg("--consumers expands what the changes reach and cannot change the answer when everything is selected; add --package, --space or --group, or run from inside a package folder")
+				r.usage(cmdIf)
+				return 2
+			}
 			ctx, stop := signalCtx()
 			defer stop()
 			sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
@@ -687,4 +699,19 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 		}
 	}
 	return 0
+}
+
+// sameDir reports whether two paths name the same folder, resolved through
+// symlinks so a macOS /tmp and its /private twin compare equal.
+func sameDir(a, b string) bool {
+	canon := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		return p
+	}
+	return canon(a) == canon(b)
 }
