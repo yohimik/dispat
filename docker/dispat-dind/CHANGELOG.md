@@ -1,5 +1,46 @@
 # Changelog
 
+## docker/dispat-dind/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- restore the 1.0 rc train
+
+
+### Features
+
+- the dind image tracks the stable CLI
+
+- finalize the workspace for 1.0.0
+
+- container images with dispat preinstalled
+
+- publish the docker hub readme
+
+
+### Fixes
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- the fetch base follows its version argument
+
+- push through buildx, a multi-platform image has no local tag
+
+
+### Dependencies
+
+- dispat: 1.0.0-rc.19 -> 1.0.0
+
 ## docker/dispat-dind/v1.0.0-rc.19 (2026-08-16)
 
 ### Features

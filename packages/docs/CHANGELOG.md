@@ -1,5 +1,98 @@
 # Changelog
 
+## packages/docs/v1.0.0 (2026-08-16)
+
+### Breaking Changes
+
+- commit to the 1.0 interfaces
+
+- restore the 1.0 rc train
+
+
+### Features
+
+- the documentation covers the stable surface
+
+- finalize the workspace for 1.0.0
+
+- anchor the palette on dark pine
+
+- the documentation site, versioned and deployed by dispat
+
+- read projects using dispat onto the landing page
+
+- exit 3 when --require-release finds nothing to release
+
+- split the docs and api sidebars
+
+- muted pine palette
+
+- build the landing page from both READMEs
+
+- read the README and the test report into the site
+
+- array of scripts, require release
+
+- forward arguments after -- to run and exec scripts
+
+- trace and debug logging for git, config and the plan
+
+- show the tests and coverage badges on the landing page
+
+- list ccme beside the manifest libraries instead of in the footer
+
+- document the standalone manifest scanner and writer on the landing page
+
+
+### Fixes
+
+- exercise a caret that reaches nobody
+
+- exercise a partial-mode member release mid-train
+
+- exercise the release pipeline across every package
+
+- nested dependencies update againx2
+
+- nested dependencies update again
+
+- nested dependencies update
+
+- dependencies update
+
+- the diagnostic registry names the step alignment codes
+
+- the tile color joins the pine palette
+
+- wrap long inline code instead of overflowing a phone
+
+- span the last feature card only on an odd count
+
+- let the footer columns wrap on mobile
+
+- pin the pwa reload popup theme alias
+
+- keep the install blocks inside a phone's viewport
+
+- keep the landing page inside a phone's viewport
+
+- sync manifests and changelogs for every updated provider
+
+- 1.0.0 release blockers
+
+- centre the landing page text
+
+- give the commit parser its own row in the libraries grid
+
+- close the prerelease-train code fence in concepts
+
+- serve a landing page at the site root instead of a 404
+
+
+### Dependencies
+
+- dispat: 1.0.0-rc.19 -> 1.0.0
+
 ## packages/docs/v1.0.0-rc.19 (2026-08-16)
 
 ### Features
