@@ -312,7 +312,7 @@ func TestVersionAt(t *testing.T) {
 	)
 	cp := &computation{ctx: context.Background(), git: git, tags: map[string]gitx.Tags{
 		"core": {
-			{Name: "core@bogus", Commit: "c0"}, // unparsed: skipped
+			{Name: "core@bogus", Commit: "c0"},                                    // unparsed: skipped
 			{Name: "core@1.1.0", Commit: "c1", Version: v(1, 1, 0), Parsed: true}, // ahead: skipped
 			{Name: "core@1.0.0", Commit: "c0", Version: v(1, 0, 0), Parsed: true},
 		},
