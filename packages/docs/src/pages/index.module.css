@@ -129,6 +129,9 @@
   border-radius: var(--ifm-global-radius);
   background: var(--ifm-background-surface-color);
   text-align: center;
+  /* A grid child's min-width is auto, so one long token inside a card would
+     otherwise size the whole column past a phone's viewport. */
+  min-width: 0;
 }
 
 .lastFeature {

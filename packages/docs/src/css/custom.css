@@ -33,6 +33,17 @@
 }
 
 /*
+ * Inline code wraps when it must: a long module path, variable or URL in a
+ * code span would otherwise set the column's minimum width and push a phone
+ * layout sideways (the landing's project cards, concepts.md and ci.md all
+ * carry such tokens). Fenced blocks are untouched: their white-space is pre,
+ * which leaves overflow-wrap nothing to break, and they scroll on their own.
+ */
+:not(pre) > code {
+  overflow-wrap: anywhere;
+}
+
+/*
  * The footer's three columns spread across the row instead of clustering
  * left. `wrap` matters: flex-wrap is not inherited, so `unset` would compute
  * to nowrap and crush the columns into one unreadable line on a phone.
