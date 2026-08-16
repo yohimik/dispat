@@ -160,8 +160,10 @@ func TestRealFlutterPubspecRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The + suffix is pub's build counter and a version write never touches a
+	// build counter, so it rides along.
 	want := strings.NewReplacer(
-		"version: 1.0.0+1", "version: 2.0.0",
+		"version: 1.0.0+1", "version: 2.0.0+1",
 		`pigeon: ">=11.0.0 <27.0.0"`, `pigeon: ">=27.0.0 <28.0.0"`,
 	).Replace(flutterPubspec)
 	if got := read(t, path); got != want {

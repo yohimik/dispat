@@ -102,6 +102,27 @@ func TestMavenRewriteDependencyAndProjectVersion(t *testing.T) {
 	}
 }
 
+// TestPubspecVersionWriteKeepsTheBuildCounter: the + suffix is pub's build
+// counter, so a version write carries it along untouched — SetBuild is the one
+// write that moves it — while a caller spelling a suffix of their own has said
+// what the whole scalar should read.
+func TestPubspecVersionWriteKeepsTheBuildCounter(t *testing.T) {
+	path := seed(t, "pubspec.yaml", "name: acme\nversion: 1.2.3+4\n")
+	if _, err := Rewrite(path, "2.0.0", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); !strings.Contains(got, "version: 2.0.0+4") {
+		t.Errorf("the build counter must survive a version write, got:\n%s", got)
+	}
+
+	if _, err := Rewrite(path, "2.1.0+7", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); !strings.Contains(got, "version: 2.1.0+7") {
+		t.Errorf("an explicit suffix replaces the counter, got:\n%s", got)
+	}
+}
+
 func TestPubspecRewriteVersionAndConstraints(t *testing.T) {
 	src := `name: acme
 version: 1.2.3    # shipped

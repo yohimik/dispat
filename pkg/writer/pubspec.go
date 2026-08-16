@@ -79,14 +79,22 @@ func rewritePubspec(path, version string, edits []Edit) (Result, error) {
 			if !ok {
 				continue
 			}
-			if line[start:end] == version {
+			// The + suffix is pub's build counter, the one counter that lives
+			// inside the version scalar. A version write never touches a build
+			// counter, so an existing suffix rides along unless the caller
+			// spelled one of their own; SetBuild is the write that moves it.
+			next := version
+			if plus := strings.IndexByte(line[start:end], '+'); plus >= 0 && !strings.Contains(version, "+") {
+				next += line[start+plus : end]
+			}
+			if line[start:end] == next {
 				continue
 			}
-			if !isYAMLWritable(version) {
-				return res, fmt.Errorf("%s: refusing to write %q into a YAML scalar", path, version)
+			if !isYAMLWritable(next) {
+				return res, fmt.Errorf("%s: refusing to write %q into a YAML scalar", path, next)
 			}
 			res.VersionWritten = true
-			lines[li] = raw[:start] + version + raw[end:]
+			lines[li] = raw[:start] + next + raw[end:]
 			changed = true
 			continue
 		}

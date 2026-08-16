@@ -145,8 +145,9 @@ type Manifest struct {
 	Version string
 	// BuildNumber is the monotonic build counter the mobile formats carry beside
 	// their marketing version, CFBundleVersion, android:versionCode,
-	// CURRENT_PROJECT_VERSION. It is not a semantic version and no writer
-	// rewrites it; empty for every format without one.
+	// CURRENT_PROJECT_VERSION. It is not a semantic version, so no version
+	// write ever moves it; the writer's SetBuild is the dedicated write.
+	// Empty for every format without one.
 	BuildNumber string
 	// Deps are the manifest's declared dependencies, sorted by field then
 	// name for deterministic output.
