@@ -9,7 +9,11 @@
 
 ## pkg/manifest/v1.0.0-rc.5 (2026-08-16)
 
+No changes: a version bump to keep the versioning group on one version.
+
 ## pkg/manifest/v1.0.0-rc.4 (2026-08-16)
+
+No changes: a version bump to keep the versioning group on one version.
 
 ## pkg/manifest/v1.0.0-rc.3 (2026-08-16)
 
