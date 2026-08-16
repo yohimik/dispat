@@ -1,5 +1,11 @@
 # Changelog
 
+## pkg/models/v1.0.0-rc.7 (2026-08-16)
+
+### Dependencies
+
+- ccme: 1.0.0-rc.4 -> 1.0.0-rc.5
+
 ## pkg/models/v1.0.0-rc.6 (2026-08-16)
 
 ### Fixes
