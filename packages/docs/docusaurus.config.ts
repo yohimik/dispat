@@ -36,7 +36,7 @@ const KEYWORDS = [
 
 const config: Config = {
   title: 'dispat',
-  tagline: 'The polyglot monorepo tool: conventional commits in, ordered parallel publishes out',
+  tagline: 'The polyglot monorepo release tool: conventional commits in, ordered parallel publishes out',
   favicon: 'logo.png',
 
   url: 'https://yohimik.github.io',
