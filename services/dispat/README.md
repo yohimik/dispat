@@ -173,6 +173,18 @@ that is what [`dispat self-update`](https://yohimik.github.io/dispat/cli/self-up
 today: resolving a release, checking the download against the published checksum, and putting the result somewhere the
 next command can find it. Pointing it at other tools is the feature.
 
+**A native package in every ecosystem.** dispat ships as a static binary, which asks a repository that already has a
+package manager to install its release tool some other way. The plan is to distribute dispat through the ecosystems it
+releases, as a thin package per ecosystem wrapping the same binary: an **npm package** a JavaScript repository adds as a
+development dependency, pins in the lockfile it already reviews and runs with `npx dispat`, and the equivalent wherever
+else a repository expects its tools to come from its own package manager. Go already works this way, since `go install`
+is that ecosystem's version of the idea.
+
+Each wrapper is also where what belongs to one ecosystem rather than to releasing in general can live: the npm one
+carries what an npm publish expects around a `package.json` and a workspace, the next one carries its own equivalent.
+dispat already reads and rewrites those manifests, so this is about meeting each ecosystem where its users are, not
+about teaching dispat a new format.
+
 ## Projects using dispat
 
 dispat's own monorepo is the reference deployment: since the very first release, every release of this repository has
