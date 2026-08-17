@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.0.6 (2026-08-17)
+
+### Fixes
+
+- why one more monorepo tool update
+
+
 ## packages/docs/v1.0.5 (2026-08-17)
 
 ### Fixes
