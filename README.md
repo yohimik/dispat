@@ -39,11 +39,18 @@ Container images for every other CI system: `yohimik/dispat-alpine`, `-ubuntu`, 
 ## Why one more monorepo tool?
 
 Every major monorepo tool can topologically sort a dependency graph: build everything in order, then publish
-everything, or publish only what changed, one package at a time. Two situations break that model in practice:
+everything, or publish only what changed, one package at a time. Turborepo, Nx, Bazel, Pants, Buck2 and moon schedule
+work across such a graph; Lerna, changesets, Rush, Melos, cargo-release, semantic-release, the npm, pnpm and yarn
+workspace commands and the Maven and Gradle reactors turn one into a release. As of dispat 1.0.0 in August 2026 the
+split is always the same: the language-agnostic ones stop before the release, and the ones that publish are built
+around a single ecosystem. Only nx release and release-please reach further, neither all the way. Two situations break
+that model in practice:
 
 1. **An error in the middle of a run.** Half the packages are published and half are not. Most tools either abort the
-   whole run or plough on and leave you to reconstruct what shipped. Re-running tends to re-release what is already
-   out, so you end up writing recovery scripts by hand.
+   whole run or carry on and leave you to reconstruct what shipped. Where recovery exists it is a registry query, as in
+   `lerna publish from-package`, and a registry answers only whether a version is already there, never what the run
+   still owes. It is one ecosystem's answer too: there is no equivalent for a Docker tag, a GitHub release, or a Maven
+   deploy that simply rejects the version it has. Recovery ends up being a script you write.
 2. **A consumer that can only be *built* once its provider is *published*.** A Node package can be built before its
    consumers publish, but a Docker image is often buildable only by pulling its base image from a registry, which means
    the provider has to be published first. Build everything then publish everything assumes every ecosystem behaves
