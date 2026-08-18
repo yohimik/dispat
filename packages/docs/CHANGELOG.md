@@ -1,5 +1,19 @@
 # Changelog
 
+## packages/docs/v1.0.8 (2026-08-18)
+
+### Fixes
+
+- what dispat buys a game project as it grows
+The game example now opens with the case for adopting it: one version
+number across the engine file, the tag, the Steam build and the itch
+upload; changelogs and announcements written from the commits; a patch
+that takes the same path as a release. Ends on the reason a single game
+binary is worth setting up this way, which is that it does not stay a
+single binary once a landing page, an SDK and a server arrive.
+
+The examples index carries the same point in its lead.
+
 ## packages/docs/v1.0.7 (2026-08-18)
 
 ### Fixes
