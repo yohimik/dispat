@@ -24,6 +24,7 @@ const sidebars: SidebarsConfig = {
   docs: [
     'getting-started',
     'concepts',
+    {type: 'doc', id: 'monorepo', label: 'One repository or many'},
     {
       type: 'category',
       label: 'Examples',
@@ -71,11 +72,18 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/pages', label: 'A site deploy'},
           ],
         },
-        {type: 'doc', id: 'examples/mixed', label: 'npm and Docker in one graph'},
-        {type: 'doc', id: 'examples/login', label: 'Registry login'},
-        {type: 'doc', id: 'examples/single-package', label: 'A single package'},
-        {type: 'doc', id: 'examples/adopting', label: 'Adopting dispat'},
-        {type: 'doc', id: 'examples/layout', label: 'Config beside the code'},
+        {
+          type: 'category',
+          label: 'Shaping the repository',
+          collapsed: true,
+          items: [
+            {type: 'doc', id: 'examples/single-package', label: 'A single package'},
+            {type: 'doc', id: 'examples/adopting', label: 'Adopting dispat'},
+            {type: 'doc', id: 'examples/layout', label: 'Config beside the code'},
+            {type: 'doc', id: 'examples/mixed', label: 'npm and Docker in one graph'},
+            {type: 'doc', id: 'examples/login', label: 'Registry login'},
+          ],
+        },
       ],
     },
     {

@@ -12,20 +12,17 @@ docs site, an SDK and a server; a library gains a CLI and a demo. Each of those 
 rather than one more release script nobody maintains. [A single package](./single-package.md) is the smallest form,
 and [A game, from one package to many](./game.md) walks the growth step by step.
 
-If a term is new, [Concepts](../concepts.md) defines all of them in a few minutes of reading.
+If a term is new, [Concepts](../concepts.md) defines all of them in a few minutes of reading, and
+[One repository or many](../monorepo.md) is the page for deciding the shape before you commit to it.
 
-## Start here
-
-| Example | What it covers |
-|---------|----------------|
-| [An npm monorepo](./npm.md) | The smallest useful setup, from zero to a published release. |
-| [A single package, no monorepo](./single-package.md) | dispat on a repository with one thing in it. |
-| [Adopting dispat](./adopting.md) | Deriving the graph and the starting versions from the manifests, in a new repository or one that already ships. |
-| [Keeping configuration beside the code](./layout.md) | Space and package config files in their own folders, and `.dispatexclude`. |
-| [Registry login, once per space](./login.md) | The `login` slot: one authentication per space, whatever the registry. |
-| [npm and Docker in one graph](./mixed.md) | The mixed case dispat was built for. |
+**Read one page, then one more.** [An npm monorepo](./npm.md) is the shortest complete setup and the best first read
+whatever you build, because every other page is the same four pieces with different commands in them. After that, go
+to the page for your own ecosystem below. If you are bringing dispat to a repository that already ships versions,
+[Adopting dispat](./adopting.md) is the second read instead.
 
 ## Ecosystem by ecosystem
+
+One page per package manager, each with a config you can copy, the scripts its stages run, and a real run.
 
 | Example | What it covers |
 |---------|----------------|
@@ -59,6 +56,19 @@ If a term is new, [Concepts](../concepts.md) defines all of them in a few minute
 | [Cross-platform binaries](./binaries.md) | Four targets, checksums, and assets attached to the GitHub release. |
 | [Helm charts that follow the image](./helm.md) | `appVersion` and image tags written by the run that pushed the image. |
 | [A site deployed from the release](./pages.md) | A docs or marketing site published during the run, with a CI-only guard. |
+
+## Shaping the repository
+
+The pages above are about one ecosystem each. These are about the repository around them, and they apply whatever you
+build.
+
+| Example | What it covers |
+|---------|----------------|
+| [A single package, no monorepo](./single-package.md) | dispat on a repository with one thing in it, and what changes when it grows. |
+| [Adopting dispat](./adopting.md) | Deriving the graph and the starting versions from the manifests, in a new repository or one that already ships. |
+| [Keeping configuration beside the code](./layout.md) | Space and package config files in their own folders, and `.dispatexclude`. |
+| [npm and Docker in one graph](./mixed.md) | Two ecosystems, one graph: the mixed case dispat was built for. |
+| [Registry login, once per space](./login.md) | The `login` slot: one authentication per space, whatever the registry. |
 
 ## Which example covers my manifest
 
