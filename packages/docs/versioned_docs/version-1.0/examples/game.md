@@ -6,6 +6,67 @@ dedicated server later, one block at a time. This page is both halves of that st
 Game engines keep their version in a file no package manager understands, so the first thing to sort out is where the
 version number lives. After that, a game is an ordinary package: something builds it, something publishes it.
 
+## What this buys you
+
+**One version number, everywhere.** The version dispat computes from your commits is written into `project.godot`,
+becomes the git tag, becomes the Steam build description and the branch that goes live, becomes the itch
+`--userversion`, heads the changelog entry and names the GitHub release. Nobody types it twice, so nothing can
+disagree about what `0.3.0` contains. When a player reports a bug against the version on their title screen, that
+string leads straight to a tag and a diff.
+
+**The changelog writes itself, per package.** The commits that caused the release are the notes:
+
+```markdown
+# Changelog
+
+## adventure@0.3.0 (2026-08-18)
+
+### Features
+
+- co-op lobby
+
+### Fixes
+
+- stop the save file corrupting on quit
+```
+
+The same text becomes the GitHub release body, and is handed to the announce stage as `DISPAT_FEATURES` and
+`DISPAT_FIXES`. Patch notes stop being a thing somebody remembers to write on release day.
+
+**Announcements go out with the facts already in them.** [`flow.announce`](../configuration/spaces.md#flowannounce)
+runs after the publish succeeded, with the release notes and the channel in its environment, and it only warns if it
+fails, because the release is already out:
+
+```console
+13:44:35 INF announce started package=adventure stage=publish version=0.3.0
+13:44:36 INF channel=stable prerelease=false package=adventure stage=publish version=0.3.0
+13:44:36 INF features: co-op lobby package=adventure stage=publish version=0.3.0
+13:44:36 INF fixes: stop the save file corrupting on quit package=adventure stage=publish version=0.3.0
+```
+
+A Discord post to players on `stable` and a quieter one to testers on `beta` is a `case` on `$DISPAT_CHANNEL` in that
+script.
+
+**A patch is not a special procedure.** A `fix:` commit is a patch release: the same build, the same upload, the same
+tag, changelog and announcement, from the same one command. There is no hotfix path to remember under pressure, which
+is when a hotfix path is normally used for the first time.
+
+**The interface does not grow with the project.** One package or twenty, the command is `dispat`. Which packages move,
+in what order, and what can run in parallel are the tool's problem. That is what makes the growth in part two cost a
+few lines of configuration rather than a migration.
+
+**And the project does grow.** Today the repository is one game binary. It rarely stays that way: a landing page with
+a buy button, a docs site for the wiki, a modding SDK, a level editor or asset pipeline somebody else on the team
+runs, a dedicated server image, a Discord bot reading your own release feed. Each of those has its own version, its
+own release rhythm and its own idea of "published", and each one is a place where a number can drift out of step with
+the game it belongs to.
+
+The usual path is that the second deliverable gets a hand-written script, the third gets another, and by the fifth
+nobody can say which versions of these things were ever tested together. Starting on dispat means the second one is a
+config block instead: it joins the same graph, takes the same commit conventions, and gets the same changelog, tag and
+announcement the game already had. Part one below is a complete setup for a single game with none of that machinery
+in sight, and part two adds four packages to it without touching the game's own entry.
+
 ## Part one: just the game
 
 ```

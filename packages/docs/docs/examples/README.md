@@ -7,8 +7,10 @@ commands (the `npm`, `docker`, `butler` lines) come from those commands, so your
 
 You do not need a monorepo to start. One folder, one package, one publish is a valid setup, and growing into a graph
 later is additive: no restructuring, and the versions already published stay the baselines everything counts from.
-[A single package](./single-package.md) is the smallest form, and
-[A game, from one package to many](./game.md) walks the growth step by step.
+That matters because a repository holding one deliverable rarely keeps holding one. A game gains a landing page, a
+docs site, an SDK and a server; a library gains a CLI and a demo. Each of those is one more block in the same file
+rather than one more release script nobody maintains. [A single package](./single-package.md) is the smallest form,
+and [A game, from one package to many](./game.md) walks the growth step by step.
 
 If a term is new, [Concepts](../concepts.md) defines all of them in a few minutes of reading.
 
