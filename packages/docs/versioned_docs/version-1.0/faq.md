@@ -74,10 +74,24 @@ corrected forward with `Edits:` and `Deletes:` footers in new commits, so the au
 ## Which languages and package managers does it work with?
 
 Any: a package is a folder and a stage is a shell command, so Go, npm, pnpm, Cargo, Maven, Python, Docker and the rest
-all sit in one dependency graph. Native manifest rewriting exists for `package.json`, `go.mod`, `requirements*.txt`,
-Dockerfiles and compose files; every other format is covered by the
-[replace strategy](./configuration/autoversion.md) or a `flow.version` script. The [examples](./examples/README.md)
-show one setup per ecosystem.
+all sit in one dependency graph. Native manifest rewriting covers all twenty-three formats dispat reads, from
+`package.json` and `go.mod` to `pom.xml`, `Cargo.toml`, `*.csproj`, `pubspec.yaml` and compose files; a version living
+somewhere no parser owns, such as a Gradle coordinate or an engine's project file, is covered by the
+[replace strategy](./configuration/autoversion.md). The [examples](./examples/README.md) show one setup per
+ecosystem, and the table there says which page covers your manifest.
+
+## Can I start with one package and add more later?
+
+Yes, and nothing has to be restructured when you do. A repository with one deliverable declares one standalone
+[`packages` entry](./examples/single-package.md) and no spaces. Adding a landing page, a docs site or an SDK later is
+one more entry each, plus an edge if they depend on one another; the tags already published stay the baselines
+everything counts from. [A game, from one package to many](./examples/game.md) walks both halves of that.
+
+## Do I have to use GitHub?
+
+No. dispat needs `git`, a POSIX shell and the full history. GitHub releases are one opt-in recorder, and the composite
+action is one of three ways to install the binary. [The release job on other providers](./reference/ci-providers.md)
+has GitLab CI, CircleCI, Jenkins, Buildkite and Azure Pipelines.
 
 ## How do I pin the dispat version in CI?
 

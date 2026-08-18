@@ -139,7 +139,7 @@ spells it. A `go.mod` gets a `replace` line, a `package.json` gets a `file:` ran
 ```console
 $ dispat writer services/api/go.mod --link github.com/acme/core=../../packages/core
 services/api/go.mod
-  applied  replace  github.com/acme/core  ../../packages/core
+  applied  link     github.com/acme/core  ../../packages/core
 1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
@@ -149,7 +149,8 @@ happen before anything is published:
 ```console
 $ dispat writer services/api/go.mod --link 'github.com/acme/core='
 services/api/go.mod
-  applied  replace  github.com/acme/core  (removed)
+  applied  link     github.com/acme/core  (removed)
+1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
 Only formats with a redirect of their own can do this: `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml` and
@@ -164,9 +165,10 @@ what the build linked.
 ```console
 $ dispat writer go.mod Cargo.toml --drop-links
 go.mod
-  applied  replace  github.com/acme/core  (removed)
+  applied  link     github.com/acme/core  (removed)
 Cargo.toml
-  applied  patch  core  (removed)
+  applied  link     core  (removed)
+2 manifest(s): 2 applied, 0 skipped, 0 missing
 ```
 
 A manifest carrying no directive is left alone and the command still succeeds, so the sweep is safe to run
@@ -265,14 +267,24 @@ Both are also available as Go libraries, [`pkg/scanner`](../go/scanner.md) and
 The two libraries share one list of file names, so anything the scanner reads has a writer, and both commands cover the
 same set:
 
-npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.toml`, `requirements*.txt`), Composer
-(`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj`, `*.fsproj`, `*.vbproj`, `*.nuspec`,
-`Directory.Packages.props`, `packages.config`), Dart and Flutter (`pubspec.yaml`), Ruby (`Gemfile`, `*.gemspec`),
-CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple bundles (`Info.plist`), Android
-(`AndroidManifest.xml`), Gradle (`libs.versions.toml`, `build.gradle`, `build.gradle.kts`) and Docker (`Dockerfile`,
-`compose.yaml`).
+| Ecosystem | Manifests | Worked example |
+|-----------|-----------|----------------|
+| npm | `package.json` | [npm](../examples/npm.md), [pnpm](../examples/pnpm.md) |
+| Go | `go.mod` | [Go](../examples/go.md) |
+| Cargo | `Cargo.toml` | [Rust](../examples/rust.md) |
+| Python | `pyproject.toml`, `requirements*.txt` | [Python](../examples/python.md) |
+| Composer | `composer.json` | [PHP](../examples/php.md) |
+| Maven | `pom.xml` | [Maven](../examples/java.md) |
+| NuGet | `*.csproj`, `*.fsproj`, `*.vbproj`, `*.nuspec`, `Directory.Packages.props`, `packages.config` | [.NET](../examples/dotnet.md) |
+| Dart and Flutter | `pubspec.yaml` | [Flutter](../examples/flutter.md) |
+| Ruby | `Gemfile`, `*.gemspec` | [Ruby](../examples/ruby.md) |
+| CocoaPods, Xcode, Apple bundles | `Podfile`, `*.podspec`, `project.pbxproj`, `Info.plist` | [Apple](../examples/apple.md) |
+| Android and Gradle | `AndroidManifest.xml`, `build.gradle`, `build.gradle.kts`, `libs.versions.toml` | [Android](../examples/android.md), [Gradle](../examples/gradle.md) |
+| Docker | `Dockerfile`, `Containerfile`, `compose.yaml` | [Docker](../examples/docker.md) |
 
-The per-format detail, including which fields each one reads and which of them can be written back, is in the
+Everything the scanner reads, the writer can write, which is what lets
+[auto-versioning](../configuration/autoversion.md) reconcile any of them without a script of your own. The per-format
+detail, including which fields each one reads and which shapes are deliberately left alone, is in the
 [scanner](../go/scanner.md) and
 [writer](../go/writer.md) module documentation.
 

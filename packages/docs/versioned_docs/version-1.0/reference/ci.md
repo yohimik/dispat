@@ -266,3 +266,8 @@ RUN sh /tmp/install.sh --version 1.2.3 && rm /tmp/install.sh
 
 dispat's own images do this in a throwaway first stage and copy the binary out, which keeps the downloader out of the
 published image; [docker/README.md](https://github.com/yohimik/dispat/tree/main/docker) has the shape.
+
+## Somewhere other than GitHub Actions
+
+The full release job written for GitLab CI, CircleCI, Jenkins, Buildkite and Azure Pipelines, with the clone settings
+and the tokens each of them needs, is [The release job on other providers](./ci-providers.md).

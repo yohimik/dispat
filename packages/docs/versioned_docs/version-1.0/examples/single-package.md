@@ -38,3 +38,10 @@ $ dispat status
 Everything else in these examples works unchanged with one package: channels, the changelog, GitHub releases, hooks,
 `dispat run`. If the repository grows a second deliverable later, add another entry (or a space) and declare the edge
 between them; the single-package setup is just the smallest case of the general one.
+
+## When it grows
+
+Adding packages is additive. Nothing moves, nothing is renamed, and the tags already published stay the baselines
+every future version counts from. [A game, from one package to many](./game.md) walks the whole path: part one is a
+repository holding a single deliverable, and part two adds a landing page, a docs site, an SDK and a server to the
+same configuration file, one block at a time.

@@ -22,10 +22,16 @@ nothing, for the versions no manifest holds (a Gradle coordinate, a README examp
 A package may use both, in which case its manifests are reconciled first. A block using neither still schedules a
 version task, which is how a space asks for [`syncLock`](#the-options) and nothing else.
 
-The rewrite is byte-precise: only the version text changes, and formatting, key order and comments survive. Writers
-exist for `package.json`, `go.mod` and `requirements*.txt` (only the matching line's specifier changes; spelling,
-spacing and comments survive). The other ecosystems (Cargo, pyproject, Composer, Maven, .NET, Dart) still feed
-`compute` and the graph, but their rewriting is `flow.version`'s job.
+The rewrite is byte-precise: only the version text changes, and formatting, key order and comments survive. Every
+format the scanner reads has a writer behind it, so the parsing strategy covers all of them: `package.json`, `go.mod`,
+`Cargo.toml`, `pyproject.toml`, `requirements*.txt`, `composer.json`, `pom.xml`, the .NET project and package files,
+`pubspec.yaml`, the Ruby, CocoaPods, Xcode, Android, Gradle and Docker files. The full list, with the fields each one
+contributes, is in [Manifest tools](../editing/manifests.md#supported-formats).
+
+What a writer will not do is replace an indirection with a literal. A Maven `${property}`, a Cargo
+`{ workspace = true }`, an MSBuild `$(Version)` and an Xcode `$(MARKETING_VERSION)` are reported as skipped and left
+exactly as they are, because the indirection is deliberate. Where the number really lives in one of those files,
+`replace` or a `flow.version` script is the tool.
 
 Two consequences worth knowing before turning it on. First, the reconciliation rule (§9.4 of the
 [commit specification](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md)) covers *every* workspace dependency, including providers released
@@ -45,7 +51,7 @@ lock follow the manifest.
 
 The pickup is reported as `W197` in the run's log and is visible in the release commit's manifest diff, but it does
 not appear in the consumer's [changelog entry](./records.md#changelog): the dependencies section lists providers that
-forced the release or released beside it, and this provider did neither — its own release documented the change, and
+forced the release or released beside it, and this provider did neither: its own release documented the change, and
 repeating it in every later consumer entry would date each entry by whatever its packages happened to lag on. A
 consumer that must not pick a provider up yet holds it with the `match` filter or an explicit
 [`dependencies` range](./dependencies.md). The same pickup runs standalone as

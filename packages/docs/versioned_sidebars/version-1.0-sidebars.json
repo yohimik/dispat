@@ -17,19 +17,120 @@
           "label": "An npm monorepo"
         },
         {
-          "type": "doc",
-          "id": "examples/pnpm",
-          "label": "A pnpm workspace"
+          "type": "category",
+          "label": "Ecosystem by ecosystem",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/pnpm",
+              "label": "A pnpm workspace"
+            },
+            {
+              "type": "doc",
+              "id": "examples/go",
+              "label": "Go modules"
+            },
+            {
+              "type": "doc",
+              "id": "examples/rust",
+              "label": "A Cargo workspace"
+            },
+            {
+              "type": "doc",
+              "id": "examples/python",
+              "label": "A Python monorepo"
+            },
+            {
+              "type": "doc",
+              "id": "examples/java",
+              "label": "Maven modules"
+            },
+            {
+              "type": "doc",
+              "id": "examples/gradle",
+              "label": "Gradle and its catalog"
+            },
+            {
+              "type": "doc",
+              "id": "examples/dotnet",
+              "label": ".NET packages"
+            },
+            {
+              "type": "doc",
+              "id": "examples/php",
+              "label": "Composer packages"
+            },
+            {
+              "type": "doc",
+              "id": "examples/ruby",
+              "label": "Ruby gems"
+            },
+            {
+              "type": "doc",
+              "id": "examples/flutter",
+              "label": "Flutter and Dart"
+            },
+            {
+              "type": "doc",
+              "id": "examples/apple",
+              "label": "iOS and CocoaPods"
+            },
+            {
+              "type": "doc",
+              "id": "examples/android",
+              "label": "An Android app"
+            },
+            {
+              "type": "doc",
+              "id": "examples/docker",
+              "label": "A Docker image chain"
+            }
+          ]
         },
         {
-          "type": "doc",
-          "id": "examples/docker",
-          "label": "A Docker image chain"
+          "type": "category",
+          "label": "Game development",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/game",
+              "label": "One package to many"
+            },
+            {
+              "type": "doc",
+              "id": "examples/steam",
+              "label": "Publishing to Steam"
+            },
+            {
+              "type": "doc",
+              "id": "examples/itch",
+              "label": "Publishing to itch.io"
+            }
+          ]
         },
         {
-          "type": "doc",
-          "id": "examples/android",
-          "label": "An Android app"
+          "type": "category",
+          "label": "Shipping artifacts",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/binaries",
+              "label": "Cross-platform binaries"
+            },
+            {
+              "type": "doc",
+              "id": "examples/helm",
+              "label": "Helm charts"
+            },
+            {
+              "type": "doc",
+              "id": "examples/pages",
+              "label": "A site deploy"
+            }
+          ]
         },
         {
           "type": "doc",
@@ -131,6 +232,11 @@
           "type": "doc",
           "id": "reference/ci",
           "label": "Getting dispat onto a runner"
+        },
+        {
+          "type": "doc",
+          "id": "reference/ci-providers",
+          "label": "Other CI providers"
         },
         {
           "type": "doc",
