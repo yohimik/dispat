@@ -1,5 +1,20 @@
 # Changelog
 
+## packages/docs/v1.0.9 (2026-08-18)
+
+### Fixes
+
+- one repository or many, and a tidier examples index
+A page for the decision itself: what a monorepo and a repository each
+actually cost, which of those costs dispat removes (ordering, per-package
+cadence, CI that scales with the diff), where it does not help (there is no
+graph across repositories), and how to move either direction without losing
+published versions.
+
+The examples index loses its duplicated "start here" table for a two-line
+reading path, and the five repository-shaping pages become a group of their
+own in both sidebars instead of sitting loose after the ecosystems.
+
 ## packages/docs/v1.0.8 (2026-08-18)
 
 ### Fixes
