@@ -1,5 +1,19 @@
 # Changelog
 
+## packages/docs/v1.0.7 (2026-08-18)
+
+### Fixes
+
+- examples per ecosystem, game stores and other CI providers
+Seventeen worked examples: one per manifest ecosystem, so all 23 formats
+the scanner and writer cover are demonstrated somewhere; a game repository
+that starts as one package and grows; Steam and itch.io publishing; and the
+release job on GitLab CI, CircleCI, Jenkins, Buildkite and Azure Pipelines.
+
+Corrects three pages that still said manifest rewriting only covered
+package.json, go.mod and requirements*.txt, and three writer transcripts
+that printed "replace" and "patch" where the CLI prints "link".
+
 ## packages/docs/v1.0.6 (2026-08-17)
 
 ### Fixes
