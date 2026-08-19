@@ -3,12 +3,14 @@
 Start with a repository that holds nothing but the game, and add the landing page, the docs, the modding SDK and the
 dedicated server later, one block at a time. This page is both halves of that story.
 
-Game engines keep their version in a file no package manager understands, so the first thing to sort out is where the
-version number lives. After that, a game is an ordinary package: something builds it, something publishes it.
+Game engines keep their version in a file no package manager understands. dispat reads and writes those files, so
+there is nothing to sort out first: a game is an ordinary package, and something builds it and something publishes
+it.
 
 ## What this buys you
 
-**One version number, everywhere.** The version dispat computes from your commits is written into `project.godot`,
+**One version number, everywhere.** The version dispat computes from your commits is written straight into
+`project.godot`,
 becomes the git tag, becomes the Steam build description and the branch that goes live, becomes the itch
 `--userversion`, heads the changelog entry and names the GitHub release. Nobody types it twice, so nothing can
 disagree about what `0.3.0` contains. When a player reports a bug against the version on their title screen, that
@@ -84,22 +86,16 @@ dispat.json
     "game": {
       "path": "game",
       "flow": {"build": "export", "publish": "publish"},
-      "autoVersion": {
-        "enabled": true,
-        "manifests": "none",
-        "replace": [
-          {"files": ["project.godot"], "find": "config/version=\"{previous}\"", "write": "config/version=\"{version}\""}
-        ]
-      }
+      "autoVersion": {"enabled": true}
     }
   },
   "initials": {"game": "0.1.0"}
 }
 ```
 
-One package, no spaces. `manifests: none` says there is no manifest to parse, and the `replace` rule writes the
-version where Godot keeps it, filling `{previous}` and `{version}` in from the run. `initials` tells dispat where the
-version numbering starts, since there is no tag yet.
+One package, no spaces. `project.godot` is a manifest dispat reads, so `autoVersion` finds the version and writes it
+back with nothing else configured. `initials` tells dispat where the version numbering starts, since there is no tag
+yet.
 
 ```console
 $ git commit -m "feat(game): co-op mode"
@@ -107,7 +103,7 @@ $ dispat
 12:50:45 INF release started root=.
 12:50:45 INF ● changed baselineFromInitials=true bump=minor channel=stable dueToProviders=[] ownCommits=1 package=game reason=direct space=game version="0.1.0 -> 0.2.0"
 12:50:45 INF release plan ready held=0 packages=1 releasing=1
-12:50:45 INF file reconciled file=project.godot occurrences=1 package=game stage=version version=0.2.0
+12:50:45 INF manifest updated manifest=project.godot package=game stage=version versionWritten=true version=0.2.0
 12:50:45 INF version succeeded package=game stage=version version=0.2.0
 12:50:45 INF build started package=game stage=build version=0.2.0
 12:50:45 INF build succeeded package=game stage=build version=0.2.0
@@ -134,32 +130,26 @@ That is a complete setup. Nothing below is required to keep using it.
 
 ### The same thing in Unity
 
-Unity keeps the version in `ProjectSettings/ProjectSettings.asset`, so only the rule changes:
+Unity keeps the version in `ProjectSettings/ProjectSettings.asset`, one folder down from the package. That is the only
+difference, and `manifests: all` covers it:
 
 ```json title="dispat.json (Unity)"
 {
-  "autoVersion": {
-    "enabled": true,
-    "manifests": "none",
-    "replace": [
-      {
-        "files": ["ProjectSettings/ProjectSettings.asset"],
-        "find": "bundleVersion: {previous}",
-        "write": "bundleVersion: {version}"
-      }
-    ]
-  }
+  "autoVersion": {"enabled": true, "manifests": "all"}
 }
 ```
 
 ```console
 $ dispat
-12:51:53 INF file reconciled file=ProjectSettings/ProjectSettings.asset occurrences=1 package=client stage=version version=0.3.0
+12:51:53 INF manifest updated manifest=ProjectSettings/ProjectSettings.asset package=client stage=version versionWritten=true
 12:51:53 INF summary channel=stable package=client status=published tag=client@0.3.0 took=1.1s version="0.2.0 -> 0.3.0"
 ```
 
-Unreal (`Config/DefaultGame.ini`, `ProjectVersion=`) and Godot 3 (`config/version`) work the same way. Any engine
-does: point the rule at the line that holds the number.
+Unreal is the same again, with its version in `Config/DefaultGame.ini`. Each engine has a page of its own for the
+detail: [Unity](./unity.md), [Godot](./godot.md), [Unreal](./unreal.md).
+
+If your engine is one dispat does not read, the [replace strategy](../configuration/autoversion.md) still works:
+point a rule at the line that holds the number, and everything else on this page is unchanged.
 
 ## Part two: the repository grows
 

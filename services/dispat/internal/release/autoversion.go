@@ -349,6 +349,21 @@ func RangeText(policy, version string, ecosystem scanner.Ecosystem) string {
 			// come to that is naming the version outright.
 			return version
 		}
+	case scanner.EcosystemUnity:
+		switch policy {
+		case "", "caret", "tilde", "exact":
+			// Unity's package manager resolves an exact version and nothing
+			// else. A caret written here leaves a project that will not open.
+			return version
+		}
+	case scanner.EcosystemO3DE:
+		switch policy {
+		case "", "caret", "tilde", "exact":
+			// O3DE spells a gem constraint the way Python spells one.
+			return "==" + version
+		}
+		// Godot, Unreal and Defold need no case: none of them declares a
+		// versioned dependency, so no range is ever rendered for one.
 	}
 	switch policy {
 	case "", "caret":

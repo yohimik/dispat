@@ -13,12 +13,16 @@ import (
 // buildWriters level with it, so reading and writing counters cannot drift.
 var buildCounterNames = []string{
 	"Info.plist", "AndroidManifest.xml", "project.pbxproj", "build.gradle", "pubspec.yaml",
+	// The engine counters. Two of them are named by their folder rather than
+	// their base name, which is why the fence resolves paths.
+	"ProjectSettings/ProjectSettings.asset", "export_presets.cfg",
+	"AcmeNet.uplugin", "Config/DefaultEngine.ini",
 }
 
 func TestEveryBuildCounterFormatHasAWriter(t *testing.T) {
 	covered := map[manifest.Format]bool{}
 	for _, name := range buildCounterNames {
-		f, ok := manifest.FormatOf(name)
+		f, ok := manifest.FormatOfPath(name)
 		if !ok {
 			t.Fatalf("%s names no format", name)
 		}

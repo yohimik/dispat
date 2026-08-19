@@ -199,6 +199,11 @@ const MANIFESTS: [language: string, files: string][] = [
   ['Swift, Objective-C: iOS, CocoaPods', 'Info.plist, project.pbxproj, Podfile, *.podspec'],
   ['Kotlin, Java: Android, Gradle', 'AndroidManifest.xml, libs.versions.toml, build.gradle(.kts)'],
   ['Docker: images and Compose', 'Dockerfile, Containerfile, compose.yaml, docker-compose.yml, and their .override spellings'],
+  ['Unity', 'Packages/manifest.json, ProjectSettings/ProjectSettings.asset'],
+  ['Godot', 'project.godot, plugin.cfg, export_presets.cfg'],
+  ['Unreal Engine', '*.uproject, *.uplugin, Config/DefaultGame.ini, Config/DefaultEngine.ini'],
+  ['Defold', 'game.project'],
+  ['O3DE', 'project.json, gem.json'],
 ];
 
 // dispat's pieces are separate Go modules, usable with no dispat in sight. Each

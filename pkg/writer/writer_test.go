@@ -11,10 +11,15 @@ import (
 	"github.com/yohimik/dispat/pkg/manifest"
 )
 
-// seed writes a manifest into a temp folder and returns its path.
+// seed writes a manifest into a temp folder and returns its path. The name may
+// carry folders, which the formats recognised by where they sit need: a
+// Packages/manifest.json is only Unity's inside a Packages folder.
 func seed(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

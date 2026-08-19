@@ -7,7 +7,7 @@ Docker reference is.
 
 The surface, by concern:
 
-- **Formats.** `Format` names each of the twenty-three recognised manifest formats, `Formats` is the canonical list
+- **Formats.** `Format` names each of the thirty-five recognised manifest formats, `Formats` is the canonical list
   both halves prove they cover, and `FormatOf` maps a file name onto its format. `IsRequirementsFile` and
   `IsDockerfile` are the two name rules too wordy for a lookup table: requirements files match by whole words, and
   Dockerfiles match `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile` and `Containerfile` while excluding prose

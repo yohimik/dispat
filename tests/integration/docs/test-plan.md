@@ -1096,6 +1096,28 @@ convergence before the next cycle.
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestSmokeReleaseCycles` | Six cycles in sequence: bootstrap (everything direct, every manifest written); a shared minor riding the image with its FROM and compose tags following; a provider releasing alone with the consumer's manifest deliberately left behind; the consumer's own next release performing the reconciliation pickup (W197, manifest moves, changelog deliberately silent); a caret propagating the provider's fix (manifest and dependencies section both move); and a whole rc train over the group — prerelease versions in the manifests, fresh-only rc entries, and a graduation whose entry documents the provider's movement over the whole train. |
 
+### Goal 41: game engine manifests (`engines_test.go`)
+
+Unity, Godot, Unreal, Defold and O3DE keep their versions in files no package manager understands. This goal is the
+proof that dispat reads and writes all twelve of those formats like any other manifest, through the same commands,
+the same exit codes and the same event stream, with no `replace` rule configured anywhere. The fixture is one engine
+monorepo holding a project of every engine, together with the folders each engine generates beside them.
+
+| Test                                             | Claim proven                                                                                                                                                                                                    |
+|--------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestEnginesScannerReadsEveryEngineFormat`       | One walk lists every engine manifest with its identity, version and ecosystem, and the folders the engines generate contribute nothing: Unity's `Library/PackageCache` holds a real `package.json` per resolved package, and a scan that entered it would report a few hundred third-party packages as members of the workspace. |
+| `TestEnginesScannerReadsTheDependencyEdges`      | The graph an engine repository has: a Unity dependency declared by folder yields the local path that makes it a workspace edge, and an Unreal plugin declared by name with no version at all is still an edge the release order respects. |
+| `TestEnginesPathQualifiedFormatsResolve`         | The four formats told apart by the folder they sit in, over a process boundary. `Packages/manifest.json` is Unity's and `public/manifest.json` is a web app manifest, and the writer refuses the second rather than guessing. |
+| `TestEnginesWriterWritesEachVersion`             | One batch spanning all five ecosystems rewrites each format's own version field, leaves every build counter where it was, and converges: a second pass applies nothing and the files come back byte for byte.   |
+| `TestEnginesWriterSetBuildWritesEveryCounter`    | `--set-build` moves the counter each engine keeps and only the counter, across every Unity platform and every Godot preset; an Unreal plugin's `Version` stays a bare integer; the scanner reads them back; and a version where an integer is required exits 1 for every one of them. |
+| `TestEnginesUnrealVersionlessPluginsAreSkipped`  | The Missing/Skipped split over the process boundary: a plugin the descriptor lists is skipped and passes `--strict`, one it does not list is missing and fails it.                                              |
+| `TestEnginesGracefulOnPartialProjects`           | The states a healthy engine repository is routinely in are not errors and write nothing: a Godot project that never set `config/version` does not gain one, and a build stamp against a manifest that declares no counter warns and leaves the file alone. |
+| `TestEnginesAutoVersionWritesTheEngineVersion`   | The point of the feature. A release run computes a version from the commits and writes it into `project.godot` with no `replace` rule configured, and everything else in the file survives.                      |
+| `TestEnginesEventsNameTheFormat`                 | Five ecosystems now cover twelve formats, so the machine contract carries the format beside the ecosystem: the project file and the export presets are told apart.                                              |
+| `TestEnginesUnityRangesArePinned`                | Unity's package manager resolves an exact version and nothing else, so a range write pins rather than writing a caret the project could not open, and a folder range beside it is untouched.                     |
+| `TestEnginesScannerStrictGatesBrokenEngineManifests` | The partial-result contract reaching the exit code for the engine formats too: a broken `Packages/manifest.json` is reported while the healthy manifests are still listed, and `--strict` refuses the same repository. |
+| `TestEnginesComputeReadsTheEngineGraph`          | `dispat compute` derives its edges from the same manifests, so a versionless Unreal plugin edge is one it suggests.                                                                                             |
+
 ## Regression fences
 
 Two planner behaviours are subtle enough to earn dedicated guard tests: each pins a property whose violation once

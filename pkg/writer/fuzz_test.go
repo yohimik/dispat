@@ -56,6 +56,9 @@ func FuzzRewriteNpm(f *testing.F) {
 func fuzzRewrite(t *testing.T, name, content, version string, edits []Edit) ([]byte, bool) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Skip()
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Skip()
 	}
@@ -517,4 +520,72 @@ func fuzzImageRewrite(t *testing.T, base, content, version string, edits []Edit)
 			t.Fatalf("rewrite restructured line %d:\n in: %q\nout: %q", i, before[i], after[i])
 		}
 	}
+}
+
+// The engine formats' fuzz targets. Three of them have no grammar to validate
+// against, so the invariant they assert is the structural one their verify
+// functions promise: a rewrite that succeeded left the file readable as the
+// format it was, with the same shape it had.
+
+func FuzzRewriteGodotCfg(f *testing.F) {
+	for _, s := range []string{
+		"[application]\n\nconfig/name=\"A\"\nconfig/version=\"1.0\"\n",
+		"[application]\nconfig/features=PackedStringArray(\"4.3\")\nconfig/version=\"1.0\"\n",
+		"[application]\nconfig/name=\"a;b\" ; note\nconfig/version=\"1.0\"\n",
+		"[preset.0]\nname=\"A\"\n[preset.0.options]\nversion/code=1\nversion/name=\"1.0\"\n",
+		"config_version=5\n", "[]\n", "[", "", "=\n", "[application]\nconfig/version=\n",
+	} {
+		f.Add(s, "2.0.0")
+	}
+	f.Fuzz(func(t *testing.T, content, version string) {
+		data, ok := fuzzRewrite(t, "project.godot", content, version, nil)
+		if !ok {
+			return
+		}
+		wasSections, wasEntries := iniShape([]byte(content), godotDialect)
+		nowSections, nowEntries := iniShape(data, godotDialect)
+		if len(wasSections) != len(nowSections) || wasEntries != nowEntries {
+			t.Fatalf("rewrite changed the file's shape:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteUnityProjectSettings(f *testing.F) {
+	for _, s := range []string{
+		"%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!129 &1\nPlayerSettings:\n  bundleVersion: 1.0\n",
+		"PlayerSettings:\n  bundleVersion: 1.0 # note\n  AndroidBundleVersionCode: 1\n",
+		"PlayerSettings:\n  buildNumber:\n    iPhone: 2\n    tvOS: 3\n",
+		"PlayerSettings:\n  bundleVersion:\n", "", "  ", "---\n", "a:\n",
+	} {
+		f.Add(s, "2.0.0")
+	}
+	f.Fuzz(func(t *testing.T, content, version string) {
+		data, ok := fuzzRewrite(t, "ProjectSettings/ProjectSettings.asset", content, version, nil)
+		if !ok {
+			return
+		}
+		// Every splice is inside a line, so the line count cannot move. A
+		// change here would mean an entry was split or joined.
+		if strings.Count(content, "\n") != strings.Count(string(data), "\n") {
+			t.Fatalf("rewrite changed the line count:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+func FuzzRewriteUPlugin(f *testing.F) {
+	for _, s := range []string{
+		`{"FileVersion":3,"Version":4,"VersionName":"1.0","Plugins":[{"Name":"B"}]}`,
+		`{"VersionName":"1.0"}`,
+		`{"Version":"4","VersionName":"1.0"}`,
+		`{"Plugins":[{},{"Name":""},42,[1]]}`,
+		`{"Plugins":{}}`, `[]`, `{`, ``,
+	} {
+		f.Add(s, "2.0.0", "B")
+	}
+	f.Fuzz(func(t *testing.T, content, version, name string) {
+		data, ok := fuzzRewrite(t, "AcmeNet.uplugin", content, version, []Edit{{Name: name, Range: "9.9.9"}})
+		if ok && json.Valid([]byte(content)) && !json.Valid(data) {
+			t.Fatalf("rewrite corrupted valid JSON:\n in: %q\nout: %q", content, data)
+		}
+	})
 }

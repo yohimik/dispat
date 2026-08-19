@@ -3,7 +3,7 @@
 A deliberately lightweight manifest reader: thin per-format parsers turning dependency manifests into one
 ecosystem-neutral shape: the package's declared identity (name, version) and its declared dependencies with their
 ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no network. The recognised
-formats are fixed at build time, twenty-three of them across fifteen ecosystems, and fence tests hold the reader and
+formats are fixed at build time, thirty-five of them across twenty ecosystems, and fence tests hold the reader and
 the writer to the same list; the shared vocabulary (dependency kinds, the file-name rules) lives in
 [`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can never drift apart. It only reads;
 rewriting is the writer's job. This is the library behind

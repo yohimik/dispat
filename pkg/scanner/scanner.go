@@ -97,6 +97,14 @@ const (
 	EcosystemGradle    Ecosystem = "gradle"    // libs.versions.toml, build.gradle(.kts)
 	EcosystemRubyGems  Ecosystem = "rubygems"  // Gemfile, *.gemspec
 	EcosystemDocker    Ecosystem = "docker"    // Dockerfile, compose.yaml
+
+	// The game engines, each named after the engine rather than a package
+	// manager, because that is what resolves their manifests.
+	EcosystemUnity  Ecosystem = "unity"  // Packages/manifest.json, ProjectSettings.asset
+	EcosystemGodot  Ecosystem = "godot"  // project.godot, plugin.cfg, export_presets.cfg
+	EcosystemUnreal Ecosystem = "unreal" // *.uproject, *.uplugin, Config/Default*.ini
+	EcosystemDefold Ecosystem = "defold" // game.project
+	EcosystemO3DE   Ecosystem = "o3de"   // project.json, gem.json
 )
 
 // ecosystems maps each format onto the ecosystem its manifests report. It is
@@ -126,6 +134,19 @@ var ecosystems = map[manifest.Format]Ecosystem{
 	manifest.FormatGemspec:         EcosystemRubyGems,
 	manifest.FormatDockerfile:      EcosystemDocker,
 	manifest.FormatCompose:         EcosystemDocker,
+
+	manifest.FormatUnityPackages:        EcosystemUnity,
+	manifest.FormatUnityProjectSettings: EcosystemUnity,
+	manifest.FormatGodotProject:         EcosystemGodot,
+	manifest.FormatGodotPlugin:          EcosystemGodot,
+	manifest.FormatGodotExportPresets:   EcosystemGodot,
+	manifest.FormatUnrealProject:        EcosystemUnreal,
+	manifest.FormatUnrealPlugin:         EcosystemUnreal,
+	manifest.FormatUnrealGameConfig:     EcosystemUnreal,
+	manifest.FormatUnrealEngineConfig:   EcosystemUnreal,
+	manifest.FormatDefoldProject:        EcosystemDefold,
+	manifest.FormatO3DEProject:          EcosystemO3DE,
+	manifest.FormatO3DEGem:              EcosystemO3DE,
 }
 
 // EcosystemOf reports the ecosystem a format's manifests belong to.
@@ -226,11 +247,27 @@ var parsers = map[manifest.Format]parseFunc{
 	manifest.FormatGemspec:         parseGemspec,
 	manifest.FormatDockerfile:      parseDockerfile,
 	manifest.FormatCompose:         parseCompose,
+
+	manifest.FormatUnityPackages:        parseUnityPackages,
+	manifest.FormatUnityProjectSettings: parseUnityProjectSettings,
+	manifest.FormatGodotProject:         parseGodotProject,
+	manifest.FormatGodotPlugin:          parseGodotPlugin,
+	manifest.FormatGodotExportPresets:   parseGodotExportPresets,
+	manifest.FormatUnrealProject:        parseUProject,
+	manifest.FormatUnrealPlugin:         parseUPlugin,
+	manifest.FormatUnrealGameConfig:     parseUnrealGameConfig,
+	manifest.FormatUnrealEngineConfig:   parseUnrealEngineConfig,
+	manifest.FormatDefoldProject:        parseDefoldProject,
+	manifest.FormatO3DEProject:          parseO3DEProject,
+	manifest.FormatO3DEGem:              parseO3DEGem,
 }
 
-// parserFor resolves a file name onto its parser.
-func parserFor(name string) (parseFunc, bool) {
-	format, ok := manifest.FormatOf(name)
+// parserFor resolves a file's path onto its parser. It takes the path rather
+// than the base name because four formats are told apart only by where they
+// sit: a bare manifest.json is a web app manifest, and only the one under
+// Packages/ is Unity's.
+func parserFor(path string) (parseFunc, bool) {
+	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return nil, false
 	}
@@ -265,13 +302,52 @@ var skipDirs = map[string]bool{
 	"xcuserdata":       true,
 }
 
+// engineDirs are the folders a game engine generates beside its project: the
+// package cache, the compiled intermediates, the editor's own state. They are
+// listed apart from skipDirs because several of the names are ordinary words a
+// repository may well use for source, and only a walk looking for manifests
+// gains by stepping over them.
+//
+// The one that matters is Unity's Library, whose PackageCache holds a copy of
+// every resolved package, each with a package.json the npm parser reads
+// perfectly well. A Unity project scanned without this list reports hundreds
+// of third-party packages as members of the workspace.
+var engineDirs = map[string]bool{
+	// Unity
+	"Library":        true,
+	"PackageCache":   true,
+	"Temp":           true,
+	"Logs":           true,
+	"UserSettings":   true,
+	"MemoryCaptures": true,
+	// Unreal
+	"Binaries":         true,
+	"Intermediate":     true,
+	"Saved":            true,
+	"DerivedDataCache": true,
+	// Both
+	"Builds": true,
+}
+
 // SkipDir reports a folder name a workspace walk must not enter: the
 // dependency trees, virtual environments and build output listed above, plus
-// every dot-folder. It is the rule Scan itself follows, exported so a caller
-// walking a package folder for some other reason stays out of exactly the
-// same places rather than keeping a second list that drifts from this one.
+// every dot-folder. It is exported so a caller walking a package folder for
+// some other reason stays out of exactly the same places rather than keeping a
+// second list that drifts from this one.
+//
+// It is not the rule Scan follows; SkipWorkspaceDir is. The two differ by the
+// engine output folders, which hold generated copies of real manifests but may
+// still hold a file a caller means to read. A tool replacing literal text uses
+// this one, because a version string under Build/ is still a version string.
 func SkipDir(name string) bool {
 	return strings.HasPrefix(name, ".") || skipDirs[name]
+}
+
+// SkipWorkspaceDir reports a folder no search for manifests should enter:
+// everything SkipDir names, plus the folders a game engine generates. It is
+// the rule Scan follows.
+func SkipWorkspaceDir(name string) bool {
+	return SkipDir(name) || engineDirs[name]
 }
 
 // maxManifestBytes caps a single manifest read. A manifest is a hand-written
@@ -349,12 +425,15 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if path != dir && SkipDir(name) {
+			if path != dir && SkipWorkspaceDir(name) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		parse, ok := parserFor(name)
+		// The walk path, not the base name: the path-qualified formats are
+		// recognised by where they sit. Resolving here keeps the cheap
+		// pre-filter a pre-filter, so filepath.Rel still runs only for matches.
+		parse, ok := parserFor(path)
 		if !ok {
 			return nil
 		}
@@ -412,7 +491,10 @@ func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 			errs = append(errs, ctxErr)
 			break
 		}
-		parse, ok := parserFor(name)
+		// Joined so the path-qualified formats can resolve: ScanRoot on a
+		// ProjectSettings folder recognises its .asset. The rel handed to
+		// parse stays the bare name, so Manifest.Path and Root do not move.
+		parse, ok := parserFor(filepath.Join(dir, name))
 		if !ok {
 			continue
 		}

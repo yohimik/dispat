@@ -267,9 +267,10 @@ github.allPackages is the configuration-level opt-in for everything else.`,
 	{
 		name:  cmdCompute,
 		short: "derive the dependency graph and the starting versions from the manifests",
-		long: `Scan every package's manifests, the same fifteen families the
+		long: `Scan every package's manifests, the same twenty families the
 scanner command reads (npm, Go, Cargo, Python, Composer, Maven, NuGet, pub,
-Ruby, CocoaPods, Xcode, Apple bundles, Android, Gradle, Docker), and suggest
+Ruby, CocoaPods, Xcode, Apple bundles, Android, Gradle, Docker, Unity, Godot,
+Unreal, Defold, O3DE), and suggest
 the config changes they imply: the dependency edges between packages, and an
 initials entry for every package already at a version no release tag carries
 yet.

@@ -3,7 +3,6 @@ package writer
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/yohimik/dispat/pkg/manifest"
 )
@@ -85,7 +84,7 @@ func Relink(path string, links []Link) (LinkResult, error) {
 			return LinkResult{}, fmt.Errorf("writer: link with no dependency name")
 		}
 	}
-	format, ok := manifest.FormatOf(filepath.Base(path))
+	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return LinkResult{}, fmt.Errorf("%s: %w", path, ErrUnsupportedManifest)
 	}
@@ -112,7 +111,7 @@ func Relink(path string, links []Link) (LinkResult, error) {
 // hold a redirect. It shares the linkers table with Relink, so the two can
 // never disagree.
 func SupportsLink(path string) bool {
-	format, ok := manifest.FormatOf(filepath.Base(path))
+	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return false
 	}

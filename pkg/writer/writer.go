@@ -53,7 +53,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/yohimik/dispat/pkg/manifest"
 )
@@ -138,6 +137,17 @@ var rewriters = map[manifest.Format]rewriteFunc{
 	manifest.FormatGemspec:         rewriteGemspec,
 	manifest.FormatCompose:         rewriteCompose,
 
+	manifest.FormatUnityProjectSettings: rewriteUnityProjectSettings,
+	manifest.FormatGodotProject:         rewriteGodotProject,
+	manifest.FormatGodotPlugin:          rewriteGodotPlugin,
+	manifest.FormatGodotExportPresets:   rewriteGodotExportPresets,
+	manifest.FormatUnrealPlugin:         rewriteUPlugin,
+	manifest.FormatUnrealGameConfig:     rewriteUnrealGameConfig,
+	manifest.FormatUnrealEngineConfig:   rewriteUnrealEngineConfig,
+	manifest.FormatDefoldProject:        rewriteDefoldProject,
+	manifest.FormatO3DEProject:          rewriteO3DE,
+	manifest.FormatO3DEGem:              rewriteO3DE,
+
 	// These formats declare no version of their own, so Rewrite's version
 	// argument has no target and is dropped here rather than inside each one.
 	manifest.FormatGoMod: func(path, _ string, edits []Edit) (Result, error) {
@@ -164,11 +174,23 @@ var rewriters = map[manifest.Format]rewriteFunc{
 	manifest.FormatDockerfile: func(path, _ string, edits []Edit) (Result, error) {
 		return rewriteDockerfile(path, edits)
 	},
+	// A Unity package manifest names what the project consumes, and an Unreal
+	// project descriptor is named by its own file; neither declares a version
+	// a writer could set.
+	manifest.FormatUnityPackages: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteUnityPackages(path, edits)
+	},
+	manifest.FormatUnrealProject: func(path, _ string, edits []Edit) (Result, error) {
+		return rewriteUProject(path, edits)
+	},
 }
 
-// dispatch resolves a manifest file name onto its writer.
-func dispatch(base string) (rewriteFunc, bool) {
-	format, ok := manifest.FormatOf(base)
+// dispatch resolves a manifest path onto its writer. It takes the path rather
+// than the base name because four formats are told apart only by where they
+// sit; a caller holding nothing but "manifest.json" is holding a web app
+// manifest as far as this package can tell, and gets no writer.
+func dispatch(path string) (rewriteFunc, bool) {
+	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return nil, false
 	}
@@ -202,7 +224,7 @@ func Rewrite(path, version string, edits []Edit) (Result, error) {
 		}
 		edits[i].Kind = kind
 	}
-	rewrite, ok := dispatch(filepath.Base(path))
+	rewrite, ok := dispatch(path)
 	if !ok {
 		return Result{}, fmt.Errorf("%s: %w", path, ErrUnsupportedManifest)
 	}
@@ -218,9 +240,11 @@ func Rewrite(path, version string, edits []Edit) (Result, error) {
 	return res, err
 }
 
-// Supported reports whether the manifest file name has a writer.
+// Supported reports whether the manifest at path has a writer. It reads the
+// whole path, not just the name, because four formats are recognised by the
+// folder they sit in.
 func Supported(path string) bool {
-	_, ok := dispatch(filepath.Base(path))
+	_, ok := dispatch(path)
 	return ok
 }
 

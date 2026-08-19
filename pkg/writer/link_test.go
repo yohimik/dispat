@@ -295,6 +295,19 @@ func TestEveryFormatDeclaresLinkSupport(t *testing.T) {
 		// registry, and there is no spelling for "resolve this one from a
 		// folder instead" to manage.
 		manifest.FormatDockerfile: true, manifest.FormatCompose: true,
+		// No game engine has a redirect table. Unity comes closest: a
+		// dependency may read "file:../core", but that is the declaration's own
+		// spelling rather than an override sitting beside it, so there is
+		// nothing to add and nothing to sweep away. Unreal resolves a plugin by
+		// name against the project and the engine, and Godot, Defold and O3DE
+		// declare no locations at all.
+		manifest.FormatUnityPackages: true, manifest.FormatUnityProjectSettings: true,
+		manifest.FormatGodotProject: true, manifest.FormatGodotPlugin: true,
+		manifest.FormatGodotExportPresets: true,
+		manifest.FormatUnrealProject:      true, manifest.FormatUnrealPlugin: true,
+		manifest.FormatUnrealGameConfig: true, manifest.FormatUnrealEngineConfig: true,
+		manifest.FormatDefoldProject: true,
+		manifest.FormatO3DEProject:   true, manifest.FormatO3DEGem: true,
 	}
 	for _, f := range manifest.Formats {
 		_, implemented := linkers[f]

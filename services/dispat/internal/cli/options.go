@@ -224,7 +224,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.wrSetVersion = fs.String("set-version", "",
 		"rewrite each manifest's own version field to this version")
 	o.wrSetBuild = fs.String("set-build", "",
-		"writer: write each manifest's build counter (CFBundleVersion, android:versionCode, CURRENT_PROJECT_VERSION, Gradle versionCode, a pubspec version's + suffix)")
+		"writer: write each manifest's build counter (CFBundleVersion, android:versionCode, CURRENT_PROJECT_VERSION, Gradle versionCode, a pubspec version's + suffix, Unity's bundle version codes, Godot's version/code, an Unreal plugin's Version and Android StoreVersion)")
 	o.wrSet = fs.StringArray("set", nil,
 		"set one dependency's declared range, [kind:]name=range (repeatable)")
 	o.wrLink = fs.StringArray("link", nil,

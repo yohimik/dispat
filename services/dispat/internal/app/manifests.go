@@ -21,6 +21,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
 
@@ -205,6 +206,7 @@ func ScanManifests(ctx context.Context, opts ScanOptions) error {
 			continue
 		}
 		opts.Log.Debug().Str("manifest", m.Path).Str("ecosystem", string(m.Ecosystem)).
+			Str("format", formatName(m.Path)).
 			Int("dependencies", len(m.Deps)).Msg("manifest read")
 		printManifest(out, m)
 	}
@@ -347,6 +349,10 @@ func logManifest(log zerolog.Logger, m scanner.Manifest) {
 	ev := log.Info().
 		Str("path", m.Path).
 		Str("ecosystem", string(m.Ecosystem)).
+		// The format beside the ecosystem, because one engine owns several:
+		// knowing a manifest was godot rather than npm is a different answer
+		// from knowing it was the export presets rather than the project file.
+		Str("format", formatName(m.Path)).
 		Bool("root", m.Root)
 	if m.Name != "" {
 		ev = ev.Str("name", m.Name)
@@ -383,12 +389,24 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 			return err
 		}
 		path := filepath.Join(opts.Root, filepath.FromSlash(rel))
-		opts.Log.Debug().Str("manifest", rel).Msg("editing manifest")
+		opts.Log.Debug().Str("manifest", rel).Str("format", formatName(rel)).
+			Msg("editing manifest")
 		res, linkRes, err := edit.apply(path)
 		if err != nil {
 			opts.Log.Error().Err(err).Str("manifest", rel).Msg("manifest edit failed")
 			errs = append(errs, err)
 			continue
+		}
+		if opts.Build != "" && !res.BuildWritten {
+			// A counter asked for and not written is worth saying out loud:
+			// the usual cause is a manifest that declares none, and a build
+			// stamp that quietly did nothing is how a store ends up ordering
+			// two uploads the same. The format having no counter at all is an
+			// error and was already returned above, so this is the narrower
+			// case, and the message names both readings because the writer
+			// deliberately reports them the same way.
+			opts.Log.Warn().Str("manifest", rel).Str("build", opts.Build).
+				Msg("build counter not written: the manifest declares none, or it already reads this value")
 		}
 		applied += len(res.Applied) + len(linkRes.Applied)
 		skipped += len(res.Skipped) + len(linkRes.Skipped)
@@ -439,6 +457,17 @@ type manifestEdit struct {
 	DropLinks bool
 	// Writer applies the edits; nil means the filesystem writer.
 	Writer writer.Writer
+}
+
+// formatName is the manifest format a path resolves to, for the debug stream.
+// The ecosystem beside it is no longer enough on its own to say which reader
+// ran: one engine can own four formats, and knowing it was the export presets
+// rather than the project file is the difference between a useful log line and
+// a puzzle. Empty for a path no format claims, which the caller only reaches
+// for a file it already read.
+func formatName(path string) string {
+	f, _ := manifest.FormatOfPath(path)
+	return string(f)
 }
 
 // empty reports an edit set with nothing in it, which is what makes a manifest

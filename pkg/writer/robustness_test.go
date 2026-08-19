@@ -28,12 +28,20 @@ var everyWriterName = []string{
 	"Alamofire.podspec", "build.gradle", "build.gradle.kts", "Gemfile",
 	"acme.gemspec", "Acme.nuspec", "Directory.Packages.props", "packages.config",
 	"Dockerfile", "compose.yaml",
+	// The engine formats. Four of them are recognised by the folder they sit
+	// in rather than by their base name, so the names here are paths and the
+	// fence resolves them as paths.
+	"Packages/manifest.json", "ProjectSettings/ProjectSettings.asset",
+	"project.godot", "plugin.cfg", "export_presets.cfg",
+	"MyGame.uproject", "AcmeNet.uplugin",
+	"Config/DefaultGame.ini", "Config/DefaultEngine.ini",
+	"game.project", "project.json", "gem.json",
 }
 
 func TestEveryWriterNameCoversEveryFormat(t *testing.T) {
 	covered := map[manifest.Format]bool{}
 	for _, name := range everyWriterName {
-		f, ok := manifest.FormatOf(name)
+		f, ok := manifest.FormatOfPath(name)
 		if !ok {
 			t.Errorf("%s: names no format", name)
 			continue
@@ -53,8 +61,10 @@ func TestRewriteReportsAnUnreadableManifest(t *testing.T) {
 	// without breaking the filesystem. Whatever the cause, the failure must
 	// surface rather than be mistaken for an empty manifest.
 	for _, name := range everyWriterName {
+		// MkdirAll, because the formats recognised by their folder are named
+		// here as paths and their parent has to exist first.
 		path := filepath.Join(t.TempDir(), name)
-		if err := os.Mkdir(path, 0o755); err != nil {
+		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		res, err := Rewrite(path, "2.0.0", []Edit{{Name: "acme", Range: "1.0.0"}})
@@ -91,6 +101,17 @@ var malformed = map[string]string{
 	"packages.config":          "<packages>",
 	"AndroidManifest.xml":      `<manifest android:versionName="1.0">`,
 	"Info.plist":               "<plist><dict><key>CFBundleShortVersionString</key>",
+	// The engine formats with a grammar to fail. The INI-family ones
+	// (project.godot, plugin.cfg, export_presets.cfg, the Unreal configs,
+	// game.project) and the Unity settings file have no parse to fail by
+	// design: an unrecognised line is stepped over, the same way the Gradle
+	// and Podfile readers step over one, which is why those are absent here
+	// too.
+	"Packages/manifest.json": `{"dependencies": {`,
+	"MyGame.uproject":        `{"Plugins": [`,
+	"AcmeNet.uplugin":        `{"VersionName":`,
+	"project.json":           `{"project_name": "acme", "dependencies": [`,
+	"gem.json":               `{"gem_name": "acme", "version":`,
 	// The Docker formats have no entry here: the Dockerfile and compose
 	// writers read any byte sequence line by line and re-run their own reader
 	// over the result instead of parsing up front, so there is no cheap

@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -38,6 +39,21 @@ const (
 	FormatGemspec         Format = "gemspec"          // *.gemspec
 	FormatDockerfile      Format = "dockerfile"       // Dockerfile, Dockerfile.*, *.Dockerfile
 	FormatCompose         Format = "compose"          // compose.yaml, docker-compose.yml, ...
+
+	// The game engines. Each keeps its version somewhere a package manager
+	// would not look, and several of them declare dependencies beside it.
+	FormatUnityPackages        Format = "unity-packages"         // Packages/manifest.json
+	FormatUnityProjectSettings Format = "unity-project-settings" // ProjectSettings/ProjectSettings.asset
+	FormatGodotProject         Format = "godot-project"          // project.godot
+	FormatGodotPlugin          Format = "godot-plugin"           // plugin.cfg
+	FormatGodotExportPresets   Format = "godot-export-presets"   // export_presets.cfg
+	FormatUnrealProject        Format = "unreal-project"         // *.uproject
+	FormatUnrealPlugin         Format = "unreal-plugin"          // *.uplugin
+	FormatUnrealGameConfig     Format = "unreal-game-config"     // Config/DefaultGame.ini
+	FormatUnrealEngineConfig   Format = "unreal-engine-config"   // Config/DefaultEngine.ini
+	FormatDefoldProject        Format = "defold-project"         // game.project
+	FormatO3DEProject          Format = "o3de-project"           // project.json
+	FormatO3DEGem              Format = "o3de-gem"               // gem.json
 )
 
 // Formats lists every recognised format. Both halves range over it to prove
@@ -49,6 +65,10 @@ var Formats = []Format{
 	FormatAndroidManifest, FormatGradleCatalog, FormatGradleBuild,
 	FormatXcodeProject, FormatPodfile, FormatPodspec, FormatGemfile,
 	FormatGemspec, FormatDockerfile, FormatCompose,
+	FormatUnityPackages, FormatUnityProjectSettings, FormatGodotProject,
+	FormatGodotPlugin, FormatGodotExportPresets, FormatUnrealProject,
+	FormatUnrealPlugin, FormatUnrealGameConfig, FormatUnrealEngineConfig,
+	FormatDefoldProject, FormatO3DEProject, FormatO3DEGem,
 }
 
 // byName maps an exact file name onto its format.
@@ -85,18 +105,57 @@ var byName = map[string]Format{
 	"docker-compose.yml":           FormatCompose,
 	"docker-compose.override.yaml": FormatCompose,
 	"docker-compose.override.yml":  FormatCompose,
+	// The engine files whose names say what they are wherever they sit. The
+	// four that do not are in byPathSuffix instead.
+	"project.godot":      FormatGodotProject,
+	"plugin.cfg":         FormatGodotPlugin,
+	"export_presets.cfg": FormatGodotExportPresets,
+	"game.project":       FormatDefoldProject,
+	"project.json":       FormatO3DEProject,
+	"gem.json":           FormatO3DEGem,
 }
 
 // byExtension maps a file extension onto its format, for the families that
 // name the file after the project rather than the format.
 var byExtension = map[string]Format{
-	".csproj":  FormatMSBuildProject,
-	".fsproj":  FormatMSBuildProject,
-	".vbproj":  FormatMSBuildProject,
-	".nuspec":  FormatNuSpec,
-	".podspec": FormatPodspec,
-	".gemspec": FormatGemspec,
+	".csproj":   FormatMSBuildProject,
+	".fsproj":   FormatMSBuildProject,
+	".vbproj":   FormatMSBuildProject,
+	".nuspec":   FormatNuSpec,
+	".podspec":  FormatPodspec,
+	".gemspec":  FormatGemspec,
+	".uproject": FormatUnrealProject,
+	".uplugin":  FormatUnrealPlugin,
 }
+
+// byPathSuffix maps a slash-anchored path suffix onto its format, for the
+// formats whose base name means something else everywhere else: manifest.json
+// is a web app manifest in most repositories, .asset is every serialised Unity
+// object, and an Unreal config file is only a manifest inside Config/.
+var byPathSuffix = map[string]Format{
+	"Packages/manifest.json":                FormatUnityPackages,
+	"ProjectSettings/ProjectSettings.asset": FormatUnityProjectSettings,
+	"Config/DefaultGame.ini":                FormatUnrealGameConfig,
+	"Config/DefaultEngine.ini":              FormatUnrealEngineConfig,
+}
+
+// byPathBase maps an ambiguous base name onto the path suffixes worth testing.
+// FormatOfPath runs once per file in a workspace walk, so the suffix scan is
+// reached only by the handful of files that could match and every other file
+// pays one map lookup instead of a comparison per suffix.
+var byPathBase = func() map[string][]string {
+	base := make(map[string][]string, len(byPathSuffix))
+	for suffix := range byPathSuffix {
+		name := suffix[strings.LastIndexByte(suffix, '/')+1:]
+		base[name] = append(base[name], suffix)
+	}
+	// Longest first, so the most specific suffix wins and the order does not
+	// depend on how the map above happened to be walked.
+	for _, suffixes := range base {
+		sort.Slice(suffixes, func(i, j int) bool { return len(suffixes[i]) > len(suffixes[j]) })
+	}
+	return base
+}()
 
 // FormatOf resolves a file's base name onto its format: by exact name, then by
 // extension, then by the two families whose names vary. A name that matches
@@ -115,6 +174,47 @@ func FormatOf(name string) (Format, bool) {
 		return FormatDockerfile, true
 	}
 	return "", false
+}
+
+// slashed renders a path with forward separators whatever host it came from.
+// filepath.ToSlash is not enough: it rewrites the running platform's separator
+// only, so a Windows path handed to a Linux process keeps its backslashes and
+// matches nothing. The cost is that a Unix file whose name genuinely contains a
+// backslash is read as though it were nested, which is a trade every path here
+// is happy to make.
+func slashed(path string) string {
+	if !strings.ContainsRune(path, '\\') {
+		return path
+	}
+	return strings.ReplaceAll(path, `\`, "/")
+}
+
+// FormatOfPath resolves a file's path onto its format: first the formats only
+// recognisable by where they sit, then FormatOf on the base name. The path may
+// be relative or absolute, and may use either separator.
+//
+// It is the entry point a walk uses, because four formats cannot be told from
+// their base name alone. FormatOf stays the answer where only a name is known,
+// and deliberately never learns those four: a bare manifest.json is a web app
+// manifest, and treating it as Unity's would be a guess.
+func FormatOfPath(path string) (Format, bool) {
+	base := path
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	if suffixes, ok := byPathBase[base]; ok {
+		p := slashed(path)
+		for _, suffix := range suffixes {
+			// Anchored on a separator, so "MyPackages/manifest.json" is not
+			// Unity's and "x/Packages/manifest.json" is.
+			if p == suffix || strings.HasSuffix(p, "/"+suffix) {
+				return byPathSuffix[suffix], true
+			}
+		}
+		// A base name reserved for a path-qualified format is nothing else.
+		return "", false
+	}
+	return FormatOf(base)
 }
 
 // IsRequirementsFile reports a pip requirements file: a .txt whose base name

@@ -29,6 +29,17 @@ var malformed = map[string]string{
 	"packages.config":          "<packages>",
 	"AndroidManifest.xml":      `<manifest android:versionName="1.0">`,
 	"Info.plist":               "<plist><dict><key>CFBundleShortVersionString</key>",
+	// The engine formats with a grammar to fail. The INI-family ones
+	// (project.godot, plugin.cfg, export_presets.cfg, the Unreal configs,
+	// game.project) and the Unity settings file have no parse to fail by
+	// design: an unrecognised line is stepped over, the same way the Gradle
+	// and Podfile readers step over one, which is why those are absent here
+	// too.
+	"Packages/manifest.json": `{"dependencies": {`,
+	"MyGame.uproject":        `{"Plugins": [`,
+	"AcmeNet.uplugin":        `{"VersionName":`,
+	"project.json":           `{"project_name": "acme", "dependencies": [`,
+	"gem.json":               `{"gem_name": "acme", "version":`,
 }
 
 func TestScanReportsEveryFormatThatDoesNotParse(t *testing.T) {
@@ -57,6 +68,14 @@ func TestScanRootReportsEveryFormatThatDoesNotParse(t *testing.T) {
 	// ScanRoot shares the contract but not the code path, so it gets the same
 	// treatment: one broken file in the folder, one healthy one beside it.
 	for name, src := range malformed {
+		if strings.Contains(name, "/") {
+			// A format recognised by the folder it sits in is one level down,
+			// and ScanRoot does not descend. That is the same reason it does
+			// not see an .xcodeproj's project.pbxproj, and it is the method's
+			// documented job rather than a gap: ScanRoot reads the files that
+			// declare a folder's own identity.
+			continue
+		}
 		dir := t.TempDir()
 		write(t, dir, name, src)
 		write(t, dir, "requirements.txt", "requests==2.31.0\n")

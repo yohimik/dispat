@@ -52,6 +52,14 @@ func TestFormatOfRecognisesEveryName(t *testing.T) {
 		{"docker-compose.yml", FormatCompose},
 		{"docker-compose.override.yaml", FormatCompose},
 		{"docker-compose.override.yml", FormatCompose},
+		{"project.godot", FormatGodotProject},
+		{"plugin.cfg", FormatGodotPlugin},
+		{"export_presets.cfg", FormatGodotExportPresets},
+		{"MyGame.uproject", FormatUnrealProject},
+		{"AcmeNet.uplugin", FormatUnrealPlugin},
+		{"game.project", FormatDefoldProject},
+		{"project.json", FormatO3DEProject},
+		{"gem.json", FormatO3DEGem},
 	} {
 		got, ok := FormatOf(tc.name)
 		if !ok || got != tc.want {
@@ -71,9 +79,81 @@ func TestFormatOfRejectsNearMisses(t *testing.T) {
 		".dockerignore", ".dockerfile", "Dockerfile.md", "Dockerfile.txt",
 		"Dockerfile.", "dockerfile-notes.md", "docker-compose.prod.yml",
 		"compose.json", "my-compose.yaml", "Containerfile.rst",
+		"MyGame.uprojectdirs", "project.godot.bak", "plugin.cfgx",
+		// The four path-qualified names are nothing on their own. A bare
+		// manifest.json is a web app manifest, and FormatOf is told only a name.
+		"manifest.json", "ProjectSettings.asset", "DefaultGame.ini", "DefaultEngine.ini",
 	} {
 		if f, ok := FormatOf(name); ok {
 			t.Errorf("FormatOf(%q) = %q, want no match", name, f)
+		}
+	}
+}
+
+func TestFormatOfPathResolvesTheFormatsThatNeedTheirFolder(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want Format
+	}{
+		// Relative, exactly the suffix, and nested behind any prefix.
+		{"Packages/manifest.json", FormatUnityPackages},
+		{"apps/client/Packages/manifest.json", FormatUnityPackages},
+		{"ProjectSettings/ProjectSettings.asset", FormatUnityProjectSettings},
+		{"game/ProjectSettings/ProjectSettings.asset", FormatUnityProjectSettings},
+		{"Config/DefaultGame.ini", FormatUnrealGameConfig},
+		{"Config/DefaultEngine.ini", FormatUnrealEngineConfig},
+		// Absolute, which is what every writer call site passes.
+		{"/repo/apps/client/Packages/manifest.json", FormatUnityPackages},
+		{"/repo/server/Config/DefaultGame.ini", FormatUnrealGameConfig},
+		// Windows separators, which is what WalkDir hands over there.
+		{`C:\repo\client\Packages\manifest.json`, FormatUnityPackages},
+		{`apps\server\Config\DefaultEngine.ini`, FormatUnrealEngineConfig},
+		// Everything else still resolves by its base name.
+		{"apps/web/package.json", FormatNpm},
+		{"go.mod", FormatGoMod},
+		{"tools/editor/project.godot", FormatGodotProject},
+		{"Plugins/AcmeNet/AcmeNet.uplugin", FormatUnrealPlugin},
+	} {
+		got, ok := FormatOfPath(tc.path)
+		if !ok || got != tc.want {
+			t.Errorf("FormatOfPath(%q) = %q,%v, want %q", tc.path, got, ok, tc.want)
+		}
+	}
+}
+
+func TestFormatOfPathRejectsTheAlmostRightFolder(t *testing.T) {
+	// The suffix match is anchored on a separator, and a base name reserved for
+	// a path-qualified format is nothing anywhere else. Both halves matter: the
+	// first stops MyPackages/ passing for Packages/, the second stops every
+	// web app manifest in every repository being read as Unity's.
+	for _, path := range []string{
+		"manifest.json",
+		"web/manifest.json",
+		"public/manifest.json",
+		"MyPackages/manifest.json",
+		"src/Packages.old/manifest.json",
+		"ProjectSettings.asset",
+		"Assets/Materials/ProjectSettings.asset",
+		"MyProjectSettings/ProjectSettings.asset",
+		"DefaultGame.ini",
+		"Saved/Config/Windows/DefaultGame.ini.bak",
+		"NotConfig/DefaultEngine.ini",
+	} {
+		if f, ok := FormatOfPath(path); ok {
+			t.Errorf("FormatOfPath(%q) = %q, want no match", path, f)
+		}
+	}
+}
+
+func TestFormatOfPathAgreesWithFormatOfEverywhereElse(t *testing.T) {
+	// The two entry points may differ only on the path-qualified formats. Any
+	// other disagreement means a file is readable through one door and not the
+	// other, which is the drift the shared table exists to prevent.
+	for name := range byName {
+		want, _ := FormatOf(name)
+		got, ok := FormatOfPath("some/folder/" + name)
+		if !ok || got != want {
+			t.Errorf("FormatOfPath(some/folder/%s) = %q,%v, want %q", name, got, ok, want)
 		}
 	}
 }

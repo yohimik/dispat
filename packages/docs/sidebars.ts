@@ -50,6 +50,9 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/apple', label: 'iOS and CocoaPods'},
             {type: 'doc', id: 'examples/android', label: 'An Android app'},
             {type: 'doc', id: 'examples/docker', label: 'A Docker image chain'},
+            {type: 'doc', id: 'examples/unity', label: 'Unity'},
+            {type: 'doc', id: 'examples/godot', label: 'Godot'},
+            {type: 'doc', id: 'examples/unreal', label: 'Unreal Engine'},
           ],
         },
         {

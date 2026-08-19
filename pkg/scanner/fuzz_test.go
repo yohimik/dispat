@@ -23,6 +23,13 @@ var fuzzManifestNames = []string{
 	"App.fsproj", "App.vbproj",
 	"Dockerfile", "Dockerfile.dev", "api.Dockerfile", "Containerfile",
 	"compose.yaml", "docker-compose.override.yml",
+	// The engine formats. Four are recognised by the folder they sit in, so
+	// they are named here as the paths that resolve them.
+	"Packages/manifest.json", "ProjectSettings/ProjectSettings.asset",
+	"project.godot", "plugin.cfg", "export_presets.cfg",
+	"MyGame.uproject", "AcmeNet.uplugin",
+	"Config/DefaultGame.ini", "Config/DefaultEngine.ini",
+	"game.project", "project.json", "gem.json",
 }
 
 func FuzzParsers(f *testing.F) {
@@ -56,6 +63,16 @@ func FuzzParsers(f *testing.F) {
 		"FROM \\\n",
 		"services:\n  api:\n    build:\n      tags:\n        - a/api:1\n    image: a/api:1\n",
 		"services:\n  api:\n    ports:\n      - \"8080:80\"\n",
+		`{"dependencies": {"com.unity.x": "1.0.0", "com.acme.core": "file:../core"}}`,
+		"%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!129 &1\nPlayerSettings:\n  bundleVersion: 1.0\n  AndroidBundleVersionCode: 1\n  buildNumber:\n    iPhone: 2\n",
+		"config_version=5\n\n[application]\n\nconfig/name=\"A\"\nconfig/version=\"1.0\"\nconfig/features=PackedStringArray(\"4.3\")\n",
+		"[plugin]\nname=\"A\"\nversion=\"1.0\"\nscript=\"plugin.gd\"\n",
+		"[preset.0]\nname=\"Android\"\n[preset.0.options]\nversion/code=1\nversion/name=\"1.0\"\n",
+		`{"FileVersion": 3, "EngineAssociation": "5.4", "Plugins": [{"Name": "A", "Enabled": true}, {}]}`,
+		`{"FileVersion": 3, "Version": 4, "VersionName": "1.0", "Plugins": [{"Name": "B"}]}`,
+		"[/Script/EngineSettings.GeneralProjectSettings]\nProjectName=A\nProjectVersion=1.0.0.0\n+ProjectVersion=9\n",
+		"[project]\ntitle = A\nversion = 1.0\ndependencies#0 = https://x/a.zip\n",
+		`{"project_name": "A", "version": "1.0.0", "dependencies": ["Atom==1.0.0", "Camera", 42]}`,
 	}
 	for _, s := range seeds {
 		f.Add(s)

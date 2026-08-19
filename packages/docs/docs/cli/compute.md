@@ -17,12 +17,14 @@ Detection still reads every package's manifests whichever way you narrow: the wo
 declared dependency onto a provider, so an edge onto a package outside the selection stays recognised rather than
 being proposed for removal.
 
-**What it reads.** Every package folder is scanned for manifests, the same fifteen ecosystems `dispat scanner` reads:
+**What it reads.** Every package folder is scanned for manifests, the same twenty ecosystems `dispat scanner` reads:
 npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.toml`, requirements files), Composer
 (`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj` and the flat lists), pub (`pubspec.yaml`), Ruby (`Gemfile`,
 `*.gemspec`), CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple bundles (`Info.plist`), Android
-(`AndroidManifest.xml`), Gradle (`libs.versions.toml`, `build.gradle(.kts)`) and Docker (`Dockerfile`,
-`compose.yaml`).
+(`AndroidManifest.xml`), Gradle (`libs.versions.toml`, `build.gradle(.kts)`), Docker (`Dockerfile`,
+`compose.yaml`), Unity (`Packages/manifest.json`, `ProjectSettings/ProjectSettings.asset`), Godot (`project.godot`,
+`plugin.cfg`, `export_presets.cfg`), Unreal (`*.uproject`, `*.uplugin`, `Config/Default*.ini`), Defold
+(`game.project`) and O3DE (`project.json`, `gem.json`).
 
 **How a dependency becomes an edge.** A declaration matches a workspace package by manifest name first (Python names are
 PEP 503-normalised, Maven names are `groupId:artifactId`, Docker names are image repositories such as

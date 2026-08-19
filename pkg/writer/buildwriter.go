@@ -3,7 +3,6 @@ package writer
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/manifest"
@@ -28,6 +27,11 @@ var buildWriters = map[manifest.Format]func(path, build string) (Result, error){
 	manifest.FormatXcodeProject:    setXcodeBuild,
 	manifest.FormatGradleBuild:     setGradleBuild,
 	manifest.FormatPubspec:         setPubspecBuild,
+
+	manifest.FormatUnityProjectSettings: setUnityBuild,
+	manifest.FormatGodotExportPresets:   setGodotExportBuild,
+	manifest.FormatUnrealPlugin:         setUPluginBuild,
+	manifest.FormatUnrealEngineConfig:   setUnrealEngineBuild,
 }
 
 // SetBuild writes the build counter of the manifest at path, in whatever
@@ -44,7 +48,7 @@ func SetBuild(path, build string) (Result, error) {
 	if build == "" {
 		return Result{}, fmt.Errorf("%s: writer: no build value to write", path)
 	}
-	format, ok := manifest.FormatOf(filepath.Base(path))
+	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return Result{}, fmt.Errorf("%s: %w", path, ErrUnsupportedManifest)
 	}
@@ -92,7 +96,7 @@ const androidVersionCodeAttr = "versionCode"
 func setAndroidBuild(path, build string) (Result, error) {
 	var res Result
 	if !allDigits(build) {
-		return res, fmt.Errorf("%s: writer: versionCode must be an integer, not %q", path, build)
+		return res, errNotAnInteger(path, "versionCode", build)
 	}
 	sp, err := openSplicer(path)
 	if err != nil {
@@ -157,7 +161,7 @@ func setXcodeBuild(path, build string) (Result, error) {
 func setGradleBuild(path, build string) (Result, error) {
 	var res Result
 	if !allDigits(build) {
-		return res, fmt.Errorf("%s: writer: versionCode must be an integer, not %q", path, build)
+		return res, errNotAnInteger(path, "versionCode", build)
 	}
 	sp, err := openSplicer(path)
 	if err != nil {
@@ -275,6 +279,14 @@ func setPubspecBuild(path, build string) (Result, error) {
 		return res, sp.commit(nil)
 	}
 	return res, nil
+}
+
+// errNotAnInteger is the refusal every integer counter shares. Several
+// platforms parse their build counter as a number and reject a package whose
+// counter is a word, so the value is checked before the file is opened rather
+// than written and discovered at upload time.
+func errNotAnInteger(path, key, build string) error {
+	return fmt.Errorf("%s: writer: %s must be an integer, not %q", path, key, build)
 }
 
 // allDigits reports a non-empty string of ASCII digits.

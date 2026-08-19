@@ -3,7 +3,6 @@ package writer
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -45,7 +44,7 @@ var listers = map[manifest.Format]listFunc{
 // matching Relink. A recognised manifest whose format has no redirect carries
 // none by definition and reports an empty list.
 func Links(path string) ([]Link, error) {
-	format, ok := manifest.FormatOf(filepath.Base(path))
+	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", path, ErrUnsupportedManifest)
 	}
