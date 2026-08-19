@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/scanner/v1.1.0 (2026-08-19)
+
+### Features
+
+- unity, unreal, godot, o3de and defold manifests supported
+
+
+### Dependencies
+
+- manifest: 1.0.0 -> 1.1.0
+
 ## pkg/scanner/v1.0.0 (2026-08-16)
 
 ### Breaking Changes
