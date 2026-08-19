@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/scanner/v1.1.1 (2026-08-19)
+
+### Fixes
+
+- unreal and unity version write
+
+
+### Dependencies
+
+- manifest: 1.1.0 -> 1.1.1
+
 ## pkg/scanner/v1.1.0 (2026-08-19)
 
 ### Features
