@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.0.11 (2026-08-19)
+
+### Fixes
+
+- wire game engines
+
+
+### Dependencies
+
+- dispat: 1.0.1 -> 1.0.2
+
 ## packages/docs/v1.0.10 (2026-08-19)
 
 ### Dependencies
