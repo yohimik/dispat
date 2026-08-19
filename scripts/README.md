@@ -10,7 +10,7 @@ in the root [`dispat.yaml`](../dispat.yaml), `deploy-docs` in
 beside the code it configures: the root file holds what every space shares, each space carries a `<space>/dispat.yaml`,
 and the two packages with exceptions of their own carry a package file. Package scripts run **inside the releasing
 package's folder**; root scripts run at the repository root. Everything they need arrives in the environment: the
-[`DISPAT_*` variables](https://yohimik.github.io/dispat/reference/environment) a stage is given, plus whatever CI
+[`DISPAT_*` variables](https://yohimik.github.io/dispat/reference/environment/) a stage is given, plus whatever CI
 exports.
 
 | Script                                     | Called from                                            | Reads                                   | Produces |
@@ -47,8 +47,8 @@ the same invocation writes (`ccme`, `dispat`, `integration`); a name ending in `
 [`coverage-badge.sh`](./coverage-badge.sh) merges the profiles that run leaves in `coverage/` and writes the badge
 JSON, and the `test-report` root script (`testreport build`) turns the same profiles and logs into
 `packages/docs/data/report.json`, which is where the documentation site's
-[coverage](https://yohimik.github.io/dispat/internals/coverage) and
-[test results](https://yohimik.github.io/dispat/internals/test-results) pages get their numbers. Both run through
+[coverage](https://yohimik.github.io/dispat/internals/coverage/) and
+[test results](https://yohimik.github.io/dispat/internals/test-results/) pages get their numbers. Both run through
 `dispat exec` from the [Release workflow](../.github/workflows/release.yml) and nowhere else: only a `--since all` run
 produces a complete profile set, so a total from a windowed run would be a number about whichever packages happened to
 change.

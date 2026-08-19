@@ -248,7 +248,7 @@ one shape the model deliberately cannot express, an unknown key, is written as `
 release.
 
 It deliberately duplicates as little as possible of the unit suites listed in
-[`Architecture`](https://yohimik.github.io/dispat/internals/architecture#testing): those cover each
+[`Architecture`](https://yohimik.github.io/dispat/internals/architecture/#testing): those cover each
 package against in-memory fakes, and `internal/cli`'s tests cover the controller itself (flags, arities, exit-code
 mapping, the init starters). `services/dispat` hosts no end-to-end test at all; this module is the sole home of every
 composition claim (the compiled binary, a real scheduler racing real processes, a config file read from disk, exit codes

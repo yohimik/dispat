@@ -7,8 +7,8 @@ hand-kept module list, while the release plan leaves it alone.
 ## testreport
 
 The one tool here. It wraps the workspace's test runs and turns their combined output into the numbers the
-documentation site publishes, so no figure on the [coverage](https://yohimik.github.io/dispat/internals/coverage) or
-[test results](https://yohimik.github.io/dispat/internals/test-results) pages is ever typed by hand.
+documentation site publishes, so no figure on the [coverage](https://yohimik.github.io/dispat/internals/coverage/) or
+[test results](https://yohimik.github.io/dispat/internals/test-results/) pages is ever typed by hand.
 
 Three verbs:
 

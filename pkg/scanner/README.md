@@ -116,7 +116,7 @@ dispat scanner --log-format json         # one JSON object per manifest
 dispat scanner --strict                  # exit 1 if any manifest failed to parse
 ```
 
-The full guide is [Manifest tools](https://yohimik.github.io/dispat/editing/manifests).
+The full guide is [Manifest tools](https://yohimik.github.io/dispat/editing/manifests/).
 
 ## Not read today
 

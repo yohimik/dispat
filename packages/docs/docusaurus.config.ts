@@ -34,6 +34,48 @@ const KEYWORDS = [
   'go modules',
 ];
 
+// Sitemap priorities, by what a page is for. The value is relative within this
+// site and means nothing outside it, so a sitemap that gives every page 0.5
+// states no preference at all, which is where this one started. Google ignores
+// priority and changefreq outright, as the sitemap plugin's own source says
+// twice; Bing and the smaller crawlers still read them.
+//
+// A route is classified by its site-relative path, with baseUrl and the
+// trailing slash taken off, which leaves no version segment either. A versioned
+// copy of `getting-started` therefore lands on the default rather than on 0.9.
+// That costs nothing while the unreleased version is noIndex and never reaches
+// the sitemap at all (see `versions` below), and it is the first thing to
+// revisit if that ever changes.
+const ENTRY_PAGES = new Set(['getting-started', 'concepts', 'monorepo']);
+const SECTION_INDEXES = new Set(['api', 'cli', 'configuration', 'examples', 'go', 'faq']);
+const LONG_TAIL_PREFIXES = ['examples/', 'internals/'];
+
+/**
+ * The priority a route takes in the sitemap, from the path it is served at:
+ * '' for the landing page, 'cli/release' for a command.
+ *
+ * The default is the reference leaf, which is most of the site: everything a
+ * reader looks something up in. The two sets are the exceptions above it, the
+ * reading path and the page each section opens on. The prefixes are the long
+ * tail below it, one page per ecosystem and one figure per suite, worth
+ * publishing and not worth crawling first.
+ */
+function sitemapPriority(path: string): number {
+  if (path === '') {
+    return 1.0;
+  }
+  if (ENTRY_PAGES.has(path)) {
+    return 0.9;
+  }
+  if (SECTION_INDEXES.has(path)) {
+    return 0.8;
+  }
+  if (LONG_TAIL_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    return 0.4;
+  }
+  return 0.6;
+}
+
 const config: Config = {
   title: 'dispat',
   tagline: 'The polyglot monorepo release tool: conventional commits in, ordered parallel publishes out',
@@ -43,6 +85,17 @@ const config: Config = {
   baseUrl: '/dispat/',
   organizationName: 'yohimik',
   projectName: 'dispat',
+
+  // Every route is written as <route>/index.html, which is the file GitHub
+  // Pages answers a directory request from, and Pages redirects /page to
+  // /page/ to get there. Left unset, Docusaurus spells the sitemap and the
+  // site's own hrefs without that slash, so all but a handful of URLs named a
+  // redirect rather than a page.
+  //
+  // `false` is the trap rather than the alternative: it writes cli.html beside
+  // the cli/ directory that holds the command pages, Pages resolves the
+  // directory first, and the four folder index pages 404.
+  trailingSlash: true,
 
   // Link rot is the whole reason this site exists as a build step: every
   // relative link and every #anchor is resolved at build time, so a bad one
@@ -130,13 +183,27 @@ const config: Config = {
           // ./docs is the default; the pages are plain markdown with no
           // frontmatter, so ordering and labels live in sidebars.ts.
           // The site is nothing but the docs, so they own the root: the
-          // README tables link to /dispat/<page>, not /dispat/docs/<page>.
+          // README tables link to /dispat/<page>/, not /dispat/docs/<page>/.
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl: ({docPath}) =>
             `${GITHUB}/edit/main/packages/docs/docs/${docPath}`,
           editCurrentVersion: true,
           showLastUpdateTime: true,
+          // The unreleased version is a copy of the released docs that no
+          // navbar entry points at, so indexing it only splits the site
+          // against itself. noIndex marks those pages, and the sitemap plugin
+          // drops every route it marks, which keeps /next/ out of the sitemap
+          // with no pattern to keep in step. The pages stay built and reachable
+          // by URL, which is what the version is for.
+          //
+          // Its own root, /next/, is a 404 and stays one: routeBasePath is '/',
+          // so a version's root is whatever page sits at that path, and the
+          // landing page exists for the released version only. Nothing indexed
+          // links to it.
+          versions: {
+            current: {noIndex: true},
+          },
         },
         blog: false,
         theme: {
@@ -147,11 +214,42 @@ const config: Config = {
           // site really has: robots.txt is served under /dispat/, which no
           // crawler reads (see static/robots.txt). lastmod is off by default.
           lastmod: 'date',
-          changefreq: 'weekly',
-          priority: 0.5,
-          // Patterns match full route paths, baseUrl included. /search is a
-          // client-side view of the index, not a page.
-          ignorePatterns: ['/dispat/search'],
+          // Patterns match full route paths, baseUrl included, and the path
+          // is spelled the way trailingSlash spells it: with the slash on, the
+          // bare `/dispat/search` matches nothing and the page comes back into
+          // the sitemap. The brace matches the route under either setting, and
+          // matches nothing else. /search is a client-side view of the index,
+          // not a page.
+          ignorePatterns: ['/dispat/search{,/}'],
+          // A priority and a changefreq per page, which is why the flat
+          // `priority` and `changefreq` options are absent: every item gets
+          // both from here, and a default underneath would be a second value
+          // nothing reads. The tiers are sitemapPriority above. The path comes off the item's own
+          // URL, which the default already built with baseUrl and the trailing
+          // slash applied, rather than out of `routes`, which would be a scan
+          // per item. The default runs exactly once: it resolves lastmod
+          // through git per route, and calling it twice repeats every one of
+          // those.
+          //
+          // The values reach the XML with one decimal, 1.0 included: the
+          // library the plugin writes through formats them, so nothing here
+          // has to carry a number as a string to keep its shape.
+          createSitemapItems: async ({defaultCreateSitemapItems, ...rest}) => {
+            const items = await defaultCreateSitemapItems(rest);
+            return items.map((item) => {
+              const path = new URL(item.url).pathname
+                .slice(rest.siteConfig.baseUrl.length)
+                .replace(/\/$/, '');
+              const priority = sitemapPriority(path);
+              return {
+                ...item,
+                priority,
+                // The pages a reader arrives on are the ones worth revisiting
+                // weekly. A command reference changes when a release changes it.
+                changefreq: priority >= 0.8 ? 'weekly' : 'monthly',
+              };
+            });
+          },
         },
       } satisfies Preset.Options,
     ],

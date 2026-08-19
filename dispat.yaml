@@ -2,7 +2,7 @@
 # one of them owns. Each space carries its own dispat.yaml in its folder, and
 # the two packages with exceptions of their own (packages/docs and
 # services/dispat) carry a package file beside their code — see
-# https://yohimik.github.io/dispat/docs/examples/layout.
+# https://yohimik.github.io/dispat/examples/layout/.
 scripts:
   go-mod-tidy: go mod tidy
   pnpm-install: pnpm install
@@ -143,10 +143,10 @@ github:
         - "irm https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.ps1 -OutFile install.ps1; ./install.ps1 -Version ${DISPAT_NEW_VERSION}"
         - "```"
         - ""
-        - "[Documentation](https://yohimik.github.io/dispat/) · [dispat in CI](https://yohimik.github.io/dispat/reference/ci) · [Container images](https://hub.docker.com/u/yohimik)"
+        - "[Documentation](https://yohimik.github.io/dispat/) · [dispat in CI](https://yohimik.github.io/dispat/reference/ci/) · [Container images](https://hub.docker.com/u/yohimik)"
     - space: [docker]
       line:
-        - "`docker pull yohimik/${DISPAT_PACKAGE}:${DISPAT_NEW_VERSION}` · [Docker Hub](https://hub.docker.com/r/yohimik/${DISPAT_PACKAGE}) · [The dispat images](https://yohimik.github.io/dispat/reference/ci#the-container-images)"
+        - "`docker pull yohimik/${DISPAT_PACKAGE}:${DISPAT_NEW_VERSION}` · [Docker Hub](https://hub.docker.com/r/yohimik/${DISPAT_PACKAGE}) · [The dispat images](https://yohimik.github.io/dispat/reference/ci/#the-container-images)"
     - space: [pkg]
       line:
         - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/${DISPAT_PACKAGE}@v${DISPAT_NEW_VERSION}) · [Documentation](https://yohimik.github.io/dispat/)"
