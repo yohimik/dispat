@@ -29,7 +29,7 @@ see live in `export_presets.cfg`. dispat reads and writes all three.
 $ git commit -m "feat(game): co-op mode"
 $ dispat
 12:50:45 INF ● changed bump=minor package=game version="0.1.0 -> 0.2.0"
-12:50:45 INF manifest updated manifest=project.godot package=game versionWritten=true
+12:50:45 INF manifest reconciled manifest=project.godot package=game ranges=0 stage=version version=0.2.0 versionWritten=true
 12:50:45 INF published package=game tag=game@0.2.0 version=0.2.0
 ```
 

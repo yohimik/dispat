@@ -506,6 +506,83 @@ func TestEnginesAutoVersionWritesTheEngineVersion(t *testing.T) {
 		"and everything else survives")
 }
 
+// TestEnginesAutoVersionWritesAPathQualifiedManifest: the same point for the
+// four formats the engine, not the author, decided the folder of. Unity keeps
+// its settings under ProjectSettings/ and Unreal keeps its version under
+// Config/, so neither file sits directly in the package and both are still the
+// package's own. A release writes them like any other manifest of the package.
+func TestEnginesAutoVersionWritesAPathQualifiedManifest(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile()
+	cfg.Scripts = map[string]models.Script{"build": {"echo built"}, "publish": {"echo published"}}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"games": {
+			Path: models.PathList{"apps"},
+			Flow: buildPublish(),
+			// `all` is what reaches a manifest a folder down; `root` never
+			// parses one, so there would be nothing to write either way.
+			AutoVersion: &models.AutoVersionConfig{Enabled: models.Bool(true), Manifests: "all"},
+		},
+	}
+	cfg.Initials = map[string]string{"client": "1.2.0", "shooter": "1.2.0"}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("apps/client/ProjectSettings/ProjectSettings.asset", unityProjectSettings)
+	r.WriteFile("apps/shooter/Config/DefaultGame.ini", unrealGameConfig)
+	// One commit naming both packages: the harness commits what is pending,
+	// so a second commit here would have nothing to stage.
+	r.Commit("feat(client, shooter): engine versions move together")
+
+	res := r.Command()
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	unity, err := os.ReadFile(r.Path("apps/client/ProjectSettings/ProjectSettings.asset"))
+	require.NoError(t, err)
+	assert.Contains(t, string(unity), "bundleVersion: 1.3.0",
+		"the computed version reaches Unity's settings file")
+	assert.Contains(t, string(unity), "AndroidBundleVersionCode: 3",
+		"and the build counter beside it is left where it was")
+
+	unreal, err := os.ReadFile(r.Path("apps/shooter/Config/DefaultGame.ini"))
+	require.NoError(t, err)
+	assert.Contains(t, string(unreal), "ProjectVersion=1.3.0",
+		"and Unreal's project version with it")
+}
+
+// TestEnginesAutoVersionLeavesANestedCopyAlone: the other half of the rule
+// above. A path-qualified manifest is the package's own where its format says
+// it lives and nowhere else, so a sample project bundled inside the package
+// keeps the version its author gave it.
+func TestEnginesAutoVersionLeavesANestedCopyAlone(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile()
+	cfg.Scripts = map[string]models.Script{"build": {"echo built"}, "publish": {"echo published"}}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"games": {
+			Path:        models.PathList{"apps"},
+			Flow:        buildPublish(),
+			AutoVersion: &models.AutoVersionConfig{Enabled: models.Bool(true), Manifests: "all"},
+		},
+	}
+	cfg.Initials = map[string]string{"client": "1.2.0"}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("apps/client/ProjectSettings/ProjectSettings.asset", unityProjectSettings)
+	r.WriteFile("apps/client/Samples/Demo/ProjectSettings/ProjectSettings.asset",
+		strings.Replace(unityProjectSettings, "bundleVersion: 1.2.0", "bundleVersion: 9.9.9", 1))
+	r.Commit("feat(client): co-op lobby")
+
+	res := r.Command()
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	own, err := os.ReadFile(r.Path("apps/client/ProjectSettings/ProjectSettings.asset"))
+	require.NoError(t, err)
+	assert.Contains(t, string(own), "bundleVersion: 1.3.0", "the package's own settings move")
+
+	sample, err := os.ReadFile(r.Path("apps/client/Samples/Demo/ProjectSettings/ProjectSettings.asset"))
+	require.NoError(t, err)
+	assert.Contains(t, string(sample), "bundleVersion: 9.9.9",
+		"a settings file bundled inside the package is somebody else's version story")
+}
+
 // TestEnginesEventsNameTheFormat: five ecosystems now cover twelve formats,
 // so the ecosystem alone no longer says which reader ran. The machine contract
 // carries the format beside it.

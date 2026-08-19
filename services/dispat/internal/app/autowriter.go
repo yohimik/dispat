@@ -450,11 +450,13 @@ func (w *writerWork) write(ctx context.Context, rel *plan.Release, mans []scanne
 			return err
 		}
 		one := edits
-		if !m.Root {
-			// The own-version write applies to the package's root manifests
+		if !m.AtPackageRoot() {
+			// The own-version write applies to the package's own manifests
 			// alone: a nested example has its own version story, and stamping
 			// the release version into it would be wrong however the sweep
-			// scans. Same rule the version stage follows.
+			// scans. A path-qualified format stays included, being nested by
+			// its engine's rule rather than by an author's filing. Same rule
+			// the version stage follows.
 			one.Version = ""
 		}
 		if w.derives() {

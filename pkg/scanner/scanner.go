@@ -198,6 +198,28 @@ type Manifest struct {
 	Root bool
 }
 
+// AtPackageRoot reports that the manifest is the scanned folder's own rather
+// than one belonging to something nested inside it.
+//
+// Root answers that for every format whose location its author chose. The
+// path-qualified formats are the exception: their folder is part of the
+// format's name, so a Unity project keeps its settings at
+// ProjectSettings/ProjectSettings.asset and an Unreal project keeps its
+// version under Config/ because the engine says so, not because somebody
+// filed them away there. Such a manifest is nested and still the scanned
+// folder's own. A copy deeper in the tree is not, and stays excluded.
+func (m Manifest) AtPackageRoot() bool {
+	if m.Root {
+		return true
+	}
+	format, ok := manifest.FormatOfPath(m.Path)
+	if !ok {
+		return false
+	}
+	suffix, ok := manifest.PathSuffix(format)
+	return ok && m.Path == suffix
+}
+
 // Scanner turns a folder into its parsed manifests. Both methods share one
 // error contract: a manifest that fails to parse is skipped, its error joined
 // into the returned error, and the successfully parsed manifests are returned

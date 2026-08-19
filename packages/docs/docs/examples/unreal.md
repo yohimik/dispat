@@ -23,7 +23,7 @@ Each `.uplugin` sits directly in its package folder, so the default manifest sco
 $ git commit -m "feat(acmenet): reliable RPC batching"
 $ dispat
 12:50:45 INF ● changed bump=minor package=acmenet version="1.2.0 -> 1.3.0"
-12:50:45 INF manifest updated manifest=AcmeNet.uplugin package=acmenet versionWritten=true
+12:50:45 INF manifest reconciled manifest=AcmeNet.uplugin package=acmenet ranges=0 stage=version version=1.3.0 versionWritten=true
 12:50:45 INF published package=acmenet tag=acmenet@1.3.0 version=1.3.0
 ```
 

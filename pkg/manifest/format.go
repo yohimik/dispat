@@ -157,6 +157,30 @@ var byPathBase = func() map[string][]string {
 	return base
 }()
 
+// byFormatSuffix is byPathSuffix read the other way, so a caller holding a
+// format can ask where that format is kept without scanning the table.
+var byFormatSuffix = func() map[Format]string {
+	out := make(map[Format]string, len(byPathSuffix))
+	for suffix, format := range byPathSuffix {
+		out[format] = suffix
+	}
+	return out
+}()
+
+// PathSuffix returns the slash-anchored path a path-qualified format is always
+// kept at, and whether the format has one at all.
+//
+// The four that do are the formats whose base name means something else
+// everywhere else, which is why their folder is part of the name rather than a
+// place the author chose: a Unity project's settings are
+// ProjectSettings/ProjectSettings.asset or they are not those settings. A
+// caller deciding whether a manifest belongs to the folder it scanned needs
+// that distinction, because such a file is nested and still the folder's own.
+func PathSuffix(f Format) (string, bool) {
+	suffix, ok := byFormatSuffix[f]
+	return suffix, ok
+}
+
 // FormatOf resolves a file's base name onto its format: by exact name, then by
 // extension, then by the two families whose names vary. A name that matches
 // nothing is not a manifest.

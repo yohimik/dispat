@@ -109,11 +109,13 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 		}
 		edits := tc.manifestEdits(av, m)
 		version := ""
-		// The own-version write applies to the package's *root* manifests
-		// alone: a nested manifest (an example, a fixture) has its own
-		// version story, and stamping the release version into it would be
-		// wrong however the space scans.
-		if av.WriteVersion && m.Root {
+		// The own-version write applies to the package's own manifests
+		// alone: a manifest nested inside it (an example, a fixture) has its
+		// own version story, and stamping the release version into it would be
+		// wrong however the space scans. A path-qualified format is the one
+		// nested file that is still the package's own, because its folder is
+		// part of the format's name; see Manifest.AtPackageRoot.
+		if av.WriteVersion && m.AtPackageRoot() {
 			version = tc.rel.Next.String()
 			if m.Version != "" && m.Version != tc.rel.Previous().String() && m.Version != version {
 				// §12.4: tags are authoritative; a manifest version disagreeing

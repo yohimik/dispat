@@ -325,3 +325,34 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestAtPackageRootCountsAPathQualifiedManifestAsTheFolder(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		root bool
+		want bool
+	}{
+		// Directly in the scanned folder: Root already says so.
+		{"project.godot", true, true},
+		{"AcmeNet.uplugin", true, true},
+		// Nested because the engine says so, which is still the folder's own.
+		{"ProjectSettings/ProjectSettings.asset", false, true},
+		{"Packages/manifest.json", false, true},
+		{"Config/DefaultGame.ini", false, true},
+		{"Config/DefaultEngine.ini", false, true},
+		// The same format one folder deeper belongs to whatever is down there:
+		// a bundled sample keeps the version its author gave it.
+		{"Samples/Demo/ProjectSettings/ProjectSettings.asset", false, false},
+		{"ThirdParty/Vendor/Config/DefaultGame.ini", false, false},
+		// Every other nested manifest is unchanged by the rule.
+		{"examples/basic/package.json", false, false},
+		{"addons/acme/plugin.cfg", false, false},
+		{"nothing/we/parse.txt", false, false},
+	} {
+		m := Manifest{Path: tc.path, Root: tc.root}
+		if got := m.AtPackageRoot(); got != tc.want {
+			t.Errorf("Manifest{Path: %q, Root: %v}.AtPackageRoot() = %v, want %v",
+				tc.path, tc.root, got, tc.want)
+		}
+	}
+}

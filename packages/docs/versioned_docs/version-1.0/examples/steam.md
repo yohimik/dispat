@@ -95,7 +95,7 @@ $ dispat
 12:54:14 INF release started root=.
 12:54:14 INF ● changed baselineFromInitials=true bump=minor channel="stable -> beta" dueToProviders=[] ownCommits=1 package=adventure reason=direct space=games version="0.2.0 -> 0.3.0-beta.0"
 12:54:14 INF release plan ready held=0 packages=1 releasing=1
-12:54:14 INF manifest updated manifest=project.godot package=adventure stage=version versionWritten=true version=0.3.0-beta.0
+12:54:14 INF manifest reconciled manifest=project.godot package=adventure ranges=0 stage=version version=0.3.0-beta.0 versionWritten=true
 12:54:14 INF version succeeded package=adventure stage=version version=0.3.0-beta.0
 12:54:14 INF build started package=adventure stage=build version=0.3.0-beta.0
 12:54:14 INF build succeeded package=adventure stage=build version=0.3.0-beta.0

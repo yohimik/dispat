@@ -158,6 +158,52 @@ func TestFormatOfPathAgreesWithFormatOfEverywhereElse(t *testing.T) {
 	}
 }
 
+func TestPathSuffixAnswersForTheFormatsThatNeedTheirFolder(t *testing.T) {
+	for _, tc := range []struct {
+		format Format
+		want   string
+	}{
+		{FormatUnityPackages, "Packages/manifest.json"},
+		{FormatUnityProjectSettings, "ProjectSettings/ProjectSettings.asset"},
+		{FormatUnrealGameConfig, "Config/DefaultGame.ini"},
+		{FormatUnrealEngineConfig, "Config/DefaultEngine.ini"},
+	} {
+		got, ok := PathSuffix(tc.format)
+		if !ok || got != tc.want {
+			t.Errorf("PathSuffix(%q) = %q,%v, want %q", tc.format, got, ok, tc.want)
+		}
+	}
+}
+
+func TestPathSuffixDeclinesEveryOtherFormat(t *testing.T) {
+	// A format named by its base name alone has no folder to report, whether
+	// the name is fixed (go.mod), an extension family (*.uplugin) or one the
+	// engine also keeps in a folder by convention (project.godot).
+	for _, format := range []Format{FormatNpm, FormatGoMod, FormatGodotProject, FormatUnrealPlugin, FormatO3DEProject} {
+		if suffix, ok := PathSuffix(format); ok {
+			t.Errorf("PathSuffix(%q) = %q,true, want no suffix", format, suffix)
+		}
+	}
+	if suffix, ok := PathSuffix(Format("not-a-format")); ok {
+		t.Errorf("PathSuffix of an unknown format = %q,true, want no suffix", suffix)
+	}
+}
+
+func TestPathSuffixAgreesWithFormatOfPath(t *testing.T) {
+	// The two halves of the same table: a format's own suffix has to resolve
+	// back to it, or one of them has drifted.
+	for _, format := range Formats {
+		suffix, ok := PathSuffix(format)
+		if !ok {
+			continue
+		}
+		got, ok := FormatOfPath(suffix)
+		if !ok || got != format {
+			t.Errorf("FormatOfPath(PathSuffix(%q)) = %q,%v, want %q", format, got, ok, format)
+		}
+	}
+}
+
 func TestFormatsListsEveryConstantOnce(t *testing.T) {
 	seen := map[Format]bool{}
 	for _, f := range Formats {

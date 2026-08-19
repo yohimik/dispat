@@ -31,7 +31,7 @@ settings file, the git tag and the changelog all say the same thing.
 $ git commit -m "feat(game): co-op lobby"
 $ dispat
 12:50:45 INF ● changed bump=minor package=game version="0.1.0 -> 0.2.0"
-12:50:45 INF manifest updated manifest=ProjectSettings/ProjectSettings.asset package=game versionWritten=true
+12:50:45 INF manifest reconciled manifest=ProjectSettings/ProjectSettings.asset package=game ranges=0 stage=version version=0.2.0 versionWritten=true
 12:50:45 INF published package=game tag=game@0.2.0 version=0.2.0
 ```
 

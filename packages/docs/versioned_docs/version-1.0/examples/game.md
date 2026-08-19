@@ -102,7 +102,7 @@ $ dispat
 12:50:45 INF release started root=.
 12:50:45 INF ● changed baselineFromInitials=true bump=minor channel=stable dueToProviders=[] ownCommits=1 package=game reason=direct space=game version="0.1.0 -> 0.2.0"
 12:50:45 INF release plan ready held=0 packages=1 releasing=1
-12:50:45 INF manifest updated manifest=project.godot package=game stage=version versionWritten=true version=0.2.0
+12:50:45 INF manifest reconciled manifest=project.godot package=game ranges=0 stage=version version=0.2.0 versionWritten=true
 12:50:45 INF version succeeded package=game stage=version version=0.2.0
 12:50:45 INF build started package=game stage=build version=0.2.0
 12:50:45 INF build succeeded package=game stage=build version=0.2.0
@@ -140,7 +140,7 @@ difference, and `manifests: all` covers it:
 
 ```console
 $ dispat
-12:51:53 INF manifest updated manifest=ProjectSettings/ProjectSettings.asset package=client stage=version versionWritten=true
+12:51:53 INF manifest reconciled manifest=ProjectSettings/ProjectSettings.asset package=client ranges=0 stage=version version=0.3.0 versionWritten=true
 12:51:53 INF summary channel=stable package=client status=published tag=client@0.3.0 took=1.1s version="0.2.0 -> 0.3.0"
 ```
 
