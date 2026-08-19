@@ -3,7 +3,7 @@ module github.com/yohimik/dispat/pkg/writer
 go 1.25
 
 require (
-	github.com/yohimik/dispat/pkg/manifest v1.1.0
+	github.com/yohimik/dispat/pkg/manifest v1.1.1
 	golang.org/x/mod v0.29.0
 )
 

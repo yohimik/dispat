@@ -1,5 +1,11 @@
 # Changelog
 
+## pkg/writer/v1.1.1 (2026-08-19)
+
+### Dependencies
+
+- manifest: 1.1.0 -> 1.1.1
+
 ## pkg/writer/v1.1.0 (2026-08-19)
 
 ### Features
