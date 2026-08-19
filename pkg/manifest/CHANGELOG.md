@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/manifest/v1.1.1 (2026-08-19)
+
+### Fixes
+
+- unreal and unity version write
+
+
 ## pkg/manifest/v1.1.0 (2026-08-19)
 
 ### Features
