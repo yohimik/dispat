@@ -1,5 +1,13 @@
 # Changelog
 
+## services/dispat/v1.0.2 (2026-08-19)
+
+### Dependencies
+
+- manifest: 1.1.0 -> 1.1.1
+- scanner: 1.1.0 -> 1.1.1
+- writer: 1.1.0 -> 1.1.1
+
 ## services/dispat/v1.0.1 (2026-08-19)
 
 ### Fixes
