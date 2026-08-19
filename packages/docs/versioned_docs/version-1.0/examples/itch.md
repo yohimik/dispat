@@ -26,17 +26,15 @@ dispat.json
     "games": {
       "path": "games",
       "flow": {"build": "export", "publish": "itch"},
-      "autoVersion": {
-        "enabled": true,
-        "manifests": "none",
-        "replace": [
-          {"files": ["project.godot"], "find": "config/version=\"{previous}\"", "write": "config/version=\"{version}\""}
-        ]
-      }
+      "autoVersion": {"enabled": true}
     }
   }
 }
 ```
+
+`project.godot` is a manifest dispat reads, so `autoVersion` finds the game's version and writes it back with
+nothing else configured. [Godot](./godot.md) covers the rest of what it reads there, `plugin.cfg` and
+`export_presets.cfg` included.
 
 `butler` reads `BUTLER_API_KEY` from the environment, so there is no login step: put the key in the job's environment
 and the publish stage is authenticated.
@@ -71,7 +69,7 @@ $ dispat
 12:55:07 INF release started root=.
 12:55:07 INF ● changed baselineFromInitials=true bump=patch channel=stable dueToProviders=[] ownCommits=1 package=adventure reason=direct space=games version="0.2.0 -> 0.2.1"
 12:55:07 INF release plan ready held=0 packages=1 releasing=1
-12:55:07 INF file reconciled file=project.godot occurrences=1 package=adventure stage=version version=0.2.1
+12:55:07 INF manifest updated manifest=project.godot package=adventure stage=version versionWritten=true version=0.2.1
 12:55:07 INF version succeeded package=adventure stage=version version=0.2.1
 12:55:07 INF build started package=adventure stage=build version=0.2.1
 12:55:07 INF build succeeded package=adventure stage=build version=0.2.1

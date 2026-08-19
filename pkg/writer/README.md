@@ -31,31 +31,42 @@ holds the ones the manifest does not declare at all, which usually means the cal
 
 ## Supported manifests
 
-| File                           | Rewrites dependency ranges                         | Rewrites the own `version` field       | Manages a local redirect |
-|--------------------------------|----------------------------------------------------|----------------------------------------|--------------------------|
-| `package.json`                 | yes (byte-precise scalar splice)                   | yes                                    | yes (`file:` ranges)     |
-| `go.mod`                       | yes (`golang.org/x/mod/modfile`)                   | no such field                          | yes (`replace`)          |
-| `requirements*.txt`            | yes (per-line splice, comments and CRLF preserved) | no such field                          | no such directive        |
-| `Dockerfile`                   | yes (the tag of a `FROM` or `COPY --from` image)   | no such field                          | no such directive        |
-| `compose.yaml`                 | yes (the tag of a service's `image`)               | yes (the image the file builds)        | no such directive        |
-| `Info.plist`                   | none to write                                      | yes (`CFBundleShortVersionString`)     | no such directive        |
-| `AndroidManifest.xml`          | none to write                                      | yes (`android:versionName`)            | no such directive        |
-| `project.pbxproj`              | none to write                                      | yes (`MARKETING_VERSION`, all configs) | no such directive        |
-| `libs.versions.toml`           | yes (through `version.ref` into `[versions]`)      | no such field                          | no such directive        |
-| `Podfile`                      | yes (per-line splice, quote style preserved)       | no such field                          | no such directive        |
-| `*.podspec`                    | yes (per-line splice)                              | yes (`s.version`)                      | no such directive        |
-| `build.gradle`(`.kts`)         | yes (the version segment of a literal coordinate)  | yes (`versionName`)                    | no such directive        |
-| `Cargo.toml`                   | yes (plain values and inline-table `version` keys) | yes (`[package] version`)              | yes (`path` keys)        |
-| `pyproject.toml`               | yes (PEP 508 array entries and Poetry tables)      | yes (`[project]`, else Poetry's)       | yes (Poetry `path`)      |
-| `composer.json`                | yes (`require`, `require-dev`)                     | yes, where one is declared             | no such directive        |
-| `pom.xml`                      | yes (each `<dependency>`'s `<version>`)            | yes (the project's own, not parent's)  | no such directive        |
-| `*.csproj`/`.fsproj`/`.vbproj` | yes (`Version` attribute and child element)        | yes (first `PropertyGroup`)            | no such directive        |
-| `*.nuspec`                     | yes (each `<dependency>`'s version attribute)      | yes (`<metadata><version>`)            | no such directive        |
-| `Directory.Packages.props`     | yes (each `PackageVersion`)                        | no such field                          | no such directive        |
-| `packages.config`              | yes (each `<package>`'s lower-case `version`)      | no such field                          | no such directive        |
-| `pubspec.yaml`                 | yes (per-line scalar splice)                       | yes                                    | yes (`dependency_overrides`) |
-| `Gemfile`                      | yes (per-line splice, quote style preserved)       | no such field                          | no such directive        |
-| `*.gemspec`                    | yes (per-line splice)                              | yes (`spec.version`)                   | no such directive        |
+| File                                    | Rewrites dependency ranges                                 | Rewrites the own `version` field       | Manages a local redirect     |
+|-----------------------------------------|------------------------------------------------------------|----------------------------------------|------------------------------|
+| `package.json`                          | yes (byte-precise scalar splice)                           | yes                                    | yes (`file:` ranges)         |
+| `go.mod`                                | yes (`golang.org/x/mod/modfile`)                           | no such field                          | yes (`replace`)              |
+| `requirements*.txt`                     | yes (per-line splice, comments and CRLF preserved)         | no such field                          | no such directive            |
+| `Dockerfile`                            | yes (the tag of a `FROM` or `COPY --from` image)           | no such field                          | no such directive            |
+| `compose.yaml`                          | yes (the tag of a service's `image`)                       | yes (the image the file builds)        | no such directive            |
+| `Info.plist`                            | none to write                                              | yes (`CFBundleShortVersionString`)     | no such directive            |
+| `AndroidManifest.xml`                   | none to write                                              | yes (`android:versionName`)            | no such directive            |
+| `project.pbxproj`                       | none to write                                              | yes (`MARKETING_VERSION`, all configs) | no such directive            |
+| `libs.versions.toml`                    | yes (through `version.ref` into `[versions]`)              | no such field                          | no such directive            |
+| `Podfile`                               | yes (per-line splice, quote style preserved)               | no such field                          | no such directive            |
+| `*.podspec`                             | yes (per-line splice)                                      | yes (`s.version`)                      | no such directive            |
+| `build.gradle`(`.kts`)                  | yes (the version segment of a literal coordinate)          | yes (`versionName`)                    | no such directive            |
+| `Cargo.toml`                            | yes (plain values and inline-table `version` keys)         | yes (`[package] version`)              | yes (`path` keys)            |
+| `pyproject.toml`                        | yes (PEP 508 array entries and Poetry tables)              | yes (`[project]`, else Poetry's)       | yes (Poetry `path`)          |
+| `composer.json`                         | yes (`require`, `require-dev`)                             | yes, where one is declared             | no such directive            |
+| `pom.xml`                               | yes (each `<dependency>`'s `<version>`)                    | yes (the project's own, not parent's)  | no such directive            |
+| `*.csproj`/`.fsproj`/`.vbproj`          | yes (`Version` attribute and child element)                | yes (first `PropertyGroup`)            | no such directive            |
+| `*.nuspec`                              | yes (each `<dependency>`'s version attribute)              | yes (`<metadata><version>`)            | no such directive            |
+| `Directory.Packages.props`              | yes (each `PackageVersion`)                                | no such field                          | no such directive            |
+| `packages.config`                       | yes (each `<package>`'s lower-case `version`)              | no such field                          | no such directive            |
+| `pubspec.yaml`                          | yes (per-line scalar splice)                               | yes                                    | yes (`dependency_overrides`) |
+| `Gemfile`                               | yes (per-line splice, quote style preserved)               | no such field                          | no such directive            |
+| `*.gemspec`                             | yes (per-line splice)                                      | yes (`spec.version`)                   | no such directive            |
+| `Packages/manifest.json`                | yes (byte-precise scalar splice, one field)                | no such field                          | no such directive            |
+| `ProjectSettings/ProjectSettings.asset` | none to write                                              | yes (`bundleVersion`)                  | no such directive            |
+| `project.godot`                         | none to write                                              | yes (`config/version`)                 | no such directive            |
+| `plugin.cfg`                            | none to write                                              | yes (the addon's `version`)            | no such directive            |
+| `export_presets.cfg`                    | none to write                                              | yes (every preset's store version)     | no such directive            |
+| `*.uproject`                            | declared, never written (a plugin is named, not versioned) | no such field                          | no such directive            |
+| `*.uplugin`                             | declared, never written (same reason)                      | yes (`VersionName`)                    | no such directive            |
+| `Config/DefaultGame.ini`                | none to write                                              | yes (`ProjectVersion`)                 | no such directive            |
+| `Config/DefaultEngine.ini`              | none to write                                              | yes (Android `VersionDisplayName`)     | no such directive            |
+| `game.project`                          | none to write (a library is an archive URL)                | yes (`version`)                        | no such directive            |
+| `project.json`/`gem.json`               | yes (the whole `Gem==1.0.0` literal)                       | yes, where one is declared             | no such directive            |
 
 The last column is `Relink`, the other half of this package. Where `Rewrite` changes the version text a manifest
 declares, `Relink` manages the directive that points a dependency at a folder in the same repository instead of at a
@@ -66,6 +77,10 @@ a NuGet package reference or a Maven coordinate names a package and nothing else
 A Docker image is named rather than located too. A reference points at a registry, so there is no redirect to manage:
 building the image from a folder in this repository is what a compose file's `build:` says, and that is the author's
 structure rather than a version dispat reconciles.
+
+The game engines say it a third way. An Unreal plugin is resolved by name against the project and the engine, a Godot
+addon and an O3DE gem sit in a folder the project already names, and a Defold library is an archive URL. There is no
+redirect any of them could carry, and nothing local for `Relink` to point at.
 
 **Every ecosystem the scanner reads now has a writer.** `TestEveryScannedEcosystemHasAWriter` is the list that says so,
 and a format the scanner learns to read should fail it until it can be written too.
@@ -202,9 +217,11 @@ equivalent, so a project not using uv gains a table its tooling will ignore.
 ## Writing the build counter
 
 The version rewriters never touch a build counter: it is a monotonic count rather than a semantic version, and the two
-move for different reasons. `SetBuild` is the separate write that moves it, in the five places a format keeps one:
+move for different reasons. `SetBuild` is the separate write that moves it, in the nine places a format keeps one:
 `CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION` (every build configuration, like the marketing
-version), Gradle's `versionCode`, and the `+` suffix a pubspec version carries.
+version), Gradle's `versionCode`, the `+` suffix a pubspec version carries, Unity's `AndroidBundleVersionCode` and the
+per-platform counters under `buildNumber` (every one of them, for the same reason), `version/code` in every Godot
+export preset, a `.uplugin`'s `Version`, and the Android `StoreVersion` in `Config/DefaultEngine.ini`.
 
 ```go
 res, err := writer.SetBuild("ios/App/Info.plist", "42")

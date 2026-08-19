@@ -13,8 +13,10 @@ import (
 // move for different reasons), so writing one is its own entry point rather
 // than a flag on Rewrite. The formats are the ones whose counter the
 // scanner reads: CFBundleVersion, android:versionCode,
-// CURRENT_PROJECT_VERSION, Gradle's versionCode, and the + suffix a pubspec
-// version carries.
+// CURRENT_PROJECT_VERSION, Gradle's versionCode, the + suffix a pubspec
+// version carries, Unity's AndroidBundleVersionCode and per-platform
+// buildNumber counters, version/code in a Godot export preset, a .uplugin's
+// Version, and the Android StoreVersion in Config/DefaultEngine.ini.
 
 // ErrNoBuildCounter marks a manifest whose format carries no build counter;
 // test with errors.Is.

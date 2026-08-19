@@ -281,6 +281,16 @@ same set:
 | CocoaPods, Xcode, Apple bundles | `Podfile`, `*.podspec`, `project.pbxproj`, `Info.plist` | [Apple](../examples/apple.md) |
 | Android and Gradle | `AndroidManifest.xml`, `build.gradle`, `build.gradle.kts`, `libs.versions.toml` | [Android](../examples/android.md), [Gradle](../examples/gradle.md) |
 | Docker | `Dockerfile`, `Containerfile`, `compose.yaml` | [Docker](../examples/docker.md) |
+| Unity | `Packages/manifest.json`, `ProjectSettings/ProjectSettings.asset` | [Unity](../examples/unity.md) |
+| Godot | `project.godot`, `plugin.cfg`, `export_presets.cfg` | [Godot](../examples/godot.md) |
+| Unreal | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` | [Unreal](../examples/unreal.md) |
+| Defold | `game.project` | [Games](../examples/game.md) |
+| O3DE | `project.json`, `gem.json` | [Games](../examples/game.md) |
+
+Four of those names only mean what they say in the right folder. A `manifest.json` is a web app manifest nearly
+everywhere, `.asset` is every serialised Unity object, and an Unreal config file is configuration wherever else it
+sits. Those four are recognised by their path, so `Packages/manifest.json` is Unity's and `public/manifest.json` is
+left alone.
 
 Everything the scanner reads, the writer can write, which is what lets
 [auto-versioning](../configuration/autoversion.md) reconcile any of them without a script of your own. The per-format

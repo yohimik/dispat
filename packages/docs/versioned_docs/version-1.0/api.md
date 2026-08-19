@@ -30,7 +30,7 @@ no dispat binary, no git repository and no network involved:
 | Package | What it does |
 |---------|--------------|
 | [`pkg/ccme`](./go/ccme.md) | Parses commit messages in the Conventional Commits Monorepo Extension format |
-| [`pkg/scanner`](./go/scanner.md) | Reads dependency manifests across fifteen ecosystems into one shape |
+| [`pkg/scanner`](./go/scanner.md) | Reads dependency manifests across twenty ecosystems into one shape |
 | [`pkg/writer`](./go/writer.md) | Rewrites those manifests in place, preserving every byte it does not change |
 | [`pkg/manifest`](./go/manifest.md) | The vocabulary the reader and the writer share |
 | [`pkg/models`](./go/models.md) | The typed configuration model, so tooling can author config files as values |

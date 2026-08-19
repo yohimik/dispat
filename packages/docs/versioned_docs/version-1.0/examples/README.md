@@ -72,7 +72,7 @@ build.
 
 ## Which example covers my manifest
 
-dispat reads and writes twenty-three manifest formats. Every one of them is worked through on one of these pages.
+dispat reads and writes thirty-five manifest formats. Every one of them is worked through on one of these pages.
 
 | Manifest | Example |
 |----------|---------|
@@ -89,10 +89,14 @@ dispat reads and writes twenty-three manifest formats. Every one of them is work
 | `AndroidManifest.xml`, `build.gradle`, `build.gradle.kts` | [Android](./android.md), [Gradle](./gradle.md) |
 | `libs.versions.toml` | [Gradle](./gradle.md) |
 | `Dockerfile`, `Containerfile`, `compose.yaml` | [Docker](./docker.md) |
+| `Packages/manifest.json`, `ProjectSettings/ProjectSettings.asset` | [Unity](./unity.md) |
+| `project.godot`, `plugin.cfg`, `export_presets.cfg` | [Godot](./godot.md) |
+| `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` | [Unreal](./unreal.md) |
+| `game.project`, `project.json`, `gem.json` | [Games](./game.md) |
 
-A version that lives in none of these, a Godot `project.godot`, a Unity `ProjectSettings.asset`, a Helm `Chart.yaml`,
-a README install line, is handled by the [replace strategy](../configuration/autoversion.md) and worked through in
-[the game](./game.md) and [Helm](./helm.md) pages.
+A version that lives in none of these, a Helm `Chart.yaml`, a README install line, a plain text file somewhere, is
+handled by the [replace strategy](../configuration/autoversion.md) and worked through on the
+[Helm](./helm.md) page.
 
 The pages under [Editing the monorepo](../editing/manifests.md) are the other half of the worked examples: the
 commands that change files across many packages between releases. How a release behaves once it covers more than one

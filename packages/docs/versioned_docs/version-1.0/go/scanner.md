@@ -2,7 +2,7 @@
 
 `github.com/yohimik/dispat/pkg/scanner` reads dependency manifests into one ecosystem-neutral shape: the package's
 declared identity, its declared dependencies, their ranges and any local-path signals. It is a dependency manifest
-parser for Go, covering twenty-three formats across fifteen ecosystems, and it only reads. Rewriting is
+parser for Go, covering thirty-five formats across twenty ecosystems, and it only reads. Rewriting is
 [the writer's](./writer.md) job.
 
 There is no SBOM machinery here, no lockfile resolution and no network. The recognised formats are fixed at build time,
@@ -72,6 +72,11 @@ are not errors: the manifest parsed, and the caller decides whether the drops ar
 | plist, Xcode | `Info.plist`, `project.pbxproj` |
 | CocoaPods | `Podfile`, `*.podspec` |
 | Android, Gradle | `AndroidManifest.xml`, `libs.versions.toml`, `build.gradle`, `build.gradle.kts` |
+| Unity | `Packages/manifest.json`, `ProjectSettings/ProjectSettings.asset` |
+| Godot | `project.godot`, `plugin.cfg`, `export_presets.cfg` |
+| Unreal | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` |
+| Defold | `game.project` |
+| O3DE | `project.json`, `gem.json` |
 
 Several formats are matched by name rather than extension. A Dockerfile matches `Dockerfile`, `Dockerfile.dev`,
 `api.Dockerfile` and Podman's `Containerfile`. A requirements file matches by whole words, so `dev-requirements.txt`
@@ -87,11 +92,18 @@ The exact fields each format contributes, and the shapes deliberately left unrea
 
 ## Helpers for callers building a graph
 
-Three exported helpers do the work the CLI needs on top of a scan. `NameIndex` maps a manifest name onto its owning
+Four exported helpers do the work the CLI needs on top of a scan. `NameIndex` maps a manifest name onto its owning
 package, preferring stated names, then root manifests, then nested ones, and reporting a same-rank collision instead of
-guessing. `ResolveLocalDir` turns a declared local path into the package folder it points at. `SkipDir` names the
-folders a workspace walk never enters, exported so a caller walking a package for its own reasons stays out of the same
-places.
+guessing. `ResolveLocalDir` turns a declared local path into the package folder it points at.
+
+`SkipDir` and `SkipWorkspaceDir` name the folders a walk never enters, exported so a caller walking a package for its
+own reasons stays out of the same places. They differ by the folders a game engine generates. `SkipDir` is the
+dependency trees, virtual environments and build output every walk avoids, and it is what a tool replacing literal
+text should follow, because a version string under `Build/` is still a version string. `SkipWorkspaceDir` adds
+`Library`, `PackageCache`, `Temp`, `Logs`, `UserSettings`, `MemoryCaptures`, `Binaries`, `Intermediate`, `Saved`,
+`DerivedDataCache` and `Builds`, and it is what `Scan` follows: Unity's `Library/PackageCache` holds a real
+`package.json` per resolved package, and a scan that entered it would report a few hundred third-party packages as
+members of the workspace.
 
 ## The same work from the command line
 

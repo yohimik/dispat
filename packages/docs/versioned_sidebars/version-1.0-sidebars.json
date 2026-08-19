@@ -90,6 +90,21 @@
               "type": "doc",
               "id": "examples/docker",
               "label": "A Docker image chain"
+            },
+            {
+              "type": "doc",
+              "id": "examples/unity",
+              "label": "Unity"
+            },
+            {
+              "type": "doc",
+              "id": "examples/godot",
+              "label": "Godot"
+            },
+            {
+              "type": "doc",
+              "id": "examples/unreal",
+              "label": "Unreal Engine"
             }
           ]
         },

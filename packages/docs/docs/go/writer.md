@@ -101,9 +101,11 @@ res, err := writer.SetBuild("ios/App/Info.plist", "42")
 // res.BuildWritten, res.Path
 ```
 
-It covers the five places a format keeps one: `CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`,
-Gradle's `versionCode` and the `+` suffix a pubspec version carries. A counter the file does not declare is not
-created, and a format with no counter at all gives `ErrNoBuildCounter`.
+It covers the nine places a format keeps one: `CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`,
+Gradle's `versionCode`, the `+` suffix a pubspec version carries, Unity's `AndroidBundleVersionCode` and the
+per-platform counters under `buildNumber`, `version/code` in every Godot export preset, a `.uplugin`'s `Version`, and
+the Android `StoreVersion` in `Config/DefaultEngine.ini`. A counter the file does not declare is not created, and a
+format with no counter at all gives `ErrNoBuildCounter`.
 
 ## The same work from the command line
 

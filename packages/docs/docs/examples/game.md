@@ -10,9 +10,8 @@ it.
 ## What this buys you
 
 **One version number, everywhere.** The version dispat computes from your commits is written straight into
-`project.godot`,
-becomes the git tag, becomes the Steam build description and the branch that goes live, becomes the itch
-`--userversion`, heads the changelog entry and names the GitHub release. Nobody types it twice, so nothing can
+`project.godot`, becomes the git tag, becomes the Steam build description and the branch that goes live, becomes
+the itch `--userversion`, heads the changelog entry and names the GitHub release. Nobody types it twice, so nothing can
 disagree about what `0.3.0` contains. When a player reports a bug against the version on their title screen, that
 string leads straight to a tag and a diff.
 

@@ -75,9 +75,9 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   code. [Details](https://yohimik.github.io/dispat/reference/commits/#release-control).
 - **Polyglot by construction: any language, any registry, any tooling.** Stages are shell commands fed a rich
   [`DISPAT_*` environment](https://yohimik.github.io/dispat/reference/environment/), release state lives in git tags,
-  and dispat reads and rewrites twenty-three manifest formats across fifteen ecosystems, npm to `go.mod` to `Podfile`,
-  so `dispat compute` can derive the dependency graph and each package's starting version from the repository you
-  already have. And because an unchanged package is simply not in the plan, there is no task cache to manage, clear or
+  and dispat reads and rewrites thirty-five manifest formats across twenty ecosystems, npm to `go.mod` to `Podfile` to
+  the project files Unity, Godot, Unreal, Defold and O3DE keep a game's version in, so `dispat compute` can derive the
+  dependency graph and each package's starting version from the repository you already have. And because an unchanged package is simply not in the plan, there is no task cache to manage, clear or
   distrust: BuildKit layers, an Nx, Turborepo or Bazel cache and the Gradle build cache all keep working inside the
   stage, and none of them can change what is versioned, ordered or tagged.
 - **Every release step is also a command, with the records built in.** Per-package changelogs, annotated tags, GitHub

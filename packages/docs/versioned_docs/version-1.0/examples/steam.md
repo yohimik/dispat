@@ -29,17 +29,14 @@ dispat.json
     "games": {
       "path": "games",
       "flow": {"login": "steam-login", "build": "export", "publish": "steam"},
-      "autoVersion": {
-        "enabled": true,
-        "manifests": "none",
-        "replace": [
-          {"files": ["project.godot"], "find": "config/version=\"{previous}\"", "write": "config/version=\"{version}\""}
-        ]
-      }
+      "autoVersion": {"enabled": true}
     }
   }
 }
 ```
+
+`project.godot` is a manifest dispat reads, so `autoVersion` finds the game's version and writes it back with
+nothing else configured. [Godot](./godot.md) has the detail.
 
 `flow.login` runs once before the first publish of the space, not once per package, which is what you want from
 anything that authenticates. It is a space-level slot for exactly that reason and cannot be set on a single package;
@@ -98,7 +95,7 @@ $ dispat
 12:54:14 INF release started root=.
 12:54:14 INF ● changed baselineFromInitials=true bump=minor channel="stable -> beta" dueToProviders=[] ownCommits=1 package=adventure reason=direct space=games version="0.2.0 -> 0.3.0-beta.0"
 12:54:14 INF release plan ready held=0 packages=1 releasing=1
-12:54:14 INF file reconciled file=project.godot occurrences=1 package=adventure stage=version version=0.3.0-beta.0
+12:54:14 INF manifest updated manifest=project.godot package=adventure stage=version versionWritten=true version=0.3.0-beta.0
 12:54:14 INF version succeeded package=adventure stage=version version=0.3.0-beta.0
 12:54:14 INF build started package=adventure stage=build version=0.3.0-beta.0
 12:54:14 INF build succeeded package=adventure stage=build version=0.3.0-beta.0

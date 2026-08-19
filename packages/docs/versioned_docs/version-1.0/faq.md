@@ -74,9 +74,10 @@ corrected forward with `Edits:` and `Deletes:` footers in new commits, so the au
 ## Which languages and package managers does it work with?
 
 Any: a package is a folder and a stage is a shell command, so Go, npm, pnpm, Cargo, Maven, Python, Docker and the rest
-all sit in one dependency graph. Native manifest rewriting covers all twenty-three formats dispat reads, from
-`package.json` and `go.mod` to `pom.xml`, `Cargo.toml`, `*.csproj`, `pubspec.yaml` and compose files; a version living
-somewhere no parser owns, such as a Gradle coordinate or an engine's project file, is covered by the
+all sit in one dependency graph. Native manifest rewriting covers all thirty-five formats dispat reads, from
+`package.json` and `go.mod` to `pom.xml`, `Cargo.toml`, `*.csproj`, `pubspec.yaml`, compose files and the game engine
+project files Unity, Godot, Unreal, Defold and O3DE keep a version in; a version living somewhere no parser owns, such
+as a Gradle coordinate or a Helm chart, is covered by the
 [replace strategy](./configuration/autoversion.md). The [examples](./examples/README.md) show one setup per
 ecosystem, and the table there says which page covers your manifest.
 

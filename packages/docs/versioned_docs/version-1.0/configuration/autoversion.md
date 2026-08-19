@@ -25,8 +25,10 @@ version task, which is how a space asks for [`syncLock`](#the-options) and nothi
 The rewrite is byte-precise: only the version text changes, and formatting, key order and comments survive. Every
 format the scanner reads has a writer behind it, so the parsing strategy covers all of them: `package.json`, `go.mod`,
 `Cargo.toml`, `pyproject.toml`, `requirements*.txt`, `composer.json`, `pom.xml`, the .NET project and package files,
-`pubspec.yaml`, the Ruby, CocoaPods, Xcode, Android, Gradle and Docker files. The full list, with the fields each one
-contributes, is in [Manifest tools](../editing/manifests.md#supported-formats).
+`pubspec.yaml`, the Ruby, CocoaPods, Xcode, Android, Gradle and Docker files, and the Unity, Godot, Unreal, Defold and
+O3DE project files. A game engine needs no `replace` rule for its own version: `project.godot`,
+`ProjectSettings/ProjectSettings.asset` and the rest are manifests like any other. The full list, with the fields each
+one contributes, is in [Manifest tools](../editing/manifests.md#supported-formats).
 
 What a writer will not do is replace an indirection with a literal. A Maven `${property}`, a Cargo
 `{ workspace = true }`, an MSBuild `$(Version)` and an Xcode `$(MARKETING_VERSION)` are reported as skipped and left
