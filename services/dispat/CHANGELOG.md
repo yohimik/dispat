@@ -1,5 +1,18 @@
 # Changelog
 
+## services/dispat/v1.0.1 (2026-08-19)
+
+### Fixes
+
+- manifest libraries updated providing unity, unreal, godot, o3de and defold manifests supported
+
+
+### Dependencies
+
+- manifest: 1.0.0 -> 1.1.0
+- scanner: 1.0.0 -> 1.1.0
+- writer: 1.0.0 -> 1.1.0
+
 ## services/dispat/v1.0.0 (2026-08-16)
 
 ### Breaking Changes
