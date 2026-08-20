@@ -228,13 +228,27 @@ func TestSelfUpdateSpeaksJSONWhenAskedTo(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, pending)
 
-	var event map[string]any
-	require.NoError(t, json.Unmarshal(bytes.TrimSpace(out.Bytes()), &event))
-	assert.Equal(t, "update check", event["message"])
+	event := findEvent(t, out.Bytes(), "update check")
 	assert.Equal(t, "1.0.0", event["version"])
 	assert.Equal(t, "1.2.0", event["latest"])
 	assert.Equal(t, true, event["pending"])
 	assert.NotContains(t, out.String(), "install it with", "the report stays out of the stream")
+}
+
+// findEvent picks one event out of the stream by its message. The stream
+// carries more than the answer — a release with no readable notes says so on
+// its way past — so a test that wants one event has to name it.
+func findEvent(t *testing.T, stream []byte, message string) map[string]any {
+	t.Helper()
+	for _, line := range bytes.Split(bytes.TrimSpace(stream), []byte("\n")) {
+		var event map[string]any
+		require.NoError(t, json.Unmarshal(line, &event), "every line is one event")
+		if event["message"] == message {
+			return event
+		}
+	}
+	t.Fatalf("no %q event in %s", message, stream)
+	return nil
 }
 
 // TestHumanBytesReadsLikeADownload: the size is there to set an expectation
@@ -246,4 +260,126 @@ func TestHumanBytesReadsLikeADownload(t *testing.T) {
 	assert.Equal(t, "13.3 MiB", humanBytes(13_896_386))
 	assert.Equal(t, "1.5 GiB", humanBytes(1610612736))
 	assert.Equal(t, "1.0 TiB", humanBytes(1<<40))
+}
+
+// notesBody is the shape dispat's own releases carry: the sections first, then
+// the rule and the install commands the release page closes with.
+const notesBody = "### Features\n\n- print the notes after an update\n\n### Fixes\n\n" +
+	"- stop a truncated listing failing opaquely\n\n---\n\n**Install this version:**\n\n" +
+	"```sh\ncurl -fsSL https://example.invalid/install.sh | sh\n```\n"
+
+// withNotes serves one release carrying a body and a release page, which is
+// what the API actually returns and what the plain `releases` helper leaves out.
+func withNotes(t *testing.T, tag, body string) selfupdate.Source {
+	t.Helper()
+	rel := map[string]any{
+		"tag_name": tag, "draft": false, "prerelease": false, "body": body,
+		"html_url": "https://github.com/o/r/releases/tag/" + strings.ReplaceAll(tag, "/", "%2F"),
+		"assets": []map[string]any{{
+			"name": selfupdate.CurrentAssetName(), "browser_download_url": "http://example.invalid/x",
+			"size": 1, "digest": "",
+		}},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if got, ok := afterTags(req.URL.Path); ok {
+			if got != tag {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(rel)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{rel})
+	}))
+	t.Cleanup(srv.Close)
+	return selfupdate.Source{APIURL: srv.URL, Owner: "o", Repo: "r"}
+}
+
+// TestSelfUpdateCheckShowsWhatWouldArrive: --check is the invocation you run
+// while deciding, so it answers with the changes rather than only the number.
+// The install commands the body carries stay out of it: they are markup for a
+// web page, and the reader already has dispat.
+func TestSelfUpdateCheckShowsWhatWouldArrive(t *testing.T) {
+	o, out := opts(t, released, withNotes(t, "services/dispat/v1.2.0", notesBody))
+	o.Check = true
+
+	pending, err := SelfUpdate(context.Background(), *o)
+	require.NoError(t, err)
+	assert.True(t, pending)
+
+	text := out.String()
+	assert.Contains(t, text, "available dispat 1.2.0")
+	assert.Contains(t, text, "what changed in 1.2.0")
+	assert.Contains(t, text, "Features")
+	assert.Contains(t, text, "- print the notes after an update")
+	assert.Contains(t, text, "full changelog: https://github.com/o/r/blob/refs/tags/"+
+		"services/dispat/v1.2.0/services/dispat/CHANGELOG.md")
+	assert.NotContains(t, text, "curl", "the install commands are the page's, not the terminal's")
+	assert.Contains(t, text, "install it with: dispat self-update",
+		"the notes go above the instruction, not instead of it")
+}
+
+// TestSelfUpdateCheckSaysNothingAboutTheReleaseYouHave: being current means
+// there is nothing to read, and printing the running version's own notes would
+// read as if an update were waiting.
+func TestSelfUpdateCheckSaysNothingAboutTheReleaseYouHave(t *testing.T) {
+	o, out := opts(t, released, withNotes(t, "services/dispat/v1.0.0", notesBody))
+	o.Check = true
+
+	pending, err := SelfUpdate(context.Background(), *o)
+	require.NoError(t, err)
+	assert.False(t, pending)
+	assert.Contains(t, out.String(), "nothing to install")
+	assert.NotContains(t, out.String(), "what changed")
+	assert.NotContains(t, out.String(), "full changelog")
+	assert.NotContains(t, out.String(), "release notes",
+		"a release nobody would install is not read at all, so it is not reported on either")
+}
+
+// TestSelfUpdateWithoutReadableNotes: a release whose body dispat makes nothing
+// of still gets its link, because "here is where to look" beats silence, and it
+// says so on the log rather than in the report.
+func TestSelfUpdateWithoutReadableNotes(t *testing.T) {
+	o, out := opts(t, released, withNotes(t, "services/dispat/v1.2.0", ""))
+	o.Check = true
+
+	_, err := SelfUpdate(context.Background(), *o)
+	require.NoError(t, err)
+
+	text := out.String()
+	assert.NotContains(t, text, "what changed", "no heading over an empty list")
+	assert.Contains(t, text, "full changelog: https://github.com/o/r/blob/refs/tags/")
+	assert.Contains(t, text, "the release carries no notes", "the reason is on the log")
+}
+
+// TestSelfUpdateNotesReachTheJSONStream: the report is for a person and the
+// event is for the stream, and both carry the same two things, so a CI job that
+// updates dispat can post what changed without scraping stdout.
+func TestSelfUpdateNotesReachTheJSONStream(t *testing.T) {
+	o, out := opts(t, released, withNotes(t, "services/dispat/v1.2.0", notesBody))
+	o.Check, o.JSON = true, true
+
+	_, err := SelfUpdate(context.Background(), *o)
+	require.NoError(t, err)
+
+	event := findEvent(t, out.Bytes(), "update check")
+	assert.Contains(t, event["notes"], "what changed in 1.2.0")
+	assert.Contains(t, event["notes"], "print the notes after an update")
+	assert.Equal(t, "https://github.com/o/r/blob/refs/tags/services/dispat/v1.2.0/"+
+		"services/dispat/CHANGELOG.md", event["changelog"])
+	assert.NotContains(t, out.String(), "full changelog:", "the report stays out of the stream")
+}
+
+// TestSelfUpdateRollbackSaysNothingAboutNotes: a rollback fetches nothing, so
+// there is no release whose notes these would be. Linking a changelog for a
+// local file swap would be inventing an answer.
+func TestSelfUpdateRollbackSaysNothingAboutNotes(t *testing.T) {
+	o, out := opts(t, released, withNotes(t, "services/dispat/v1.2.0", notesBody))
+	o.Rollback, o.Check = true, true
+
+	_, err := SelfUpdate(context.Background(), *o)
+	require.NoError(t, err)
+	assert.NotContains(t, out.String(), "what changed")
+	assert.NotContains(t, out.String(), "full changelog")
 }

@@ -10,6 +10,16 @@ downloading dispat-darwin-arm64 (13.3 MiB)
 installed dispat 1.1.0 at /usr/local/bin/dispat
 the previous binary is at /usr/local/bin/dispat.backup, removed on its own after a week
 put it back with "dispat self-update --rollback"
+
+what changed in 1.1.0
+
+  Features
+    - self-update reads out what it installed
+
+  Fixes
+    - a truncated release listing says so instead of failing as bad JSON
+
+full changelog: https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md
 ```
 
 The binary you were running is not thrown away. It is renamed to sit beside the
@@ -26,7 +36,9 @@ container image, where a self-update cannot outlive the container anyway, is
 It is worth knowing exactly what happens to the file you depend on.
 
 1. **It finds the release.** dispat's own GitHub releases are listed, the ones
-   tagged for the CLI are picked out, and the highest stable version wins.
+   tagged for the CLI are picked out, and the highest stable version wins. The
+   release notes come back in the same answer, so they are read here, before
+   anything is fetched.
 2. **It downloads the binary for your platform.** Linux, macOS and Windows, on
    Intel and on ARM: six binaries, one per platform, named after it.
 3. **It checks what arrived.** The size has to match what the release
@@ -46,6 +58,50 @@ is no half-installed anything to clean up.
 The path never changes, so whatever put `dispat` on your `PATH` still points at
 it. Nothing needs re-linking and no shell needs restarting.
 
+## What you just got
+
+An update raises one question, so dispat answers it before you have to ask. Once
+the new binary is in place it reads out what changed in the release it installed,
+and links the changelog for everything the summary left out.
+
+```console
+what changed in 1.1.0
+
+  Features
+    - self-update reads out what it installed
+
+  Fixes
+    - a truncated release listing says so instead of failing as bad JSON
+
+full changelog: https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md
+```
+
+This costs nothing. The release notes arrive in the same response that decided
+which release to install, so no extra call is made to fetch them, and they are
+read before the download starts rather than after. The release you are told about
+is therefore always the release you got.
+
+A few things about what you see:
+
+- **It is the release you installed, not everything you skipped.** Updating from
+  1.0.0 straight to 1.3.0 reads out 1.3.0. The changelog link is how you catch up
+  on the versions in between, and it holds all of them.
+- **It is a summary, not the page.** A GitHub release body is written for a
+  browser: install commands, code blocks, a row of links at the bottom. None of
+  that is useful in a terminal you are already running dispat in, so dispat keeps
+  the headings and their bullets and drops the rest. A long release is cut short
+  with a line saying so.
+- **The link points at the tag.** It is the changelog as that release left it, not
+  as the repository looks today, so the link under "you now have 1.1.0" still
+  shows 1.1.0's changelog a year from now.
+- **It never gets in the way.** A release with no notes, or notes dispat cannot
+  make sense of, prints the link on its own. The update itself does not depend on
+  any of this working.
+
+With `logFormat: json` none of it is printed. The same two things travel as
+`notes` and `changelog` fields on the `update installed` event instead, so a CI
+job that updates dispat can post what changed without reading stdout.
+
 ## Checking without installing
 
 `--check` answers one question, changes nothing, and exits `1` when there is
@@ -56,14 +112,26 @@ $ dispat self-update --check
 current   dispat 1.0.0 (darwin_arm64)
 available dispat 1.1.0 (services/dispat/v1.1.0)
 
+what changed in 1.1.0
+
+  Features
+    - self-update reads out what it installed
+
+full changelog: https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md
+
 install it with: dispat self-update
 
 $ echo $?
 1
 ```
 
-When you are already current it prints the same two lines, says `nothing to
-install`, and exits `0`.
+Deciding whether to update is exactly when the changelog is worth reading, so
+`--check` shows the same summary the install would. Nothing has been downloaded
+at that point, and nothing will be.
+
+When you are already current it prints the first two lines, says `nothing to
+install`, and exits `0`. There are no notes in that case, because they would be
+the notes of the release you are already running.
 
 ## Going back
 
@@ -198,6 +266,9 @@ dispat 1.1.0 (darwin_arm64, go install)
 $ dispat self-update --check
 current   dispat 1.1.0 (darwin_arm64, go install)
 available dispat 1.2.0 (services/dispat/v1.2.0)
+
+what changed in 1.2.0
+...
 
 update it with: go install github.com/yohimik/dispat/services/dispat@latest
 ```

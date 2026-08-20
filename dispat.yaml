@@ -112,13 +112,22 @@ commit:
 github:
   enabled: true
   allPackages: true
-  # Every release body opens with where what shipped can be fetched and read,
-  # above the change sections. The lines interpolate the releasing package's
-  # own DISPAT_* variables, and the package/space filters write each block
-  # only for the releases it is about. The installer is fetched from this
-  # release's own v{version} alias tag, so a prerelease installs with the
-  # installer it shipped with.
-  header:
+  # Every release body closes with where what shipped can be fetched and read,
+  # under the change sections: the page is about what changed, and the way to
+  # install it is the next thing you want rather than the first. The rule leads
+  # the block so the sections above it end cleanly. The lines interpolate the
+  # releasing package's own DISPAT_* variables, and the package/space filters
+  # write each block only for the releases it is about. The installer is
+  # fetched from this release's own v{version} alias tag, so a prerelease
+  # installs with the installer it shipped with.
+  #
+  # The rule is also what `dispat self-update` cuts on when it prints a
+  # release's notes to a terminal, so everything below it stays out of the
+  # summary a user reads after an update.
+  footer:
+    - line:
+        - "---"
+        - ""
     - package: [dispat]
       # The same three install variants the README offers, pinned to this
       # release's own installer via its v{version} alias tag. The PowerShell
@@ -153,6 +162,3 @@ github:
     - package: [docs]
       line:
         - "[The documentation site](https://yohimik.github.io/dispat/) this release deploys."
-    - line:
-        - ""
-        - "---"

@@ -86,8 +86,21 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		change = rel.Version.Compare(cur) > 0
 	}
 
+	// The notes are read off the response that already chose the release, so
+	// what the user is told afterwards describes the release that was selected
+	// rather than whatever a second call might return. It happens here, before
+	// the asset is even looked up, let alone downloaded.
+	//
+	// Only when something would change: the notes of the release already
+	// running answer no question, and reporting that it carries none would be
+	// noise about a release nobody asked about.
+	var notes selfupdate.Notes
+	if change {
+		notes = readNotes(opts, rel)
+	}
+
 	if opts.Check {
-		report(opts, rel.Tag, rel.Version.String(), change)
+		report(opts, rel, notes, change)
 		return change, nil
 	}
 	if !change {
@@ -140,7 +153,7 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		if exe != "" {
 			ev = ev.Str("path", exe)
 		}
-		ev.Str("backup", backup).Msg("update installed")
+		ev.Str("backup", backup).Func(notesFields(opts, rel, notes)).Msg("update installed")
 		return false, nil
 	}
 	if exe != "" {
@@ -150,10 +163,65 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 	}
 	fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", backup)
 	fmt.Fprintf(opts.Out, "put it back with \"dispat self-update --rollback\"\n")
+	writeNotes(opts, rel, notes)
+	// The macOS warning stays last. It is the one line that asks the reader to
+	// go and do something, and burying it under the changelog would be the
+	// same as not printing it.
 	if note := selfupdate.MacNote(opts.GOOS, exe); exe != "" && note != "" {
 		fmt.Fprint(opts.Out, note)
 	}
 	return false, nil
+}
+
+// readNotes turns the selected release's body into something printable, and
+// says at debug level how much of it was understood.
+//
+// It cannot fail. A body dispat makes nothing of leaves the link to carry the
+// answer, which is why the warning below is a warning and not an error: the
+// update itself is unaffected either way.
+func readNotes(opts SelfUpdateOptions, rel selfupdate.Release) selfupdate.Notes {
+	opts.Log.Debug().Str("tag", rel.Tag).Int("bytes", len(rel.Body)).
+		Msg("self-update: release notes fetched")
+	notes := selfupdate.ParseNotes(rel.Body)
+	if notes.Empty() {
+		opts.Log.Warn().Str("tag", rel.Tag).
+			Msg("the release carries no notes dispat can read; linking the changelog instead")
+		return notes
+	}
+	opts.Log.Debug().Str("tag", rel.Tag).Int("sections", len(notes.Sections)).
+		Int("items", notes.Items()).Bool("truncated", notes.Truncated).
+		Msg("self-update: release notes parsed")
+	return notes
+}
+
+// notesFields adds what changed to a JSON event: the rendered notes, when
+// there are any, and the changelog link either way. The same two things the
+// report prints, as fields, so a machine reading the log learns what a person
+// reading the terminal does.
+func notesFields(opts SelfUpdateOptions, rel selfupdate.Release, notes selfupdate.Notes) func(*zerolog.Event) {
+	return func(ev *zerolog.Event) {
+		if body := notes.Render(rel.Version.String()); body != "" {
+			ev.Str("notes", body)
+		}
+		if url := opts.Source.ChangelogURL(rel); url != "" {
+			ev.Str("changelog", url)
+		}
+	}
+}
+
+// writeNotes prints what changed and where the rest of it is. It is the
+// report's half of the pair; JSON runs take notesFields instead, and both
+// callers have already chosen between the two before reaching here.
+//
+// A release with nothing readable still gets its link, because "here is where
+// to look" is a better answer than silence.
+func writeNotes(opts SelfUpdateOptions, rel selfupdate.Release, notes selfupdate.Notes) {
+	if body := notes.Render(rel.Version.String()); body != "" {
+		fmt.Fprintf(opts.Out, "\n%s", body)
+	}
+	if url := opts.Source.ChangelogURL(rel); url != "" {
+		fmt.Fprintf(opts.Out, "\nfull changelog: %s\n", url)
+	}
 }
 
 // resolve picks the release to install: the one named, or the highest the
@@ -170,19 +238,28 @@ func resolve(ctx context.Context, opts SelfUpdateOptions) (selfupdate.Release, e
 }
 
 // report is what --check prints, for every selection it can be given.
-func report(opts SelfUpdateOptions, tag, latest string, change bool) {
+//
+// It answers "what would I get", so it shows the notes as well as the version:
+// deciding whether to update is exactly the moment the changelog is worth
+// reading, and this is the invocation that changes nothing while you decide.
+func report(opts SelfUpdateOptions, rel selfupdate.Release, notes selfupdate.Notes, change bool) {
+	latest := rel.Version.String()
 	if opts.JSON {
 		opts.Log.Info().Str("version", opts.Build.Version).Str("latest", latest).
-			Str("tag", tag).Bool("pending", change).Msg("update check")
+			Str("tag", rel.Tag).Bool("pending", change).
+			Func(notesFields(opts, rel, notes)).Msg("update check")
 		return
 	}
 	fmt.Fprintf(opts.Out, "current   dispat %s (%s)\n", opts.Build.Version,
 		opts.Build.Platform(opts.GOOS, opts.GOARCH))
-	fmt.Fprintf(opts.Out, "available dispat %s (%s)\n", latest, tag)
+	fmt.Fprintf(opts.Out, "available dispat %s (%s)\n", latest, rel.Tag)
 	if !change {
+		// Nothing to install is nothing to read about: the notes here would
+		// describe the release already running.
 		fmt.Fprintln(opts.Out, "\nnothing to install")
 		return
 	}
+	writeNotes(opts, rel, notes)
 	switch opts.Build.Origin {
 	case selfupdate.OriginGoInstall:
 		fmt.Fprintf(opts.Out, "\nupdate it with: %s\n", selfupdate.GoInstallCommand)

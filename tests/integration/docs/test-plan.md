@@ -806,6 +806,11 @@ file it is running from is exercised for real rather than mocked.
 | `TestSelfUpdateWithNothingForThisPlatform` | A release cut before a platform joined the build matrix names the binaries it does have rather than leaving the reader guessing. |
 | `TestSelfUpdateWithoutAStableRelease` | Where every tag is a candidate, "no matching release" naming the flag that would find one beats "you are up to date". |
 | `TestSelfUpdateCommandWordKeepsItsScript` | Every command word permanently shadows a run script of the same name, which is why the word is `self-update` and not `update`. A deliberate, tested fact rather than a surprise. |
+| `TestSelfUpdatePrintsWhatChanged` | An update answers the question it raises. The change sections of the release body reach the terminal, the install commands and footer links the same body carries do not, and the changelog is linked at the tag that was installed so the link keeps saying what it said today. |
+| `TestSelfUpdateCheckShowsWhatWouldArrive` | `--check` shows the notes it would install while still installing nothing and still exiting 1, which is what makes it the invocation you run while deciding rather than a bare version comparison. |
+| `TestSelfUpdateNotesNeverBlockTheUpdate` | An empty body, a body that is only a footer, markup dispat reads nothing in, and a body far past the parser's cap all end with the new binary in place and the link left to carry the answer. The notes are a courtesy; the binary is the point. |
+| `TestSelfUpdateReadsTheNotesBeforeTheDownload` | The fake records the order it was asked, proving the notes ride off the response that chose the release rather than a second call afterwards, and that the binary is fetched exactly once. |
+| `TestSelfUpdateNotesReachTheJSONStream` | Under `--log-format json` every line is an event and the `update installed` event carries the notes and the changelog as fields, so a job that updates dispat can post what changed without scraping stdout. |
 
 ### Goal 23: the `compute` command (`compute_test.go`)
 

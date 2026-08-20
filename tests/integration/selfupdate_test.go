@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,11 +47,36 @@ type suRepo struct {
 	backup string
 	api    string
 	assets map[string][]byte // asset name -> the binary that version serves
+	// body is the release notes every served release carries. A scenario that
+	// wants a different shape sets it and calls serve again.
+	body string
+	// hits records the paths the fake answered, in order, which is how a test
+	// proves the notes were read before the binary was fetched. The handler
+	// runs on the server's goroutines, so the lock is not decoration.
+	mu   sync.Mutex
+	hits []string
 }
+
+// requests is the paths the fake has answered so far.
+func (r *suRepo) requests() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.hits...)
+}
+
+// suBody is the release body dispat's own releases carry: the change sections,
+// then the rule and the install commands the release page closes with. The
+// fixture is the real shape on purpose, because what the command has to get
+// right is dropping the second half of it.
+const suBody = "### Features\n\n- read a release's notes after an update\n\n" +
+	"### Fixes\n\n- stop a truncated listing failing opaquely\n\n" +
+	"### Release\n\n- commit: abc123\n\n---\n\n**Install this version:**\n\n" +
+	"```sh\ncurl -fsSL https://example.invalid/install.sh | sh\n```\n\n" +
+	"[Documentation](https://example.invalid/docs)\n"
 
 func newSURepo(t *testing.T) *suRepo {
 	t.Helper()
-	r := &suRepo{Repo: harness.New(t), assets: map[string][]byte{}}
+	r := &suRepo{Repo: harness.New(t), assets: map[string][]byte{}, body: suBody}
 	r.exe = filepath.Join(t.TempDir(), "dispat"+exeSuffix())
 	copyFile(t, harness.BuildVersioned(t, suOld), r.exe)
 	r.backup = backupPath(r.exe)
@@ -88,6 +114,8 @@ func (r *suRepo) serve(t *testing.T, versions map[string]string) {
 		sum := sha256.Sum256(r.assets[e.version])
 		return map[string]any{
 			"tag_name": e.tag, "draft": false, "prerelease": e.prerelease,
+			"body":     r.body,
+			"html_url": base + "/o/r/releases/tag/" + strings.ReplaceAll(e.tag, "/", "%2F"),
 			"assets": []map[string]any{{
 				"name": e.assetName, "size": len(r.assets[e.version]),
 				"browser_download_url": base + "/dl/" + e.version,
@@ -96,6 +124,9 @@ func (r *suRepo) serve(t *testing.T, versions map[string]string) {
 		}
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.mu.Lock()
+		r.hits = append(r.hits, req.URL.Path)
+		r.mu.Unlock()
 		if version, ok := strings.CutPrefix(req.URL.Path, "/dl/"); ok {
 			data, known := r.assets[version]
 			if !known {
@@ -466,4 +497,154 @@ func TestSelfUpdateCommandWordKeepsItsScript(t *testing.T) {
 	res = r.RunScript("self-update", "--since", "all")
 	assert.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, res.Stdout, "the script ran", "the two-word spelling still reaches it")
+}
+
+// TestSelfUpdatePrintsWhatChanged: the question an update raises is "what did I
+// just get", and the release body that answers it is already in the response
+// that chose the release. What reaches the terminal is the change sections; the
+// install commands the same body carries are for the release page, and a reader
+// who is running dispat has already installed it.
+func TestSelfUpdatePrintsWhatChanged(t *testing.T) {
+	r := newSURepo(t)
+
+	res := r.update()
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Equal(t, suNew, r.version(r.exe), "the binary really was replaced")
+
+	out := res.Stdout
+	assertOrderedIn(t, out,
+		"installed dispat "+suNew,
+		"put it back with",
+		"what changed in "+suNew,
+		"Features",
+		"- read a release's notes after an update",
+		"Fixes",
+		"- stop a truncated listing failing opaquely",
+		"full changelog: ",
+	)
+	assert.NotContains(t, out, "curl -fsSL", "the install commands are the page's, not the terminal's")
+	assert.NotContains(t, out, "Install this version")
+	assert.NotContains(t, out, "[Documentation]", "and neither are the footer links")
+	assert.Contains(t, out, "/blob/refs/tags/services/dispat/v"+suNew+"/services/dispat/CHANGELOG.md",
+		"the changelog is linked at the tag that was installed, so it keeps saying this")
+}
+
+// TestSelfUpdateCheckShowsWhatWouldArrive: deciding whether to update is
+// exactly when the changelog is worth reading, and --check is the invocation
+// that changes nothing while you decide. It still gates: exit 1, and the binary
+// on disk is untouched.
+func TestSelfUpdateCheckShowsWhatWouldArrive(t *testing.T) {
+	r := newSURepo(t)
+
+	res := r.update("--check")
+	assert.Equal(t, 1, res.Code, "still a gate")
+	assertOrderedIn(t, res.Stdout,
+		"available dispat "+suNew,
+		"what changed in "+suNew,
+		"- read a release's notes after an update",
+		"full changelog: ",
+		"install it with: dispat self-update",
+	)
+	assert.NotContains(t, res.Stdout, "curl -fsSL")
+	assert.Equal(t, suOld, r.version(r.exe), "and nothing was installed")
+	assert.NoFileExists(t, r.backup, "nor was a backup made")
+}
+
+// TestSelfUpdateNotesNeverBlockTheUpdate: the notes are a courtesy and the
+// binary is the point. A body that is empty, that is nothing but the footer, or
+// that is far longer than anything a release carries all end the same way: the
+// new binary is in place and the link is there to fall back on.
+func TestSelfUpdateNotesNeverBlockTheUpdate(t *testing.T) {
+	for name, body := range map[string]string{
+		"no body at all":                 "",
+		"a footer and nothing else":      "---\n\n[Documentation](https://example.invalid/docs)\n",
+		"markup dispat reads nothing in": "<h3>Features</h3><ul><li>streaming</li></ul>",
+		"far more than a release carries": "### Features\n\n" +
+			strings.Repeat("- a change with a reasonably long description\n", 20000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newSURepo(t)
+			r.body = body
+			r.serve(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+
+			res := r.update()
+			require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+			assert.Equal(t, suNew, r.version(r.exe), "the update is what matters")
+			assert.Contains(t, res.Stdout, "installed dispat "+suNew)
+			assert.Contains(t, res.Stdout, "full changelog: ",
+				"and the link carries the answer whatever the body did")
+		})
+	}
+}
+
+// TestSelfUpdateReadsTheNotesBeforeTheDownload: the notes describe the release
+// that was chosen, so they are read off the response that chose it rather than
+// from a second call afterwards. The fake records what it was asked for, in
+// order, which is the only way to see that from outside the process.
+func TestSelfUpdateReadsTheNotesBeforeTheDownload(t *testing.T) {
+	r := newSURepo(t)
+
+	res := r.update()
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	paths := r.requests()
+	require.NotEmpty(t, paths)
+	var listed, downloaded int
+	for i, path := range paths {
+		switch {
+		case strings.Contains(path, "/releases"):
+			if listed == 0 {
+				listed = i + 1
+			}
+		case strings.HasPrefix(path, "/dl/"):
+			downloaded = i + 1
+		}
+	}
+	require.NotZero(t, listed, "the release was looked up")
+	require.NotZero(t, downloaded, "and the binary fetched")
+	assert.Less(t, listed, downloaded, "the notes arrive with the release, before the binary")
+	assert.Equal(t, 1, strings.Count(strings.Join(paths, "\n"), "/dl/"),
+		"and the binary is fetched exactly once")
+}
+
+// TestSelfUpdateNotesReachTheJSONStream: the report is for a person and the
+// event is for the stream CI already ingests. A job that updates dispat can
+// post what changed without scraping stdout.
+func TestSelfUpdateNotesReachTheJSONStream(t *testing.T) {
+	r := newSURepo(t)
+
+	res := r.update("--log-format", "json")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.NotContains(t, res.Stdout, "full changelog:", "the report stays out of the stream")
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		var event map[string]any
+		assert.NoError(t, json.Unmarshal([]byte(line), &event),
+			"every line is an event, so no report text leaked in beside them")
+	}
+
+	installed := suEvent(t, res.Stdout, "update installed")
+	notes, _ := installed["notes"].(string)
+	assert.Contains(t, notes, "what changed in "+suNew)
+	assert.Contains(t, notes, "read a release's notes after an update")
+	assert.NotContains(t, notes, "curl -fsSL")
+	changelog, _ := installed["changelog"].(string)
+	assert.Contains(t, changelog, "/blob/refs/tags/services/dispat/v"+suNew+
+		"/services/dispat/CHANGELOG.md")
+}
+
+// suEvent picks one event out of a JSON run by its message. The stream carries
+// more than the answer, so a test that wants one event has to name it.
+func suEvent(t *testing.T, stream, message string) map[string]any {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(stream), "\n") {
+		var event map[string]any
+		if json.Unmarshal([]byte(line), &event) != nil {
+			continue
+		}
+		if event["message"] == message {
+			return event
+		}
+	}
+	t.Fatalf("no %q event in:\n%s", message, stream)
+	return nil
 }

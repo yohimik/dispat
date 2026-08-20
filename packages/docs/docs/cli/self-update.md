@@ -8,10 +8,20 @@ release published, run once to prove it works, and only then moved into place. T
 as `<name>.backup` and removed by a later run a week on. Nothing moves until every check has passed, so a failed update
 leaves the working binary exactly where it was.
 
+Once the new binary is in place, dispat reads out what changed in it and links the changelog at the tag it installed.
+`--check` shows the same, before anything is downloaded.
+
 ```console
 $ dispat self-update --check
 current   dispat 1.0.0 (darwin_arm64)
 available dispat 1.1.0 (services/dispat/v1.1.0)
+
+what changed in 1.1.0
+
+  Features
+    - self-update reads out what it installed
+
+full changelog: https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md
 
 install it with: dispat self-update
 ```

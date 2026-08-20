@@ -303,3 +303,109 @@ func TestLatestStopsWithTheContext(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, context.Canceled), "got %v", err)
 }
+
+// TestLatestAndAtCarryTheNotes: the body and the release's own page ride along
+// with whichever lookup found the release, so nothing has to go back to the API
+// to find out what changed. Both paths, because a version named with --release
+// deserves the same answer as the one found by looking.
+func TestLatestAndAtCarryTheNotes(t *testing.T) {
+	const body = "### Features\n\n- streaming\n"
+	const page = "https://github.com/o/r/releases/tag/services%2Fdispat%2Fv1.1.0"
+	rel := releaseJSON("services/dispat/v1.1.0", false, false, "dispat-linux-amd64")
+	rel["body"], rel["html_url"] = body, page
+	src := listing(t, rel)
+
+	latest, err := src.Latest(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, body, latest.Body)
+	assert.Equal(t, page, latest.HTMLURL)
+
+	at, err := src.At(context.Background(), "1.1.0")
+	require.NoError(t, err)
+	assert.Equal(t, body, at.Body, "the by-tag lookup answers the same")
+	assert.Equal(t, page, at.HTMLURL)
+}
+
+// TestGetRefusesAResponseItCannotHaveReadWhole: a listing past the read cap is
+// a truncated document, and parsing one reports a syntax error about JSON that
+// was never malformed. Naming the cap is the difference between a reader who
+// knows what happened and one who thinks GitHub is broken.
+func TestGetRefusesAResponseItCannotHaveReadWhole(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// A well formed listing that simply does not fit.
+		fmt.Fprint(w, `[{"tag_name":"services/dispat/v1.1.0","body":"`)
+		filler := strings.Repeat("a", 1<<16)
+		for written := 0; written <= maxListBody; written += len(filler) {
+			fmt.Fprint(w, filler)
+		}
+		fmt.Fprint(w, `"}]`)
+	}))
+	t.Cleanup(srv.Close)
+	src := &Source{APIURL: srv.URL, Owner: "o", Repo: "r"}
+
+	_, err := src.Latest(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "larger than", "the refusal names the cap")
+	assert.NotContains(t, err.Error(), "invalid character", "and is not a JSON complaint")
+}
+
+// TestChangelogURLPointsAtTheTag: the link is printed under "you now have
+// 1.1.0", so it has to keep showing 1.1.0's changelog forever. The tag carries
+// slashes of its own, which is why the ref is fully qualified.
+func TestChangelogURLPointsAtTheTag(t *testing.T) {
+	src := &Source{Owner: "yohimik", Repo: "dispat"}
+	rel := Release{
+		Tag:     "services/dispat/v1.1.0",
+		HTMLURL: "https://github.com/yohimik/dispat/releases/tag/services%2Fdispat%2Fv1.1.0",
+	}
+	assert.Equal(t,
+		"https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md",
+		src.ChangelogURL(rel))
+}
+
+// TestChangelogURLWithoutAReleasePage: an older GitHub Enterprise, or a fake
+// that never sent one, still gets a link — from the owner and repo the source
+// was pointed at, which is the only other thing that knows the repository.
+func TestChangelogURLFallsBack(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src  Source
+		rel  Release
+		want string
+	}{
+		"no release page": {
+			src:  Source{Owner: "o", Repo: "r"},
+			rel:  Release{Tag: "services/dispat/v1.1.0"},
+			want: "https://github.com/o/r/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md",
+		},
+		"a release page of an unexpected shape": {
+			src:  Source{Owner: "o", Repo: "r"},
+			rel:  Release{Tag: "services/dispat/v1.1.0", HTMLURL: "https://example.invalid/whatever"},
+			want: "https://github.com/o/r/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md",
+		},
+		"github enterprise, taken from the release's own page": {
+			src:  Source{APIURL: "https://ghe.example/api/v3", Owner: "o", Repo: "r", TagPrefix: "cli/v"},
+			rel:  Release{Tag: "cli/v2.0.0", HTMLURL: "https://ghe.example/o/r/releases/tag/cli%2Fv2.0.0"},
+			want: "https://ghe.example/o/r/blob/refs/tags/cli/v2.0.0/cli/CHANGELOG.md",
+		},
+		"a tag prefix naming no folder falls back to the root changelog": {
+			src:  Source{Owner: "o", Repo: "r", TagPrefix: "v"},
+			rel:  Release{Tag: "v1.1.0"},
+			want: "https://github.com/o/r/blob/refs/tags/v1.1.0/CHANGELOG.md",
+		},
+		"a tag prefix that is not a version prefix at all": {
+			src:  Source{Owner: "o", Repo: "r", TagPrefix: "release-"},
+			rel:  Release{Tag: "release-1.1.0"},
+			want: "https://github.com/o/r/blob/refs/tags/release-1.1.0/CHANGELOG.md",
+		},
+		"no tag, no link": {
+			src:  Source{Owner: "o", Repo: "r"},
+			rel:  Release{},
+			want: "",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.src.ChangelogURL(tc.rel))
+		})
+	}
+}
