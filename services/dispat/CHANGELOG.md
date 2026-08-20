@@ -1,5 +1,16 @@
 # Changelog
 
+## services/dispat/v1.1.0 (2026-08-20)
+
+### Features
+
+- self-update prints changelog
+
+
+### Dependencies
+
+- models: 1.0.0 -> 1.1.0
+
 ## services/dispat/v1.0.2 (2026-08-19)
 
 ### Dependencies
