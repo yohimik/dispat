@@ -1,5 +1,30 @@
 # Changelog
 
+## packages/docs/v1.0.12 (2026-08-20)
+
+### Fixes
+
+- a control repository for many repositories
+The pattern that gets the graph back without merging anyone's code: one
+small repository holding every configuration, linking the product
+repositories in as git submodules. A pointer bump is a commit touching one
+path, so dispat reads it as a change to that package and the fleet plans,
+orders and propagates as a single monorepo, while nobody in the linked
+repositories touches a dispat file.
+
+Both layouts get a section: a wrapper folder, where the changelog lands
+somewhere the release commit can stage it, and the submodule mounted as the
+package, where it does not. Both build models too, building in the control
+repository and triggering each repository's own pipeline. Plus the sync
+script that turns upstream subjects into --- separated units, the parser
+settings that implies, the cross-repository edges compute derives on its
+own, and what to watch for.
+
+Every transcript is a real run against throwaway fleets built for it.
+
+monorepo.md and the FAQ point at it, since the first says outright that
+dispat cannot span repositories.
+
 ## packages/docs/v1.0.11 (2026-08-19)
 
 ### Fixes
