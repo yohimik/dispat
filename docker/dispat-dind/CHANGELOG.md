@@ -1,5 +1,11 @@
 # Changelog
 
+## docker/dispat-dind/v1.1.0 (2026-08-20)
+
+### Dependencies
+
+- dispat: 1.0.2 -> 1.1.0
+
 ## docker/dispat-dind/v1.0.2 (2026-08-19)
 
 ### Dependencies

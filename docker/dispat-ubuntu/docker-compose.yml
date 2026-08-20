@@ -11,7 +11,7 @@
 # from here and its moving tags from whichever channel it is on.
 services:
   dispat:
-    image: docker.io/yohimik/dispat-ubuntu:1.0.2
+    image: docker.io/yohimik/dispat-ubuntu:1.1.0
     build:
       # The repository root, so the Dockerfile can COPY install.sh with nothing
       # staged first. The root .dockerignore keeps that context to one file.
