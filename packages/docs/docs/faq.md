@@ -59,6 +59,15 @@ Yes: `--package`, `--space` and `--group` narrow any command, and standing in a 
 reports what the selection costs, a split version group catches up on the next run (`W231`, `W234`), and `--strict`
 turns any cost into a refusal. [Partial releases](./reference/releasing/partial-releases.md) is the guide.
 
+## Can dispat release packages that live in different repositories?
+
+Not on its own: the plan comes from one checkout, so there is no graph spanning repositories and nothing to order
+them by. The way around it is to give dispat a checkout that contains them all. One small repository holds every
+configuration and links the others in as git submodules, and moving a submodule forward is a commit dispat reads like
+any other, so releases across the whole fleet get ordered, versioned and changelogged from one place.
+[A control repository for many repositories](./control-repository.md) is the pattern, the two layouts it comes in and
+what it costs.
+
 ## How do I stop something from releasing?
 
 The ladder, from softest to hardest: `Release-As: none` holds a package without discarding anything, and

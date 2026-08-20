@@ -64,6 +64,13 @@ as Renovate or Dependabot opens the pull request, and dispat in the consumer's r
 other change. The [reconciliation pickup](./configuration/autoversion.md#picking-up-providers-released-without-you)
 handles the same situation inside one repository automatically, which is a fair summary of what the shape buys you.
 
+There is one way to get the graph back without merging anything, and it is worth knowing about before you accept the
+trade above. A repository that holds nothing but the configuration, and links the others in as git submodules, is a
+single checkout again: dispat runs there, orders the releases across every linked repository and propagates between
+them, while the code stays where it is and the teams working on it never touch a dispat file.
+[A control repository for many repositories](./control-repository.md) is that pattern in full, including what it
+costs.
+
 ## dispat in a single-project repository
 
 Nothing about dispat requires more than one package. A repository whose whole deliverable is one thing declares one

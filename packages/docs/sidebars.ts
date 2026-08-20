@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
     'getting-started',
     'concepts',
     {type: 'doc', id: 'monorepo', label: 'One repository or many'},
+    {type: 'doc', id: 'control-repository', label: 'A control repository'},
     {
       type: 'category',
       label: 'Examples',

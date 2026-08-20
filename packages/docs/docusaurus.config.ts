@@ -46,7 +46,7 @@ const KEYWORDS = [
 // That costs nothing while the unreleased version is noIndex and never reaches
 // the sitemap at all (see `versions` below), and it is the first thing to
 // revisit if that ever changes.
-const ENTRY_PAGES = new Set(['getting-started', 'concepts', 'monorepo']);
+const ENTRY_PAGES = new Set(['getting-started', 'concepts', 'monorepo', 'control-repository']);
 const SECTION_INDEXES = new Set(['api', 'cli', 'configuration', 'examples', 'go', 'faq']);
 const LONG_TAIL_PREFIXES = ['examples/', 'internals/'];
 
