@@ -58,6 +58,8 @@ redundant, and contradicting them causes an error.
 
 Both depths default to `0`, and neither bounds the other. A unit reaches nobody on either axis until you say so.
 
+![The same commit planned twice: as feat(core) only core releases, and amended to feat(core)^^ the whole consumer closure joins the plan while utils, a provider, stays unchanged.](/demo-blast.gif)
+
 ## Footers
 
 | Footer                                 | Effect                                                                                        |

@@ -52,6 +52,18 @@
   margin-bottom: 2rem;
 }
 
+/* The demo recording sits above the transcript: the same terminal, in motion.
+   It is wider than the transcript because its lines are the tool's real
+   output, unabridged. */
+.demo {
+  display: block;
+  width: 100%;
+  max-width: 64rem;
+  height: auto;
+  margin: 0 auto 1.5rem;
+  border-radius: 8px;
+}
+
 /* The transcript is the hero's evidence, so it stays narrow enough to read and
    left-aligned inside the centred column. */
 .transcript {

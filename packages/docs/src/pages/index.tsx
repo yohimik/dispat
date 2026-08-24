@@ -138,6 +138,21 @@ function Hero(): React.ReactElement {
             Examples
           </Link>
         </div>
+        {/* The release story in motion: the graph from the manifests, the
+            commit deciding the blast radius, the ordered parallel run, a
+            contained failure, and the catch-up re-run. */}
+        <video
+          className={styles.demo}
+          autoPlay
+          loop
+          muted
+          playsInline
+          width={1920}
+          height={1080}
+          aria-label="An animated dependency graph of four packages across npm, Go, and Docker: commits decide the blast radius, builds and publishes run in dependency order in parallel, a failed build stays contained while its consumer is skipped, and a re-run finishes exactly what the first run still owed">
+          <source src={useBaseUrl('/demo-release.webm')} type="video/webm" />
+          <source src={useBaseUrl('/demo-release.mp4')} type="video/mp4" />
+        </video>
         {/* `console` rather than the README's `sh`: this is a transcript, and
             shell-session highlighting is what tells the commands from their
             output. The README fence has to stay `sh` for GitHub. */}

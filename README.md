@@ -37,6 +37,11 @@ irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 Pull container images for any other CI system: `yohimik/dispat-alpine`, `-ubuntu`, `-debian`, and `-dind`. See
 [dispat in CI](https://yohimik.github.io/dispat/reference/ci/).
 
+<p align="center">
+  <img src="imgs/demo-release.gif" width="830"
+       alt="An animated dependency graph of four packages across npm, Go, and Docker: commits decide the blast radius, builds and publishes run in dependency order in parallel, a failed build stays contained while its consumer is skipped, and a re-run finishes exactly what the first run still owed">
+</p>
+
 ## Why one more monorepo tool?
 
 Every major monorepo tool can topologically sort a dependency graph to build everything in order. Turborepo, Nx, Bazel,
