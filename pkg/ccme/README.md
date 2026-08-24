@@ -364,4 +364,4 @@ Go 1.21 or later. No dependencies.
 
 ## Licence
 
-MIT. See [LICENSE](./LICENSE).
+GPL-3.0-or-later. See [LICENSE](./LICENSE).

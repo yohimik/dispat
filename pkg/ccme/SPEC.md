@@ -4,6 +4,7 @@
 Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** git tags of the form
 `<package>@<version>`
 **Conformance:** §17 · **Security considerations:** §18 · **Test vectors:** Appendix B
+**License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
 
 Requirement levels follow RFC 2119 (§2). This specification is itself versioned under SemVer; see §17.3 for what
 constitutes a patch, minor, and major revision of the document.
