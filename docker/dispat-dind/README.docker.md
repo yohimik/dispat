@@ -1,18 +1,18 @@
 # dispat with Docker-in-Docker
 
-The [dispat](https://github.com/yohimik/dispat) release orchestrator CLI beside a Docker daemon, on `docker:29-dind`,
-for release flows whose build stage is itself a `docker build`, for `linux/amd64` and `linux/arm64`.
+This image packages the [dispat](https://github.com/yohimik/dispat) release orchestrator CLI alongside a Docker daemon.
+It runs on `docker:29-dind` for `linux/amd64` and `linux/arm64`. Use this image when your build stage is a
+`docker build`.
 
-dispat releases a monorepo from its conventional commits: it plans version bumps across packages and spaces, runs
-their version, build and publish scripts in dependency order, writes changelogs, tags, creates GitHub releases and
-survives a failed leg without re-releasing what already shipped. See the
+dispat reads your conventional commits to release a monorepo, planning version bumps across packages and spaces before
+running your version, build, and publish scripts in dependency order. The tool writes changelogs, creates tags, and
+publishes GitHub releases. It survives a failed leg without re-releasing what already shipped, and you can see the
 [documentation](https://yohimik.github.io/dispat/) for the full model.
 
-The image keeps its base's `ENTRYPOINT` (`dockerd-entrypoint.sh`), so it behaves exactly like `docker:dind`: run it
-with `--privileged`, or use it as a `services: docker:dind` companion. It carries the CLI plus `git`,
-`ca-certificates`, `openssh-client` and `tzdata` on top of the base, and
-`git config --system --add safe.directory '*'` is baked in, so a repository mounted from a foreign uid works without
-ceremony.
+Run this image with `--privileged` or use it as a `services: docker:dind` companion. It behaves exactly like
+`docker:dind` because it keeps the base `ENTRYPOINT` (`dockerd-entrypoint.sh`), but it adds the dispat CLI, `git`,
+`ca-certificates`, `openssh-client`, and `tzdata`. You can mount a repository from a foreign uid and it works
+immediately because `git config --system --add safe.directory '*'` is baked in.
 
 ```sh
 docker run --rm --privileged -v "$PWD:/workspace" -w /workspace yohimik/dispat-dind:1 dispat status
@@ -27,12 +27,12 @@ docker run --rm --privileged -v "$PWD:/workspace" -w /workspace yohimik/dispat-d
 | major, major.minor | `1`, `1.4`     | stable releases only          |
 | `latest`           |                | stable releases only          |
 
-Pin the major (`:1`) in CI. `latest` never points at a prerelease.
+Pin the major tag (`:1`) in CI. The `latest` tag never points at a prerelease.
 
 ## The other images
 
-`yohimik/dispat-alpine` (the smallest), `yohimik/dispat-ubuntu` (the default) and `yohimik/dispat-debian`, none of
-which need a daemon or `--privileged`.
+You can also use `yohimik/dispat-alpine` (the smallest), `yohimik/dispat-ubuntu` (the default), or
+`yohimik/dispat-debian`. None of these alternative images need a daemon or the `--privileged` flag.
 
 Links: [documentation](https://yohimik.github.io/dispat/) · [source](https://github.com/yohimik/dispat) ·
 [releases](https://github.com/yohimik/dispat/releases)

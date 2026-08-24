@@ -1,7 +1,7 @@
 # Composer packages
 
-PHP packages in one repository, released to Packagist. Composer takes its versions from git tags, so the tag is the
-release and `composer.json` only has to name the right constraints.
+You can release PHP packages from one repository to Packagist. Composer takes its versions from git tags. This means
+the tag is the release, and `composer.json` only has to name the right constraints.
 
 ## The layout
 
@@ -30,12 +30,12 @@ dispat.json
 }
 ```
 
-There is nothing to upload. Packagist reads the repository and its tags, so the publish stage is at most a webhook
-telling it to look now. If your repository already has the Packagist webhook installed, drop the `publish` slot
-entirely and let the tag be the whole release.
+You have nothing to upload. Packagist reads the repository and its tags, so the publish stage is at most a webhook
+telling it to look now. Drop the `publish` slot entirely if your repository already has the Packagist webhook
+installed. The tag becomes the whole release.
 
-`{name}/v{version}` puts the package name in the tag, which is what makes per-package tags in a monorepo readable and
-what a Composer monorepo split tool expects.
+The `{name}/v{version}` format puts the package name in the tag. This makes per-package tags in a monorepo readable. It
+is also what a Composer monorepo split tool expects.
 
 ## A release
 
@@ -51,11 +51,11 @@ $ dispat autoversion
 12:44:57 INF auto-versioning finished failed=0 ran=2 skipped=0 stage=autoversion
 ```
 
-`versionWritten=false` is the normal and correct outcome here. A `composer.json` usually declares no `version` field,
-because Composer derives it from the tag, and dispat writes a version field only where one exists. `core` produced no
-line at all: nothing in its manifest needed changing.
+Expect to see `versionWritten=false` as the normal and correct outcome here. A `composer.json` usually declares no
+`version` field because Composer derives it from the tag. dispat writes a version field only where one exists.
 
-The constraint in the consumer did move:
+The `core` package produced no line at all because nothing in its manifest needed changing. Check the consumer to see
+the updated constraint:
 
 ```json
 {
@@ -70,9 +70,8 @@ The constraint in the consumer did move:
 
 ## What dispat reads and writes
 
-The name is the `name` field, `vendor/package`. `require` becomes dependencies and `require-dev` becomes dev
-dependencies, and platform requirements are skipped, because `php` and `ext-mbstring` are not packages anybody
-publishes:
+dispat reads the `name` field as `vendor/package`. It maps `require` to dependencies and `require-dev` to dev
+dependencies. It skips platform requirements because nobody publishes `php` or `ext-mbstring` as packages.
 
 ```console
 $ dispat scanner
@@ -83,24 +82,24 @@ packages/web/composer.json  composer  acme/web
 1 manifest(s), 3 dependency declaration(s)
 ```
 
-The identity line carries no `@version` because this manifest declares none. Writes go to both `require` sections, and
-to the `version` field only if the file already has one.
+Look at the identity line. It carries no `@version` because this manifest declares none. dispat writes to both
+`require` sections, and it updates the `version` field only if the file already has one.
 
 ## Worth knowing
 
-- **A tag is permanent in practice.** Packagist caches what it saw; moving a tag after the fact is how you get two
-  different archives with one version number. Fix forward instead.
-- **`composer.lock` belongs to applications, not libraries.** If a deployable application in the repository commits
-  one, add `composer update --lock` as a [`syncLock`](../configuration/autoversion.md) script so it follows the
-  manifest.
-- **Path repositories are for development.** A `"repositories": [{"type": "path", ...}]` entry pointing next door must
-  not reach a tag; the [`--verify-unlinked` gate](../editing/manifests.md#verifying-the-tree) catches the manifest
-  formats dispat links, and a `dispat if` check catches the rest.
-- **Branch aliases are unnecessary here.** Every release is a real version on a real tag, which is what
-  `^1.3.0` resolves against.
+- **A tag is permanent in practice.** Packagist caches what it saw. Moving a tag creates two different archives with
+  one version number, so fix forward instead.
+- **`composer.lock` belongs to applications, not libraries.** Add `composer update --lock` as a
+  [`syncLock`](../configuration/autoversion.md) script if a deployable application in the repository commits one. This
+  ensures the lockfile follows the manifest.
+- **Path repositories are for development.** Prevent a `"repositories": [{"type": "path", ...}]` entry pointing next
+  door from reaching a tag. The [`--verify-unlinked` gate](../editing/manifests.md#verifying-the-tree) catches the
+  manifest formats dispat links. Use a `dispat if` check to catch the rest.
+- **Branch aliases are unnecessary here.** Every release is a real version on a real tag. This is what `^1.3.0`
+  resolves against.
 
 ## See also
 
-- [A Go module workspace](./go.md) for the other ecosystem where the tag is the whole publish.
-- [Release records](../configuration/records.md) for pushing tags and writing the changelog.
-- [Commit message reference](../reference/commits.md) for scopes, propagation and channels.
+- [A Go module workspace](./go.md) shows the other ecosystem where the tag is the whole publish.
+- [Release records](../configuration/records.md) explains pushing tags and writing the changelog.
+- [Commit message reference](../reference/commits.md) covers scopes, propagation, and channels.

@@ -1,7 +1,7 @@
 # Unity
 
 A Unity project keeps its version in `ProjectSettings/ProjectSettings.asset` and its dependencies in
-`Packages/manifest.json`. dispat reads and writes both, so a Unity game releases the same way an npm package does: one
+`Packages/manifest.json`. dispat reads and writes both. A Unity game releases the same way an npm package does: one
 command, one version, one tag.
 
 ## The short version
@@ -23,9 +23,9 @@ command, one version, one tag.
 }
 ```
 
-`manifests: all` is what reaches `ProjectSettings/ProjectSettings.asset`, because it sits one folder down from the
-package rather than directly in it. Nothing else is needed. Commit a feature, run `dispat`, and the version in the
-settings file, the git tag and the changelog all say the same thing.
+Use `manifests: all` to reach `ProjectSettings/ProjectSettings.asset`. The file sits one folder down from the package
+rather than directly in it. Commit a feature and run `dispat`. The settings file, the git tag, and the changelog will
+all show the same version.
 
 ```console
 $ git commit -m "feat(game): co-op lobby"
@@ -46,8 +46,8 @@ $ dispat
 | `AndroidBundleVersionCode` | the build counter | `--set-build` |
 | `buildNumber` (per platform) | the build counter, when there is no Android one | `--set-build` |
 
-The file is YAML, but not YAML any library will parse: Unity writes its own tag directive and tags the document with a
-class id.
+The file is YAML, but standard libraries cannot parse it. Unity writes its own tag directive and tags the document with
+a class id.
 
 ```yaml
 %YAML 1.1
@@ -62,13 +62,12 @@ PlayerSettings:
   AndroidBundleVersionCode: 7
 ```
 
-A conforming YAML parser refuses `!u!129`, which would mean refusing every real Unity project, so dispat reads the
-file by line instead. Only the settings one level in are read, so the nested mappings below them cannot leak a version
-into the answer.
+A conforming YAML parser refuses `!u!129`. dispat reads the file by line instead, so it can parse any real Unity
+project. It only reads settings one level deep, so nested mappings cannot leak a version into the answer.
 
 ### `Packages/manifest.json`
 
-Every entry is a dependency, in whichever of the three forms Unity accepts:
+Every entry is a dependency. dispat accepts all three forms Unity uses:
 
 ```json
 {
@@ -80,36 +79,36 @@ Every entry is a dependency, in whichever of the three forms Unity accepts:
 }
 ```
 
-All three are kept exactly as written. The `file:` form also tells dispat the folder it points at, which is what makes
-an embedded package part of the workspace graph: release `com.acme.core` and the project consuming it releases after.
+dispat keeps all three exactly as written. The `file:` form tells dispat which folder it points at. This makes an
+embedded package part of the workspace graph. Release `com.acme.core`, and the project consuming it releases next.
 
-The manifest declares no name and no version of its own. It says what the project consumes, not what it is.
+The manifest declares no name and no version of its own. It lists what the project consumes.
 
 ## Build numbers for the stores
 
-Google Play and the App Store order uploads by an integer counter, not by the version players see. `--set-build`
-writes that counter and nothing else:
+Google Play and the App Store order uploads by an integer counter. They ignore the version players see. Run
+`--set-build` to write that counter and nothing else:
 
 ```console
 $ dispat writer --set-build "$GITHUB_RUN_NUMBER" game/ProjectSettings/ProjectSettings.asset
 ```
 
-Every counter in the file moves, not the first one. A project shipping to Steam, the App Store and Google Play from
-one settings file has three, and stamping one of them would upload two builds the stores order wrongly.
+Every counter in the file moves. A project shipping to Steam, the App Store, and Google Play from one settings file has
+three counters. Stamping only one of them would upload two builds with the wrong store order.
 
-The counter must be an integer, because that is what the stores parse. A version string is refused before the file is
-opened rather than written and discovered at upload time.
+Pass an integer for the counter. The stores require it, so dispat enforces it. Passing a version string fails before
+the file opens, saving you from an upload error later.
 
-A version write never touches a counter, and a build write never touches the version. They move for different reasons,
-so they are separate commands.
+A version write never touches a counter. A build write never touches the version. They move for different reasons, so
+you use separate commands for each.
 
 ## Unity packages
 
-A UPM package is an npm package: same `package.json`, same fields, same registry protocol. dispat reads it with its
-npm reader, so a repository of Unity packages needs nothing special.
+A UPM package is an npm package. It uses the same `package.json`, the same fields, and the same registry protocol.
+dispat reads it with its npm reader. A repository of Unity packages needs no special setup.
 
-One thing is worth setting. UPM resolves an exact version and nothing else, so a caret range would leave a project
-that will not open:
+Set the range policy to exact. UPM resolves an exact version and nothing else. A caret range leaves a project that
+fails to open:
 
 ```json title="dispat.json"
 {
@@ -122,27 +121,27 @@ that will not open:
 }
 ```
 
-Ranges written into `Packages/manifest.json` are always pinned, whatever the policy says, for the same reason.
+Ranges written into `Packages/manifest.json` are always pinned. dispat ignores the policy here to keep the project
+working.
 
 ## What dispat leaves alone
 
-`ProjectSettings/ProjectVersion.txt` pins the editor version. That is a toolchain choice rather than something the
-project ships, so dispat never reads or writes it.
+`ProjectSettings/ProjectVersion.txt` pins the editor version. This is a toolchain choice. dispat never reads or writes
+it.
 
-`Packages/packages-lock.json` is a lock file. dispat does not write lock files in any ecosystem; the `syncLock` hook
-is where you run the tool that owns yours.
+`Packages/packages-lock.json` is a lock file. dispat does not write lock files in any ecosystem. Run the tool that owns
+yours in the `syncLock` hook.
 
 ## The folders dispat stays out of
 
-`Library/` is Unity's `node_modules`. Its `PackageCache` holds a real `package.json` for every resolved package, and a
-scan that read them would report a few hundred third-party packages as members of your workspace. dispat never
-descends into it, nor into `Temp`, `Logs`, `UserSettings`, `MemoryCaptures` or `Builds`.
+`Library/` is Unity's `node_modules`. Its `PackageCache` holds a real `package.json` for every resolved package, which
+would flood your workspace with third-party packages if scanned. dispat never descends into `Library/`, `Temp`, `Logs`,
+`UserSettings`, `MemoryCaptures`, or `Builds`.
 
-If your repository has a source folder named `Library` or `Builds`, move it or rename it: manifests inside will not be
-found.
+Rename any source folder called `Library` or `Builds`. dispat will not find manifests inside them.
 
 ## Where to go next
 
-- [Games](./game.md) for a repository that grows past one project.
-- [Godot](./godot.md) and [Unreal](./unreal.md) for the other engines.
-- [Auto-versioning](../configuration/autoversion.md) for what `manifests` and `range` do in full.
+- Read [Games](./game.md) when your repository grows past one project.
+- See [Godot](./godot.md) and [Unreal](./unreal.md) for the other engines.
+- Read [Auto-versioning](../configuration/autoversion.md) to see what `manifests` and `range` do in full.

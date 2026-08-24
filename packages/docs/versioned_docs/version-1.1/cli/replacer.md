@@ -1,23 +1,27 @@
 # The replacer command
 
-`dispat replacer <file>...` applies each `--replace 'find=>write'` to each named file, in the order given and to every
-occurrence, parsing nothing. It is the tool for the versions no manifest holds: a Gradle coordinate, a Helm chart,
-a README example. A pattern that matched nothing anywhere fails only under `--strict`; a file that cannot be read, or
-that looks binary, exits `1`.
+Run `dispat replacer <file>...` to change literal text across your files. Pass `--replace 'find=>write'` to swap every
+occurrence of a string without parsing the file format, and repeat the flag to apply multiple replacements in order.
+Use this for versions that live outside standard manifests, like a Gradle coordinate, a Helm chart, or a README
+example.
 
-`dispat scanner`, `dispat writer` and `dispat replacer` expose the manifest libraries directly: the first prints what a
-folder's manifests declare, the second edits a declaration in place while preserving the file's formatting, and the
-third replaces literal text in any file at all. All three need no config file, no git repository and no release plan,
-so they work on any checkout. Positional paths resolve against `--root`, and `--log-format json` swaps each command's
-listing for one event per file.
+The command exits `1` if a file cannot be read or looks binary. If a pattern matches nothing, the command succeeds
+unless you pass `--strict`.
+
+The `dispat scanner`, `dispat writer`, and `dispat replacer` commands expose the manifest libraries directly.
+`dispat scanner` prints what a folder's manifests declare, `dispat writer` edits a declaration in place while
+preserving formatting, and `dispat replacer` changes literal text anywhere. You do not need a config file, a git
+repository, or a release plan to run them on any checkout.
+
+Positional paths resolve against `--root`. Pass `--log-format json` to swap the default listing for one event per file.
 
 The replacer has [a page of its own](../editing/replacer.md).
 
 ## Flags
 
-Beside the [global flags](./README.md#global-flags):
+These apply alongside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--replace`               |             | `replacer` and `autoreplacer`: replace literal text, `find=>write`; repeatable and applied in order. See [The replacer](../editing/replacer.md). |
-| `--strict`            |             | Turns a tolerated finding into a failure. `scanner`, `writer` and `replacer`: a manifest that failed to parse, an edit the manifest does not declare, or a `--replace` that matched nothing. |
+| `--replace`           |             | Use with `replacer` and `autoreplacer` to replace literal text using `find=>write`. You can repeat this flag to apply multiple replacements in order. See [The replacer](../editing/replacer.md). |
+| `--strict`            |             | Turn a tolerated finding into a failure. For `scanner`, `writer`, and `replacer`, this fails the command if a manifest fails to parse, an edit targets a missing declaration, or a `--replace` matches nothing. |

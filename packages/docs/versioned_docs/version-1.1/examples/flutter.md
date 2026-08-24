@@ -1,7 +1,7 @@
 # A Flutter app and its packages
 
-Dart packages published to pub.dev and a Flutter app built from them, with the app's build number handled separately
-from its version.
+Build a Flutter app from Dart packages published to pub.dev. dispat manages the app's build number separately from its
+version.
 
 ## The layout
 
@@ -11,9 +11,9 @@ apps/app/pubspec.yaml         acme_app 0.4.1+41, depends on acme_core
 dispat.json
 ```
 
-`0.4.1+41` is two numbers in one string. `0.4.1` is the version, and `+41` is the build number the stores use to tell
-one upload from another. dispat treats them as what they are: the release moves the version, and a separate write
-moves the counter.
+`0.4.1+41` is two numbers in one string. The version is `0.4.1`, and `+41` is the build number the stores use to tell
+one upload from another. dispat treats them as what they are. The release moves the version, and a separate write moves
+the counter.
 
 ## The configuration
 
@@ -39,13 +39,13 @@ moves the counter.
 }
 ```
 
-Two spaces because the two halves ship differently. A package is published to pub.dev; an app is built into a bundle
-and handed to a store. They still sit in one graph, so the app's `acme_core` constraint is reconciled before it
-builds.
+You define two spaces because the two halves ship differently. You publish a package to pub.dev, and you build an app
+into a bundle for a store. They still sit in one dependency graph, so dispat reconciles the app's `acme_core`
+constraint before it builds.
 
-`set-build` runs in `flow.beforeBuild`, after the version stage has written the new version and before the bundle is
-produced. That order matters: the version write preserves the existing build number, and this script then replaces it
-with the CI run number.
+The `set-build` script runs in `flow.beforeBuild`, after the version stage writes the new version and before the bundle
+is produced. That order matters. The version write preserves the existing build number, and this script then replaces
+it with the CI run number.
 
 ## A release
 
@@ -63,8 +63,8 @@ $ dispat autoversion
 12:45:22 INF auto-versioning finished failed=0 ran=2 skipped=0 stage=autoversion
 ```
 
-`W192` says the manifest and the tags disagreed, and that the tags won. It appears on every Flutter app whose version
-carries a build suffix, because `0.4.1+41` is not the same string as the baseline `0.4.1`. Nothing is lost: the
+The `W192` code says the manifest and the tags disagreed, and the tags won. You see this on every Flutter app whose
+version carries a build suffix, because `0.4.1+41` is not the same string as the baseline `0.4.1`. Nothing is lost. The
 counter survives the write.
 
 ```yaml title="apps/app/pubspec.yaml, after the version stage"
@@ -97,12 +97,13 @@ packages/core/pubspec.yaml  pub  acme_core@1.2.0
 2 manifest(s), 4 dependency declaration(s)
 ```
 
-The identity is `name` and `version`, with the `+N` suffix reported separately as `build 41`. `dependencies` and
-`dev_dependencies` are read, and `dependency_overrides` are folded in. A dependency written as a block rather than a
-string, `flutter: {sdk: flutter}` or a `git:` entry, has no version to show and none to write, so it appears with an
-empty range and is skipped by writes.
+The identity is `name` and `version`, with the `+N` suffix reported separately as `build 41`. dispat reads
+`dependencies` and `dev_dependencies`, and it folds `dependency_overrides` in. A dependency written as a block rather
+than a string has no version to show and none to write. This applies to `flutter: {sdk: flutter}` or a `git:` entry, so
+they appear with an empty range and dispat skips them during writes.
 
-Local development against the package next door uses the same `dependency_overrides`, written and removed for you:
+Run these commands for local development against a neighbouring package. dispat writes and removes the same
+`dependency_overrides` for you:
 
 ```sh
 dispat autowriter --since all --link-local     # path overrides in
@@ -115,13 +116,13 @@ way never to have that conversation.
 
 ## Worth knowing
 
-- **The store build number must only ever increase.** `$GITHUB_RUN_NUMBER` is monotonic per workflow and costs
-  nothing; a value derived from the version is fine too, as long as it never goes backwards. Android additionally
+- **The store build number must only ever increase.** The `$GITHUB_RUN_NUMBER` variable is monotonic per workflow and
+  costs nothing. A value derived from the version is fine too, as long as it never goes backwards. Android additionally
   requires an integer, and dispat refuses a value that is not one before touching the file.
-- **`dart pub publish` is final.** A published version can be retracted for 7 days but never replaced.
+- **`dart pub publish` is final.** You can retract a published version for 7 days, but you can never replace it.
 - **`--force` skips the confirmation prompt.** A stage has no terminal, so an interactive publish hangs the run.
-- **`pubspec_overrides.yaml` is not read.** dispat writes overrides into the pubspec itself, which is the file both
-  the tooling and the reader agree on.
+- **`pubspec_overrides.yaml` is not read.** dispat writes overrides into the pubspec itself. This is the file both the
+  tooling and the reader agree on.
 
 ## See also
 

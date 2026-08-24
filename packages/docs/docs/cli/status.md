@@ -1,25 +1,25 @@
 # The status command
 
-`dispat status` plans and prints the graph with computed version bumps, then exits. Nothing is executed, tagged or
-written. It takes the release's own selection flags.
+Run `dispat status` to plan and print the graph with its computed version bumps. dispat exits without executing,
+tagging, or writing anything. You can pass the same selection flags that a release takes.
 
-The plan is computed for the whole repository and narrowed exactly as a release would narrow it, so the graph shows
-what `dispat release` with the same flags is about to do; see
-[Releasing part of the graph](./release.md#releasing-part-of-the-graph) for the selection rules and what `--strict`
-refuses. What `status` exits with is in [Exit codes](./README.md#exit-codes).
+dispat computes the plan for the whole repository and narrows it exactly as a release would. This means the printed
+graph shows exactly what `dispat release` will do with the same flags. See
+[Releasing part of the graph](./release.md#releasing-part-of-the-graph) for selection rules and `--strict` refusals,
+and [Exit codes](./README.md#exit-codes) for exit values.
 
-Because it computes the same plan a release does and touches nothing, it is also the first thing to reach for when a
-release refuses to start: every diagnostic a release would raise appears here first, as many times as you care to run
-it. [Diagnostic codes](../reference/plan-errors.md) walks through what each of them means.
+Run this command first when a release refuses to start. Every diagnostic a release would raise appears here, and you
+can run it safely as many times as you need. Read [Diagnostic codes](../reference/plan-errors.md) to understand what
+each error means.
 
 ## Flags
 
-Beside the [global flags](./README.md#global-flags):
+You can use these flags alongside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--strict`            |             | Turns a tolerated finding into a failure. `release` and `status`: a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; see [Releasing part of the graph](./release.md#releasing-part-of-the-graph). |
-| `--require-release`   |             | `release` and `status`: exit `3` when the plan releases nothing, apart from exit `1`'s failures, for the CI stage whose point is that this run publishes something. The graph is printed first, so the refusal comes with the plan that explains it. Only packages this run will actually publish count, and a held, withheld or unselected one does not; see [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan). |
+| Flag | Default | Effect |
+|---|---|---|
+| `--package`, `-p` | | Narrows the plan to the named packages. You can repeat this flag, pass a comma-separated list, and use `*` globs (`-p '*'` selects every package). dispat matches names case-insensitively across every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). See [Choosing the packages](./run.md#choosing-the-packages). |
+| `--space`, `-s` | | Narrows the plan to every package in the named spaces. You can use the same spelling rules and globs as `--package` across the same eleven commands. A standalone package belongs to no space. See [Choosing the packages](./run.md#choosing-the-packages). |
+| `--group`, `-g` | | Narrows the plan to every package in the named [versioning groups](../reference/releasing/versioning.md). You can use the same spelling rules across the same eleven commands. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces. See [Choosing the packages](./run.md#choosing-the-packages). |
+| `--strict` | | Turns a tolerated finding into a failure for `release` and `status`. dispat refuses the plan before anything is published if it cannot release your selection as it stands. This happens if a package is waiting for its providers or if you split a versioning group. See [Releasing part of the graph](./release.md#releasing-part-of-the-graph). |
+| `--require-release` | | Forces `release` and `status` to exit `3` if the plan releases nothing, distinct from exit `1` for failures. Use this for a CI stage that must publish something. dispat prints the graph first so you see the plan that explains the refusal. Only packages this run will actually publish count, while held, withheld, or unselected packages do not. See [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan). |

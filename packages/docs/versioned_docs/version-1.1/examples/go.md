@@ -1,7 +1,7 @@
 # A Go module workspace
 
-Several Go modules in one repository, released in dependency order. Go has no registry to publish to, so the tag *is*
-the release, which makes this the shortest setup on the site.
+Keep several Go modules in one repository, and release them in dependency order. Go has no registry to publish to, so
+the tag *is* the release. This makes a Go workspace the shortest setup on the site.
 
 ## The layout
 
@@ -35,22 +35,22 @@ dispat.json
 }
 ```
 
-There is no `publish` script. A Go module is fetched from a git tag, so once the tag exists the version is available;
-`dispat commit --tag --push`, or the [release commit](../configuration/records.md) doing it for you, is the whole
-publish. `autoVersion` keeps the `require` lines pointing at the versions this run produced, and `tidy` makes `go.sum`
-follow.
+You do not write a `publish` script because a Go module is fetched directly from a git tag. Run
+`dispat commit --tag --push` to finish the release, or let the [release commit](../configuration/records.md) do it for
+you. The `autoVersion` field keeps the `require` lines pointing at the versions this run produced, and `tidy` updates
+`go.sum` to match.
 
 ## The tag format matters here
 
-`{name}/v{version}` is not decoration. The go tool finds a module in a subdirectory only under a tag prefixed with that
-subdirectory, so a module at `packages/core` must be tagged `packages/core/v0.1.0`. Name your packages after their
-folders and the format above produces exactly that. dispat's own Go modules use
-`"tagFormat": "pkg/{name}/v{version}"` for the same reason.
+The `{name}/v{version}` format is not decoration. The go tool finds a module in a subdirectory only under a tag
+prefixed with that subdirectory, so a module at `packages/core` must be tagged `packages/core/v0.1.0`. Name your
+packages after their folders to produce exactly that format, just as dispat uses `"tagFormat": "pkg/{name}/v{version}"`
+for its own modules.
 
 ## Letting dispat read the graph
 
-`go.mod` already says that `api` requires `core`. [`dispat compute`](../cli/compute.md) turns that into configuration
-instead of you writing it out:
+Your `go.mod` already says that `api` requires `core`. Run [`dispat compute`](../cli/compute.md) to turn that into
+configuration instead of writing it out yourself:
 
 ```console
 $ dispat compute --write
@@ -59,7 +59,7 @@ $ dispat compute --write
 applied 1 change(s) to dispat.json (previous copies carry the .backup suffix)
 ```
 
-From then on the plan is ordered, and `api` waits for `core`:
+The plan is ordered from then on, and `api` waits for `core`:
 
 ```console
 $ git commit -m "feat(core): typed client options"
@@ -72,8 +72,8 @@ $ dispat status
 
 ## What dispat reads and writes
 
-The scanner reads the module path as the name, every `require` as a dependency, and a relative `replace` as a link to
-a folder. `go.mod` declares no version of its own, which is why the identity line below carries no `@version`:
+The scanner reads the module path as the name, every `require` as a dependency, and a relative `replace` as a link to a
+folder. A `go.mod` file declares no version of its own. This is why the identity line below carries no `@version`:
 
 ```console
 $ dispat scanner
@@ -84,7 +84,7 @@ services/api/go.mod  gomod  github.com/acme/api
 2 manifest(s), 2 dependency declaration(s)
 ```
 
-Writing goes through the same module parser the go tool uses, so a `require` block keeps its grouping and its comments:
+dispat writes through the same module parser the go tool uses. A `require` block keeps its grouping and its comments:
 
 ```console
 $ dispat writer services/api/go.mod --set github.com/acme/core=v1.3.0
@@ -93,15 +93,15 @@ services/api/go.mod
 1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
-Two rules are Go's rather than dispat's. Ranges do not exist in `go.mod`, so a `caret` or `tilde` policy still writes
-the exact canonical `vX.Y.Z`. And a requirement that is not already there is never added, because adding one is
+Two rules belong to Go rather than dispat. Ranges do not exist in `go.mod`, so a `caret` or `tilde` policy still writes
+the exact canonical `vX.Y.Z`. dispat never adds a requirement that is not already there, because adding one is
 `go get`'s job and it has a `go.sum` to update.
 
 ## Building against the working tree
 
-To compile a service against the copy of the library next door rather than a published version, write a `replace` and
-take it away again afterwards. [`dispat autowriter`](../editing/autowriter.md) does both across every package the plan
-covers:
+Write a `replace` directive to compile a service against the copy of the library next door rather than a published
+version, and take it away again afterwards. Run [`dispat autowriter`](../editing/autowriter.md) to do both across every
+package the plan covers:
 
 ```json title="dispat.json (the link bracket)"
 {
@@ -113,23 +113,24 @@ covers:
 }
 ```
 
-`replace` directives must never reach a tag: a consumer fetching the module would get a path that does not exist on
-their machine. Run `verify` before the release and a leftover link fails the run with code `E215` instead of shipping.
+A `replace` directive must never reach a tag, because a consumer fetching the module would get a path that does not
+exist on their machine. Run `verify` before the release. A leftover link fails the run with code `E215` instead of
+shipping.
 
 ## Worth knowing
 
-- **Major versions past v1 change the module path.** `v2` means the path becomes `github.com/acme/core/v2`, in the
-  module line and in every consumer's `require`. dispat writes the versions; moving the path is a source change you
-  make in the commit that breaks the API.
-- **`go mod tidy` runs after the version stage, not before.** That is what `syncLock` is for: the manifest is already
+- **Major versions past v1 change the module path.** A `v2` release means the path becomes `github.com/acme/core/v2` in
+  the module line and in every consumer's `require`. dispat writes the versions, but moving the path is a source change
+  you make in the commit that breaks the API.
+- **`go mod tidy` runs after the version stage, not before.** This is what `syncLock` is for. The manifest is already
   reconciled when the command runs, so it only refreshes `go.sum`.
-- **Indirect requirements are left alone.** The scanner keeps them apart from the module's own declarations, because
-  the toolchain owns them.
-- **Nothing publishes if the tag is not pushed.** Check `commit.push` in
+- **Indirect requirements are left alone.** The scanner keeps them apart from the module's own declarations because the
+  toolchain owns them.
+- **Nothing publishes if the tag is not pushed.** Set `commit.push` in your
   [release records](../configuration/records.md), or push the tags in the job that runs dispat.
 
 ## See also
 
-- [Manifest tools](../editing/manifests.md) for the scanner and writer on their own.
-- [`dispat compute`](../cli/compute.md) for deriving the graph and the starting versions.
-- [Pipeline patterns](../reference/pipelines.md) for the working-tree link bracket in a CI job.
+- Read [Manifest tools](../editing/manifests.md) to use the scanner and writer on their own.
+- Run [`dispat compute`](../cli/compute.md) to derive the graph and the starting versions.
+- Check [Pipeline patterns](../reference/pipelines.md) for the working-tree link bracket in a CI job.

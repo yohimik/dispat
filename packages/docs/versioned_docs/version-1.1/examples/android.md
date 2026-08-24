@@ -1,11 +1,11 @@
 # An Android app
 
-Releasing an Android app from a monorepo: Gradle builds driven by the computed version, a monotonic `versionCode`, and
-a bundle attached to the GitHub release.
+You can release an Android app from a monorepo using Gradle builds driven by the computed version. This setup requires
+a monotonic `versionCode` and attaches a bundle to the GitHub release.
 
-Gradle projects fit the same build and publish slots as every other ecosystem. The version travels through environment
-variables into Gradle properties, and the "publish" of an app is whatever your delivery is: a Play upload, an artifact
-repository, an APK attached to a GitHub release.
+Gradle projects fit the same build and publish slots as every other ecosystem. Pass the version through environment
+variables into your Gradle properties. The publish step for an app is whatever your delivery requires, like a Play
+upload, an artifact repository, or an APK attached to a GitHub release.
 
 ```json
 {
@@ -25,14 +25,14 @@ repository, an APK attached to a GitHub release.
 }
 ```
 
-Two Gradle-specific notes:
+Keep two Gradle-specific details in mind:
 
-- Scripts run inside the package folder (here `android/<app>`), so a Gradle wrapper at the repository root sits two
-  levels up: `../../gradlew`.
-- `versionCode` must be a monotonically increasing integer. A simple derivation from the semantic version:
-  `-PversionCode=$((MAJOR * 10000 + MINOR * 100 + PATCH))` computed in the script from `$DISPAT_NEW_VERSION`.
+- Scripts run inside the package folder, which is `android/<app>` in this example. Call the Gradle wrapper at the
+  repository root by going two levels up with `../../gradlew`.
+- The `versionCode` must be a monotonically increasing integer. Derive this directly from the semantic version in your
+  script. Compute `-PversionCode=$((MAJOR * 10000 + MINOR * 100 + PATCH))` using `$DISPAT_NEW_VERSION`.
 
-To attach the built bundle to the GitHub release instead, export it as an asset from the build script:
+Attach the built bundle to the GitHub release by exporting it as an asset from the build script:
 
 ```sh
 echo "DISPAT_EXPORT_GITHUB=$PWD/app/build/outputs/bundle/release/app-release.aab" >> "$DISPAT_OUTPUT"

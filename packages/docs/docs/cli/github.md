@@ -1,42 +1,46 @@
 # The github command
 
-`dispat github` creates each covered package's GitHub release, exactly what the release pipeline's own recorder
-would create: the release named after the package tag (or after
-[`releaseName`](../configuration/records.md#your-own-words-around-an-entry)), its body the rendered changelog
-sections. A release the
-repository already carries is a skip (`W224`), so a repeated invocation, and the release that follows one, converge
-instead of failing on the API's duplicate-tag rejection.
+Run `dispat github` to create a GitHub release for each covered package. It creates exactly what the release pipeline's
+recorder would create: a release named after the package tag, or after
+[`releaseName`](../configuration/records.md#your-own-words-around-an-entry), with the rendered changelog sections as
+its body. If the repository already has the release, dispat skips it and logs `W224`. This means a repeated run, and
+the release that follows it, converge instead of failing when the API rejects a duplicate tag.
 
-The opt-in is the one the recorder uses: a package is released when its scripts exported
-[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs), or when
-[`github.allPackages`](../configuration/records.md#github) covers it. Run inside a stage script, the command reads that
-export out of its own environment (the stage handed it over, along with `DISPAT_PACKAGE` naming whose it is) and
-attaches the files it lists. Run by hand with the variable exported, it covers every package the invocation selects.
-Without either opt-in the command publishes nothing, and says so with exit `0`.
+You opt in exactly as you do for the recorder. dispat releases a package when its scripts export
+[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs) or when
+[`github.allPackages`](../configuration/records.md#github) covers it.
 
-It covers its packages one at a time, since a repository has one index and one HEAD, and a release order is worth reading.
+When you run this inside a stage script, dispat reads that export from its environment and attaches the listed files.
+The stage provides this environment along with `DISPAT_PACKAGE` to identify the package. If you run the command by hand
+with the variable exported, it covers every package your invocation selects. Without either opt-in, the command
+publishes nothing and exits with `0`.
+
+The command covers packages one at a time. A repository has one index and one HEAD, and a clear release order is worth
+reading.
 
 ## The selection it shares
 
 `dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
-steps to custom flows. A stage script can run a step at the moment the flow needs it, and the release stage later
-finds the work done and skips it.
+steps to custom flows. You can run a step from a stage script exactly when your flow needs it. The release stage later
+sees the work is done and skips it.
 
-All four share the run command's [selection](./run.md#choosing-the-packages) *and* its window. With no terms they cover
-every releasing package in dependency order. `--package`, `--space`, `--group` or the invocation folder narrows that,
-`--since` replaces the window, `--consumers` expands it downstream, and `--on-error` decides what a failed package does
-to its dependents.
+All four commands share the run command's [selection](./run.md#choosing-the-packages) *and* its window. Run them with
+no terms to cover every releasing package in dependency order. You can narrow this with `--package`, `--space`,
+`--group`, or the invocation folder. You can also replace the window with `--since`, expand it downstream with
+`--consumers`, and handle failures with `--on-error`.
 
-Two rules about what a selection may contain. A term matching no package is an error. A *selected* package that is not
-releasing is a logged no-op, so a flow never fails over a converged or held package. That second rule is also why a
-step run after `dispat commit --tag` covers nothing until `--since all` puts the tagged package back on the table.
+A selection follows two rules. First, a term matching no package is an error. Second, a *selected* package that is not
+releasing becomes a logged no-op, so your flow never fails over a converged or held package.
 
-The four command words are reserved. Like every command name, each wins the `dispat <script>` shorthand over a
-[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so `dispat commit` is always the command.
-Spelling it out as `dispat run commit` still reaches the script.
+This second rule explains why a step run after `dispat commit --tag` covers nothing. You must use `--since all` to put
+the tagged package back on the table.
 
-Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
-[flags table](#flags).
+These four command words are reserved. Like every command name, they win the `dispat <script>` shorthand over a
+[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name. This means `dispat commit` always runs
+the command, but you can reach a script named commit by spelling it out as `dispat run commit`.
+
+Every config value these commands consume is also a flag. You can override the config for a single run using the
+options in the [flags table](#flags).
 
 ## Flags
 
@@ -44,12 +48,12 @@ Beside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--since`             |             | The same seven commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
-| `--consumers`         |             | The same seven commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
-| `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
-| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `github`: override the matching `github.*` values for every package of the invocation.  |
-| `--target`            |             | `github` only: create the tag at this commit or branch (`target_commitish`). Only safe once the commit is on the remote.   |
-| `--release-name`      | from config | `changelog` and `github`: override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for the invocation. `$VAR` and `${VAR}` expand as they do in the config. |
+| `--package`, `-p`     |             | Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and comma-separated. It matches case-insensitively and accepts `*` globs (`-p '*'` covers every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
+| `--space`, `-s`       |             | Narrow the same eleven commands to every package in the named spaces. This accepts the same spellings and globs as the package flag. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
+| `--group`, `-g`       |             | Narrow the same eleven commands to every package in the named [versioning groups](../reference/releasing/versioning.md). This accepts the same spellings and globs. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
+| `--since`             |             | Cover the packages modified by commits since a specific git revision. This applies to the same seven commands and replaces the release window. Pass `all` to cover every package; see [the run command](./run.md).                |
+| `--consumers`         |             | Expand the selection downstream for the same seven commands. This covers every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
+| `--on-error`          | `skip`      | Decide what a failed package does to its dependents for every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` (transitive) or `continue`. The command exits `1` on any failure regardless of this setting.                                         |
+| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | Override the matching `github.*` values for every package in the `github` command invocation.  |
+| `--target`            |             | Push the commit to the remote before you use this. It tells the `github` command to create the tag at this commit or branch (`target_commitish`).   |
+| `--release-name`      | from config | Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for the `changelog` and `github` commands. Environment variables like `$VAR` and `${VAR}` expand exactly as they do in the config. |

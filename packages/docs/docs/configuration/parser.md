@@ -1,72 +1,72 @@
 # Commit parsing options
 
-How commit messages are parsed and what an error in one does to the run. The message format itself is in the
+Read how dispat parses commit messages and handles errors. You can find the message format in the
 [commit message reference](../reference/commits.md).
 
 ## `commitErrors`
 
-What an error in a commit message does to the run.
+This setting controls how dispat handles a commit message error.
 
 | Value              | Effect                                                                                                    |
 |--------------------|-----------------------------------------------------------------------------------------------------------|
-| `warn` *(default)* | The offending unit contributes nothing and the run continues. Other units in the same commit still apply. |
-| `error`            | Any commit error stops the run before anything is built, published or tagged.                             |
+| `warn` *(default)* | The offending unit contributes nothing, but the run continues. Other units in the same commit still apply. |
+| `error`            | Any commit error stops the run before dispat builds, publishes, or tags anything.                             |
 
-`warn` is the blast radius the spec assigns to unit- and message-scoped errors: a malformed header or a scope naming an
-unknown package is an authoring mistake in *one unit*, and the rest of the history is unaffected. `error` is the
-stricter reading, and the one to choose when a mistyped scope silently dropping a package from a release is the worse
-failure of the two.
+The spec assigns `warn` as the blast radius for unit-scoped and message-scoped errors. A malformed header or a scope
+naming an unknown package is an authoring mistake in *one unit*, so the rest of the history remains unaffected. Choose
+the stricter `error` reading when a mistyped scope silently dropping a package from a release is the worse failure of
+the two.
 
-Neither value affects **repository-scoped** failures: a prerelease tag with no numeric counter, a computed version that
-would not exceed the baseline, a graduation that would go backwards, a dependency cycle. Those mean no correct plan
-exists, so the run always aborts before releasing anything. They are fixed by correcting the repository (usually a tag)
-and re-running, not by editing a commit.
+Neither value affects **repository-scoped** failures like a dependency cycle or a prerelease tag with no numeric
+counter. A computed version that fails to exceed the baseline or a graduation that goes backwards also means no correct
+plan exists. The run always aborts before releasing anything, so you must fix the repository (usually a tag) and re-run
+instead of editing a commit.
 
-Diagnostics are printed either way, with their code (`E130`, `W193`, ...), the package and the commit, unless
-[`parser.quiet`](#quiet) hides the parser's own, which changes what you read and nothing about what the run does.
+You see diagnostics printed either way with their code (`E130`, `W193`, ...), the package, and the commit. Set
+[`parser.quiet`](#quiet) to hide the parser's own output. This changes what you read but alters nothing about what the
+run does.
 
 ## `nonPackageScopes`
 
-Scope names that are deliberately not packages, so naming one is not the typo the unknown-package error exists to catch.
-A unit scoping only these resolves to nothing, silently and with no diagnostic.
+List scope names that are deliberately not packages. This tells dispat not to flag them as typos with the
+unknown-package error. A unit scoping only these resolves to nothing, silently, and with no diagnostic.
 
-The default is `["release"]`, and it is load-bearing rather than cosmetic. dispat's own release commit is
-`chore(release): {tags}`. Without the exemption, every run in [`commit`](./records.md#commit) mode would leave an error
-behind for the next run to trip over. Under `commitErrors: "error"` that would be a tool that breaks its own repository
-on the second release. Add your own conventions (`deps`, `ci`, ...) as needed; setting it to `[]`
-disables the exemption entirely.
+The default `["release"]` is load-bearing rather than cosmetic. The tool's own release commit is
+`chore(release): {tags}`. Without the exemption, every run in [`commit`](./records.md#commit) mode leaves an error
+behind for the next run to trip over. Under `commitErrors: "error"`, that breaks the repository on the second release.
+Add your own conventions (`deps`, `ci`, ...) as needed, or set it to `[]` to disable the exemption entirely.
 
 ## `parser`
 
-The commit-message parser options. Everything is optional: an absent
-`parser` object (or any unset field) keeps the default, so existing configurations parse exactly as before. An invalid
-value fails the config load, before any planning.
+Configure the commit-message parser options here. Everything is optional. An absent `parser` object or any unset field
+keeps the default, so existing configurations parse exactly as before. An invalid value fails the config load before
+dispat does any planning.
 
-One setting deserves calling out before the table. **`propagation.depth` changes propagation from opt-in to
-on-by-default.** With the default `0`, a plain `feat(core):` releases `core` alone and reach must be written per commit
-(`^`, `^^`, `+N`). With `1`, every bump reaches its direct consumers with no caret written; `all` reaches every
-transitive consumer. A directive on the unit always wins over the default. Teams coming from tools with automatic
-propagation usually want `1` here; teams that want blast radius readable from each commit keep `0`.
+Read about one setting before the table. **`propagation.depth` changes propagation from opt-in to on-by-default.** The
+default `0` means a plain `feat(core):` releases `core` alone, and you must write reach per commit (`^`, `^^`, `+N`).
+Set it to `1` so every bump reaches its direct consumers with no caret written, or use `all` to reach every transitive
+consumer. A directive on the unit always wins over the default. Use `1` if you want automatic propagation, or keep `0`
+if you want blast radius readable from each commit.
 
 | Key                        | Default                            | Description                                                                                                                                                                                                                                                          |
 |----------------------------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `separator`                | `---`                              | The unit separator line. At least three ASCII-printable characters, no whitespace, must not begin like a type. Repositories exchanging patches by mail often use `%%%`.                                                                                              |
-| `types`                    | the standard table                 | Map of commit type → bump (`none`, `patch`, `minor`, `major`). A non-empty map **replaces** the standard table (`feat`=minor, `fix`/`perf`/`revert`=patch, the rest none) wholesale, so list every type you keep. Names are a-z only (viper lowercases keys anyway). |
-| `quiet`                    | `false`                            | Hide the parser's own diagnostics from the log; see [Quiet](#quiet).                                                                                                                                                                                                 |
-| `strictTypes`              | `false`                            | Turn an unknown commit type into an error (E140) instead of a warning; the [`commitErrors`](#commiterrors) policy decides whether that stops the run.                                                                                                                |
-| `lenient`                  | `false`                            | Downgrade selected authoring errors to warnings: an uppercase type is lowercased, a missing space after `:` is accepted, a footer contradicting an inline directive wins.                                                                                            |
-| `maxDescriptionLength`     | `100`                              | The long-description warning threshold, in Unicode scalar values; negative disables it.                                                                                                                                                                              |
-| `propagation.bump`         | `patch`                            | The bump consumers take when a unit propagates without saying which: `none`, `patch`, `minor`, `major` or `inherit` (copy the unit's own bump).                                                                                                                      |
-| `propagation.depth`        | `0`                                | The default propagation depth: a number of edges or `all`. See the note above the table.                                                                                                                                                                             |
-| `propagation.channelDepth` | `0`                                | The channel-axis counterpart: how far a channel travels by default.                                                                                                                                                                                                  |
-| `propagation.kinds`        | all but `devDependencies`          | The dependency edges propagation follows: `dependencies`, `peerDependencies`, `optionalDependencies`, `devDependencies`, or the wildcard `*` for every kind.                                                                                                                                    |
-| `propagation.channel`      | `inherit`                          | The default propagated channel value.                                                                                                                                                                                                                                |
-| `limits.unitsPerMessage`   | `64`                               | Most `---`-separated units one commit message may carry. The three `limits.*` keys are always-enforced parser bounds: exceeding one voids the whole message (E158), and a negative value disables that bound (trusted input only).                                   |
-| `limits.scopeTermsPerUnit` | `256`                              | Most scope terms (names, globs, exclusions) one unit's scope-set may carry.                                                                                                                                                                                          |
-| `limits.messageBytes`      | `1048576`                          | Largest commit message parsed, in bytes (1 MiB).                                                                                                                                                                                                                     |
-| `allowedChannels`          | unrestricted                       | Restrict prerelease channel names (E181 outside the list); `stable` is always accepted.                                                                                                                                                                              |
-| `messageLevelTrailers`     | Signed-off-by, Co-authored-by, ... | Authorship/review trailers ignored wherever they appear. Setting the key replaces the list.                                                                                                                                                                          |
-| `issueTrailers`            | Closes, Fixes, Refs, Resolves      | Issue-reference trailers, ignored for versioning but surfaced for changelogs. Setting the key replaces the list.                                                                                                                                                     |
+| `separator`                | `---`                              | The unit separator line requires at least three ASCII-printable characters and no whitespace. It must not begin like a type. Repositories exchanging patches by mail often use `%%%`.                                                                                              |
+| `types`                    | the standard table                 | Map a commit type to a bump (`none`, `patch`, `minor`, `major`). A non-empty map **replaces** the standard table (`feat`=minor, `fix`/`perf`/`revert`=patch, the rest none) wholesale, so you must list every type you keep. Names use a-z only, and viper lowercases keys anyway. |
+| `quiet`                    | `false`                            | Hide the parser's own diagnostics from the log. See [Quiet](#quiet).                                                                                                                                                                                                 |
+| `strictTypes`              | `false`                            | Turn an unknown commit type into an error (E140) instead of a warning. The [`commitErrors`](#commiterrors) policy decides whether that stops the run.                                                                                                                |
+| `lenient`                  | `false`                            | Downgrade selected authoring errors to warnings. This lowercases an uppercase type, accepts a missing space after `:`, and lets a footer contradicting an inline directive win.                                                                                            |
+| `maxDescriptionLength`     | `100`                              | Set the long-description warning threshold in Unicode scalar values. A negative value disables it.                                                                                                                                                                              |
+| `propagation.bump`         | `patch`                            | Choose the bump consumers take when a unit propagates without saying which. Options are `none`, `patch`, `minor`, `major`, or `inherit` (copy the unit's own bump).                                                                                                                      |
+| `propagation.depth`        | `0`                                | Set the default propagation depth as a number of edges or `all`. See the note above the table.                                                                                                                                                                             |
+| `propagation.channelDepth` | `0`                                | Set the channel-axis counterpart. This controls how far a channel travels by default.                                                                                                                                                                                                  |
+| `propagation.kinds`        | all but `devDependencies`          | Choose the dependency edges propagation follows. Options are `dependencies`, `peerDependencies`, `optionalDependencies`, `devDependencies`, or the wildcard `*` for every kind.                                                                                                                                    |
+| `propagation.channel`      | `inherit`                          | Set the default propagated channel value.                                                                                                                                                                                                                                |
+| `limits.unitsPerMessage`   | `64`                               | Set the most `---`-separated units one commit message may carry. The three `limits.*` keys are always-enforced parser bounds, and exceeding one voids the whole message (E158). A negative value disables that bound for trusted input only.                                   |
+| `limits.scopeTermsPerUnit` | `256`                              | Set the most scope terms (names, globs, exclusions) one unit's scope-set may carry.                                                                                                                                                                                          |
+| `limits.messageBytes`      | `1048576`                          | Set the largest commit message parsed, in bytes (1 MiB).                                                                                                                                                                                                                     |
+| `allowedChannels`          | unrestricted                       | Restrict prerelease channel names. This throws E181 for names outside the list, though `stable` is always accepted.                                                                                                                                                                              |
+| `messageLevelTrailers`     | Signed-off-by, Co-authored-by, ... | List authorship and review trailers ignored wherever they appear. Setting the key replaces the list.                                                                                                                                                                          |
+| `issueTrailers`            | Closes, Fixes, Refs, Resolves      | List issue-reference trailers. These are ignored for versioning but surfaced for changelogs, and setting the key replaces the list.                                                                                                                                                     |
 
 ```yaml
 parser:
@@ -78,31 +78,30 @@ parser:
 
 ### Quiet
 
-A repository whose history predates the convention earns a diagnostic on nearly every old commit, and the noise buries
-the findings that matter. `parser.quiet: true` hides the parser's own findings from the log: the ones about the text
-of a commit message, codes `E0xx`/`E1xx` and `W0xx`/`W1xx`.
+A repository whose history predates the convention earns a diagnostic on nearly every old commit. This noise buries the
+findings that matter. Set `parser.quiet: true` to hide the parser's own findings about the text of a commit message,
+specifically codes `E0xx`/`E1xx` and `W0xx`/`W1xx`.
 
 ```yaml
 parser:
   quiet: true
 ```
 
-It is a display decision and only that. Every diagnostic is still raised, still counted, and still does whatever it did
-before: under `commitErrors: "error"` a hidden error still refuses the release, and a
-[repository-scoped](#commiterrors) failure still aborts the run. The plan-diagnostics summary line reports how many
-lines went unprinted, so "nothing is wrong" and "you asked not to see it" never look the same:
+This is a display decision and only that. Every diagnostic is still raised, counted, and does whatever it did before.
+Under `commitErrors: "error"`, a hidden error still refuses the release, and a [repository-scoped](#commiterrors)
+failure still aborts the run. Read the plan-diagnostics summary line to see how many lines went unprinted. This ensures
+"nothing is wrong" and "you asked not to see it" never look the same:
 
 ```console
 INF plan diagnostics warnings=12 errors=1 hidden=13
 ```
 
-Findings about the workspace rather than the message are never hidden: an unknown scope (`E130`), a catch-up
-(`W193`), a blocked package (`W194`), a package a [selection](../reference/releasing/partial-releases.md) could not release yet
-(`W230`).
-They explain a release outcome that a reader of the commit log alone cannot account for, which is the whole reason
-they exist.
+You always see findings about the workspace rather than the message. These include an unknown scope (`E130`), a
+catch-up (`W193`), a blocked package (`W194`), or a package a [selection](../reference/releasing/partial-releases.md)
+could not release yet (`W230`). They exist to explain a release outcome that a reader of the commit log alone cannot
+account for.
 
-The [`--quiet-parser` flag](../cli/README.md#global-flags) overrides the config in both directions:
+Pass the [`--quiet-parser` flag](../cli/README.md#global-flags) to override the config in both directions:
 
 ```sh
 dispat status --quiet-parser         # hide them for this invocation

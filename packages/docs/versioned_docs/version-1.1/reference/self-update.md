@@ -208,10 +208,10 @@ run "dispat self-update" to install it
 ```
 
 The check runs alongside your command rather than in front of it, and **no
-command ever waits for it**. If the answer has not come back by the time the
-work is done, it is dropped and the command exits. Offline, behind a proxy, out
-of API quota, or simply finished first: all of them look the same, and all of
-them cost nothing.
+command waits for it** unless `DISPAT_UPDATE_CHECK=1` asks for the wait. If
+the answer has not come back by the time the work is done, it is dropped and
+the command exits. Offline, behind a proxy, out of API quota, or simply
+finished first: all of them look the same, and all of them cost nothing.
 
 That does mean a fast command often finishes first and says nothing. Nothing
 is wrong when that happens. `dispat self-update --check` is the way to ask and

@@ -1,23 +1,24 @@
 # The if command
 
-`dispat if` chooses between shell scripts by testing a condition, so a stage can branch without depending on the
-shell it is running under. The condition asks the environment (`CI`, `ENV=prod`), the filesystem (`-f
-data/report.json`, `-d build`) or the repository (`--changed`, did the selected packages change). It plans no
-release and sweeps no packages.
+`dispat if` chooses between shell scripts by testing a condition. This lets a
+stage branch without depending on the shell it runs under. The condition asks
+the environment (`CI`, `ENV=prod`), the filesystem (`-f data/report.json`,
+`-d build`), or the repository (`--changed`). It plans no release and sweeps no
+packages.
 
-It exists because everything dispat runs is a shell command. Stages, hooks and `run` scripts are all strings handed to
-`/bin/sh -c`, which works well until a script needs to do one of two ordinary things: branch on a variable, or call
-another script you already wrote.
+Everything dispat runs is a shell command. Stages, hooks, and `run` scripts are
+strings handed to `/bin/sh -c`. This works well until your script needs to
+branch on a variable or call another script.
 
-Two small commands cover those.
+Two small commands cover those needs.
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
 $ dispat exec build --for pkg:core
 ```
 
-Neither one plans a release, sweeps your packages or touches the dependency
-graph. They run one script and get out of the way.
+Neither command plans a release, sweeps your packages, or touches the
+dependency graph. They run one script and exit.
 
 ## Which command do I want
 
@@ -27,11 +28,11 @@ graph. They run one script and get out of the way.
 | run one declared script, once, right here           | `dispat exec <script>`       |
 | choose between shell commands based on a condition  | `dispat if <cond>`           |
 
-`dispat run` is the one that knows about your monorepo. It computes a plan,
-works out which packages changed and runs the script in each of them in
-dependency order. `dispat exec` does none of that. It looks up one script by
-name and runs it, which is what you want when you are already inside a stage
-script and just need to call something else.
+`dispat run` knows about your monorepo. It computes a plan, finds which
+packages changed, and runs the script in each of them in dependency order.
+`dispat exec` ignores the dependency graph. It looks up one script by name and
+runs it. Call `dispat exec` when you are inside a stage script and need to run
+another script.
 
 ## dispat if
 
@@ -43,7 +44,7 @@ dispat if --changed [--since <rev>] [-p <pkg>] [-s <space>] [-g <group>] [--cons
 ```
 
 The leading condition takes the first `--then`. Each `--elif` takes the next
-one. `--else` runs when nothing else matched.
+`--then`. The `--else` script runs when nothing else matches.
 
 ```sh
 dispat if 'ENV=prod'      --then 'deploy prod' \
@@ -51,20 +52,21 @@ dispat if 'ENV=prod'      --then 'deploy prod' \
        --else               'echo nothing to deploy'
 ```
 
-The first condition that holds wins, and the rest are skipped without being
-looked at. So a chain of `--elif` is a switch, and `--else` is its default case.
+The first condition that holds wins. dispat skips the rest without looking at
+them. A chain of `--elif` flags acts as a switch, and `--else` is its default
+case.
 
-If nothing matches and you gave no `--else`, nothing runs and the command exits
-`0`. That is deliberate: a guard that finds nothing to do has done its job.
+If nothing matches and you provide no `--else`, nothing runs. The command exits
+`0`. A guard that finds nothing to do has done its job.
 
-The scripts are shell text, not script names. This is the shell's own
-if/elif/else, spelled so it fits on one line inside a JSON or YAML config file
-where a real `if` block would be unreadable.
+The scripts are shell text, not script names. This acts like the shell's own
+if/elif/else. dispat spells it this way so it fits on one line inside a JSON or
+YAML config file.
 
-The leading condition comes from exactly one place: the positional condition,
-`--changed`, `--file` or `--dir`. Giving two is a usage error, because two
-answers to "what does the first `--then` guard" would leave one silently
-ignored. Every `--elif` is an environment condition.
+The leading condition comes from exactly one place. You provide a positional
+condition, `--changed`, `--file`, or `--dir`. Passing two is a usage error,
+because dispat would have to silently ignore one. Every `--elif` is an
+environment condition.
 
 ### Environment conditions
 
@@ -77,29 +79,28 @@ ignored. Every `--elif` is an environment condition.
 | `NAME~glob`     | it matches the pattern, where `*` matches anything  |
 | `NAME!~glob`    | it does not match the pattern                       |
 
-"Set" means set and not empty, the same thing `[ -n "$NAME" ]` means in the
-shell. CI systems export empty variables all the time, and an empty value is
-almost never a yes. If you specifically want to ask whether a variable is empty,
-`NAME=` is the way, because an unset variable expands to nothing exactly as it
-would in a shell.
+"Set" means set and not empty. This matches what `[ -n "$NAME" ]` means in the
+shell. CI systems export empty variables often, and an empty value rarely means
+yes. Use `NAME=` to ask whether a variable is empty. An unset variable expands
+to nothing, exactly as it does in a shell.
 
-The value can contain anything, operators included. Only the first operator ends
-the variable name, so `URL=a~b` asks whether `URL` is the text `a~b`.
+The value can contain anything, including operators. Only the first operator
+ends the variable name. The condition `URL=a~b` asks whether `URL` equals the
+exact text `a~b`, not whether it matches a glob.
 
-Globs use the same matcher as everywhere else in dispat, where `*` matches any
-run of characters including slashes:
+Globs use the same matcher as everywhere else in dispat. A `*` matches any run
+of characters, including slashes.
 
 ```sh
 dispat if 'BRANCH~release/*' --then 'dispat release'
 ```
 
-These conditions read the environment the command was given, and nothing else.
-There is no config file to load and no repository to be standing in, so
-`dispat if` works anywhere.
+These conditions read only the environment given to the command. dispat loads
+no config file and requires no repository. You can run `dispat if` anywhere.
 
 ### File tests
 
-`--file` (`-f`) and `--dir` (`-d`) ask the filesystem instead:
+The `--file` (`-f`) and `--dir` (`-d`) flags ask the filesystem instead.
 
 | Condition     | True when                                       |
 |---------------|--------------------------------------------------|
@@ -110,69 +111,72 @@ There is no config file to load and no repository to be standing in, so
 dispat if -f data/report.json --then 'npm run build-docs' --else 'echo no report yet'
 ```
 
-A path that is absent, or there but the wrong kind, makes the condition false.
-It is never an error, exactly as `[ -f ]` and `[ -d ]` behave in the shell:
-the question was "is it there", and it is not. Symbolic links are followed, so
-a link to a file passes `-f`.
+A path that is absent or the wrong kind makes the condition false. This is
+never an error. It matches how `[ -f ]` and `[ -d ]` behave in the shell.
+Symbolic links are followed, so a link to a file passes `-f`.
 
-A relative path resolves against the folder the chosen script runs in, which
-is the invocation folder, or wherever [`--in`](#choosing-the-folder-it-runs-in)
-points. The test and a path written inside the script text therefore always
-mean the same file. An absolute path is used as it is.
+A relative path resolves against the folder the chosen script runs in. This is
+the invocation folder, or wherever [`--in`](#choosing-the-folder-it-runs-in)
+points. The test and a path written inside the script text always mean the same
+file. An absolute path resolves exactly as written.
 
-Like the environment conditions, file tests read no config file and need no
-repository.
+File tests read no config file and need no repository.
 
 ### Changed packages
 
-`--changed` asks the repository: it holds when changed packages are selected.
-The selection works exactly like [`dispat run`'s](./run.md), so a gate and the
-run it guards can never disagree about what changed.
+The `--changed` flag asks the repository. It holds when changed packages are
+selected. The selection works exactly like [`dispat run`'s](./run.md). A gate
+and the run it guards never disagree about what changed.
 
 ```sh
 dispat if --changed -p docs --since origin/main --then 'dispat run build-docs'
 ```
 
-`--since <rev>` sets the window to what the commits since that revision
-address, with the same scope semantics [`dispat run --since`](./run.md) uses:
-a commit's written scopes are authoritative, and only scopeless commits fall
-back to the files they changed. Without `--since`, the window is the
-release window, the packages with something pending, so a bare `dispat if
---changed` asks "would a release do anything". `--since all` selects every
-package, changed or not.
+Pass `--since <rev>` to set the window to what the commits since that revision
+address. This uses the same scope semantics as
+[`dispat run --since`](./run.md). A commit's written scopes are authoritative,
+and only scopeless commits fall back to the files they changed.
 
-`--consumers` expands the window downstream before the selection narrows it,
-so the gate asks whether the selection is among what the changes reach:
+Without `--since`, the window is the release window, which contains the
+packages with something pending. A bare `dispat if --changed` asks whether a
+release would do anything. Pass `--since all` to select every package, changed
+or not.
+
+The `--consumers` flag expands the window downstream before the selection
+narrows it. The gate asks whether the selection is among what the changes
+reach.
 
 ```sh
 dispat if --changed -p web --consumers --since HEAD~1 --then 'dispat run e2e -p web'
 ```
 
-This holds when `web`, or anything `web` transitively consumes, changed. Note
-that this is the one place `--consumers` composes in that order. A sweep like
-`dispat run` narrows first and expands after, asking for the selection's
-dependents; a gate that did the same would find `--consumers` unable to ever
-change its answer, since expanding a selection never empties it and never
-fills an empty one.
+This holds when `web` changes, or when anything `web` transitively consumes
+changes. This is the only place `--consumers` composes in that order. A sweep
+like `dispat run` narrows first and expands after, asking for the selection's
+dependents.
 
-`--package`/`-p`, `--space`/`-s` and `--group`/`-g` narrow the answer the way
-they narrow every command, invocation folder included: run inside a package
-folder with no terms, the gate asks about that package alone. An empty
-selection is an honest false. A term that matches no package at all is an
-error, never a false, because a gate reading a typo as "no" would silently
+A gate doing the same would find `--consumers` unable to change its answer.
+Expanding a selection never empties it, and it never fills an empty one.
+
+The `--package`/`-p`, `--space`/`-s`, and `--group`/`-g` flags narrow the
+answer the way they narrow every command. This includes the invocation folder.
+Run the command inside a package folder with no terms, and the gate asks about
+that package alone. An empty selection evaluates to false. A term that matches
+no package at all is an error. A gate reading a typo as false would silently
 never fire.
 
-Asking about the repository costs finding out: `--changed` reads the config
-file, walks the tags and parses the commits, the same work `dispat status`
-does, where every other condition reads nothing. A `--changed` that cannot be
-evaluated, a revision git cannot resolve or a configuration that cannot be
-loaded, exits `1`. The selection flags belong to `--changed`, so giving any of
-them with another condition is a usage error.
+Asking about the repository requires work. The `--changed` flag reads the
+config file, walks the tags, and parses the commits. This is the same work
+`dispat status` does, while every other condition reads nothing.
+
+The command exits `1` when `--changed` cannot be evaluated. This happens when
+git cannot resolve a revision or dispat cannot load the configuration. The
+selection flags belong to `--changed`. Passing any of them with another
+condition is a usage error.
 
 ### Nesting
 
-A branch is just shell text, so another dispat command is a perfectly ordinary
-thing to put in one:
+A branch is shell text. You can put another dispat command inside one.
 
 ```sh
 dispat if CI --then 'dispat if TIER=gold --then "deploy gold" --else "deploy standard"'
@@ -180,50 +184,54 @@ dispat if CI --then 'dispat if TIER=gold --then "deploy gold" --else "deploy sta
 
 ## Choosing the folder it runs in
 
-The chosen branch runs where you are standing, so a relative path in it means
-what you meant. `--in` sends it somewhere else:
+The chosen branch runs in your current folder. A relative path inside the
+branch resolves from there. Use `--in` to send it somewhere else.
 
 ```console
 $ dispat if CI --then 'make ci' --in ./build
 $ dispat if CI --then 'make ci' --in pkg:core
 ```
 
-It takes a folder path, or any of the [place names](./locations.md) `dispat
-exec` takes. A relative `--file` or `--dir` path moves with it, so the test
-asks about the folder the script actually runs in.
+Pass a folder path or any of the [place names](./locations.md) `dispat exec`
+takes. A relative `--file` or `--dir` path moves with it. The test asks about
+the folder the script actually runs in.
 
-There is one thing worth knowing here. `dispat if` reads no config file, which
-is what makes it cheap enough to call in a loop, and a path or `cwd` keeps it
-that way because your command line already said everything needed. Naming
-`pkg:`, `space:` or `root` does make it read your config, since there is no
-other way to find out where a package lives. You pay for that only when you ask.
+The `dispat if` command reads no config file. This makes it cheap enough to
+call in a loop. Passing a path or `cwd` keeps it cheap, because your command
+line provides everything needed.
 
-A folder that does not exist stops the command with a message naming it.
+Naming `pkg:`, `space:`, or `root` forces dispat to read your config, because
+it must find out where a package lives. You pay this cost only when you ask.
+
+A folder that does not exist stops the command and prints a message naming the
+folder.
 
 ## Exit codes
 
-Both commands hand back the exit code of the script they ran. `dispat if CI
---then 'exit 7'` exits `7`. That keeps them transparent in a pipeline: whatever
-you were gating on still works with a helper in the middle.
+Both commands return the exit code of the script they run. The command
+`dispat if CI --then 'exit 7'` exits `7`. This keeps them transparent in a
+pipeline, so your gated command still works with a helper in the middle.
 
-`--on-failure` changes that. It runs when the chosen script fails, and its own
-exit code becomes the command's:
+The `--on-failure` flag changes this behavior. It runs when the chosen script
+fails. Its own exit code becomes the command's exit code.
 
 ```console
 $ dispat exec deploy --on-failure 'notify-slack "deploy failed"; exit 1'
 ```
 
-The failure script runs even when the first one was killed by Ctrl-C, so a
-cleanup still gets its chance.
+The failure script runs even when you kill the first script with Ctrl-C. Your
+cleanup still gets a chance to run.
 
-`2` still means the command line itself did not make sense, which is worth
-knowing if your script also exits `2`. Ending `--on-failure` with an explicit
-`exit 1` removes the ambiguity.
+An exit code of `2` means the command line itself was invalid. Keep this in
+mind if your script also exits `2`. End `--on-failure` with an explicit
+`exit 1` to remove the ambiguity.
 
-A condition that is false runs its `--else`, or nothing, and exits
-accordingly; being false is not a failure. The one condition that can fail is
-`--changed`, when it cannot be evaluated at all: a revision git cannot
-resolve, or a configuration that cannot be loaded, exits `1`.
+A false condition runs its `--else` branch, or nothing, and exits accordingly.
+Being false is not a failure.
+
+The `--changed` condition fails when dispat cannot evaluate it. The command
+exits `1` when git cannot resolve a revision or dispat cannot load the
+configuration.
 
 ## Flags
 
@@ -241,6 +249,9 @@ resolve, or a configuration that cannot be loaded, exits `1`.
 | `--in <folder>`       | Run the chosen script in this folder: a path, or any [place name](./locations.md). |
 | `--on-failure <script>` | Run this when the chosen script fails, and exit with its code instead.       |
 
-Needs no config file and no git repository, unless `--in` names a package, a
-space or the root, or `--changed` asks about the repository itself. The shell
-is `/bin/sh -c`, since there is no config here to take a `shell` setting from.
+The command needs no config file and no git repository. This changes only when
+`--in` names a package, a space, or the root, or when `--changed` asks about
+the repository.
+
+The shell is `/bin/sh -c`. There is no config file to take a `shell` setting
+from.

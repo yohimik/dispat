@@ -1,10 +1,9 @@
 # Recovering from a failed run
 
-What to do when a release run fails partway: nothing but re-running it. This is the scenario every release tool has to
-answer for, and dispat's answer is that the same command, run again, finishes exactly what the first run still owed.
+Run `dispat` again to recover from a failed release run. dispat finishes exactly what the first run still owed.
 
-Here is the whole story on a real run. `core` and its consumer `app` release together, and `app`'s tests break its
-build after `core` already published.
+In this example, `core` and its consumer `app` release together. The tests for `app` break its build after `core`
+already published.
 
 ```console
 $ git commit -m "feat(core)^: new API, reaching the app"
@@ -28,8 +27,8 @@ $ git tag
 core@0.1.0
 ```
 
-The run exits non-zero, `core@0.1.0` is out and tagged, `app` is not. There is no state file to repair and no version to
-reconcile by hand. Fix the tests and run the same command again:
+The run exits with a non-zero status, leaving `core@0.1.0` tagged while `app` is not. You do not need to repair a state
+file or reconcile versions by hand. Fix the tests and run the command again:
 
 ```console
 $ dispat
@@ -43,21 +42,19 @@ $ dispat
 12:04:05 INF done cancelled=0 failed=0 held=0 published=1 skipped=0 took=1.2s unchanged=1
 ```
 
-The second run recomputed the same plan from history and configuration, saw `core@0.1.0` already recorded, and executed
-only the missing half. `W193` is the marker to look for: it says `app` is releasing at exactly the version it was owed
-from the earlier run, not because of any new commit. `core` is not re-released, however many times you run this. If
-instead a *provider* fails, its consumers are skipped and reported with
-`W194`, and the same re-run catches them up once the provider is fixed.
+The second run recomputes the plan from history and configuration, sees `core@0.1.0` is already recorded, and executes
+only the missing half. The `W193` marker confirms `app` is releasing at the exact version it was owed from the earlier
+run, while `core` is never re-released. If a *provider* fails instead, dispat skips its consumers and reports them with
+`W194`, so you can catch them up with a re-run once you fix the provider.
 
-An interrupted run (Ctrl-C, a killed CI job) follows the same rule: packages whose publish completed keep their record,
-everything else is reported as `cancelled`, and the next run picks up exactly the remainder.
+An interrupted run follows the same rule. If you press Ctrl-C or a CI job dies, packages with a completed publish keep
+their record. dispat reports everything else as `cancelled`, and your next run picks up exactly the remainder.
 
-Catch-up has a manifest half as well as a release half: a consumer that did not release beside its provider keeps its
-old range until its own next release, whose version stage reconciles the range to the provider's published version
-(`W197`). That pickup is
+Catch-up has a manifest half as well as a release half. A consumer that failed to release beside its provider keeps its
+old range until its own next release, when the version stage reconciles the range to the provider's published version
+(`W197`). This pickup is
 [the auto-version reconciliation](../../configuration/autoversion.md#picking-up-providers-released-without-you), not a
-release of the provider's making.
+release triggered by the provider.
 
-The properties that make this safe, and why no state file is involved, are in
-[Concepts](../../concepts.md#catch-up-failed-consumers-are-never-lost). What each diagnostic code means is in
-[Diagnostic codes](../plan-errors.md).
+Read [Concepts](../../concepts.md#catch-up-failed-consumers-are-never-lost) to understand the properties that make this
+safe and why dispat needs no state file. You can look up each diagnostic code in [Diagnostic codes](../plan-errors.md).

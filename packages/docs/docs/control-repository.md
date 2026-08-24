@@ -1,23 +1,22 @@
 # A control repository for many repositories
 
-When your code lives in many repositories, one small repository can hold every dispat configuration and link the
-others in as git submodules. dispat runs in that one repository and treats the whole fleet as a single monorepo: one
-dependency graph, releases in the right order, a version and a changelog for each linked repository. Nobody working in
-those repositories has to learn dispat, change how they commit, or maintain a release pipeline.
+When your code lives in many repositories, one small repository can hold every dispat configuration and link the others
+in as git submodules. Run dispat in that one repository to treat the whole fleet as a single monorepo. You get one
+dependency graph, releases in the right order, and a version and a changelog for each linked repository. Nobody working
+in those repositories has to learn dispat, change how they commit, or maintain a release pipeline.
 
-This page is the pattern in full: the shape, why it works, the two layouts it comes in, a complete configuration, and
-what it costs.
+This page shows the pattern in full. It covers the shape, why it works, the two layouts it comes in, a complete
+configuration, and what it costs.
 
 ## The problem it solves
 
-[One repository or many](./monorepo.md) explains why dispat cannot order releases across repositories: the graph is the
+[One repository or many](./monorepo.md) explains why dispat cannot order releases across repositories. The graph is the
 packages in one checkout, and separate repositories have no shared history to read.
 
-The way around that is not to merge anyone's code. It is to create one more repository, small and boring, that
-contains no product code at all. It holds the dispat configuration, the build and publish commands, and a git
-submodule for each repository you want to release. That repository is the single checkout dispat needs. The teams keep
-their own repositories, their own permissions and their own review rules, and the release machinery lives in exactly
-one place.
+Create one more repository to get around this without merging anyone's code. This repository contains no product code
+at all. It holds the dispat configuration, the build and publish commands, and a git submodule for each repository you
+want to release. That repository provides the single checkout dispat needs. The teams keep their own repositories,
+permissions, and review rules. The release machinery lives in exactly one place.
 
 Teams usually call it the control repository, the platform repository, or just `release`. This page calls it the
 **control repository** and calls the repositories it points at **linked repositories**.
@@ -41,20 +40,20 @@ platform/                       the control repository
       src/                      submodule -> github.com/acme/web
 ```
 
-Three parts, and only three:
+Set up three parts, and only three:
 
 - **The control repository** is a normal dispat monorepo. `libs` and `services` are spaces, `sdk`, `api` and `web` are
   packages, and each package is a folder like any other.
-- **The linked repositories** are untouched. They hold source code and nothing else. No `dispat.yaml`, no commit
-  convention, no release job.
+- **The linked repositories** are untouched. They hold source code and nothing else. They need no `dispat.yaml`, no
+  commit convention, and no release job.
 - **The pointer** is what a git submodule actually is: a single entry in the control repository recording which commit
   of the linked repository this checkout uses.
 
 ## Why it works
 
 Git does not store a submodule's files in the parent repository. It stores one entry, at the submodule's path, holding
-a commit hash. Moving a linked repository forward is therefore an ordinary commit in the control repository that
-changes exactly one path:
+a commit hash. Move a linked repository forward by making an ordinary commit in the control repository that changes
+exactly one path:
 
 ```console
 $ git -C services/api/src fetch origin && git -C services/api/src checkout origin/main
@@ -66,30 +65,30 @@ feat(api): a health endpoint
 services/api/src
 ```
 
-That last line is the whole trick. dispat decides which package a commit touched by looking at the paths it changed,
-and `services/api/src` sits inside the `api` package folder. So a pointer bump is a change to `api`, exactly as if
+That last line is the whole trick. dispat decides which package a commit touched by looking at the paths it changed.
+`services/api/src` sits inside the `api` package folder, so a pointer bump is a change to `api`. It works exactly as if
 someone had edited a file there. Everything dispat does with an ordinary change now applies: the version, the
-changelog, the tag, the propagation to consumers, the ordering of the build.
+changelog, the tag, the propagation to consumers, and the ordering of the build.
 
-Scopes work the way they do everywhere else, which means the commit above did not need its `(api)` scope at all. A
-commit with no scope is attributed to the packages whose folders it touched, so a bare `fix: pick up the latest api`
-reaches the same package. Writing the scope is still worth it, because it is what makes the log readable.
+Scopes work the way they do everywhere else. The commit above did not need its `(api)` scope at all. A commit with no
+scope is attributed to the packages whose folders it touched, so a bare `fix: pick up the latest api` reaches the same
+package. Writing the scope is still worth it because it makes the log readable.
 
 ## What you get back
 
-- **One dependency graph across repositories.** An edge from `api` to `sdk` is declared once, in the control
-  repository, whatever repositories the two live in.
-- **Releases in topological order.** The library publishes before the service that consumes it, and unrelated
-  packages publish in parallel.
-- **Propagation.** A breaking change in one repository can bump every repository that depends on it, in the same run.
+- **One dependency graph across repositories.** Declare an edge from `api` to `sdk` once in the control repository,
+  whatever repositories the two live in.
+- **Releases in topological order.** The library publishes before the service that consumes it, and unrelated packages
+  publish in parallel.
+- **Propagation.** Bump every repository that depends on a breaking change in one repository, in the same run.
 - **A version, a changelog and a tag per linked repository**, all independent of each other.
 - **One pipeline** instead of one per repository.
-- **Selective work.** [`dispat run --since`](./cli/run.md) and [`dispat if --changed`](./cli/if.md) narrow a job to the
-  packages a pointer bump reached, so the pipeline cost follows the change and not the size of the fleet.
+- **Selective work.** Run [`dispat run --since`](./cli/run.md) and [`dispat if --changed`](./cli/if.md) to narrow a job
+  to the packages a pointer bump reached. The pipeline cost follows the change and not the size of the fleet.
 
 Here is the payoff. `api` depends on `sdk`, they live in different repositories, and one commit moved the `sdk`
-pointer. The `^` on the type is the [reach directive](./reference/commits.md), which says "and the packages that
-depend on this one":
+pointer. The `^` on the type is the [reach directive](./reference/commits.md). It says "and the packages that depend on
+this one":
 
 ```console
 $ git commit -m "feat(sdk)^: a retry policy for every client call"
@@ -100,30 +99,30 @@ $ dispat status
 09:31:07 INF release plan ready held=0 packages=3 releasing=2
 ```
 
-Two different repositories are releasing, in order, from one commit, and a third correctly stayed out of it.
+Two different repositories are releasing in order from one commit. A third correctly stayed out of it.
 
 ## What stays separate, and why that is the point
 
 The versions live in the control repository. The tags are its tags, the changelog files are its files, and its history
-is the release history. The linked repositories keep their own history and their own tags, untouched.
+is the release history. The linked repositories keep their own history and their own tags untouched.
 
 That separation is the reason to do this rather than a drawback of it. The people working in the linked repositories
-open pull requests, review them and merge them exactly as they do today. They never write a conventional commit, never
+open pull requests, review them, and merge them exactly as they do today. They never write a conventional commit, never
 edit a `dispat.yaml`, and never wonder why a release did not fire. All of that lives in one repository, usually owned
 by one team.
 
-It has a real cost, and it is worth being clear about it. **The control repository sees one commit per bump, not the
-history behind it.** A pointer moving from one commit to another is a single event, so the release notes are only as
-good as the message on that one commit. [Where the version comes from](#where-the-version-comes-from) is entirely
-about writing that message well, including a script that generates it from the linked repository's own log.
+It has a real cost, and you should be clear about it. **The control repository sees one commit per bump, not the
+history behind it.** A pointer moving from one commit to another is a single event. The release notes are only as good
+as the message on that one commit. [Where the version comes from](#where-the-version-comes-from) is entirely about
+writing that message well. This includes a script that generates it from the linked repository's own log.
 
 ## Two layouts
 
-There are two places the submodule can sit, and the difference matters more than it looks.
+There are two places the submodule can sit. The difference matters more than it looks.
 
 ### A wrapper folder
 
-The package is a folder the control repository owns, and the submodule sits inside it, conventionally at `src`:
+Make the package a folder the control repository owns, and place the submodule inside it, conventionally at `src`:
 
 ```text
 services/api/            the package
@@ -132,10 +131,10 @@ services/api/            the package
 ```
 
 This is the layout to prefer. The reason is one git rule: **a parent repository cannot commit files that live inside a
-submodule.** `git add services/api/src` stages the pointer and nothing else, so anything dispat writes inside the
-submodule is left behind as a modification in the linked repository's working copy. With a wrapper folder, the
-changelog, any per-package config file and anything else generated during a release land in the wrapper, where the
-release commit stages them normally:
+submodule.** Run `git add services/api/src` to stage the pointer and nothing else. Anything dispat writes inside the
+submodule is left behind as a modification in the linked repository's working copy. Use a wrapper folder so the
+changelog, any per-package config file, and anything else generated during a release land in the wrapper. The release
+commit stages them normally:
 
 ```console
 $ git show --stat HEAD
@@ -151,29 +150,29 @@ commit 4b30761ce873ec6b9608eea50b982be86e7de126
 
 Two things to know about a wrapper:
 
-- The wrapper has no manifest of its own, so set
-  [`autoVersion.manifests: "all"`](./configuration/autoversion.md) when you want the manifests inside the submodule
-  reconciled. The default, `root`, looks only at the wrapper's own folder and finds nothing there.
-- If a package needs to be known by the name its manifest uses rather than its folder name, state it with
-  [`manifestNames`](./configuration/packages.md).
+- The wrapper has no manifest of its own. Set [`autoVersion.manifests: "all"`](./configuration/autoversion.md) when you
+  want the manifests inside the submodule reconciled. The default, `root`, looks only at the wrapper's own folder and
+  finds nothing there.
+- State the package name with [`manifestNames`](./configuration/packages.md) if a package needs to be known by the name
+  its manifest uses rather than its folder name.
 
-Optionally add `src: src` to the package. That narrows what counts as a change to the submodule pointer alone, so
-editing the wrapper's own files does not trigger a release. The pointer still counts, because its path is exactly the
-folder `src` names.
+Optionally add `src: src` to the package. That narrows what counts as a change to the submodule pointer alone. Editing
+the wrapper's own files does not trigger a release. The pointer still counts because its path is exactly the folder
+`src` names.
 
 ### The submodule as the package
 
-The submodule is mounted directly as the package folder:
+Mount the submodule directly as the package folder:
 
 ```text
 services/api/            submodule -> github.com/acme/api
 ```
 
-Flatter, and easier to explain to someone reading the repository for the first time. It costs two things.
+This layout is flatter and easier to explain to someone reading the repository for the first time. It costs two things.
 
 **The changelog would be written inside the linked repository.** dispat writes a package's changelog in the package
-folder, which is now the submodule, so the file is created in the linked repository's working copy and no commit in
-the control repository can pick it up:
+folder, which is now the submodule. The file is created in the linked repository's working copy, and no commit in the
+control repository can pick it up:
 
 ```console
 $ dispat release
@@ -184,13 +183,13 @@ $ git -C services/api status --short
 ?? CHANGELOG.md
 ```
 
-The file exists, nothing tracks it, and the next checkout throws it away. So this layout means
+The file exists, nothing tracks it, and the next checkout throws it away. This layout means setting
 `changelog: {enabled: false}` and using the GitHub release as the record instead.
 
 **A file in the linked repository can change dispat's behaviour.** dispat reads a `dispat.yaml` from a package's own
 folder as a configuration layer. Under this layout that folder belongs to another team, who do not know they own a
-dispat config file. A file that happens to be named that way is read, and one declaring `spaces` or `packages` is
-refused outright.
+dispat config file. dispat reads a file that happens to be named that way, and refuses outright one declaring `spaces`
+or `packages`.
 
 ### Choosing
 
@@ -202,12 +201,12 @@ refused outright.
 | Extra folder to explain                    | yes, one per package                 | no                                  |
 | Manifest discovery                         | needs `manifests: "all"`             | works by default                    |
 
-Take the wrapper unless you have decided you do not want changelog files at all. The rest of this page uses it, and
+Take the wrapper unless you have decided you do not want changelog files at all. The rest of this page uses it and
 notes where the flat layout differs.
 
 ## The configuration
 
-One file, for the tree at the top of this page:
+Write one file for the tree at the top of this page:
 
 ```yaml
 scripts:
@@ -237,22 +236,22 @@ commit:
   push: true
 ```
 
-Nothing here is special to the pattern. It is an ordinary dispat configuration, and the only sign that these packages
-live in other repositories is `--prefix src`, which points npm at the submodule inside each package folder. Under the
-flat layout the commands would be plain `npm ci` and `npm publish`, because the package folder is the submodule.
+Nothing here is special to the pattern. It is an ordinary dispat configuration. The only sign that these packages live
+in other repositories is `--prefix src`, which points npm at the submodule inside each package folder. Under the flat
+layout the commands would be plain `npm ci` and `npm publish` because the package folder is the submodule.
 
-`commit.enabled` writes the release commit that carries the changelog entries, and `commit.push` sends it and the
-tags to the control repository's remote. The pointers themselves were committed earlier, by whoever moved them.
+Set `commit.enabled` to write the release commit that carries the changelog entries. Set `commit.push` to send it and
+the tags to the control repository's remote. The pointers themselves were committed earlier by whoever moved them.
 
 ## Where the version comes from
 
-The pointer bump commit is the only input dispat has, so how that commit gets written decides how good this pattern
-feels. Three ways, from simplest to most automated. They combine freely.
+The pointer bump commit is the only input dispat has. How that commit gets written decides how good this pattern feels.
+Choose from three ways, from simplest to most automated. They combine freely.
 
 ### Someone moves the pointer
 
-A person, or a bot such as Renovate, opens a pull request in the control repository that moves one submodule forward
-and describes it:
+A person, or a bot such as Renovate, opens a pull request in the control repository. This pull request moves one
+submodule forward and describes it:
 
 ```sh
 git -C services/api/src fetch origin
@@ -261,12 +260,12 @@ git add services/api/src
 git commit -m "feat(api): a health endpoint"
 ```
 
-This is worth starting with. It reads well, it puts the release decision in front of a reviewer, and it needs no
-tooling at all. It stops scaling when the fleet is large enough that nobody wants to write those messages.
+This is worth starting with. It reads well, puts the release decision in front of a reviewer, and needs no tooling at
+all. It stops scaling when the fleet is large enough that nobody wants to write those messages.
 
 ### The linked repository asks for a release
 
-The linked repository's own CI, on merge to its main branch, tells the control repository what happened. It sends a
+The linked repository's own CI tells the control repository what happened on merge to its main branch. It sends a
 `repository_dispatch` event carrying the package name and the bump it wants:
 
 ```yaml
@@ -281,14 +280,13 @@ The linked repository's own CI, on merge to its main branch, tells the control r
     GH_TOKEN: ${{ secrets.PLATFORM_TOKEN }}
 ```
 
-A workflow in the control repository receives it, moves the pointer, and commits
-`feat(api): a health endpoint`. This is the only option that puts anything in the linked repository, and it is a few
-lines that never mention dispat.
+A workflow in the control repository receives it, moves the pointer, and commits `feat(api): a health endpoint`. This
+is the only option that puts anything in the linked repository. It is a few lines that never mention dispat.
 
 ### A sync job writes the commit
 
-The control repository fetches every linked repository on a schedule and writes the commits itself, deriving each one
-from the linked repository's own log. This scales best, and it is the version most fleets end up on.
+Fetch every linked repository on a schedule. The control repository writes the commits itself, deriving each one from
+the linked repository's own log. This scales best, and it is the version most fleets end up on.
 
 ```sh title="tools/sync.sh"
 #!/bin/sh
@@ -341,10 +339,11 @@ echo "$name: $(git rev-parse --short "$old") -> $(git rev-parse --short "$new")"
 ```
 
 The part that makes this work is the `---` line. A dispat commit message can carry
-[many units in one commit](./reference/commits.md), each with its own type and scope, so a single pointer bump
-covering three upstream commits becomes three units and versions as if all three had been made in the control
-repository. Here is the script against a linked repository whose team writes conventional commits sometimes and plain
-sentences the rest of the time:
+[many units in one commit](./reference/commits.md), each with its own type and scope. A single pointer bump covering
+three upstream commits becomes three units. It versions as if all three had been made in the control repository.
+
+Here is the script against a linked repository whose team writes conventional commits sometimes and plain sentences the
+rest of the time:
 
 ```console
 $ ./tools/sync.sh web services/web/src
@@ -381,15 +380,16 @@ $ dispat preview --changelog
 - preload the hero image
 ```
 
-Three commits, written by people who have never heard of dispat, in a repository dispat has never been installed in,
-and the changelog reads properly.
+Three commits were written by people who have never heard of dispat, in a repository dispat has never been installed
+in, and the changelog reads properly.
 
 Run one job per package, or loop over them and let a single commit cover several packages. The units in one commit may
 carry different scopes, so one sync commit can release the whole fleet.
 
 ### Settings this implies
 
-Whichever way the message gets written, a control repository that copies text from elsewhere wants three settings:
+Configure three settings for a control repository that copies text from elsewhere, whichever way the message gets
+written:
 
 ```yaml
 parser:
@@ -401,39 +401,39 @@ nonPackageScopes: [release, sync]
 ```
 
 - `parser.maxDescriptionLength: -1` turns off the long-description warning. Upstream subject lines were not written to
-  dispat's 100 character limit and there is no point being told so on every release.
+  dispat's 100 character limit, and there is no point being told so on every release.
 - `parser.propagation.depth: 1` makes a bump reach the packages that depend on it without anyone writing the `^`
-  directive. This matters more here than in an ordinary monorepo: a generated commit message cannot know how far a
+  directive. This matters more here than in an ordinary monorepo. A generated commit message cannot know how far a
   change should reach, and the person who wrote the upstream commit was never asked. Setting the default in the
-  configuration is the honest place for that decision. Use `all` for the whole transitive closure, and leave it at
-  the default `0` if you would rather each bump stay put until someone asks for more.
-- `nonPackageScopes` should name whatever scope your own bookkeeping commits use, so a `chore(sync):` commit is not
-  reported as naming a package that does not exist. `release` is in the default list and must stay.
-- `commitErrors` should be left at its default, `warn`. A message assembled from someone else's subject lines will
-  occasionally produce something dispat cannot parse, and that unit dropping out is a far better outcome than the
-  whole release refusing to run.
+  configuration is the honest place for that decision. Use `all` for the whole transitive closure. Leave it at the
+  default `0` if you would rather each bump stay put until someone asks for more.
+- `nonPackageScopes` should name whatever scope your own bookkeeping commits use. This ensures a `chore(sync):` commit
+  is not reported as naming a package that does not exist. `release` is in the default list and must stay.
+- Leave `commitErrors` at its default, `warn`. A message assembled from someone else's subject lines will occasionally
+  produce something dispat cannot parse. That unit dropping out is a far better outcome than the whole release refusing
+  to run.
 
 ## Building and publishing
 
-Two models. The first is why most people adopt the pattern; the second is for fleets with pipelines they cannot
-retire.
+Choose between two models. The first is why most people adopt the pattern, and the second is for fleets with pipelines
+they cannot retire.
 
 ### The control repository builds
 
-The `flow` in the control repository holds the build and publish commands, and they run against the checked-out
-submodule. This is the configuration shown above: `npm --prefix src ci`, `npm --prefix src publish`.
+The `flow` in the control repository holds the build and publish commands. They run against the checked-out submodule.
+This is the configuration shown above: `npm --prefix src ci`, `npm --prefix src publish`.
 
-Everything in [Examples](./examples/README.md) applies unchanged, because from dispat's point of view these are
-ordinary packages in ordinary folders. `flow.login` runs once per space, so one registry login covers every package in
-it. `DISPAT_NEW_VERSION` and the rest of the [script environment](./reference/environment.md) are there as usual.
+Everything in [Examples](./examples/README.md) applies unchanged because from dispat's point of view these are ordinary
+packages in ordinary folders. `flow.login` runs once per space, so one registry login covers every package in it.
+`DISPAT_NEW_VERSION` and the rest of the [script environment](./reference/environment.md) are there as usual.
 
-This is the model that gets the linked repositories down to source code and nothing else, and it is the one to choose
-when the repositories build in similar enough ways that a handful of shared scripts covers them.
+Choose this model when the repositories build in similar enough ways that a handful of shared scripts covers them. It
+gets the linked repositories down to source code and nothing else.
 
 ### The control repository triggers each pipeline
 
-If a linked repository has a build that only it knows how to run, the control repository can compute the version and
-ordering and then hand off:
+Compute the version and ordering in the control repository and then hand off if a linked repository has a build that
+only it knows how to run:
 
 ```yaml
 scripts:
@@ -445,19 +445,19 @@ scripts:
       --repo acme/$DISPAT_PACKAGE --exit-status
 ```
 
-The `publish` script must not return until the publish has actually happened, because everything downstream of it,
-the tag, the changelog and any consumer waiting on this package, treats a successful publish as the point of no
-return.
+The `publish` script must not return until the publish has actually happened. Everything downstream of it treats a
+successful publish as the point of no return. This includes the tag, the changelog, and any consumer waiting on this
+package.
 
-You keep the ordering, the versions and the records, and you give up two things: each linked repository still has a
+You keep the ordering, the versions, and the records. You give up two things. Each linked repository still has a
 pipeline to maintain, and something has to sit and poll for the result.
 
 ### Making the release visible in the linked repository
 
-The tag and the changelog live in the control repository, which is not where a user of the linked repository looks.
-Three optional additions, each independent of the others:
+The tag and the changelog live in the control repository, which is not where a user of the linked repository looks. Add
+three optional settings, each independent of the others:
 
-- **Put the GitHub release on the linked repository.** `github.owner` and `github.repo` are per-package overrides:
+- **Put the GitHub release on the linked repository.** Set `github.owner` and `github.repo` as per-package overrides:
 
   ```yaml
   packages:
@@ -467,7 +467,7 @@ Three optional additions, each independent of the others:
         repo: api
   ```
 
-  The release, its notes and its assets then appear on `acme/api`, created with the same token.
+  The release, its notes, and its assets then appear on `acme/api`, created with the same token.
 
 - **Tag the linked repository too**, from a publish script:
 
@@ -478,14 +478,14 @@ Three optional additions, each independent of the others:
 
   Those tags are the linked repository's own. dispat never reads them, so they cannot confuse the version it computes.
 
-- **Point dispat's own tag at a commit a script produced.** If a release script creates a commit somewhere, writing
-  `PACKAGE_API=<hash>` to `$DISPAT_OUTPUT` (the package name uppercased) moves the tag and the GitHub release onto
-  that commit instead of the release commit. See [script outputs](./reference/environment.md#script-outputs).
+- **Point dispat's own tag at a commit a script produced.** Write `PACKAGE_API=<hash>` to `$DISPAT_OUTPUT` (the package
+  name uppercased) if a release script creates a commit somewhere. This moves the tag and the GitHub release onto that
+  commit instead of the release commit. See [script outputs](./reference/environment.md#script-outputs).
 
 ## Dependencies across repositories
 
-This is the part that no arrangement of separate repositories can give you. Edges are declared in the control
-repository, and a dependency that crosses a repository boundary is written exactly like one that does not:
+This is the part that no arrangement of separate repositories can give you. Declare edges in the control repository. A
+dependency that crosses a repository boundary is written exactly like one that does not:
 
 ```yaml
 dependencies:
@@ -493,8 +493,8 @@ dependencies:
   web: [sdk]
 ```
 
-You do not have to write them by hand. [`dispat compute`](./cli/compute.md) reads the manifests inside the submodules
-and finds the edges itself:
+You do not have to write them by hand. Run [`dispat compute`](./cli/compute.md) to read the manifests inside the
+submodules and find the edges automatically:
 
 ```console
 $ dispat compute
@@ -503,22 +503,23 @@ $ dispat compute
 1 suggestion(s); apply all with --write, choose with --interactive
 ```
 
-It found a `package.json` two levels inside a wrapper, in a different repository, and derived an edge that dispat now
+It found a `package.json` two levels inside a wrapper, in a different repository. It derived an edge that dispat now
 orders releases by.
 
 ### One caveat: writes inside a submodule
 
-[Automatic version reconciliation](./configuration/autoversion.md) updates a consumer's manifest so its range points
-at the provider's new version. Under a wrapper layout it needs `manifests: "all"` to see manifests inside the
-submodule at all. Once it does, there is a wrinkle: that manifest lives in a linked repository, and the control
-repository cannot commit it. The write still happens in the working tree, so the build uses the right version, but it
-is not recorded anywhere.
+[Automatic version reconciliation](./configuration/autoversion.md) updates a consumer's manifest so its range points at
+the provider's new version. Under a wrapper layout it needs `manifests: "all"` to see manifests inside the submodule at
+all.
 
-Two reasonable ways to handle that, and they are genuinely both fine:
+Once it does, there is a wrinkle. That manifest lives in a linked repository, and the control repository cannot commit
+it. The write still happens in the working tree, so the build uses the right version, but it is not recorded anywhere.
 
-- **Let it be a build-time edit.** Keep `autoVersion` on so the build resolves against the version being released,
-  and let each linked repository update its own ranges the way it already does, usually with Renovate or Dependabot.
-  This keeps the linked repositories in charge of their own manifests.
+Handle that in two reasonable ways. They are genuinely both fine:
+
+- **Let it be a build-time edit.** Keep `autoVersion` on so the build resolves against the version being released. Let
+  each linked repository update its own ranges the way it already does, usually with Renovate or Dependabot. This keeps
+  the linked repositories in charge of their own manifests.
 - **Push the edit back.** Have a publish script commit the manifest change in the submodule and push it:
 
   ```sh
@@ -529,8 +530,8 @@ Two reasonable ways to handle that, and they are genuinely both fine:
 
 ## Starting from versions already published
 
-The linked repositories have probably shipped versions already, and the control repository has no tags, so its first
-run would start everything from scratch. State the baselines instead:
+The linked repositories have probably shipped versions already. The control repository has no tags, so its first run
+would start everything from scratch. State the baselines instead:
 
 ```yaml
 initials:
@@ -539,12 +540,12 @@ initials:
   web: 0.14.2
 ```
 
-The next release of `sdk` then continues from `2.3.1`. `dispat compute --write` fills this block in from the manifests
-it finds, and [Adopting dispat](./examples/adopting.md) walks the whole procedure with transcripts.
+The next release of `sdk` then continues from `2.3.1`. Run `dispat compute --write` to fill this block in from the
+manifests it finds. [Adopting dispat](./examples/adopting.md) walks the whole procedure with transcripts.
 
 ## The release job
 
-The one pipeline the whole fleet needs. The submodules must be checked out, and the history must be complete, because
+Configure the one pipeline the whole fleet needs. Check out the submodules, and fetch the complete history, because
 dispat reads tags and commits:
 
 ```yaml
@@ -571,12 +572,12 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
 
-Two details specific to this pattern. `submodules: recursive` is required, and without it the package folders are
-empty and nothing builds. `token` has to be a token that can read the linked repositories: the automatic
-`GITHUB_TOKEN` is scoped to the repository running the job, so private submodules fail to clone with it.
+Two details are specific to this pattern. `submodules: recursive` is required. Without it, the package folders are
+empty and nothing builds. `token` has to be a token that can read the linked repositories. The automatic `GITHUB_TOKEN`
+is scoped to the repository running the job, so private submodules fail to clone with it.
 
-The [release lock](./reference/releasing/release-lock.md) is a tag on the control repository's own remote, so two runs
-of this job cannot overlap, and nothing else in the organisation is affected by it.
+The [release lock](./reference/releasing/release-lock.md) is a tag on the control repository's own remote. Two runs of
+this job cannot overlap, and nothing else in the organisation is affected by it.
 
 Add the sync job beside it if you are generating the bump commits:
 
@@ -605,7 +606,7 @@ jobs:
           git push
 ```
 
-The identity lines are not optional: a runner has no git user configured, and the script commits. The push lands on
+The identity lines are not optional. A runner has no git user configured, and the script commits. The push lands on
 `main`, which starts the release job above.
 
 ## What to watch for
@@ -613,20 +614,20 @@ The identity lines are not optional: a runner has no git user configured, and th
 - **The control repository sees the pointer, not the history.** Everything a release knows comes from the bump commit
   message. Get that message right and the rest follows.
 - **A checkout without submodules produces empty folders.** The pointers are in the history either way, so the plan
-  comes out identical and nothing warns. The failure arrives later, when a build finds nothing to build. Use
+  comes out identical and nothing warns. The failure arrives later when a build finds nothing to build. Use
   `submodules: recursive` in every job, including the ones that only run `dispat run` or `dispat if`.
 - **A shallow clone breaks the plan.** dispat counts commits since a tag, so the control repository needs its full
   history.
-- **`revertOnFail` does not clean inside a submodule.** `git clean` refuses to descend into one, so a failed package
-  can leave the linked repository's working copy modified. On an ephemeral CI runner this does not matter. On a
-  long-lived one, reset the submodules at the start of the job.
-- **A space `path` cannot point outside the repository.** Relative paths that escape the root are refused, which is
-  exactly why the link is a submodule: it brings the code inside the checkout rather than reaching outside it.
-- **A linked repository that is itself a dispat monorepo does not merge.** Put it in a wrapper, where its config file
-  is never read, or exclude the folder with [`.dispatexclude`](./examples/layout.md). Do not mount it as a package
-  and hope the two configurations agree.
+- **`revertOnFail` does not clean inside a submodule.** `git clean` refuses to descend into one. A failed package can
+  leave the linked repository's working copy modified. This does not matter on an ephemeral CI runner. Reset the
+  submodules at the start of the job on a long-lived runner.
+- **A space `path` cannot point outside the repository.** Relative paths that escape the root are refused. This is
+  exactly why the link is a submodule. It brings the code inside the checkout rather than reaching outside it.
+- **A linked repository that is itself a dispat monorepo does not merge.** Put it in a wrapper where its config file is
+  never read. Alternatively, exclude the folder with [`.dispatexclude`](./examples/layout.md). Do not mount it as a
+  package and hope the two configurations agree.
 - **Relative submodule URLs resolve against the control repository's own remote.** `git submodule add ../api.git` is
-  convenient on GitHub, where every repository sits under the same owner, and confusing anywhere else. Absolute URLs
+  convenient on GitHub, where every repository sits under the same owner. It is confusing anywhere else. Absolute URLs
   are never wrong.
 
 ## See also

@@ -1,15 +1,16 @@
 # Static env
 
-The `env` objects add fixed environment variables to the scripts dispat runs. The simplest use is one map at the top of
-the file, reaching everything:
+Define fixed environment variables for your scripts using `env` objects. Put a single map at the top of your
+configuration file to reach every script:
 
 ```yaml
 env:
   NPM_CONFIG_REGISTRY: https://npm.corp.example
 ```
 
-Spaces and packages can add their own, and the three layers merge key by key with the most local one winning. A key set
-in only one layer reaches every script under it; a key set in two is decided by the nearer:
+You can also add `env` objects to spaces and packages. dispat merges these three layers key by key, and the most local
+definition wins. A key set in only one layer reaches every script under it, but a key set in multiple layers uses the
+nearest value:
 
 ```yaml
 env:
@@ -24,40 +25,45 @@ packages:
       CGO_ENABLED: "1"                             # core's scripts only
 ```
 
-A package's scripts here see all three: the registry, the Go flags, and `CGO_ENABLED`. The other packages of `libs` see
-the first two. The run-level hooks, which execute at the repository root with no package in view, see the top-level map
-alone, because no space or package applies to them.
+Scripts in the `core` package see all three variables: the registry, the Go flags, and `CGO_ENABLED`. Scripts in other
+`libs` packages see only the first two.
 
-Where you can write an `env` map, you can write it in a [space folder's or package folder's own config file](./packages.md)
-too. Those count as layers like any other, the in-folder file being more local than the entry that names it.
+Run-level hooks execute at the repository root with no package in view. They see only the top-level map because no
+space or package applies to them.
+
+You can also write an `env` map inside a [space folder's or package folder's own config file](./packages.md). These
+files count as layers just like the main configuration. An in-folder file acts as a more local layer than the entry
+that names it.
 
 ## Where else a variable can come from
 
-The `env` objects are the configuration's own statement, so they win over the process environment and over the
-[`.env` file](./dotenv.md) dispat reads from the folder you run it in. A variable nothing here mentions still reaches
-your scripts if the environment or that file defines it.
+Variables defined in `env` objects always win over the process environment and the [`.env` file](./dotenv.md). dispat
+reads that file from the folder you run it in. If your configuration omits a variable, your scripts still receive it
+from the environment or `.env` file.
 
 ## Values can reference other variables
 
-`$NAME` and `${NAME}` in a value are expanded before the script runs, against the script's computed
-[`DISPAT_*` variables](../reference/environment.md) first and the process environment second:
+Write `$NAME` or `${NAME}` to expand a value before the script runs. dispat resolves these against the script's
+computed [`DISPAT_*` variables](../reference/environment.md) first, and the process environment second:
 
 ```yaml
 env:
   CUSTOM_TAG: custom_$DISPAT_VERSION
 ```
 
-Each package's scripts get their own version, so `core` at 1.4.0 sees `CUSTOM_TAG=custom_1.4.0`. dispat does this
-expansion itself, because exported variables never pass through a shell. Write `$$` for a literal dollar sign; an
-unknown name expands to nothing, the same as in a shell.
+Each package gets its own version for its scripts. The `core` package at 1.4.0 sees `CUSTOM_TAG=custom_1.4.0`. dispat
+handles this expansion directly because exported variables never pass through a shell.
+
+Write `$$` to escape a literal dollar sign. An unknown name expands to nothing, just like in a shell.
 
 ## Two things you cannot do
 
-Keys keep the exact case you write them in, which is worth knowing because the rest of the configuration is
-case-insensitive: script names, space names and package names all match regardless of case. Environment variables do
-not, so dispat reads the `env` objects back from your file to preserve their spelling. Two keys differing only in case
-are rejected, since there would be no way to tell which one you meant.
+Keys keep the exact case you write them in. The rest of the configuration is case-insensitive, so script names, space
+names, and package names match regardless of case. Environment variables are case-sensitive.
 
-A static variable also cannot override a computed one. The `DISPAT_` prefix is reserved, and setting a key that starts
-with it is a configuration error rather than something quietly ignored. That is what lets a script read
+dispat reads the `env` objects back from your file to preserve your exact spelling. It rejects two keys that differ
+only in case because it cannot determine which one you meant.
+
+You cannot override a computed variable with a static one. The `DISPAT_` prefix is reserved, so setting a key that
+starts with it throws a configuration error instead of failing quietly. This strictness means your scripts can read
 `DISPAT_VERSION` and trust it.

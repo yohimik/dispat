@@ -1,12 +1,12 @@
 # Unreal Engine
 
-An Unreal plugin keeps its version in its `.uplugin`, a project keeps its in `Config/DefaultGame.ini`, and the Android
-store fields live in `Config/DefaultEngine.ini`. dispat reads and writes all of them, and reads the plugin graph a
-`.uproject` declares.
+An Unreal plugin stores its version in its `.uplugin` file. A project keeps its version in `Config/DefaultGame.ini`,
+and the Android store fields live in `Config/DefaultEngine.ini`. dispat reads and writes all of these files, and it
+reads the plugin graph declared by a `.uproject`.
 
 ## The short version
 
-A repository of plugins is a workspace like any other:
+Treat a repository of plugins as a standard workspace. Define your packages in `dispat.json`:
 
 ```json title="dispat.json"
 {
@@ -17,7 +17,8 @@ A repository of plugins is a workspace like any other:
 }
 ```
 
-Each `.uplugin` sits directly in its package folder, so the default manifest scope reaches it.
+Place each `.uplugin` directly in its package folder so the default manifest scope finds it. Commit your changes and
+run `dispat` to bump the versions.
 
 ```console
 $ git commit -m "feat(acmenet): reliable RPC batching"
@@ -50,11 +51,11 @@ $ dispat
 | `Version` | the build counter | `--set-build` |
 | `Plugins[].Name` | dependencies, with no version | never |
 
-The name is the file's own base name rather than `FriendlyName`, because that is what other descriptors reference the
-plugin by and what the folder on disk is called. It is the name a workspace can actually resolve.
+dispat uses the file's base name as the package name instead of `FriendlyName`. Other descriptors reference the plugin
+by this base name, and it matches the folder on disk. A workspace resolves this name directly.
 
-`Version` is written back as a bare integer, because that is what the engine's build tool expects. Where a descriptor
-already spells it as a string, dispat keeps that shape rather than reformatting somebody else's file on the way past.
+dispat writes `Version` back as a bare integer because the engine's build tool expects that format. If a descriptor
+already formats the version as a string, dispat keeps that shape. It avoids reformatting existing files.
 
 ### `*.uproject`
 
@@ -68,8 +69,9 @@ already spells it as a string, dispat keeps that shape rather than reformatting 
 }
 ```
 
-A project descriptor declares no version of its own. What it declares is which plugins it enables, and those are
-dependency edges: release `AcmeNet` first, then the project that uses it. `dispat compute` will suggest exactly that.
+A project descriptor declares no version of its own. It declares which plugins it enables, and dispat treats these as
+dependency edges. Release `AcmeNet` first, then release the project that uses it, which `dispat compute` suggests
+automatically.
 
 ### `Config/DefaultGame.ini` and `Config/DefaultEngine.ini`
 
@@ -85,14 +87,14 @@ StoreVersion=7
 VersionDisplayName=1.2.0
 ```
 
-`ProjectVersion` is the version a packaged game reports at runtime, `VersionDisplayName` is what the Play Store
-listing shows, and `StoreVersion` is the integer Google Play orders uploads by.
+`ProjectVersion` sets the version a packaged game reports at runtime. `VersionDisplayName` controls what the Play Store
+listing shows. `StoreVersion` provides the integer Google Play uses to order uploads.
 
-Unreal writes `ProjectVersion` with four components. dispat keeps whatever text you give it, because that text is what
-the engine reads, and normalising it here would make the two disagree.
+Unreal writes `ProjectVersion` with four components. dispat keeps whatever text you provide because the engine reads
+that exact text. Normalising the text would cause disagreements with the engine.
 
-Both files are recognised only inside a `Config/` folder. A `DefaultEngine.ini` anywhere else is configuration, not a
-manifest.
+Put both files inside a `Config/` folder so dispat recognises them. A `DefaultEngine.ini` anywhere else acts as
+configuration, not a manifest.
 
 ## Plugins have no versions, and that is fine
 
@@ -102,8 +104,8 @@ An Unreal descriptor names a plugin and stops there:
 "Plugins": [{ "Name": "AcmeNet", "Enabled": true }]
 ```
 
-There is no version text, because the engine resolves a plugin by name against the project and the engine itself. So
-asking dispat to write a range for one reports it **skipped**, not missing:
+The descriptor lacks version text because the engine resolves a plugin by name against the project and the engine
+itself. Ask dispat to write a version range for a plugin, and it reports the file as **skipped**, not missing:
 
 ```console
 $ dispat writer --set AcmeNet=1.3.0 Server.uproject
@@ -111,11 +113,12 @@ Server.uproject
 1 manifest(s): 0 applied, 1 skipped, 0 missing
 ```
 
-Skipped means the dependency is there and carries nothing a writer could change. Missing would mean the file does not
-declare it at all, which is a real disagreement between you and the file, and only that fails `--strict`. Every
-healthy Unreal descriptor is permanently in the skipped state, so warning about it would be noise.
+A skipped dependency exists but carries no version text for a writer to change. A missing dependency means the file
+does not declare it at all, creating a disagreement that fails a `--strict` run. Every healthy Unreal descriptor stays
+permanently in the skipped state, so warnings here would create noise.
 
-A disabled plugin is still declared, and still an edge. A build that turns it back on needs it released.
+A disabled plugin remains declared and still acts as a dependency edge. A build that turns the plugin back on requires
+a released version.
 
 ## Build numbers for the stores
 
@@ -125,26 +128,28 @@ $ dispat writer --set-build "$GITHUB_RUN_NUMBER" \
     Config/DefaultEngine.ini
 ```
 
-The plugin's `Version` and the Android `StoreVersion` both move, and no version string does. Both are integers to the
-tool that reads them, so a version string is refused before the file is opened.
+Run this command to bump the plugin's `Version` and the Android `StoreVersion` without changing any version strings.
+Both fields require integers. dispat refuses a version string before it even opens the file.
 
 ## What dispat leaves alone
 
-`EngineAssociation` pins the engine a project builds against. That is a toolchain choice rather than something the
-project ships, so dispat never reads or writes it, on the same reasoning that leaves a Maven parent version alone.
+`EngineAssociation` pins the engine a project builds against. This represents a toolchain choice rather than a shipped
+artifact. dispat never reads or writes it, just as it ignores a Maven parent version.
 
-`*.Build.cs` and `*.Target.cs` declare module dependencies in C#. They are source files, not manifests.
+`*.Build.cs` and `*.Target.cs` declare module dependencies in C#. dispat ignores them because they are source files,
+not manifests.
 
-An array operation (`+ProjectVersion=`, `.ProjectVersion=`) is a different declaration from a plain assignment, and
-Unreal resolves the two differently. dispat writes the plain one and leaves the operations alone.
+An array operation like `+ProjectVersion=` or `.ProjectVersion=` acts as a different declaration from a plain
+assignment. Unreal resolves the two differently. dispat writes the plain assignment and leaves the array operations
+alone.
 
 ## The folders dispat stays out of
 
-`Binaries`, `Intermediate`, `Saved` and `DerivedDataCache` hold generated copies of the descriptors beside them.
+The `Binaries`, `Intermediate`, `Saved`, and `DerivedDataCache` folders hold generated copies of the descriptors.
 dispat never descends into any of them.
 
 ## Where to go next
 
-- [Games](./game.md) for a repository that grows past one project.
-- [Unity](./unity.md) and [Godot](./godot.md) for the other engines.
-- [compute](../cli/compute.md) for turning the plugin graph into config.
+- Read [Games](./game.md) for a repository that grows past one project.
+- Check [Unity](./unity.md) and [Godot](./godot.md) for other game engines.
+- Use [compute](../cli/compute.md) to turn the plugin graph into configuration.

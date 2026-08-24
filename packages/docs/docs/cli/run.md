@@ -1,93 +1,94 @@
 # The run command
 
-`dispat run <script>` plans, then runs the named
-[script](../configuration/spaces.md#scripts-and-dispat-run) inside each changed package that has one, honouring the
-dependency graph. Nothing is released or tagged. A failing script's dependents are skipped or kept running per
-`--on-error`.
+Run `dispat run <script>` to plan and execute a named [script](../configuration/spaces.md#scripts-and-dispat-run)
+inside each changed package that has one, honouring the dependency graph. Nothing is released or tagged. If a script
+fails, dispat skips its dependents or keeps them running according to `--on-error`.
 
 Each package looks the name up in its own `scripts`, then its space's, then the file's. The level you define a name at
-is therefore what decides the reach: a file-level script runs in every changed package, a space's in that space's
-packages, a package's in that package alone. A selected package with no command for the name does nothing. Exit `1`
-means either that no level defines the name, or that none of the selected packages have it.
+decides its reach, so a file-level script runs in every changed package, a space's script runs in that space's
+packages, and a package's script runs in that package alone. A selected package with no command for the name does
+nothing, while a missing name exits `1` because either no level defines it or none of the selected packages have it.
 
 Selection happens in three steps, in this order:
 
-1. **A window** decides which packages are on the table. By default that is the changed packages: the set a release
-   would process, plus every changed package of a
-   [`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none), which runs
-   scripts without ever releasing. `--since <rev>` instead selects the packages the commits in `rev..HEAD` address: `HEAD~1`
-   for the last commit (per-commit CI), `origin/main` for this branch's own commits (PR pipelines), a release tag, or
-   the reserved `all` for every package, changed or not. Selection follows the planner's
-   [scope semantics](../reference/commits.md#scope-sets): a commit's written scopes are authoritative, and only scopeless units
-   fall back to the files they changed.
-2. **The filter** picks from that window: `--package` / `--space` / `--group`, or the folder you are standing in, as described in
-   [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core when
-   core changed and nothing at all when it did not. `--since all -p core` is how you run a script in a package
-   regardless, and the way to try one script under the exact input its stage would give it, without releasing anything.
-   An unchanged package carries its baseline as both the old and the new version.
-3. **`--consumers`** then expands the result with every package that transitively depends on a selected one (a
-   consumer pulled in brings its own consumers), so downstream packages re-run with a change the window alone would
-   not reach. The expansion is deliberately not filtered back out: asking for a package's consumers is asking for
-   packages you did not name. The added packages run whether or not they changed, after their selected providers, with
-   the ordinary `--on-error` cascade.
+1. **A window** decides which packages are on the table, defaulting to the changed packages and every changed package
+   of a [`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none). Pass
+   `--since <rev>` to select the packages the commits in `rev..HEAD` address, using `HEAD~1` for the last commit,
+   `origin/main` for a branch, a release tag, or `all` for every package. Selection follows the planner's
+   [scope semantics](../reference/commits.md#scope-sets), so a commit's written scopes are authoritative and only
+   scopeless units fall back to the files they changed.
+2. **The filter** picks from that window using `--package`, `--space`, `--group`, or your current folder, as described
+   in [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core
+   when core changed and nothing at all when it did not. Pass `--since all -p core` to run a script regardless of
+   changes, which lets you try a script under its exact stage input while an unchanged package carries its baseline as
+   both the old and the new version.
+3. **`--consumers`** then expands the result with every package that transitively depends on a selected one, so
+   downstream packages re-run with a change the window alone would not reach. A consumer pulled in brings its own
+   consumers, and this expansion is deliberately not filtered back out because asking for a package's consumers means
+   asking for packages you did not name. The added packages run whether or not they changed, executing after their
+   selected providers with the ordinary `--on-error` cascade.
 
-`dispat <script>` is a shorthand whenever `<script>` is not a command name. Both spellings take the same flags and
+Run `dispat <script>` as a shorthand whenever `<script>` is not a command name. Both spellings take the same flags and
 narrow to the same folders.
 
 ## Choosing the packages
 
-Three flags name the same thing three ways. `--package` (`-p`) names packages. `--space` (`-s`) names spaces, and
-selects every package of one. `--group` (`-g`) names [versioning groups](../reference/releasing/versioning.md), and selects every package
-that versions with the rest of the group. All three are repeatable and comma-separated (`-p core,web`,
-`-p core -p web`), matched case-insensitively, and all three accept `*` globs: `-p '@acme/*'` for a prefix, `-p '*'`
-for every package, `-s '*'` for every space, `-g '*'` for every group. Quote a glob, or the shell expands it first. No
-word is reserved: a package named `all` is selected by `all` and by nothing else. Terms combine by union, so a package
-named twice over is still selected once.
+Three flags name the same thing three ways. Use `--package` (`-p`) to name packages, `--space` (`-s`) to name spaces
+and select every package inside them, and `--group` (`-g`) to name
+[versioning groups](../reference/releasing/versioning.md) and select every package that versions with the group. All
+three are repeatable, comma-separated (`-p core,web`, `-p core -p web`), and matched case-insensitively.
+
+All three accept `*` globs, like `-p '@acme/*'` for a prefix, `-p '*'` for every package, `-s '*'` for every space, or
+`-g '*'` for every group. Quote a glob, or the shell expands it first. No word is reserved, so a package named `all` is
+selected by `all` and by nothing else. Terms combine by union, so a package named twice over is still selected once.
 
 A space is a folder and a group is a versioning relationship, which is why they are separate flags. A group may hold
-packages from several spaces, or a single package out of one, and a
+packages from several spaces, or a single package out of one. A
 [standalone package](../configuration/packages.md#standalone-packages-path) that joined a group is reachable by
-`--group` although it belongs to no space at all. A package that versions on its own belongs to no group, so `-g '*'`
-never reaches it.
+`--group` although it belongs to no space at all.
 
-A term that matches nothing is an error, never an empty selection, because a command that quietly acts on nothing is
-how a typo hides. The error names what was discovered, and looks across the other two flags: naming a space in
-`--package`, a group in `--space`, or a package in `--group` says so and points at the flag that reaches it. A
-standalone package belongs to no space, so `--package` (or `-p '*'`) is the only way to name one unless it joined a
-group; `-s '*'` means every configured space and leaves it out.
+A package that versions on its own belongs to no group. This means `-g '*'` never reaches it.
 
-With no terms at all, the folder the command was invoked from is the selection: inside a package folder (or any
-subdirectory of it) that package, inside a space folder that space, anywhere else, the monorepo root included,
-nothing, so the command covers its usual set. The deepest match wins, so a standalone package nested inside another
-package's folder still selects itself. A term on the command line always beats the folder it was typed in. A group is
-never inferred this way, because no folder is a group; `--group` is the only way to name one.
+A term that matches nothing is an error, never an empty selection, because a command that quietly acts on nothing hides
+typos. The error names what dispat discovered and looks across the other two flags. Naming a space in `--package`, a
+group in `--space`, or a package in `--group` triggers a message pointing to the correct flag.
+
+A standalone package belongs to no space. This makes `--package` (or `-p '*'`) the only way to name one unless it
+joined a group. The `-s '*'` flag means every configured space and leaves it out.
+
+With no terms at all, dispat selects the folder you invoked the command from. Inside a package folder it selects that
+package, inside a space folder it selects that space, and anywhere else it selects nothing so the command covers its
+usual set. The deepest match wins, so a standalone package nested inside another package's folder still selects itself.
+
+A term on the command line always beats the folder you typed it in. A group is never inferred this way because no
+folder is a group. You must use `--group` to name one.
 
 Eleven commands read the same selection: `release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
-`autowriter`, `autoreplacer`, `commit`, `github` and `compute`. What each of them *does* with it differs (a release
-additionally has to respect publish order, described in [Releasing part of the graph](./release.md)), but which
-packages a term picks out never does.
+`autowriter`, `autoreplacer`, `commit`, `github` and `compute`. What each command *does* with the selection differs. A
+release additionally respects publish order, described in [Releasing part of the graph](./release.md), but which
+packages a term picks out never changes.
 
 ## Passing arguments to the script
 
-Everything after `--` goes to the script instead of to dispat:
+Pass arguments after `--` to send them to the script instead of to dispat:
 
 ```sh
 dispat run test -- --watch
 dispat test -- --watch          # the shorthand does the same
 ```
 
-With `"test": "vitest run"` in your config, both of those run `vitest run --watch`. The arguments are **appended to
-the command text**, which is the same thing `npm run test -- --watch` does, so nothing in your config has to be
-rewritten to accept them.
+With `"test": "vitest run"` in your config, both of those commands run `vitest run --watch`. The arguments are
+**appended to the command text**, matching what `npm run test -- --watch` does. You do not have to rewrite anything in
+your config to accept them.
 
-Three things follow from that, and all of them are worth knowing before you rely on it.
+Three things follow from that. Know them before you rely on this feature.
 
 **Every covered package gets them.** A run is one intent about a selection, so `dispat run test -- --watch` puts
-`--watch` on the test script of every package the run covers, not just the first. Narrow it with `--package` if that
-is not what you meant.
+`--watch` on the test script of every covered package. Narrow the selection with `--package` if you only want to target
+one.
 
-**They land at the end of the command.** A script that is a single command takes them where you expect. One that ends
-in something else does not:
+**They land at the end of the command.** A script that is a single command takes them where you expect. A script that
+ends in something else does not:
 
 ```json
 {
@@ -98,11 +99,12 @@ in something else does not:
 }
 ```
 
-The second still works, but only because the argument happened to land on the command it was meant for. If a script
-ends in something that should not receive them, wrap the part that should: `sh -c 'vitest run "$@"' _`.
+The second script still works, but only because the argument landed on the command it was meant for. If a script ends
+in a command that should not receive arguments, wrap the part that should. Use `sh -c 'vitest run "$@"' _` to control
+where the arguments go.
 
 **On a [multi-command script](../configuration/scripts.md#one-name-several-commands), only the last command takes
-them.** The last command is the script's work; the ones before it are what had to happen first, and would break if they
+them.** The last command does the script's work. The commands before it are prerequisites, and they would break if they
 took the arguments too:
 
 ```json
@@ -113,9 +115,9 @@ took the arguments too:
 }                                      //   →  vitest run --watch
 ```
 
-If the command that should receive them is not the last one, reorder the script or split it in two.
+If the command that should receive the arguments is not the last one, reorder the script or split it in two.
 
-A `--` is required. A bare word after the script name is still an error, because packages are chosen with flags:
+You must include the `--`. A bare word after the script name is an error, because you choose packages with flags:
 
 ```sh
 dispat run test core        # error: the selection is a flag
@@ -123,8 +125,9 @@ dispat run test -p core     # this is how you narrow it
 dispat run test -- core     # and this passes "core" to the script
 ```
 
-Arguments carrying spaces or shell characters are quoted for you, so `dispat run test -- --filter 'my suite'` arrives
-as one argument. Only `run` and `exec` forward; every other command refuses a `--` rather than ignoring it.
+dispat quotes arguments carrying spaces or shell characters for you, so `dispat run test -- --filter 'my suite'`
+arrives as one argument. Only `run` and `exec` forward arguments. Every other command refuses a `--` rather than
+ignoring it.
 
 ## Flags
 
@@ -132,9 +135,9 @@ Beside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`), and `if --changed`: narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same commands: narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](#choosing-the-packages).            |
-| `--since`             |             | The seven sweeping commands and `if --changed`: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
-| `--consumers`         |             | The seven sweeping commands and `if --changed`: additionally cover every package that transitively depends on a selected one. For `if`, the expansion runs before the selection narrows; see [the if command](./if.md#changed-packages).                                                          |
-| `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
+| `--package`, `-p`     |             | Use with every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`) and `if --changed` to narrow to the named packages. The flag is repeatable, comma-separated, matched case-insensitively, and accepts `*` globs (`-p '*'` is every package). See [Choosing the packages](#choosing-the-packages).                     |
+| `--space`, `-s`       |             | Use with the same commands to narrow to every package of the named spaces, using the same spellings. A standalone package belongs to no space. See [Choosing the packages](#choosing-the-packages).            |
+| `--group`, `-g`       |             | Use with the same commands to narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), using the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces. See [Choosing the packages](#choosing-the-packages).            |
+| `--since`             |             | Use with the seven sweeping commands and `if --changed` to cover the packages the commits since a git revision address, instead of the release window. Pass `all` to cover every package. See [the run command](./run.md).                |
+| `--consumers`         |             | Use with the seven sweeping commands and `if --changed` to additionally cover every package that transitively depends on a selected one. For `if`, the expansion runs before the selection narrows. See [the if command](./if.md#changed-packages).                                                          |
+| `--on-error`          | `skip`      | Use with every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`) to control what a failed package does to its dependents. Choose `skip` (transitive) or `continue`. Either way, the command exits `1` on any failure.                                         |

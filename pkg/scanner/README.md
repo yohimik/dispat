@@ -63,7 +63,7 @@ The name a Docker manifest declares is an image repository (`ghcr.io/acme/api`, 
 either states `manifestNames` or leans on the substring name matching, whose last-segment rule maps the two onto each
 other.
 
-The mobile platforms are covered too. Four of these declare an identity and a version but no dependencies at all, so
+The mobile platforms are covered too. Three of these declare an identity and a version but no dependencies at all, so
 they feed auto-versioning rather than the dependency graph. Every Java-world coordinate is spelled `group:artifact`,
 which means a version-catalog entry, a build script's literal notation and a `pom.xml` dependency all name the same
 package.
@@ -78,10 +78,28 @@ package.
 | `libs.versions.toml`   | gradle    | `[libraries]` by Maven coordinate, `version.ref` resolved through `[versions]`                |
 | `build.gradle`(`.kts`) | gradle    | `applicationId`/`namespace`, `versionName`, `versionCode`, literal coordinates, `project(…)`  |
 
-`Manifest.BuildNumber` carries the monotonic counter these formats keep beside their marketing version
+The game engines are covered too, each named after the engine rather than after a package manager, because the engine
+is what resolves its manifests. Several of them keep the version in a file no package manager would look in, and a few
+declare an identity without declaring dependencies, so they feed auto-versioning rather than the dependency graph.
+
+| File                                    | Ecosystem | Reads                                                                                    |
+|-----------------------------------------|-----------|--------------------------------------------------------------------------------------------|
+| `Packages/manifest.json`                | unity     | the flat dependency map, registry versions, `file:` folders as local paths; no identity of its own |
+| `ProjectSettings/ProjectSettings.asset` | unity     | `productName`, `bundleVersion`, `AndroidBundleVersionCode` and `buildNumber` as the build number |
+| `project.godot`                         | godot     | the `[application]` name and `config/version`, which an unversioned project leaves empty  |
+| `plugin.cfg`                            | godot     | one addon's `[plugin]` name and version                                                  |
+| `export_presets.cfg`                    | godot     | the first preset's name, its store version, and `version/code` as the build number       |
+| `*.uproject`                            | unreal    | the file's base name as the identity and every enabled plugin as a dependency, never a version |
+| `*.uplugin`                             | unreal    | the same, plus `VersionName` and `Version` as the build number                           |
+| `Config/DefaultGame.ini`                | unreal    | `ProjectName` and `ProjectVersion`                                                        |
+| `Config/DefaultEngine.ini`              | unreal    | the Android `VersionDisplayName`, and `StoreVersion` as the build number                  |
+| `game.project`                          | defold    | `title` and `version`; a library is an archive URL, so no dependencies are read           |
+| `project.json`/`gem.json`               | o3de      | the project or gem name, `version`, and the `Gem==1.0.0` dependency specifiers            |
+
+`Manifest.BuildNumber` carries the monotonic counter the formats above keep beside their marketing version
 (`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`, Gradle's `versionCode`, a pubspec version's `+`
-suffix). It is not a semantic version, so no version write ever moves it; the writer's `SetBuild` is the one entry
-point that does.
+suffix, Unity's `buildNumber`, a `.uplugin`'s `Version`). It is not a semantic version, so no version write ever
+moves it; the writer's `SetBuild` is the one entry point that does.
 
 `Manifest.Dropped` names the entries a manifest declared but the parser could not coerce into a dependency, one line
 each (`service db: not a mapping`). They are not errors: the manifest parsed, and the caller decides whether the drops
@@ -97,8 +115,9 @@ while still being able to redirect a module reached only transitively, which a G
 
 Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, stated names first, then root
 manifests, then nested ones, with a same-rank collision reported instead of guessed), `ResolveLocalDir` (declared local
-path → owning package folder) and `SkipDir` (the folder names a workspace walk never enters, exported so a caller
-walking a package for other reasons stays out of the same places).
+path → owning package folder), `SkipDir` (the dependency trees, virtual environments, build output and dot-folders,
+exported so a caller walking a package for other reasons stays out of the same places) and `SkipWorkspaceDir`
+(everything `SkipDir` names plus the folders a game engine generates, which is the rule `Scan` itself follows).
 
 `Owner.Names` is how a package with no readable identity joins the index: a Gradle module or a Makefile project
 declares nothing a parser here can read, so the caller states the names it answers to and they outrank anything a file

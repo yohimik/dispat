@@ -12,7 +12,7 @@ Scripts: map[string]models.Script{
 "release": {"npm ci", "npm publish"},     // or a sequence, run in order
 },
 Spaces: map[string]models.SpaceConfig{
-"libs": {Path: "packages", Flow: &models.SpaceFlowConfig{
+"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
 Build: []string{"build"}, Publish: []string{"publish"},
 }},
 },

@@ -1,11 +1,10 @@
 # Publishing to Steam
 
-Uploading a build to Steam with `steamcmd`, with the version in the build description and the release channel
-deciding which Steam branch goes live.
+Upload a build to Steam with `steamcmd`. Put the version in the build description and let the release channel decide
+which Steam branch goes live. Steam has no version field.
 
-Steam has no version field. A build is a numbered upload with a description attached, and what players get is
-whichever build a branch points at. That maps onto dispat cleanly once you decide two things: what the description
-says, and which branch a given release sets live.
+A build is a numbered upload with a description attached, and players get whichever build a branch points at. This maps
+onto dispat cleanly once you decide what the description says and which branch a given release sets live.
 
 ## The layout
 
@@ -35,17 +34,17 @@ dispat.json
 }
 ```
 
-`project.godot` is a manifest dispat reads, so `autoVersion` finds the game's version and writes it back with
-nothing else configured. [Godot](./godot.md) has the detail.
+dispat reads the `project.godot` manifest. The `autoVersion` field finds the game's version and writes it back with
+nothing else configured. Read [Godot](./godot.md) for the detail.
 
-`flow.login` runs once before the first publish of the space, not once per package, which is what you want from
-anything that authenticates. It is a space-level slot for exactly that reason and cannot be set on a single package;
-a repository with one game still uses a space to get it. See
-[registry login, once per space](./login.md).
+Set `flow.login` to run your authentication script once before the first publish of the space. It runs once per space,
+not once per package. A repository with one game still uses a space to get this behavior.
+
+See [registry login, once per space](./login.md).
 
 ## The build script
 
-SteamPipe reads a VDF file. Two values in it change per release, so keep it as a template:
+SteamPipe reads a VDF file. Keep it as a template, because two values in it change per release:
 
 ```
 "AppBuild"
@@ -64,7 +63,7 @@ SteamPipe reads a VDF file. Two values in it change per release, so keep it as a
 }
 ```
 
-And fill it in from the environment dispat provides:
+Fill the template in using the environment dispat provides:
 
 ```sh title="games/adventure/scripts/steam-publish.sh"
 #!/bin/sh
@@ -82,12 +81,12 @@ sed -e "s|{{DESC}}|$DISPAT_NEW_VERSION|" \
 steamcmd +login "$STEAM_USERNAME" +run_app_build /tmp/app_build.vdf +quit
 ```
 
-`$DISPAT_CHANNEL` is the release channel: `stable` for an ordinary release, `beta` or `rc` for a prerelease. Name your
-Steam branches after your channels and the mapping is this one line.
+`$DISPAT_CHANNEL` holds the release channel. This is `stable` for an ordinary release, or `beta` or `rc` for a
+prerelease. Name your Steam branches after your channels to make the mapping a single line.
 
 ## A release
 
-A commit marked `%beta` puts the game on the beta line, and the same script sends it to the `beta` branch:
+Mark a commit with `%beta` to put the game on the beta line. The script sends it to the `beta` branch:
 
 ```console
 $ git commit -m "feat(adventure)%beta: new boss fight"
@@ -106,11 +105,11 @@ $ dispat
 12:54:16 INF summary channel=beta package=adventure status=published tag=adventure@0.3.0-beta.0 took=1.4s version="0.2.0 -> 0.3.0-beta.0"
 ```
 
-The login happens once, after the build succeeded and before the first publish. A build that fails never reaches
-Steam at all.
+Watch the login happen once, after the build succeeds and before the first publish. A build that fails never reaches
+Steam.
 
-Testers on the beta branch get it. When it is ready for everybody, graduate the same work rather than rebuilding a
-different version of it:
+Testers on the beta branch get the build. Graduate the same work when it is ready for everybody, rather than rebuilding
+a different version of it:
 
 ```console
 $ git commit -m "release(adventure)%beta>stable: ship it"
@@ -120,13 +119,13 @@ $ dispat
 12:54:16 INF summary channel=stable package=adventure status=published tag=adventure@0.3.0 took=1.0s version="0.3.0-beta.0 -> 0.3.0"
 ```
 
-`0.3.0-beta.0` became `0.3.0`, the branch became the default one, and both uploads are on the same store page with
-descriptions you can read in the Steamworks build list.
+The `0.3.0-beta.0` release became `0.3.0` and the branch became the default one. Both uploads sit on the same store
+page. You can read their descriptions in the Steamworks build list.
 
 ## Several platforms in one release
 
-A Steam app usually has one depot per platform. Export them all in the build stage, then upload once: SteamPipe takes
-every depot in the same run, which is what keeps the platforms on one build number.
+A Steam app usually has one depot per platform. Export them all in the build stage, then upload once. SteamPipe takes
+every depot in the same run, which keeps the platforms on one build number.
 
 ```json
 {
@@ -136,13 +135,13 @@ every depot in the same run, which is what keeps the platforms on one build numb
 }
 ```
 
-If you would rather see each export as its own line in the log, give the build stage a
-[list of scripts](../configuration/scripts.md) instead of one command.
+Give the build stage a [list of scripts](../configuration/scripts.md) instead of one command to see each export as its
+own line in the log.
 
 ## Authentication in CI
 
-Steam Guard makes a plain password login impossible on a fresh runner. The usual approach is to log in once on a
-machine you control, then carry the resulting `config.vdf` into CI as a secret and place it before dispat runs:
+Steam Guard makes a plain password login impossible on a fresh runner. Log in once on a machine you control. Carry the
+resulting `config.vdf` into CI as a secret and place it before dispat runs:
 
 ```yaml title=".github/workflows/release.yml"
       - name: Restore the Steam session
@@ -156,24 +155,24 @@ machine you control, then carry the resulting `config.vdf` into CI as a secret a
           STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
 ```
 
-The `steam-login` script then succeeds without a prompt, once, and every publish in the space reuses that session.
+The `steam-login` script then succeeds without a prompt. It runs once, and every publish in the space reuses that
+session.
 
 ## Worth knowing
 
-- **Uploading is not releasing.** A build sitting on a branch nobody is on changes nothing for players, which is what
-  makes this safe to automate. Setting the default branch live is the moment that matters, and the
-  `%beta>stable` graduation above is where it happens.
-- **Steam build numbers are Valve's, versions are yours.** The tag `game@0.3.0` and the changelog are your record; the
-  build description is how you find that release again in the Steamworks list.
-- **A failed upload costs you nothing but time.** No version was consumed, and the next run re-does the leg that
-  failed. See [recovering from a failed run](../reference/releasing/recovery.md).
-- **Keep the export in the build stage.** If `godot --headless` fails, the run stops before `steamcmd` is even
-  launched.
-- **Test the whole thing on a private branch first.** Set `SetLive` to a branch only you are on, run a release, and
-  look at what arrives.
+- **Uploading is not releasing.** A build sitting on a branch nobody is on changes nothing for players. This makes
+  automation safe. Set the default branch live to release the game, which happens in the `%beta>stable` graduation
+  above.
+- **Steam build numbers are Valve's, versions are yours.** The tag `adventure@0.3.0` and the changelog are your record.
+  The build description is how you find that release again in the Steamworks list.
+- **A failed upload costs you nothing but time.** No version was consumed. The next run re-does the leg that failed.
+  See [recovering from a failed run](../reference/releasing/recovery.md).
+- **Keep the export in the build stage.** The run stops before `steamcmd` launches if `godot --headless` fails.
+- **Test the whole thing on a private branch first.** Set `SetLive` to a branch only you are on. Run a release and look
+  at what arrives.
 
 ## See also
 
-- [Publishing to itch.io](./itch.md), which is often the same build going to a second store.
+- [Publishing to itch.io](./itch.md) to send the same build to a second store.
 - [A game, from one package to many](./game.md) for the repository around this.
-- [Prerelease branches](../reference/releasing/prerelease-branches.md) for mapping git branches onto channels.
+- [Prerelease branches](../reference/releasing/prerelease-branches.md) to map git branches onto channels.

@@ -1,6 +1,6 @@
 # .NET packages
 
-Projects packed and pushed to NuGet, with `<Version>` and every `PackageReference` between them written before
+You pack and push projects to NuGet. **dispat** writes `<Version>` and every `PackageReference` between them before
 `dotnet pack` runs.
 
 ## The layout
@@ -11,10 +11,9 @@ src/web/Acme.Web.csproj      Acme.Web 0.4.1, references Acme.Core
 dispat.json
 ```
 
-Folder names become package names, and a dot in a configuration key reads as nesting, so keep the folders plain
-(`core`, not `Acme.Core`). The NuGet id is read out of the project file, so the two are already connected; if a
-project declares no `PackageId`, state the id under
-[`manifestNames`](../configuration/packages.md#manifestnames).
+Give your folders plain names like `core` instead of `Acme.Core`, because folder names become package names and a dot
+in a configuration key reads as nesting. **dispat** reads the NuGet id out of the project file to connect the two. If a
+project declares no `PackageId`, state the id under [`manifestNames`](../configuration/packages.md#manifestnames).
 
 ## The configuration
 
@@ -34,8 +33,8 @@ project declares no `PackageId`, state the id under
 }
 ```
 
-`range: exact` because NuGet resolves a bare version as "this or newer" already; writing `1.3.0` says what you mean
-and keeps the diff readable.
+Set `range: exact` in your configuration because NuGet already resolves a bare version as "this or newer". Writing
+`1.3.0` says exactly what you mean and keeps the diff readable.
 
 ## A release
 
@@ -54,7 +53,7 @@ $ dispat status
 12:41:35 INF release plan ready held=0 packages=2 releasing=2
 ```
 
-The version stage then writes both files, and `dotnet pack` picks the versions straight out of them:
+The version stage writes both files. Your `dotnet pack` command then picks the versions straight out of them:
 
 ```console
 $ dispat autoversion
@@ -74,9 +73,10 @@ src/web/Acme.Web.csproj  nuget  Acme.Web@0.4.1
 2 manifest(s), 2 dependency declaration(s)
 ```
 
-The name is `PackageId`, falling back to `AssemblyName` and then to the file name. A `ProjectReference` is reported as
-a link to that folder, which is how `compute` finds an edge even when no version is declared anywhere. Writes go to
-the first `<Version>` and to each `PackageReference`, whether the version sits in an attribute or in a child element:
+**dispat** reads `PackageId` for the name, falling back to `AssemblyName` and then to the file name. A
+`ProjectReference` reports as a link to that folder, so `compute` finds an edge even when no version is declared
+anywhere. Writes go to the first `<Version>` and to each `PackageReference`, whether the version sits in an attribute
+or in a child element:
 
 ```console
 $ dispat writer src/web/Acme.Web.csproj --set-version 0.5.0 --set Acme.Core=1.3.0
@@ -86,16 +86,16 @@ src/web/Acme.Web.csproj
 1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
-A version written as an MSBuild property, `$(AcmeCoreVersion)`, is reported as skipped and left alone. Four file
-names are covered in all: `*.csproj`, `*.fsproj` and `*.vbproj`, plus `*.nuspec`, `Directory.Packages.props` and
+**dispat** skips a version written as an MSBuild property like `$(AcmeCoreVersion)` and leaves it alone. It covers four
+file names in all: `*.csproj`, `*.fsproj`, and `*.vbproj`, plus `*.nuspec`, `Directory.Packages.props`, and
 `packages.config` for the projects that keep their versions in one of those.
 
 ## Central package management
 
 With `ManagePackageVersionsCentrally`, no project file carries a version for its references. They all live in one
-`Directory.Packages.props` at the repository root, which belongs to no package, so no package's version stage will
-touch it. Reconcile it once per run instead, in the [`run.beforeAll` hook](../configuration/run-hooks.md), which fires
-after planning and before any build:
+`Directory.Packages.props` at the repository root, which belongs to no package, so no package's version stage touches
+it. Reconcile it once per run in the [`run.beforeAll` hook](../configuration/run-hooks.md), which fires after planning
+and before any build:
 
 ```json title="dispat.json (central package management)"
 {
@@ -115,10 +115,9 @@ after planning and before any build:
 }
 ```
 
-`DISPAT_WORKSPACE_CORE_VERSION` is the version the `core` package will carry at the end of the run: its planned
-version when it is releasing, its current one otherwise. Every workspace package has such a variable, so the script is
-one `--set` per package you publish to your own feed. The whole run, with `pack` and `push` standing in for the real
-commands:
+`DISPAT_WORKSPACE_CORE_VERSION` is the version the `core` package carries at the end of the run: its planned version
+when releasing, and its current version otherwise. Every workspace package has this variable, so write one `--set` per
+package you publish to your own feed. Here is the whole run, with `pack` and `push` standing in for the real commands:
 
 ```console
 $ dispat
@@ -150,18 +149,19 @@ $ dispat
 12:43:50 INF done cancelled=0 failed=0 held=0 published=2 skipped=0 took=0.6s unchanged=0
 ```
 
-`web` starts building while `core` is still publishing, and waits for it before its own publish. That ordering is the
-only reason the versions it just wrote resolve.
+The `web` package starts building while `core` is still publishing. It waits for `core` to finish before its own
+publish. That ordering is the only reason the versions it just wrote resolve.
 
 ## Worth knowing
 
-- **Assembly versions are not package versions.** `dotnet pack` derives `AssemblyVersion` and `FileVersion` from
-  `Version` unless you set them, which is usually what you want. Set them explicitly if your consumers bind strictly.
-- **A pushed version is permanent.** Unlisting hides a package on NuGet, it does not free the number.
-- **`--skip-duplicate` makes a re-run survivable.** After a failure partway through a run, the next run may re-push a
-  package that already landed; that flag turns the conflict into a no-op.
-- **Nothing above needs the .NET SDK to be reasoned about.** `dispat scanner` and `dispat writer` read and edit the
-  project files directly, so a CI step can check them before any restore happens.
+- **Assembly versions are not package versions.** Your `dotnet pack` command derives `AssemblyVersion` and
+  `FileVersion` from `Version` unless you set them, which is usually what you want. Set them explicitly if your
+  consumers bind strictly.
+- **A pushed version is permanent.** Unlisting hides a package on NuGet, but it does not free the number.
+- **`--skip-duplicate` makes a re-run survivable.** Add this flag to turn a conflict into a no-op. After a failure
+  partway through a run, the next run may re-push a package that already landed.
+- **Nothing above needs the .NET SDK to be reasoned about.** Run `dispat scanner` and `dispat writer` to read and edit
+  the project files directly, so a CI step can check them before any restore happens.
 
 ## See also
 

@@ -25,7 +25,7 @@ too.
 Every one of them plans first, exactly like a release would, so they always agree with each other about what the new
 versions are. None of them needs the release to be running.
 
-## Two rules that make them safe
+## Four rules that make them safe
 
 **They only touch packages that are actually releasing.** A step command computes the release plan, then works on the
 packages that plan is releasing. If you point one at a package with no pending changes, it says so and does nothing.

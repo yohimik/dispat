@@ -1,20 +1,21 @@
 # The exec command
 
-`dispat exec <script>` runs one declared script once, in the environment of a package, a space or the folder you are
-standing in. It plans no release and sweeps no packages.
+Run `dispat exec <script>` to execute one declared script once. It runs in the
+environment of a package, a space, or your current folder. It plans no release
+and sweeps no packages.
 
-It exists because everything dispat runs is a shell command. Stages, hooks and `run` scripts are all strings handed to
-`/bin/sh -c`, which works well until a script needs to do one of two ordinary things: branch on a variable, or call
-another script you already wrote.
+Everything dispat runs is a shell command. Stages, hooks, and `run` scripts are
+strings handed to `/bin/sh -c`. That works well until a script needs to branch
+on a variable or call another script you already wrote.
 
-Two small commands cover those.
+Two small commands cover those needs.
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
 $ dispat exec build --for pkg:core
 ```
 
-Neither one plans a release, sweeps your packages or touches the dependency
+Neither command plans a release. They ignore your packages and the dependency
 graph. They run one script and get out of the way.
 
 ## Which command do I want
@@ -25,11 +26,10 @@ graph. They run one script and get out of the way.
 | run one declared script, once, right here           | `dispat exec <script>`       |
 | choose between shell commands based on a variable   | `dispat if <cond>`           |
 
-`dispat run` is the one that knows about your monorepo. It computes a plan,
-works out which packages changed and runs the script in each of them in
-dependency order. `dispat exec` does none of that. It looks up one script by
-name and runs it, which is what you want when you are already inside a stage
-script and just need to call something else.
+Use `dispat run` to compute a plan across your monorepo. It finds changed
+packages and runs the script in dependency order. `dispat exec` ignores the
+graph and runs one script by name. Call it when you are inside a stage script
+and need to trigger another command.
 
 ## dispat exec
 
@@ -40,13 +40,14 @@ dispat exec <script> [--for pkg:<name> | space:<name> | root | cwd] [--fallback]
                      [--in <folder> | pkg:<name> | space:<name> | root | cwd]
 ```
 
-`dispat exec` runs one script your config declares, in the current folder, once.
+Run `dispat exec` to execute one script your config declares. It runs once in
+the current folder.
 
 ### One subject decides everything
 
-`--for pkg:core` names the subject of the invocation. The subject decides two
-things at once: which `scripts` map the name is looked up in, and whose
-environment the script runs with.
+Pass `--for pkg:core` to name the subject of the invocation. The subject
+decides which `scripts` map to read. It also decides whose environment the
+script runs with.
 
 | Flag              | Subject                          |
 |-------------------|-----------------------------------|
@@ -56,22 +57,22 @@ environment the script runs with.
 | `--for root`      | the top level, said out loud      |
 | `--for cwd`       | whatever you are standing in      |
 
-Those values are the same everywhere dispat asks you where something is. They
-have [a page of their own](./locations.md).
+These values are the same everywhere dispat asks for a location. Read
+[a page of their own](./locations.md) for details.
 
-This is how workspace tools generally behave. `npm -w core run build` is core's
-script with core's environment, not two separate decisions, and `dispat exec` is
-the same idea.
+Workspace tools generally behave this way. `npm -w core run build` runs core's
+script with core's environment as a single decision. `dispat exec` shares the
+same idea.
 
-The folder you are standing in is consulted only when you ask for it with `cwd`.
-Every other invocation means the same thing whether you run it from the
-repository root, from inside a package, or from a CI job that starts somewhere
-unpredictable.
+Pass `cwd` to consult the folder you are standing in. Every other invocation
+means the same thing from any directory. A command behaves identically from the
+repository root, inside a package, or a random CI folder.
 
 ### Using the folder you are in
 
-`--for cwd` is the opt-in. It reads your folder exactly the way `dispat run`
-does, finding the deepest package or space that contains it:
+Pass `--for cwd` to opt in. It reads your folder exactly the way `dispat run`
+does. It finds the deepest package or space that contains your current
+directory:
 
 ```console
 $ cd packages/core
@@ -79,15 +80,15 @@ $ dispat exec build --for cwd
 core-build
 ```
 
-This is the short way to say "build the thing I am looking at". It costs a
-scan of your workspace and nothing more, so it still reads no git history.
+This is the short way to build the thing you are looking at. It costs a scan of
+your workspace and nothing more. It still reads no git history.
 
-If you are standing somewhere that is no package and no space, you get the top
-level, and dispat logs a line saying so rather than leaving you guessing.
+Stand outside any package or space and you get the top level. dispat logs a
+line saying so rather than leaving you guessing.
 
 ### Finding the script
 
-By default only the level you named is read:
+By default, dispat reads only the level you named:
 
 ```console
 $ dispat exec build --for pkg:core
@@ -97,11 +98,10 @@ error: no script "deploy" in package "core"
 ```
 
 That second failure is on purpose. If `deploy` is declared at the top level and
-you asked for core's, running the top-level one quietly would hide a mistake
-that is easy to make and hard to notice.
+you asked for core's script, running the top-level one quietly hides a mistake.
 
-When you do want a name to be found further up, `--fallback` resolves it the way
-`dispat run` does, walking from the package to its space to the top level:
+Pass `--fallback` to find a name further up. It resolves the script the way
+`dispat run` does. It walks from the package to its space to the top level:
 
 | Invocation                                         | Order tried                              |
 |----------------------------------------------------|------------------------------------------|
@@ -109,31 +109,32 @@ When you do want a name to be found further up, `--fallback` resolves it the way
 | `dispat exec build --for space:libs --fallback`    | the space, then the top level            |
 | `dispat exec build --fallback`                     | the top level, same as without it        |
 
-The nearer level still wins, so a package that declares its own `build` gets its
-own. If nothing in the chain has the name, the error lists every level it looked
-in, which is what tells a missing script apart from a misplaced one.
+The nearer level still wins. A package that declares its own `build` gets its
+own script. If nothing in the chain has the name, the error lists every level
+it checked.
 
 ### Taking the script from somewhere else
 
-Once in a while the script you want to run belongs to one package and the thing
-you want to run it against is another. `--script-from` says so:
+Sometimes the script you want belongs to one package, but you want to run it
+against another. Pass `--script-from` to do this:
 
 ```sh
 dispat exec verify --for pkg:api --script-from pkg:core
 ```
 
-That runs core's `verify` text with api's environment. It accepts everything
-`--for` does, `cwd` included, and it moves the lookup only. The environment
-always stays with the subject.
+That command runs core's `verify` text with api's environment. It accepts
+everything `--for` does, including `cwd`. It moves the script lookup only,
+because the environment always stays with the subject.
 
 ### What the script gets
 
-Your config's `env` block belongs to the script, so it is always applied, layered
-from the file up through the space to the package. Nothing to switch on.
+Your config's `env` block belongs to the script. dispat always applies it,
+layered from the file up through the space to the package. You have nothing to
+switch on.
 
 The `DISPAT_*` release variables are different. They describe one package's
-release, so working them out means computing a plan, and that reads git tags and
-history. `--env` is where you ask for that:
+release, so working them out means computing a plan. That plan reads git tags
+and history. Pass `--env` to ask for those variables:
 
 | `--env`            | The script also gets                                                    | Cost               |
 |--------------------|-------------------------------------------------------------------------|--------------------|
@@ -146,22 +147,22 @@ $ dispat exec announce --for pkg:core --fallback --env both
 announcing core at 1.4.0
 ```
 
-That is the useful part: a script written against `$DISPAT_VERSION` can now be
-run on its own, without running a release to get at it.
+A script written against `$DISPAT_VERSION` can now run on its own. You do not
+need to run a release to get at it.
 
-The release variables need a package, since a space has no version of its own to
-report, so `--env dispat` without a package subject is refused rather than
-quietly handing you a smaller environment. With `--for cwd` that check happens
-once your folder has been read, so standing in a package is enough.
+The release variables need a package, because a space has no version of its
+own. dispat refuses `--env dispat` without a package subject, rather than
+quietly handing you a smaller environment. With `--for cwd`, that check happens
+after reading your folder. Standing in a package is enough.
 
-**No `dispat exec` reads git unless `--env` asked it to.** Worth remembering if
-you are calling it in a loop.
+**No `dispat exec` reads git unless `--env` asked it to.** Remember this when
+you call it in a loop.
 
 ### Inside a stage or a run script
 
-When `dispat exec` is called from somewhere dispat already set up, the `DISPAT_*`
-variables are in the process environment already, and the script inherits them
-with no flag at all:
+Call `dispat exec` from somewhere dispat already set up, and the `DISPAT_*`
+variables are in the process environment already. The script inherits them with
+no flag at all:
 
 ```json title="dispat.json"
 {
@@ -172,85 +173,86 @@ with no flag at all:
 }
 ```
 
-Run under `dispat run ci`, the inner `announce` sees the whole release
-environment. This is the case `dispat exec` was written for, and it costs
+Run `dispat run ci`, and the inner `announce` sees the whole release
+environment. This is the exact case `dispat exec` was written for. It costs
 nothing.
 
 ### Passing arguments to the script
 
-Everything after `--` goes to the script instead of to dispat, appended to the
-command the configuration declares:
+Put arguments after `--` to send them to the script instead of to dispat. They
+append to the command the configuration declares:
 
 ```console
 $ dispat exec deploy -- --dry-run
 ```
 
-With `"deploy": "./deploy.sh"` that runs `./deploy.sh --dry-run`, so a script
-in the config takes a value from the terminal without being edited. Arguments
-carrying spaces or shell characters are quoted for you.
+With `"deploy": "./deploy.sh"`, that runs `./deploy.sh --dry-run`. A script in
+the config takes a value from the terminal without being edited. dispat quotes
+arguments carrying spaces or shell characters for you.
 
-They reach the script and nothing else: `--on-failure` never receives them,
-because that script is about the failure rather than about the work. And as
-with [`dispat run`](./run.md#passing-arguments-to-the-script), they land at the
-*end* of the command text, so a script that ends in something other than the
-program you meant should wrap it: `sh -c './deploy.sh "$@"' _`. On a
-[multi-command script](../configuration/scripts.md#one-name-several-commands)
-that end is the *last* command; the setup commands before it run as the config
-wrote them.
+These arguments reach the script and nothing else. `--on-failure` never
+receives them, because that script handles the failure rather than the work. As
+with [`dispat run`](./run.md#passing-arguments-to-the-script), arguments land
+at the *end* of the command text. If your script ends in something other than
+the target program, wrap it: `sh -c './deploy.sh "$@"' _`. On a
+[multi-command script](../configuration/scripts.md#one-name-several-commands),
+that end is the *last* command. The setup commands before it run exactly as
+written.
 
-`dispat if` forwards nothing. Its branches are already shell text you write in
-full, so there is nothing a forwarded argument would reach that the branch
-cannot say itself.
+`dispat if` forwards nothing. You write its branches in full as shell text.
+There is nothing a forwarded argument would reach that the branch cannot say
+itself.
 
 ### Choosing the folder it runs in
 
-Your script runs where you are standing. `--in` sends it somewhere else:
+Your script runs where you are standing. Pass `--in` to send it somewhere else:
 
 ```console
 $ dispat exec build --in pkg:core
 $ dispat exec build --in ./dist
 ```
 
-It takes a folder path, or any of the [place names](./locations.md) `--for`
-takes. A relative path is relative to where you are standing.
+The flag takes a folder path or any of the [place names](./locations.md)
+`--for` takes. A relative path is relative to where you are standing.
 
-This is a separate question from `--for`, and the two are free to disagree:
+This is a separate question from `--for`. The two are free to disagree:
 
 ```console
 $ dispat exec release --for pkg:core --in root
 ```
 
-That is core's script, with core's environment and core's `DISPAT_*` variables,
-run from your repository root. If you want a package's folder as well as its
-environment, `--in pkg:core` alongside says so.
+That runs core's script from your repository root. It keeps core's environment
+and core's `DISPAT_*` variables. Pass `--in pkg:core` alongside it if you want
+a package's folder as well as its environment.
 
-A folder that does not exist stops the command with a message naming it, so a
-typo does not turn into a confusing shell error. `--on-failure` runs in the same
+A missing folder stops the command with a message naming it. This prevents a
+typo from turning into a confusing shell error. `--on-failure` runs in the same
 folder as the script it follows.
 
 ## Exit codes
 
-Both commands hand back the exit code of the script they ran. `dispat if CI
---then 'exit 7'` exits `7`. That keeps them transparent in a pipeline: whatever
-you were gating on still works with a helper in the middle.
+Both commands hand back the exit code of the script they ran. Run
+`dispat if CI --then 'exit 7'` and it exits `7`. That keeps them transparent in
+a pipeline, so whatever you were gating on still works.
 
-A script bound to [several commands](../configuration/scripts.md#one-name-several-commands)
-stops at the first one that fails, and that command's code is the script's; the
+A script bound to
+[several commands](../configuration/scripts.md#one-name-several-commands) stops
+at the first failure. That command's code becomes the script's exit code. The
 commands after it do not run.
 
-`--on-failure` changes that. It runs when the chosen script fails, and its own
-exit code becomes the command's:
+Pass `--on-failure` to change that. It runs when the chosen script fails. Its
+own exit code becomes the command's exit code:
 
 ```console
 $ dispat exec deploy --on-failure 'notify-slack "deploy failed"; exit 1'
 ```
 
-The failure script runs even when the first one was killed by Ctrl-C, so a
-cleanup still gets its chance.
+The failure script runs even when Ctrl-C kills the first script. This
+guarantees a cleanup still gets its chance.
 
-`2` still means the command line itself did not make sense, which is worth
-knowing if your script also exits `2`. Ending `--on-failure` with an explicit
-`exit 1` removes the ambiguity.
+An exit code of `2` means the command line itself did not make sense. Keep this
+in mind if your script also exits `2`. End `--on-failure` with an explicit
+`exit 1` to remove the ambiguity.
 
 ## Flags
 
@@ -263,5 +265,5 @@ knowing if your script also exits `2`. Ending `--on-failure` with an explicit
 | `--in <folder>`         | Run the script in this folder: a path, or any [place name](./locations.md).             |
 | `--on-failure <script>` | Run this when the script fails, and exit with its code instead.                         |
 
-Needs a config file, since the script name comes from it. Uses the configured
-`shell` if you set one.
+The command needs a config file to look up the script name. It uses the
+configured `shell` if you set one.

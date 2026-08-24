@@ -1,7 +1,7 @@
 # The `.env` file
 
-Before dispat does anything else, it reads `.env` from the folder you run it in and adds those variables to its own
-environment. Every script, hook and login command it runs inherits them, and so does dispat itself.
+dispat reads `.env` from your current folder before doing anything else. It adds these variables to its own
+environment. Every script, hook, and login command inherits them. dispat inherits them too.
 
 ```sh
 # .env
@@ -14,58 +14,56 @@ scripts:
   publish: npm publish --access public   # reads NPM_TOKEN from the environment
 ```
 
-The file is optional. Most repositories have none, and that is not an error. The format is the usual one:
-`NAME=value` per line, `#` comments, quotes when a value has spaces, and an optional `export` in front.
+You do not need this file. Most repositories have none, and that is not an error. The format is standard: one
+`NAME=value` per line, `#` for comments, quotes for spaces, and an optional `export` prefix.
 
-The file is read from the **current directory**, the folder your shell is in, not from `--root` and not from the
-monorepo root. It belongs to whoever is running the command rather than to the repository being released.
+dispat reads the file from the **current directory**. This is the folder your shell is in, not `--root` and not the
+monorepo root. The file belongs to the person running the command, not the repository being released.
 
 ## What wins
 
-Three things can set a variable a script sees. From weakest to strongest:
+Three sources can set a variable for your scripts. From weakest to strongest:
 
 | Source | Beaten by | Why |
 |--------|-----------|-----|
-| `.env` | everything below | It fills in what nothing else said |
-| The environment you ran dispat in | the config's `env` | A value your CI job exported is never replaced by a file in the repository |
+| `.env` | everything below | It fills in what nothing else sets |
+| The environment you ran dispat in | the config's `env` | A value your CI job exports is never replaced by a file in the repository |
 | The config's [`env`](./env.md) objects | the computed `DISPAT_*` variables | The configuration is the repository's own statement about its scripts |
 
-So a token exported by a CI job wins over a `.env` someone committed by accident, and a variable the config pins wins
-over both. The computed `DISPAT_VERSION` and its siblings always win, as they always do.
+A token exported by a CI job wins over a `.env` someone committed by accident. A variable pinned in the config wins
+over both. The computed `DISPAT_VERSION` and its siblings always win.
 
 ## Naming other files
 
-`--env-file` reads a file of your choosing instead of `./.env`:
+Pass `--env-file` to read a specific file instead of `./.env`:
 
 ```sh
 dispat release --env-file .env.ci
 ```
 
-It is repeatable, and a later file wins over an earlier one:
+You can repeat the flag. A later file wins over an earlier one:
 
 ```sh
 dispat release --env-file .env.shared --env-file .env.ci
 ```
 
-Naming files turns the default off, so `./.env` is not read as well. And a file you name that is not there stops the
-run, the same way a misspelled `--config` does: asking for a file and silently getting none of it is worse than
-stopping.
+Naming a file turns the default off, so dispat skips `./.env`. A missing named file stops the run. This works the same
+way a misspelled `--config` does. Asking for a file and silently getting nothing is worse than stopping.
 
 ## Dispat's own variables
 
-Because the file is read into the environment, it also reaches the variables dispat reads for itself: the GitHub token
-of [`github`](./records.md#github), `DISPAT_UPDATE_CHECK`, `DISPAT_UNSAFE_DISABLE_LOCK`, and any variable a record
-line or an `env` value refers to with `$NAME`. Keeping `GITHUB_TOKEN` in `.env` and never in a shell profile is a
-supported way to work.
+The file reaches the variables dispat reads for itself. You can set the GitHub token for
+[`github`](./records.md#github), `DISPAT_UPDATE_CHECK`, `DISPAT_UNSAFE_DISABLE_LOCK`, and any variable a record line or
+an `env` value refers to with `$NAME`. Keeping `GITHUB_TOKEN` in `.env` instead of a shell profile works perfectly.
 
-The config's own `env` object refuses keys starting with `DISPAT_`, since a computed variable could never be shadowed
-anyway. `.env` allows them, because reaching those switches is the point. The computed variables still win inside
-package scripts.
+The config's `env` object refuses keys starting with `DISPAT_`. A computed variable could never be shadowed anyway. The
+`.env` file allows them, because reaching those switches is the point. The computed variables still win inside package
+scripts.
 
 ## Secrets
 
-A `.env` is where tokens live, so dispat never logs a value from one. `--log-level debug` reports how many files were
-read, and `--log-level trace` names the keys and whether each one was added or already set:
+Tokens live in `.env` files. dispat never logs a value from one. Run with `--log-level debug` to see how many files
+were read. Run with `--log-level trace` to see the keys and whether each was added or already set:
 
 ```
 TRC variable added from an environment file key=NPM_TOKEN
@@ -73,5 +71,5 @@ TRC the environment already sets this variable key=GITHUB_TOKEN
 DBG environment files read added=1 files=[".env"] kept=1
 ```
 
-Add `.env` to your `.gitignore`. Nothing in dispat requires the file to be committed, and the precedence rules above
-are built on the assumption that the real secrets come from your CI provider.
+Add `.env` to your `.gitignore`. dispat does not need this file committed. The precedence rules assume your real
+secrets come from your CI provider.

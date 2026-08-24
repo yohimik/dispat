@@ -1,7 +1,7 @@
 # dispat in CI
 
-dispat is a release tool, so the machine that runs it is nearly always a CI runner. There are three ways to get it
-there, and which one you want is decided by where your pipeline runs:
+dispat is a release tool. You will nearly always run it on a CI runner. Choose one of three ways to install it based on
+where your pipeline runs:
 
 | You are on | Use |
 |---|---|
@@ -9,10 +9,10 @@ there, and which one you want is decided by where your pipeline runs:
 | GitLab CI, Jenkins, Buildkite, anything with a job image | [a container image](#the-container-images) |
 | anything else, or a custom image | [the install script](#the-install-script) |
 
-All three end at the same binary, and the last two are the same script: the images install themselves with it.
+All three methods install the same binary. The container images use the install script internally.
 
-This page is about getting the binary onto a runner. What to run once it is there, from per-commit test windows to a
-fully gated release pipeline, is [Pipeline patterns](./pipelines.md).
+This page covers installing the binary on a runner. Read [Pipeline patterns](./pipelines.md) to learn what to run next.
+That guide covers everything from per-commit test windows to a fully gated release pipeline.
 
 ## The GitHub Action
 
@@ -23,8 +23,8 @@ fully gated release pipeline, is [Pipeline patterns](./pipelines.md).
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The action installs the CLI and puts it on `PATH`. It does not run it: like `setup-go` and `setup-node`, it leaves
-that to a step of your own, which is what lets you pass your own flags, environment and working directory.
+The action installs the CLI and puts it on `PATH`. It does not run dispat. You run it in your own step, like you would
+with `setup-go` and `setup-node`. This lets you pass your own flags, environment and working directory.
 
 ### Inputs
 
@@ -34,7 +34,7 @@ that to a step of your own, which is what lets you pass your own flags, environm
 | `bin-dir` | `$HOME/.dispat/bin` | Where to install. The action adds it to `PATH` either way. |
 | `github-token` | `${{ github.token }}` | Only raises the API rate limit; dispat's releases are public. |
 
-Pin a version when a release should be reproducible a year from now:
+Pin a version to make a release reproducible a year from now:
 
 ```yaml
 - uses: yohimik/dispat@v1
@@ -44,8 +44,8 @@ Pin a version when a release should be reproducible a year from now:
 
 ### Outputs
 
-`version` is what was installed, and `path` is the binary's full path, useful when a later step wants to be explicit
-rather than rely on `PATH`:
+The `version` output contains the installed version. The `path` output contains the binary's full path. Use the path
+when a later step needs an explicit location instead of relying on `PATH`:
 
 ```yaml
 - id: setup
@@ -53,7 +53,7 @@ rather than rely on `PATH`:
 - run: echo "installed ${{ steps.setup.outputs.version }}"
 ```
 
-The action runs on `ubuntu-*`, `macos-*` and `windows-*` runners.
+The action supports `ubuntu-*`, `macos-*` and `windows-*` runners.
 
 ### A full release job
 
@@ -77,33 +77,31 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Whatever your stage scripts shell out to (`node`, `go`, `cargo`, `docker`) is still yours to set up in steps before
-this one. dispat itself needs only `git` and a POSIX shell.
+Set up your stage scripts in steps before this one. If your scripts shell out to `node`, `go`, `cargo`, or `docker`,
+you must install those tools first. dispat itself needs only `git` and a POSIX shell.
 
-`contents: write` is needed even by a job that pushes nothing: the run claims the repository with a
-[release lock](../reference/releasing/release-lock.md) tag on the remote before it plans, so that two jobs releasing at once are refused
-rather than raced. That also makes the job safe to trigger on every merge; the second run stops immediately instead of
-publishing beside the first.
+Grant `contents: write` even for a job that pushes nothing. The run claims the repository with a
+[release lock](../reference/releasing/release-lock.md) tag on the remote before it plans. This refuses a second job
+instead of racing it. You can safely trigger the job on every merge because the second run stops immediately.
 
 ## Gating a pipeline on the plan
 
-A repository with nothing pending releases nothing and exits `0`. That is the right answer, because there was nothing to do,
-and a job triggered on every merge must not go red because this particular merge was a `docs:` commit. But a stage
-whose *point* is that something shipped needs the opposite: a deploy that runs after the release, an announcement, a
-downstream trigger. Passing quietly on an empty plan is how a pipeline ends up deploying nothing.
+A repository with nothing pending releases nothing and exits `0`. This keeps your pipeline green when a merge only
+contains a `docs:` commit. But a stage whose *point* is that something shipped needs the opposite. A deploy, an
+announcement, or a downstream trigger will deploy nothing if it passes quietly on an empty plan.
 
-`--require-release` is that gate. On `release` and `status` alike, it exits `3` when the plan releases nothing, a
-code of its own beside exit `1`'s failures:
+Pass `--require-release` to gate these steps. The `release` and `status` commands exit `3` when the plan releases
+nothing. This gives you a dedicated code separate from exit `1` failures:
 
 ```sh
 dispat status --require-release    # 0 releasing, 3 nothing to release, 1 something is wrong
 ```
 
-Only packages the run will actually publish count. A package held by `Release-As: none`, one
-[withheld until its providers release](./releasing/partial-releases.md), and one your `--package`/`--space`/`--group`
-selection left out are all "not releasing", because none of them gets a version this run.
+Only packages the run will actually publish count. A package held by `Release-As: none` gets no version this run. A
+package [withheld until its providers release](./releasing/partial-releases.md) or excluded by your
+`--package`/`--space`/`--group` selection also counts as "not releasing".
 
-The plain shape is one job that decides and one that acts:
+The simplest pipeline uses one job that decides and one that acts:
 
 ```yaml
 jobs:
@@ -132,35 +130,33 @@ jobs:
     # ... the release job above
 ```
 
-`status` takes no lock and writes nothing, so the gate is free to run as often as you like. On `release` the flag is
-answered before the [release lock](./releasing/release-lock.md) is taken and before `beforeAll` runs, so
-`dispat --require-release` in a single-job pipeline refuses without ever claiming the repository or executing one of
-your scripts.
+Run `status` as often as you like. It takes no lock and writes nothing. On `release`, dispat answers the flag before it
+takes the [release lock](./releasing/release-lock.md) and before `beforeAll` runs. This means
+`dispat --require-release` in a single-job pipeline refuses the run without claiming the repository or executing your
+scripts.
 
-Note the shell here: the exit code is captured and mapped rather than run bare, because `set -e` would otherwise end
-the job on the `3` that is the whole answer. And it is a `case` rather than an `if`, because an `if` folds every
-nonzero code together: a broken configuration or an unreadable tag would read as "nothing to release" and the
-pipeline would skip the release instead of failing. Exit `3` is the answer; everything else is a failure and stays
-one. A step that *should* fail the pipeline when nothing released (a manually dispatched release, say) wants the
-bare form instead.
+Capture and map the exit code in your shell script. Running it bare with `set -e` would end the job on `3` before you
+can read the answer. Use a `case` statement rather than an `if` statement. An `if` statement folds every nonzero code
+together, so a broken configuration would look like "nothing to release" and skip the job instead of failing. Exit `3`
+means nothing released, while everything else is a real failure. Use the bare form only when a step *should* fail the
+pipeline when nothing releases.
 
 ## Gating a step on what changed
 
-Where `--require-release` gates a whole job, [`dispat if --changed`](../cli/if.md#changed-packages) gates one step
-inside a script, with the same selection `dispat run` covers packages by. A PR pipeline that builds the docs only
-when the docs changed, downstream dependencies included:
+Use [`dispat if --changed`](../cli/if.md#changed-packages) to gate one step inside a script. This uses the same
+selection `dispat run` covers packages by, while `--require-release` gates a whole job. You can build the docs in a PR
+pipeline only when the docs changed:
 
 ```sh
 dispat if --changed -p docs --consumers --since origin/main --then 'dispat run build-docs'
 ```
 
-The condition holds when the selection is reached by the changes, runs its `--then`, and passes that script's exit
-code through; when nothing relevant changed it runs nothing and exits `0`, so the step stays green on quiet days.
-Counting changes against a branch base needs the history to reach it, which is the same `fetch-depth: 0` the release
-job already uses.
+The condition holds when changes reach the selection. It runs the `--then` script and passes the exit code through. It
+runs nothing and exits `0` when nothing relevant changed, keeping the step green. You need `fetch-depth: 0` to count
+changes against a branch base.
 
-File tests gate on artifacts the same way, with no repository involved. A docs deploy that requires the test report
-to have been produced first:
+File tests gate on artifacts the same way, with no repository involved. You can require a test report before deploying
+the docs:
 
 ```sh
 dispat if -f packages/docs/data/report.json \
@@ -170,7 +166,7 @@ dispat if -f packages/docs/data/report.json \
 
 ## The container images
 
-Four images, one per base, on `linux/amd64` and `linux/arm64`:
+Choose from four images on `linux/amd64` and `linux/arm64`:
 
 | Image | Base | Size |
 |---|---|---|
@@ -179,8 +175,8 @@ Four images, one per base, on `linux/amd64` and `linux/arm64`:
 | `yohimik/dispat-debian` | `debian` | 69 MB |
 | `yohimik/dispat-dind` | `docker:dind` | 142 MB |
 
-Each carries the CLI, `git`, CA certificates, an SSH client and `tzdata`. Nothing else: your pipeline's toolchain is
-yours to add, and every extra package in a base image is one more thing to patch.
+Each image carries the CLI, `git`, CA certificates, an SSH client and `tzdata`. Add your pipeline's toolchain yourself.
+Every extra package in a base image is one more thing to patch.
 
 ```yaml
 # GitLab CI
@@ -204,27 +200,27 @@ docker run --rm -v "$PWD:/workspace" yohimik/dispat-alpine:1 dispat status
 | major, major.minor | `1`, `1.4` | stable releases only |
 | `latest` | | stable releases only |
 
-A release publishes every tag from one build, so `1`, `1.4` and `latest` are the same digest as the version they
-follow rather than a later copy of it.
+A release publishes every tag from one build. The tags `1`, `1.4` and `latest` share the exact digest of the version
+they follow.
 
-Pin `1` in a pipeline. `latest` never points at a prerelease: that is what the channel tags are for.
+Pin `1` in a pipeline. The `latest` tag never points at a prerelease. Use the channel tags for prereleases.
 
 ### Two things worth knowing
 
-**The repository you mount is owned by another uid**, so every git call would fail with "dubious ownership". The
-images set `git config --system --add safe.directory '*'` to make a bind-mounted checkout work.
+**The repository you mount is owned by another uid**. Every git call would fail with "dubious ownership" without
+configuration. The images set `git config --system --add safe.directory '*'` to make a bind-mounted checkout work.
 
-**Only `dispat-dind` declares an `ENTRYPOINT`**, inherited from `docker:dind` so it keeps behaving like that image
-(it still wants `--privileged`, or a `services: docker:dind` companion). The other three declare none on purpose:
-GitLab CI and GitHub Actions container jobs run their script through the image's shell, and a fixed entrypoint is what
-breaks that.
+**Only `dispat-dind` declares an `ENTRYPOINT`**. It inherits this from `docker:dind` to keep behaving like that image.
+You still need `--privileged` or a `services: docker:dind` companion. The other three images declare no entrypoint so
+GitLab CI and GitHub Actions can run scripts through the image's shell.
 
-**`dispat self-update` is not the way to upgrade one.** It replaces a binary that does not outlive the container;
-change the image tag instead. The images set `DISPAT_UPDATE_CHECK=0` so they do not nag about it.
+**`dispat self-update` is not the way to upgrade one.** That command replaces a binary that dies with the container.
+Change the image tag instead. The images set `DISPAT_UPDATE_CHECK=0` to disable update warnings.
 
 ## The install script
 
-The same script the images use, and the one [Getting started](../getting-started.md#install) hands to a human:
+The container images use this install script. It is the same script [Getting started](../getting-started.md#install)
+hands to a human:
 
 ```sh title="With curl"
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
@@ -234,9 +230,9 @@ curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
 
-It resolves the latest stable release (or takes `--version`), downloads the binary for the platform it is running on,
-verifies it against the checksum GitHub published, and installs it into `--bin-dir`. It needs `curl` or `wget` and
-nothing else: no package manager, no Go toolchain.
+The script resolves the latest stable release or takes a `--version` flag. It downloads the binary for the current
+platform and verifies it against the GitHub checksum. Then it installs the binary into `--bin-dir`. The script requires
+only `curl` or `wget`, with no package manager or Go toolchain needed.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -245,13 +241,13 @@ nothing else: no package manager, no Go toolchain.
 | `--os`, `--arch` | this machine's | Override the platform, for building an image for another one. |
 | `--token` | `$GITHUB_TOKEN` | Raises the API rate limit. |
 
-The resolved version is printed to stdout and everything else to stderr, so a script can capture it:
+The script prints the resolved version to stdout and everything else to stderr. Capture the version in your own script:
 
 ```sh
 VERSION=$(curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh)
 ```
 
-Pin the URL to a tag rather than `main` if you want the installer itself to be reproducible:
+Pin the URL to a tag rather than `main` to make the installer reproducible. Use a URL like
 `https://raw.githubusercontent.com/yohimik/dispat/services/dispat/v1.2.3/install.sh`.
 
 ### In your own image
@@ -264,10 +260,10 @@ ADD https://raw.githubusercontent.com/yohimik/dispat/main/install.sh /tmp/instal
 RUN sh /tmp/install.sh --version 1.2.3 && rm /tmp/install.sh
 ```
 
-dispat's own images do this in a throwaway first stage and copy the binary out, which keeps the downloader out of the
-published image; [docker/README.md](https://github.com/yohimik/dispat/tree/main/docker) has the shape.
+The dispat images run this script in a throwaway first stage and copy the binary out. This keeps the downloader out of
+the published image. Read [docker/README.md](https://github.com/yohimik/dispat/tree/main/docker) to see how this works.
 
 ## Somewhere other than GitHub Actions
 
-The full release job written for GitLab CI, CircleCI, Jenkins, Buildkite and Azure Pipelines, with the clone settings
-and the tokens each of them needs, is [The release job on other providers](./ci-providers.md).
+Read [The release job on other providers](./ci-providers.md) for full release jobs on GitLab CI, CircleCI, Jenkins,
+Buildkite and Azure Pipelines. That guide includes the clone settings and tokens each provider needs.

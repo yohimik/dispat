@@ -1,11 +1,11 @@
 # Go packages
 
-dispat is assembled from five Go modules, and each one is importable on its own. Parsing commit messages and reading
-and rewriting dependency manifests are problems older than releases, so they are packages first and dispat internals
-second: none of them needs the CLI, a git repository or a network.
+dispat is assembled from five Go modules, and you can import each one on its own. Parsing commit messages and rewriting
+dependency manifests are problems older than releases. These modules are packages first and dispat internals second, so
+none of them needs the CLI, a git repository, or a network.
 
-Everything else the CLI does lives under `services/dispat/internal`, which Go makes unreachable from outside the
-module. The five packages below are the whole of the importable surface.
+Everything else the CLI does lives under `services/dispat/internal`. Go makes this unreachable from outside the module.
+The five packages below are the whole of the importable surface.
 
 ## The packages
 
@@ -19,19 +19,19 @@ module. The five packages below are the whole of the importable surface.
 
 ## How they fit together
 
-The dependency shape is deliberately shallow. `ccme` depends on nothing outside the standard library. `manifest`
-depends on nothing and is imported by both `scanner` and `writer`, which is what keeps the reader and the writer
-covering exactly the same formats. `models` imports `ccme`, because a resolved configuration carries a parser
-configuration inside it.
+The dependency shape is deliberately shallow, and `ccme` depends on nothing outside the standard library. Both
+`scanner` and `writer` import `manifest` to keep them covering exactly the same formats. `models` imports `ccme`
+because a resolved configuration carries a parser configuration inside it.
 
-That leaves two natural pairs. `scanner` and `writer` are the manifest halves: one reads a version, the other writes
-it, and both agree byte for byte on where the value sits because `manifest` decides for them. `ccme` and `models` are
-the input halves: one reads the commit messages, the other describes the file that configures how they are read.
+That leaves two natural pairs. `scanner` and `writer` are the manifest halves, where one reads a version and the other
+writes it, and both agree byte for byte on where the value sits because `manifest` decides for them. `ccme` and
+`models` are the input halves, where one reads the commit messages and the other describes the file configuring how
+they are read.
 
 ## Installing
 
-Each module is versioned and tagged separately, in the layout Go expects for a multi-module repository, so a tag reads
-`pkg/ccme/v1.0.0` rather than a repository-wide version:
+Each module is versioned and tagged separately. They use the layout Go expects for a multi-module repository. A tag
+reads `pkg/ccme/v1.0.0` rather than a repository-wide version:
 
 ```sh
 go get github.com/yohimik/dispat/pkg/ccme
@@ -41,15 +41,15 @@ go get github.com/yohimik/dispat/pkg/manifest
 go get github.com/yohimik/dispat/pkg/models
 ```
 
-Taking one package does not pull the others in unless it needs them, and none of them pulls in the CLI.
+Taking one package does not pull the others in unless it needs them. None of them pulls in the CLI.
 
 ## The same work from the command line
 
-Three of the packages have a command that is the package with a report attached, and those commands need no
-configuration file and no git repository:
+Three of the packages have a command that wraps the package with a report attached. You do not need a configuration
+file or a git repository to run them:
 
 - [`dispat scanner`](../cli/scanner.md) prints what a folder's manifests declare.
 - [`dispat writer`](../cli/writer.md) applies manifest edits in place.
 - [`dispat replacer`](../cli/replacer.md) replaces literal text in any file.
 
-They are the quickest way to see what a package does with your own files before importing it.
+Run these commands to see what a package does with your own files before you import it.

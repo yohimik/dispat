@@ -1,7 +1,7 @@
 # A Python monorepo
 
-Distributions in one repository, built and uploaded with `uv`, with `pyproject.toml` and the `requirements.txt` beside
-it both kept current by dispat.
+Keep your distributions in one repository. Build and upload them with `uv`. Let dispat keep `pyproject.toml` and the
+`requirements.txt` beside it current.
 
 ## The layout
 
@@ -31,16 +31,17 @@ dispat.json
 }
 ```
 
-Poetry, PDM, Hatch, and plain `build` plus `twine`, all drop into the same two scripts; nothing above is uv-specific
-except the commands themselves.
+You can use Poetry, PDM, Hatch, or plain `build` plus `twine`. They all drop into the same two scripts. Nothing in the
+configuration is uv-specific except the commands themselves.
 
-One option to know about before you need it: `autoVersion.manifests` defaults to `root`, which reconciles the
-manifests directly in the package folder. Set it to `all` when a package keeps a second manifest deeper down, such as
-a `deploy/requirements.txt` next to a Dockerfile.
+Check `autoVersion.manifests` before you need it. It defaults to `root` to reconcile the manifests directly in the
+package folder. Set it to `all` when a package keeps a second manifest deeper down, such as a `deploy/requirements.txt`
+next to a Dockerfile.
 
 ## A release
 
-`acme-app` has no commits of its own here. It moves because the commit on `core` asked for its dependants with `^`:
+The `acme-app` package has no commits of its own here. It moves because the commit on `core` asked for its dependants
+with `^`:
 
 ```console
 $ git commit -m "feat(core)^: stream responses"
@@ -50,7 +51,7 @@ $ dispat status
 12:39:15 INF release plan ready held=0 packages=2 releasing=2
 ```
 
-Without the `^`, `core` would release alone and `app` would stay where it is until it next has a reason of its own.
+Leave out the `^` to release `core` alone. The `app` package stays where it is until it next has a reason of its own.
 [Propagation is opt-in](../concepts.md#propagation-is-opt-in) so that one library fix does not rebuild the world.
 
 ## What the version stage does
@@ -63,8 +64,8 @@ $ dispat autoversion
 12:39:15 INF auto-versioning finished failed=0 ran=2 skipped=0 stage=autoversion
 ```
 
-Three files, two packages, one pass. `versionWritten=false` on the requirements file is not a failure: that format has
-no version of its own to write, only pins to reconcile. The result:
+dispat updates three files across two packages in one pass. A status of `versionWritten=false` on the requirements file
+is not a failure because that format has no version of its own to write, only pins to reconcile. The result:
 
 ```toml
 [project]
@@ -82,8 +83,8 @@ acme-core==1.3.0
 httpx==0.27.2
 ```
 
-Only the version text moved. The comment, the ordering and `httpx` are exactly as they were, which is what makes the
-release commit reviewable.
+Only the version text moved. The comment, the ordering and `httpx` are exactly as they were. This makes the release
+commit reviewable.
 
 ## What dispat reads and writes
 
@@ -102,17 +103,18 @@ packages/core/pyproject.toml  python  acme-core@1.2.0
 ```
 
 - **`pyproject.toml`** is read as PEP 621 first (`[project]`), falling back to `[tool.poetry]`. Optional dependencies
-  become optional ones, and both PEP 735 `[dependency-groups]` and non-main Poetry groups become dev dependencies.
-- **Requirements files** match by whole words, so `requirements.txt`, `dev-requirements.txt` and `requirements-ci.txt`
-  all count and a file with `dev` or `test` in its name is read as dev dependencies. An editable local install,
-  `-e ./core`, is reported as a link to that folder.
-- **Names are normalised** the way PyPI normalises them (PEP 503), so `Acme_Core` and `acme-core` are one package.
-- **Python ranges are written as `==X.Y.Z`.** A `caret` or `tilde` policy is an npm idea; the Python writers use the
+  become optional ones. Both PEP 735 `[dependency-groups]` and non-main Poetry groups become dev dependencies.
+- **Requirements files** match by whole words. Files like `requirements.txt`, `dev-requirements.txt` and
+  `requirements-ci.txt` all count, and a file with `dev` or `test` in its name is read as dev dependencies. dispat
+  reports an editable local install, `-e ./core`, as a link to that folder.
+- **Names are normalised** the way PyPI normalises them (PEP 503). This means `Acme_Core` and `acme-core` are one
+  package.
+- **Python ranges are written as `==X.Y.Z`.** A `caret` or `tilde` policy is an npm idea. The Python writers use the
   spelling the ecosystem actually resolves.
 
 ## Building against the package next door
 
-`--link` writes a `[tool.uv.sources]` path entry, and the empty form removes it:
+Pass `--link` to write a `[tool.uv.sources]` path entry. The empty form removes it:
 
 ```sh
 dispat autowriter --since all --link-local     # develop against the working tree
@@ -122,17 +124,17 @@ dispat scanner --verify-unlinked               # E215 if one survived
 
 ## Worth knowing
 
-- **A version on PyPI cannot be replaced.** Test in the build stage, upload in the publish stage, and let the ordering
+- **A version on PyPI cannot be replaced.** Test in the build stage and upload in the publish stage. Let the ordering
   guarantee that a dependency is on the index before its consumer needs it.
-- **`uv lock` runs after the manifests are reconciled.** That is what `syncLock` means: the lock follows the manifest
+- **`uv lock` runs after the manifests are reconciled.** This is what `syncLock` means. The lock follows the manifest
   rather than choosing versions of its own.
 - **A workspace-wide lock file lives at the repository root**, outside every package folder. List it under
   [`commit.include`](../configuration/records.md#commit) so the release commit carries it.
-- **Publishing needs credentials, once per space.** A token in the environment is enough for `uv publish`; if your
+- **Publishing needs credentials, once per space.** A token in the environment is enough for `uv publish`. If your
   registry needs a login command, the [`flow.login` slot](./login.md) runs it once per space per run.
 
 ## See also
 
-- [autoVersion](../configuration/autoversion.md) for `manifests`, `match` and `syncLock` in full.
-- [An npm monorepo](./npm.md) for the same shape in a different ecosystem.
-- [A Docker image chain](./docker.md) if the requirements file exists to feed an image.
+- Read [autoVersion](../configuration/autoversion.md) for `manifests`, `match` and `syncLock` in full.
+- Read [An npm monorepo](./npm.md) for the same shape in a different ecosystem.
+- Read [A Docker image chain](./docker.md) if the requirements file exists to feed an image.

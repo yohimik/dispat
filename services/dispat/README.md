@@ -189,7 +189,7 @@ about teaching dispat a new format.
 
 dispat's own monorepo is the reference deployment: since the very first release, every release of this repository has
 been planned and published by the dispat built from the same checkout. The first stable run cut eleven packages in one
-release: this CLI with six static binaries (Linux, macOS and Windows, on amd64 and arm64), the six Go modules, four
+release: this CLI with six static binaries (Linux, macOS and Windows, on amd64 and arm64), the five Go modules, four
 container images and the [documentation site](https://yohimik.github.io/dispat/), each with its own tag, changelog
 entry and GitHub release. The workflow behind it lives in the repository
 ([release.yml](../../.github/workflows/release.yml)) and follows the same shape the

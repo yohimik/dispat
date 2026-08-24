@@ -1,7 +1,7 @@
 # A Gradle library and its version catalog
 
-A published JVM library, an app that consumes it, and the `gradle/libs.versions.toml` both of them share, all moving
-to the same new version in one run.
+You can release a published JVM library, an app that consumes it, and their shared `gradle/libs.versions.toml` file in
+one run. They all move to the same new version together.
 
 ## The layout
 
@@ -46,18 +46,18 @@ dispat.json
 }
 ```
 
-Three lines carry most of the weight, and each has a reason.
+Three lines carry most of the weight. Each has a specific purpose.
 
-**`manifestNames`.** A Gradle build script declares dependencies as coordinates, `com.acme:core`, while your package is
-a folder called `core`. Stating the coordinate connects the two, so a declaration anywhere in the repository is
-recognised as this package.
+**`manifestNames`.** Set this to connect your package folder to its Gradle coordinate. A Gradle build script declares
+dependencies as coordinates like `com.acme:core`, but your package sits in a folder called `core`. Stating the
+coordinate tells dispat to recognize a declaration anywhere in the repository as this package.
 
-**`range: exact`.** The default policy writes `^1.3.0`, which is npm's spelling and means nothing to Gradle. A
-coordinate takes a plain version, so say so.
+**`range: exact`.** Set this because a Gradle coordinate takes a plain version. The default policy writes `^1.3.0`.
+That is npm's spelling, and it means nothing to Gradle.
 
-**The `replace` rule.** A `build.gradle.kts` that declares `version = "1.2.0"` at the top level is a plain Kotlin
-assignment, not a manifest field, so the parsing strategy has nothing to grip. A literal find-and-write does the job,
-with `{previous}` and `{version}` filled in by the run.
+**The `replace` rule.** Use a literal find-and-write because a top-level `version = "1.2.0"` in `build.gradle.kts` is a
+plain Kotlin assignment. It is not a manifest field, so the parsing strategy has nothing to grip. The run fills in
+`{previous}` and `{version}` automatically.
 
 ## A release
 
@@ -84,10 +84,11 @@ $ dispat
 12:46:52 INF done cancelled=0 failed=0 held=0 published=2 skipped=0 took=0.5s unchanged=0
 ```
 
-`ranges=1` on the app is the coordinate in its `dependencies { }` block moving to `com.acme:core:1.3.0`, and
-`file reconciled` on the library is the `replace` rule writing `version = "1.3.0"` into its build script.
+Look at `ranges=1` in the output for the app. This shows the coordinate in its `dependencies { }` block moving to
+`com.acme:core:1.3.0`. The `file reconciled` log on the library means the `replace` rule wrote `version = "1.3.0"` into
+its build script.
 
-The catalog moves once, in `beforeAll`, because it belongs to the repository rather than to any one package:
+The catalog belongs to the repository rather than to any one package. It moves once during the `beforeAll` stage.
 
 ```toml
 [versions]
@@ -99,8 +100,8 @@ acme-core = { module = "com.acme:core", version.ref = "acme-core" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 ```
 
-The `[libraries]` entry is untouched. dispat followed the `version.ref` to the `[versions]` table and wrote the number
-where it actually lives, which is the only edit that does not break the reference.
+Notice that the `[libraries]` entry remains untouched. dispat followed the `version.ref` to the `[versions]` table and
+wrote the number where it actually lives. This is the only edit that preserves the reference.
 
 ## What dispat reads and writes
 
@@ -115,32 +116,33 @@ libs/core/build.gradle.kts  gradle
 3 manifest(s), 3 dependency declaration(s)
 ```
 
-**In a catalog**, both spellings of a library are read: the `group:artifact:version` shorthand string and the table
-form with `module` or `group` plus `name`. A version behind `version.ref` is resolved through `[versions]` on the way
-in and written back there on the way out. Bundles and plugins are not dependencies and are left alone.
+**In a catalog**, dispat reads both spellings of a library: the `group:artifact:version` shorthand string and the table
+form with `module` or `group` plus `name`. It resolves a version behind `version.ref` through `[versions]` on the way
+in and writes it back there on the way out. Bundles and plugins are left alone because they are not dependencies.
 
-**In a build script**, a literal coordinate in the `dependencies { }` block is a dependency. A catalog accessor,
-`libs.okhttp`, is not: the version is in the catalog, and that is where dispat edits it. A project dependency,
-`project(":core")`, is read as a link to that module.
+**In a build script**, dispat treats a literal coordinate in the `dependencies { }` block as a dependency. A catalog
+accessor like `libs.okhttp` is not a dependency here, because the version lives in the catalog where dispat edits it.
+It reads a project dependency like `project(":core")` as a link to that module.
 
-**Identity** comes from `applicationId`, falling back to `namespace`, with `versionName` as the version and
-`versionCode` as a build counter. A library module that declares neither, like `libs/core` above, has no identity of
-its own, which is exactly why `manifestNames` is in the configuration.
+**Identity** comes from `applicationId`, falling back to `namespace`. dispat uses `versionName` as the version and
+`versionCode` as a build counter. A library module that declares neither has no identity of its own, like `libs/core`
+above, which is exactly why `manifestNames` is in the configuration.
 
 ## Worth knowing
 
-- **`versionCode` is never written by a version write.** It is a counter, not a version: it moves once per build,
-  whatever the release decides. `dispat writer <file> --set-build "$GITHUB_RUN_NUMBER"` is the write that moves it,
-  and it insists on an integer.
-- **One `[versions]` entry shared by two libraries cannot take two different versions.** If two edits land on the
-  same `version.ref`, the write is refused rather than silently picking one. Give each library its own entry.
-- **A version assembled from properties is left alone.** `version = project.property("acmeVersion")` is an
-  indirection somebody set up on purpose; point a `replace` rule at `gradle.properties` instead.
+- **`versionCode` is never written by a version write.** It is a counter rather than a version, so it moves once per
+  build regardless of the release. The command to move it insists on an integer, so provide one when you run
+  `dispat writer <file> --set-build "$GITHUB_RUN_NUMBER"`.
+- **One `[versions]` entry shared by two libraries cannot take two different versions.** Give each library its own
+  entry. If two edits land on the same `version.ref`, dispat refuses the write rather than silently picking one.
+- **A version assembled from properties is left alone.** An assignment like `version = project.property("acmeVersion")`
+  is an intentional indirection. Point a `replace` rule at `gradle.properties` instead.
 - **The catalog is at the repository root**, outside every package folder. List it under
-  [`commit.include`](../configuration/records.md#commit) so the release commit carries the change made in `beforeAll`.
+  [`commit.include`](../configuration/records.md#commit). This ensures the release commit carries the change made in
+  `beforeAll`.
 
 ## See also
 
-- [An Android app](./android.md) for the app side, including `versionCode` and a bundle on the GitHub release.
-- [Maven modules](./java.md) for the other JVM build tool.
-- [Replacing text across the monorepo](../editing/autoreplacer.md) for versions no parser owns.
+- [An Android app](./android.md) covers the app side. This includes `versionCode` and a bundle on the GitHub release.
+- [Maven modules](./java.md) covers the other JVM build tool.
+- [Replacing text across the monorepo](../editing/autoreplacer.md) explains how to handle versions no parser owns.

@@ -1,13 +1,13 @@
 # Adopting dispat
 
-How to introduce dispat into a repository, whether it is brand new or has been shipping versions for years. Both halves
-run through [`dispat compute`](../cli/compute.md), which reads what the manifests already declare instead of asking you
-to transcribe it.
+Introduce dispat into a new repository or one that has shipped versions for years. Run
+[`dispat compute`](../cli/compute.md) to read what your manifests already declare, which saves you from transcribing
+everything by hand.
 
 ## Let the manifests declare the graph
 
-Instead of maintaining `dependencies` by hand and writing a version-sync script, let dispat read both from the
-manifests. One space, `autoVersion` turned on, and no `dependencies` yet:
+Let dispat read your `dependencies` from the manifests instead of maintaining them by hand. Define a space, turn on
+`autoVersion`, and leave `dependencies` empty for now:
 
 ```json
 {
@@ -32,8 +32,8 @@ manifests. One space, `autoVersion` turned on, and no `dependencies` yet:
 }
 ```
 
-`packages/web/package.json` declares `"@acme/core": "workspace:*"`. `dispat compute` finds the edge and shows where it
-came from:
+Write `"@acme/core": "workspace:*"` in `packages/web/package.json`. Run `dispat compute` to find the dependency edge
+and see where it came from:
 
 ```console
 $ dispat compute
@@ -50,8 +50,9 @@ $ dispat compute --check
 dependencies and baselines are in sync: 1 detected edge(s), 1 declared
 ```
 
-`--check` exits non-zero whenever the config lags the manifests, so put it in CI next to your linters. Now release:
-the `autoVersion` block means dispat itself rewrites the manifests at the version stage, before each build.
+Put `dispat compute --check` in CI next to your linters, because it exits non-zero whenever the config lags the
+manifests. Now run `dispat` to release. The `autoVersion` block tells dispat to rewrite the manifests at the version
+stage, before each build.
 
 ```console
 $ dispat
@@ -71,21 +72,20 @@ $ cat packages/web/package.json
 }
 ```
 
-Read the manifest: the `workspace:*` range became `^0.1.0` (only ranges matching the `match` globs are touched, so the
-hand-pinned `left-pad` survived), and the `version` field advanced on its own. Only the version text changed; every
-other byte of the file is exactly as it was. To regenerate a lock file after the rewrite, name a `syncLock`
-script in the block and, if the lock file lives at the repo root, list it under `commit.include` so the release commit
-carries it. Details: [`autoVersion`](../configuration/autoversion.md) and
-[the compute command](../cli/compute.md).
+Check the manifest to see that the `workspace:*` range became `^0.1.0` and the `version` field advanced. The
+hand-pinned `left-pad` survived because dispat only touches ranges matching the `match` globs, leaving every other byte
+of the file exactly as it was. Name a `syncLock` script to regenerate a lock file after the rewrite, and list it under
+`commit.include` if it lives at the repo root (details in [`autoVersion`](../configuration/autoversion.md) and
+[the compute command](../cli/compute.md)).
 
 ## Adopt dispat in a repository that already ships versions
 
-The recipe above starts from zero. Most repositories do not: `packages/core/package.json` already says `1.4.2`,
-`packages/web/package.json` says `2.1.0`, and those numbers are on the registry. Nothing in a dispat config says so
-yet, and versions live in git tags, so a first run would see no tags, start both packages at `0.0.0` and release
-`0.0.1`. That is the one thing to sort out before the first release, and `dispat compute` does it for you.
+The previous recipe starts from zero, but most repositories already have versions like `1.4.2` in
+`packages/core/package.json` and `2.1.0` in `packages/web/package.json`. dispat reads versions from git tags, so a
+first run with no tags starts both packages at `0.0.0` and releases `0.0.1`. Run `dispat compute` to sort this out
+before the first release.
 
-Write the smallest config that describes the layout, then run compute and read what it found:
+Write a minimal config that describes your layout. Run compute and read the output:
 
 ```console
 $ dispat compute
@@ -96,13 +96,13 @@ $ dispat compute
 3 suggestion(s); apply all with --write, choose with --interactive
 ```
 
-Two kinds of line, from one read of the same files. The `add` line is the dependency graph, as above. Each `initial`
-line is a starting point: the version that package is at today, which dispat needs written down because no release tag
-carries it yet. The evidence after each line is the file it came from, so a number that looks wrong is one `cat` away
-from being explained.
+dispat prints two kinds of line from reading the same files. The `add` line defines the dependency graph, while each
+`initial` line defines a starting version that dispat needs written down because no release tag carries it yet. The
+evidence after each line shows the source file, so you can run `cat` to explain any wrong number.
 
-Nothing has been written at this point. `--write` applies the lot, and `--interactive` walks them one at a time if you
-would rather take the graph now and think about the versions:
+dispat writes nothing to disk until you pass a flag. Run `dispat compute --write` to apply everything at once, or pass
+`--interactive` to walk through the changes one at a time. This lets you accept the graph now and think about the
+versions later:
 
 ```console
 $ dispat compute --write
@@ -113,7 +113,8 @@ $ dispat compute --write
 applied 3 change(s) to dispat.json (previous copies carry the .backup suffix)
 ```
 
-The config now carries both, and the previous version of the file is beside it as `dispat.json.backup`:
+The config now carries both the graph and the starting versions. You will find the previous version of the file saved
+as `dispat.json.backup`:
 
 ```json title="dispat.json"
 {
@@ -127,8 +128,8 @@ The config now carries both, and the previous version of the file is beside it a
 }
 ```
 
-Check the result before releasing anything. `dispat status` plans without touching the repository, and the plan now
-continues the history the manifests knew about:
+Run `dispat status` to check the result before releasing anything. This plans the release without touching the
+repository. The plan now continues the history that your manifests knew about:
 
 ```console
 $ dispat status
@@ -137,17 +138,17 @@ $ dispat status
 12:04:05 INF release plan ready held=0 packages=2 releasing=2
 ```
 
-`baselineFromInitials=true` is dispat saying where each starting point came from. After the first release the tags
-exist, they win over the entries from then on, and compute has nothing more to say about baselines. Three things are
-worth knowing while you are here:
+The `baselineFromInitials=true` field shows where each starting point came from. Tags exist after the first release,
+and they win over the config entries from then on. Compute has nothing more to say about baselines once the tags take
+over, but keep three things in mind:
 
-- A number you disagree with is yours to change. Edit the entry, or write it before running compute at all: an entry
-  that already exists is never touched, `"core": "0.0.0"` included, which is how you tell dispat a package really does
-  start from zero.
-- Packages that are already tagged are skipped, so this is safe to run in a repository that has been releasing with
-  dispat for a year. Nothing is proposed for a package whose tags can answer the question.
-- Versions that state an intention rather than a release are left alone: a Maven `1.0.0-SNAPSHOT`, or two manifests in
-  one package that disagree about the number (reported as `W225`). Those are decisions, and compute does not make
-  decisions for you.
+- Edit any number you disagree with, or write it before running compute at all. dispat never touches an entry that
+  already exists. Write `"core": "0.0.0"` to tell dispat a package really does start from zero.
+- dispat skips packages that are already tagged. This makes compute safe to run in a repository that has been releasing
+  with dispat for a year. Nothing is proposed for a package when the tags can answer the question.
+- dispat ignores versions that state an intention rather than a release. This includes a Maven `1.0.0-SNAPSHOT` or two
+  manifests in one package that disagree about the number (reported as `W225`). Those are decisions, and compute does
+  not make decisions for you.
 
-Full rules: [the compute command](../cli/compute.md) and [`initials`](../configuration/versions.md#initials).
+Read the full rules in [the compute command](../cli/compute.md) and
+[`initials`](../configuration/versions.md#initials).

@@ -1,7 +1,7 @@
 # A Cargo workspace
 
-Crates in one workspace, versioned from commits and published to crates.io in dependency order, with the `path`
-dependencies between them rewritten to real versions before anything is uploaded.
+Keep your crates in one workspace. dispat versions them from commits and publishes them to crates.io in dependency
+order. The tool rewrites the `path` dependencies between your crates to real versions before it uploads anything.
 
 ## The layout
 
@@ -31,15 +31,17 @@ dispat.json
 }
 ```
 
-`--allow-dirty` is not carelessness. The version stage has just written the new version into `Cargo.toml`, so the
-working tree is dirty by design when the publish runs; the release commit at the end of the run is what records those
-edits. `Cargo.lock` lives at the workspace root, outside every package folder, so it is named under `commit.include`
-to reach the same commit.
+Pass `--allow-dirty` to your publish script. The version stage writes the new version into `Cargo.toml` right before
+the publish runs, so your working tree is dirty by design. The release commit at the end of the run records those
+edits.
+
+Include `Cargo.lock` under `commit.include` to reach the same commit. The file lives at the workspace root, outside
+every package folder.
 
 ## Starting from the versions already in the files
 
-Cargo manifests declare their versions, so [`dispat compute`](../cli/compute.md) can derive both halves of the setup at
-once: the edges between crates, and the baseline each crate starts from.
+Run [`dispat compute`](../cli/compute.md) to derive the edges between crates and the baseline each crate starts from.
+dispat can read both halves of the setup at once because Cargo manifests declare their versions.
 
 ```console
 $ dispat compute --write
@@ -50,7 +52,7 @@ $ dispat compute --write
 applied 3 change(s) to dispat.json (previous copies carry the .backup suffix)
 ```
 
-The plan then reads like the workspace does:
+Run `dispat status` to see a plan that matches your workspace.
 
 ```console
 $ git commit -m "feat(core)!: rename the client builder"
@@ -61,13 +63,13 @@ $ dispat status
 12:38:37 INF release plan ready held=0 packages=2 releasing=2
 ```
 
-`core` publishes first because `app` declares it. Current cargo waits for a published crate to appear in the registry
-index before it exits, so by the time `app` uploads, the version it names is fetchable.
+dispat publishes `core` first because `app` declares it. Cargo waits for a published crate to appear in the registry
+index before it exits. The version `app` names is fetchable by the time it uploads.
 
 ## What dispat reads and writes
 
-A `path` dependency is reported with an arrow, since it is the strongest evidence that two folders belong to one
-workspace:
+Run `dispat scanner` to see your dependencies. dispat reports a `path` dependency with an arrow, because a path is the
+strongest evidence that two folders belong to one workspace.
 
 ```console
 $ dispat scanner
@@ -81,8 +83,9 @@ crates/core/Cargo.toml  cargo  acme-core@1.2.0
 2 manifest(s), 5 dependency declaration(s)
 ```
 
-Writes land in the version field and in the `version` key of a dependency, whether it is written as a bare string or
-as an inline table. Anything inherited from the workspace is skipped, because its version is not in this file:
+Run `dispat writer` to update your manifests. dispat writes to the version field and the `version` key of a dependency.
+It handles bare strings and inline tables. The tool skips anything inherited from the workspace because the version is
+not in the file.
 
 ```console
 $ dispat writer crates/app/Cargo.toml --set-version 0.5.0 --set acme-core=^1.3.0 --set tokio=1.41.0
@@ -93,18 +96,20 @@ crates/app/Cargo.toml
 1 manifest(s): 1 applied, 1 skipped, 0 missing
 ```
 
-`tokio` is declared `{ workspace = true }`. Skipped is the correct outcome there: the version lives in the root
-`[workspace.dependencies]`, and writing a literal into the member would break the inheritance somebody set up on
-purpose. The same applies to `version.workspace = true` on the package itself, so a workspace that inherits its
-version needs an [`autoVersion.replace`](../configuration/autoversion.md) rule aimed at the root manifest instead.
+The manifest declares `tokio` as `{ workspace = true }`. Skipped is the correct outcome here. The version lives in the
+root `[workspace.dependencies]`, and writing a literal into the member breaks the inheritance you set up.
 
-A dependency carrying only a `path` and no version keeps working locally but cannot be published, since crates.io
-requires a version for every dependency. Declare both, as `acme-core = { version = "1.2.0", path = "../core" }`, and
-dispat keeps the version half current.
+The same applies to `version.workspace = true` on the package itself. Point an
+[`autoVersion.replace`](../configuration/autoversion.md) rule at the root manifest if your workspace inherits its
+version.
+
+crates.io requires a version for every dependency, so a dependency carrying only a `path` fails to publish. Declare
+both a version and a path, like `acme-core = { version = "1.2.0", path = "../core" }`. dispat keeps the version half
+current.
 
 ## Building against the crate next door
 
-`dispat writer --link` writes a `[patch.crates-io]` entry, and the empty form takes it away again:
+Run `dispat writer --link` to write a `[patch.crates-io]` entry. The empty form takes it away again.
 
 ```sh
 dispat autowriter --since all --link-local     # before the build
@@ -114,17 +119,17 @@ dispat scanner --verify-unlinked               # fails with E215 if one is left 
 
 ## Worth knowing
 
-- **Yanking is not a rollback.** If a publish fails halfway through a run, fix forward and release again; a version
-  number on crates.io is spent whatever happens next. [Recovering from a failed run](../reference/releasing/recovery.md)
-  explains what re-running does and does not repeat.
-- **`0.x` versions are their own compatibility rule.** Cargo treats `0.4` and `0.5` as incompatible, so a `feat` on a
+- **Yanking is not a rollback.** Fix forward and release again if a publish fails halfway through a run. A version
+  number on crates.io is spent whatever happens next. Read
+  [Recovering from a failed run](../reference/releasing/recovery.md) to see what re-running does and does not repeat.
+- **`0.x` versions are their own compatibility rule.** Cargo treats `0.4` and `0.5` as incompatible. A `feat` on a
   pre-1.0 crate is a breaking change for its consumers even though dispat calls it a minor. Reach the consumers
   deliberately with `^` in the commit when that matters.
-- **Keep `cargo publish` last.** Anything that can fail, `cargo test` and `cargo package` above all, belongs in the
-  build stage, where failing costs nothing.
+- **Keep `cargo publish` last.** Put anything that can fail in the build stage, where failing costs nothing. This
+  applies to `cargo test` and `cargo package` above all.
 
 ## See also
 
-- [autoVersion](../configuration/autoversion.md) for the rewriting policy and `syncLock`.
-- [Manifest tools](../editing/manifests.md) for the scanner and the writer used on their own.
-- [Shared versions](../reference/releasing/versioning.md) if the crates should move as one version.
+- Read [autoVersion](../configuration/autoversion.md) for the rewriting policy and `syncLock`.
+- Read [Manifest tools](../editing/manifests.md) for the scanner and the writer used on their own.
+- Read [Shared versions](../reference/releasing/versioning.md) if the crates should move as one version.

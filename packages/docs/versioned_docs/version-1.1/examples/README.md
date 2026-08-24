@@ -1,28 +1,35 @@
 # Examples
 
-Complete, copy-ready release setups, one page per ecosystem and one per delivery target, each with the config, the
-scripts its stages run, and the terminal output of a real run. Every dispat transcript in this section was produced by
-running dispat against a throwaway repository; only timestamps and durations are normalized. Lines printed by your own
-commands (the `npm`, `docker`, `butler` lines) come from those commands, so yours will differ.
+These pages give you complete, copy-ready release setups. You get one page per ecosystem and one per delivery target.
+Each page shows the config, the scripts its stages run, and the terminal output of a real run.
 
-You do not need a monorepo to start. One folder, one package, one publish is a valid setup, and growing into a graph
-later is additive: no restructuring, and the versions already published stay the baselines everything counts from.
-That matters because a repository holding one deliverable rarely keeps holding one. A game gains a landing page, a
-docs site, an SDK and a server; a library gains a CLI and a demo. Each of those is one more block in the same file
-rather than one more release script nobody maintains. [A single package](./single-package.md) is the smallest form,
-and [A game, from one package to many](./game.md) walks the growth step by step.
+Every dispat transcript comes from a real run against a throwaway repository, with only timestamps and durations
+normalized. Lines printed by your own commands, like `npm`, `docker`, or `butler`, come directly from those tools. Your
+output will look different.
 
-If a term is new, [Concepts](../concepts.md) defines all of them in a few minutes of reading, and
-[One repository or many](../monorepo.md) is the page for deciding the shape before you commit to it.
+You do not need a monorepo to start. One folder, one package, one publish is a valid setup. Growing into a graph later
+is additive, so you avoid restructuring and keep your already published versions as baselines.
 
-**Read one page, then one more.** [An npm monorepo](./npm.md) is the shortest complete setup and the best first read
-whatever you build, because every other page is the same four pieces with different commands in them. After that, go
-to the page for your own ecosystem below. If you are bringing dispat to a repository that already ships versions,
-[Adopting dispat](./adopting.md) is the second read instead.
+This matters because a repository holding one deliverable rarely stops there. A game gains a landing page, a docs site,
+an SDK, and a server, while a library gains a CLI and a demo. Each addition becomes one more block in the same file
+rather than another release script nobody maintains.
+
+Read [A single package](./single-package.md) to see the smallest form. Then read
+[A game, from one package to many](./game.md) to walk through the growth step by step.
+
+Check [Concepts](../concepts.md) if a term is new. It defines all of them in a few minutes of reading. Read
+[One repository or many](../monorepo.md) to decide your shape before you commit to it.
+
+**Read one page, then one more.** Start with [An npm monorepo](./npm.md) whatever you build. It is the shortest
+complete setup and the best first read, because every other page uses the same four pieces with different commands.
+
+After that, go to the page for your own ecosystem below. Read [Adopting dispat](./adopting.md) second instead if you
+are bringing dispat to a repository that already ships versions.
 
 ## Ecosystem by ecosystem
 
-One page per package manager, each with a config you can copy, the scripts its stages run, and a real run.
+These pages cover one package manager each. They include a config you can copy, the scripts its stages run, and a real
+run.
 
 | Example | What it covers |
 |---------|----------------|
@@ -59,8 +66,8 @@ One page per package manager, each with a config you can copy, the scripts its s
 
 ## Shaping the repository
 
-The pages above are about one ecosystem each. These are about the repository around them, and they apply whatever you
-build.
+The pages above focus on one ecosystem each. The pages below cover the repository around them. They apply to your setup
+whatever you build.
 
 | Example | What it covers |
 |---------|----------------|
@@ -72,7 +79,7 @@ build.
 
 ## Which example covers my manifest
 
-dispat reads and writes thirty-five manifest formats. Every one of them is worked through on one of these pages.
+dispat reads and writes thirty-five manifest formats. You will find every one of them worked through on these pages.
 
 | Manifest | Example |
 |----------|---------|
@@ -94,11 +101,12 @@ dispat reads and writes thirty-five manifest formats. Every one of them is worke
 | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` | [Unreal](./unreal.md) |
 | `game.project`, `project.json`, `gem.json` | [Games](./game.md) |
 
-A version that lives in none of these, a Helm `Chart.yaml`, a README install line, a plain text file somewhere, is
-handled by the [replace strategy](../configuration/autoversion.md) and worked through on the
-[Helm](./helm.md) page.
+You might have a version that lives outside these formats, like a Helm `Chart.yaml`, a README install line, or a plain
+text file. The [replace strategy](../configuration/autoversion.md) handles those. Read the [Helm](./helm.md) page to
+see it worked through.
 
-The pages under [Editing the monorepo](../editing/manifests.md) are the other half of the worked examples: the
-commands that change files across many packages between releases. How a release behaves once it covers more than one
-package is under Releasing, starting with [shared versions](../reference/releasing/versioning.md), and the CI side is
-under [dispat in CI](../reference/ci.md).
+The pages under [Editing the monorepo](../editing/manifests.md) provide the other half of the worked examples. They
+show the commands that change files across many packages between releases.
+
+Read [shared versions](../reference/releasing/versioning.md) to see how a release behaves once it covers more than one
+package. Check [dispat in CI](../reference/ci.md) for the CI side.

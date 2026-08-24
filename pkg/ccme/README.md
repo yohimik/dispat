@@ -110,7 +110,7 @@ ChannelDepth: 1,
 Kinds:        []ccme.DependencyKind{ccme.KindDependencies, ccme.KindPeerDependencies},
 Channel:      ccme.ChannelInherit,
 },
-Limits: ccme.Limits{           // §14.1 parser bounds; 0 = default, negative = off
+Limits: ccme.Limits{           // §14.1 parser bounds; 0 = default, negative rejected
 UnitsPerMessage:   64,
 ScopeTermsPerUnit: 256,
 MessageBytes:      1 << 20,
@@ -160,7 +160,7 @@ message length with no backtracking, and the hot path avoids copying the input.
 - **One allocation for all units,** not one per unit, and none at all for the per-unit checks: scope-overlap,
   propagation-redundancy and `Release-As` scope checks are all scans over a handful of terms rather than temporary maps
   or filtered slices.
-- **Footer keys are matched with an ASCII fold-compare** over the nine-entry registry instead of lowercasing the key
+- **Footer keys are matched with an ASCII fold-compare** over the eleven-entry registry instead of lowercasing the key
   into a fresh string for a map lookup. `BREAKING CHANGE` sits outside it, since §8.1.1 makes it the one key compared
   exactly.
 - **Clean parses do not allocate diagnostics.** `Errors()` and `Warnings()` return nil rather than an empty slice, so a
@@ -303,7 +303,8 @@ A commit message is untrusted input (§18), so the §14.1 caps are on by default
 | `ScopeTermsPerUnit`   |     256 |
 | `MessageBytes`        |   1 MiB |
 
-A zero field takes the default; a negative one disables that bound, which is only appropriate for input you control.
+A zero field takes the default. The bounds cannot be disabled: a commit message is untrusted input, so `Validate`
+rejects a negative value and `NewParser` returns the error. Raise the numbers instead.
 
 A SemVer 2.0.0 parser (`ParseVersion`, `Version.Compare`) is included because an exact `Release-As` value has to be
 validated at parse time; it is also the type a release engine needs on top.
@@ -327,7 +328,7 @@ go test -fuzz '^FuzzNormalize$'    -fuzztime 2m
 
 The suite reproduces every vector of Appendix B.1 and B.2, and gates six things a release depends on:
 
-- **Every diagnostic code is reachable.** `TestEveryDiagnosticCodeIsReachable` maps all 40 codes to an input that
+- **Every diagnostic code is reachable.** `TestEveryDiagnosticCodeIsReachable` maps all 42 codes to an input that
   produces it, and fails if a code is declared without a test or produced without being declared.
 - **No input can panic.** Three fuzz targets cover `Parse`, `ParseSubject` and `Normalize`, checking that diagnostic
   positions stay inside the message, that `Valid` matches the diagnostics attached to a unit, that re-parsing the

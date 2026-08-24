@@ -1,7 +1,7 @@
 # An iOS app and a CocoaPods library
 
-An app archived and uploaded to App Store Connect, a pod published to trunk, and the four Apple file formats that
-carry a version between them.
+You will archive an app and upload it to App Store Connect. You will also publish a pod to trunk. Four Apple file
+formats carry a version between them.
 
 ## The layout
 
@@ -42,14 +42,15 @@ dispat.json
 }
 ```
 
-**`range: "~> {version}"`** because CocoaPods writes optimistic requirements the Ruby way, not the npm way.
+Set **`range: "~> {version}"`** because CocoaPods writes optimistic requirements the Ruby way. It does not use the npm
+way.
 
-**`manifestNames`** connects the pod name `AcmeCore` to the folder called `core`, so a `pod 'AcmeCore'` line anywhere
-is recognised as this package.
+Use **`manifestNames`** to connect the pod name `AcmeCore` to the folder called `core`. dispat then recognises a
+`pod 'AcmeCore'` line anywhere as this package.
 
 **The `stamp` script** exists because of where Xcode keeps versions. `autoVersion` writes a package's own version into
-the manifests directly in its folder, and an iOS project keeps `Info.plist` and `project.pbxproj` one level deeper, in
-`App/` and `Acme.xcodeproj/`. One `dispat writer` call in `beforeBuild` writes both, along with the build number.
+the manifests directly in its folder, but an iOS project keeps `Info.plist` and `project.pbxproj` one level deeper in
+`App/` and `Acme.xcodeproj/`. Call `dispat writer` in `beforeBuild` to write both files along with the build number.
 
 ## A release
 
@@ -82,7 +83,7 @@ $ dispat
 12:49:43 INF done cancelled=0 failed=0 held=0 published=2 skipped=0 took=0.6s unchanged=0
 ```
 
-The pod publishes first, the app's `Podfile` is reconciled to `~> 1.3.0`, and both project files end up carrying
+The pod publishes first. dispat reconciles the app's `Podfile` to `~> 1.3.0`. Both project files end up carrying
 `0.4.2` with `CFBundleVersion` and `CURRENT_PROJECT_VERSION` set to the run number:
 
 ```
@@ -113,29 +114,28 @@ pods/core/AcmeCore.podspec  cocoapods  AcmeCore@1.2.0
 | `Podfile` | none | none | none | every `pod` line |
 | `*.podspec` | `name` | `version` | none | every `s.dependency` |
 
-Writes to `project.pbxproj` reach every build configuration, so Debug and Release do not drift apart. A value that
-defers to something else is skipped rather than flattened: `$(MARKETING_VERSION)` in a plist points at the build
-setting, and a podspec saying `s.version = Acme::VERSION` points at a Ruby constant. Point an
-[`autoVersion.replace`](../configuration/autoversion.md) rule at the file that really holds the number in those cases.
+Writes to `project.pbxproj` reach every build configuration so Debug and Release do not drift apart. Point an
+[`autoVersion.replace`](../configuration/autoversion.md) rule at the file that really holds the number when a value
+defers to something else. dispat skips these values rather than flattening them. For example, `$(MARKETING_VERSION)` in
+a plist points at the build setting, and a podspec saying `s.version = Acme::VERSION` points at a Ruby constant.
 
-A pod inside a test target is reported as a dev dependency. Pods pinned by `:git` or `:path` name a place rather than
-a version and are never rewritten.
+dispat reports a pod inside a test target as a dev dependency. Pods pinned by `:git` or `:path` name a place rather
+than a version. dispat never rewrites them.
 
 ## Worth knowing
 
 - **`CFBundleVersion` must increase for every upload**, even when the marketing version does not change. That is the
-  whole reason it is separate, and why the stamp script uses the CI run number rather than anything derived from the
-  release.
-- **A version write never moves a build counter**, and `--set-build` never moves a version. Two numbers, two writes,
-  no surprises.
-- **`pod trunk push` needs a session**, which belongs in [`flow.login`](./login.md) so it happens once per space.
-- **App Store Connect is asynchronous.** The upload succeeding is not the release being live; the tag records what you
+  whole reason it is separate. The stamp script uses the CI run number rather than anything derived from the release.
+- **A version write never moves a build counter**, and `--set-build` never moves a version. You get two numbers and two
+  writes.
+- **`pod trunk push` needs a session**. Put this in [`flow.login`](./login.md) so it happens once per space.
+- **App Store Connect is asynchronous.** The upload succeeding is not the release being live. The tag records what you
   shipped, and review is downstream of it.
-- **Swift Package Manager needs no manifest support here.** `Package.swift` resolves versions from git tags, so the
-  tag dispat writes is the whole story, exactly as with [Go](./go.md).
+- **Swift Package Manager needs no manifest support here.** `Package.swift` resolves versions from git tags. The tag
+  dispat writes is the whole story, exactly as with [Go](./go.md).
 
 ## See also
 
-- [A Flutter app and its packages](./flutter.md) if the app is built from Dart.
-- [An Android app](./android.md) for the same shape on the other platform.
-- [Manifest tools](../editing/manifests.md#writing-the-build-counter) for `--set-build` on its own.
+- Check [A Flutter app and its packages](./flutter.md) if the app is built from Dart.
+- Read [An Android app](./android.md) for the same shape on the other platform.
+- See [Manifest tools](../editing/manifests.md#writing-the-build-counter) for `--set-build` on its own.

@@ -1,7 +1,7 @@
 # An npm monorepo
 
-The smallest real npm monorepo release setup: one space of packages, a build and a publish command, and versions
-computed from your commits.
+Save this configuration to define the smallest real npm monorepo release setup. It contains one space of packages, a
+build and a publish command, and versions computed from your commits.
 
 ```json
 {
@@ -21,7 +21,7 @@ computed from your commits.
 }
 ```
 
-Commit work with the package name in the scope, then look at the plan before releasing anything:
+Commit your work with the package name in the scope. Run `dispat status` to check the plan before you release anything:
 
 ```console
 $ git commit -m "feat(logger): first version of the logger"
@@ -30,7 +30,7 @@ $ dispat status
 12:04:05 INF release plan ready held=0 packages=1 releasing=1
 ```
 
-`status` changes nothing; it shows what a release would do. The release itself:
+Run `dispat` to execute the release. The `status` command you just ran changes nothing on disk.
 
 ```console
 $ dispat
@@ -49,12 +49,11 @@ $ git tag
 logger@0.1.0
 ```
 
-The annotated tag is the record that the publish happened. Push it (or let dispat push it, see
-[release records](../configuration/records.md)) and the release is done.
+Push the annotated tag to finish the release. This tag is the record that the publish happened, but you can also
+configure dispat to push it for you (see [release records](../configuration/records.md)).
 
-One thing to know about versions: your `package.json` version field does not drive anything. dispat computes the version
-from commits and tags, and hands it to your scripts as `$DISPAT_NEW_VERSION`. A typical build script therefore stamps it
-in before packing:
+Stamp the computed version into your package before packing. Your `package.json` version field does not drive anything.
+dispat computes the version from commits and tags, and hands it to your scripts as `$DISPAT_NEW_VERSION`:
 
 ```sh
 npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run build

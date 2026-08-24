@@ -1,8 +1,7 @@
 # custom
 
-`custom` is a free-form object dispat never reads. Everything else in the file is checked against the known keys, and an
-unrecognised one is an error that catches typos. `custom` is the exception: put whatever your own tooling needs in it
-and dispat will carry it without looking inside.
+Put data for your own tooling in the `custom` object. dispat checks everything else in the file against known keys to
+catch typos. It carries `custom` without looking inside.
 
 ```yaml
 custom:
@@ -10,9 +9,9 @@ custom:
   dashboard: https://grafana.example/d/releases
 ```
 
-Spaces and package entries have their own `custom` objects. Unlike `env`, nothing merges: each one belongs to the level
-that wrote it.
+Add `custom` objects to spaces and package entries as needed. Unlike `env`, these objects do not merge. Each one
+belongs only to the level where you write it.
 
-One thing dispat does look at inside `custom`: a [`$ref`](./refs.md) means there what it means everywhere else, so
-`custom: {$ref: ./cfg/team.yaml}` pulls that file in, and so does a `$ref` nested anywhere within. There is no
-exception for `custom`, which also means data of your own that happens to use a `$ref` key is read as a reference.
+Do not use a literal [`$ref`](./refs.md) key for your own data. dispat evaluates references inside `custom` exactly
+like it does everywhere else. Writing `custom: {$ref: ./cfg/team.yaml}` pulls that file in, and so does a `$ref` nested
+anywhere within your object.

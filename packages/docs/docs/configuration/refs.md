@@ -1,10 +1,8 @@
 # Splitting the file with `$ref`
 
-One config file describes the whole monorepo, and in a big repository that file gets long. `$ref` lets you move any
-part of it into a file of its own.
-
-Anywhere a value belongs, you can write an object holding a single `$ref` key that names another file. Dispat reads
-that file and uses its content as the value:
+One config file describes the whole monorepo, so in a big repository that file gets long. Use `$ref` to move any part
+of it into a separate file. Write an object holding a single `$ref` key anywhere a value belongs, and dispat will use
+that file's content as the value:
 
 ```yaml
 # dispat.yaml
@@ -26,25 +24,26 @@ apps:
     build: [build]
 ```
 
-The two files together mean exactly what one file with the spaces written inline would mean. Nothing else changes:
-the same keys are checked, the same typos are caught, the same errors come out.
+The two files act exactly like one file with the spaces written inline. Nothing else changes. dispat checks the same
+keys, catches the same typos, and prints the same errors.
 
 ## Where the path points
 
-A relative path is resolved against the folder of the file that wrote it, not against the monorepo root. So
-`cfg/spaces.yaml` above can itself say `$ref: ./flow.yaml` and get `cfg/flow.yaml`, and you can move the whole `cfg`
-folder somewhere else without editing anything inside it.
+Write a relative path to resolve it against the folder of the file that wrote it, not against the monorepo root. This
+means `cfg/spaces.yaml` above can say `$ref: ./flow.yaml` and get `cfg/flow.yaml`. You can move the whole `cfg` folder
+somewhere else without editing anything inside it.
 
-An absolute path is used as written, which is how you reach a file shared from outside the repository.
+Write an absolute path to reach a file shared from outside the repository. dispat uses absolute paths exactly as
+written.
 
-**Paths inside a referenced file still mean what they would mean inline.** A space's `path`, a package's `path`, `src`
-and the changelog's `file` are all resolved the way they always are: from the monorepo root, or from the package
-folder. Only `$ref` itself is relative to the file it is written in. In the example above, `path: packages/libs`
-points at `packages/libs` under the monorepo root, not at `cfg/packages/libs`.
+**Paths inside a referenced file still mean what they would mean inline.** A space's `path`, a package's `path`, `src`,
+and the changelog's `file` resolve from the monorepo root or from the package folder, while only `$ref` itself is
+relative to the file it is written in. In the example above, `path: packages/libs` points at `packages/libs` under the
+monorepo root, not at `cfg/packages/libs`.
 
 ## What a referenced file can hold
 
-Anything a value can be. An object, as above, but also a list or a single value:
+A referenced file can hold anything a value can be. This includes an object, a list, or a single value:
 
 ```yaml
 shell:
@@ -53,16 +52,16 @@ tagFormat:
   $ref: ./cfg/tag-format.yaml  # '{name}@v{version}'
 ```
 
-The file can be JSON, YAML or TOML, whatever the file referencing it is. The extension decides how it is read, so a
-YAML config can pull in a JSON fragment and the other way around.
+The file can be JSON, YAML, or TOML. The extension decides how dispat reads it. A YAML config can pull in a JSON
+fragment, and a JSON config can pull in a YAML fragment.
 
-An empty file is an error. A `$ref` says "the value is over there", so a file with nothing in it is almost always a
-mistake rather than an intention.
+Do not reference an empty file. This causes an error because a `$ref` expects a value. An empty file is almost always a
+mistake.
 
 ## Merging several files
 
-A `$ref` can name a list of files instead of one. Dispat reads them in the order they are written and combines them
-into a single value. This is how a block that several places need is written once and adjusted where it has to be:
+Name a list of files in a `$ref` to combine them into a single value. dispat reads them in the order they are written.
+Use this to write a shared block once and adjust it where needed:
 
 ```yaml
 # dispat.yaml
@@ -72,11 +71,10 @@ scripts:
     - ./cfg/scripts-local.yaml
 ```
 
-Objects merge key by key, and the last file to write a key is the one that wins. In the example above,
-`cfg/scripts-local.yaml` needs to hold only the scripts it changes; everything else comes from the common file.
+Objects merge key by key. The last file to write a key wins. In the example above, `cfg/scripts-local.yaml` only needs
+to hold the scripts it changes, because everything else comes from the common file.
 
-Lists are joined end to end, which is what makes this useful for the record lines around a changelog entry or a GitHub
-release:
+Lists join end to end. This helps when you build the record lines around a changelog entry or a GitHub release:
 
 ```yaml
 changelog:
@@ -86,34 +84,32 @@ changelog:
       - ./cfg/footer-extra.yaml    # the ones this one adds
 ```
 
-The files have to agree on what they hold. Every file of one `$ref` must hold an object, or every file must hold a
-list; a single value cannot be merged with anything. Mixing them is an error naming both files and what each of them
-holds. A list naming no files at all is an error too, and a list naming one file means exactly what naming that file
-directly means.
+Every file of one `$ref` must hold an object, or every file must hold a list, because a single value cannot merge with
+anything. Mixing types causes an error that names both files and their contents. Naming no files is an error, and
+naming one file means exactly what naming that file directly means.
 
-Keys written beside the reference still win over the merged result, the same way they win over a single file. The
-merge itself is not a deep merge: a key an object holds replaces that key whole, exactly as
+Keys written beside the reference win over the merged result, exactly as they do for a single file. The merge itself is
+not a deep merge. A key an object holds replaces that key whole, exactly as
 [overriding](#overriding-part-of-a-fragment) does.
 
 ## References inside references
 
-A referenced file may hold references of its own, resolved against its own folder. There is no limit worth thinking
-about, and a file used in two places is simply read twice.
+A referenced file can hold references of its own. These resolve against its own folder. Nesting is capped at 32
+levels, which no honest configuration reaches, and dispat reads a file twice if you use it in two places.
 
-What is refused is a loop. If a file ends up reading itself, directly or through others, dispat stops and prints the
-path it took:
+Do not create a loop. dispat stops and prints the path if a file reads itself, directly or through others:
 
 ```
 config: $ref cycle: dispat.yaml (spaces) -> cfg/spaces.yaml (libs.flow) -> dispat.yaml;
 a file cannot reference itself, directly or through another
 ```
 
-Each step names the file and, in brackets, the key that pointed onwards.
+Each step names the file. The key that pointed onwards is in brackets.
 
 ## Overriding part of a fragment
 
-Keys written beside a `$ref` win over the file it names. That is what lets one shared fragment serve places that agree
-with all of it and places that agree with most of it:
+Write keys beside a `$ref` to win over the file it names. This lets one shared fragment serve places that agree with
+all of it and places that agree with most of it:
 
 ```yaml
 spaces:
@@ -124,39 +120,39 @@ spaces:
     versioning: independent    # everything else comes from the fragment
 ```
 
-The override replaces the key it names, whole. It is not a deep merge, so an object written beside a reference
-replaces that object rather than blending into it.
+The override replaces the key it names whole. It is not a deep merge. An object written beside a reference replaces
+that object rather than blending into it.
 
-Overriding only works when the referenced file holds an object. If it holds a list or a single value there is nothing
-for the extra keys to override, and dispat says so.
+Overriding only works when the referenced file holds an object. dispat prints an error if the file holds a list or a
+single value, because there is nothing for the extra keys to override.
 
 ## Where references can go
 
-Every property, at every depth, including inside `custom`. The document itself can be one too, which is how a
-repository keeps its real configuration somewhere other than the name dispat looks for:
+Put a reference in every property, at every depth. This includes inside `custom`. The document itself can be a
+reference, which lets a repository keep its real configuration somewhere else:
 
 ```json
 {"$ref": "./cfg/dispat.yaml"}
 ```
 
-Folder config files, the ones a space folder or a package folder can carry, are read the same way and can be split
-the same way.
+Folder config files work the same way. You can split the config files that a space folder or a package folder carries.
 
 ## Editing a split config
 
-[`dispat compute --write`](../cli/compute.md) writes into the file that actually holds the key. If your `packages` map
-lives in a fragment, the fragment is what gets rewritten, the reference in the root config stays as it is, and the
-backup copy sits beside the file that changed.
+Run [`dispat compute --write`](../cli/compute.md) to write into the file that actually holds the key. If your
+`packages` map lives in a fragment, dispat rewrites the fragment. The reference in the root config stays as it is, and
+the backup copy sits beside the file that changed.
 
-The one thing it will not do is write a key that comes from more than one file at once. That happens two ways: a key
-composed from a fragment *and* the keys beside the reference, and a key merged from a `$ref` naming several files. In
-both cases there is more than one file the new value could go in and no reason to prefer one, so dispat refuses and
-says what to change. For a composed key, write it beside the `$ref` or leave the reference as the whole value; for a
-merged one, write it beside the `$ref` or point the reference at a single file.
+dispat will not write a key that comes from more than one file at once, which happens when a key is composed from a
+fragment *and* the keys beside the reference, or when a key merges from a `$ref` naming several files. dispat refuses
+and says what to change because it has no reason to prefer one file over another. For a composed key, write it beside
+the `$ref` or leave the reference as the whole value, and for a merged one, write it beside the `$ref` or point the
+reference at a single file.
 
 ## Seeing what was read
 
-`--log-level debug` reports how many files the configuration was made of, and `--log-level trace` names each one:
+Pass `--log-level debug` to see how many files the configuration was made of. Pass `--log-level trace` to name each
+one:
 
 ```
 DBG configuration loaded config=dispat.yaml configFiles=3 root=/repo spaces=2
@@ -165,8 +161,8 @@ TRC configuration file read file=/repo/cfg/spaces.yaml
 TRC configuration file read file=/repo/cfg/flow.yaml
 ```
 
-That is the first thing to check when a split config does not behave: a `$ref` naming the wrong fragment looks exactly
-like a key nobody wrote.
+Check this first when a split config does not behave. A `$ref` naming the wrong fragment looks exactly like a key
+nobody wrote.
 
-One limitation worth knowing: when a value is wrong, the error names the key path (`spaces["libs"]: ...`) rather than
-the file the text was written in. The trace above is how you find that file.
+When a value is wrong, the error names the key path (`spaces["libs"]: ...`) rather than the file the text was written
+in. Use the trace above to find that file.

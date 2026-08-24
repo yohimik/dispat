@@ -1,7 +1,7 @@
 # dependencies
 
-`dependencies` declares the consumer → provider relations the graph orders releases by. It is an object keyed by the
-consumer, and each consumer lists what it depends on:
+`dependencies` declares the consumer to provider relations the graph uses to order releases. Write it as an object
+keyed by the consumer. List what each consumer depends on:
 
 ```yaml
 dependencies:
@@ -9,7 +9,8 @@ dependencies:
   web: core            # one provider needs no array
 ```
 
-A provider is a bare name when that is all there is to say about the edge. When it carries more, write it as an object:
+Name the provider as a bare string when you only need to declare the edge. Write it as an object when you need to
+configure more details:
 
 ```yaml
 dependencies:
@@ -21,29 +22,31 @@ dependencies:
       kind: devDependencies
 ```
 
-`kind` names the manifest field the edge stands for: `dependencies` (the default), `devDependencies`,
-`peerDependencies` or `optionalDependencies`. Propagation follows or ignores the edge according to
-`parser.propagation.kinds`, whose default is every kind except `devDependencies`.
+Set `kind` to name the manifest field the edge stands for. This can be `dependencies` (the default), `devDependencies`,
+`peerDependencies` or `optionalDependencies`. Propagation follows or ignores the edge based on
+`parser.propagation.kinds`, which defaults to every kind except `devDependencies`.
 
-`keep: true` marks an edge [`dispat compute`](../cli/compute.md) must never suggest removing: a deliberate relation no
-manifest declares, such as a Docker base-image chain. The planner treats kept edges like any other.
+Set `keep: true` to mark an edge [`dispat compute`](../cli/compute.md) must never suggest removing. Use this for
+deliberate relations no manifest declares, like a Docker base-image chain. The planner treats kept edges like any other
+edge.
 
-Both packages must exist, and their names are matched the way every other name-keyed part of the config is matched,
-without regard to case. Self-dependencies and cycles are rejected; duplicates are ignored.
+Both packages must exist. dispat matches their names without regard to case, just like every other name-keyed part of
+the config. It rejects self-dependencies and cycles, and ignores duplicates.
 
-One direction is closed. A package of a
-[`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none) may consume
-releasable packages, for example through a permanent local link, but a releasable package cannot name one as a
-provider: the provider would never have a version for auto-versioning to write, so the edge is refused when the
-configuration loads. Between two `none` packages an edge is ordinary, and orders their script runs.
+You cannot make a releasable package depend on a package in a
+[`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none). The provider would
+never have a version for auto-versioning to write, so dispat refuses the edge when the configuration loads. A `none`
+package can consume releasable packages, and edges between two `none` packages work normally to order their script
+runs.
 
 ## Where an edge can be written
 
-The same object can be written at three levels, and every declaration merges into one graph. Nothing overrides
-anything: an edge is declared once, wherever it reads best.
+You can write the same object at three levels. dispat merges every declaration into one graph. Nothing overrides
+anything, so you declare an edge once wherever it reads best.
 
-At the **root**, for any edge at all. On a **space**, for the edges that belong next to it. On a **package**, in its
-[`packages` entry or in-folder file](./packages.md#package-dependencies), where it lists its own providers.
+Write it at the **root** for any edge at all. Write it on a **space** for the edges that belong next to it. Write it on
+a **package** in its [`packages` entry or in-folder file](./packages.md#package-dependencies) to list its own
+providers.
 
 ```json
 {
@@ -58,14 +61,13 @@ At the **root**, for any edge at all. On a **space**, for the edges that belong 
 }
 ```
 
-An edge written on a space must **touch** it: its consumer or its provider is one of that space's own packages. That
-covers the edges inside a space, and cross-space edges too, which belong to whichever of the two spaces you think of
-as owning the relation. An edge between two packages of neither space is refused, because a reader looking for it
-would have no space to look in. Those belong in the root object.
+An edge written on a space must **touch** it, meaning the consumer or the provider is one of that space's own packages.
+This covers edges inside a space and cross-space edges. dispat refuses an edge between two packages of neither space,
+because those belong in the root object.
 
-[`dispat compute`](../cli/compute.md) edits each edge where it was written, so a correction to an edge declared on a
-space is applied there. New edges it discovers go to the root object instead: whether a space may hold a given edge
-is a rule about the graph, and compute leaves that decision to you.
+Run [`dispat compute`](../cli/compute.md) to edit each edge where it was written. It applies corrections to an edge
+declared on a space directly to that space. It writes a new edge where its consumer already declares its providers,
+and to the root object when the consumer declares none, because it leaves space organization decisions to you.
 
-The object keyed by consumer is the only shape the key accepts. An entry inside a consumer's list may not name a
-`consumer` of its own, because the key it sits under already says which package the edge belongs to.
+You must use an object keyed by the consumer. An entry inside a consumer's list cannot name a `consumer` of its own.
+The key it sits under already says which package the edge belongs to.

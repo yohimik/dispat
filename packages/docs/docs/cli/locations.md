@@ -1,8 +1,7 @@
 # Naming a place in your monorepo
 
-Three flags on the two shell helpers ask the same question: where in the
-monorepo do you mean? They all take the same answers, so once you know one you
-know all three.
+Three flags on the two shell helpers ask where you mean in the monorepo. They
+take the same answers except for one. Learn one flag and you know all three.
 
 ```console
 $ dispat exec build --for pkg:core          # whose script, and whose environment
@@ -14,19 +13,19 @@ $ dispat exec build --in pkg:core            # which folder to run in
 
 | You write        | You mean                                              |
 |------------------|-------------------------------------------------------|
-| `pkg:core`       | the package called `core`                             |
-| `space:libs`     | the space called `libs`                               |
-| `root`           | the top level, meaning your repository root           |
-| `cwd`            | wherever you are standing right now                   |
-| `packages/core`  | that folder, and only `--in` accepts this             |
+| `pkg:core`       | the package named `core`                              |
+| `space:libs`     | the space named `libs`                                |
+| `root`           | the top level of your repository                      |
+| `cwd`            | the folder you are standing in right now              |
+| `packages/core`  | that specific folder, accepted only by `--in`         |
 
-Names are exact. There are no globs here, because each of these flags wants one
-answer and a pattern matching two packages has no answer to give.
+Names are exact. You cannot use globs here. Each flag needs exactly one answer,
+and a pattern matching two packages cannot provide that.
 
 ## cwd, and what "standing" means
 
-`cwd` is the folder you ran the command from. It is the same thing `dispat run`
-uses when you type no `--package` and it works out which package you are in:
+The `cwd` value means the folder you ran the command from. The `dispat run`
+command uses this same logic to find your package when you omit `--package`.
 
 ```console
 $ cd packages/core
@@ -34,8 +33,8 @@ $ dispat exec build --for cwd
 core-build
 ```
 
-dispat looks for the deepest thing containing your folder. A package wins over
-the space that holds it, and a folder inside neither one means the top level:
+dispat looks for the deepest container around your folder. A package wins over
+the space holding it. A folder inside neither one resolves to the top level.
 
 | Standing in           | `cwd` means                             |
 |-----------------------|------------------------------------------|
@@ -44,17 +43,18 @@ the space that holds it, and a folder inside neither one means the top level:
 | `packages`            | the space `libs`, if that is its folder  |
 | `docs`                | the top level                            |
 
-That last row is worth knowing. Standing somewhere that is no package and no
-space is not an error, it just widens to the top level, and dispat says so in
-the log so you are never left wondering why a different script ran.
+Standing outside a package or space is not an error. The context widens to the
+top level. dispat prints this in the log so you know exactly why a specific
+script ran.
 
-One subtlety: `cwd` follows `--root` when you pass it. `--root` is how you tell
-dispat where you are standing, so `dispat exec build --for cwd --root apps/web`
-means the same as running the command from `apps/web`.
+Pass `--root` to tell dispat where you are standing. The `cwd` value follows
+this flag. Running `dispat exec build --for cwd --root apps/web` acts exactly
+like running the command from `apps/web`.
 
 ## Which folder does my script run in
 
-By default, the one you are standing in. `--in` moves it:
+Your script runs in the folder you are standing in by default. Pass `--in` to
+change this location.
 
 ```console
 $ cd packages/core
@@ -62,51 +62,52 @@ $ dispat exec build          # runs here, in packages/core
 $ dispat exec build --in root # runs at the repository root instead
 ```
 
-`--in` takes a folder path as well as the four words above. A relative path is
-relative to where you are standing, so `--in ../api` does what it looks like.
+The `--in` flag accepts a folder path alongside the four reserved words above.
+Relative paths resolve from where you are standing. Passing `--in ../api` moves
+execution up and into the API folder.
 
-If you have a folder genuinely called `root` or `cwd`, write `./root` and
-`./cwd`. The bare words are taken as the reserved ones, the same way a shell
-would.
+Write `./root` or `./cwd` if you have actual folders with those names. dispat
+treats the bare words as reserved values. This matches standard shell
+behaviour.
 
-A folder that is not there stops the command with a message naming it, rather
-than letting your shell complain about a directory it could not enter.
+Passing a missing folder stops the command immediately. dispat prints an error
+naming the path. This prevents your shell from failing later on a directory it
+cannot enter.
 
 ## The subject and the folder are separate questions
 
-This trips people up once, and then never again. `--for` says whose script and
-whose environment. `--in` says where it runs. Neither implies the other:
+The `--for` flag sets the script and the environment. The `--in` flag sets the
+execution directory. Neither flag implies the other.
 
 ```console
 $ dispat exec release --for pkg:core --in root
 ```
 
-That runs core's `release` script, with core's environment and core's
-`DISPAT_*` variables, from the repository root. If you want both to be core,
-say so twice, or stand in core's folder and use `--for cwd`.
+That command runs the `release` script belonging to core from the repository
+root. It uses core's environment and core's `DISPAT_*` variables. Say so twice
+if you want both to be core, or stand in core's folder and pass `--for cwd`.
 
 ## A note on symlinks
 
-dispat compares folders as they are written, without following symlinks. If you
-reach your packages through a symlinked path, `cwd` may not recognise where you
-are. `dispat run` behaves the same way, so the two stay consistent, but it is
-worth knowing if your checkout is unusual.
+dispat compares folders exactly as they are written and does not follow
+symlinks. The `cwd` value may not recognise your location if you reach your
+packages through a symlinked path. The `dispat run` command behaves the same
+way to keep the tools consistent, which matters for unusual checkouts.
 
 ## What about `dispat if`
 
-`dispat if` takes `--in` too, with the same values:
+The `dispat if` command also accepts `--in` with the exact same values.
 
 ```console
 $ dispat if CI --then 'make ci' --in pkg:core
 ```
 
-`dispat if` normally reads no config file at all, which is what makes it cheap
-enough to call in a loop. A path or `cwd` keeps it that way, since your command
-line already said everything needed. Naming `pkg:`, `space:` or `root` does
-make it read your config, because there is no other way to find out where a
-package lives. So does the [`--changed`](./if.md#changed-packages) condition,
-which asks about the repository itself. You pay for that only when you ask for
-it.
+The `dispat if` command normally skips reading your config file so it stays
+cheap enough to call in a loop. Passing a path or `cwd` keeps it fast, while
+naming `pkg:`, `space:`, or `root` forces dispat to read your config to locate
+the package. The [`--changed`](./if.md#changed-packages) condition also
+triggers a read to query the repository, so you only pay for this when you ask
+for it.
 
 ## See also
 

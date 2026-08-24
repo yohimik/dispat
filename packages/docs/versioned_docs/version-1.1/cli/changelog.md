@@ -1,33 +1,34 @@
 # The changelog command
 
-`dispat changelog` writes each covered package's pending changelog entry, exactly what the release
-stage's recorder would write. An entry that already exists in the file is a skip (`W226`), and the same check makes
-the release stage skip entries this command already wrote. That is the point of running it early: a changelog written
-in a `beforePublish` script, before `dispat commit`, lands inside the tagged commit.
+Run `dispat changelog` to write the pending changelog entry for each covered package, exactly as the release stage's
+recorder would write it. If an entry already exists, dispat skips it and logs `W226`, and this same check tells the
+release stage to skip entries you already wrote. Run this command early so a changelog written in a `beforePublish`
+script, before `dispat commit`, lands inside the tagged commit.
 
-It writes inside each package's own folder and rides the build concurrency budget.
+dispat writes these entries inside each package's own folder. The command rides your build concurrency budget.
 
 ## The selection it shares
 
-`dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
-steps to custom flows. A stage script can run a step at the moment the flow needs it, and the release stage later
-finds the work done and skips it.
+`dispat changelog`, `dispat autoversion`, `dispat commit`, and `dispat github` expose the release pipeline's native
+steps to custom flows. You can run a step from a stage script at the exact moment your flow needs it. The release stage
+later finds the work done and skips it.
 
-All four share the run command's [selection](./run.md#choosing-the-packages) *and* its window. With no terms they cover
-every releasing package in dependency order. `--package`, `--space`, `--group` or the invocation folder narrows that,
-`--since` replaces the window, `--consumers` expands it downstream, and `--on-error` decides what a failed package does
-to its dependents.
+All four commands share the run command's [selection](./run.md#choosing-the-packages) *and* its window. Run them with
+no terms to cover every releasing package in dependency order. You can narrow this list with `--package`, `--space`,
+`--group`, or your invocation folder, adjust the window with `--since` or `--consumers`, and handle failures with
+`--on-error`.
 
-Two rules about what a selection may contain. A term matching no package is an error. A *selected* package that is not
-releasing is a logged no-op, so a flow never fails over a converged or held package. That second rule is also why a
-step run after `dispat commit --tag` covers nothing until `--since all` puts the tagged package back on the table.
+Two rules govern what a selection may contain. A term matching no package causes an error, but a *selected* package
+that is not releasing becomes a logged no-op. This means your flow never fails over a converged or held package, which
+is why a step run after `dispat commit --tag` covers nothing until `--since all` puts the tagged package back on the
+table.
 
-The four command words are reserved. Like every command name, each wins the `dispat <script>` shorthand over a
-[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so `dispat commit` is always the command.
-Spelling it out as `dispat run commit` still reaches the script.
+The four command words are reserved. Each command name wins the `dispat <script>` shorthand over a
+[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so `dispat commit` always runs the
+command. You can still reach your script by spelling it out as `dispat run commit`.
 
-Every config value the commands consume is also a flag that overrides it for the invocation, listed in the
-[flags table](#flags).
+Every config value these commands consume is also a flag. You can use these flags to override the config for a single
+invocation. See the [flags table](#flags) for details.
 
 ## Flags
 
@@ -35,11 +36,11 @@ Beside the [global flags](./README.md#global-flags):
 
 | Flag                  | Default     | Effect                                                                                                                                                                                                 |
 |-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`): narrow to the named packages. Repeatable and comma-separated, matched case-insensitively, `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | The same eleven commands: narrow to every package of the named spaces, with the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | The same eleven commands: narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), with the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--since`             |             | The same seven commands: cover the packages the commits since a git revision address, instead of the release window. `all` covers every package; see [the run command](./run.md).                |
-| `--consumers`         |             | The same seven commands: additionally cover every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
-| `--on-error`          | `skip`      | Every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`): what a failed package does to its dependents, `skip` (transitive) or `continue`. Either way the command exits `1` on any failure.                                         |
-| `--file`, `--file-title`, `--date-format` | from config | `changelog` only: override the matching `changelog.*` values for every package of the invocation. `--file-title` states the whole title as one line. |
-| `--release-name`      | from config | `changelog` and `github`: override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for the invocation. `$VAR` and `${VAR}` expand as they do in the config. |
+| `--package`, `-p`     |             | Narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. This repeatable, comma-separated flag matches case-insensitively and accepts `*` globs, so `-p '*'` selects every package. See [Choosing the packages](./run.md#choosing-the-packages). |
+| `--space`, `-s`       |             | Narrow the same eleven commands to every package of the named spaces. This flag uses the same spellings as the package flag, and a standalone package belongs to no space. See [Choosing the packages](./run.md#choosing-the-packages). |
+| `--group`, `-g`       |             | Narrow the same eleven commands to every package of the named [versioning groups](../reference/releasing/versioning.md). This flag uses the same spellings, and a group is a `versionGroups` entry or a space that versions as one, so it may cross spaces. See [Choosing the packages](./run.md#choosing-the-packages). |
+| `--since`             |             | Cover the packages addressed by commits since a git revision for the same seven commands. This replaces the default release window. Pass `all` to cover every package, and see [the run command](./run.md) for details. |
+| `--consumers`         |             | Tell the same seven commands to additionally cover every package that transitively depends on a selected one. See [the run command](./run.md). |
+| `--on-error`          | `skip`      | Decide what a failed package does to its dependents during every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` for transitive skipping or `continue`. The command always exits `1` on any failure. |
+| `--file`, `-f`, `--file-title`, `--date-format` | from config | Override the matching `changelog.*` values for every package in a `changelog` invocation. Use `--file-title` to state the whole title as one line. |
+| `--release-name`      | from config | Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for a `changelog` or `github` invocation. Variables like `$VAR` and `${VAR}` expand exactly as they do in the config. |

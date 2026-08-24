@@ -1,7 +1,7 @@
 # Run-level hooks
 
-Seven hooks observe the run as a whole rather than any one package. They live in the **top-level `run` object**, run in
-the **monorepo root**, and each is a no-op when not configured:
+Seven hooks observe the run as a whole rather than any one package. They live in the **top-level `run` object** and
+execute in the **monorepo root**. Each is a no-op when unconfigured:
 
 ```yaml
 run:
@@ -19,28 +19,25 @@ run:
 | `run.beforePush`   | Before the push. `commit.push` mode only.                                         |
 | `run.afterPush`    | After the push succeeded.                                                         |
 
-`run.beforeAll` is the one **gating** run hook: it fires before any release work, when failing it can still stop
-everything, so it does, fail-fast, aborting the run with exit `1` before anything is built, published or tagged. Every
-other run hook only **warns** on failure (a warn-only sequence: every command runs even when an earlier one failed),
-because it runs after the work it observes. The "after" hooks additionally only run when the operation they bracket
-succeeded: a hook observing a commit or push that never happened would be reporting a lie.
+`run.beforeAll` is the one **gating** run hook. It fires before any release work begins. A failure aborts the run with
+exit `1` before dispat builds, publishes, or tags anything. Every other run hook only **warns** on failure. These run
+after the work they observe, so dispat executes every command in the sequence even if an earlier one fails. The "after"
+hooks only run when their bracketed operation succeeds.
 
-All seven receive `DISPAT_STAGE` naming the hook and the [workspace listing](../reference/environment.md#workspace-data);
-`run.postAll` and everything after it additionally receive the
-[run outcome listing](../reference/environment.md#run-outcome-data) reporting which packages published, failed, were skipped or
-were never planned to release (`run.beforeAll` fires before any outcome exists).
+All seven hooks receive `DISPAT_STAGE` naming the hook and the
+[workspace listing](../reference/environment.md#workspace-data). `run.postAll` and later hooks also receive the
+[run outcome listing](../reference/environment.md#run-outcome-data). This data reports which packages published,
+failed, were skipped, or were never planned to release. `run.beforeAll` fires before any outcome exists.
 
 ## They belong to `dispat release`
 
-These seven fire for `dispat release` and for nothing else. The [step commands](../reference/releasing/steps.md) do
-not fire them, not even the ones bracketing the phase they perform: `dispat commit --tag --push` makes the release
-commit, writes the tags and pushes without `run.beforeCommit` or `run.afterPush` ever running.
+These seven fire for `dispat release` and nothing else. The [step commands](../reference/releasing/steps.md) do not
+fire them. For example, `dispat commit --tag --push` makes the release commit, writes tags, and pushes without ever
+triggering `run.beforeCommit` or `run.afterPush`.
 
-That is deliberate, for two reasons.
-
-A run hook exists to give you a seam into a moment **dispat** chooses. Inside a release, dispat decides when the commit
-happens, so it offers you `beforeCommit`. A flow that calls `dispat commit` itself already owns that moment, and
-brackets it by writing the line before and the line after:
+This design is deliberate. A run hook gives you a seam into a moment **dispat** chooses. Inside a release, dispat
+decides when the commit happens, so it offers `beforeCommit`. A script that calls `dispat commit` already owns that
+moment. You bracket the commit by writing the line before and the line after:
 
 ```yaml
 scripts:
@@ -53,51 +50,49 @@ spaces:
       beforePublish: [notify-before, commit, notify-after]
 ```
 
-The second reason is that `run` means *once per run*. `flow.beforePublish` executes **per package**, and nesting the
-step commands there is the [recommended pattern](../reference/releasing/steps.md), so a release of ten packages would
-fire each commit hook ten times from inside itself and once more from its own finalize, with nothing in the
-environment to tell one firing from another. A hook you cannot count is worse than a hook that does not fire.
+The `run` object also means *once per run*. The `flow.beforePublish` hook executes **per package**, and nesting step
+commands there is the [recommended pattern](../reference/releasing/steps.md). A release of ten packages would fire each
+commit hook ten times from inside itself and once more from its own finalize. Nothing in the environment would
+distinguish one firing from another.
 
 ## The branch guard
 
-`run.allowBranch` is not a hook but a guard. When you set it, a release run refuses to start unless the branch you have
-checked out matches one of the patterns you listed:
+Configure `run.allowBranch` to guard your releases. A release run refuses to start unless your checked-out branch
+matches one of your listed patterns:
 
 ```yaml
 run:
   allowBranch: [main, release/*]
 ```
 
-That is the whole feature. A run from `main` proceeds; a run from `feature/tryout` stops with exit `1` and a message
-naming both the branch and the patterns, before any verification, any hook, and any release work. Nothing is built,
-nothing is tagged, and the repository is left exactly as it was found.
+A run from `main` proceeds normally. A run from `feature/tryout` stops with exit `1` and prints a message naming both
+the branch and the patterns. This happens before any verification, hooks, or release work, leaving the repository
+exactly as dispat found it.
 
-A `*` matches any run of characters, separators included, so `release/*` reaches `release/v2/hotfix`. A detached HEAD
-has no branch name, so it matches nothing, including a pattern as broad as `*`.
+A `*` matches any run of characters, including separators. This means `release/*` matches `release/v2/hotfix`. A
+detached HEAD has no branch name, so it matches nothing, even a pattern as broad as `*`.
 
-The guard is about releasing, not about looking. Read-only commands (`status`, `preview`, `compute`) work on any branch,
-which is what you want on a pull request. The [step commands](../reference/releasing/steps.md) are not guarded either: they are built to run
-inside a release stage that this guard has already cleared.
+The guard restricts releasing, not looking. Read-only commands like `status`, `preview`, and `compute` work on any
+branch. The [step commands](../reference/releasing/steps.md) are also unguarded. They are built to run inside a release
+stage that this guard has already cleared.
 
-Leave the list unset to release from any branch. That suits single-branch repositories and disposable clones, and it is
-the default.
+Leave the list unset to release from any branch. This is the default behavior. It suits single-branch repositories and
+disposable clones.
 
 ### Releasing from a stale checkout
 
-There is a second guard, and it needs no configuration. When the finalize phase is set to push
-([`commit.push`](./records.md#commit)), dispat checks that your checkout is not behind the branch it would push to, and
-refuses if it is:
+A second guard needs no configuration. When you set the finalize phase to push ([`commit.push`](./records.md#commit)),
+dispat checks your checkout against the remote branch. It refuses to run if your local branch is behind:
 
 ```console
 $ dispat
 ERR refusing to release  error="the checkout is behind origin/main; pull before releasing"
 ```
 
-The reason is that the plan is computed from the tags this clone can see. If someone else has released in the meantime,
-your checkout is planning versions that may already exist, and the push at the end would be rejected anyway, after
-everything was built, published and tagged. Failing at the start costs nothing; failing at the end costs a release.
+dispat computes the plan from the tags your local clone can see. If someone else released in the meantime, your
+checkout plans versions that may already exist. The push at the end would fail after everything was built, published,
+and tagged. Failing at the start costs nothing. Failing at the end costs a release.
 
-`git pull` and run again. Two cases are deliberately not treated as behind: a branch the remote does not have yet,
-because the first push is what creates it, and a detached HEAD, where there is no branch to compare. The check is an
-`ls-remote`, so `commit.verify: false`, the escape hatch for remotes that reject `ls-remote` but accept pushes, turns
-it off along with the reachability check.
+Run `git pull` and try again. dispat ignores this check for a detached HEAD or a new branch the remote does not have
+yet. The check uses `ls-remote`. Set `commit.verify: false` to turn off this check if your remote rejects `ls-remote`
+but accepts pushes.

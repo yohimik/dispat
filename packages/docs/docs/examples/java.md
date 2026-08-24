@@ -1,6 +1,7 @@
 # Maven modules
 
-Java modules in one repository, each with its own `pom.xml`, versioned from commits and deployed in dependency order.
+Keep your Java modules in one repository with a `pom.xml` for each. dispat versions them from commits and deploys them
+in dependency order.
 
 ## The layout
 
@@ -33,8 +34,9 @@ dispat.json
 }
 ```
 
-The version stage writes the new version into each `pom.xml` before `mvn` ever runs, so the artifact Maven builds
-already carries the right coordinates. No `-Dversion` flag, no `versions:set`, no `${revision}` property.
+dispat writes the new version into each `pom.xml` during the version stage. It does this before `mvn` ever runs, so the
+artifact Maven builds already carries the right coordinates. You do not need a `-Dversion` flag, `versions:set`, or a
+`${revision}` property.
 
 ## A release
 
@@ -53,13 +55,14 @@ $ dispat status
 12:41:17 INF release plan ready held=0 packages=2 releasing=2
 ```
 
-The scopes in your commits are the folder names, `core` and `api`, not the Maven coordinates. If you would rather
-write `feat(com.acme:core)`, state that coordinate under [`manifestNames`](../configuration/packages.md#manifestnames)
-for the package.
+Write the folder names, `core` and `api`, as the scopes in your commits. Do not use the Maven coordinates. If you
+prefer to write `feat(com.acme:core)`, set that coordinate in
+[`manifestNames`](../configuration/packages.md#manifestnames) for the package.
 
 ## What dispat reads and writes
 
-A Maven manifest is identified by `groupId:artifactId`, and a module that omits its `groupId` inherits the parent's:
+dispat identifies a Maven manifest by its `groupId:artifactId`. A module inherits the parent's group if it omits its
+own `groupId`:
 
 ```console
 $ dispat scanner
@@ -71,8 +74,8 @@ services/api/pom.xml  maven  com.acme:api@0.4.1
 2 manifest(s), 3 dependency declaration(s)
 ```
 
-`test` scope is reported as a dev dependency, and `optional` as an optional one. A version written as a property is
-read exactly as it is written, and it is the one thing writes will not touch:
+dispat reports a `test` scope as a dev dependency, and an `optional` scope as an optional one. It reads a version
+written as a property exactly as it is written. Writes will not touch that property:
 
 ```console
 $ dispat writer services/api/pom.xml --set-version 0.5.0 --set com.acme:core=1.3.0 --set com.fasterxml.jackson.core:jackson-databind=2.18.1
@@ -83,18 +86,18 @@ services/api/pom.xml
 1 manifest(s): 1 applied, 1 skipped, 0 missing
 ```
 
-`${jackson.version}` is an indirection somebody set up on purpose, and replacing it with a literal would break it.
-Skipped is the healthy answer, and it never fails a release. The same rule protects `<parent><version>`: dispat writes
-a project's own `<version>` and never its parent's.
+You set up `${jackson.version}` as an indirection on purpose, so replacing it with a literal would break it. Skipped is
+the healthy answer and never fails a release. The same rule protects `<parent><version>`, because dispat writes a
+project's own `<version>` and never its parent's.
 
-Note the colon in `--set com.acme:core=1.3.0`. A prefix before the colon is read as a manifest field only when it is
-one of `dependencies`, `devDependencies`, `peerDependencies` or `optionalDependencies`, so Maven coordinates keep
-their own colon and need no escaping.
+Look at the colon in `--set com.acme:core=1.3.0`. dispat reads a prefix before the colon as a manifest field only when
+it matches `dependencies`, `devDependencies`, `peerDependencies` or `optionalDependencies`. This means Maven
+coordinates keep their own colon and need no escaping.
 
 ## If your modules inherit their version from a parent
 
-Many multi-module builds give each module `<version>` through the parent instead of declaring one. dispat then has
-nothing to write in the module, so put the parent's version in the version stage yourself:
+Many multi-module builds give each module its `<version>` through the parent instead of declaring one. dispat then has
+nothing to write in the module. Put the parent's version in the version stage yourself:
 
 ```json title="dispat.json (parent-managed versions)"
 {
@@ -110,21 +113,21 @@ nothing to write in the module, so put the parent's version in the version stage
 }
 ```
 
-A `flow.version` script and `autoVersion` can coexist: the block reconciles what it can parse, then the script runs
-and sees the already-reconciled files.
+You can use a `flow.version` script and `autoVersion` together. The block reconciles what it can parse. The script then
+runs and sees the already-reconciled files.
 
 ## Worth knowing
 
-- **Maven Central is append-only and slow to sync.** A release that fails after the deploy has spent that version.
-  Fix forward and let the next run take the next number.
-- **Credentials live in `settings.xml`.** In CI, write it in a step before dispat, or in a
-  [`flow.login`](./login.md) script so it happens once per space.
-- **`SNAPSHOT` versions are outside all of this.** dispat computes release versions; if you also publish snapshots
-  from every commit, keep that as a separate job that never runs `dispat`.
-- **`mvn -B` matters.** A stage runs without a terminal, and a Maven that decides to be interactive will hang the run.
+- **Maven Central is append-only and slow to sync.** A release spends that version if it fails after the deploy. Fix
+  forward and let the next run take the next number.
+- **Credentials live in `settings.xml`.** Write this file in a CI step before you run dispat. You can also write it in
+  a [`flow.login`](./login.md) script so it happens once per space.
+- **`SNAPSHOT` versions are outside all of this.** dispat computes release versions. Keep your snapshot publishes in a
+  separate job that never runs `dispat`.
+- **`mvn -B` matters.** A stage runs without a terminal. Maven hangs the run if it decides to be interactive.
 
 ## See also
 
 - [A Gradle library and its version catalog](./gradle.md) for the other JVM build tool.
-- [autoVersion](../configuration/autoversion.md) for what the version stage reconciles.
-- [Release steps](../reference/releasing/steps.md) for running the pieces of a release by hand.
+- [autoVersion](../configuration/autoversion.md) explains what the version stage reconciles.
+- [Release steps](../reference/releasing/steps.md) shows how to run the pieces of a release by hand.

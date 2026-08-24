@@ -23,8 +23,8 @@ No setup beyond the repository itself is needed. Requirements:
 - the **Go toolchain** (see [`go.mod`](./go.mod) for the version) on `PATH`;
 - **git** on `PATH`; every test creates and drives a real repository (tests skip if git is missing).
 
-The module resolves its dispat dependencies through the workspace (`go.work` at the monorepo root) and local
-`replace` directives, so a plain checkout is ready to run. The dispat and tsmark binaries are compiled **once per
+The module resolves its dispat dependencies through the workspace (`go.work` at the monorepo root), so a plain
+checkout is ready to run. The dispat and tsmark binaries are compiled **once per
 `go test` invocation** and shared across all tests (a `sync.Once` cache in the harness); each test creates its
 repository in a fresh `t.TempDir()`, so tests are independent and safe to run in any order or subset.
 

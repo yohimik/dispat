@@ -1,46 +1,46 @@
 # Pipeline patterns
 
-The CI/CD shapes that get the most out of dispat: testing only what a commit changed, testing against the working tree
-with local links, and a gated release pipeline where write permission, full tests and a human trigger each sit exactly
-where they belong. Every pattern here is lifted from the pipelines this repository releases itself with, so each one is
-exercised on every dispat release.
+These CI/CD shapes get the most out of dispat. You can test only what a commit changed, test against the working tree
+with local links, and build a gated release pipeline. Write permission, full tests, and a human trigger sit exactly
+where they belong.
 
-[dispat in CI](./ci.md) covers the step before any of this: getting the binary onto a runner.
+This repository releases itself using these exact pipelines. Every pattern here runs on every dispat release.
+
+Read [dispat in CI](./ci.md) to get the binary onto a runner before you start.
 
 ## Test only what a commit changed
 
-`dispat run` takes a `--since` window, so a per-commit test job runs each package's `tests` script only for the
-packages the last commit addressed, and for everything that depends on them:
+Run `dispat run` with a `--since` window to test only the packages a commit changed. A per-commit test job runs each
+package's `tests` script for the addressed packages and everything that depends on them:
 
 ```sh
 dispat run tests --since HEAD~1 --consumers
 ```
 
-`--since HEAD~1` selects the packages the last commit's units address: written scopes first, changed files for
-scopeless commits. One value covers both triggers a test workflow has. A push lands one commit, and a pull request is
-checked out as a merge commit whose first parent is the base branch tip, so `HEAD~1` spans exactly the pull request's
-changes. No base revision has to be computed in the workflow.
+Pass `--since HEAD~1` to select the packages the last commit addresses, reading written scopes first and then changed
+files for scopeless commits. This single value covers both triggers in a test workflow because a push lands one commit
+and a pull request checks out as a merge commit with the base branch tip as its first parent. `HEAD~1` spans exactly
+the pull request's changes, so you do not have to compute a base revision.
 
-`--consumers` is the reason to route this through dispat instead of a shell loop: it expands the selection to every
-package that transitively depends on a selected one, so a change to a shared library also tests everything built on
-top of it. The run honours the dependency graph and the build concurrency budget, and a failing package skips its
-dependents unless `--on-error continue` says otherwise.
+Pass `--consumers` to expand the selection to every package that transitively depends on a selected one, testing
+everything built on top of a shared library. This expansion routes the work through dispat instead of a shell loop. The
+run honours the dependency graph and the build concurrency budget, and a failing package skips its dependents unless
+you pass `--on-error continue`.
 
-The same window fits other scripts with other trade-offs. This repository's build job runs
-`dispat run build --since HEAD~1` **without** `--consumers`, because every container image depends on the CLI and the
-expansion would turn any library change into a set of emulated multi-arch image builds. Choose per script: correctness
-gates want `--consumers`, expensive artifact builds often do not.
+You can use the same window for other scripts with different trade-offs. This repository's build job runs
+`dispat run build --since HEAD~1` **without** `--consumers` because every container image depends on the CLI, and
+expansion would turn any library change into a set of emulated multi-arch image builds. Choose this per script:
+correctness gates want `--consumers`, but expensive artifact builds often do not.
 
-Two related windows are worth knowing. `--since origin/main` covers everything a branch has changed, and
-`--since all` opts out of windowing entirely, which is what a release gate wants (see
-[the gated pipeline](#the-gated-release-pipeline) below). A coverage total in particular has to come from a
-`--since all` run, because a windowed run tests only part of the monorepo.
+Pass `--since origin/main` to cover everything a branch changed. Pass `--since all` to opt out of windowing entirely,
+which a release gate needs for its full run (see [the gated pipeline](#the-gated-release-pipeline) below). A coverage
+total must come from a `--since all` run because a windowed run tests only part of the monorepo.
 
 ## Testing against the working tree: the link bracket
 
 Tests that exercise the checkout's own libraries need each consumer to resolve its providers from the working tree
-rather than from the registry. In ecosystems with a redirect directive, [`dispat autowriter`](../cli/autowriter.md)
-derives those redirects from what the manifests already declare:
+instead of the registry. Run [`dispat autowriter`](../cli/autowriter.md) in ecosystems with a redirect directive to
+derive those redirects from what the manifests already declare:
 
 ```sh
 dispat autowriter --link-local --since all --sync-lock=false    # open the bracket
@@ -51,52 +51,50 @@ dispat scanner --root-only --verify-unlinked                    # prove it close
 
 Four details make the bracket safe:
 
-- **Close it unconditionally.** In GitHub Actions the unlink step carries `if: always()`, and unlinking is idempotent,
-  so a failed test run never leaves redirects behind.
-- **`--sync-lock=false` on both sides.** A lock-file regeneration such as `go mod tidy` must not run while the
-  redirects are in place: a local folder needs no checksum, so the sync would delete `go.sum` entries that are needed
-  again the moment you unlink.
-- **Prove it, do not trust it.** [`dispat scanner --verify-unlinked`](../cli/scanner.md) exits `1` if any manifest
-  still carries a redirect, which turns "the bracket closed" from a hope into a gate. Its inverse, `--verify-linked`,
-  gates the opposite state.
-- **A link must never publish.** Nothing in a release removes one, so the bracket belongs in test jobs, and the verify
-  gate belongs in front of any job that packs or publishes.
+- **Close it unconditionally.** Put `if: always()` on the unlink step in GitHub Actions. Unlinking is idempotent, so a
+  failed test run never leaves redirects behind.
+- **`--sync-lock=false` on both sides.** Never run a lock-file regeneration like `go mod tidy` while redirects are in
+  place. A local folder needs no checksum, so a sync would delete `go.sum` entries that you need again the moment you
+  unlink.
+- **Prove it, do not trust it.** Run [`dispat scanner --verify-unlinked`](../cli/scanner.md) to turn a closed bracket
+  into a gate. It exits `1` if any manifest still carries a redirect, and its inverse, `--verify-linked`, gates the
+  opposite state.
+- **A link must never publish.** A release never removes a link. Put the bracket in test jobs, and put the verify gate
+  in front of any job that packs or publishes.
 
 Five manifest formats have a redirect directive to manage: `go.mod` (`replace`), `Cargo.toml` (`[patch.crates-io]`),
-`pubspec.yaml` (`dependency_overrides`), `pyproject.toml` (`[tool.uv.sources]`) and `package.json` (`overrides` and
-its yarn and pnpm spellings). One caveat inside that list: a *derived* link skips `package.json`, because npm refuses
-an override for a directly declared dependency unless the specs match exactly; an explicit
-`--link name=path` still writes one. The full walkthrough is
-[Editing across the monorepo](../editing/autowriter.md#working-against-local-folders).
+`pubspec.yaml` (`dependency_overrides`), `pyproject.toml` (`[tool.uv.sources]`), and `package.json` (`overrides` and
+its yarn and pnpm spellings). A *derived* link skips `package.json` because npm refuses an override for a directly
+declared dependency unless the specs match exactly, but an explicit `--link name=path` still writes one. Read
+[Editing across the monorepo](../editing/autowriter.md#working-against-local-folders) for the full walkthrough.
 
 ## When your ecosystem has no link directive
 
-Most formats have no redirect to manage, and a link request against one is reported as skipped rather than performed.
-The alternatives, in the order worth trying:
+Most formats have no redirect to manage. dispat reports a link request against one as skipped instead of performed. Try
+these alternatives in this order:
 
-1. **Your package manager's own workspaces.** npm, pnpm and Yarn workspaces already resolve internal dependencies from
-   the tree, which is why the npm ecosystem rarely needs a link at all. Where the workspace mechanism covers local
-   resolution, let it.
-2. **Local specs written into the declaration.** [`dispat writer --set`](../cli/writer.md) and
-   `dispat autowriter --set` write a range verbatim, and in several formats the local redirect *is* a form of the
-   declaration: a Gemfile's `path:`, a Podfile's `:path`, an editable `-e ./pkg` requirements line, a `workspace:*`
-   protocol range. Writing and reverting such a spec is an ordinary set, and the scanner reads it back as a local
-   path.
-3. **Literal replacement for everything else.** [`dispat autoreplacer`](../editing/autoreplacer.md) rewrites literal
-   text across every covered package, and its `--replace` patterns may name `{provider}` and `{providerVersion}`, so a
-   hand-assembled Gradle coordinate or a Helm image line can be pointed at a locally published version and back.
-   [`autoVersion.replace`](../configuration/autoversion.md) is the same idea as configuration.
-4. **A script pair as the bracket.** Where the redirect is a command rather than a file edit, bind `link` and `unlink`
+1. **Your package manager's own workspaces.** npm, pnpm, and Yarn workspaces resolve internal dependencies from the
+   tree. This means the npm ecosystem rarely needs a link, so let the workspace mechanism cover local resolution where
+   it can.
+2. **Local specs written into the declaration.** Run [`dispat writer --set`](../cli/writer.md) or
+   `dispat autowriter --set` to write a range verbatim. The local redirect *is* a form of the declaration in several
+   formats: a Gemfile's `path:`, a Podfile's `:path`, an editable `-e ./pkg` requirements line, or a `workspace:*`
+   protocol range. Writing and reverting this spec is an ordinary set, and the scanner reads it back as a local path.
+3. **Literal replacement for everything else.** Use [`dispat autoreplacer`](../editing/autoreplacer.md) to rewrite
+   literal text across every covered package. Its `--replace` patterns can name `{provider}` and `{providerVersion}`,
+   so you can point a hand-assembled Gradle coordinate or a Helm image line at a locally published version and back.
+   The [`autoVersion.replace`](../configuration/autoversion.md) field uses the same idea as configuration.
+4. **A script pair as the bracket.** Sometimes a redirect is a command instead of a file edit. Bind `link` and `unlink`
    [scripts](../configuration/scripts.md) and run them with [`dispat exec`](../cli/exec.md) or `dispat run` around the
-   tests, with the space's `onFail` script as the net. That is exactly how this repository's own bracket is wired.
+   tests, using the space's `onFail` script as the net. This repository wires its own bracket exactly this way.
 
 ## The gated release pipeline
 
-The robust shape has four stages, each answering one question, each gating the next. This is the pipeline dispat
-releases itself with.
+The robust shape has four stages. Each stage answers one question and gates the next. dispat releases itself with this
+pipeline.
 
-**Stage 1: is there anything to release?** A plan job runs `dispat status --require-release` and publishes the answer
-as a job output:
+**Stage 1: is there anything to release?** Run a plan job with `dispat status --require-release` to find out. The job
+publishes the answer as an output:
 
 ```yaml
 jobs:
@@ -120,32 +118,31 @@ jobs:
           esac
 ```
 
-Two details carry the safety. The exit code is mapped through a `case` because exit `3` is the *answer* and every
-other nonzero code is a failure: a bare command under `set -e` would fail the job instead of answering, and a plain
-`if` would read a broken configuration as "nothing to release" and skip the release instead of failing. And the job
-needs only `contents: read`: `status` takes no release lock and creates no tag, so write permission stays out of
-every job except the one that releases. That is the permission gate.
+Two details carry the safety. Map the exit code through a `case` statement because exit `3` is the *answer*, whereas a
+bare command fails the job and a plain `if` reads a broken configuration as an empty release. The job needs only
+`contents: read` because `status` takes no release lock, which keeps write permission out of every job except the one
+that releases.
 
-**Stage 2: the human gate.** The release workflow triggers on `workflow_dispatch`, so a person decides when a release
-run starts, and a `concurrency` group with `cancel-in-progress: false` queues a second dispatch behind the first
-instead of racing it. A CI system with approval mechanisms, such as GitHub environments or GitLab manual jobs, can put
-the approval between the plan job and the release job instead; dispat does not care which, because the
-[release lock](./releasing/release-lock.md) refuses a concurrent release either way.
+**Stage 2: the human gate.** Trigger the release workflow on `workflow_dispatch` so a person decides when a release run
+starts, and use a `concurrency` group with `cancel-in-progress: false` to queue a second dispatch behind the first. A
+CI system with approval mechanisms, like GitHub environments or GitLab manual jobs, can put the approval between the
+plan job and the release job. The [release lock](./releasing/release-lock.md) refuses a concurrent release either way,
+so dispat does not care which method you use.
 
-**Stage 3: the full suite, as the release gate.** The per-commit job tested `--since HEAD~1`; the job that gates a
-release tests everything, inside the link bracket:
+**Stage 3: the full suite, as the release gate.** The per-commit job tested `--since HEAD~1`. The job that gates a
+release tests everything inside the link bracket:
 
 ```sh
 dispat run tests --since all
 ```
 
-`--since all` is deliberate here. This run gates a release of the whole graph, so every package's tests run whether or
-not it changed, and it is the one run that can produce a complete coverage measurement.
+Pass `--since all` deliberately here. This run gates a release of the whole graph. Every package's tests run whether or
+not it changed, making this the only run that can produce a complete coverage measurement.
 
-**Stage 4: the release, and its outcome as an output.** The release job alone gets `contents: write`, runs
-`dispat --log-format json`, and turns what happened into outputs for the jobs after it. `--require-release` composes
-here too: on `release` it is answered *before* the release lock is taken, so a run that would publish nothing never
-makes a real release queue behind it. The outcome export uses the run hooks and [`dispat if`](../cli/if.md):
+**Stage 4: the release, and its outcome as an output.** Give the release job `contents: write` permissions and run
+`dispat --log-format json` to turn what happened into outputs for the jobs after it. The `--require-release` flag
+composes here too, answering *before* taking the release lock so an empty run never makes a real release queue behind
+it. Use the run hooks and [`dispat if`](../cli/if.md) to export the outcome:
 
 ```yaml title="dispat.yaml"
 scripts:
@@ -157,14 +154,14 @@ run:
   postAll: post-release
 ```
 
-A verification job then keys on that output, checks out the tag the release created, and exercises the published
-artifact, which is how a broken release is caught by the same pipeline that made it.
+A verification job keys on that output. It checks out the tag the release created and exercises the published artifact.
+The same pipeline that made a broken release catches it.
 
 ## Selecting from the pipeline
 
-`dispat release` and `dispat status` take the selection flags, so a pipeline that can pass arguments can release part
-of the monorepo: `-p` names packages, `-s` a space's, `-g` a versioning group's. On GitHub Actions that is a
-`workflow_dispatch` input:
+Pass selection flags to `dispat release` and `dispat status` so a pipeline that accepts arguments can release part of
+the monorepo. Use `-p` to name packages, `-s` for a space's packages, and `-g` for a versioning group's packages. You
+can use a `workflow_dispatch` input on GitHub Actions:
 
 ```yaml
 on:
@@ -179,18 +176,18 @@ on:
 - run: dispat release --log-format json ${{ inputs.only && format('-p {0}', inputs.only) }}
 ```
 
-An empty input releases everything, and `-p core,web` releases a subset at exactly the versions a full release would
-have given it. The safety rails hold with arguments coming from outside:
+Leave the input empty to release everything. Pass `-p core,web` to release a subset at exactly the versions a full
+release would give it. The safety rails hold when you pass arguments from outside:
 
-- A selection only ever narrows the plan, so a typo'd name is an error rather than an empty release, and
-  `--require-release` still fails a selection that would publish nothing.
-- A selected package whose provider is releasing and unselected is **withheld** (`W230`): it waits for the next run
+- A selection only narrows the plan. A typo in a name causes an error instead of an empty release, and the
+  `--require-release` flag still fails a selection that publishes nothing.
+- A selected package whose provider is releasing and unselected is **withheld** (`W230`). It waits for the next run
   instead of shipping against a version that is not out yet.
-- `-g` releases a whole [versioning group](./releasing/versioning.md), so a shared version can never be split by the
-  flag that names it, and a selection that splits a group some other way is reported (`W231`).
-- `--strict` turns both findings into a refusal, after the graph is printed and before anything is built, for
-  pipelines that would rather stop than defer.
+- The `-g` flag releases a whole [versioning group](./releasing/versioning.md). A shared version never splits by the
+  flag that names it, and dispat reports any selection that splits a group some other way (`W231`).
+- Pass `--strict` to turn both findings into a refusal. This happens after dispat prints the graph and before it builds
+  anything, which helps pipelines that would rather stop than defer.
 
-The same holds anywhere: any CI system that can pass arguments to a command can drive partial releases with `-p`,
-`-s` and `-g`, and [Partial releases](./releasing/partial-releases.md) is the full description of what a narrowed
-release does.
+The same holds anywhere. Any CI system that can pass arguments to a command can drive partial releases with `-p`, `-s`,
+and `-g`. Read [Partial releases](./releasing/partial-releases.md) for the full description of what a narrowed release
+does.
