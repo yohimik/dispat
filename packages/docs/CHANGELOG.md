@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.1 (2026-08-24)
+
+### Fixes
+
+- improve readability
+
+
 ## packages/docs/v1.1.0 (2026-08-20)
 
 ### Dependencies
