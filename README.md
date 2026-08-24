@@ -28,8 +28,8 @@ irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 ```
 
 ```yaml
-# ...or on GitHub Actions (pin @v1 once 1.0.0 is out; the v1 alias tracks the latest stable)
-- uses: yohimik/dispat@main
+# ...or on GitHub Actions
+- uses: yohimik/dispat@v1
 - run: dispat --log-format json
 ```
 
