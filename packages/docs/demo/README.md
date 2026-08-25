@@ -24,7 +24,7 @@ Every composition runs at twenty frames per second (`Root.tsx`), which is what s
 particular is not a cut: the master fails api on purpose, and the graph-not-a-list slide wants the run that
 completes. The landing page's carousel pairs each CLI README key-feature bullet with its clip (`FEATURE_MEDIA` in
 [`DemoCarousel`](../src/components/DemoCarousel/index.tsx)), in the README's order, and follows them with the
-`EXTRA_SLIDES` defined there: six more stories the documentation describes, each with its own animation:
+`EXTRA_SLIDES` defined there: eight more stories the documentation describes, each with its own animation:
 
 | Composition | Asset | Story | Embedded in |
 |---|---|---|---|

@@ -62,7 +62,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   builds and publishes in parallel with separate concurrency budgets, and supports `isBuildWaitingPublish` for
   ecosystems like Docker where a consumer must wait for its provider to publish before building.
 - **Blast radius written in the commit.** A `feat(core):` commit releases `core` alone, `^` bumps its direct consumers,
-  `^^` reaches the full transitive closure, and `+N` traverses exactly N edges. You control the exact blast radius
+  `^^` reaches the full transitive closure, and `+N` reaches up to N edges away. You control the exact blast radius
   directly from git history.
 - **Self-healing runs, because a release is a distributed transaction.** Publishing a graph performs irreversible
   writes across external registries without rollbacks, so each package commits its leg by creating an annotated git tag
