@@ -1,5 +1,11 @@
 # Changelog
 
+## packages/docs/v1.1.5 (2026-08-25)
+
+### Dependencies
+
+- infra: 0.0.0 -> 0.0.1
+
 ## packages/docs/v1.1.4 (2026-08-25)
 
 ### Fixes
