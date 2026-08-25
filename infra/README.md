@@ -37,7 +37,9 @@ The only thing a CI apply cannot create is the identity CI authenticates as. It 
 the exact names `ci.tf` declares — the Workload Identity pool and provider (pinned to this repository), the releaser
 service account and its bindings — together with the GitHub secrets and variables above; the first release imported
 and adopted all of it, and `ci.tf` has managed it since. Recreating it in a fresh project means repeating those
-gcloud commands from `ci.tf`'s declarations and refilling the CI environment.
+gcloud commands from `ci.tf`'s declarations, refilling the CI environment, and enabling the APIs: compute, dns, iam,
+iamcredentials, sts, storage, and cloudresourcemanager, the last of which the releaser needs at plan time (the
+project-number lookup in `rebuild.sh`) and at apply time (project IAM bindings).
 
 A release applies the footprint and deploys the site in one run, infra first (the docs package declares the edge that
 orders it). The domain's Cloud DNS zone predates this configuration, so Terraform expects it by name
