@@ -14,7 +14,7 @@ import React from 'react';
 import styles from './index.module.css';
 
 // The docs own the root (docs.routeBasePath === '/'), so this page is the site
-// entry point: yohimik.github.io/dispat/, the URL every README and every search
+// entry point: dispat.dev/, the URL every README and every search
 // result points at. It carries the same claims as the two READMEs, because a
 // redirect gave crawlers and readers nothing to land on.
 //

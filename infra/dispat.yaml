@@ -1,0 +1,47 @@
+# The infra package's own configuration: how the Google Cloud footprint that
+# serves dispat.dev releases, beside the Terraform it drives.
+#
+# The footprint is written only from CI, through the release flow below. A
+# release that carries no infra commits skips the package entirely, so
+# terraform runs only when the configuration changed, and the infra/v* tag
+# history is the list of applied states. No state is stored anywhere: the
+# build stage rebuilds it on the runner by importing what exists
+# (rebuild.sh), saves the exact execution plan, and the publish stage applies
+# that file, so what runs is what the plan showed; the state dies with the
+# job. A failed apply aborts the release before the tag is recorded. Locally
+# the same rebuild feeds an inspection plan; only the apply is fenced to CI.
+tagFormat: infra/v{version}
+# The tag alone is the record: infrastructure changes concern nobody who
+# reads changelogs or release pages, so neither is written for this package.
+# The commits behind each tag say what changed.
+changelog:
+  enabled: false
+github:
+  enabled: false
+scripts:
+  # Swept by `dispat run vet` like every module, and skips cleanly on a
+  # machine without terraform so the sweep stays green everywhere.
+  vet: |
+    set -eu
+    command -v terraform >/dev/null || { echo "terraform is not installed; skipping"; exit 0; }
+    terraform fmt -check -recursive
+    terraform init -backend=false -input=false >/dev/null
+    terraform validate
+  # Rebuild the state from the cloud, then save the exact plan the publish
+  # stage will apply. Read-only toward the infrastructure, so it runs both
+  # as the release's build stage and locally for inspection.
+  tf-plan: |
+    set -eu
+    sh rebuild.sh
+    terraform plan -input=false -out=tfplan
+  # Applies the plan tf-plan saved, nothing else, so what runs is what the
+  # plan showed. The one write, and it happens only in CI: without the
+  # guard, `dispat run tf-apply` would rewrite the live footprint from a
+  # developer's working tree.
+  tf-apply: |
+    set -eu
+    dispat if 'CI!=true' --then 'echo "infra is written only from CI (set CI=true to override)" >&2; exit 1'
+    terraform apply -input=false tfplan
+flow:
+  build: tf-plan
+  publish: tf-apply

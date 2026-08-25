@@ -1,0 +1,11 @@
+# Local Terraform working state and anything that can carry identifiers or
+# secrets. The dependency lock file is tracked; everything else Terraform
+# writes stays local.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+tfplan
+.env
+crash.log

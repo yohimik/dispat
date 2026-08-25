@@ -6,7 +6,7 @@ release orchestrator CLI on `alpine:3.24` into a 15 MB image for `linux/amd64` a
 dispat reads your conventional commits to release a monorepo. It plans version bumps across packages and spaces, runs
 their version, build, and publish scripts in dependency order, and writes changelogs, tags, and GitHub releases. It
 survives a failed leg without re-releasing what already shipped, as explained in the full
-[documentation](https://yohimik.github.io/dispat/).
+[documentation](https://dispat.dev/).
 
 The image carries the CLI and four required dependencies: `git`, `ca-certificates`, `openssh-client` for `git+ssh`
 remotes, and `tzdata`. It leaves your pipeline toolchain up to you. The container bakes in
@@ -33,5 +33,5 @@ Pin the major tag (`:1`) when you configure CI. The `latest` tag never points at
 Use `yohimik/dispat-ubuntu` as your default, because it matches the base of most CI runners. You can also pull
 `yohimik/dispat-debian`, or choose `yohimik/dispat-dind` for release flows where the build stage is a `docker build`.
 
-Read the [documentation](https://yohimik.github.io/dispat/), view the [source](https://github.com/yohimik/dispat), or
+Read the [documentation](https://dispat.dev/), view the [source](https://github.com/yohimik/dispat), or
 browse the [releases](https://github.com/yohimik/dispat/releases).

@@ -117,7 +117,7 @@ dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a mi
 
 Pass `--set [kind:]name=range` to specify dependency updates. The range begins after the first `=`, and dispat
 interprets the prefix as a kind only for standard dependency fields, preserving colons in Maven coordinates. For
-complete details, see [Manifest tools](https://yohimik.github.io/dispat/editing/manifests/).
+complete details, see [Manifest tools](https://dispat.dev/editing/manifests/).
 
 Run `dispat replacer <file>...` to execute `Replace` across arbitrary files and inspect the report:
 

@@ -7,7 +7,7 @@ It runs on `docker:29-dind` for `linux/amd64` and `linux/arm64`. Use this image 
 dispat reads your conventional commits to release a monorepo, planning version bumps across packages and spaces before
 running your version, build, and publish scripts in dependency order. The tool writes changelogs, creates tags, and
 publishes GitHub releases. It survives a failed leg without re-releasing what already shipped, and you can see the
-[documentation](https://yohimik.github.io/dispat/) for the full model.
+[documentation](https://dispat.dev/) for the full model.
 
 Run this image with `--privileged` or use it as a `services: docker:dind` companion. It behaves exactly like
 `docker:dind` because it keeps the base `ENTRYPOINT` (`dockerd-entrypoint.sh`), but it adds the dispat CLI, `git`,
@@ -34,5 +34,5 @@ Pin the major tag (`:1`) in CI. The `latest` tag never points at a prerelease.
 You can also use `yohimik/dispat-alpine` (the smallest), `yohimik/dispat-ubuntu` (the default), or
 `yohimik/dispat-debian`. None of these alternative images need a daemon or the `--privileged` flag.
 
-Links: [documentation](https://yohimik.github.io/dispat/) · [source](https://github.com/yohimik/dispat) ·
+Links: [documentation](https://dispat.dev/) · [source](https://github.com/yohimik/dispat) ·
 [releases](https://github.com/yohimik/dispat/releases)

@@ -43,9 +43,9 @@ go test ./... -count 5           # stability check: repeated runs pass
 Current test results are omitted here so the documentation contains only verified measurements. Every release runs the
 entire suite and publishes live data alongside the documentation site:
 
-- **[test results](https://yohimik.github.io/dispat/internals/test-results/)**: counts, timings, race detector results,
+- **[test results](https://dispat.dev/internals/test-results/)**: counts, timings, race detector results,
   and the scope of each test file.
-- **[test coverage](https://yohimik.github.io/dispat/internals/coverage/)**: statement coverage across all workspace
+- **[test coverage](https://dispat.dev/internals/coverage/)**: statement coverage across all workspace
   packages, including this suite's instrumented binary.
 
 To see which goals each test proves, consult the matrix in the [test plan](./docs/test-plan.md).

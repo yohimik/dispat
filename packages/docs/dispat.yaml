@@ -5,34 +5,54 @@ versionGroup: cli
 dependencies:
   - provider: dispat
     keep: true
+  # The infra package applies the site's Google Cloud footprint; this edge
+  # orders that apply ahead of the deploy below, and propagates: an infra
+  # release patch-bumps the docs, so the site redeploys onto the footprint
+  # that just changed. A patch stays the docs' own under the cli group's
+  # fixedMajorMinor mode, so the CLI is not dragged along.
+  - provider: infra
+    keep: true
 scripts:
-  # Publish stage: force-push the built site to an orphan gh-pages branch.
+  # Publish stage: sync the built site into the bucket behind dispat.dev.
   #
-  # A publish stage is a shell command, not a GitHub Action, so the official
-  # actions/deploy-pages route is unavailable. Pushing a branch is the same
-  # mechanism the coverage badge uses (the push-badge script at the root), and
-  # it needs nothing beyond the contents:write and GITHUB_TOKEN that
-  # release.yml already grants.
+  # The workflow authenticates the run to Google Cloud through Workload
+  # Identity Federation before dispat starts, so gcloud here already acts as
+  # the releaser service account; no key ever exists. The bucket and URL map
+  # names are identifiers this repository deliberately does not carry, so
+  # they arrive as environment variables (GitHub repository variables in CI;
+  # infra/README.md lists them), and the guards fail the run early and by
+  # name when one is missing.
+  #
+  # Three commands, one cache story. The rsync uploads everything with a
+  # five-minute TTL, comparing checksums rather than mtimes because the
+  # Docker export refreshes every mtime. The second pass marks the
+  # content-hashed files under assets/ immutable for a year; a changed asset
+  # is a new name, so those never need to expire. The CDN honours both
+  # because the backend bucket runs in USE_ORIGIN_HEADERS mode, and the one
+  # wildcard invalidation per release makes the new pages visible at once,
+  # with the TTLs as the safety net around it. Invalidation is free and
+  # rate-limited per URL map; a release performs exactly one, --async because
+  # nothing here depends on its completion.
   #
   # The tag is the record that this leg committed, so a deploy must only ever
   # happen inside the release run: without the `dispat if` guard on the first
   # line, `dispat run deploy-docs` would publish a developer's working tree to
-  # the live site. The .nojekyll stops GitHub Pages running Jekyll over the
-  # branch, which would drop any path segment starting with an underscore.
+  # the live site.
   deploy-docs: |
     set -eu
     dispat if 'CI!=true' --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
-    : "${GITHUB_TOKEN:?GITHUB_TOKEN is required to push gh-pages}"
-    : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required to push gh-pages}"
-    touch build/.nojekyll
-    cd build
-    git init -q -b gh-pages
-    git config user.name "github-actions[bot]"
-    git config user.email "github-actions[bot]@users.noreply.github.com"
-    git add -A
-    git commit -qm "docs: deploy ${DISPAT_NEW_VERSION}"
-    git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
-    echo "deployed ${DISPAT_NEW_VERSION} to gh-pages"
+    : "${DOCS_BUCKET:?DOCS_BUCKET is required (the bucket name is not committed; see infra/README.md)}"
+    : "${DOCS_URL_MAP:?DOCS_URL_MAP is required (the URL map name is not committed; see infra/README.md)}"
+    gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+      --checksums-only \
+      --cache-control='public, max-age=300, must-revalidate' \
+      build "gs://${DOCS_BUCKET}"
+    gcloud storage objects update --recursive \
+      --cache-control='public, max-age=31536000, immutable' \
+      "gs://${DOCS_BUCKET}/assets/**"
+    gcloud compute url-maps invalidate-cdn-cache "${DOCS_URL_MAP}" \
+      --path '/*' --async
+    echo "deployed ${DISPAT_NEW_VERSION} to gs://${DOCS_BUCKET}"
   # The site, and the version snapshot that goes in it, from one build.
   #
   # `docs` and `dispat` share the `cli` version group, so they release

@@ -30,7 +30,7 @@ function Token({token}: {token: Inline}): React.ReactElement {
       );
     case 'link':
       // `to` for a route on this site, `href` for anywhere else: Docusaurus
-      // prefixes `to` with baseUrl and would send /dispat/https://… otherwise.
+      // prefixes `to` with baseUrl and would send /https://… otherwise.
       return token.internal ? (
         <Link to={token.href}>
           <Inlines tokens={token.v} />

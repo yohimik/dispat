@@ -42,7 +42,7 @@ const theRealBody = `### Features
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v1.1.0/install.sh | sh
 ` + "```" + `
 
-[Documentation](https://yohimik.github.io/dispat/) · [Container images](https://hub.docker.com/u/yohimik)
+[Documentation](https://dispat.dev/) · [Container images](https://hub.docker.com/u/yohimik)
 `
 
 // TestParseNotesReadsARealReleaseBody: the shape dispat actually publishes,

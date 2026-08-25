@@ -1,6 +1,6 @@
 # docs
 
-Open the documentation site at <https://yohimik.github.io/dispat/>. This Docusaurus project is the only Node package in
+Open the documentation site at <https://dispat.dev/>. This Docusaurus project is the only Node package in
 the repository. Everything else is Go.
 
 The site is a released package. dispat discovers it as a folder of the `packages` space declared in the root
@@ -20,7 +20,7 @@ Run everything from the **repository root**. This directory is the pnpm workspac
 
 ```sh
 pnpm install                            # once; installs this package's dependencies
-pnpm docs:start                         # dev server on http://localhost:3000/dispat/
+pnpm docs:start                         # dev server on http://localhost:3000/
 pnpm docs:build                         # production build into packages/docs/build
 pnpm --filter dispat-docs typecheck     # tsc, no emit
 ```
@@ -36,9 +36,9 @@ relative link and every `#anchor` resolves at build time, so a dead link fails t
 job in [`.github/workflows/tests.yml`](../../.github/workflows/tests.yml) runs this check for every change to this
 package and does nothing else, because deployment belongs to the release run.
 
-The `baseUrl` is `/dispat/`, and Docusaurus mounts its router **without** a `basename`. Routes are registered with the
-base URL already included, so route internal links in a `.tsx` page through `@docusaurus/Link` or `useBaseUrl`. Never
-use a raw router path, because a bare `/getting-started` resolves outside the site and lands on the 404 page.
+The `baseUrl` is `/`, served at [dispat.dev](https://dispat.dev/). Routes are registered with the base URL already
+included, so route internal links in a `.tsx` page through `@docusaurus/Link` or `useBaseUrl` anyway: the habit keeps
+every link correct if the base ever changes again, and `Link` is what makes navigation client-side.
 
 ## Search
 
@@ -50,8 +50,8 @@ That same `/` is why the index covers only the doc pages. The plugin treats ever
 doc, and `/` is the parent of everything. The landing page is classified as a doc, matches none, and drops out, so
 `indexPages` cannot rescue it and search engines see it through the sitemap instead.
 
-Read [`static/robots.txt`](./static/robots.txt) for details on `robots.txt` and `sitemap.xml`. It explains why a
-project Pages site relies entirely on the sitemap.
+Read [`static/robots.txt`](./static/robots.txt) for details on `robots.txt` and `sitemap.xml`. Served at the domain
+root of dispat.dev, the file is authoritative, and it names the sitemap that enumerates the pages.
 
 ## Installable, and offline for those who ask
 
@@ -68,15 +68,15 @@ when offline mode is off to keep the site installable for everybody.
 Two path rules look alike but act differently:
 
 - **`pwaHead` entries are `baseUrl`-aware.** The plugin prefixes any `href` or `content` value that has a file
-  extension, so a path like `/manifest.json` ships as `/dispat/manifest.json` while `#1b1b1d` and `yes` pass through
-  untouched. The top-level `headTags` array is *not* aware, so it emits verbatim and the same paths there would 404.
+  extension; with the base at `/` the prefix is invisible, but `#1b1b1d` and `yes` still pass through untouched. The
+  top-level `headTags` array is *not* aware, so it emits verbatim.
 - **[`static/manifest.json`](./static/manifest.json) is a plain static file.** Nothing rewrites its contents. Every URL
-  inside it spells `/dispat/` out in full.
+  inside it is spelled out in full, with the trailing slash: behind the load balancer a slashless path is a missing
+  object, not a redirect, so the four shortcut URLs carry theirs.
 
-Set `scope` and `start_url` to `/dispat/`, never `/`. The `yohimik.github.io` domain is a shared origin hosting every
-project site, and a `/` scope makes links to unrelated projects open inside the dispat app window. The `/dispat/` path
-also matches the worker's own scope exactly, because the plugin emits `build/sw.js` at `/dispat/sw.js` and a worker's
-scope defaults to its directory.
+`scope` and `start_url` are `/`, which a dedicated domain makes correct: dispat.dev serves nothing but this site, so
+the app window owns the origin, and `/` matches the worker's own scope exactly because the plugin emits `build/sw.js`
+at `/sw.js` and a worker's scope defaults to its directory.
 
 The icons in [`static/img/`](./static/img) derive from the repository's `imgs/logo.png`, which is 295×295 dark art on
 transparency. Flatten them onto white first. iOS composites `apple-touch-icon` alpha onto black and the Android splash
@@ -98,7 +98,7 @@ px because the safe zone is the centred circle at 80% of the canvas, and the lar
 has side 409.6/√2.
 
 The plugin returns early unless `NODE_ENV=production`, so **nothing appears in `pnpm docs:start`**. Run a build, then
-run `pnpm --filter dispat-docs serve` and open `http://localhost:3000/dispat/?offlineMode=true` to test this. Service
+run `pnpm --filter dispat-docs serve` and open `http://localhost:3000/?offlineMode=true` to test this. Service
 workers need a secure context, which `localhost` provides and a LAN IP does not.
 
 Cache Storage stays empty *without* that query string, which means the feature is working. Check DevTools → Application
@@ -112,7 +112,7 @@ ships.
 
 The animated demos on the landing page, in the repository README, and on the commit-messages page come from
 [`demo/`](./demo). Each clip is a [Remotion](https://www.remotion.dev) composition rendered into the committed assets
-in the repository's `imgs/` folder, which the site serves statically at `/dispat/<name>`. Run `demo/render.sh` to
+in the repository's `imgs/` folder, which the site serves statically at `/<name>`. Run `demo/render.sh` to
 regenerate them after editing a scene. Read [`demo/README.md`](./demo/README.md) for the composition list and the size
 budget the script enforces.
 

@@ -21,7 +21,7 @@ FROM docker:${DOCKER_VERSION}
 LABEL org.opencontainers.image.title="dispat" \
       org.opencontainers.image.description="The dispat release orchestrator, with a Docker daemon" \
       org.opencontainers.image.source="https://github.com/yohimik/dispat" \
-      org.opencontainers.image.url="https://yohimik.github.io/dispat" \
+      org.opencontainers.image.url="https://dispat.dev" \
       org.opencontainers.image.licenses="MIT"
 
 # The dind image is Alpine with a daemon on top: git and the rest are not in it.

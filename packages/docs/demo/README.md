@@ -46,9 +46,9 @@ completes. The landing page's carousel pairs each CLI README key-feature bullet 
 | `Lock` | `demo-lock` | The release lock: a runner claims the `dispat-release-lock` tag and releases, a second run is rejected with nothing planned or built, and the returned lock lets the retry claim cleanly. | the carousel: "One release at a time" |
 
 The scenes restate the documentation's claims:
-[concepts](https://yohimik.github.io/dispat/concepts/),
-[commit messages](https://yohimik.github.io/dispat/reference/commits/), and
-[recovering from a failed run](https://yohimik.github.io/dispat/reference/releasing/recovery/). The palette and the
+[concepts](https://dispat.dev/concepts/),
+[commit messages](https://dispat.dev/reference/commits/), and
+[recovering from a failed run](https://dispat.dev/reference/releasing/recovery/). The palette and the
 `#101713` background come from the documentation theme, the log captions use the pretty mode's colors, and the type
 is JetBrains Mono throughout, so the animations read as the same product as the site and the terminal.
 

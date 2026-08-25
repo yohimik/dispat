@@ -6,7 +6,7 @@ Pull this image to run the [dispat](https://github.com/yohimik/dispat) release o
 
 dispat releases a monorepo from its conventional commits. It plans version bumps across packages and spaces, runs their
 version, build, and publish scripts in dependency order, writes changelogs, creates tags, and publishes GitHub
-releases. Read the [documentation](https://yohimik.github.io/dispat/) to see how it survives a failed leg without
+releases. Read the [documentation](https://dispat.dev/) to see how it survives a failed leg without
 re-releasing what already shipped.
 
 The image carries the CLI and four required dependencies: `git`, `ca-certificates`, `openssh-client` for `git+ssh`
@@ -34,5 +34,5 @@ Pin the major tag (`:1`) in CI. The `latest` tag never points at a prerelease.
 You can also use `yohimik/dispat-alpine` for the smallest footprint or `yohimik/dispat-ubuntu` as the default. Use
 `yohimik/dispat-dind` for release flows where your build stage is itself a `docker build`.
 
-Links: [documentation](https://yohimik.github.io/dispat/) · [source](https://github.com/yohimik/dispat) ·
+Links: [documentation](https://dispat.dev/) · [source](https://github.com/yohimik/dispat) ·
 [releases](https://github.com/yohimik/dispat/releases)

@@ -26,7 +26,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 LABEL org.opencontainers.image.title="dispat" \
       org.opencontainers.image.description="The dispat release orchestrator, on Ubuntu" \
       org.opencontainers.image.source="https://github.com/yohimik/dispat" \
-      org.opencontainers.image.url="https://yohimik.github.io/dispat" \
+      org.opencontainers.image.url="https://dispat.dev" \
       org.opencontainers.image.licenses="MIT"
 
 RUN apt-get update \

@@ -10,7 +10,7 @@ each space carries a `<space>/dispat.yaml`, and two exception packages carry the
 
 Package scripts run **inside the releasing package's folder**, while root scripts run at the repository root. Scripts
 receive everything they need through environment variables: the
-[`DISPAT_*` variables](https://yohimik.github.io/dispat/reference/environment/) from their stage, plus variables
+[`DISPAT_*` variables](https://dispat.dev/reference/environment/) from their stage, plus variables
 exported by CI.
 
 | Script                                     | Called from                                            | Reads                                   | Produces |
@@ -44,8 +44,8 @@ the exit status of the underlying test run. Pass a `<log-name>` that matches the
 
 Run [`coverage-badge.sh`](./coverage-badge.sh) to merge the generated profiles in `coverage/` and produce the badge
 JSON. The `test-report` root script (`testreport build`) then compiles those profiles and logs into
-`packages/docs/data/report.json`, which feeds the site [coverage](https://yohimik.github.io/dispat/internals/coverage/)
-and [test results](https://yohimik.github.io/dispat/internals/test-results/) pages. The
+`packages/docs/data/report.json`, which feeds the site [coverage](https://dispat.dev/internals/coverage/)
+and [test results](https://dispat.dev/internals/test-results/) pages. The
 [Release workflow](../.github/workflows/release.yml) runs both through `dispat exec` because only a `--since all` run
 generates a complete profile set across all packages.
 

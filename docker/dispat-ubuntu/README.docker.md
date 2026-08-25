@@ -7,7 +7,7 @@ dispat releases a monorepo from its conventional commits. It plans version bumps
 their version, build and publish scripts in dependency order.
 
 It writes changelogs, creates tags, and pushes GitHub releases. If a leg fails, dispat survives without re-releasing
-what already shipped. Read the [documentation](https://yohimik.github.io/dispat/) to understand the full model.
+what already shipped. Read the [documentation](https://dispat.dev/) to understand the full model.
 
 The image carries the CLI and the four dependencies it needs to run. These are `git`, `ca-certificates`,
 `openssh-client` for `git+ssh` remotes, and `tzdata`. It includes nothing else, because your pipeline provides its own
@@ -36,5 +36,5 @@ Pin the major (`:1`) in CI. The `latest` tag never points at a prerelease.
 Choose `yohimik/dispat-alpine` for the smallest footprint or `yohimik/dispat-debian` for a standard environment. Pull
 `yohimik/dispat-dind` for release flows whose build stage is itself a `docker build`.
 
-Links: [documentation](https://yohimik.github.io/dispat/) · [source](https://github.com/yohimik/dispat) ·
+Links: [documentation](https://dispat.dev/) · [source](https://github.com/yohimik/dispat) ·
 [releases](https://github.com/yohimik/dispat/releases)

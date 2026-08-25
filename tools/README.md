@@ -7,8 +7,8 @@ tags, or publishes it. You declare it in the root `dispat.yaml` with `versioning
 ## testreport
 
 This is the only tool in the module. It wraps workspace test runs and aggregates their output for the documentation
-site. That means every figure on the [coverage](https://yohimik.github.io/dispat/internals/coverage/) and
-[test results](https://yohimik.github.io/dispat/internals/test-results/) pages comes directly from live runs.
+site. That means every figure on the [coverage](https://dispat.dev/internals/coverage/) and
+[test results](https://dispat.dev/internals/test-results/) pages comes directly from live runs.
 
 Three verbs:
 

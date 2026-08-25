@@ -35,7 +35,7 @@ irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 ```
 
 Pull container images for any other CI system: `yohimik/dispat-alpine`, `-ubuntu`, `-debian`, and `-dind`. See
-[dispat in CI](https://yohimik.github.io/dispat/reference/ci/).
+[dispat in CI](https://dispat.dev/reference/ci/).
 
 <p align="center">
   <img src="imgs/demo-release.gif" width="830"
@@ -84,7 +84,7 @@ $ dispat
   project and nuspec family, Dart, Ruby, Dockerfiles, and compose files. It also supports mobile platforms (Info.plist,
   project.pbxproj, Podfile, and .podspec on iOS; AndroidManifest.xml, Gradle build scripts, and version catalogs on
   Android) and game engines (Unity, Godot, Unreal, Defold, and O3DE), which keep their versions in files no package
-  manager understands. Set the per-[space](https://yohimik.github.io/dispat/concepts/) `isBuildWaitingPublish` option
+  manager understands. Set the per-[space](https://dispat.dev/concepts/) `isBuildWaitingPublish` option
   to state whether a consumer's build needs its provider merely *built*, as node does, or already *published*, as
   docker does. This schedules a four-level npm to docker chain correctly with no extra work.
 - **No task cache, because there is nothing to cache.** Most monorepo tools make unchanged work cheap by running it and

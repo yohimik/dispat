@@ -11,7 +11,7 @@ import type {Inline} from './types';
 // already does for a broken link.
 
 /** The site's own base URL as the README spells it. */
-const SITE = 'https://yohimik.github.io/dispat';
+const SITE = 'https://dispat.dev';
 
 /** The repository, for the paths a README writes relative to itself. */
 const GITHUB = 'https://github.com/yohimik/dispat';

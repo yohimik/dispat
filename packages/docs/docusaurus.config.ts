@@ -81,20 +81,23 @@ const config: Config = {
   tagline: 'The polyglot monorepo release tool: conventional commits in, ordered parallel publishes out',
   favicon: 'logo.png',
 
-  url: 'https://yohimik.github.io',
-  baseUrl: '/dispat/',
+  url: 'https://dispat.dev',
+  baseUrl: '/',
   organizationName: 'yohimik',
   projectName: 'dispat',
 
-  // Every route is written as <route>/index.html, which is the file GitHub
-  // Pages answers a directory request from, and Pages redirects /page to
-  // /page/ to get there. Left unset, Docusaurus spells the sitemap and the
-  // site's own hrefs without that slash, so all but a handful of URLs named a
-  // redirect rather than a page.
+  // Every route is written as <route>/index.html, which is the file the
+  // bucket's main_page_suffix answers a directory request from. Behind the
+  // load balancer the bucket never redirects /page to /page/ the way its own
+  // website endpoint would, so the slash must already be in every URL the
+  // site spells: left unset, Docusaurus writes the sitemap and the site's
+  // own hrefs without it, and all but a handful of URLs would land on the
+  // 404 page instead of a page.
   //
   // `false` is the trap rather than the alternative: it writes cli.html beside
-  // the cli/ directory that holds the command pages, Pages resolves the
-  // directory first, and the four folder index pages 404.
+  // the cli/ directory that holds the command pages, a directory request
+  // resolves to the folder's missing index, and the four folder index pages
+  // 404.
   trailingSlash: true,
 
   // Link rot is the whole reason this site exists as a build step: every
@@ -121,9 +124,9 @@ const config: Config = {
     testReport,
     [
       // Installable, and readable offline once installed. The plugin emits
-      // build/sw.js, served at /dispat/sw.js, so the worker's scope is the
-      // directory it sits in: it cannot touch the other projects sharing the
-      // yohimik.github.io origin. None of this exists in `docusaurus start` --
+      // build/sw.js, served at /sw.js, so the worker's scope is the directory
+      // it sits in, which on this dedicated domain is the whole origin the
+      // site owns. None of this exists in `docusaurus start` --
       // the plugin returns null outside NODE_ENV=production, so a service
       // worker only appears in a real build.
       '@docusaurus/plugin-pwa',
@@ -147,11 +150,11 @@ const config: Config = {
           // docs grow another 16%.
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         } as PwaOptions['injectManifestConfig'],
-        // href/content values carrying a file extension are baseUrl-prefixed by
-        // the plugin itself, so '/manifest.json' ships as
-        // '/dispat/manifest.json'. Colours and 'yes' have no extension and pass
-        // through untouched. These cannot move to the headTags array below:
-        // that one is emitted verbatim, and the paths would 404.
+        // href/content values carrying a file extension are baseUrl-prefixed
+        // by the plugin itself; with the base at '/' the prefix is invisible,
+        // but the distinction still matters if the base ever changes. Colours
+        // and 'yes' have no extension and pass through untouched. The
+        // headTags array below is emitted verbatim instead.
         pwaHead: [
           {tagName: 'link', rel: 'manifest', href: '/manifest.json'},
           {tagName: 'meta', name: 'theme-color', content: '#101713'},
@@ -183,7 +186,7 @@ const config: Config = {
           // ./docs is the default; the pages are plain markdown with no
           // frontmatter, so ordering and labels live in sidebars.ts.
           // The site is nothing but the docs, so they own the root: the
-          // README tables link to /dispat/<page>/, not /dispat/docs/<page>/.
+          // README tables link to /<page>/, not /docs/<page>/.
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl: ({docPath}) =>
@@ -210,17 +213,17 @@ const config: Config = {
           customCss: './src/css/custom.css',
         },
         sitemap: {
-          // The sitemap is the only crawl entry point a GitHub Pages *project*
-          // site really has: robots.txt is served under /dispat/, which no
-          // crawler reads (see static/robots.txt). lastmod is off by default.
+          // robots.txt at the domain root names this sitemap, and the sitemap
+          // is what actually enumerates the pages for a crawler (see
+          // static/robots.txt). lastmod is off by default.
           lastmod: 'date',
           // Patterns match full route paths, baseUrl included, and the path
           // is spelled the way trailingSlash spells it: with the slash on, the
-          // bare `/dispat/search` matches nothing and the page comes back into
-          // the sitemap. The brace matches the route under either setting, and
+          // bare `/search` matches nothing and the page comes back into the
+          // sitemap. The brace matches the route under either setting, and
           // matches nothing else. /search is a client-side view of the index,
           // not a page.
-          ignorePatterns: ['/dispat/search{,/}'],
+          ignorePatterns: ['/search{,/}'],
           // A priority and a changefreq per page, which is why the flat
           // `priority` and `changefreq` options are absent: every item gets
           // both from here, and a default underneath would be a second value
@@ -291,7 +294,7 @@ const config: Config = {
         '@type': 'SoftwareSourceCode',
         name: 'dispat',
         description: DESCRIPTION,
-        url: 'https://yohimik.github.io/dispat/',
+        url: 'https://dispat.dev/',
         codeRepository: GITHUB,
         programmingLanguage: 'Go',
         license: 'https://opensource.org/licenses/MIT',
@@ -309,7 +312,7 @@ const config: Config = {
         '@type': 'SoftwareApplication',
         name: 'dispat',
         description: DESCRIPTION,
-        url: 'https://yohimik.github.io/dispat/',
+        url: 'https://dispat.dev/',
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'Linux, macOS, Windows',
         softwareRequirements: 'git',

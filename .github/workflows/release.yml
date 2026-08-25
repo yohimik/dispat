@@ -195,7 +195,8 @@ jobs:
     needs: tests
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # commits, tags, GitHub releases, gh-pages
+      contents: write     # commits, tags, GitHub releases
+      id-token: write     # the OIDC token Workload Identity Federation trades
     outputs:
       cli-released: ${{ steps.dispat.outputs.cli-released }}
       cli-version: ${{ steps.dispat.outputs.cli-version }}
@@ -239,6 +240,33 @@ jobs:
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # Google Cloud, for the infra package's terraform stages and the docs
+      # deploy. auth trades the job's OIDC token for the releaser service
+      # account through Workload Identity Federation, so no key exists
+      # anywhere; the provider and account names are identifiers this
+      # repository deliberately does not carry, hence the secrets. The
+      # credentials file it writes is what both gcloud (via setup-gcloud) and
+      # terraform (via GOOGLE_APPLICATION_CREDENTIALS) pick up.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_RELEASER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      # For the infra package's stages: no state is stored anywhere, so its
+      # build stage rebuilds one on this runner from the cloud, plans, and
+      # the publish stage applies the saved plan (see infra/rebuild.sh).
+      # wrapper off because the binary is invoked by dispat's stage scripts,
+      # not by workflow steps, and the wrapper's output capture only gets in
+      # their way.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
       - name: Set up dispat
         uses: ./
 
@@ -277,6 +305,14 @@ jobs:
           # The docker space's login stage authenticates the image pushes.
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          # The Google Cloud identifiers the infra and docs stages read; the
+          # repository carries none of them, so this mapping is where each
+          # value enters the run, set once at day zero (infra/README.md).
+          DOCS_BUCKET: ${{ vars.DOCS_BUCKET }}
+          DOCS_URL_MAP: ${{ vars.DOCS_URL_MAP }}
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_bucket_name: ${{ vars.DOCS_BUCKET }}
+          TF_VAR_dns_zone: ${{ vars.DNS_ZONE }}
         # The checkout's own build leads PATH, so the nested `dispat
         # changelog` / `dispat commit` / `dispat if` invocations inside the
         # stage scripts resolve it too. The committer identity comes from
