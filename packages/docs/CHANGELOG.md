@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.4 (2026-08-25)
+
+### Fixes
+
+- minified styles
+
+
 ## packages/docs/v1.1.3 (2026-08-25)
 
 ### Fixes
