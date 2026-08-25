@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.3 (2026-08-25)
+
+### Fixes
+
+- slides added on landing page
+
+
 ## packages/docs/v1.1.2 (2026-08-24)
 
 ### Fixes
