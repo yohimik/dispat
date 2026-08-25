@@ -47,7 +47,12 @@
   transition: opacity 0.4s ease, visibility 0.4s;
 }
 
-.activeSlide {
+/* The compound selector is load-bearing: with a bare .activeSlide, the
+   production minifier merges this rule into an earlier Infima navbar rule
+   with the same declarations, which moves it ahead of .slide in the bundle
+   and lets the hidden state win the equal-specificity tie. The extra class
+   outranks .slide whatever order the bundle puts them in. */
+.slide.activeSlide {
   opacity: 1;
   visibility: visible;
 }
