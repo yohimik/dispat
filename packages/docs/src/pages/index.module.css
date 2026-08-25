@@ -27,7 +27,8 @@
 .sectionLead {
   max-width: 52rem;
   margin: 0 auto 1.5rem;
-  font-size: 1.05rem;
+  font-size: 1rem;
+  line-height: 1.65;
 }
 
 .badges {
@@ -52,49 +53,34 @@
   margin-bottom: 2rem;
 }
 
-/* The demo recording sits above the transcript: the same terminal, in motion.
-   It is wider than the transcript because its lines are the tool's real
-   output, unabridged. */
-.demo {
-  display: block;
-  width: 100%;
-  max-width: 64rem;
-  height: auto;
-  margin: 0 auto 1.5rem;
-  border-radius: 8px;
+/* Each section opens like a slide: a hairline, the territory chip, and a
+   mono title, so the page below the deck speaks the deck's language. */
+.section {
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  padding: 3rem 0 3.25rem;
 }
 
-/* The transcript is the hero's evidence, so it stays narrow enough to read and
-   left-aligned inside the centred column. */
-.transcript {
-  max-width: 44rem;
-  margin: 0 auto;
-  text-align: left;
+.chip {
+  margin: 0 0 0.9rem;
+  text-align: center;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ifm-color-primary);
 }
 
 .sectionTitle {
   text-align: center;
-  font-size: 2rem;
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
+  font-size: 1.5rem;
+  margin-bottom: 1.4rem;
 }
 
 .sectionLead {
   text-align: center;
-}
-
-/* The two situations that break "build all, then publish all", in the same
-   numbered shape the repository README uses. */
-.problems {
-  max-width: 52rem;
-  margin: 0 auto 1.5rem;
-  padding-left: 0;
-  font-size: 1.05rem;
-  text-align: center;
-  /* Same reason as .reference: the numbers stay with the centred text. */
-  list-style-position: inside;
-}
-
-.problems li + li {
-  margin-top: 0.75rem;
+  color: var(--ifm-color-emphasis-800);
 }
 
 .features {
@@ -111,22 +97,14 @@
   .title {
     font-size: 2.25rem;
   }
-
-  .lastFeature {
-    grid-column: 1;
-  }
 }
 
-/* The commit parser stands alone on the first row, full width; the manifest pair
-   shares the second, which is also how they relate to each other. */
+/* The three modules side by side, the way the deck rows three package
+   cards: equal columns keep every card's measure readable. */
 .libraries {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1.5rem;
-}
-
-.libraries > :first-child {
-  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
 }
 
 @media (max-width: 996px) {
@@ -135,41 +113,54 @@
   }
 }
 
+/* A card shaped like the deck's package cards: rounded, hairline border,
+   left-set text at a comfortable size. */
 .feature {
-  padding: 1.5rem;
+  padding: 1.35rem 1.5rem 1.45rem;
   border: 1px solid var(--ifm-color-emphasis-200);
-  border-radius: var(--ifm-global-radius);
+  border-radius: 14px;
   background: var(--ifm-background-surface-color);
-  text-align: center;
+  text-align: left;
   /* A grid child's min-width is auto, so one long token inside a card would
      otherwise size the whole column past a phone's viewport. */
   min-width: 0;
 }
 
-.lastFeature {
-  grid-column: 1 / -1;
+.feature p {
+  margin-bottom: 0;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--ifm-color-emphasis-800);
 }
 
 .featureTitle {
-  font-size: 1.15rem;
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
+  font-size: 0.98rem;
+  margin-bottom: 0.75rem;
 }
 
 .tableTitle {
-  margin-top: 2rem;
+  margin-top: 2.25rem;
   text-align: center;
-  font-size: 1.25rem;
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
+  font-size: 1.05rem;
 }
 
-/* The manifest table is wide by nature: keep it readable and let it scroll on a
-   phone rather than squeezing the file names. */
+/* The manifest table, panelled like the deck's terminal: wide by nature, so
+   it scrolls on a phone rather than squeezing the file names. */
 .manifests {
   max-width: 60rem;
   margin: 0 auto;
+  padding: 0.5rem 1.25rem 1rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 14px;
+  background: var(--ifm-background-surface-color);
   overflow-x: auto;
 }
 
 .manifests table {
   width: 100%;
+  font-size: 0.92rem;
 }
 
 /* Infima left-aligns table headers; centre them with the rest of the page. */
@@ -179,6 +170,12 @@
   text-align: center;
 }
 
+.manifests p {
+  margin: 0.75rem 0 0;
+  font-size: 0.92rem;
+  color: var(--ifm-color-emphasis-800);
+}
+
 .manifests code {
   font-size: 0.85em;
 }
@@ -186,6 +183,7 @@
 .reference {
   max-width: 52rem;
   margin: 0 auto;
+  font-size: 0.95rem;
   line-height: 1.9;
   text-align: center;
   /* Centred text with markers hanging outside the box reads as misaligned, so
@@ -194,16 +192,31 @@
   padding-left: 0;
 }
 
-/* The three install blocks sit in a row where there is room and stack on a
-   phone. auto-fit rather than a fixed column count, so the last row is never a
-   half-empty box beside a full one; `min(20rem, 100%)` rather than a bare
-   20rem, so a viewport narrower than the track still gets one column that
-   fits instead of one that overflows. */
+/* The two Unix blocks share the first row and Windows takes the second in
+   full width; everything stacks on a phone. */
 .install {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
   margin-bottom: 1.5rem;
+}
+
+.install > :last-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 996px) {
+  .install {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A command is one long URL: wrap it inside its block rather than clipping
+   or scrolling it. */
+.install pre,
+.install code {
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* A grid track sized in `fr` takes its content's minimum size, and an install
@@ -215,14 +228,4 @@
 .install > * {
   margin-bottom: 0;
   min-width: 0;
-}
-
-/* The line under the hero transcript: the same caveat the CLI README carries
-   after the same block, sized down so the transcript stays the focus. */
-.transcriptNote {
-  margin: 0 auto;
-  max-width: 46rem;
-  font-size: 0.9rem;
-  text-align: left;
-  color: var(--ifm-color-emphasis-700);
 }

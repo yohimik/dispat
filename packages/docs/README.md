@@ -108,6 +108,14 @@ A registered service worker outlives the plugin that installed it. Back PWA supp
 `swCustom` calls `self.registration.unregister()` and purges the caches. Delete the plugin only after that release
 ships.
 
+## Demo animations
+
+The animated demos on the landing page, in the repository README, and on the commit-messages page come from
+[`demo/`](./demo). Each clip is a [Remotion](https://www.remotion.dev) composition rendered into the committed assets
+in the repository's `imgs/` folder, which the site serves statically at `/dispat/<name>`. Run `demo/render.sh` to
+regenerate them after editing a scene. Read [`demo/README.md`](./demo/README.md) for the composition list and the size
+budget the script enforces.
+
 ## Release
 
 dispat releases the `docs` package like any other. It has a `keep: true` dependency on `dispat`, so the site rebuilds

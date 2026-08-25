@@ -1,8 +1,8 @@
 # Updating dispat
 
-dispat ships as a single binary. There is nothing to uninstall, no package
-database to keep in step, and no dependency to resolve. The flip side is that
-nothing updates it for you, which is what `dispat self-update` is for.
+Run `dispat self-update` to upgrade your binary in place. Because dispat ships
+as a single binary with no external dependencies or package databases, nothing
+updates it automatically.
 
 ```console
 $ dispat self-update
@@ -22,47 +22,41 @@ what changed in 1.1.0
 full changelog: https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md
 ```
 
-The binary you were running is not thrown away. It is renamed to sit beside the
-new one, so if the new version turns out to be wrong for you, one command puts
-the old one back.
+dispat renames your existing binary instead of deleting it. If the new version
+causes problems, you can restore the old binary with a single command.
 
-This is the command for a binary that is already installed and wants to become a
-newer one. Installing dispat in the first place, or pinning a version in a
-container image, where a self-update cannot outlive the container anyway, is
-[the install script's](./ci.md#the-install-script) job instead.
+Use `dispat self-update` to update an existing binary on your machine. To
+install dispat for the first time or pin a version in a container image, use
+[the install script's](./ci.md#the-install-script) method instead.
 
 ## What it does, step by step
 
-It is worth knowing exactly what happens to the file you depend on.
+Here is what happens to your binary during an update:
 
-1. **It finds the release.** dispat's own GitHub releases are listed, the ones
-   tagged for the CLI are picked out, and the highest stable version wins. The
-   release notes come back in the same answer, so they are read here, before
-   anything is fetched.
-2. **It downloads the binary for your platform.** Linux, macOS and Windows, on
-   Intel and on ARM: six binaries, one per platform, named after it.
-3. **It checks what arrived.** The size has to match what the release
-   advertised, and the checksum has to match the one GitHub published for that
-   file. A download that was cut short or altered on the way is refused here.
-4. **It runs the new binary once.** A file can arrive perfectly intact and
-   still be the wrong thing. Asking it for its version before trusting it is
-   cheap, and finding out afterwards would mean finding out with no working
-   dispat.
-5. **Only then does it swap.** Your current binary is renamed to
-   `dispat.backup`, and the new one takes its place.
+1. **It finds the release.** dispat lists its GitHub releases, filters for CLI
+   tags, and picks the highest stable version. It reads the release notes
+   directly from this response before fetching any files.
+2. **It downloads the binary for your platform.** It pulls the matching binary
+   from six platform builds across Linux, macOS, and Windows on Intel and ARM.
+3. **It checks what arrived.** It verifies that the file size matches the
+   release metadata and validates the checksum against the published GitHub
+   hash. dispat rejects any download that was altered or cut short.
+4. **It runs the new binary once.** It invokes the new binary to check its
+   version before committing the change. This prevents broken or mismatched
+   binaries from replacing your working tool.
+5. **Only then does it swap.** dispat renames your existing binary to
+   `dispat.backup` and puts the new one in its place.
 
-Nothing moves until every check has passed. If anything at all goes wrong, the
-binary you were running is still exactly where it was, still working, and there
-is no half-installed anything to clean up.
+No files move until every check passes. If an error occurs, your existing
+binary stays intact and ready to run.
 
-The path never changes, so whatever put `dispat` on your `PATH` still points at
-it. Nothing needs re-linking and no shell needs restarting.
+Your binary path stays the same, so your `PATH` configuration remains valid.
+You do not need to re-link binaries or restart your shell.
 
 ## What you just got
 
-An update raises one question, so dispat answers it before you have to ask. Once
-the new binary is in place it reads out what changed in the release it installed,
-and links the changelog for everything the summary left out.
+After installing the new binary, dispat prints a summary of changes and
+provides a link to the complete changelog.
 
 ```console
 what changed in 1.1.0
@@ -76,36 +70,35 @@ what changed in 1.1.0
 full changelog: https://github.com/yohimik/dispat/blob/refs/tags/services/dispat/v1.1.0/services/dispat/CHANGELOG.md
 ```
 
-This costs nothing. The release notes arrive in the same response that decided
-which release to install, so no extra call is made to fetch them, and they are
-read before the download starts rather than after. The release you are told about
-is therefore always the release you got.
+Fetching these notes requires no extra network requests. dispat receives the
+release notes in the initial release check before downloading the binary,
+ensuring the printed summary always matches the installed version.
 
-A few things about what you see:
+Keep these details in mind:
 
-- **It is the release you installed, not everything you skipped.** Updating from
-  1.0.0 straight to 1.3.0 reads out 1.3.0. The changelog link is how you catch up
-  on the versions in between, and it holds all of them.
-- **It is a summary, not the page.** A GitHub release body is written for a
-  browser: install commands, code blocks, a row of links at the bottom. None of
-  that is useful in a terminal you are already running dispat in, so dispat keeps
-  the headings and their bullets and drops the rest. A long release is cut short
-  with a line saying so.
-- **The link points at the tag.** It is the changelog as that release left it, not
-  as the repository looks today, so the link under "you now have 1.1.0" still
-  shows 1.1.0's changelog a year from now.
-- **It never gets in the way.** A release with no notes, or notes dispat cannot
-  make sense of, prints the link on its own. The update itself does not depend on
-  any of this working.
+- **It is the release you installed, not everything you skipped.** If you
+  upgrade from 1.0.0 directly to 1.3.0, dispat prints notes for 1.3.0. Use the
+  changelog link to see notes for all skipped versions.
+- **It is a summary, not the page.** dispat strips browser-focused content like
+  installation commands and code blocks, printing only release headings and
+  bullets. Very long release notes are truncated with a notice.
+- **The link points at the tag.** The link targets the changelog at that
+  specific Git tag rather than the current repository state, preserving
+  historical notes.
+- **It never gets in the way.** If release notes are missing or unparseable,
+  dispat prints only the link. Update execution never depends on release note
+  formatting.
 
-With `logFormat: json` none of it is printed. The same two things travel as
-`notes` and `changelog` fields on the `update installed` event instead, so a CI
-job that updates dispat can post what changed without reading stdout.
+When you configure `logFormat: json`, dispat omits human-readable text. It
+includes the summary and link in the `notes` and `changelog` fields of the
+`update installed` event instead, allowing CI pipelines to parse updates
+cleanly.
 
 ## Checking without installing
 
-`--check` answers one question, changes nothing, and exits `1` when there is
-something to install. That makes it usable as a gate in a script.
+Run `dispat self-update --check` to inspect available updates without modifying
+files. The command exits with code `1` when an update is available, making it
+suitable for script gates.
 
 ```console
 $ dispat self-update --check
@@ -125,18 +118,17 @@ $ echo $?
 1
 ```
 
-Deciding whether to update is exactly when the changelog is worth reading, so
-`--check` shows the same summary the install would. Nothing has been downloaded
-at that point, and nothing will be.
+`--check` displays the release summary and changelog link without downloading
+the binary payload.
 
-When you are already current it prints the first two lines, says `nothing to
-install`, and exits `0`. There are no notes in that case, because they would be
-the notes of the release you are already running.
+If you are already running the latest version, dispat prints the current and
+available versions, outputs `nothing to install`, and exits with code `0`. It
+skips release notes when no update is needed.
 
 ## Going back
 
-The copy left behind is a real, working binary, and `--rollback` puts it back
-without touching the network at all.
+Run `dispat self-update --rollback` to restore your previous binary without
+using the network.
 
 ```console
 $ dispat self-update --rollback
@@ -144,26 +136,23 @@ rolled back to dispat 1.0.0 at /usr/local/bin/dispat
 dispat 1.1.0 is now the backup, so another --rollback returns to it
 ```
 
-Notice the second line. A rollback does not throw away the version it replaced,
-it swaps the two, so rolling back twice puts you back where you started. You do
-not have to be certain before running it.
+Rolling back swaps the active binary and the backup file. Running `--rollback`
+a second time restores the newer version again.
 
-Before restoring anything it runs the kept binary, exactly as it does with a
-download. A backup that will not start is refused rather than installed.
+dispat tests the backup binary before restoring it to ensure it executes
+properly. If the backup fails to start, dispat aborts the rollback.
 
-`dispat self-update --check --rollback` says which version the backup holds
-without moving anything.
+Run `dispat self-update --check --rollback` to inspect the backup version
+without changing files.
 
 ### The backup does not stay forever
 
-A week after it was created, the next dispat command you run deletes it. That
-is long enough to notice a bad update and go back, and short enough that a
-15 MiB copy of an old binary is not still sitting in `/usr/local/bin` a year
-later.
+dispat deletes the backup file automatically during the first command you run
+after seven days. This gives you time to detect issues while preventing old
+binaries from accumulating on disk.
 
-Nothing else is ever touched, and the check costs a single look at the
-filesystem. Once the backup is gone, `--release` is how you get an older
-version:
+The cleanup check inspects only the backup timestamp. If the backup has been
+purged, download an older release explicitly using `--release`:
 
 ```sh
 dispat self-update --release 1.0.0
@@ -171,7 +160,8 @@ dispat self-update --release 1.0.0
 
 ## Choosing a version
 
-By default you get the highest stable release. Three flags change that.
+dispat installs the latest stable release by default. You can change this
+behavior with three flags:
 
 | Flag                  | Effect                                                                                       |
 |-----------------------|----------------------------------------------------------------------------------------------|
@@ -179,15 +169,14 @@ By default you get the highest stable release. Three flags change that.
 | `--prerelease`        | Consider release candidates too.                                                              |
 | `--force`             | Install the selected release even when it is not newer.                                       |
 
-`--prerelease` means "consider them too", not "prefer them". Ordering still
-decides, and `1.2.0` is above `1.2.0-rc.1`, so a released version wins over the
-candidates that led to it. Once a stable release exists, `--prerelease` stops
-changing the answer on its own.
+The `--prerelease` flag evaluates prereleases alongside stable releases.
+Standard version ordering still applies: because `1.2.0` ranks higher than
+`1.2.0-rc.1`, stable versions take precedence when available.
 
-Nothing ever downgrades by itself. If the release dispat found is older than
-what you are running, it says you are already current and stops. Naming a
-version with `--release`, or asking with `--force`, is how you say you meant
-it. That is also the way off a prerelease line:
+dispat never downgrades your binary automatically. If the latest available
+release is older than your current version, dispat reports that you are up to
+date. Pass `--release` or `--force` to perform a downgrade or move from a
+prerelease back to stable:
 
 ```console
 $ dispat self-update --force
@@ -196,8 +185,7 @@ installed dispat 1.1.0 at /usr/local/bin/dispat
 
 ## Being told there is an update
 
-You do not have to remember to check. Any command will mention a newer stable
-release on its way out:
+Any standard dispat command notifies you if a newer stable release exists:
 
 ```console
 $ dispat status
@@ -207,28 +195,27 @@ a newer stable release is available: 1.1.0 (you have 1.0.0)
 run "dispat self-update" to install it
 ```
 
-The check runs alongside your command rather than in front of it, and **no
-command waits for it** unless `DISPAT_UPDATE_CHECK=1` asks for the wait. If
-the answer has not come back by the time the work is done, it is dropped and
-the command exits. Offline, behind a proxy, out of API quota, or simply
-finished first: all of them look the same, and all of them cost nothing.
+The update check runs in the background while your command executes, and **no
+command waits for it** unless you set `DISPAT_UPDATE_CHECK=1`. If your command
+finishes before GitHub responds, dispat discards the check and exits
+immediately. Network timeouts, offline environments, or rate limits will not
+slow down your workflow.
 
-That does mean a fast command often finishes first and says nothing. Nothing
-is wrong when that happens. `dispat self-update --check` is the way to ask and
-be sure of an answer.
+Fast commands frequently finish before the background check completes. Run
+`dispat self-update --check` when you want an immediate, synchronous check.
 
-Two more things keep it quiet:
+Notifications are suppressed under two conditions:
 
-- With `logFormat: json` it never runs at all. JSON output is being read by
-  something that cannot act on a suggestion, and CI should not be calling
-  GitHub on every run.
-- The notice is only ever about stable releases. Running a release candidate
-  tells you when the stable it leads to lands, and never nags you towards the
-  next candidate.
+- When `logFormat: json` is active, dispat skips update checks entirely to
+  avoid corrupting structured logs or making redundant network calls in CI.
+- Notifications only report stable releases. If you run a release candidate,
+  dispat alerts you when the final stable release arrives, not when subsequent
+  release candidates appear.
 
 ### Turning it off
 
-Set `updateCheck` to `false` in your config file:
+Disable update checks across your project by setting `updateCheck` to `false`
+in your configuration file:
 
 ```json title="dispat.json"
 {
@@ -236,28 +223,26 @@ Set `updateCheck` to `false` in your config file:
 }
 ```
 
-That is a refusal to ask, not a refusal to print: with it set, no request is
-made at all. For the commands that read no config file, and for turning it off
-across a machine, set `DISPAT_UPDATE_CHECK=0` in the environment.
+When disabled, dispat makes no network requests. To disable checks globally or
+for commands that do not read config files, set `DISPAT_UPDATE_CHECK=0` in your
+environment.
 
-The variable's other edge is a request: `DISPAT_UPDATE_CHECK=1` makes the
-command wait for the answer, up to the check's own two-second timeout, instead
-of printing it only when it arrives in time. Left unset, nothing ever waits.
+Set `DISPAT_UPDATE_CHECK=1` if you want commands to block until the check
+finishes, subject to a two-second timeout. When left unset, commands never
+wait.
 
 ## How you installed it matters
 
-`dispat --version` says which build you are running, because that decides how
-it gets updated.
+Run `dispat --version` to check your build type before updating:
 
 ```console
 $ dispat --version
 dispat 1.1.0 (darwin_arm64)
 ```
 
-A binary installed with `go install` says so, and `self-update` will not
-replace it. Rewriting a file the Go toolchain owns works right up until the
-next `go install`, so dispat tells you the command that actually updates it
-instead:
+If you installed dispat using `go install`, `self-update` refuses to overwrite
+the binary. Modifying Go-managed binaries causes conflicts during future
+`go install` runs, so dispat prints the required update command instead:
 
 ```console
 $ dispat --version
@@ -273,58 +258,59 @@ what changed in 1.2.0
 update it with: go install github.com/yohimik/dispat/services/dispat@latest
 ```
 
-A build you compiled yourself reports `dev` and refuses too. It has no released
-version to compare against, and overwriting somebody's own build is not
-something a tool should do quietly.
+Locally compiled builds report `dev` and will also refuse updates. These
+binaries have no official release baseline to compare against.
 
-The same applies to a package manager. If Homebrew, Scoop or your distribution
-installed dispat, update it the way you installed it: replacing the file in
-place works, and then the package manager overwrites it again on its next
-upgrade.
+Use your package manager if you installed dispat via Homebrew, Scoop, or a
+system repository. Upgrading directly through your package manager prevents
+local binary replacements from being overwritten later.
 
 ## On macOS
 
-dispat's macOS binaries are not notarised by Apple. Most of the time this is
-invisible, because a file dispat downloaded itself is not quarantined the way a
-browser download is. If macOS does refuse to open it, allow it once under
-**System Settings → Privacy & Security**, or clear the flag by hand:
+dispat's macOS binaries are not notarised by Apple. macOS rarely flags binaries
+downloaded through dispat, but if the system blocks execution, allow the binary
+under **System Settings → Privacy & Security** or remove the quarantine
+attribute directly:
 
 ```sh
 xattr -d com.apple.quarantine /usr/local/bin/dispat
 ```
 
-dispat prints this reminder itself, both when it suggests an update and after
-it installs one, so it never comes as a surprise.
+dispat prints this reminder when notifying you of updates and immediately after
+installing a new version.
 
 ## When it will not work
 
-A few refusals are worth recognising.
+Here is how to resolve common errors:
 
-**"is not writable"**, when dispat lives somewhere you do not own, such as
-`/usr/local/bin` on a machine where that belongs to root. Re-run with the
-rights to replace it. The refusal comes before the download, so nothing has
-been transferred and nothing has been changed.
+**"is not writable"** appears when dispat lacks write permissions for its
+binary directory, such as a root-owned `/usr/local/bin`. Re-run the command
+with elevated permissions. dispat checks write access before downloading, so
+your files remain unchanged.
 
-**"no matching release"**, when nothing published fits. Usually that means
-there is no stable release yet, and `--prerelease` will find the candidates. It
-also covers `--release` naming a version that does not exist, which is worth
-telling apart from being up to date.
+**"no matching release"** indicates that no release matches your criteria. This
+occurs if there are no stable releases yet (in which case pass `--prerelease`)
+or if `--release` specifies a non-existent version.
 
-**"carries no dispat-linux-arm64"**, when the release predates your platform
-being built for. The message lists the binaries that release does carry.
+**"carries no dispat-linux-arm64"** occurs when an older release lacks binaries
+compiled for your target architecture. The error output lists the available
+platform binaries for that release.
 
-**"hashes to ..."**, when the download does not match the checksum the release
-published. The working binary is untouched. Try again, and if it keeps
-happening, something between you and GitHub is changing the file.
+**"hashes to ..."** means the downloaded payload failed checksum verification
+against the published release hash. Your existing binary remains untouched.
+Retry the download; repeated failures point to a proxy or network middlebox
+altering files.
 
 ## Exit codes
 
-`0` when the command did what was asked, including when there was nothing to
-do. `1` when it could not: no matching release, no binary for the platform, a
-download that failed a check, a directory it cannot write to, a build it will
-not replace, or a `--check` that found something to install. `2` for a command
-line that does not make sense, such as `--rollback` next to `--release`, since
-a rollback downloads nothing.
+`0` indicates success, including when no updates were needed.
+
+`1` indicates a failed operation or an available update during `--check`.
+Causes include missing releases, unsupported platforms, failed checksums, write
+permission errors, or unsupported build types.
+
+`2` indicates invalid command-line usage, such as combining `--rollback` with
+`--release`.
 
 ## Every flag
 
@@ -337,5 +323,5 @@ a rollback downloads nothing.
 | `--rollback`          | Restore the kept binary and download nothing. Combines with `--check`; refuses the flags that select a release.  |
 | `--owner`, `--repo`, `--api-url`, `--token-env` | Point the command at a different repository or a GitHub Enterprise endpoint. A token only raises the API rate limit. |
 
-Needs no config file and no git repository: it is about the binary, not about
-whatever project you happen to be standing in.
+`self-update` operates directly on the binary itself. You can run it anywhere
+without a configuration file or Git repository.

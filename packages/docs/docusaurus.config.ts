@@ -190,12 +190,12 @@ const config: Config = {
             `${GITHUB}/edit/main/packages/docs/docs/${docPath}`,
           editCurrentVersion: true,
           showLastUpdateTime: true,
-          // The unreleased version is a copy of the released docs that no
-          // navbar entry points at, so indexing it only splits the site
-          // against itself. noIndex marks those pages, and the sitemap plugin
-          // drops every route it marks, which keeps /next/ out of the sitemap
-          // with no pattern to keep in step. The pages stay built and reachable
-          // by URL, which is what the version is for.
+          // The unreleased version is a copy of the released docs, and
+          // indexing it would only split the site against itself. noIndex
+          // marks those pages, and the sitemap plugin drops every route it
+          // marks, which keeps /next/ out of the sitemap with no pattern to
+          // keep in step. The version dropdown still lists it as "Next" for
+          // a reader who wants the unreleased line; crawlers stay away.
           //
           // Its own root, /next/, is a 404 and stays one: routeBasePath is '/',
           // so a version's root is whatever page sits at that path, and the
@@ -358,6 +358,9 @@ const config: Config = {
       items: [
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
         {type: 'docSidebar', sidebarId: 'api', position: 'left', label: 'API'},
+        // The way into the older lines: without this item the versioned docs
+        // build but nothing on the page reaches them.
+        {type: 'docsVersionDropdown', position: 'right', dropdownActiveClassDisabled: true},
         {href: GITHUB, label: 'GitHub', position: 'right'},
         {href: DISCORD, label: 'Discord', position: 'right'},
       ],

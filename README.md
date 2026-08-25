@@ -189,3 +189,7 @@ suits you better.
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for more information.
+
+The CCME specification, [pkg/ccme/SPEC.md](./pkg/ccme/SPEC.md), is licensed under GPL-3.0-or-later, and dispat uses GPL
+licensed materials from CCME. See [pkg/ccme/LICENSE-SPEC](./pkg/ccme/LICENSE-SPEC). The parser implementing it stays
+under MIT along with the rest of the project.

@@ -1,14 +1,13 @@
 # writer
 
-A deliberately lightweight manifest writer: format-preserving in-place edits where only the version text being changed
-is replaced, and every other byte of the file (indentation, key order, comments) survives verbatim. The writing
-counterpart of [`pkg/scanner`](../scanner), sharing its vocabulary through
-[`pkg/manifest`](../manifest), and the library behind dispat's native auto-versioning. Every format the scanner reads
-has a writer here, fenced by tests; each rewrite is byte-precise or it does not ship.
+Use dispat's manifest writer to make format-preserving edits in place. It replaces only the target version text while
+preserving every other byte, including indentation, key order, and comments. This library serves as the writing
+counterpart to [`pkg/scanner`](../scanner), shares its vocabulary through [`pkg/manifest`](../manifest), and powers
+native auto-versioning in dispat.
 
-Every format writer reads and writes through one internal splicer, so the read cap, the splice, the proof that the
-result still parses and the atomic write happen in one place for all of them. `Replace` is that same machinery with
-the format knowledge taken away, for the versions no manifest holds.
+Every format writer reads and writes through a single internal splicer. That splicer enforces the read cap, performs
+the splice, proves the output parses, and executes the atomic write. `Replace` uses that same engine without
+format-specific rules to edit versions outside standard manifests.
 
 ```go
 res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
@@ -22,12 +21,13 @@ w := writer.New() // the same entry points behind one Writer value,
 res, err = w.Rewrite("packages/web/package.json", "1.3.0", nil)
 ```
 
-Writes are atomic, through a same-folder temp file, an fsync and a rename, and are skipped entirely when nothing
-changed. Reads are capped at 16 MiB (`ErrManifestTooLarge`), and an unsupported path gives `ErrUnsupportedManifest`.
+All writes are atomic: dispat writes to a temporary file in the same folder, runs an fsync, and renames the file over
+the original. If nothing changed, dispat skips the write entirely. Manifest reads are capped at 16 MiB
+(`ErrManifestTooLarge`), and unsupported file paths return `ErrUnsupportedManifest`.
 
-The result separates three outcomes. `Applied` holds the edits that changed the file. `Skipped` holds the ones whose
-dependency is declared but whose version cannot be written, which is the normal state of a healthy manifest. `Missing`
-holds the ones the manifest does not declare at all, which usually means the caller and the file disagree.
+Inspect the returned result to track three distinct outcomes. `Applied` lists the edits that modified the file on disk.
+`Skipped` contains declared dependencies whose versions cannot be updated, while `Missing` lists entries that the
+manifest does not declare.
 
 ## Supported manifests
 
@@ -68,37 +68,31 @@ holds the ones the manifest does not declare at all, which usually means the cal
 | `game.project`                          | none to write (a library is an archive URL)                | yes (`version`)                        | no such directive            |
 | `project.json`/`gem.json`               | yes (the whole `Gem==1.0.0` literal)                       | yes, where one is declared             | no such directive            |
 
-The last column is `Relink`, the other half of this package. Where `Rewrite` changes the version text a manifest
-declares, `Relink` manages the directive that points a dependency at a folder in the same repository instead of at a
-registry. Only five formats have such a directive to manage, which is why the rest of the column reads the way it does:
-a NuGet package reference or a Maven coordinate names a package and nothing else, and there is no spelling for
-"resolve this one locally" for `Relink` to add or remove. `SupportsLink` reports the same five at runtime.
+Use `Relink` to manage the directive that points a dependency at a folder in your repository instead of a registry.
+Only five formats support this directive, while formats like NuGet and Maven name packages without any local redirect
+syntax. Call `SupportsLink` at runtime to check whether a format supports these directives.
 
-A Docker image is named rather than located too. A reference points at a registry, so there is no redirect to manage:
-building the image from a folder in this repository is what a compose file's `build:` says, and that is the author's
-structure rather than a version dispat reconciles.
+Docker images are named by registry coordinates rather than file paths. You do not manage redirects for Docker
+references because a compose file's `build:` key already defines local build paths.
 
-The game engines say it a third way. An Unreal plugin is resolved by name against the project and the engine, a Godot
-addon and an O3DE gem sit in a folder the project already names, and a Defold library is an archive URL. There is no
-redirect any of them could carry, and nothing local for `Relink` to point at.
+Game engines handle local references differently. Unreal plugins resolve by name, Godot addons and O3DE gems live in
+directories named by the project, and Defold libraries point at archive URLs, so none of them use `Relink`.
 
-**Every ecosystem the scanner reads now has a writer.** `TestEveryScannedEcosystemHasAWriter` is the list that says so,
-and a format the scanner learns to read should fail it until it can be written too.
+**Every ecosystem the scanner reads now has a writer.** The suite `TestEveryScannedEcosystemHasAWriter` enforces this
+coverage, failing whenever the scanner learns a format that lacks a writer.
 
-Every writer proves its output before a byte lands: `json.Valid` for the JSON formats, `modfile.Parse` for go.mod, a
-re-parse for the XML formats, `toml.Unmarshal` for the TOML ones.
+Every writer verifies its output before writing bytes to disk. dispat runs `json.Valid` for JSON, `modfile.Parse` for
+`go.mod`, full re-parsing for XML, and `toml.Unmarshal` for TOML.
 
-`project.pbxproj`, the Ruby manifests and the Gradle build scripts have no cheap grammar to re-parse against, so three
-guards stand in for one. A replacement carrying any byte that could end a literal or open a block is refused outright.
-The file's brace balance must come out unchanged. And the reader is run over the result, where it has to agree that
-every splice landed where it was aimed.
+For `project.pbxproj`, Ruby manifests, and Gradle scripts, dispat uses three structural guards in place of full grammar
+parsing. It refuses replacements that contain bytes capable of ending literals or opening blocks, checks that brace
+balance remains identical, and re-scans the file to verify that each splice landed accurately.
 
-The two Docker formats have no grammar to re-parse either, and they answer it with two guards. Nothing is written that
-a registry would not accept as a tag, so the replacement can never carry a character that ends the value it sits in.
-And the reader is run over the result, where every reference must read back as the tag it was aimed at.
+For Docker formats, dispat enforces two guards. It rejects any replacement string that a registry would refuse as a
+tag, preventing syntax breaks in the enclosing value, and re-reads the output to confirm each reference matches the
+intended tag.
 
-The Docker formats decline three shapes of reference outright, and each comes back as `Skipped` rather than as an
-error, because each is how a careful file is written:
+The Docker rewriters skip three reference patterns outright, returning them as `Skipped`:
 
 | Reference                       | Why it is left alone                                                                     |
 |---------------------------------|------------------------------------------------------------------------------------------|
@@ -106,13 +100,13 @@ error, because each is how a careful file is written:
 | `FROM redis@sha256:...`         | the digest is what gets pulled, so a new tag beside it would name a version nothing uses  |
 | `FROM ${REGISTRY}/base:${TAG}`  | the value is resolved outside the file, and a literal would sever the indirection         |
 
-A tag is also not a range. `^1.2.3` is not something a registry can resolve, so a caret policy writes the bare version
-into a Docker manifest; a `{version}` template still passes through, which is how `{version}-alpine` is spelled.
+Docker tags do not support ranges like `^1.2.3`. When given a caret policy, dispat writes the bare version into the
+Docker manifest while still preserving templates such as `{version}-alpine`.
 
 ## From the command line
 
-`dispat writer <manifest>...` is this package with a report attached, and it needs no dispat config file and no git
-repository:
+Run `dispat writer <manifest>...` to rewrite manifests and print a summary report without needing a repository or
+configuration file:
 
 ```sh
 dispat writer packages/web/package.json --set-version 1.3.0     # the own version
@@ -121,11 +115,11 @@ dispat writer services/api/go.mod --link github.com/acme/core=../core
 dispat writer packages/web/package.json --set nope=1.0 --strict # exit 1 on a missing edit
 ```
 
-`--set` takes `[kind:]name=range`, where the range starts after the first `=` and the kind prefix is only read as one
-for the four dependency fields, so a Maven `group:artifact` coordinate keeps its colon. The full guide is
-[Manifest tools](https://yohimik.github.io/dispat/editing/manifests/).
+Pass `--set [kind:]name=range` to specify dependency updates. The range begins after the first `=`, and dispat
+interprets the prefix as a kind only for standard dependency fields, preserving colons in Maven coordinates. For
+complete details, see [Manifest tools](https://yohimik.github.io/dispat/editing/manifests/).
 
-`dispat replacer <file>...` is `Replace` with the same report attached:
+Run `dispat replacer <file>...` to execute `Replace` across arbitrary files and inspect the report:
 
 ```sh
 dispat replacer --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' build.gradle README.md
@@ -134,8 +128,9 @@ dispat replacer --strict --replace 'stale-pattern=>x' Dockerfile   # exit 1 when
 
 ## Replacing literal text: `Replace`
 
-Some versions do not live in a manifest: a coordinate a Gradle script assembles by hand, a base image in a Dockerfile,
-the install line in a README. `Replace` is the format writer with the format knowledge taken away.
+Use `Replace` when versions live outside standard manifests, such as coordinates assembled in Gradle scripts,
+Dockerfile base images, or README install lines. It strips away format-specific logic to perform literal text
+replacements across your files.
 
 ```go
 res, err := writer.Replace("build.gradle", []writer.Replacement{
@@ -144,18 +139,17 @@ res, err := writer.Replace("build.gradle", []writer.Replacement{
 // res.Applied, res.Skipped, res.Missing, res.Count, res.Path
 ```
 
-It runs over any file at all, replaces every occurrence rather than the first, and applies its replacements in order,
-each over what the one before it left. It shares the read cap and the atomic write with the rest of the package, and it
-refuses a file that looks binary (`ErrBinaryFile`, decided by a NUL byte in the first 8 KiB) so a replacement never
-lands in a PNG that happens to contain the version text. `ReplaceBytes` is the same work in memory, without touching
-the caller's input.
+Pass any text file to `Replace` to update every matching occurrence in order, applying each replacement on top of
+previous edits. It uses the same read limits and atomic write guarantees as manifest rewrites, and it rejects binary
+files (`ErrBinaryFile`) if it finds a NUL byte within the first 8 KiB. Call `ReplaceBytes` to run these replacements
+purely in memory without touching disk.
 
-Because it parses nothing it also cannot tell an intended match from an accidental one, so a replacement should carry
-enough context to be unambiguous: `com.acme:core:1.2.0`, not `1.2.0`.
+Provide enough surrounding context to make each match unambiguous, such as `com.acme:core:1.2.0` instead of `1.2.0`.
+Because `Replace` does not parse syntax, it cannot distinguish between intended targets and accidental substrings.
 
 ## Redirecting a dependency to a local folder
 
-`go.mod` can point a dependency somewhere else, and a few other formats can too:
+Call `Relink` on supported formats like `go.mod` to redirect a dependency to a local folder:
 
 ```go
 res, err := writer.Relink("services/svc/go.mod", []writer.Link{
@@ -164,8 +158,8 @@ res, err := writer.Relink("services/svc/go.mod", []writer.Link{
 // res.Applied, res.Skipped, res.Missing, res.Path
 ```
 
-An empty `Path` removes the redirect instead of adding one, which is what a release does before publishing: a local
-link that ships to consumers gives them a module they cannot resolve.
+Pass an empty `Path` to remove an existing redirect. Always clear local redirects before publishing releases so
+consumers do not receive unresolvable local paths.
 
 | Format           | Directive                                      | How the redirect is spelled                       |
 |------------------|------------------------------------------------|---------------------------------------------------|
@@ -175,91 +169,86 @@ link that ships to consumers gives them a module they cannot resolve.
 | `pyproject.toml` | `[tool.uv.sources]`                            | `core = { path = "../core" }`                     |
 | `package.json`   | `overrides`, `resolutions` or `pnpm.overrides` | `"core": "file:../core"`                          |
 
-`Link.Version` narrows the redirect to one required version, which only `go.mod` can express. The others key their
-directive on the name alone and ignore it.
+Set `Link.Version` to restrict the redirect to a specific required version, which only `go.mod` supports. Other formats
+match on name alone and ignore this field.
 
-`SupportsLink` answers in advance whether a file has anywhere to put one. Every other format writes nothing and
-reports each link in `Skipped`.
+Call `SupportsLink` to verify whether a file format supports redirect directives. Unsupported formats make no changes
+on disk and report each link in `Skipped`.
 
-`Links` is the other direction: it enumerates the directives a file already carries, across every place the five
-formats keep one, so a CI gate can prove no local link survived a build without knowing any names in advance.
-`DropLinks` is `Links` followed by the matching removals: the shape of an "unlink whatever the build linked" step.
+Call `Links` to inspect all active redirects across the five supported formats, which allows CI pipelines to verify
+that no local links remain. Use `DropLinks` to discover and remove all active redirects in a single step.
 
 ```go
 links, err := writer.Links("services/svc/go.mod")   // what the file redirects today
 res, err := writer.DropLinks("services/svc/go.mod") // remove them all
 ```
 
-npm, Yarn and pnpm each name that map differently, so the field is chosen by reading the file rather than by guessing.
-An existing `resolutions` or `pnpm.overrides` wins, then a `packageManager` field naming yarn or pnpm, and npm's
-`overrides` is the default. All three read a `file:` specifier, which is the portable spelling, and the scanner reads it
-back out as a local path.
+In `package.json`, dispat selects the redirect field by inspecting your manifest. It prioritises existing `resolutions`
+or `pnpm.overrides` fields, checks `packageManager` for yarn or pnpm, and defaults to npm's `overrides`. All three
+managers accept `file:` specifiers, which the scanner reads as local paths.
 
-One caveat is npm's alone: it refuses an override for a package the manifest depends on directly unless the two specs
-match exactly, so overrides there are aimed at transitive dependencies. Yarn and pnpm have no such rule.
+Be aware of npm's override rule: npm rejects overrides for direct dependencies unless the target specifier matches
+exactly, making it suitable primarily for transitive dependencies. Yarn and pnpm impose no such restriction.
 
-The test a format has to pass is narrow: it must point a **package at a local folder**, through a **separate,
-package-keyed directive**. `Gemfile`, `Podfile`, `requirements*.txt`, Poetry tables and `.csproj` are out because their
-redirect is part of a declaration rather than a directive to manage.
+To support `Relink`, a format must point a **package at a local folder** through a **separate, package-keyed
+directive**. Formats like `Gemfile`, `Podfile`, `requirements*.txt`, Poetry tables, and `.csproj` are unsupported
+because their local paths are embedded directly inside dependency declarations.
 
-`pom.xml` has no redirect at all. Gradle can substitute in `resolutionStrategy` or `settings.gradle`, but only as
-statements inside a closure, which is the one place this package will not write. Version catalogs, `Info.plist`,
-`AndroidManifest.xml`, `project.pbxproj`, `.nuspec`, `packages.config` and `Directory.Packages.props` have nothing of
-the kind.
+`pom.xml` provides no redirect mechanism. Gradle can redirect dependencies inside `resolutionStrategy` or
+`settings.gradle`, but only through closure statements that dispat does not modify. Files like version catalogs,
+`Info.plist`, `AndroidManifest.xml`, `project.pbxproj`, `.nuspec`, `packages.config`, and `Directory.Packages.props`
+offer no redirect directives.
 
-One thing worth knowing: `composer.json` has a literal `"replace"` key and it does not mean this. It declares that the
-package provides another one, which is how forks and metapackages tell Composer not to install the original. Writing a
-redirect there would be wrong, so Composer is left alone.
+Do not use `composer.json` for redirects. Its `"replace"` key declares that a package provides an alternative
+implementation, such as for forks, rather than redirecting paths on disk.
 
-The pyproject table is uv's, and only uv's. Poetry spells the same idea on the declaration and PEP 621 has no
-equivalent, so a project not using uv gains a table its tooling will ignore.
+The `pyproject.toml` table applies only to uv. Poetry defines local dependencies directly on declarations, and PEP 621
+lacks redirect syntax, so non-uv tools will ignore this table.
 
 ## Writing the build counter
 
-The version rewriters never touch a build counter: it is a monotonic count rather than a semantic version, and the two
-move for different reasons. `SetBuild` is the separate write that moves it, in the nine places a format keeps one:
-`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION` (every build configuration, like the marketing
-version), Gradle's `versionCode`, the `+` suffix a pubspec version carries, Unity's `AndroidBundleVersionCode` and the
-per-platform counters under `buildNumber` (every one of them, for the same reason), `version/code` in every Godot
-export preset, a `.uplugin`'s `Version`, and the Android `StoreVersion` in `Config/DefaultEngine.ini`.
+Version rewriters do not modify build counters, which track monotonic increments rather than semantic versions. Call
+`SetBuild` to update counters across the nine supported formats: `CFBundleVersion`, `android:versionCode`,
+`CURRENT_PROJECT_VERSION` across all build configurations, Gradle's `versionCode`, pubspec `+` suffixes, Unity's
+`AndroidBundleVersionCode` and per-platform `buildNumber` entries, Godot export preset `version/code` keys, `.uplugin`
+`Version` fields, and Android `StoreVersion` in `Config/DefaultEngine.ini`.
 
 ```go
 res, err := writer.SetBuild("ios/App/Info.plist", "42")
 // res.BuildWritten, res.Path
 ```
 
-A counter the file does not declare is not created (the pubspec suffix, part of the version scalar, is the one
-exception), a counter deferring to a build setting is left alone, and the Android and Gradle counters must be
-integers. A format with no counter at all gives `ErrNoBuildCounter`.
+`SetBuild` leaves missing counters untouched, except for pubspec version suffixes, and ignores counters that point to
+external build settings. Android and Gradle counters require integer values, and calling `SetBuild` on formats without
+counter support returns `ErrNoBuildCounter`.
 
 ## Behaviours worth reading first
 
-Three behaviours are worth reading before turning these on.
+Review these three manifest update behaviours before applying edits.
 
-A `[versions]` entry that several catalog libraries share **fans out**. Changing one coordinate changes every library
-pinned to that ref, which follows from the file the author wrote. Two edits landing on one shared entry with different
-text are refused with `ErrConflictingEdits` instead of letting the last one win.
+When multiple catalog dependencies share a single `[versions]` entry, updating that entry **fans out** across all
+linked coordinates. If two concurrent edits attempt to set different versions for the same shared reference, dispat
+aborts with `ErrConflictingEdits`.
 
-`MARKETING_VERSION` is written to *every* build configuration, since leaving Debug and Release disagreeing is worse than
-either alternative. A project holding two targets at different versions on purpose is the case this cannot serve.
+dispat updates `MARKETING_VERSION` across *every* build configuration to keep Debug and Release targets synchronized.
+You cannot use this workflow if your project deliberately assigns different version numbers to different targets.
 
-A coordinate declared under several Gradle configurations is updated in all of them.
+dispat updates a coordinate across every Gradle configuration where it appears.
 
-A value that defers to something outside the file is left alone rather than replaced with a literal. Overwriting it
-would sever the indirection it exists for. That covers a Maven `${property}`, a Cargo `{ workspace = true }`, an MSBuild
-or Xcode `$(...)` property, a nuspec `$version$` pack-time token, and the `spec.version = Acme::VERSION` constant nearly
-every published gem uses to keep its library and its packaging in step.
+dispat preserves indirect values that reference external definitions rather than replacing them with literal strings.
+This rule protects Maven `${property}` references, Cargo `{ workspace = true }` entries, MSBuild and Xcode `$(...)`
+properties, nuspec `$version$` tokens, and Ruby `spec.version = Acme::VERSION` constants.
 
-A Maven `<parent>`'s version is never written either. It selects which POM this one inherits from, so moving it would
-repoint the build instead of releasing the module.
+dispat never modifies a Maven `<parent>` version. Changing the parent version alters project inheritance rather than
+updating the module version.
 
-Nothing is added where a declaration carries no version on purpose. A pod or gem with no requirement, one pinned to a
-git revision or a path, a constraint spread across two literals (`gem 'pg', '>= 0.18', '< 2.0'`), and a catalog library
-with no version are all reported in `Skipped`.
+dispat skips unversioned declarations instead of adding new version constraints. It marks unpinned pods or gems, git
+and path dependencies, multi-literal constraints like `gem 'pg', '>= 0.18', '< 2.0'`, and unversioned catalog entries
+as `Skipped`.
 
-There is one exception, and it follows an older precedent. A bare PEP 508 entry gains its first specifier, in
-`pyproject.toml` as in a requirements file, because a name with no specifier there is an unpinned dependency rather than
-a choice.
+As an exception, dispat adds a version specifier to bare PEP 508 entries in `pyproject.toml` and requirements files. In
+those ecosystems, an entry without a specifier represents an unpinned dependency rather than an intentional version
+exclusion.
 
 ## Requirements
 

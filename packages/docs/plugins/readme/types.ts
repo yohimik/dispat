@@ -19,13 +19,12 @@ export type Inline =
    */
   | {t: 'link'; href: string; internal: boolean; v: Inline[]};
 
-/** A paragraph, a list, and the paragraph that closes it. */
+/** A paragraph and the list under it. */
 export interface Argument {
   intro: Inline[];
   /** Whether the README numbered the list, which is part of what it says. */
   ordered: boolean;
   items: Inline[][];
-  outro?: Inline[];
 }
 
 /** One `## Key features` bullet of the CLI README, as a card. */
@@ -38,8 +37,6 @@ export interface Feature {
 export interface RepositoryReadme {
   /** The opening paragraphs, before the install commands: what dispat is. */
   lead: Inline[][];
-  /** `## Why one more monorepo tool?`: the two situations, and the answer. */
-  problems: Argument;
   /** `## Inspiration`: what dispat descends from. */
   inspiration: Argument;
   /** `## Projects using dispat`: the real repositories, dispat's own first. */
@@ -48,10 +45,6 @@ export interface RepositoryReadme {
 
 /** What the landing page takes from the CLI README. */
 export interface CliReadme {
-  /** The terminal tour: the first fenced block under `## In the terminal`. */
-  transcript: string;
-  /** The paragraph that follows it, which explains what the tour left out. */
-  transcriptNote: Inline[];
   features: Feature[];
 }
 

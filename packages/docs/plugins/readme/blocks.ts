@@ -122,24 +122,3 @@ export function firstList(blocks: Block[], where: string): {ordered: boolean; it
   return {ordered: found.ordered, items: found.items};
 }
 
-/** The paragraph that follows the first list: a list's closing remark. */
-export function paraAfterList(blocks: Block[], where: string): string {
-  const at = blocks.findIndex((b) => b.kind === 'list');
-  if (at < 0) {
-    throw new Error(`${where}: no list to follow`);
-  }
-  return firstPara(blocks.slice(at + 1), `${where}, after its list`);
-}
-
-/** The first fenced block, and the paragraph under it. */
-export function firstFence(blocks: Block[], where: string): {code: string; note: string} {
-  const at = blocks.findIndex((b) => b.kind === 'fence');
-  if (at < 0) {
-    throw new Error(`${where}: no fenced block`);
-  }
-  const fence = blocks[at];
-  return {
-    code: fence.kind === 'fence' ? fence.code : '',
-    note: firstPara(blocks.slice(at + 1), `${where}, after its fenced block`),
-  };
-}

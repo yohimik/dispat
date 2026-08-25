@@ -1,0 +1,3 @@
+# Remotion's raw renders; render.sh converts them into the committed assets
+# in imgs/.
+/out

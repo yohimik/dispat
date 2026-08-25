@@ -1,4 +1,4 @@
-import {firstFence, firstList, firstPara, paraAfterList, parseBlocks, section} from './blocks';
+import {firstList, firstPara, parseBlocks, section} from './blocks';
 import {parseInline} from './inline';
 import type {Argument, CliReadme, Feature, Inline, RepositoryReadme} from './types';
 
@@ -31,12 +31,9 @@ function inlines(texts: string[], source: Source, where: string): Inline[][] {
 }
 
 /**
- * A paragraph, the list under it, and the paragraph that closes the list.
- *
- * Both sections read from the repository README are shaped this way: state the
- * problem, enumerate it, then answer it.
+ * A paragraph and the list under it: the shape of the inspiration section.
  */
-function argument(blocks: ReturnType<typeof parseBlocks>, source: Source, heading: string, closed: boolean): Argument {
+function argument(blocks: ReturnType<typeof parseBlocks>, source: Source, heading: string): Argument {
   const where = `"## ${heading}"`;
   const body = section(blocks, heading, source.path);
   const list = firstList(body, `${source.path}: ${where}`);
@@ -44,7 +41,6 @@ function argument(blocks: ReturnType<typeof parseBlocks>, source: Source, headin
     intro: inline(firstPara(body, `${source.path}: ${where}`), source, where),
     ordered: list.ordered,
     items: inlines(list.items, source, where),
-    outro: closed ? inline(paraAfterList(body, `${source.path}: ${where}`), source, `${where} closing`) : undefined,
   };
 }
 
@@ -74,11 +70,7 @@ export function parseRepositoryReadme(src: string): RepositoryReadme {
 
   return {
     lead: inlines(lead, ROOT_README, 'the opening'),
-    // The problems section ends on the paragraph that answers them; the
-    // inspiration list is followed by the next heading, so it has no closing
-    // remark to look for.
-    problems: argument(blocks, ROOT_README, 'Why one more monorepo tool?', true),
-    inspiration: argument(blocks, ROOT_README, 'Inspiration', false),
+    inspiration: argument(blocks, ROOT_README, 'Inspiration'),
     users: inlines(users.items, ROOT_README, '"## Projects using dispat"'),
   };
 }
@@ -112,15 +104,11 @@ function feature(bullet: string): Feature {
 export function parseCliReadme(src: string): CliReadme {
   const blocks = parseBlocks(src);
 
-  // The first fenced block under "In the terminal" is the walkthrough; the "a
-  // few more moves" block below it is a reference list and belongs on the CLI
-  // page rather than in the hero.
-  const terminal = firstFence(section(blocks, 'In the terminal', CLI_README.path), `${CLI_README.path}: "## In the terminal"`);
+  // The terminal tour under "## In the terminal" stays with the README: the
+  // hero used to quote it, but the demo carousel now plays the same lines as
+  // the scenes' log captions, so the only extraction left is the feature
+  // cards.
   const features = firstList(section(blocks, 'Key features', CLI_README.path), `${CLI_README.path}: "## Key features"`).items.map(feature);
 
-  return {
-    transcript: terminal.code,
-    transcriptNote: inline(terminal.note, CLI_README, 'the terminal tour note'),
-    features,
-  };
+  return {features};
 }

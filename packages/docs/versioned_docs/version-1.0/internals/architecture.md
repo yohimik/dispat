@@ -464,8 +464,8 @@ running no prerelease train no unit carries a channel directive at all and the c
 ## Deliberately out of scope
 
 dispat implements the release computation. Some parts of the specification assume an engine that also reads package
-manifests and knows about registries; those are delegated to the version and publish scripts instead, which is what
-keeps dispat language-agnostic:
+manifests and knows about registries. dispat delegates those to the version and publish scripts instead. This keeps
+dispat language-agnostic:
 
 | Not implemented                                             | Delegated to                                                                                                                                                                          |
 |-------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -477,19 +477,20 @@ keeps dispat language-agnostic:
 | Post-run convergence verification                           | (nothing; re-run `status`)                                                                                                                                                            |
 | `requireCodeownerFor`, the CODEOWNER gate on directives     | (nothing; the specification's own configuration for it is unmodelled, so no directive can be gated on approval)                                                                       |
 
-A consequence for the diagnostics registry: the specification codes that belong to these registry- and audit-aware
-features are never emitted by dispat. `E197` (publish-order violation), `E198` (registry identity unverifiable) and
-`E199` (convergence check failed) assume an engine that queries registries and audits its own runs; `W195` (staleness
-audit) and `W196` (published version adopted from the registry) belong to the same features. Every other code of the
-registry, the repository-scoped bucket included (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`), is implemented and
-emitted. That includes the codes the registry leaves to the engine rather than to the parser: `E210`-`E213` and
-`W209`-`W215`, which resolve an `Edits` or `Deletes` target against history and report what the correction did, are
-raised here (see [Correcting a record](../reference/corrections.md)). What each of those six means for somebody
-looking at one, and what to do about it, is in [Diagnostic codes](../reference/plan-errors.md).
+This has a consequence for the diagnostics registry. dispat never emits the specification codes that belong to these
+registry-aware and audit-aware features. Errors like `E197` (publish-order violation), `E198` (registry identity
+unverifiable), and `E199` (convergence check failed) assume an engine that queries registries and audits its own runs.
+Warnings like `W195` (staleness audit) and `W196` (published version adopted from the registry) belong to the same
+features. dispat implements and emits every other code of the registry, including the repository-scoped bucket (`E182`,
+`E185`, `E191`, `E195`, `E196`, `E200`). This includes the codes the registry leaves to the engine rather than to the
+parser. dispat raises `E210`-`E213` and `W209`-`W215` here. These resolve an `Edits` or `Deletes` target against
+history and report what the correction did (see [Correcting a record](../reference/corrections.md)). Read
+[Diagnostic codes](../reference/plan-errors.md) to see what each of those six means and what to do about it.
 
-In the other direction, twenty-five codes are dispat's own, outside the specification's registry, attached to features
-the specification predates or does not have. They are numbered from `W220` and `E215` upward, clear of the registry
-(which ends at `W215` and `E213`) and of `W195`/`W196`, which the specification reserves for the audit features above.
+In the other direction, twenty-nine codes are dispat's own. They sit outside the specification's registry, attached to
+features the specification predates or does not have. They are numbered from `W220` and `E215` upward. This clears the
+registry, which ends at `W215` and `E213`. It also clears `W195` and `W196`, which the specification reserves for the
+audit features above.
 
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
@@ -507,8 +508,9 @@ the specification predates or does not have. They are numbered from `W220` and `
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 
-All of them follow the registry's numbering conventions and blast-radius rules, and are documented where their features
-are. `W192`, `W197` and `W203`, the auto-versioning narrations, are the specification's own §9.4/§12.4 codes.
+All of these codes follow the registry's numbering conventions and blast-radius rules. dispat documents them where
+their features are. The auto-versioning narrations `W192`, `W197`, and `W203` are the specification's own §9.4/§12.4
+codes.
 
 ## Testing
 

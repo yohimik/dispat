@@ -45,8 +45,8 @@ export default function readme(context: LoadContext): Plugin {
       );
       const data = {repository: parseRepositoryReadme(root), cli: parseCliReadme(cli)};
       logger.info`Landing page: ${String(data.repository.lead.length)} opening paragraphs and ${String(
-        data.repository.problems.items.length,
-      )} problems from path=${ROOT_README.path}, ${String(data.cli.features.length)} features and the terminal tour from path=${
+        data.repository.inspiration.items.length,
+      )} inspirations from path=${ROOT_README.path}, ${String(data.cli.features.length)} features from path=${
         CLI_README.path
       }.`;
       return data;

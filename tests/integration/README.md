@@ -1,32 +1,32 @@
 # Integration tests
 
-The black-box integration suite for the dispat CLI. It is a separate Go module that structurally cannot import
-`services/dispat/internal/*` (Go's `internal` rule): it compiles the **real binary** from
-[`services/dispat`](../../services/dispat), drives it against disposable git repositories exactly as a user's shell
-would, and asserts on the three outputs a release run actually has:
+This is the black-box integration suite for the dispat CLI. Because it is a separate Go module, Go's `internal` rule
+prevents it from importing `services/dispat/internal/*`. It compiles the **real binary** from
+[`services/dispat`](../../services/dispat), runs it against disposable git repositories just like your shell would, and
+asserts on three release outputs:
 
-- **git state**: tags (their objects, messages and targets), commits, changelog files;
-- **JSON log events**: `--log-format json`, the machine-readable contract CI ingests;
+- **git state**: tags (their objects, messages and targets), commits, and changelog files.
+- **JSON log events**: `--log-format json`, the machine-readable contract CI ingests.
 - **execution timelines**: nanosecond-resolution intervals recorded by the purpose-built `tsmark` probe, wherever
   *timing* rather than mere ordering is the claim.
 
-Configs are authored as typed models from the public [`pkg/models`](../../pkg/models) module and marshalled to JSON, so
-a test that compiles is a test whose config loads.
+You author test configs as typed models from the public [`pkg/models`](../../pkg/models) module and marshal them to
+JSON. If your test compiles, its config is guaranteed to load.
 
-The full design (goals, architecture, the coverage matrix per test, flakiness posture and conventions for new tests)
-lives in the **[test plan](./docs/test-plan.md)**.
+Read the **[test plan](./docs/test-plan.md)** for the full design, including goals, architecture, flakiness policies,
+conventions, and the per-test coverage matrix.
 
 ## Setup
 
-No setup beyond the repository itself is needed. Requirements:
+You do not need any setup beyond cloning the repository. Ensure you have these tools installed:
 
-- the **Go toolchain** (see [`go.mod`](./go.mod) for the version) on `PATH`;
-- **git** on `PATH`; every test creates and drives a real repository (tests skip if git is missing).
+- The **Go toolchain** (see [`go.mod`](./go.mod) for the version) on `PATH`.
+- **git** on `PATH`. Every test creates and drives a real repository, and tests skip automatically if git is missing.
 
-The module resolves its dispat dependencies through the workspace (`go.work` at the monorepo root), so a plain
-checkout is ready to run. The dispat and tsmark binaries are compiled **once per
-`go test` invocation** and shared across all tests (a `sync.Once` cache in the harness); each test creates its
-repository in a fresh `t.TempDir()`, so tests are independent and safe to run in any order or subset.
+Dependencies resolve through the workspace (`go.work` at the monorepo root), so a clean checkout is ready immediately.
+The harness compiles the dispat and tsmark binaries **once per `go test` invocation** and caches them via `sync.Once`
+across all tests. Each test builds its repository in a fresh `t.TempDir()`, so you can run tests in any order or select
+any subset safely.
 
 ## Running
 
@@ -40,13 +40,12 @@ go test ./... -count 5           # stability check: repeated runs pass
 
 ## Results
 
-Nothing about how this suite is doing is written down here, because it would be a claim rather than a measurement.
-Every release runs the whole thing and publishes what it found with the site it releases:
+Current test results are omitted here so the documentation contains only verified measurements. Every release runs the
+entire suite and publishes live data alongside the documentation site:
 
-- **[test results](https://yohimik.github.io/dispat/internals/test-results/)**: the counts, the timings, the race
-  pass, and what each test file covers;
-- **[test coverage](https://yohimik.github.io/dispat/internals/coverage/)**: the statements the whole workspace's
-  tests reach, per package, this suite's instrumented binary included.
+- **[test results](https://yohimik.github.io/dispat/internals/test-results/)**: counts, timings, race detector results,
+  and the scope of each test file.
+- **[test coverage](https://yohimik.github.io/dispat/internals/coverage/)**: statement coverage across all workspace
+  packages, including this suite's instrumented binary.
 
-The claim-by-claim matrix stays here, in the [test plan](./docs/test-plan.md), because it belongs beside the tests it
-maps: a row per test, saying which goal it proves.
+To see which goals each test proves, consult the matrix in the [test plan](./docs/test-plan.md).

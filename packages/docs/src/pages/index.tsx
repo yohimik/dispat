@@ -4,6 +4,7 @@ import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import {usePluginData} from '@docusaurus/useGlobalData';
 import {README_PLUGIN} from '@site/plugins/readme/name';
 import type {Argument, ReadmeData} from '@site/plugins/readme/types';
+import DemoCarousel from '@site/src/components/DemoCarousel';
 import Inlines from '@site/src/components/Inline';
 import CodeBlock from '@theme/CodeBlock';
 import Heading from '@theme/Heading';
@@ -18,17 +19,16 @@ import styles from './index.module.css';
 // redirect gave crawlers and readers nothing to land on.
 //
 // Those claims are *read* from the READMEs at build time rather than restated
-// here: the opening, the "why one more monorepo tool?" argument and the
-// inspiration list from the repository README, the terminal tour and the
-// feature cards from the CLI one. They used to be a second copy under a comment
+// here: the opening and the inspiration list from the repository README, the
+// key-feature slides from the CLI one; the "why one more monorepo tool?"
+// argument is drawn as the hero deck's opening slide. They used to be a
+// second copy under a comment
 // promising to keep them in step, which is not a promise a comment can keep.
 // See plugins/readme. What is still written here is the landing page's own:
 // the badges, the install blocks, the reading list and the invitation.
 //
-// Four strings here do restate something written elsewhere, and are the whole
-// of what a rewrite has to keep in step by hand:
-//   - the <Features> heading repeats the repository README's "## Why one more
-//     monorepo tool?", which plugins/readme/parse.ts matches literally;
+// Three strings here do restate something written elsewhere, and are the
+// whole of what a rewrite has to keep in step by hand:
 //   - MANIFESTS mirrors the format tables in pkg/scanner's README;
 //   - the three INSTALL_* commands repeat the repository README's install
 //     blocks and Getting started's;
@@ -51,15 +51,7 @@ function useReadme(): ReadmeData {
  * A README paragraph, its list, and the paragraph closing it: the shape of
  * both arguments the repository README makes.
  */
-function Argued({
-  argument,
-  className,
-  children,
-}: {
-  argument: Argument;
-  className: string;
-  children?: React.ReactNode;
-}): React.ReactElement {
+function Argued({argument, className}: {argument: Argument; className: string}): React.ReactElement {
   const List = argument.ordered ? 'ol' : 'ul';
   return (
     <>
@@ -75,12 +67,26 @@ function Argued({
           </li>
         ))}
       </List>
-      {(argument.outro || children) && (
-        <p className={styles.sectionLead}>
-          {argument.outro && <Inlines tokens={argument.outro} />} {children}
-        </p>
-      )}
     </>
+  );
+}
+
+/**
+ * A landing page section in the deck's own language: a hairline above, a
+ * small uppercase chip naming the territory, and a mono title, the same
+ * shapes the hero's slides and the clips' chips use.
+ */
+function Section({chip, title, children}: {chip: string; title: string; children: React.ReactNode}): React.ReactElement {
+  return (
+    <section className={styles.section}>
+      <div className="container">
+        <p className={styles.chip}>{chip}</p>
+        <Heading as="h2" className={styles.sectionTitle}>
+          {title}
+        </Heading>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -138,64 +144,16 @@ function Hero(): React.ReactElement {
             Examples
           </Link>
         </div>
-        {/* The release story in motion: the graph from the manifests, the
-            commit deciding the blast radius, the ordered parallel run, a
-            contained failure, and the catch-up re-run. */}
-        <video
-          className={styles.demo}
-          autoPlay
-          loop
-          muted
-          playsInline
-          width={1920}
-          height={1080}
-          aria-label="An animated dependency graph of four packages across npm, Go, and Docker: commits decide the blast radius, builds and publishes run in dependency order in parallel, a failed build stays contained while its consumer is skipped, and a re-run finishes exactly what the first run still owed">
-          <source src={useBaseUrl('/demo-release.webm')} type="video/webm" />
-          <source src={useBaseUrl('/demo-release.mp4')} type="video/mp4" />
-        </video>
-        {/* `console` rather than the README's `sh`: this is a transcript, and
-            shell-session highlighting is what tells the commands from their
-            output. The README fence has to stay `sh` for GitHub. */}
-        <CodeBlock language="console" className={styles.transcript}>
-          {cli.transcript}
-        </CodeBlock>
-        <p className={styles.transcriptNote}>
-          <Inlines tokens={cli.transcriptNote} />
-        </p>
+        {/* The CLI README's key features as a deck: one slide per bullet,
+            each an animated illustration of its claim with the README's own
+            words in a band underneath. The deck replaced the terminal
+            transcript and the feature-card grid that used to sit on this
+            page: the pretty log's lines play inside the animations, and the
+            feature bullets are still read from the README at build time, so
+            the evidence moved into the deck rather than out of the page. */}
+        <DemoCarousel features={cli.features} />
       </div>
     </header>
-  );
-}
-
-function Features(): React.ReactElement {
-  const {repository, cli} = useReadme();
-
-  return (
-    <section className="container margin-vert--xl">
-      <Heading as="h2" className={styles.sectionTitle}>
-        Why one more monorepo tool?
-      </Heading>
-      {/* The repository README's section of the same name. The pointer at the
-          end is the landing page's own: the README has no Concepts page to
-          send a reader to. */}
-      <Argued argument={repository.problems} className={styles.problems}>
-        <Link to="/concepts">Concepts</Link> works both situations through end to end.
-      </Argued>
-      {/* The cards are the CLI README's `## Key features` bullets, one card
-          each, read at build time. Adding a bullet there adds a card here. */}
-      <div className={styles.features}>
-        {cli.features.map((feature, i) => (
-          <div className={[styles.feature, i === cli.features.length - 1 && cli.features.length % 2 !== 0 ? styles.lastFeature : ''].join(' ')} key={feature.title}>
-            <Heading as="h3" className={styles.featureTitle}>
-              {feature.title}
-            </Heading>
-            <p>
-              <Inlines tokens={feature.body} />
-            </p>
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -226,10 +184,7 @@ const MANIFESTS: [language: string, files: string][] = [
 // the guarantees are written down; those pages link on to pkg.go.dev.
 function Libraries(): React.ReactElement {
   return (
-    <section className="container margin-bottom--xl">
-      <Heading as="h2" className={styles.sectionTitle}>
-        Lightweight libraries, usable on their own
-      </Heading>
+    <Section chip="libraries" title="Lightweight libraries, usable on their own">
       <p className={styles.sectionLead}>
         Parsing commit messages and reading and rewriting dependency manifests are problems far older than releases, so
         dispat keeps all three as standalone Go modules with no dependency on the CLI, on git or on a network. The
@@ -327,7 +282,7 @@ function Libraries(): React.ReactElement {
           rewrites them at the version stage.
         </p>
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -336,10 +291,7 @@ function Libraries(): React.ReactElement {
 // whether the command is worth running.
 function Install(): React.ReactElement {
   return (
-    <section className="container margin-bottom--xl">
-      <Heading as="h2" className={styles.sectionTitle}>
-        Install
-      </Heading>
+    <Section chip="install" title="Install">
       <p className={styles.sectionLead}>
         One command, and no runtime to install first. The script downloads the binary for your platform, checks it
         against the checksum GitHub published, and puts it on your <code>PATH</code>.
@@ -367,7 +319,7 @@ function Install(): React.ReactElement {
         More ways to install (<code>go install</code>, the GitHub Action, the container images) and how to pin a
         version are in <Link to="/getting-started">Getting started</Link>.
       </p>
-    </section>
+    </Section>
   );
 }
 
@@ -379,10 +331,7 @@ function Projects(): React.ReactElement {
   const {repository} = useReadme();
 
   return (
-    <section className="container margin-bottom--xl">
-      <Heading as="h2" className={styles.sectionTitle}>
-        Projects using dispat
-      </Heading>
+    <Section chip="in production" title="Projects using dispat">
       <p className={styles.sectionLead}>
         The first monorepo dispat releases is its own: every tag, changelog, GitHub release and container image of this
         project, and this documentation site, ship through a dispat run.
@@ -396,16 +345,13 @@ function Projects(): React.ReactElement {
           </div>
         ))}
       </div>
-    </section>
+    </Section>
   );
 }
 
 function Reference(): React.ReactElement {
   return (
-    <section className="container margin-bottom--xl">
-      <Heading as="h2" className={styles.sectionTitle}>
-        The documentation
-      </Heading>
+    <Section chip="read on" title="The documentation">
       <ul className={styles.reference}>
         <li>
           <Link to="/getting-started">Getting started</Link>: install the binary, write one config file, wire the
@@ -442,7 +388,7 @@ function Reference(): React.ReactElement {
           does.
         </li>
       </ul>
-    </section>
+    </Section>
   );
 }
 
@@ -453,24 +399,18 @@ function Inspiration(): React.ReactElement {
   const {repository} = useReadme();
 
   return (
-    <section className="container margin-bottom--xl">
-      <Heading as="h2" className={styles.sectionTitle}>
-        Inspiration
-      </Heading>
+    <Section chip="lineage" title="Inspiration">
       {/* The repository README's section of the same name, read at build time
           rather than kept in step by hand. Its relative link to pkg/ccme comes
           back as a GitHub URL; see plugins/readme/inline.ts. */}
       <Argued argument={repository.inspiration} className={styles.reference} />
-    </section>
+    </Section>
   );
 }
 
 function Community(): React.ReactElement {
   return (
-    <section className="container margin-bottom--xl text--center">
-      <Heading as="h2" className={styles.sectionTitle}>
-        Have questions or issues?
-      </Heading>
+    <Section chip="community" title="Have questions or issues?">
       <p className={styles.sectionLead}>
         Want to share a project you release with dispat? Come and say hello on Discord. Bugs and feature requests are
         welcome as GitHub issues too, whichever suits you better.
@@ -483,7 +423,7 @@ function Community(): React.ReactElement {
           Open an issue
         </Link>
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -494,7 +434,6 @@ export default function Home(): React.ReactElement {
       description="dispat is a release tool for polyglot monorepos. It reads your conventional commits, works out every package version with propagation to dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.">
       <Hero />
       <main>
-        <Features />
         <Libraries />
         <Install />
         <Projects />

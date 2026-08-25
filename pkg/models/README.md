@@ -1,9 +1,8 @@
 # models
 
-The public configuration model of the dispat CLI: the typed structs a `dispat.json` / `dispat.yaml` /
-`dispat.toml` decodes into, published so external tooling (generators, migration scripts, the black-box integration
-suite) can author configurations as typed values and marshal them to loadable files instead of hand-writing raw config
-strings.
+This package provides the public configuration model for the dispat CLI. It contains the typed structs that
+`dispat.json`, `dispat.yaml`, and `dispat.toml` decode into. External tools like generators, migration scripts, and
+test suites can build configurations as typed Go values and marshal them directly to valid config files.
 
 ```go
 cfg := models.File{
@@ -24,30 +23,28 @@ Packages: map[string]models.PackageConfig{
 data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 ```
 
-The contract: every field carries a `mapstructure` tag (how the CLI decodes the file) and a `json` tag with the same key
-(how a model marshals back into a loadable file), so **a marshalled model is a loadable config**. Optional sub-objects
-are pointers, so an unset object marshals as an absent key rather than `{}` noise. Tri-state options are
-`*bool` with nil-safe accessors and a `Bool()` helper; that covers `enabled`, `verify`, `writeVersion`, and every scalar
-of a `PackageConfig` override, where absent must mean "inherit".
+Every field carries a `mapstructure` tag for decoding and a matching `json` tag for encoding, so **a marshalled model
+is a loadable config**. Optional sub-objects use pointers so unset fields are omitted from output instead of emitting
+empty `{}` blocks. Tri-state options use `*bool` with nil-safe accessors and a `Bool()` helper, which covers `enabled`,
+`verify`, `writeVersion`, and every scalar in a `PackageConfig` override where absent means "inherit".
 
-A `Packages` entry plays one of two roles: without `Path` it overrides the space configuration of the package whose
-folder name matches the key; with `Path` it declares a standalone package outside every space. The model always holds
-dependency edges as the flat `[]DependencyConfig` list, and the expansion lives here too: `Dependencies` and
-`ProviderList` unmarshal every shorthand the config file accepts (a bare provider name, a consumer-keyed map, a full
-edge object) into that flat list, and marshal back the shortest spelling that says the same thing. `Providers` builds
-the list in code the way the shorthand does in a file.
+A `Packages` entry plays one of two roles: without `Path` it overrides the space configuration for the matching package
+folder, and with `Path` it declares a standalone package outside every space. The model stores dependency edges as a
+flat `[]DependencyConfig` slice. `Dependencies` and `ProviderList` unmarshal config shorthands (bare names, consumer
+maps, full edge objects) into that list and marshal back the shortest equivalent form, while `Providers` lets you build
+that list in code.
 
-A `Scripts` value is a `Script`: the commands one name binds, in the order they run. It decodes from either shape the
-config file accepts (a bare string or an array of them) and marshals back as the shortest one that carries what the
-script says, so a single-command script written as a string is written back as a string.
+A `Scripts` value is a `Script`, representing the commands bound to a name in execution order. It decodes from a single
+string or an array of strings. When marshalled, it outputs the shortest form, writing single-command scripts back as
+bare strings.
 
-This module contains models only. Loading, validation, defaulting and package discovery live in the CLI's internal
-config package: an invalid model marshals fine and fails with a clear error when the CLI loads it.
+This module contains data models only. Loading, validation, defaulting, and package discovery live in the CLI internal
+config package. An invalid model will marshal without errors, but the CLI will reject it when loading.
 
 ## Requirements
 
-Go 1.22 or later (the workspace itself builds with the Go version `go.work` declares). One dependency: the workspace's
-own [`pkg/ccme`](../ccme) (for the resolved parser configuration type).
+You need Go 1.22 or later (the workspace builds with the version declared in `go.work`). The package has one
+dependency: [`pkg/ccme`](../ccme), used for resolved parser configuration types.
 
 ## Licence
 

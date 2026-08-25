@@ -1,13 +1,14 @@
 # scanner
 
-A deliberately lightweight manifest reader: thin per-format parsers turning dependency manifests into one
-ecosystem-neutral shape: the package's declared identity (name, version) and its declared dependencies with their
-ranges, manifest fields and local-path signals. No SBOM machinery, no lockfile resolution, no network. The recognised
-formats are fixed at build time, thirty-five of them across twenty ecosystems, and fence tests hold the reader and
-the writer to the same list; the shared vocabulary (dependency kinds, the file-name rules) lives in
-[`pkg/manifest`](../manifest) so this reader and [`pkg/writer`](../writer) can never drift apart. It only reads;
-rewriting is the writer's job. This is the library behind
-`dispat compute` (deriving a monorepo's dependency graph from its manifests) and the executor's native auto-versioning.
+The `scanner` package is a lightweight manifest reader. It parses dependency manifests into one ecosystem-neutral
+shape: the package's declared identity (name and version) and its declared dependencies with their ranges, manifest
+fields, and local-path signals. It does not resolve lockfiles, build SBOMs, or make network calls.
+
+The parser recognizes thirty-five formats across twenty ecosystems at build time. Fence tests keep the reader and the
+writer aligned on the same list. Shared rules and dependency kinds live in [`pkg/manifest`](../manifest) so this reader
+and [`pkg/writer`](../writer) never drift apart. `scanner` only reads manifests; use `writer` to update them.
+
+This package powers `dispat compute` when it derives your dependency graph, and it drives native auto-versioning.
 
 ```go
 sc := scanner.New()
@@ -18,9 +19,9 @@ mans, err = scanner.Scan(ctx, "packages/web") // the package-level conveniences
 roots, err = scanner.ScanRoot(ctx, "packages/web")
 ```
 
-Both methods share one error contract: a manifest that fails to parse is skipped, its error joined into the returned
-error, and the parsed manifests come back either way, so callers can report the problem and keep the partial result.
-Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is deterministic.
+Both methods share an error contract. If a manifest fails to parse, dispat skips it, joins its error into the returned
+error, and returns all successfully parsed manifests. This lets you report problems without discarding partial results.
+Reads are capped at 16 MiB per file (`ErrManifestTooLarge`), and output order is always deterministic.
 
 ## Supported manifests
 
@@ -44,29 +45,26 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`); output order is det
 | `Dockerfile`, `Containerfile` | docker | every `FROM`, `COPY --from` and `RUN --mount=…,from=` image; stage aliases and `scratch` excluded |
 | `compose.yaml`      | docker    | the image the file builds as its identity, every other service's image as a dependency            |
 
-A Dockerfile is matched by name rather than by extension, so `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile` and
-Podman's `Containerfile` all count. A compose file is matched by name too: `compose.yaml`, `compose.yml`,
-`docker-compose.yaml`, `docker-compose.yml` and the `.override.` variant of each, which is the set the Compose
-specification itself loads. A requirements file is matched by whole words rather than a glob: a `.txt` whose base name
-starts or ends with the word `requirements` counts, so `dev-requirements.txt` and `requirements-test.txt` land in
-devDependencies while `requirements-latest.txt` stays a plain requirements file and `old-requirements-notes.txt` is
-prose, not a manifest.
+dispat matches a Dockerfile by name rather than extension. `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile`, and
+Podman's `Containerfile` all match. Compose files match by name as well: `compose.yaml`, `compose.yml`,
+`docker-compose.yaml`, `docker-compose.yml`, and their `.override.` variants.
 
-Docker has no version field, so the reader takes the identity from the images the file names. The rule, in order: the
-service that declares both a `build` section and a tagged `image` is producing that image here, which is as close to
-"this is my package" as compose gets; failing that, the tagged repository the most services name. Ties go to the lowest
-service name, because a YAML mapping decodes in no order worth trusting and the answer has to come from the data. A
-compose file that only wires third-party services together declares no identity at all, which is the honest answer
-rather than a guess. A Dockerfile never declares one: what it builds is named on the command line, not in the file.
+Requirements files match whole words rather than globs. Any `.txt` file whose base name starts or ends with
+`requirements` counts. This puts `dev-requirements.txt` and `requirements-test.txt` into devDependencies, keeps
+`requirements-latest.txt` as a runtime manifest, and ignores files like `old-requirements-notes.txt`.
 
-The name a Docker manifest declares is an image repository (`ghcr.io/acme/api`, not `api`), so a package usually
-either states `manifestNames` or leans on the substring name matching, whose last-segment rule maps the two onto each
-other.
+Docker files have no version field, so dispat derives their identity from image names. In a Compose file, dispat first
+looks for a service that declares both a `build` block and a tagged `image`. If none exists, it uses the tagged
+repository named by the most services, breaking ties with the alphabetically lowest service name. A Compose file that
+only wires third-party images together declares no identity, and Dockerfiles never declare an identity because their
+target tag is set on the command line.
 
-The mobile platforms are covered too. Three of these declare an identity and a version but no dependencies at all, so
-they feed auto-versioning rather than the dependency graph. Every Java-world coordinate is spelled `group:artifact`,
-which means a version-catalog entry, a build script's literal notation and a `pom.xml` dependency all name the same
-package.
+Because Docker manifests declare full image repositories like `ghcr.io/acme/api`, you can map them to packages using
+`manifestNames` or rely on dispat's last-segment name matching.
+
+Mobile platforms are supported as well. Three mobile formats declare an identity and a version without dependencies, so
+they drive auto-versioning rather than the dependency graph. Every Java coordinate uses the `group:artifact` format,
+aligning version catalogs, build script literals, and `pom.xml` dependencies to the same package name.
 
 | File                   | Ecosystem | Reads                                                                                        |
 |------------------------|-----------|----------------------------------------------------------------------------------------------|
@@ -78,9 +76,9 @@ package.
 | `libs.versions.toml`   | gradle    | `[libraries]` by Maven coordinate, `version.ref` resolved through `[versions]`                |
 | `build.gradle`(`.kts`) | gradle    | `applicationId`/`namespace`, `versionName`, `versionCode`, literal coordinates, `project(…)`  |
 
-The game engines are covered too, each named after the engine rather than after a package manager, because the engine
-is what resolves its manifests. Several of them keep the version in a file no package manager would look in, and a few
-declare an identity without declaring dependencies, so they feed auto-versioning rather than the dependency graph.
+Game engines are also supported under the engine's name because the engine resolves its own manifests. Several formats
+store versions in non-standard files or declare identities without dependencies, feeding auto-versioning instead of the
+dependency graph.
 
 | File                                    | Ecosystem | Reads                                                                                    |
 |-----------------------------------------|-----------|--------------------------------------------------------------------------------------------|
@@ -96,37 +94,37 @@ declare an identity without declaring dependencies, so they feed auto-versioning
 | `game.project`                          | defold    | `title` and `version`; a library is an archive URL, so no dependencies are read           |
 | `project.json`/`gem.json`               | o3de      | the project or gem name, `version`, and the `Gem==1.0.0` dependency specifiers            |
 
-`Manifest.BuildNumber` carries the monotonic counter the formats above keep beside their marketing version
-(`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`, Gradle's `versionCode`, a pubspec version's `+`
-suffix, Unity's `buildNumber`, a `.uplugin`'s `Version`). It is not a semantic version, so no version write ever
-moves it; the writer's `SetBuild` is the one entry point that does.
+`Manifest.BuildNumber` holds the monotonic build counter stored alongside marketing versions, such as
+`CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`, Gradle's `versionCode`, a pubspec `+` suffix,
+Unity's `buildNumber`, or a `.uplugin` `Version`. Because this is not a semantic version, normal version bumps do not
+touch it. Only the writer's `SetBuild` method updates this value.
 
-`Manifest.Dropped` names the entries a manifest declared but the parser could not coerce into a dependency, one line
-each (`service db: not a mapping`). They are not errors: the manifest parsed, and the caller decides whether the drops
-are worth reporting. The shapes a format reads selectively by design are not dropped entries; those are listed under
-[Not read today](#not-read-today).
+`Manifest.Dropped` lists entries that the parser could not convert into dependencies, formatted with one line per entry
+(such as `service db: not a mapping`). These are not parse errors, and your calling code decides whether to log or
+ignore them. Unread syntax that dispat ignores by design does not appear here; see [Not read today](#not-read-today)
+for those rules.
 
-`Manifest.Indirect` carries the requirements a manifest records as transitive bookkeeping rather than as its own
-declarations. Only `go.mod` has the distinction and only its parser fills the field; a requirement in `Deps` never
-appears there as well, and an indirect require that a relative `replace` pins locally counts as a declaration and stays
-in `Deps`. Keeping the two apart is what lets a caller reconcile ranges without touching a version the toolchain owns,
-while still being able to redirect a module reached only transitively, which a Go build needs, since it honours
-`replace` in the main module alone.
+`Manifest.Indirect` holds transitive bookkeeping requirements rather than direct package declarations. Only `go.mod`
+uses this field. A dependency in `Deps` never appears in `Indirect`, though an indirect require pinned locally by a
+relative `replace` directive counts as a declaration and stays in `Deps`. Separating them allows you to reconcile
+version ranges without touching toolchain versions while still redirecting transitive modules in the root Go module.
 
-Helpers shared by the CLI's two consumers: `NameIndex` (manifest name → owning package, stated names first, then root
-manifests, then nested ones, with a same-rank collision reported instead of guessed), `ResolveLocalDir` (declared local
-path → owning package folder), `SkipDir` (the dependency trees, virtual environments, build output and dot-folders,
-exported so a caller walking a package for other reasons stays out of the same places) and `SkipWorkspaceDir`
-(everything `SkipDir` names plus the folders a game engine generates, which is the rule `Scan` itself follows).
+The scanner exposes shared helper functions:
+- `NameIndex`: maps manifest names to owning packages, prioritizing explicit names, then root manifests, then nested
+  files, and reporting same-rank collisions.
+- `ResolveLocalDir`: resolves a declared local path to its owning package folder.
+- `SkipDir`: lists dependency directories, virtual environments, build outputs, and hidden folders to ignore when
+  walking trees.
+- `SkipWorkspaceDir`: includes everything in `SkipDir` plus engine-generated folders, matching the walk rules in
+  `Scan`.
 
-`Owner.Names` is how a package with no readable identity joins the index: a Gradle module or a Makefile project
-declares nothing a parser here can read, so the caller states the names it answers to and they outrank anything a file
-declares.
+Use `Owner.Names` to register packages that lack readable manifest identities, such as Makefile projects or certain
+Gradle modules. Stated names in `Owner.Names` take precedence over any identity read from disk.
 
 ## From the command line
 
-`dispat scanner [folder]` is this package with a listing attached, and it needs no dispat config file and no git
-repository:
+Run `dispat scanner [folder]` to inspect parsed manifests directly from your terminal. It runs without a git repository
+or a dispat configuration file:
 
 ```sh
 dispat scanner packages/web              # every manifest under the folder
@@ -139,54 +137,49 @@ The full guide is [Manifest tools](https://yohimik.github.io/dispat/editing/mani
 
 ## Not read today
 
-These gaps are written down so nobody meets them for the first time in production.
+These limitations are documented so you do not encounter unexpected behavior in production.
 
-Not read: npm `workspaces`, `overrides` and `resolutions`; Cargo `[workspace.dependencies]`, `[workspace.members]` and
-target-specific tables; Maven `${property}` interpolation, parent-POM resolution, `<dependencyManagement>` and
-`<modules>`; Poetry multi-constraint dependency lists; PEP 735 `include-group`; `Directory.Build.props` and NuGet lock
-files; Bundler's alternative `gems.rb` spelling and its `Gemfile.lock`.
+dispat does not read npm `workspaces`, `overrides`, or `resolutions`; Cargo `[workspace.dependencies]`,
+`[workspace.members]`, or target-specific tables; Maven `${property}` interpolation, parent-POM resolution,
+`<dependencyManagement>`, or `<modules>`; Poetry multi-constraint dependency lists; PEP 735 `include-group`;
+`Directory.Build.props` and NuGet lock files; or Bundler `gems.rb` and `Gemfile.lock`.
 
-A `.nuspec` packed from a project is a template. NuGet fills in its `$id$` and `$version$` tokens at pack time, so a
-token version is kept as written and a token identifier reads as empty. An Xcode `$(PRODUCT_BUNDLE_IDENTIFIER)` is
-treated the same way.
+A `.nuspec` generated from a project is a template. NuGet resolves `$id$` and `$version$` tokens during packaging, so
+dispat preserves a token version as written and parses a token identifier as empty. Xcode
+`$(PRODUCT_BUNDLE_IDENTIFIER)` values behave the same way.
 
-Version text is always kept as written, so name matching still carries the graph when the version is indirected. The
-`Acme::VERSION` constant nearly every gemspec assigns its version from reads as no version at all, because the number
-lives in a Ruby source file rather than the manifest.
+Version strings are preserved exactly as written, allowing name matching to build the graph even when versions are
+indirect. If a gemspec assigns its version from a constant like `Acme::VERSION`, dispat reads no version because the
+value lives in a Ruby source file.
 
-The mobile formats are read by recognising the statement shapes that declare something. Anything a single file cannot
-resolve is dropped instead of guessed at, and on a modern Android project that is a great deal.
+Mobile manifests are read by matching declared statement structures. Anything that cannot be resolved within a single
+file is dropped rather than guessed.
 
-Not read: version-catalog accessors (`implementation libs.retrofit`), interpolated versions (`"…:$coreVersion"`, and
-`#{...}` in a Podfile), `ext` properties, and a `versionName` computed from a properties file.
+dispat does not read Gradle version-catalog accessors (`implementation libs.retrofit`), interpolated version strings
+(`"…:$coreVersion"` or `#{...}` in Podfiles), `ext` properties, or `versionName` values loaded from property files.
 
-A Gradle `project(':core')` reference is recorded by its last path segment with **no** local path. A project path is
-relative to the build's root, which one build file does not reveal, so guessing at the folder could land on a real but
-unrelated package. `settings.gradle` `projectDir` remapping is invisible for the same reason.
+A Gradle `project(':core')` reference is recorded using its last path segment with **no** local path. Project paths are
+relative to the root build file, which cannot be determined from a single submodule file. For the same reason,
+`settings.gradle` `projectDir` remaps are not tracked.
 
-`[plugins]` and `[bundles]` catalog tables are not dependencies. Subspec dependencies are collected but not attributed
-to their subspec, and `.podspec.json` is a different grammar in JSON. Only the legacy pre-namespacing attributes are
-read from an `AndroidManifest.xml`, so a modern project correctly reads empty there and declares its versions in
-`build.gradle` instead.
+Catalog `[plugins]` and `[bundles]` tables are not parsed as dependencies. Podspec subspec dependencies are parsed
+together without subspec attribution, and `.podspec.json` is not supported. `AndroidManifest.xml` only parses legacy
+pre-namespacing attributes, so modern projects will read empty and should declare their versions in `build.gradle`.
 
-Apple build-setting references are kept as written where a version is expected, matching the Maven `${property}` rule.
-A `$(PRODUCT_BUNDLE_IDENTIFIER)`-shaped *identifier* reads as empty instead: every project spells it identically, and
-`NameIndex` would report the shared literal as an ambiguous name. `Info.plist` is matched by exact name, so the legacy
-`MyApp-Info.plist` spelling is not recognised.
+Apple build-setting references remain unexpanded when parsed as versions, matching Maven `${property}` handling. A
+`$(PRODUCT_BUNDLE_IDENTIFIER)`-shaped *identifier* reads as empty to prevent `NameIndex` from colliding on identical
+literal strings across projects. `Info.plist` files require an exact name match, so names like `MyApp-Info.plist` are
+ignored.
 
 ### Whole ecosystems not read
 
-Some package managers have no reader here at all. Each entry states what reading it would take, so the cost of closing
-a gap is known before anyone starts.
+Some package managers have no reader implemented. Each item below notes the parsing model required:
 
-- Swift Package Manager: `Package.swift` is executable Swift rather than a manifest, the same objection that keeps
-  the statement-shape readers above conservative.
-- Helm: `Chart.yaml` is plain YAML with a `version`, an `appVersion` and a `dependencies` list, the cheapest gap in
-  this list to close.
-- Elixir: `mix.exs` is executable Elixir, readable only the way the Ruby files are read, by recognising the statement
-  shapes that declare something.
-- Deno: `deno.json` is plain JSON whose imports map carries versioned specifiers.
-- Conan: `conanfile.txt` is a flat list; `conanfile.py` is executable Python and shares Swift PM's objection.
+- Swift Package Manager: `Package.swift` is executable Swift code rather than static data.
+- Helm: `Chart.yaml` is standard YAML containing `version`, `appVersion`, and `dependencies` fields.
+- Elixir: `mix.exs` is executable Elixir code that requires statement-shape pattern matching.
+- Deno: `deno.json` is standard JSON with versioned specifiers in its imports map.
+- Conan: `conanfile.txt` is a flat text list, while `conanfile.py` is executable Python code.
 
 ## Requirements
 

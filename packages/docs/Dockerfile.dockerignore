@@ -35,3 +35,8 @@ packages/docs/node_modules
 packages/docs/build
 packages/docs/.docusaurus
 packages/docs/.cache-loader
+
+# The demo-rendering tooling: the site build plays the committed assets in
+# imgs/ and never runs Remotion, so its sources, dependencies and renders
+# have no business in the image.
+packages/docs/demo

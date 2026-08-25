@@ -1,11 +1,11 @@
 # dispat <img alt="dispat logo" align="right" width="128" height="128" src="../../imgs/logo.png" />
 
-The dispat command line tool: a single Go binary that plans and runs monorepo releases from your conventional commits.
-What the tool is and why it exists is in the [repository README](../../README.md); this page is about using it.
+The dispat command line tool is a single Go binary that plans and runs monorepo releases from conventional commits.
+Read the [repository README](../../README.md) to learn why dispat exists, or follow this guide to start using it.
 
 ## In the terminal
 
-Point one config file at your packages, write commits as usual, and dispat works out the rest:
+Point one config file at your packages, write your commits as usual, and let dispat handle the release logic:
 
 ```sh
 $ go install github.com/yohimik/dispat/services/dispat@latest
@@ -33,12 +33,13 @@ $ dispat                            # re-running is always safe
 done  published=0  unchanged=4
 ```
 
-(Output abridged. The starter config still needs two things from you: which folders hold your packages, and the build
-and publish commands to run in them.) If `api`'s build had failed, `core` and `utils` would still have shipped, the run
-would exit non-zero, and the next run would release `api` at the exact version it was owed. Runs are self-healing, and
-that failure model is the point of the tool; [Concepts](https://yohimik.github.io/dispat/concepts/) explains it.
+The output above is abridged. Before your first release, edit the starter config to list your package folders and set
+their build and publish commands. If `api` fails to build in that run, `core` and `utils` still ship, dispat exits
+non-zero, and the next run releases `api` at the exact version it was owed.
 
-A few more moves:
+Runs are self-healing, and [Concepts](https://yohimik.github.io/dispat/concepts/) explains this failure model in depth.
+
+Run these commands for common daily tasks:
 
 ```sh
 $ dispat preview                    # pending release notes, all packages (-p core: just one)
@@ -57,40 +58,42 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 
 ## Key features
 
-- **Releases the graph, not a list.** Consumer and provider ordering, parallel builds and publishes with separate
-  concurrency budgets, and `isBuildWaitingPublish` for the ecosystems, Docker among them, where a consumer can only
-  build once its provider is published.
-- **Blast radius written in the commit.** `feat(core):` releases `core` alone, `^` reaches its direct consumers, `^^`
-  the transitive closure, and `+N` exactly N edges. Nothing is released on a guess.
-- **Self-healing runs, because a release is a distributed transaction.** Publishing a graph means irreversible writes
-  across independent services with no rollback to fall back on, so each package's leg commits by durably recording its
-  own completion: the annotated git tag, written only once the publish succeeded. A broken package skips only its true
-  dependants while everything else keeps releasing, and re-running *is* the recovery: the plan is a pure function of
-  history, graph and configuration, so the next run recomputes the same transaction and executes only the legs whose
-  record is missing. No state files, no double releases and no repair scripts.
-  [Details](https://yohimik.github.io/dispat/internals/architecture/).
-- **Release control from commits.** `%beta` starts a prerelease train and `%beta>stable` graduates it,
-  `Release-As: none` holds a package and `Release-As: auto` resumes it, `Release-As: 2.0.0` pins an exact version and
-  `cancel(pkg)` discards pending work. It is written in commits, so release decisions are reviewed and versioned like
-  code. [Details](https://yohimik.github.io/dispat/reference/commits/#release-control).
-- **Polyglot by construction: any language, any registry, any tooling.** Stages are shell commands fed a rich
-  [`DISPAT_*` environment](https://yohimik.github.io/dispat/reference/environment/), release state lives in git tags,
-  and dispat reads and rewrites thirty-five manifest formats across twenty ecosystems, npm to `go.mod` to `Podfile` to
-  the project files Unity, Godot, Unreal, Defold and O3DE keep a game's version in, so `dispat compute` can derive the
-  dependency graph and each package's starting version from the repository you already have. And because an unchanged package is simply not in the plan, there is no task cache to manage, clear or
-  distrust: BuildKit layers, an Nx, Turborepo or Bazel cache and the Gradle build cache all keep working inside the
-  stage, and none of them can change what is versioned, ordered or tagged.
-- **Every release step is also a command, with the records built in.** Per-package changelogs, annotated tags, GitHub
-  releases and an optional release commit, each also runnable alone (`dispat changelog`, `commit`, `github`) with the
-  release stage finding the work done and skipping it. `dispat status` dry-runs the whole plan, a
-  [release lock](https://yohimik.github.io/dispat/reference/releasing/release-lock/) refuses two releases of one
-  repository at once, and `dispat release -p core` (or `-s libs`, `-g platform`) ships a subset at exactly the versions
-  a full release would have given it, with `dispat if`, `exec`, `autowriter` and `autoreplacer` as the glue a custom
-  pipeline is assembled from. [Details](https://yohimik.github.io/dispat/reference/releasing/steps/).
+- **Releases the graph, not a list.** dispat manages consumer and provider ordering across your workspace. It runs
+  builds and publishes in parallel with separate concurrency budgets, and supports `isBuildWaitingPublish` for
+  ecosystems like Docker where a consumer must wait for its provider to publish before building.
+- **Blast radius written in the commit.** A `feat(core):` commit releases `core` alone, `^` bumps its direct consumers,
+  `^^` reaches the full transitive closure, and `+N` traverses exactly N edges. You control the exact blast radius
+  directly from git history.
+- **Self-healing runs, because a release is a distributed transaction.** Publishing a graph performs irreversible
+  writes across external registries without rollbacks, so each package commits its leg by creating an annotated git tag
+  only after publishing succeeds. If a package fails, dispat skips only its dependants while unrelated packages
+  continue shipping. Re-running *is* the recovery because the plan is a pure function of git history, the dependency
+  graph, and your configuration, so the next run executes only the unfinished legs without state files or repair
+  scripts. Read more in [Details](https://yohimik.github.io/dispat/internals/architecture/).
+- **Release control from commits.** Use `%beta` to start a prerelease train and `%beta>stable` to graduate it. Set
+  `Release-As: none` to hold a package, `Release-As: auto` to resume releases, `Release-As: 2.0.0` to pin a version, or
+  `cancel(pkg)` to drop pending changes. Because you write these directives into commit messages, release decisions are
+  reviewed and tracked like code. Read more in
+  [Details](https://yohimik.github.io/dispat/reference/commits/#release-control).
+- **Polyglot by construction: any language, any registry, any tooling.** Stages execute shell commands populated with a
+  rich [`DISPAT_*` environment](https://yohimik.github.io/dispat/reference/environment/), storing release state
+  entirely in git tags. dispat reads and rewrites thirty-five manifest formats across twenty ecosystems, from npm to
+  `go.mod` to `Podfile` and game project files in Unity, Godot, Unreal, Defold, and O3DE, so `dispat compute` derives
+  your graph and starting versions automatically. Unchanged packages stay out of the plan entirely, letting external
+  caches like BuildKit, Turborepo, Nx, Bazel, or Gradle operate inside stages without affecting versioning or tags.
+- **Every release step is also a command, with the records built in.** Generate per-package changelogs, annotated tags,
+  GitHub releases, or release commits individually with standalone commands like `dispat changelog`, `commit`, or
+  `github`. When the main release stage runs later, it detects completed records and skips them. You can dry-run plans
+  with `dispat status`, prevent concurrent runs using a
+  [release lock](https://yohimik.github.io/dispat/reference/releasing/release-lock/), release subsets using
+  `dispat release -p core` (or `-s libs`, `-g platform`), and assemble custom workflows with `dispat if`, `exec`,
+  `autowriter`, and `autoreplacer`. Read more in
+  [Details](https://yohimik.github.io/dispat/reference/releasing/steps/).
 
 ## Documentation
 
-Start with [Getting started](https://yohimik.github.io/dispat/getting-started/), then dip into the references as needed:
+Start with [Getting started](https://yohimik.github.io/dispat/getting-started/), then dip into the references as
+needed:
 
 | Document                                                                                             | Contents                                                                                                                                                                                   |
 |------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -142,66 +145,58 @@ Start with [Getting started](https://yohimik.github.io/dispat/getting-started/),
 | [Test results](https://yohimik.github.io/dispat/internals/test-results/)                              | What the suite did: the counts, the timings, the race pass, and what each area covers.                                                                                                     |
 | [Integration tests](../../tests/integration)                                                         | The black-box suite itself: setup, running, and the test plan.                                                                                                                             |
 
-[`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) show every option in
-one annotated file.
+See [`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) to inspect every
+configuration option in a single annotated file.
 
 ## Testing
 
-The failure semantics above are the tool's main promise, so they are tested at two independent layers, both run by
-[CI](../../.github/workflows/tests.yml) on every push: unit tests against in-memory fakes, and a black-box
-[integration suite](../../tests/integration) that compiles the real binary and drives it against disposable git
-repositories, asserting on git state, JSON logs and nanosecond-resolution execution timelines.
+dispat verifies its failure semantics across two independent layers run by [CI](../../.github/workflows/tests.yml) on
+every push. First, unit tests evaluate logic against in-memory fakes. Second, a black-box
+[integration suite](../../tests/integration) builds the binary and runs it against disposable git repositories,
+asserting on git state, JSON logs, and nanosecond-resolution execution timelines.
 
-No number about the suite is written here. Every release measures them and publishes them with the site it releases:
-what the tests reach is in [test coverage](https://yohimik.github.io/dispat/internals/coverage/), what they did is in
-[test results](https://yohimik.github.io/dispat/internals/test-results/), and the claim-by-claim matrix behind the
-integration suite is its [test plan](../../tests/integration/docs/test-plan.md).
+Every release calculates fresh test metrics and publishes them directly to the docs site. You can review code reach in
+[test coverage](https://yohimik.github.io/dispat/internals/coverage/), execution counts and timings in
+[test results](https://yohimik.github.io/dispat/internals/test-results/), and verified scenarios in the
+[test plan](../../tests/integration/docs/test-plan.md).
 
 ## On the roadmap
 
-Written down so the shape of it is not a surprise. Nothing described here exists yet, and nothing in the first release
-depends on it.
+These planned features outline future development. Nothing described below exists yet, and current releases do not
+depend on them.
 
-**Managing the tools a release needs.** Today every stage script assumes its tools are already on the machine, so
-getting them there is somebody else's problem: a CI setup step, a Dockerfile layer, a package manager, or a `curl` line
-at the top of a script. That is the one part of a release pipeline dispat has no opinion about, and it is where "works
-on my machine" tends to survive.
+**Managing the tools a release needs.** Stage scripts currently assume required CLI tools already exist on the runner
+or host machine. You must install them using CI setup steps, Dockerfile layers, package managers, or setup scripts.
 
-The plan is to let a repository declare the CLI tools its stages need and have dispat fetch them, from a **GitHub
-release** or from a **URL you provide**, pinned to the version the config names. The machinery already exists, since
-that is what [`dispat self-update`](https://yohimik.github.io/dispat/cli/self-update/) does for dispat's own binary
-today: resolving a release, checking the download against the published checksum, and putting the result somewhere the
-next command can find it. Pointing it at other tools is the feature.
+The goal is to let your configuration declare required CLI tools so dispat can fetch them from a **GitHub release** or
+a **URL you provide**, pinned to an exact version. dispat already uses this logic internally for
+[`dispat self-update`](https://yohimik.github.io/dispat/cli/self-update/), which resolves releases, verifies checksums,
+and installs binaries. Future releases will extend that engine to external tools.
 
-**A native package in every ecosystem.** dispat ships as a static binary, which asks a repository that already has a
-package manager to install its release tool some other way. The plan is to distribute dispat through the ecosystems it
-releases, as a thin package per ecosystem wrapping the same binary: an **npm package** a JavaScript repository adds as a
-development dependency, pins in the lockfile it already reviews and runs with `npx dispat`, and the equivalent wherever
-else a repository expects its tools to come from its own package manager. Go already works this way, since `go install`
-is that ecosystem's version of the idea.
+**A native package in every ecosystem.** dispat currently ships as a standalone static binary, requiring manual
+installation outside of standard language managers. The goal is to distribute wrapper packages across native
+ecosystems, such as an **npm package** that you can add as a development dependency, pin in your lockfile, and run with
+`npx dispat`. Go projects already support this workflow through `go install`.
 
-Each wrapper is also where what belongs to one ecosystem rather than to releasing in general can live: the npm one
-carries what an npm publish expects around a `package.json` and a workspace, the next one carries its own equivalent.
-dispat already reads and rewrites those manifests, so this is about meeting each ecosystem where its users are, not
-about teaching dispat a new format.
+Each package wrapper will also handle ecosystem-specific workflows, such as npm publish expectations around
+`package.json` and workspace structures. Because dispat already reads and rewrites these manifests, native wrappers
+will fit smoothly into your existing project conventions.
 
 ## Projects using dispat
 
-dispat's own monorepo is the reference deployment: since the very first release, every release of this repository has
-been planned and published by the dispat built from the same checkout. The first stable run cut eleven packages in one
-release: this CLI with six static binaries (Linux, macOS and Windows, on amd64 and arm64), the five Go modules, four
-container images and the [documentation site](https://yohimik.github.io/dispat/), each with its own tag, changelog
-entry and GitHub release. The workflow behind it lives in the repository
-([release.yml](../../.github/workflows/release.yml)) and follows the same shape the
-[CI reference](https://yohimik.github.io/dispat/reference/ci/) documents for any repository; the full list of projects
-is in the [repository README](../../README.md#projects-using-dispat).
+dispat releases its own monorepo: every release of this repository is planned and published by the binary built from
+that checkout. The first stable release shipped eleven packages at once: this CLI across six platform targets, five Go
+modules, four container images, and the [documentation site](https://yohimik.github.io/dispat/), each with its own tag,
+changelog, and GitHub release. The release workflow lives in [release.yml](../../.github/workflows/release.yml),
+following the structure described in the [CI reference](https://yohimik.github.io/dispat/reference/ci/).
 
-Releasing a project with dispat? Share it on the Discord below and it can be listed here.
+See the [repository README](../../README.md#projects-using-dispat) for the full list of projects. If you release a
+project with dispat, share it on Discord to get it listed.
 
 ## Community
 
-Have questions or issues? Want to share a project you release with dispat?
-Come and say hello: **[discord.gg/83PwVSCCmk](https://discord.gg/83PwVSCCmk)**.
+Join the community to ask questions, report issues, or share projects:
+**[discord.gg/83PwVSCCmk](https://discord.gg/83PwVSCCmk)**.
 
-Bugs and feature requests are welcome as [GitHub issues](https://github.com/yohimik/dispat/issues) too, whichever suits
-you better.
+You can also submit bug reports and feature requests directly through
+[GitHub issues](https://github.com/yohimik/dispat/issues).

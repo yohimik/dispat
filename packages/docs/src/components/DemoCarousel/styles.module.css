@@ -1,0 +1,228 @@
+/**
+ * The hero's key-feature deck. The width matches the video the carousel
+ * replaced: wide, because the clips' lines are the tool's real output.
+ */
+
+.carousel {
+  max-width: 64rem;
+  margin: 0 auto 1.5rem;
+}
+
+/* The slides stack in one grid cell and crossfade; the frame takes the
+   tallest slide's height, so the page never jumps as the deck rotates. The
+   background and the type below come from the animation's own palette
+   (packages/docs/demo/illustration/src/theme.ts), so the band under a clip
+   reads as part of the same canvas in both site themes. container-type lets
+   the band size its type in cqw: like any presentation, the text scales with
+   the slide, so a slide that fits on a desktop fits identically on a
+   phone. */
+.frame {
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+  /* The band's surface: the only part of the frame left visible is the
+     strip the controls sit on, and it should read as part of the band. */
+  background: #161d18;
+  container-type: inline-size;
+}
+
+/* The slides stack in one grid cell and crossfade; the stack takes the
+   tallest slide's height, and the controls live below it in normal flow, so
+   the two can never overlap however deep the nav wraps. */
+.stack {
+  display: grid;
+}
+
+/* visibility rather than display for the hidden slides: it still fades, it
+   keeps every slide contributing its height to the grid, and it takes the
+   overlay's links out of the tab order while another slide is up. */
+.slide {
+  grid-area: 1 / 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.4s ease, visibility 0.4s;
+}
+
+.activeSlide {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The clips keep an empty strip at the top of their 1920x1080 canvas (the
+   master composition's scene titles type there); the deck crops part of it
+   away, cover anchored to the bottom, keeping enough of the strip for the
+   slide title and clear air between it and the diagram. */
+.video {
+  display: block;
+  width: 100%;
+  /* Explicit auto height: without it the element's height="1080" attribute
+     wins and cover blows the clip up instead of cropping the strip. */
+  height: auto;
+  aspect-ratio: 1920 / 880;
+  object-fit: cover;
+  object-position: bottom;
+}
+
+/* The claim's title, in the clips' own title spot: the strip the crop
+   deliberately leaves at the top of the canvas. */
+.slideTitle {
+  position: absolute;
+  top: 1.5cqw;
+  left: 5cqw;
+  right: 5cqw;
+  margin: 0;
+  text-align: center;
+  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
+  font-size: 1.9cqw;
+  font-weight: 700;
+  color: #dce3dd;
+}
+
+/* The claim's words under the animation that illustrates them, centred in
+   whatever the tallest slide's text leaves over. */
+.band {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 1.7cqw 5.5cqw 1.9cqw;
+  border-top: 1.5px solid #232b26;
+  background: #161d18;
+  text-align: center;
+}
+
+.bandBody {
+  margin: 0;
+  font-size: 1.45cqw;
+  line-height: 1.6;
+  color: #a9b5ad;
+}
+
+.bandBody code {
+  border: none;
+  padding: 0.05em 0.3em;
+  background: rgba(220, 227, 221, 0.09);
+  color: #dce3dd;
+  font-size: 0.95em;
+}
+
+/* The animation's green, not the theme's: the light theme's primary is a
+   deep green that would vanish on this dark canvas. */
+.bandBody a,
+.bandBody a code {
+  color: #4cd98a;
+}
+
+/* The deck's one control surface, a player bar living in the band's lower
+   half: transport on the left, a hairline, then the named slides. Sized in
+   cqw like the rest of the slide, so it wraps the same way at every
+   width. */
+.controls {
+  margin: 0 2.6cqw 1.5cqw;
+  display: flex;
+  align-items: center;
+  gap: 1cqw;
+  padding: 0.8cqw 1.1cqw;
+  border-radius: 1.4cqw;
+  background: rgba(220, 227, 221, 0.04);
+  border: 1.5px solid #232b26;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.55cqw;
+}
+
+.divider {
+  align-self: stretch;
+  width: 1.5px;
+  background: #232b26;
+}
+
+.pills {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55cqw 0.7cqw;
+}
+
+.navButton {
+  padding: 0.32cqw 1.15cqw;
+  border: none;
+  border-radius: 999px;
+  background: rgba(220, 227, 221, 0.08);
+  color: #c3cdc6;
+  font-size: 1.28cqw;
+  font-family: var(--ifm-font-family-base);
+  line-height: 1.55;
+  cursor: pointer;
+}
+
+.navButton:hover {
+  background: rgba(220, 227, 221, 0.18);
+}
+
+.activeNavButton,
+.activeNavButton:hover {
+  background: #6fae8a;
+  color: #101713;
+}
+
+/* The transport's round buttons, the size of a pill. */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.62cqw;
+  height: 2.62cqw;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(220, 227, 221, 0.08);
+  color: #c3cdc6;
+  cursor: pointer;
+}
+
+.iconButton svg {
+  width: 1.45cqw;
+  height: 1.45cqw;
+}
+
+.iconButton:hover {
+  background: rgba(220, 227, 221, 0.18);
+}
+
+.activeIconButton,
+.activeIconButton:hover {
+  background: #6fae8a;
+  color: #101713;
+}
+
+/* The speed cycler. Fixed width, sized for "0.5×", the widest label: the
+   pill must not resize as the label changes or the whole row shifts. */
+.speedButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.7cqw;
+  height: 2.62cqw;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(220, 227, 221, 0.08);
+  color: #c3cdc6;
+  font-size: 1.28cqw;
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.speedButton:hover {
+  background: rgba(220, 227, 221, 0.18);
+}

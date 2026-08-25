@@ -3,7 +3,9 @@
 Read this page to understand the source code or why a behaviour works the way it does. It covers the modules dispat is
 assembled from, the algorithms behind the plan, the execution model, and the design decisions that shape both.
 References like `§N.N` point into the conventional-commits specification the parser implements, located at
-[`pkg/ccme/SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md).
+[`pkg/ccme/SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). The specification is licensed under
+GPL-3.0-or-later, and dispat uses GPL licensed materials from CCME wherever this documentation quotes or restates it.
+The parser itself and the rest of dispat remain under MIT.
 
 ## Runtime steps
 
