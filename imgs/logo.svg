@@ -4,7 +4,10 @@
        side 6 offset by 3, every edge on the grid so any integer multiple of
        9 pixels renders without anti-aliasing. Two darks on purpose: the ring
        sits a step lighter than the square, which is what keeps the overlap
-       readable where the shapes meet. -->
+       readable where the shapes meet. The white tile is part of the mark,
+       not transparency to be filled in: the site shows this one variant on
+       light and dark surfaces alike, and the tile is what it stands on. -->
+  <rect width="9" height="9" fill="#FFFFFF"/>
   <path fill="#171717" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
   <path fill="#0D0D0D" d="M3 3h6v6H3Z"/>
 </svg>
