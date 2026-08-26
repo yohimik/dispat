@@ -293,7 +293,8 @@ runs.
 
 Run `dispat run <name>` to compute the plan. dispat then runs that script inside every changed package that has one, in
 dependency order. `dispat <name>` is the same thing whenever `<name>` is not a command name. Nothing is released or
-tagged.
+tagged. A covered package without the name does nothing. A name no level defines is an error, and what a selection that
+resolves the name nowhere does depends on whether you named it; read the rule in [The run command](../cli/run.md).
 
 Package selection is a shared subject across commands. This covers which packages run, how `--package` / `--space` /
 `--group` and the invocation folder narrow the target, and what `--since` and `--consumers` do to the window. Read

@@ -464,12 +464,13 @@ running no prerelease train no unit carries a channel directive at all and the c
 ## Deliberately out of scope
 
 dispat implements the release computation. Some parts of the specification assume an engine that also reads package
-manifests and knows about registries. dispat delegates those to the version and publish scripts instead. This keeps
-dispat language-agnostic:
+manifests and knows about registries. The manifest half is native when a space opts into
+[`autoVersion`](../configuration/autoversion.md), whose parsing strategy covers every format the scanner reads; the
+registry half is delegated to the version and publish scripts. This keeps dispat language-agnostic:
 
 | Not implemented                                             | Delegated to                                                                                                                                                                          |
 |-------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Rewriting dependency ranges in manifests                    | native for `package.json`/`go.mod` under [`autoVersion`](../configuration/autoversion.md) (W197/W203); other ecosystems: `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
+| Rewriting dependency ranges in manifests                    | native under [`autoVersion`](../configuration/autoversion.md) for every scanner-read format, npm and Go through the game engines ([Supported formats](../editing/manifests.md#supported-formats)), reported as W197/W203; indirections and versions no manifest holds: `replace` rules or `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
 | Manifest-vs-baseline version checks                         | native under `autoVersion` (W192); otherwise nothing                                                                                                                                  |
 | Publish targets, registries, adopting published versions    | `flow.publish`                                                                                                                                                                        |
 | `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps                                                                                                                         |

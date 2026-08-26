@@ -104,11 +104,12 @@ func newDiscovery(c *File, root string) (*discovery, error) {
 	}, nil
 }
 
-// resolveSpace settles one space's configuration: the root file's defaults,
-// then the space entry over them, then each of the space's folders' own
-// config files in path order, which together are the layer between the entry
-// and anything said about one package.
-func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
+// resolveSpaceConfig settles one space's own configuration — the root file's
+// defaults, the space entry over them, then each of the space's folders' own
+// config files in path order — without walking the folders for packages. It
+// is the first phase of resolveSpace, and the whole of what
+// ResolvedSpaceConfigs needs.
+func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []SpaceFile, []string, error) {
 	sc := spaceBase(d.c, d.c.Spaces[sn])
 	dirs := make([]string, len(sc.Path))
 	for i, p := range sc.Path {
@@ -127,7 +128,7 @@ func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 		}
 		spaceFile, spaceSrc, err := loadSpaceFile(dir)
 		if err != nil {
-			return nil, fmt.Errorf("config: space %q: %w", sn, err)
+			return SpaceConfig{}, nil, nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
 		if spaceSrc == "" {
 			continue
@@ -135,15 +136,46 @@ func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 		label := fmt.Sprintf("space %q (%s)", sn, spaceSrc)
 		sc = mergePackageOverride(sc, spaceOverride(spaceFile))
 		if sc, err = validateSpaceAs(label, sc); err != nil {
-			return nil, fmt.Errorf("config: %w", err)
+			return SpaceConfig{}, nil, nil, nil, fmt.Errorf("config: %w", err)
 		}
 		if err := validateSpacePackages(label+": packages", spaceFile.Packages); err != nil {
-			return nil, fmt.Errorf("config: %w", err)
+			return SpaceConfig{}, nil, nil, nil, fmt.Errorf("config: %w", err)
 		}
 		files = append(files, spaceFile)
 		srcs = append(srcs, spaceSrc)
 	}
 	d.spaceConfigs[sn] = sc
+	return sc, dirs, files, srcs, nil
+}
+
+// ResolvedSpaceConfigs settles every space's own configuration — the root
+// file's entry with the space folders' config files merged over it — without
+// walking the folders for packages. It exists for the caller that needs a
+// space's scripts when the space holds no package to carry them: `dispat
+// run`'s typo guard, which must not call a name undefined because the one
+// space defining it is empty.
+func ResolvedSpaceConfigs(c *File, root string) (map[string]SpaceConfig, error) {
+	d, err := newDiscovery(c, root)
+	if err != nil {
+		return nil, err
+	}
+	for _, sn := range sortedSpaceNames(c) {
+		if _, _, _, _, err := d.resolveSpaceConfig(sn); err != nil {
+			return nil, err
+		}
+	}
+	return d.spaceConfigs, nil
+}
+
+// resolveSpace settles one space's configuration: the root file's defaults,
+// then the space entry over them, then each of the space's folders' own
+// config files in path order, which together are the layer between the entry
+// and anything said about one package.
+func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
+	sc, dirs, files, srcs, err := d.resolveSpaceConfig(sn)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := d.collectSpaceDeps(sn, files, srcs); err != nil {
 		return nil, err

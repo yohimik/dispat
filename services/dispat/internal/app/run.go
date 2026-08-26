@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
@@ -57,11 +58,16 @@ type RunOptions struct {
 // A package resolves the name through its own scripts, then its space's, then
 // the top level's, so where a name is defined is what a run covers: a
 // top-level script reaches every changed package, a space's reaches that
-// space's, and a package's reaches that package alone. A selected package
-// that resolves nothing completes as a no-op — but a name nothing defines, or
-// a selection in which no package resolves it, is an error, because running
-// nothing silently is how a typo hides. opts decides which packages the run
-// covers (see RunOptions); any failure makes the whole command fail.
+// space's, and a package's reaches that package alone. A covered package that
+// resolves nothing completes as a no-op. A name nothing defines is an error,
+// and so is an explicit selection — a --package, --space or --group term, or
+// the package or space folder the command was invoked from — in which no
+// package resolves it, because running nothing against what the user named is
+// how a typo hides. A selection the window assembled on its own that resolves
+// nothing completes as a reported no-op instead: the window claims only that
+// packages changed, not that the script reaches them. opts decides which
+// packages the run covers (see RunOptions); any failure makes the whole
+// command fail.
 func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error {
 	if !a.scriptDefinedAnywhere(name) {
 		msg := fmt.Sprintf("no script %q is defined at the top level, in a space or in a package", name)
@@ -81,7 +87,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return errors.New("no correct plan exists")
 	}
-	covered, err := a.coveredPackages(ctx, pl, opts.Window)
+	sel, covered, err := a.coveredSelection(ctx, pl, opts.Window)
 	if err != nil {
 		a.log.Error().Err(err).Msg("cannot run the script")
 		return err
@@ -103,20 +109,37 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		a.log.Warn().Err(drainErr).Msg("run interrupted")
 		return drainErr
 	}
-	// The script exists somewhere — the guard above said so — but not where
-	// this run looked. Silence here would read like a clean run of nothing,
-	// so the mismatch between the name's level and the selection is an error.
-	// A selection that is empty to begin with is not: nothing changed, and a
-	// run over no packages is an honest no-op.
+	// A selection that is empty to begin with is a clean no-op: nothing
+	// changed, and a run over no packages has nothing to say.
 	if len(covered) > 0 && rep.Resolved == 0 {
+		if err := a.reportNothingResolved(name, sel, covered); err != nil {
+			return err
+		}
+	}
+	if rep.Failed > 0 {
+		return fmt.Errorf("%d run script(s) failed", rep.Failed)
+	}
+	return nil
+}
+
+// reportNothingResolved decides what a sweep that resolved the script in no
+// covered package means. The script exists somewhere — the typo guard said so
+// — but not where this run looked. A selection the user spelled out, with a
+// --package, --space or --group term or by invoking the command from a
+// package or space folder, is a claim that the script reaches those packages,
+// and running nothing against that claim is how a typo hides — so it errors.
+// A selection the window assembled on its own claims nothing: a changed
+// window that happens to hold only packages outside the script's reach is an
+// honest no-op, said out loud at info so a green sweep still explains itself.
+func (a *App) reportNothingResolved(name string, sel filter.Result, covered []string) error {
+	if sel.Active() {
 		err := fmt.Errorf("no selected package defines script %q (selected: %s)",
 			name, strings.Join(covered, ", "))
 		a.log.Error().Err(err).Msg("nothing to run")
 		return err
 	}
-	if rep.Failed > 0 {
-		return fmt.Errorf("%d run script(s) failed", rep.Failed)
-	}
+	a.log.Info().Str("script", name).Strs("covered", covered).
+		Msg("script resolves in no covered package, nothing to do")
 	return nil
 }
 
@@ -140,6 +163,18 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 	for _, po := range a.cfg.Packages {
 		if _, ok := po.Scripts[key]; ok {
 			return true
+		}
+	}
+	// The two levels only the filesystem knows come last, cheapest first: a
+	// space folder's own config file defines its scripts whether or not the
+	// space discovered a single package, which the package walk below — the
+	// one place a script defined solely in a package folder's file can be
+	// seen — cannot answer for an empty space.
+	if spaces, err := config.ResolvedSpaceConfigs(a.cfg, a.root); err == nil {
+		for _, sc := range spaces {
+			if _, ok := sc.Script(name); ok {
+				return true
+			}
 		}
 	}
 	pkgs, _, _, err := config.DiscoverPackages(a.cfg, a.root)

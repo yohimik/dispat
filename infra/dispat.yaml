@@ -19,8 +19,6 @@ changelog:
 github:
   enabled: false
 scripts:
-  # Swept by `dispat run build --since HEAD~1` like every module and keeps error
-  build: "echo built"
   # Swept by `dispat run vet` like every module, and skips cleanly on a
   # machine without terraform so the sweep stays green everywhere.
   vet: |

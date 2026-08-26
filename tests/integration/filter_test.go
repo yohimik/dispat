@@ -296,14 +296,38 @@ func TestFilterExplicitTermsBeatTheFolder(t *testing.T) {
 	assert.Equal(t, []string{"site"}, logged(r, "stamp.log"))
 }
 
-// TestFilterRefusesASelectionWithoutTheScript: a filter reaching only packages
-// that resolve no command for the name is an error, not a silent no-op — the
-// same guard a whole-monorepo run applies.
+// TestFilterRefusesASelectionWithoutTheScript: a selection the user spelled
+// out reaching only packages that resolve no command for the name is an
+// error, not a silent no-op — in every explicit spelling: a package term, a
+// space term, the invocation folder, and a term composed with --since. The
+// window-only counterpart is a reported no-op, pinned in run_test.go.
 func TestFilterRefusesASelectionWithoutTheScript(t *testing.T) {
 	r := filterRepo(t)
 	res := r.RunScript("lint", "-p", "site")
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stdout, "no selected package defines script")
+
+	res = r.RunScript("lint", "-s", "apps")
+	assert.Equal(t, 1, res.Code, "a space term is the same claim about its packages")
+	assert.Contains(t, res.Stdout, "no selected package defines script")
+
+	res = r.CommandAt("apps/site", "lint")
+	assert.Equal(t, 1, res.Code, "the invocation folder is an explicit selection too")
+	assert.Contains(t, res.Stdout, "no selected package defines script")
+
+	res = r.RunScript("lint", "--since", "all", "-p", "site")
+	assert.Equal(t, 1, res.Code, "--since widens the window without excusing the term")
+	assert.Contains(t, res.Stdout, "no selected package defines script")
+}
+
+// TestRunMixedSelectionRunsTheResolvers: an explicit selection refuses only
+// when nothing resolves the name — one resolver among the named packages
+// runs, the rest complete as no-ops, and the command succeeds.
+func TestRunMixedSelectionRunsTheResolvers(t *testing.T) {
+	r := filterRepo(t)
+	res := r.RunScript("lint", "-p", "core,site")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, []string{"core"}, logged(r, "lint.log"), "core runs; site is a no-op, not a refusal")
 }
 
 // TestFilterStepCommandsSelect: the step commands take the same terms and the

@@ -152,20 +152,29 @@ type WindowOptions struct {
 // left out is said out loud, because "I asked for core and nothing happened"
 // deserves a reason.
 func (a *App) coveredPackages(ctx context.Context, pl *plan.Plan, opts WindowOptions) ([]string, error) {
+	_, covered, err := a.coveredSelection(ctx, pl, opts)
+	return covered, err
+}
+
+// coveredSelection is coveredPackages together with the filter's resolved
+// Result, for the one caller that must know whether the packages were named or
+// merely fell inside the window: `dispat run` treats the two differently when
+// none of them resolves the script.
+func (a *App) coveredSelection(ctx context.Context, pl *plan.Plan, opts WindowOptions) (filter.Result, []string, error) {
 	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
 	if err != nil {
-		return nil, err
+		return filter.Result{}, nil, err
 	}
 	window, err := a.windowPackages(ctx, pl, opts)
 	if err != nil {
-		return nil, err
+		return filter.Result{}, nil, err
 	}
 	covered := sel.Keep(window)
 	a.reportOutsideWindow(sel, covered)
 	if opts.Consumers {
 		covered = withConsumers(pl, covered)
 	}
-	return covered, nil
+	return sel, covered, nil
 }
 
 // windowPackages resolves the window alone: the packages --since addresses,

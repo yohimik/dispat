@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -36,6 +38,49 @@ func runPlan(root string, names []string, providers map[string][]string) *plan.P
 func runApp(root string) *App {
 	cfg := &config.File{Spaces: map[string]config.SpaceConfig{"libs": {Path: config.PathList{"libs"}}}}
 	return New(root, cfg, zerolog.Nop())
+}
+
+// TestReportNothingResolved pins the split the run command draws when the
+// sweep resolved the script in no covered package: a selection the user
+// named errors, a selection the window assembled on its own is a reported
+// no-op.
+func TestReportNothingResolved(t *testing.T) {
+	root := t.TempDir()
+	pl := runPlan(root, []string{"a", "b"}, nil)
+	a := runApp(root)
+
+	sel, err := filter.Resolve(filter.Filter{Packages: []string{"a"}}, a.planWorkspace(pl))
+	require.NoError(t, err)
+	require.True(t, sel.Active())
+	err = a.reportNothingResolved("stamp", sel, []string{"a"})
+	require.Error(t, err, "an explicit selection without the script is a refusal")
+	assert.EqualError(t, err, `no selected package defines script "stamp" (selected: a)`)
+
+	assert.NoError(t, a.reportNothingResolved("stamp", filter.Result{}, []string{"a", "b"}),
+		"a window-only selection without the script is a no-op, not a failure")
+}
+
+// TestScriptDefinedAnywhereSeesAnEmptySpaceFile: a script written in a space
+// folder's own config file counts as defined even when the space discovers no
+// package — the one carrier the package walk cannot answer for. The config
+// goes through Load like a real run's, because Load is what settles the
+// defaults discovery leans on.
+func TestScriptDefinedAnywhereSeesAnEmptySpaceFile(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "emptyspace"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "emptyspace", "dispat.json"),
+		[]byte(`{"scripts": {"special": ["echo hi"]}}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"),
+		[]byte(`{"spaces": {"empty": {"path": "emptyspace"}}}`), 0o644))
+	cfg, err := config.Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	a := New(root, cfg, zerolog.Nop())
+
+	assert.True(t, a.scriptDefinedAnywhere("special"),
+		"a space folder's script needs no package to be seen")
+	assert.True(t, a.scriptDefinedAnywhere("SPECIAL"),
+		"the lookup folds case like every other level")
+	assert.False(t, a.scriptDefinedAnywhere("ghost"))
 }
 
 func TestScriptWorkStage(t *testing.T) {

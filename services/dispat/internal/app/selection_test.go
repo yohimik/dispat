@@ -79,6 +79,39 @@ func TestCoveredPackages(t *testing.T) {
 	assert.Contains(t, err.Error(), "a, b, c, d", "the error lists what was discovered")
 }
 
+// TestCoveredSelectionReportsActivity pins what makes a selection explicit:
+// a term and the invocation folder switch the filter's Result on, the window
+// alone never does — the whole distinction `dispat run` draws when nothing
+// resolves a script — and the coveredPackages wrapper returns the same
+// covered packages.
+func TestCoveredSelectionReportsActivity(t *testing.T) {
+	root := t.TempDir()
+	pl := runPlan(root, []string{"a", "b"}, nil)
+	pl.Releases["a"].Pinned = true
+	app := runApp(root)
+	ctx := context.Background()
+
+	for name, tc := range map[string]struct {
+		opts   WindowOptions
+		active bool
+	}{
+		"no filter is not explicit":         {WindowOptions{}, false},
+		"since alone is not explicit":       {WindowOptions{Since: SinceAll}, false},
+		"a package term is explicit":        {WindowOptions{Filter: filter.Filter{Packages: []string{"a"}}}, true},
+		"the invocation folder is explicit": {WindowOptions{Filter: filter.Filter{Dir: filepath.Join(root, "libs", "a")}}, true},
+		"a term stays explicit under since": {WindowOptions{Since: SinceAll, Filter: filter.Filter{Packages: []string{"b"}}}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sel, covered, err := app.coveredSelection(ctx, pl, tc.opts)
+			require.NoError(t, err)
+			assert.Equal(t, tc.active, sel.Active())
+			viaWrapper, err := app.coveredPackages(ctx, pl, tc.opts)
+			require.NoError(t, err)
+			assert.Equal(t, covered, viaWrapper, "the wrapper is the same selection minus the Result")
+		})
+	}
+}
+
 func TestSincePackagesAll(t *testing.T) {
 	root := t.TempDir()
 	pl := runPlan(root, []string{"a", "b"}, map[string][]string{})

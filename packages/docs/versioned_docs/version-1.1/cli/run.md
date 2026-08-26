@@ -7,7 +7,11 @@ fails, dispat skips its dependents or keeps them running according to `--on-erro
 Each package looks the name up in its own `scripts`, then its space's, then the file's. The level you define a name at
 decides its reach, so a file-level script runs in every changed package, a space's script runs in that space's
 packages, and a package's script runs in that package alone. A selected package with no command for the name does
-nothing, while a missing name exits `1` because either no level defines it or none of the selected packages have it.
+nothing, and a name no level defines exits `1`, because a run that silently does nothing is how a typo hides. When the
+name exists but none of the covered packages resolves it, the outcome depends on how they were chosen: a selection you
+named yourself, with `--package`, `--space`, `--group` or by invoking the command from a package or space folder,
+exits `1`, since naming packages claims the script reaches them, while a selection the window assembled on its own
+completes as a no-op and reports at info level that no covered package resolves the script.
 
 Selection happens in three steps, in this order:
 
@@ -16,7 +20,9 @@ Selection happens in three steps, in this order:
    `--since <rev>` to select the packages the commits in `rev..HEAD` address, using `HEAD~1` for the last commit,
    `origin/main` for a branch, a release tag, or `all` for every package. Selection follows the planner's
    [scope semantics](../reference/commits.md#scope-sets), so a commit's written scopes are authoritative and only
-   scopeless units fall back to the files they changed.
+   scopeless units fall back to the files they changed. A window that covers only packages outside the script's reach
+   completes as a no-op, so a sweep such as `dispat run build --since HEAD~1` stays green when a commit touches only
+   packages without the script.
 2. **The filter** picks from that window using `--package`, `--space`, `--group`, or your current folder, as described
    in [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core
    when core changed and nothing at all when it did not. Pass `--since all -p core` to run a script regardless of

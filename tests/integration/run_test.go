@@ -10,10 +10,12 @@ package integration
 // file's, so the level x is defined at is what a run covers: a top-level
 // script reaches every changed package, a space's reaches that space's, a
 // package's reaches that package alone. A changed package that resolves
-// nothing completes as a no-op; a name nothing defines, and a selection in
-// which no package resolves it, are both errors. What a failure does to the
-// failed package's dependents is the --on-error flag: "skip" (default) or
-// "continue"; any failure makes the command exit 1.
+// nothing completes as a no-op. A name nothing defines is an error, and so is
+// an explicit selection — a --package, --space or --group term, or the
+// invocation folder — in which no package resolves it; a selection only the
+// window assembled that resolves nothing is a reported no-op instead. What a
+// failure does to the failed package's dependents is the --on-error flag:
+// "skip" (default) or "continue"; any failure makes the command exit 1.
 
 import (
 	"os"
@@ -240,11 +242,12 @@ func TestRunResolvesTheMostLocalScript(t *testing.T) {
 		"app takes its own, core takes its space's, tool takes the file's")
 }
 
-// TestRunNoSelectedPackageDefinesIt: the name exists — so this is not the
-// typo guard — but nowhere in the selection, which would otherwise run
-// nothing and report success. The mismatch between the name's level and the
-// selection is an error.
-func TestRunNoSelectedPackageDefinesIt(t *testing.T) {
+// TestRunWindowSelectionWithoutTheScriptIsANoOp: the name exists — so this is
+// not the typo guard — but nowhere in the window's selection. Nothing was
+// named, so the mismatch accuses nobody: the run exits 0 and reports at info
+// level that the script reached no covered package. The explicit-selection
+// counterpart, which does error, is pinned in filter_test.go.
+func TestRunWindowSelectionWithoutTheScriptIsANoOp(t *testing.T) {
 	r := runRepo(t)
 	cfg := runConfig()
 	cfg.Packages = map[string]models.PackageConfig{
@@ -256,12 +259,96 @@ func TestRunNoSelectedPackageDefinesIt(t *testing.T) {
 	r.CommitEmpty("fix(core): only core changes now")
 
 	res := r.RunScript("stamp")
-	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Empty(t, runLog(r))
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Empty(t, runLog(r), "nothing ran")
+	e := findEvent(t, res.Events, "script resolves in no covered package, nothing to do")
+	assert.Equal(t, "stamp", e.Str("script"))
 
-	// The same name over a selection that does contain tool is fine.
+	// The same name over a window that does contain tool runs it.
 	r.RunScriptOK("stamp", "--since", "all")
 	assert.Equal(t, []string{"tool"}, runLog(r))
+}
+
+// TestRunSinceWindowWithoutTheScriptIsANoOp is the sweep-in-CI shape of the
+// no-op rule: a space defines the script, a standalone package does not, and
+// a commit touching only the standalone package makes `--since HEAD~1` cover
+// it alone. The sweep stays green rather than demanding a dummy script.
+func TestRunSinceWindowWithoutTheScriptIsANoOp(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	libs := cfg.Spaces["libs"]
+	libs.Scripts = map[string]models.Script{"lint": {`echo "$DISPAT_PACKAGE" >> ../../lint.log`}}
+	cfg.Spaces["libs"] = libs
+	cfg.Packages = map[string]models.PackageConfig{"solo": {Path: "tools/solo", Flow: buildPublish()}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("tools/solo/main.txt", "x")
+	r.Commit("feat(core,solo): bootstrap both")
+	r.WriteFile("tools/solo/touch.txt", "x")
+	r.Commit("chore(solo): touch solo alone")
+
+	res := r.RunScript("lint", "--since", "HEAD~1")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.NoFileExists(t, r.Path("lint.log"), "the space's packages are outside the window")
+	e := findEvent(t, res.Events, "script resolves in no covered package, nothing to do")
+	assert.Equal(t, "lint", e.Str("script"))
+	assert.Equal(t, []any{"solo"}, e["covered"], "the report names what the window covered")
+
+	// A window that does reach the defining space runs it.
+	r.RunScriptOK("lint", "--since", "all")
+	data, err := os.ReadFile(r.Path("lint.log"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core"}, strings.Fields(string(data)))
+}
+
+// TestRunSpaceFileScriptInAnEmptySpace: a script written only in a space
+// folder's own config file, in a space that holds no package, must count as
+// defined — the typo guard reads the space files, not just the packages. The
+// run itself is then the window no-op, because no covered package resolves it.
+func TestRunSpaceFileScriptInAnEmptySpace(t *testing.T) {
+	r := runRepo(t)
+	cfg := runConfig()
+	cfg.Spaces["archive"] = models.SpaceConfig{Path: models.PathList{"archive"}, Flow: buildPublish()}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("archive/dispat.json", `{"scripts": {"special": ["echo special ran"]}}`)
+	r.Commit("chore(core): add an empty space with its own script")
+
+	res := r.RunScript("special")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	findEvent(t, res.Events, "script resolves in no covered package, nothing to do")
+
+	res = r.RunScript("ghost")
+	assert.Equal(t, 1, res.Code, "a name no level defines is still the typo guard's error")
+}
+
+// TestRunConsumersWindowWithoutTheScriptIsANoOp: --consumers expands a
+// window-only selection without making it explicit, so a script the expanded
+// selection still cannot resolve stays a reported no-op rather than an error.
+func TestRunConsumersWindowWithoutTheScriptIsANoOp(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Packages = map[string]models.PackageConfig{
+		"extra": {Scripts: map[string]models.Script{"special": {`echo "$DISPAT_PACKAGE" >> ../../special.log`}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "mid", Provider: "core"},
+		{Consumer: "app", Provider: "mid"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "mid")
+	r.SeedPackage("packages", "app")
+	r.SeedPackage("packages", "extra")
+	r.Commit("feat(core,mid,app,extra): bootstrap the chain")
+	r.WriteFile("packages/core/touch.txt", "x")
+	r.Commit("chore(core): touch core alone")
+
+	res := r.RunScript("special", "--since", "HEAD~1", "--consumers")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.NoFileExists(t, r.Path("special.log"), "extra is not among core's consumers")
+	e := findEvent(t, res.Events, "script resolves in no covered package, nothing to do")
+	assert.Equal(t, []any{"core", "mid", "app"}, e["covered"],
+		"the expansion happened; it just reached no package with the script")
 }
 
 // TestRunFilterRunsATopLevelScriptInOnePackage: a filtered run executes one
