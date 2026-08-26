@@ -119,13 +119,13 @@ budget the script enforces.
 
 ## Release
 
-dispat releases the `docs` package like any other. It has a `keep: true` dependency on `dispat`, so the site rebuilds
-after the CLI it documents:
+dispat releases the `docs` package like any other. It has `keep: true` dependencies on `dispat` and on `infra`, so the
+site rebuilds after the CLI it documents and deploys after the footprint it lands on:
 
 | Stage     | Script                                                   | What it does                                                                             |
 |-----------|----------------------------------------------------------|------------------------------------------------------------------------------------------|
 | `build`   | the `build` script in [`dispat.yaml`](./dispat.yaml)     | This runs the containerised production build via [`Dockerfile`](./Dockerfile) and exports it back into the package folder. It freezes a `versioned_docs` snapshot on the way, once per **stable minor** release. The build uses the `DOCS_VERSION` build arg, and prereleases cut nothing. |
-| `publish` | the `deploy-docs` script in [`dispat.yaml`](./dispat.yaml) | This force-pushes `build/` to an orphan `gh-pages` branch. It refuses to run outside CI.         |
+| `publish` | the `deploy-docs` script in [`dispat.yaml`](./dispat.yaml) | This syncs `build/` into the Cloud Storage bucket behind [dispat.dev](https://dispat.dev/), sets the cache lifetimes, and invalidates the CDN. It refuses to run outside CI. |
 
 Tags use the format `packages/docs/v<version>`. The files `versioned_docs/`, `versioned_sidebars/`, and `versions.json`
 are **source**, not build output. A script writes them once, and you edit them by hand afterwards, so they remain
