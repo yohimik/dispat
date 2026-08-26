@@ -79,7 +79,10 @@ function sitemapPriority(path: string): number {
 const config: Config = {
   title: 'dispat',
   tagline: 'The polyglot monorepo release tool: conventional commits in, ordered parallel publishes out',
-  favicon: 'logo.png',
+  // The SVG carries its own prefers-color-scheme rule, so the glyph stays
+  // visible on a dark tab strip; the .ico in headTags is the fallback for
+  // whatever cannot read it.
+  favicon: 'favicon.svg',
 
   url: 'https://dispat.dev',
   baseUrl: '/',
@@ -286,6 +289,9 @@ const config: Config = {
   // Structured data for the site root, so a crawler gets the project's identity
   // and its feature list without having to infer them from the prose.
   headTags: [
+    // The legacy favicon, beside the SVG the `favicon` option emits: older
+    // consumers pick the .ico, everything current prefers the vector.
+    {tagName: 'link', attributes: {rel: 'icon', href: '/favicon.ico', sizes: '32x32'}},
     {
       tagName: 'script',
       attributes: {type: 'application/ld+json'},
@@ -353,7 +359,7 @@ const config: Config = {
     ],
     navbar: {
       title: 'dispat',
-      logo: {alt: 'dispat logo', src: 'logo.png'},
+      logo: {alt: 'dispat logo', src: 'logo.svg', srcDark: 'logo-dark.svg'},
       // Two sidebars, two items. Docs is what a reader works through, API is
       // what a reader looks something up in; see the comment in sidebars.ts.
       // A docSidebar item lands on its sidebar's first page, so Docs opens on

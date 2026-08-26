@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9" width="288" height="288">
+  <!-- The dark-theme variant of logo.svg: identical geometry, fills mirrored
+       so the ring again sits one step toward the background relative to the
+       square. -->
+  <path fill="#E8E8E8" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
+  <path fill="#FFFFFF" d="M3 3h6v6H3Z"/>
+</svg>

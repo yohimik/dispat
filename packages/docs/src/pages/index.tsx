@@ -9,6 +9,7 @@ import Inlines from '@site/src/components/Inline';
 import CodeBlock from '@theme/CodeBlock';
 import Heading from '@theme/Heading';
 import Layout from '@theme/Layout';
+import ThemedImage from '@theme/ThemedImage';
 import React from 'react';
 
 import styles from './index.module.css';
@@ -104,7 +105,13 @@ function Hero(): React.ReactElement {
   return (
     <header className={styles.hero}>
       <div className="container">
-        <img className={styles.logo} src={useBaseUrl('/logo.png')} alt="dispat logo" width={128} height={128} />
+        <ThemedImage
+          className={styles.logo}
+          alt="dispat logo"
+          width={128}
+          height={128}
+          sources={{light: useBaseUrl('/logo.svg'), dark: useBaseUrl('/logo-dark.svg')}}
+        />
         <Heading as="h1" className={styles.title}>
           {siteConfig.title}
         </Heading>

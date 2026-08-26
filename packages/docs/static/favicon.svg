@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9">
+  <!-- The mark from imgs/logo.svg with one addition a favicon needs: the
+       browser reads the page's colour scheme, not the site's theme toggle,
+       so the glyph carries its own dark-scheme rule and stays visible on a
+       dark tab strip. -->
+  <style>
+    .ring { fill: #171717; }
+    .square { fill: #0D0D0D; }
+    @media (prefers-color-scheme: dark) {
+      .ring { fill: #E8E8E8; }
+      .square { fill: #FFFFFF; }
+    }
+  </style>
+  <path class="ring" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
+  <path class="square" d="M3 3h6v6H3Z"/>
+</svg>

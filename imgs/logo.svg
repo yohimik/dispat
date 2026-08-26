@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9" width="288" height="288">
+  <!-- The mark on a 9-unit grid, the same drawing the CLI banner prints: an
+       outlined square of side 6 with a 1-unit stroke, and a filled square of
+       side 6 offset by 3, every edge on the grid so any integer multiple of
+       9 pixels renders without anti-aliasing. Two darks on purpose: the ring
+       sits a step lighter than the square, which is what keeps the overlap
+       readable where the shapes meet. -->
+  <path fill="#171717" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
+  <path fill="#0D0D0D" d="M3 3h6v6H3Z"/>
+</svg>
