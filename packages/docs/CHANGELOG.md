@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.9 (2026-08-26)
+
+### Fixes
+
+- logo transparency
+
+
 ## packages/docs/v1.1.8 (2026-08-26)
 
 ### Fixes
