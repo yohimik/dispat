@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.8 (2026-08-26)
+
+### Fixes
+
+- color scheme
+
+
 ## packages/docs/v1.1.7 (2026-08-26)
 
 ### Fixes
