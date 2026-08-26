@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.7 (2026-08-26)
+
+### Fixes
+
+- logo colors
+
+
 ## packages/docs/v1.1.6 (2026-08-26)
 
 ### Fixes
