@@ -1,13 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9" width="288" height="288">
-  <!-- The mark on a 9-unit grid, the same drawing the CLI banner prints: an
-       outlined square of side 6 with a 1-unit stroke, and a filled square of
-       side 6 offset by 3, every edge on the grid so any integer multiple of
-       9 pixels renders without anti-aliasing. Two darks on purpose: the ring
-       sits a step lighter than the square, which is what keeps the overlap
-       readable where the shapes meet. The white tile is part of the mark,
-       not transparency to be filled in: the site shows this one variant on
-       light and dark surfaces alike, and the tile is what it stands on. -->
-  <rect width="9" height="9" fill="#FFFFFF"/>
-  <path fill="#171717" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
-  <path fill="#0D0D0D" d="M3 3h6v6H3Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="300" height="300">
+  <!-- The mark in its original colours, the same drawing the CLI banner
+       prints: an outlined square with a stroke of 2 half-units and a filled
+       square offset onto it, the ring a step lighter than the square so the
+       overlap reads. The white is not a background: it is a keyline, one
+       half-unit wide, half the ring's stroke, following the outer
+       silhouette of the two squares, plus the ring's counter, so the shapes
+       carry their own edge onto any surface and everything beyond the
+       keyline stays transparent. All coordinates are integers on the
+       half-unit grid, so any multiple of 20 pixels renders without
+       anti-aliasing. -->
+  <rect x="0" y="0" width="14" height="14" fill="#FFFFFF"/>
+  <rect x="6" y="6" width="14" height="14" fill="#FFFFFF"/>
+  <path fill="#171717" fill-rule="evenodd" d="M1 1h12v12H1Z M3 3v8h8V3Z"/>
+  <rect x="7" y="7" width="12" height="12" fill="#0D0D0D"/>
 </svg>

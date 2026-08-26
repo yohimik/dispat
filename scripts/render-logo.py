@@ -16,8 +16,11 @@ and the release toolchain gains no dependency. Run from the repository root:
 import struct
 import zlib
 
-# Two darks, as imgs/logo.svg declares them: the ring sits a step lighter
-# than the square, which keeps the overlap readable where the shapes meet.
+# The mark's original two darks, as imgs/logo.svg declares them: the ring a
+# step lighter than the square, which keeps the overlap readable where the
+# shapes meet. Every canvas is opaque white, the plate being part of the
+# mark, and the glyph is centred so the plate borders it on all sides by at
+# least half the ring's stroke width.
 RING = (23, 23, 23, 255)
 SQUARE = (13, 13, 13, 255)
 WHITE = (255, 255, 255, 255)
@@ -85,9 +88,34 @@ def write(path, data):
     print(f"wrote {path} ({len(data)} bytes)")
 
 
-# The white-plate mark: the repository README and the social card, where a
-# transparent background would land on unknown colours.
-write("imgs/logo.png", png_bytes(render(300, 30, WHITE)))
+# The keyline mark, exactly as imgs/logo.svg draws it: the white is not a
+# background but a border one half-unit wide, half the ring's stroke,
+# following the outer silhouette of the two squares plus the ring's counter;
+# beyond it the canvas is transparent. Coordinates are in half-units, the
+# canvas 20 of them.
+def render_keyline(h):
+    size = 20 * h
+    px = [[CLEAR] * size for _ in range(size)]
+
+    def fill(x, y, w, wd, color):
+        for yy in range(y * h, (y + wd) * h):
+            row = px[yy]
+            for xx in range(x * h, (x + w) * h):
+                row[xx] = color
+
+    fill(0, 0, 14, 14, WHITE)
+    fill(6, 6, 14, 14, WHITE)
+    fill(1, 1, 12, 2, RING)
+    fill(1, 11, 12, 2, RING)
+    fill(1, 3, 2, 8, RING)
+    fill(11, 3, 2, 8, RING)
+    fill(7, 7, 12, 12, SQUARE)
+    return px
+
+
+# The repository README and the social card: the same keyline mark, at 300
+# pixels (15 per half-unit).
+write("imgs/logo.png", png_bytes(render_keyline(15)))
 
 # PWA and platform icons, flattened onto white: iOS composites alpha onto
 # black and the Android splash draws over background_color, so dark art on
@@ -100,12 +128,15 @@ write("packages/docs/static/img/icon-512.png", png_bytes(render(512, 48, WHITE))
 write("packages/docs/static/img/icon-maskable-512.png", png_bytes(render(512, 32, WHITE)))
 write("packages/docs/static/img/apple-touch-icon.png", png_bytes(render(180, 16, WHITE)))
 
-# The legacy-favicon fallback, transparent like the SVG that modern browsers
-# pick instead.
+# The legacy-favicon fallback, the same keyline mark as everything else.
+# The 20-half-unit grid keeps edges strict only at multiples of 20 pixels,
+# so the entries are 20, 40 and 60; consumers scale to the slot they have,
+# and modern browsers pick the SVG instead.
 write(
     "packages/docs/static/favicon.ico",
     ico_bytes([
-        (32, png_bytes(render(32, 3, CLEAR))),
-        (48, png_bytes(render(48, 5, CLEAR))),
+        (20, png_bytes(render_keyline(1))),
+        (40, png_bytes(render_keyline(2))),
+        (60, png_bytes(render_keyline(3))),
     ]),
 )
