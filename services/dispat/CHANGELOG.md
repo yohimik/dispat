@@ -1,5 +1,12 @@
 # Changelog
 
+## services/dispat/v1.1.1 (2026-08-26)
+
+### Fixes
+
+- window-only run selections without the script no-op
+
+
 ## services/dispat/v1.1.0 (2026-08-20)
 
 ### Features
