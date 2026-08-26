@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.1.6 (2026-08-26)
+
+### Fixes
+
+- match logo
+
+
 ## packages/docs/v1.1.5 (2026-08-25)
 
 ### Dependencies
