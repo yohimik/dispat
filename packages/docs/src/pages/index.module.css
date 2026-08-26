@@ -1,16 +1,14 @@
 /**
  * Landing page only. Everything here is scoped through the CSS module, and the
  * colours come from Infima variables so light and dark modes both work without
- * a second rule set. The hero is the one exception: like the navbar, whose
- * style is 'dark' in both themes, it keeps the dark surface always, so the
- * light-filled logo variant it shows never loses its ground.
+ * a second rule set.
  */
 
 .hero {
   padding: 3rem 0 2rem;
   text-align: center;
-  background: #1b1b1d;
-  border-bottom: 1px solid #2a2e33;
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
 }
 
 .logo {
@@ -21,7 +19,6 @@
 .title {
   margin-bottom: 0.5rem;
   font-size: 3rem;
-  color: #f5f6f7;
 }
 
 
@@ -32,22 +29,6 @@
   margin: 0 auto 1.5rem;
   font-size: 1rem;
   line-height: 1.65;
-}
-
-/* The hero's own text sits on the pinned dark surface in both themes, so its
-   colours are pinned with it; sectionLead stays themed, it lives on the page
-   background. The link colour is the dark palette's sage accent. */
-.lead {
-  color: #dfe3e0;
-}
-
-.lead a {
-  color: #6fae8a;
-}
-
-.lead code {
-  background: rgba(220, 227, 221, 0.12);
-  color: #dfe3e0;
 }
 
 .badges {

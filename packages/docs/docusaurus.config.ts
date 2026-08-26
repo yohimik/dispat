@@ -358,12 +358,10 @@ const config: Config = {
       {name: 'twitter:card', content: 'summary'},
     ],
     navbar: {
-      // Dark in both themes, like the footer and the landing hero: the mark's
-      // home surface is dark, so the header keeps it and the light-filled
-      // logo variant needs no srcDark switching.
-      style: 'dark',
       title: 'dispat',
-      logo: {alt: 'dispat logo', src: 'logo-dark.svg'},
+      // The black mark in both themes, no srcDark switching, by choice: one
+      // variant everywhere over per-theme swaps.
+      logo: {alt: 'dispat logo', src: 'logo.svg'},
       // Two sidebars, two items. Docs is what a reader works through, API is
       // what a reader looks something up in; see the comment in sidebars.ts.
       // A docSidebar item lands on its sidebar's first page, so Docs opens on

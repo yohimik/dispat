@@ -106,7 +106,7 @@ function Hero(): React.ReactElement {
       <div className="container">
         <img
           className={styles.logo}
-          src={useBaseUrl('/logo-dark.svg')}
+          src={useBaseUrl('/logo.svg')}
           alt="dispat logo"
           width={128}
           height={128}
