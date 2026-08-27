@@ -345,6 +345,7 @@ tests/integration/
   longitudinal_test.go      goal 38
   entrybodies_test.go       goal 39
   smoke_test.go             goal 40
+  smoke_features_test.go    goal 43
 
   main_test.go              TestMain: removes the shared binary build dir at the
                             end of the whole run (a sync.Once cache no t.Cleanup
@@ -1143,6 +1144,20 @@ the command exits with — plus the wire details only a real HTTP server can wit
 | `TestWebhookTriggerCustomEvent`                     | `dispat trigger <word>` raises `script.<word>`: subscribable by exact name, attributed to the raising package and stage, and an unsubscribed word arrives nowhere.                                            |
 | `TestWebhookScriptProgressTrigger`                  | `dispat trigger progress` raised from a stage script lands its `script.progress` deliveries between the stage's own bracket events, attributed to the raising package, stage and version, with the value (including a genuine 0) and the message intact. |
 | `TestWebhookTriggerOutsideARunIsHarmless`           | The trigger command by hand: it delivers without the package fields, exits 0, and a dead endpoint is a W239 warning rather than an exit code — a script cannot fail its stage by reporting progress.          |
+
+### Goal 43: the key-features smoke walk (`smoke_features_test.go`)
+
+Goal 40's companion in breadth: where the release-cycle walk proves the release protocol in depth, this walk takes one
+toy workspace through the commands CI pipelines and day-to-day use lean on, asserting each command's observable
+artefact and exit code over the process boundary. The assertions are deliberately happy-path — the per-feature suites
+own the deep cases — because both smoke walks are what the release build runs against the exact binaries it is about
+to export: `services/dispat/Dockerfile`'s test stage selects `-run 'TestSmoke'` with `DISPAT_TEST_BINARY` pointing the
+harness at the freshly cross-compiled binary, so the gate answers "do the shipped bytes work" rather than re-proving
+the feature matrix.
+
+| Test                     | Claim proven                                                                                                                                                                                                     |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestSmokeKeyFeatures`   | One walk over the key commands: `init` creates a loadable starter and refuses to overwrite it; `status` reports the pending graph and `--require-release` answers 0 pending / 3 converged (the contract the release workflow's plan job gates on); `preview` names the pending tag; `compute` detects the edge the manifests express, fails `--check` while the config lags, and `--write` adopts it; the `if --changed` gate answers from the release window and an explicit one; `run` sweeps a window with `--consumers`; `exec` runs the named root script; the release itself tags, writes changelogs and rewrites manifests, and a caretless fix does not propagate; the post-release `changelog` step command is a logged no-op; and the scanner lists the workspace's manifests. |
 
 ## Regression fences
 
