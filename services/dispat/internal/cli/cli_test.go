@@ -234,12 +234,12 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 
 		// `--` forwards to a script, so it needs a script to forward to and a
 		// command that has one.
-		{"run", "--", "--fix"},                 // no script name, whatever follows the dash
-		{"--", "--fix"},                        // no command at all
-		{"status", "--", "x"},                  // status runs no script
-		{"commit", "--", "x"},                  // nor do the step commands
+		{"run", "--", "--fix"},                   // no script name, whatever follows the dash
+		{"--", "--fix"},                          // no command at all
+		{"status", "--", "x"},                    // status runs no script
+		{"commit", "--", "x"},                    // nor do the step commands
 		{"trigger", "progress", "10", "--", "x"}, // trigger forwards nothing either
-		{"if", "CI", "--then", "a", "--", "x"}, // nor `if`, whose branches are already shell text
+		{"if", "CI", "--then", "a", "--", "x"},   // nor `if`, whose branches are already shell text
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
