@@ -1,5 +1,11 @@
 # Changelog
 
+## packages/docs/v1.2.0 (2026-08-27)
+
+### Dependencies
+
+- dispat: 1.1.1 -> 1.2.0
+
 ## packages/docs/v1.1.10 (2026-08-26)
 
 ### Dependencies

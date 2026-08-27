@@ -3,7 +3,7 @@
 # docker/dispat-ubuntu/docker-compose.yml carries the reasoning behind the shape.
 services:
   dispat:
-    image: docker.io/yohimik/dispat-dind:1.1.1
+    image: docker.io/yohimik/dispat-dind:1.2.0
     build:
       context: ../..
       dockerfile: docker/dispat-dind/Dockerfile
