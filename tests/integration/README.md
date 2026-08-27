@@ -28,6 +28,12 @@ The harness compiles the dispat and tsmark binaries **once per `go test` invocat
 across all tests. Each test builds its repository in a fresh `t.TempDir()`, so you can run tests in any order or select
 any subset safely.
 
+Setting `DISPAT_TEST_BINARY=<path>` makes the harness drive that prebuilt binary instead of compiling one — this is how
+the release build's test stage (see [`services/dispat/Dockerfile`](../../services/dispat/Dockerfile)) runs the smoke
+walks (`-run 'TestSmoke'`) against the exact cross-compiled binaries it is about to export. The variable is mutually
+exclusive with `DISPAT_COVERDIR`: a prebuilt binary carries no coverage instrumentation, and the harness refuses the
+combination rather than silently contributing nothing.
+
 ## Running
 
 ```sh

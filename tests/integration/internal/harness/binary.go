@@ -64,14 +64,18 @@ func Build(t testing.TB) (dispatBin, tsmarkBin string) {
 //	go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=cover-integration.out
 func coverDir() string { return os.Getenv("DISPAT_COVERDIR") }
 
+// prebuiltBin is the value of DISPAT_TEST_BINARY: a dispat binary to drive
+// instead of building one from the working tree. The release build sets it to
+// run the smoke suite against the exact artefact about to be exported (see
+// services/dispat/Dockerfile's test stage) — a fresh native build passing
+// says nothing about the cross-compiled bytes that ship. Empty (the default)
+// means the suite builds its own, as it always has.
+func prebuiltBin() string { return os.Getenv("DISPAT_TEST_BINARY") }
+
 func build() (dispat, tsmark string, err error) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return "", "", fmt.Errorf("go toolchain not found on PATH: %w", err)
-	}
-	root, err := monorepoRoot()
-	if err != nil {
-		return "", "", err
 	}
 	dir, err := os.MkdirTemp("", "dispat-it-bin-")
 	if err != nil {
@@ -85,15 +89,49 @@ func build() (dispat, tsmark string, err error) {
 	if coverDir() != "" {
 		coverArgs = []string{"-cover", "-covermode=atomic", "-coverpkg=./..."}
 	}
-	dispat = filepath.Join(dir, "dispat")
-	if err := goBuild(goBin, dispat, filepath.Join(root, "services", "dispat"), coverArgs...); err != nil {
-		return "", "", fmt.Errorf("building dispat: %w", err)
+	if pre := prebuiltBin(); pre != "" {
+		// A prebuilt binary carries no instrumentation, so counters asked for
+		// here would silently never arrive and the coverage profile would
+		// shrink with nothing failing. Refusing the combination keeps that a
+		// loud configuration error instead.
+		if coverDir() != "" {
+			return "", "", fmt.Errorf("DISPAT_TEST_BINARY and DISPAT_COVERDIR are mutually exclusive: a prebuilt binary has no coverage instrumentation")
+		}
+		dispat, err = filepath.Abs(pre)
+		if err != nil {
+			return "", "", fmt.Errorf("resolving DISPAT_TEST_BINARY: %w", err)
+		}
+		if info, statErr := os.Stat(dispat); statErr != nil || info.IsDir() {
+			return "", "", fmt.Errorf("DISPAT_TEST_BINARY is not a runnable file: %s", dispat)
+		}
+	} else {
+		// Only a from-source build needs the workspace: the CLI lives in a
+		// sibling module go.work stitches in. The prebuilt path deliberately
+		// never asks — the release build's test stage has no go.work at all,
+		// which is exactly the published module's own build environment.
+		root, rootErr := monorepoRoot()
+		if rootErr != nil {
+			return "", "", rootErr
+		}
+		dispat = filepath.Join(dir, "dispat")
+		if err := goBuild(goBin, dispat, filepath.Join(root, "services", "dispat"), coverArgs...); err != nil {
+			return "", "", fmt.Errorf("building dispat: %w", err)
+		}
 	}
 	tsmark = filepath.Join(dir, "tsmark")
-	if err := goBuild(goBin, tsmark, filepath.Join(root, "tests", "integration", "cmd", "tsmark")); err != nil {
+	if err := goBuild(goBin, tsmark, filepath.Join(moduleRoot(), "cmd", "tsmark")); err != nil {
 		return "", "", fmt.Errorf("building tsmark: %w", err)
 	}
 	return dispat, tsmark, nil
+}
+
+// moduleRoot is this module's own folder — where cmd/tsmark lives — derived
+// from this source file rather than from go.work, because tsmark must build
+// wherever the module itself can: the workspace has a go.work, the release
+// build's test stage does not, and tsmark belongs to both.
+func moduleRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
 }
 
 // stamped caches the version-stamped builds, one per version, for the same
