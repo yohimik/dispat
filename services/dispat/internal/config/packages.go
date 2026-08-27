@@ -318,6 +318,9 @@ func validatePackageLayer(label string, po PackageConfig) error {
 	if err := validateEnv(label+": env", po.Env); err != nil {
 		return err
 	}
+	if err := validateWebhookList(label+": webhooks", po.Webhooks); err != nil {
+		return err
+	}
 	return validateSrc(label, po.Src)
 }
 
@@ -376,6 +379,12 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	// which is the only way a package can drop an alias its space declared.
 	if po.AliasTags != nil {
 		sc.AliasTags = po.AliasTags
+	}
+	// Webhooks replace on the same terms as aliasTags: a stated list is the
+	// whole list, so a package can drop an endpoint its space declared, and
+	// an explicit empty list is how a level opts out entirely.
+	if po.Webhooks != nil {
+		sc.Webhooks = po.Webhooks
 	}
 	if po.Versioning != "" {
 		sc.Versioning = po.Versioning
@@ -451,6 +460,7 @@ func rootDefaults(c *File) SpaceConfig {
 		Flow:                  c.Flow,
 		TagFormat:             c.TagFormat,
 		AliasTags:             c.AliasTags,
+		Webhooks:              c.Webhooks,
 		Versioning:            c.Versioning,
 		AutoVersion:           c.AutoVersion,
 		Changelog:             c.Changelog,
@@ -471,6 +481,7 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 		Flow:                  sc.Flow,
 		TagFormat:             sc.TagFormat,
 		AliasTags:             sc.AliasTags,
+		Webhooks:              sc.Webhooks,
 		Versioning:            sc.Versioning,
 		VersionGroup:          sc.VersionGroup,
 		Scripts:               sc.Scripts,
@@ -513,6 +524,7 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		Flow:                  f.Flow,
 		TagFormat:             f.TagFormat,
 		AliasTags:             f.AliasTags,
+		Webhooks:              f.Webhooks,
 		Versioning:            f.Versioning,
 		VersionGroup:          f.VersionGroup,
 		Scripts:               f.Scripts,
@@ -615,6 +627,7 @@ func applyMerged(pkg *model.Package, merged SpaceConfig, ex *packageExtras) {
 	pkg.Src = merged.Src
 	pkg.Changelog = changelogSpec(merged.Changelog)
 	pkg.GitHub = githubSpec(merged.GitHub)
+	pkg.Webhooks = merged.Webhooks
 	pkg.ManifestNames = ex.manifestNames
 	pkg.OwnScripts = ex.ownScripts
 }

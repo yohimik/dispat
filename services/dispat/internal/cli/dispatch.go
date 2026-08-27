@@ -673,6 +673,10 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 			ReleaseName: *o.releaseName}) != nil {
 			return 1
 		}
+	case cmdTrigger:
+		if a.Trigger(ctx, r.inv.event, r.inv.progress, r.inv.message) != nil {
+			return 1
+		}
 	case cmdCompute:
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
 			Write:       *o.computeWrite,

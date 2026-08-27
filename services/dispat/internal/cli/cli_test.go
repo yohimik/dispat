@@ -218,6 +218,14 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"autowriter", "--set-version", "1.0.0", "--manifests", "none"}, // not a scope it has
 		{"autoversion", "--manifests", "sideways"},
 		{"changelog", "--on-error", "explode"}, // every sweeping command validates it
+		{"trigger"},                            // trigger needs an event
+		{"trigger", "progress"},                // progress is typed and needs its value
+		{"trigger", "progress", "abc"},         // the value is a whole number
+		{"trigger", "progress", "101"},         // ...between 0 and 100
+		{"trigger", "progress", "-1"},          //
+		{"trigger", "script.deployed"},         // the event is a bare word, not a dotted name
+		{"trigger", "2fast"},                   // ...starting with a letter
+		{"trigger", "has space"},               // ...and staying one word
 		{"scanner", "a", "b"},                  // scanner takes at most one folder
 		{"writer"},                             // writer needs at least one manifest
 		{"writer", "go.mod"},                   // ...and something to write
@@ -230,6 +238,7 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"--", "--fix"},                        // no command at all
 		{"status", "--", "x"},                  // status runs no script
 		{"commit", "--", "x"},                  // nor do the step commands
+		{"trigger", "progress", "10", "--", "x"}, // trigger forwards nothing either
 		{"if", "CI", "--then", "a", "--", "x"}, // nor `if`, whose branches are already shell text
 	} {
 		var stdout, stderr bytes.Buffer

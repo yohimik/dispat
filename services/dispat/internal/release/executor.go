@@ -142,7 +142,11 @@ type Executor struct {
 	// Scanner reads manifests for the autoVersion spaces' native rewriting;
 	// nil defaults to the filesystem scanner.
 	Scanner scanner.Scanner
-	Log     zerolog.Logger
+	// Observer receives release-progress events (stage transitions, package
+	// outcomes); nil disables observation. It only observes: nothing it does
+	// with an event can affect the run. See Observer.
+	Observer Observer
+	Log      zerolog.Logger
 }
 
 type taskKind uint8
@@ -385,13 +389,22 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		// Interrupted (or, impossibly after E200, cyclic): tasks that never
 		// launched left their packages pending. Cancelled, not failed — nothing
 		// about them went wrong, and the next run picks them up unchanged.
+		// The names are collected under the lock and announced after it: the
+		// observer is called outside the mutex everywhere.
+		var cancelled []string
 		r.mu.Lock()
-		for _, res := range results {
+		for name, res := range results {
 			if res.Status == StatusPending {
 				res.Status = StatusCancelled
+				cancelled = append(cancelled, name)
 			}
 		}
 		r.mu.Unlock()
+		for _, name := range slices.Sorted(slices.Values(cancelled)) {
+			ev := packageEvent(name, p.Releases[name], EventPackageCancelled)
+			ev.Status = StatusCancelled.String()
+			e.notify(ev)
+		}
 		if ctx.Err() != nil {
 			e.Log.Warn().Msg("run interrupted: remaining packages cancelled; completed releases keep their records")
 		} else {
@@ -533,6 +546,9 @@ func (r *run) execute(ctx context.Context, t task) {
 		// Interrupted between scheduling and start: no scripts, no hooks.
 		res.Status = StatusCancelled
 		r.mu.Unlock()
+		ev := packageEvent(t.pkg, rel, EventPackageCancelled)
+		ev.Status = StatusCancelled.String()
+		r.notify(ev)
 		return
 	}
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results); skip {
@@ -546,6 +562,9 @@ func (r *run) execute(ctx context.Context, t task) {
 		// Non-suppressible (§16) — a package that was in the plan and produced
 		// nothing must be accounted for.
 		log.Warn().Str("code", plan.CodeBlocked).Str("reason", reason).Msg("skipped")
+		ev := packageEvent(t.pkg, rel, EventPackageSkipped)
+		ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, blocker
+		r.notify(ev)
 		if ran && rel.Pkg.Space.RevertOnFail {
 			r.revert(ctx, rel, log)
 		}
@@ -588,12 +607,18 @@ func (r *run) execute(ctx context.Context, t task) {
 		res.Duration = time.Since(r.started[t.pkg])
 		r.mu.Unlock()
 		if interrupted {
+			ev := packageEvent(t.pkg, rel, EventPackageCancelled)
+			ev.Status, ev.Error = StatusCancelled.String(), err.Error()
+			r.notify(ev)
 			log.Warn().Err(err).Msg(t.kind.String() + " interrupted")
 			if rel.Pkg.Space.RevertOnFail {
 				r.revert(context.WithoutCancel(ctx), rel, log)
 			}
 			return
 		}
+		ev := packageEvent(t.pkg, rel, EventPackageFailed)
+		ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), t.kind.String(), err.Error()
+		r.notify(ev)
 		log.Error().Err(err).Msg(msg)
 		if rel.Pkg.Space.RevertOnFail {
 			r.revert(ctx, rel, log)
@@ -659,6 +684,13 @@ func (r *run) execute(ctx context.Context, t task) {
 		frame.commands, frame.before, frame.after = nil, nil, nil
 	}
 
+	// The event reports the task starting, not a script: a stage with no
+	// configured command still runs and still transitions, so it is still
+	// observed.
+	stageEv := packageEvent(t.pkg, rel, EventStageStarted)
+	stageEv.Stage = t.kind.String()
+	r.notify(stageEv)
+
 	if t.kind == taskPublish {
 		if err := tc.loginGate(ctx); err != nil {
 			fail(err, "login failed")
@@ -675,6 +707,8 @@ func (r *run) execute(ctx context.Context, t task) {
 		// skip must stay conservative about what it cannot see.
 		tc.markManifestsChanged()
 	}
+	stageEv.Name = EventStageSucceeded
+	r.notify(stageEv)
 	if t.kind != taskPublish {
 		log.Info().Msg(t.kind.String() + " succeeded")
 		return
@@ -802,6 +836,9 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	res.Status = StatusPublished
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 	tc.mu.Unlock()
+	ev := packageEvent(tc.t.pkg, rel, EventPackagePublished)
+	ev.Status, ev.Tag = StatusPublished.String(), rel.TagName()
+	tc.notify(ev)
 	// In release-commit mode the tag does not exist yet — finalize creates it
 	// — so the line names it as planned rather than stating it as a fact.
 	if tc.Tagger != nil {
@@ -827,8 +864,16 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// and no failure among them stops the others from running.
 	_ = tc.hook(ctx, "beforeAnnounce", space.BeforeAnnounceScript, false)
 	if len(space.AnnounceScript) > 0 {
+		// Unlike the graph stages, announce is observed only when a script is
+		// configured: it is a tail of the publish rather than a task of its
+		// own, and an empty announce transitions nothing worth reporting.
+		annEv := packageEvent(tc.t.pkg, rel, EventStageStarted)
+		annEv.Stage = "announce"
+		tc.notify(annEv)
 		tc.log.Info().Msg("announce started")
 		_ = tc.sequence("announce", space.AnnounceScript, false).RunMergingOutputs(ctx, rel)
+		annEv.Name = EventStageSucceeded
+		tc.notify(annEv)
 	}
 	_ = tc.hook(ctx, "postAnnounce", space.PostAnnounceScript, false)
 }

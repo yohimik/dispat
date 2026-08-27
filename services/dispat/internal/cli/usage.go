@@ -265,6 +265,32 @@ github.allPackages is the configuration-level opt-in for everything else.`,
 			windowFlags...),
 	},
 	{
+		name:  cmdTrigger,
+		short: "raise a webhook event from inside a script",
+		long: `Deliver one script-raised event to the configured webhooks:
+
+    dispat trigger progress 40 compiling assets
+    dispat trigger deployed version is live
+
+The event is one word — a letter, then letters, digits, dashes or
+underscores — delivered as script.<word>, so a subscription tells dispat's
+own events apart from what a script said by the prefix alone. progress is
+the one typed event: its first argument is a whole number from 0 to 100.
+Everything after the event (and the value) is the event's free-text message.
+
+Meant for a stage script saying something between the stage.started and
+stage.succeeded events the release emits on its own. The package, stage and
+version are read from the DISPAT_* environment the enclosing run exported,
+so the event attributes itself to the script that raised it and routes to
+that package's effective webhook list; invoked outside a run, those fields
+are simply absent and the top-level list alone hears it.
+
+Like every webhook outcome, an endpoint that cannot be reached is a W239
+warning, never an exit code: a script cannot fail its stage by reporting.
+With no webhooks configured the command does nothing and exits 0.`,
+		flags: nil,
+	},
+	{
 		name:  cmdCompute,
 		short: "derive the dependency graph and the starting versions from the manifests",
 		long: `Scan every package's manifests, the same twenty families the

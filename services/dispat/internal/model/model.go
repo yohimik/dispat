@@ -332,6 +332,11 @@ type Package struct {
 	// recorders read the package alone.
 	Changelog ChangelogSpec
 	GitHub    GitHubSpec
+	// Webhooks is the package's effective webhook list, settled by the same
+	// ladder: the nearest level that stated one, whole. The validated config
+	// entries are the policy — nothing about them needs re-deriving — so
+	// they are carried as they are.
+	Webhooks []public.WebhookConfig
 	// ManifestNames are the manifest names the configuration states this
 	// package is known by, for the packages whose files declare none the
 	// workspace can learn. They outrank a declared name and feed the one

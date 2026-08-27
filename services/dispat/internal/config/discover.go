@@ -326,6 +326,7 @@ func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Pack
 		PublishWeight: s.publishWeight,
 		Changelog:     s.changelog,
 		GitHub:        s.github,
+		Webhooks:      s.sc.Webhooks,
 		Src:           s.sc.Src,
 	}
 	label := fmt.Sprintf("space %q: package %q", s.name, name)

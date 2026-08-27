@@ -92,6 +92,10 @@ type File struct {
 	// tagFormat produces; see AliasTagConfig. Overridable per space and per
 	// package, where a list replaces the inherited one rather than adding to it.
 	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	// Webhooks are HTTP endpoints notified of release progress; see
+	// WebhookConfig. Deliveries are asynchronous and observe only: a failed or
+	// unreachable endpoint warns and never affects the release.
+	Webhooks []WebhookConfig `mapstructure:"webhooks" json:"webhooks,omitempty"`
 
 	// The repository-wide defaults for the space-shaped keys. Each is the
 	// bottom of the same ladder a package's configuration is folded through —
@@ -605,6 +609,13 @@ type SpaceConfig struct {
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
 	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	// Webhooks replaces the inherited webhook list for this level's packages;
+	// see WebhookConfig. A stated list replaces the whole inherited one, so an
+	// empty list declared here means "no webhooks", which is how a level opts
+	// out. The run-bracket events (release.started, release.finished) always
+	// deliver to the top-level list alone: they describe the run, which no one
+	// package speaks for.
+	Webhooks []WebhookConfig `mapstructure:"webhooks" json:"webhooks,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
 	// "independent" (default) or one of the shared modes. See the Versioning*
 	// constants.
@@ -703,6 +714,7 @@ type SpaceFile struct {
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
 	AliasTags    []AliasTagConfig   `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	Webhooks     []WebhookConfig    `mapstructure:"webhooks" json:"webhooks,omitempty"`
 	Versioning   string             `mapstructure:"versioning" json:"versioning,omitempty"`
 	VersionGroup string             `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
 	Scripts      map[string]Script  `mapstructure:"scripts" json:"scripts,omitempty"`
@@ -807,6 +819,13 @@ type PackageConfig struct {
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
 	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	// Webhooks replaces the inherited webhook list for this level's packages;
+	// see WebhookConfig. A stated list replaces the whole inherited one, so an
+	// empty list declared here means "no webhooks", which is how a level opts
+	// out. The run-bracket events (release.started, release.finished) always
+	// deliver to the top-level list alone: they describe the run, which no one
+	// package speaks for.
+	Webhooks []WebhookConfig `mapstructure:"webhooks" json:"webhooks,omitempty"`
 	// Versioning overrides how the package relates to its space's shared
 	// version — most usefully "independent", opting one package out of a
 	// fixed space. Mutually exclusive with naming a declared versionGroup,

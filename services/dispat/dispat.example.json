@@ -142,6 +142,33 @@
     ],
     "postAll": "notify"
   },
+  "webhooks": [
+    {
+      "url": "https://ci.example.com/hooks/dispat",
+      "events": [
+        "release.started",
+        "release.finished"
+      ]
+    },
+    {
+      "name": "deploy-tracker",
+      "url": "https://tracker.internal/dispat",
+      "events": [
+        "package.published",
+        "package.failed"
+      ],
+      "headers": [
+        {
+          "name": "X-Api-Key",
+          "value": "$TRACKER_TOKEN"
+        }
+      ],
+      "secretEnv": "DISPAT_WEBHOOK_SECRET",
+      "timeout": 10,
+      "env": "CI=true",
+      "format": "{\"text\": \"dispat: {package} {version} {event}\"}"
+    }
+  ],
   "env": {
     "NPM_CONFIG_REGISTRY": "https://registry.npmjs.org",
     "CUSTOM_TAG": "custom_$DISPAT_VERSION"

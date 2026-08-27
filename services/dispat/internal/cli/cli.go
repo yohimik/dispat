@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/pkg/writer"
 
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
@@ -43,6 +46,7 @@ const (
 	cmdAutoreplacer = "autoreplacer" // literal replacements, over the whole selection
 	cmdCommit       = "commit"       // per-package release commit (--tag, --push)
 	cmdGithub       = "github"       // per-package GitHub release, published now
+	cmdTrigger      = "trigger"      // raise a webhook event from inside a script
 
 	// The manifest commands, exposing the pkg/scanner and pkg/writer
 	// libraries directly. Like init, they need no config file and no git
@@ -194,6 +198,11 @@ type invocation struct {
 	dir     string   // scanner: the optional folder to scan
 	paths   []string // writer and replacer: the files to edit
 	args    []string // run and exec: what followed `--`, for the script
+	// trigger: the raised event name, the progress value when the event is
+	// progress, and the optional free-text message.
+	event    string
+	progress *int
+	message  string
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
@@ -273,6 +282,39 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 			usage(inv.cmd)
 			return inv, true
 		}
+	case cmdTrigger:
+		// `trigger <event> [message...]` raises script.<event>; `progress`
+		// is the one typed kind, whose first argument is its 0-100 value.
+		if len(rest) < 2 {
+			log.Error().Msg("trigger requires an event: trigger <event> [message], or trigger progress <0-100> [message]")
+			usage(inv.cmd)
+			return inv, true
+		}
+		word := rest[1]
+		if !public.IsWebhookScriptWord(word) {
+			log.Error().Str("event", word).
+				Msg("a triggered event is one word: a letter, then letters, digits, dashes or underscores")
+			usage(inv.cmd)
+			return inv, true
+		}
+		inv.event = public.WebhookScriptEvent(word)
+		args := rest[2:]
+		if word == "progress" {
+			if len(rest) < 3 {
+				log.Error().Msg("trigger progress requires its value: trigger progress <0-100> [message]")
+				usage(inv.cmd)
+				return inv, true
+			}
+			pct, err := strconv.Atoi(rest[2])
+			if err != nil || pct < 0 || pct > 100 {
+				log.Error().Str("value", rest[2]).Msg("trigger progress wants a whole number between 0 and 100")
+				usage(inv.cmd)
+				return inv, true
+			}
+			inv.progress = &pct
+			args = rest[3:]
+		}
+		inv.message = strings.Join(args, " ")
 	case cmdScanner:
 		if len(rest) > 2 {
 			log.Error().Msg("scanner takes at most one argument: the folder to scan")

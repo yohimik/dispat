@@ -22,6 +22,7 @@ dispat [command] [flags]
 | `autoreplacer`         | Replace literal text across every covered package; see [The autoreplacer command](./autoreplacer.md). |
 | `commit`                  | Create the per-package release commit; see [The commit command](./commit.md).                               |
 | `github`                  | Create the per-package GitHub release immediately; see [The github command](./github.md).                           |
+| `trigger <event>`         | Deliver one script-raised `script.<event>` webhook event, from inside a stage script; see [The trigger command](./trigger.md). |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
 | `if [cond]`               | Run one of several shell scripts. dispat chooses the script based on a condition matching the environment, the filesystem, or the changed packages; see [The if command](./if.md). |
 | `exec <script>`           | Run one declared script here exactly once. You can run it for a named subject or the folder you are in; see [The exec command](./exec.md). |

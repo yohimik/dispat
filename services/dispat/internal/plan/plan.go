@@ -212,6 +212,13 @@ const (
 	// never versioned or released — and the warning is what tells the author
 	// the footer they wrote moves nothing.
 	CodeNonePinned = "W238"
+	// CodeWebhookFailed reports a webhook delivery that did not get through:
+	// the endpoint kept refusing, never answered, or the run had more events
+	// than the delivery queue could hold. A warning rather than an error by
+	// design — like W232, it concerns telling the world about work that
+	// already happened, and a listener that missed a notification is never a
+	// reason to fail the release it was watching.
+	CodeWebhookFailed = "W239"
 
 	// --- release outcomes (§13.7a, §13.9) ---
 

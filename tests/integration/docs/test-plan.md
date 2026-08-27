@@ -1116,6 +1116,34 @@ monorepo containing a project for each engine alongside their generated folders.
 | `TestEnginesScannerStrictGatesBrokenEngineManifests` | The partial-result contract reaching the exit code for the engine formats too: a broken `Packages/manifest.json` is reported while the healthy manifests are still listed, and `--strict` refuses the same repository. |
 | `TestEnginesComputeReadsTheEngineGraph`          | `dispat compute` derives its edges from the same manifests, so a versionless Unreal plugin edge is one it suggests.                                                                                             |
 
+### Goal 42: external webhooks (`webhooks_test.go`)
+
+The `webhooks` config declares HTTP endpoints a release run notifies of its progress: the run brackets
+(`release.started` / `release.finished`), per-package stage transitions and per-package outcomes. The contract under
+test is isolation — deliveries are asynchronous, and no endpoint behaviour may change what the release does or what
+the command exits with — plus the wire details only a real HTTP server can witness.
+
+| Test                                                | Claim proven                                                                                                                                                                                                 |
+|-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestWebhookHappyPathSequence`                      | The whole stream of a two-package release, in order: `release.started` opens with the plan snapshot, each package's stages bracket exactly, `package.published` carries the tag and versions with no unexpected field, and `release.finished` closes with the counts. |
+| `TestWebhookEventFilters`                           | Subscriptions are per webhook: an events list admits what it names, `package.*` admits the family, and two webhooks sharing one event each receive their own delivery.                                        |
+| `TestWebhookFailingEndpointNeverAffectsTheRelease`  | An endpoint answering 500 to everything costs the run nothing: the release publishes, tags and exits 0, and every failed delivery warns as W239 naming the endpoint url.                                      |
+| `TestWebhookUnreachableEndpointNeverAffectsTheRelease` | The same isolation with no server at all: connection refused is only a W239.                                                                                                                              |
+| `TestWebhookSlowEndpointIsBounded`                  | A hanging endpoint is bounded by the webhook's own timeout and the end-of-run flush deadline; the command still finishes promptly.                                                                            |
+| `TestWebhookSignature`                              | With `secretEnv` set, every delivery's `X-Dispat-Signature` verifies as the standard `sha256=` HMAC over the exact captured body bytes.                                                                       |
+| `TestWebhookHeadersAndMethod`                       | The configured method and headers reach the wire, with a `$VAR` header value expanded from the process environment.                                                                                           |
+| `TestWebhookConfigRejections`                       | A broken declaration — unknown event, missing url, bad method — stops the load naming `webhooks[0]`, and nothing is released.                                                                                 |
+| `TestWebhookInterruptedRunStillReportsTheOutcome`   | The flush is detached from cancellation: a SIGINT mid-build still delivers the `package.cancelled` events and a `release.finished` saying `interrupted` before the process exits.                             |
+| `TestWebhookFailedRunKeepsItsExitCode`              | The exit-code fence: a run with a failing package exits with exactly the code its webhook-less twin exits with, while `release.finished` reports the failure honestly.                                        |
+| `TestWebhookRefusedRunEmitsNothing`                 | A run refused before execution (the branch guard) makes no delivery at all: webhooks begin only once the run is committed to execute.                                                                         |
+| `TestWebhookPackageOverrideRouting`                 | The ladder's replace-wholesale rule on the wire: a package stating its own list routes its events to its endpoint alone, the root endpoint keeps the run brackets and the other packages.                     |
+| `TestWebhookEmptyListOptsOutOnTheWire`              | `webhooks: []` at a package silences that package while the root endpoint keeps the brackets and the sibling — raw config, because the typed model's omitempty cannot write an empty list.                    |
+| `TestWebhookCustomFormat`                           | A `format` template replaces the payload byte for byte, tokens rendered from the event, and the `X-Dispat-Event` header still names what a formatted body may not.                                            |
+| `TestWebhookEnvGate`                                | `env: DISPAT_IT_CI=true` keeps the webhook silent until the condition holds: the same trigger delivers nothing without the variable and everything with it.                                                   |
+| `TestWebhookTriggerCustomEvent`                     | `dispat trigger <word>` raises `script.<word>`: subscribable by exact name, attributed to the raising package and stage, and an unsubscribed word arrives nowhere.                                            |
+| `TestWebhookScriptProgressTrigger`                  | `dispat trigger progress` raised from a stage script lands its `script.progress` deliveries between the stage's own bracket events, attributed to the raising package, stage and version, with the value (including a genuine 0) and the message intact. |
+| `TestWebhookTriggerOutsideARunIsHarmless`           | The trigger command by hand: it delivers without the package fields, exits 0, and a dead endpoint is a W239 warning rather than an exit code — a script cannot fail its stage by reporting progress.          |
+
 ## Regression fences
 
 Dedicated guard tests pin subtle planner properties so regressions fail exactly one distinct test:

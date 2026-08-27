@@ -11,6 +11,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,6 +25,7 @@ import (
 
 	public "github.com/yohimik/dispat/pkg/models"
 
+	"github.com/yohimik/dispat/services/dispat/internal/cond"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -51,6 +53,8 @@ type (
 	Dependencies             = public.Dependencies
 	ProviderList             = public.ProviderList
 	AliasTagConfig           = public.AliasTagConfig
+	WebhookConfig            = public.WebhookConfig
+	WebhookHeader            = public.WebhookHeader
 
 	ParserConfig            = public.ParserConfig
 	ParserPropagationConfig = public.ParserPropagationConfig
@@ -917,6 +921,9 @@ func validate(c *File) error {
 	if err := validateLogging(c); err != nil {
 		return err
 	}
+	if err := validateWebhooks(c); err != nil {
+		return err
+	}
 	if c.CommitErrors == "" {
 		c.CommitErrors = CommitErrorsWarn
 	}
@@ -1065,6 +1072,93 @@ func validateLogging(c *File) error {
 	return nil
 }
 
+// validateWebhooks checks the top-level webhooks list; the space and package
+// lists go through validateWebhookList with their own position labels, from
+// validateSpace and validatePackageLayer.
+func validateWebhooks(c *File) error {
+	return validateWebhookList("webhooks", c.Webhooks)
+}
+
+// validateWebhookList checks one level's webhook list on its own and
+// normalizes each entry's method in place. Webhooks only observe a release,
+// but their declarations are refused as strictly as anything else: an
+// endpoint that never fires because of a misspelled event name is a promise
+// silently broken. where names the list's position in the file.
+func validateWebhookList(where string, hooks []WebhookConfig) error {
+	names := map[string]int{}
+	for i, w := range hooks {
+		label := fmt.Sprintf("%s[%d]", where, i)
+		if w.URL == "" {
+			return fmt.Errorf("%s: url is required", label)
+		}
+		u, err := url.Parse(w.URL)
+		if err != nil {
+			return fmt.Errorf("%s: url %q is invalid: %w", label, w.URL, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("%s: url %q must use http or https", label, w.URL)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("%s: url %q has no host", label, w.URL)
+		}
+		method := strings.ToUpper(w.Method)
+		if method == "" {
+			method = "POST"
+		}
+		if method != "POST" && method != "PUT" && method != "PATCH" {
+			return fmt.Errorf("%s: method %q is invalid (want POST, PUT or PATCH)", label, w.Method)
+		}
+		hooks[i].Method = method
+		for j, ev := range w.Events {
+			if !public.KnownWebhookPattern(ev) {
+				return fmt.Errorf("%s: events[%d]: unknown event %q (want %s, a wildcard like \"*\" or \"package.*\", or a script-raised name like \"script.deployed\")",
+					label, j, ev, quotedNames(public.WebhookEvents()))
+			}
+		}
+		// The env gate parses under the same grammar `dispat if` uses, and is
+		// checked here for the same reason every condition is checked at its
+		// source: one that silently never matched would look exactly like a
+		// webhook that never fired.
+		if w.Env != "" {
+			if _, err := cond.ParseCondition(w.Env); err != nil {
+				return fmt.Errorf("%s: env: %w", label, err)
+			}
+		}
+		for j, h := range w.Headers {
+			if h.Name == "" {
+				return fmt.Errorf("%s: headers[%d]: name is required", label, j)
+			}
+			if strings.ContainsAny(h.Name, " :") {
+				return fmt.Errorf("%s: headers[%d]: name %q must not contain spaces or colons", label, j, h.Name)
+			}
+		}
+		if w.Timeout < 0 {
+			return fmt.Errorf("%s: timeout must be >= 0, got %d", label, w.Timeout)
+		}
+		// The format's tokens are checked against the payload vocabulary at
+		// load: a template naming a field the payload never carries would
+		// otherwise render an empty hole on every delivery, forever.
+		var badField string
+		public.ExpandWebhookFormat(w.Format, func(field string) string {
+			if badField == "" && !public.KnownWebhookFormatField(field) {
+				badField = field
+			}
+			return ""
+		})
+		if badField != "" {
+			return fmt.Errorf("%s: format: unknown field {%s} (want %s)",
+				label, badField, quotedNames(public.WebhookFormatFields()))
+		}
+		if w.Name != "" {
+			if prev, dup := names[w.Name]; dup {
+				return fmt.Errorf("%s: name %q is already used by webhooks[%d]", label, w.Name, prev)
+			}
+			names[w.Name] = i
+		}
+	}
+	return nil
+}
+
 // validateSpace checks one space — path, tag format, versioning mode,
 // scripts — and returns it with its versioning value normalized. What the
 // space's flow references is not checked here: a reference resolves in a
@@ -1082,6 +1176,9 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 		return s, err
 	}
 	if err := validateAliasTags(label+": aliasTags", s.AliasTags); err != nil {
+		return s, err
+	}
+	if err := validateWebhookList(label+": webhooks", s.Webhooks); err != nil {
 		return s, err
 	}
 	if err := validateSrc(label, s.Src); err != nil {

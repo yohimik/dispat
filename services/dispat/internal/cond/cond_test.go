@@ -1,4 +1,4 @@
-package app
+package cond
 
 import (
 	"os"

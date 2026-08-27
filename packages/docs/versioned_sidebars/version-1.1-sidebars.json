@@ -383,6 +383,11 @@
         },
         {
           "type": "doc",
+          "id": "cli/trigger",
+          "label": "trigger"
+        },
+        {
+          "type": "doc",
           "id": "cli/compute",
           "label": "compute"
         },
@@ -458,6 +463,11 @@
           "type": "doc",
           "id": "configuration/run-hooks",
           "label": "Run-level hooks"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/webhooks",
+          "label": "Webhooks"
         },
         {
           "type": "doc",

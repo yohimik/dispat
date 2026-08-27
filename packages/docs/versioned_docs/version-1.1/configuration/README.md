@@ -41,6 +41,7 @@ The larger objects have their own pages:
 | [`dependencies`](./dependencies.md)   | Consumer → provider relations between packages.                                                                                             |
 | [Script sequences](./scripts.md)      | `scripts`. This covers binding a name to one command or to several, and what a failure inside a sequence does to the rest of it.                        |
 | [Run-level hooks](./run-hooks.md)     | The top-level `run` object. This includes the hooks that observe the run as a whole, the branch guard, and the stale-checkout guard.                          |
+| [Webhooks](./webhooks.md)             | `webhooks`. These are the HTTP endpoints a release run notifies of its progress, asynchronously and without ever gating the run.                                |
 | [Static env](./env.md)                | `env`. These are fixed environment variables added to every script the run executes.                                                                  |
 | [The `.env` file](./dotenv.md)        | The environment file read from the current directory into the run. This covers `--env-file` and what wins over what.                                    |
 | [custom](./custom.md)                 | `custom`. This is free-form data dispat never reads.                                                                                                |
@@ -76,6 +77,7 @@ full examples.
 | `env`              | map name → value                           | no       | Fixed environment variables added to every script the run executes. Spaces and packages layer their own maps on top. See [Static env](./env.md).                     |
 | `custom`           | object                                     | no       | Free-form data dispat never reads. This is a place to keep your own tooling's settings without the unknown-key check rejecting them. Spaces and packages have their own `custom` blocks. See [custom](./custom.md).  |
 | `run`              | object                                     | no       | The branch guard (`allowBranch`) and the run-level hooks (`beforeAll` through `afterPush`), keyed by name. See [Run-level hooks](./run-hooks.md) and [The branch guard](./run-hooks.md#the-branch-guard).  |
+| `webhooks`         | array of objects                           | no       | HTTP endpoints notified of release progress. Deliveries are asynchronous and never affect the run. You can override this per space and per package. See [Webhooks](./webhooks.md).      |
 | `src`              | string                                     | no       | Default scope folder for every package, resolved against each package's own folder. See [What counts as a change](./change-scope.md#src-only-this-folder-is-the-package). |
 | `ignore`           | array of strings                           | no       | Default change-scope ignore patterns. See [What counts as a change](./change-scope.md#ignore-everything-except-these).                                                  |
 | `flow`             | object                                     | no       | Default stages and hooks for every space. See [Stages and hooks](./spaces.md#stages-and-hooks). A space, and then a package, replaces the entries it names and keeps the rest. You can declare `login` here and it still runs once per space.  |
@@ -123,6 +125,7 @@ is not the same as leaving it out, and only writing `false` overrides a `true` a
 | `custom` | yes | yes | yes |
 | `tagFormat` | yes | yes | yes |
 | `aliasTags` | yes | yes | yes |
+| `webhooks` | yes | yes | yes |
 | `autoVersion` | yes | yes | yes |
 | `isBuildWaitingPublish` | yes | yes | yes |
 | `revertOnFail` | yes | yes | yes |
@@ -143,7 +146,7 @@ How a level combines with the one below it depends on the setting:
   `flow` clears an inherited entry. An empty array in `scripts` is an error because a name bound to no command resolves
   to nothing. dispat replaces an entry whole however many commands it binds. Restating a multi-command script creates a
   new sequence rather than adding to the inherited one.
-- **Replaced whole.** `autoVersion`, `aliasTags`, and `manifestNames`. Their empty fields carry meaning against their
+- **Replaced whole.** `autoVersion`, `aliasTags`, `webhooks`, and `manifestNames`. Their empty fields carry meaning against their
   siblings, so a partial overlay cannot express what they mean. Write an empty `aliasTags: []` to make a package opt
   out.
 - **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.

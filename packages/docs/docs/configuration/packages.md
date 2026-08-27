@@ -119,7 +119,7 @@ field. The layer nearest the package wins:
 | 6 | package configuration file| `<space folder>/<package>/dispat.json`             |
 
 Layer 0 is the repository's own defaults for the keys a space could state (`flow`, `autoVersion`, `versioning`,
-`tagFormat`, `aliasTags`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail`). You write a setting every space
+`tagFormat`, `aliasTags`, `webhooks`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail`). You write a setting every space
 shares once here. See [Where a setting can live](./README.md#where-a-setting-can-live).
 
 Layers 1 and 2 are the space, and they describe every package in it. Layers 3 to 6 each name one package, ordered by

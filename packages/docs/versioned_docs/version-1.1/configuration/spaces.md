@@ -166,7 +166,7 @@ A `none` space cannot join or form a versioning group. A releasable package cann
 package. Such a provider never has a version for auto-versioning to write, so dispat refuses the configuration at load.
 The reverse direction is fine. A `none` package may depend on releasable packages, for example through a permanent
 [local link](../editing/manifests.md). Release-only settings on a `none` space load without error and never take
-effect. These include `tagFormat`, `aliasTags`, publish stages, changelog and GitHub blocks.
+effect. These include `tagFormat`, `aliasTags`, `webhooks`, publish stages, changelog and GitHub blocks.
 
 A space with shared versioning is a versioning group whose name is the space's own. Read about the general mechanism
 under [Versioning groups](#versioning-groups). That section covers groups that cut across the filesystem. Everything

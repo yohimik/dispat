@@ -241,6 +241,32 @@ run:
   # beforeAll: check-preconditions
   postAll: notify
 
+# HTTP endpoints notified of release progress: the run brackets
+# (release.started / release.finished), each package's stages (stage.started /
+# stage.succeeded) and each package's outcome (package.published /
+# package.failed / package.skipped / package.cancelled). Deliveries are
+# asynchronous and never gate the run: a dead endpoint costs a W239 warning
+# and nothing else. An unset events list subscribes to every event; "*" and
+# family patterns like "package.*" also work. secretEnv names an environment
+# variable whose value signs every delivery (X-Dispat-Signature, the sha256=
+# HMAC of the body), and header values may reference environment variables so
+# a token never lives in the file.
+webhooks:
+  - url: https://ci.example.com/hooks/dispat
+    events: [release.started, release.finished]
+  - name: deploy-tracker
+    url: https://tracker.internal/dispat
+    events: [package.published, package.failed]
+    headers:
+      - name: X-Api-Key
+        value: $TRACKER_TOKEN
+    secretEnv: DISPAT_WEBHOOK_SECRET
+    timeout: 10
+    # Active only on the runner (the dispat-if condition grammar), and with a
+    # payload of its own shape: {field} tokens render as the event's fields.
+    env: CI=true
+    format: '{"text": "dispat: {package} {version} {event}"}'
+
 # Fixed environment variables added to every script. Spaces and packages
 # declare their own `env` objects and the layers merge key by key, the most
 # local winning. Keys keep their exact case, values may reference other

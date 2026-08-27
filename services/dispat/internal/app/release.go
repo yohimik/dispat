@@ -182,6 +182,24 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		return nil, err
 	}
 
+	// Webhooks begin once the run is committed to execute: a refused run — a
+	// blocked plan, failed verification, a failed gating hook — emits nothing,
+	// because nothing it planned was ever started. Close is deferred right
+	// here so every exit path flushes the queued deliveries, detached from
+	// cancellation (an interrupt is the run outcome listeners most want to
+	// hear about) and bounded by the dispatcher's own flush deadline; deferred
+	// after the lock's release above, so the flush finishes first.
+	wh := a.webhookDispatcher(pl)
+	// The interface field is only assigned through a non-nil check: a typed
+	// nil *Dispatcher inside the interface would defeat the executor's own
+	// nil test.
+	var obs release.Observer
+	if wh != nil {
+		defer wh.Close(context.WithoutCancel(ctx))
+		obs = wh
+		wh.Event(a.releaseStartedEvent(pl))
+	}
+
 	executor := &release.Executor{
 		BuildConcurrency:   a.cfg.BuildConcurrency,
 		PublishConcurrency: a.cfg.PublishConcurrency,
@@ -191,6 +209,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		Reverter:           a.git,
 		Force:              a.cfg.Commit.ForceEnabled(),
 		Scanner:            a.scan,
+		Observer:           obs,
 		Log:                a.log,
 	}
 	start := time.Now()
@@ -222,6 +241,18 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// it: re-run an interrupted or failed run, or go and repair a release that
 	// is out but under-recorded.
 	crit.adopt(results)
+	if wh != nil {
+		// The one closing delivery, whatever the outcome: the status names
+		// the run's own word for it, the same word the exit code speaks.
+		status := "succeeded"
+		switch {
+		case interrupted:
+			status = "interrupted"
+		case failed > 0:
+			status = "failed"
+		}
+		wh.Event(a.releaseFinishedEvent(pl, results, status))
+	}
 	if interrupted {
 		return results, ctx.Err()
 	}
