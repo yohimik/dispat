@@ -1,13 +1,26 @@
 # syntax=docker/dockerfile:1
 #
-# The dispat CLI's build stage, containerised: the six release binaries, built
-# from this checkout with the release version baked in and exported to the host
-# as a plain folder.
+# The dispat CLI's build-and-test stage, containerised: the six release
+# binaries, built from this checkout with the release version baked in, smoke
+# tested, and exported to the host as a plain folder. The export descends from
+# the test stage, so a failed check fails this build and nothing comes out:
+# what lands in dist/ is six binaries that were tested, never six that merely
+# compiled.
 #
 # One binary per mainstream platform, because `dispat self-update` downloads the
 # asset named after the running platform: a target missing here is a platform
 # that cannot update itself. The names are part of that contract and must not
 # change.
+#
+# What the smoke proves is tiered by what one builder can execute. Every
+# binary is read back (`go version -m`) to prove it is a Go executable for the
+# platform its name claims. Both linux binaries are run — the foreign
+# architecture through binfmt, which the workflows' setup-qemu step and Docker
+# Desktop both provide. The builder's own linux binary then carries the e2e
+# smoke suite (tests/integration, -run 'TestSmoke'). The darwin and windows
+# binaries cannot run here at all; executing those falls to the release's
+# post-release matrix, which installs the published binary on all three
+# runner operating systems.
 #
 # The build runs here rather than on the runner so that a CI job needs a Go
 # toolchain for nothing but bootstrapping dispat itself. Cross-compilation is
@@ -62,6 +75,80 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     done; \
     echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output
 
+# The smoke gate: the binaries above, proven to work before anything exports
+# them. Tests run against /out's exact bytes — a fresh native build passing
+# says nothing about what a cross-compile produced — via DISPAT_TEST_BINARY,
+# which points the integration harness at a prebuilt binary instead of its
+# own `go build` (see tests/integration/internal/harness/binary.go).
+#
+# The suite drives dispat against disposable git repositories, so git is
+# installed and then asserted: without it the harness skips every test, and a
+# gate that passes by skipping is worse than no gate.
+FROM build AS test
+
+# The builder's own architecture — which of the six binaries can carry the
+# test suite natively.
+ARG TARGETARCH
+
+# Redeclared: a stage does not inherit its parent's ARGs, only the value the
+# caller passed survives into a stage that asks for it again. What the loop
+# below expects of --version is decided by this, and an empty value stamps a
+# binary that reports dev (see selfupdate.Describe), so empty and dev are the
+# same case there.
+ARG DISPAT_VERSION=dev
+
+RUN apk add --no-cache git && git --version
+
+# Copied here, after the compiles, so a test-only change never invalidates
+# the cross-compile layer above.
+COPY tests/integration /src/tests/integration
+
+# The suite resolves the pkg/* modules through a workspace, exactly as the
+# checkout does: the pins in tests/integration/go.mod are only as fresh as the
+# last release, so a harness field added beside a new feature would not
+# compile against the published copies. The workspace is written rather than
+# copied because the checkout's go.work also names modules this context
+# deliberately leaves out, and it is scoped to the test invocation below:
+# GOWORK stays off for the binaries' own build, whose whole point is the
+# published module's workspace-less environment.
+ARG GO_VERSION
+RUN printf 'go %s\n\nuse (\n\t./tests/integration\n\t./pkg/ccme\n\t./pkg/manifest\n\t./pkg/models\n\t./pkg/scanner\n\t./pkg/writer\n)\n' \
+      "$GO_VERSION" > /src/go.work
+
+# The same bypass the workflows use: the pkg/* modules this suite pins are
+# fetched from their tags directly, not from a proxy that may not have seen a
+# tag dispat itself created moments ago.
+ENV GOPRIVATE=github.com/yohimik/dispat
+
+# A stamped binary's --version otherwise starts a background update check
+# against the GitHub API; anything that parses as false turns it off.
+ENV DISPAT_UPDATE_CHECK=false
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    set -eu; \
+    for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do \
+      GOOS="${target%/*}"; \
+      GOARCH="${target#*/}"; \
+      case "$GOOS" in windows) ext=".exe" ;; *) ext="" ;; esac; \
+      name="dispat-${GOOS}-${GOARCH}${ext}"; \
+      info="$(go version -m "/out/$name")"; \
+      echo "$info" | grep -q "GOOS=$GOOS" || { echo "$name is not a $GOOS binary" >&2; exit 1; }; \
+      echo "$info" | grep -q "GOARCH=$GOARCH" || { echo "$name is not a $GOARCH binary" >&2; exit 1; }; \
+      echo "validated $name"; \
+    done; \
+    for arch in amd64 arm64; do \
+      out="$(/out/dispat-linux-$arch --version)"; \
+      echo "$out" | grep -q "(linux_$arch)" || { echo "dispat-linux-$arch reports the wrong platform: $out" >&2; exit 1; }; \
+      if [ -n "$DISPAT_VERSION" ] && [ "$DISPAT_VERSION" != "dev" ]; then \
+        echo "$out" | grep -q "dispat $DISPAT_VERSION " || { echo "dispat-linux-$arch reports the wrong version: $out" >&2; exit 1; }; \
+      fi; \
+      echo "executed dispat-linux-$arch: $(echo "$out" | grep 'dispat ')"; \
+    done; \
+    GOWORK=/src/go.work DISPAT_TEST_BINARY="/out/dispat-linux-${TARGETARCH}" \
+      go test -C /src/tests/integration -run 'TestSmoke' -count=1 -timeout 20m .; \
+    echo "smoke suite passed against dispat-linux-${TARGETARCH}"
+
 # The stage's outputs, GITHUB_OUTPUT-style, as the caller will read them: the
 # build above knows the binaries' names and nothing about where the export will
 # land, so the destination is passed in and joined onto them here. What comes
@@ -75,7 +162,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # The default is what a hand build of this target gets: names relative to the
 # folder that was exported, which is the one reading they are always correct
 # under. A release passes the absolute path.
-FROM build AS staged
+FROM test AS staged
 ARG DISPAT_EXPORT_BASE=.
 RUN set -eu; \
     while IFS= read -r line; do \

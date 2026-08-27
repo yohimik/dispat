@@ -49,6 +49,12 @@ scripts:
     # the one thing the container cannot work out for itself: it names
     # its artefacts against that path, so what comes back needs no
     # rewriting here.
+    #
+    # The export target descends from the Dockerfile's test stage, so
+    # this one invocation is also the smoke gate: every binary is
+    # validated, both linux binaries are executed, and the e2e smoke
+    # suite runs against the exact bytes about to land in dist/. A
+    # binary that merely compiled never comes out.
     - >-
       docker buildx build --file Dockerfile --target export
       --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"

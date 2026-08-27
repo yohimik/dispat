@@ -12,6 +12,10 @@
 services/*
 !services/dispat
 
+# The smoke suite the test stage runs against the built binaries; see the
+# Dockerfile's test stage.
+!tests
+
 # The export folder of a previous build. It is the one thing under
 # services/dispat that is output rather than source, and shipping it into the
 # context would grow with every build.
