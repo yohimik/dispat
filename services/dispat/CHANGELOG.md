@@ -1,5 +1,16 @@
 # Changelog
 
+## services/dispat/v1.2.0 (2026-08-27)
+
+### Features
+
+- external webhooks
+
+
+### Dependencies
+
+- models: 1.1.0 -> 1.2.0
+
 ## services/dispat/v1.1.1 (2026-08-26)
 
 ### Fixes
