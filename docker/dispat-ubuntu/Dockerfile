@@ -29,17 +29,35 @@ LABEL org.opencontainers.image.title="dispat" \
       org.opencontainers.image.url="https://dispat.dev" \
       org.opencontainers.image.licenses="MIT"
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      git \
-      ca-certificates \
-      openssh-client \
-      tzdata \
- && rm -rf /var/lib/apt/lists/* \
- # dispat shells out to git (internal/app/app.go refuses to start without it)
- # over a checkout bind-mounted from the host, which another uid owns. Without
- # this every git call fails with "dubious ownership".
- && git config --system --add safe.directory '*'
+# The install retries around apt's one flaky failure mode: Ubuntu mirrors
+# delete a superseded .deb the moment a security update replaces it, so an
+# index fetched moments before the rotation 404s mid-download — which is what
+# failed the arm64 leg of the 1.2.0 release, since that leg reads
+# ports.ubuntu.com rather than the primary archive. A retry is only worth
+# anything if it refreshes the index first, so the update is inside the loop
+# and the stale lists are dropped before each new attempt.
+RUN set -eu; \
+    attempt=1; \
+    while :; do \
+      rc=0; \
+      { apt-get update \
+        && apt-get install -y --no-install-recommends \
+             git \
+             ca-certificates \
+             openssh-client \
+             tzdata; } || rc=$?; \
+      [ "$rc" -eq 0 ] && break; \
+      [ "$attempt" -ge 3 ] && exit "$rc"; \
+      echo "apt attempt $attempt failed; refreshing the index and retrying" >&2; \
+      attempt=$((attempt + 1)); \
+      rm -rf /var/lib/apt/lists/*; \
+      sleep 15; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    # dispat shells out to git (internal/app/app.go refuses to start without
+    # it) over a checkout bind-mounted from the host, which another uid owns.
+    # Without this every git call fails with "dubious ownership".
+    git config --system --add safe.directory '*'
 
 COPY --from=fetch /out/dispat /usr/local/bin/dispat
 
