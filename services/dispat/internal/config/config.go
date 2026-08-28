@@ -1,5 +1,5 @@
-// Package config loads and validates the monorepo configuration file (via
-// viper) and discovers the packages living inside the configured spaces.
+// Package config loads and validates the monorepo configuration file and
+// discovers the packages living inside the configured spaces.
 //
 // The configuration model itself — the structs a config file decodes into —
 // is public, in the pkg/models module, so external tooling can author
@@ -291,10 +291,11 @@ func checkScriptValues(label string, scripts map[string]Script) error {
 }
 
 // Load reads and validates the configuration file. When flags is non-nil the
-// "concurrency", "log-level" and "log-format" flags are bound through viper,
-// so explicitly set flags override file values (and file values override flag
-// defaults). Defaults applied afterwards: concurrency 0 means the number of
-// CPUs, logLevel defaults to "info", logFormat to "pretty".
+// "concurrency", "log-level" and "log-format" flags override the file, but only
+// where the caller actually passed one: an unset flag carries a default, and a
+// default is not an instruction. Defaults applied afterwards: concurrency 0
+// means the number of CPUs, logLevel defaults to "info", logFormat to
+// "pretty".
 // defaultFileNames are the config file names the CLI looks for, in order,
 // when --config is not explicitly set: the file `dispat init` writes under
 // each of its formats. The first that exists wins.
@@ -488,35 +489,32 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	v, err := viperFromTree(t, flags)
-	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
-	}
+	raw := lowerTree(t, flags)
 
 	// The keys a package entry may never hold are refused by name, at every
 	// map that holds entries, before decoding drops them into an unknown-key
 	// error that could not say why.
-	if err := refusePackageEntryKeys("packages", rawEntries(v, "packages")); err != nil {
+	if err := refusePackageEntryKeys("packages", rawEntries(raw, "packages")); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	for _, sn := range sortedKeys(rawEntries(v, "spaces")) {
+	for _, sn := range sortedKeys(rawEntries(raw, "spaces")) {
 		if err := refusePackageEntryKeys(fmt.Sprintf("spaces[%q]: packages", sn),
-			rawEntries(v, "spaces", sn, "packages")); err != nil {
+			rawEntries(raw, "spaces", sn, "packages")); err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
 	}
 
 	var cfg File
-	// UnmarshalExact rejects unknown keys, catching config typos early.
-	// WeaklyTypedInput lets a scalar concurrency value decode into the slice,
-	// and the shorthand hooks expand {consumer: provider(s)} dependency items
-	// and bare record lines into full entries before decoding.
-	if err := v.UnmarshalExact(&cfg, weakDecode); err != nil {
+	// decodeExact rejects unknown keys, catching config typos early. Weak
+	// typing lets a scalar concurrency value decode into the slice, and the
+	// shorthand hooks expand {consumer: provider(s)} dependency items and bare
+	// record lines into full entries before decoding.
+	if err := decodeExact(settings(raw), &cfg, weakDecode); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
-	// Env keys must keep their exact case; viper lowercased them along with
-	// every other map key. This runs before validation so the keys it reports
-	// on are the ones the file actually wrote.
+	// Env keys must keep their exact case; the lowered tree folded them along
+	// with every other map key. This runs before validation so the keys it
+	// reports on are the ones the file actually wrote.
 	restoreEnvCase(envRestorerOf(t), &cfg)
 	cfg.SourceFiles = t.files
 	if err := validate(&cfg); err != nil {
@@ -537,8 +535,8 @@ var providerListType = reflect.TypeOf(public.ProviderList(nil))
 //
 // The expansion itself lives in pkg/models, so this and the public type's own
 // UnmarshalJSON cannot come to disagree about what the config language is.
-// The one thing that differs here is the input: viper has already lowercased
-// every map key by the time the hook sees it, so consumer names arrive folded
+// The one thing that differs here is the input: lowerTree has already folded
+// every map key by the time the hook sees it, so consumer names arrive lowercased
 // — exactly like the keys of `packages` and `spaces`, and resolved back onto
 // the packages they name in discovery.
 func dependencyFormHook(_, to reflect.Type, data any) (any, error) {
@@ -1781,7 +1779,7 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 // canonicaliseEndpoints rewrites every declared edge's endpoints to the exact
 // name of the package they mean.
 //
-// The `dependencies` map is keyed by consumer, and viper lowercases the keys
+// The `dependencies` map is keyed by consumer, and lowerTree folds the keys
 // of every map in the config, so a package folder named "Web" is declared as
 // "web" by the time discovery sees it. That is the same fold `packages` and
 // `spaces` entries already go through, and it is resolved the same way: keys

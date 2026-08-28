@@ -1,7 +1,7 @@
 package config
 
 // The loader every config file arrives through: which formats it reads, what
-// it makes of a file that says nothing, and the copy that keeps viper's
+// it makes of a file that says nothing, and the copy that keeps the decode's
 // key-lowercasing away from the tree the env pass reads.
 //
 // Configs are authored as typed models and marshalled, as everywhere else in
@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,11 +93,11 @@ func TestReadTreeTopLevelMustBeAnObject(t *testing.T) {
 	assert.Contains(t, err.Error(), "the top level is not an object")
 }
 
-// TestViperFromTreeLeavesTheTreeAlone: viper lowercases the keys of the map it
-// is handed, in place and all the way down, and then keeps those very maps. It
-// therefore gets a copy: the tree is what the env pass reads case-exactly, and
-// a config whose env survived the decode is the proof it was not shared.
-func TestViperFromTreeLeavesTheTreeAlone(t *testing.T) {
+// TestLowerTreeLeavesTheTreeAlone: the lowered view folds every key of the map
+// it is handed, all the way down and inside lists too. It is therefore a copy:
+// the tree is what the env pass reads case-exactly, and a config whose env
+// survived the decode is the proof it was not shared.
+func TestLowerTreeLeavesTheTreeAlone(t *testing.T) {
 	tree := &tree{root: map[string]any{
 		"spaces": map[string]any{"Libs": map[string]any{
 			"env":       map[string]any{"MiXed": "v"},
@@ -104,14 +105,127 @@ func TestViperFromTreeLeavesTheTreeAlone(t *testing.T) {
 		}},
 	}}
 
-	v, err := viperFromTree(tree, nil)
-	require.NoError(t, err)
-	require.NotNil(t, v.Get("spaces"))
+	raw := lowerTree(tree, nil)
+	assert.Equal(t, map[string]any{"spaces": map[string]any{"libs": map[string]any{
+		"env":       map[string]any{"mixed": "v"},
+		"aliastags": []any{map[string]any{"format": "latest"}},
+	}}}, raw, "the lowered view folds every key, lists included")
 
 	assert.Equal(t, map[string]any{"spaces": map[string]any{"Libs": map[string]any{
 		"env":       map[string]any{"MiXed": "v"},
 		"aliasTags": []any{map[string]any{"Format": "latest"}},
 	}}}, tree.root, "the tree keeps every key as the file spelled it")
+}
+
+// TestLowerTreeFoldsEveryKindOfMap: the lowered view is what makes the config
+// language case-insensitive, so it has to reach every map a parser can
+// produce. A yaml mapping with a non-string key parses as a generic map, and a
+// typed container is not the config language's map at all — its keys are a Go
+// type's, and renaming them would corrupt the value rather than fold it.
+func TestLowerTreeFoldsEveryKindOfMap(t *testing.T) {
+	typed := map[string][]string{"Keep": {"As-Is"}}
+	tree := &tree{root: map[string]any{
+		"Generic": map[any]any{"MiXed": "v", 1: "one", true: "yes"},
+		"List":    []any{map[any]any{"Nested": "v"}},
+		"Typed":   typed,
+	}}
+
+	raw := lowerTree(tree, nil)
+	assert.Equal(t, map[string]any{"mixed": "v", "1": "one", "true": "yes"}, raw["generic"],
+		"a generic map becomes a string-keyed one, folded, so the decode meets one kind of map")
+	assert.Equal(t, []any{map[string]any{"nested": "v"}}, raw["list"])
+	assert.Equal(t, typed, raw["typed"], "a typed container keeps its own keys")
+
+	raw["typed"].(map[string][]string)["Keep"][0] = "changed"
+	assert.Equal(t, "As-Is", typed["Keep"][0], "and is copied rather than shared")
+}
+
+// TestSettingsPrunesEmptyObjectsAndSplitsPaths pins the two rules the decode
+// input carries that the lowered tree does not: an object with no keys is not
+// a key at all, which is why an opt-in block written as a bare {} says nothing
+// rather than enabling itself at its defaults; and a key spelled with the
+// delimiter is the levels it names. Both are load-bearing — the config tests
+// author their opt-in blocks around the first — so they are pinned here rather
+// than left to be rediscovered.
+func TestSettingsPrunesEmptyObjectsAndSplitsPaths(t *testing.T) {
+	out := settings(map[string]any{
+		"kept":    map[string]any{"leaf": "v"},
+		"empty":   map[string]any{},
+		"hollow":  map[string]any{"inner": map[string]any{}},
+		"a.b":     "dotted",
+		"list":    []any{},
+		"nothing": nil,
+	})
+
+	assert.Equal(t, map[string]any{"leaf": "v"}, out["kept"])
+	assert.NotContains(t, out, "empty", "an object with no keys is not a key")
+	assert.NotContains(t, out, "hollow", "nor is one holding only empty objects")
+	assert.Equal(t, map[string]any{"b": "dotted"}, out["a"], "the delimiter is a level")
+	assert.Equal(t, []any{}, out["list"], "an empty list is a value, not an absence")
+	assert.Contains(t, out, "nothing", "a key written with no value is still a key")
+}
+
+// TestLowerTreeFlagOverridesOnlyWhenPassed pins the one thing a flag binding
+// ever meant: a flag the caller actually passed replaces what the file says,
+// and a flag left alone carries its default into nothing at all. The two cases
+// are one test because the bug they guard against is the pair being confused —
+// an unset --log-level clobbering a configured logLevel with "" looks like a
+// config that was never read.
+func TestLowerTreeFlagOverridesOnlyWhenPassed(t *testing.T) {
+	newFlags := func() *pflag.FlagSet {
+		fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+		fs.IntSlice("concurrency", nil, "")
+		fs.String("log-level", "", "")
+		fs.String("log-format", "", "")
+		return fs
+	}
+	configured := func() *tree {
+		return &tree{root: map[string]any{
+			"concurrency": []any{4, 2},
+			"logLevel":    "debug",
+			"logFormat":   "json",
+		}}
+	}
+
+	t.Run("unset", func(t *testing.T) {
+		raw := lowerTree(configured(), newFlags())
+		assert.Equal(t, []any{4, 2}, raw["concurrency"])
+		assert.Equal(t, "debug", raw["loglevel"])
+		assert.Equal(t, "json", raw["logformat"])
+	})
+
+	t.Run("passed", func(t *testing.T) {
+		fs := newFlags()
+		require.NoError(t, fs.Parse([]string{"--concurrency", "1,3", "--log-level", "warn"}))
+
+		raw := lowerTree(configured(), fs)
+		// A list flag hands over its elements: its printed form is "[1,3]",
+		// which no list field could be weakly typed out of.
+		assert.Equal(t, []string{"1", "3"}, raw["concurrency"])
+		assert.Equal(t, "warn", raw["loglevel"])
+		assert.Equal(t, "json", raw["logformat"], "a flag nobody passed leaves its key alone")
+	})
+
+	t.Run("through_the_loader", func(t *testing.T) {
+		cfg := minimalConfig()
+		cfg.LogLevel = "debug"
+		cfg.Concurrency = []int{4, 2}
+		root := writeModelRepo(t, cfg, "pkgs/core")
+
+		loaded, err := Load(filepath.Join(root, "dispat.json"), newFlags())
+		require.NoError(t, err)
+		assert.Equal(t, "debug", loaded.LogLevel, "an unset flag does not clobber the file")
+		assert.Equal(t, 4, loaded.BuildConcurrency)
+		assert.Equal(t, 2, loaded.PublishConcurrency)
+
+		fs := newFlags()
+		require.NoError(t, fs.Parse([]string{"--log-level", "warn", "--concurrency", "1,3"}))
+		overridden, err := Load(filepath.Join(root, "dispat.json"), fs)
+		require.NoError(t, err)
+		assert.Equal(t, "warn", overridden.LogLevel)
+		assert.Equal(t, 1, overridden.BuildConcurrency)
+		assert.Equal(t, 3, overridden.PublishConcurrency)
+	})
 }
 
 // TestRefReplacesTheValue: the whole point, at three levels of nesting and in

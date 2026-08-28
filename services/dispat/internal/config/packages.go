@@ -18,7 +18,6 @@ import (
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/spf13/viper"
 
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -95,7 +94,7 @@ func validateVersionGroups(c *File) error {
 // resolveVersionGroup resolves a versionGroup reference onto the group key
 // and versioning mode it stands for: a declared versionGroups entry, or a
 // space whose own versioning is shared (its implicit group). The lookup is
-// case-insensitive because viper lowercases both maps' keys.
+// case-insensitive because the lowered tree folds both maps' keys.
 func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
 	low := strings.ToLower(ref)
 	if g, ok := c.VersionGroups[low]; ok {
@@ -221,14 +220,14 @@ func collectObjectDeps(declared []DeclaredDependency, deps Dependencies, src Dep
 
 // packageEntryKeys are the keys a `packages` entry may never hold. A package
 // entry configures one package, so it holds neither spaces nor packages of
-// its own; UnmarshalExact would refuse them as unknown keys, and naming them
+// its own; decodeExact would refuse them as unknown keys, and naming them
 // here says why and points at the levels that do take them.
 var packageEntryKeys = []string{"spaces", "packages"}
 
 // refusePackageEntryKeys walks a raw `packages` map straight from the config
 // reader — before decoding, which is the only moment the offending key still
 // exists — and rejects an entry holding one of packageEntryKeys. label names
-// the map for the error; keys arrive lowercased, like every viper map key.
+// the map for the error; keys arrive lowercased, like every config map key.
 func refusePackageEntryKeys(label string, entries map[string]any) error {
 	names := make([]string, 0, len(entries))
 	for name := range entries {
@@ -262,11 +261,11 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// rawEntries reads a raw map value out of a config reader, at the key path
+// rawEntries reads a raw map value out of a lowered tree, at the key path
 // given. Anything that is not a map of objects yields nothing: decoding is
 // what reports a malformed shape, in its own words.
-func rawEntries(v *viper.Viper, keyPath ...string) map[string]any {
-	var cur any = v.Get(keyPath[0])
+func rawEntries(raw map[string]any, keyPath ...string) map[string]any {
+	cur := raw[keyPath[0]]
 	for _, key := range keyPath[1:] {
 		m, ok := cur.(map[string]any)
 		if !ok {
@@ -884,10 +883,10 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 // openFolderConfig probes a folder for its in-folder dispat config file — the
 // same names and formats the root config resolves through, minus what the
 // folder's .dispatexclude excludes — and returns both views of it: the tree it
-// parsed into, keys spelled as written, and the viper that decodes the model
-// from it. An absent file yields an empty path and a nil reader, which every
-// caller reads as "this folder says nothing".
-func openFolderConfig(dir string) (*viper.Viper, *tree, string, error) {
+// parsed into, keys spelled as written, and the lowered copy the model is
+// decoded from. An absent file yields an empty path and a nil tree, which
+// every caller reads as "this folder says nothing".
+func openFolderConfig(dir string) (map[string]any, *tree, string, error) {
 	names, err := configCandidates(dir)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
@@ -900,11 +899,7 @@ func openFolderConfig(dir string) (*viper.Viper, *tree, string, error) {
 	if err != nil {
 		return nil, nil, p, err
 	}
-	v, err := viperFromTree(t, nil)
-	if err != nil {
-		return nil, nil, p, err
-	}
-	return v, t, p, nil
+	return lowerTree(t, nil), t, p, nil
 }
 
 // weakDecode is the decoding stance every in-folder file shares with the root
@@ -927,9 +922,9 @@ func weakDecode(dc *mapstructure.DecoderConfig) {
 // monorepo root may declare. The folder holds a repository of its own, and a
 // nested root must be ignored rather than half-merged; role and remedy name
 // what the folder was being read as and how to take it out of the walk.
-func refuseNestedRoot(v *viper.Viper, path, role, remedy string, keys ...string) error {
+func refuseNestedRoot(raw map[string]any, path, role, remedy string, keys ...string) error {
 	for _, key := range keys {
-		if v.IsSet(key) {
+		if isSet(raw, key) {
 			return fmt.Errorf(
 				"%s declares %s, so the folder looks like a monorepo root of its own rather than a %s; %s, or remove the file",
 				path, key, role, remedy)
@@ -942,22 +937,22 @@ func refuseNestedRoot(v *viper.Viper, path, role, remedy string, keys ...string)
 // file and decodes it as a PackageConfig, the file's top-level object.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
 	var pc PackageConfig
-	v, t, p, err := openFolderConfig(dir)
-	if err != nil || v == nil {
+	raw, t, p, err := openFolderConfig(dir)
+	if err != nil || raw == nil {
 		return pc, p, err
 	}
-	if err := refuseNestedRoot(v, p, "package",
+	if err := refuseNestedRoot(raw, p, "package",
 		"exclude the folder with "+DispatexcludeName, "spaces", "packages"); err != nil {
 		return pc, p, err
 	}
-	if err := v.UnmarshalExact(&pc, weakDecode); err != nil {
+	if err := decodeExact(settings(raw), &pc, weakDecode); err != nil {
 		return pc, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
 	if pc.Path != "" {
 		return pc, p, fmt.Errorf(
 			"%s: %s", p, pathRefused("a package folder's config file"))
 	}
-	// Env keys must keep their exact case; viper lowercased them.
+	// Env keys must keep their exact case; the lowered tree folded them.
 	pc.Env = envRestorerOf(t).envAt("env")
 	return pc, p, nil
 }
@@ -969,21 +964,21 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 // name rather than as a bare unknown key.
 func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	var sf SpaceFile
-	v, t, p, err := openFolderConfig(dir)
-	if err != nil || v == nil {
+	raw, t, p, err := openFolderConfig(dir)
+	if err != nil || raw == nil {
 		return sf, p, err
 	}
-	if err := refuseNestedRoot(v, p, "space folder",
+	if err := refuseNestedRoot(raw, p, "space folder",
 		"drop the space from the root config", "spaces"); err != nil {
 		return sf, p, err
 	}
-	if v.IsSet("path") {
+	if isSet(raw, "path") {
 		return sf, p, fmt.Errorf("%s: %s", p, pathRefused("a space folder's config file"))
 	}
-	if err := refusePackageEntryKeys(p+": packages", rawEntries(v, "packages")); err != nil {
+	if err := refusePackageEntryKeys(p+": packages", rawEntries(raw, "packages")); err != nil {
 		return sf, p, err
 	}
-	if err := v.UnmarshalExact(&sf, weakDecode); err != nil {
+	if err := decodeExact(settings(raw), &sf, weakDecode); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
 	// The space folder's own env layer and those of the packages entries next
@@ -992,7 +987,7 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	return sf, p, nil
 }
 
-// restoreSpaceFileEnvCase replaces a space folder file's viper-lowercased env
+// restoreSpaceFileEnvCase replaces a space folder file's lowercased env
 // maps — the space's own and each of its packages entries' — with exact-case
 // ones taken from the file's own tree.
 func restoreSpaceFileEnvCase(r *envRestorer, sf *SpaceFile) {

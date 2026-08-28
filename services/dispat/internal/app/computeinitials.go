@@ -79,7 +79,7 @@ func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []m
 	// An entry already in the config is the operator's own statement, and the
 	// way to silence this suggestion for good: 0.0.0 included, it is never
 	// rewritten. Matching is case-insensitive, the way App.initialVersions
-	// matches them, because viper lowercases map keys.
+	// matches them, because the config's map keys arrive lowercased.
 	decided := make(map[string]bool, len(a.cfg.Initials))
 	for key := range a.cfg.Initials {
 		decided[strings.ToLower(key)] = true
@@ -238,7 +238,7 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 // map, leaving every entry already there exactly as it is.
 //
 // The current map is re-read from the file rather than taken from the loaded
-// config: viper lowercases every map key, so writing the parsed map back
+// config: every map key arrives lowercased, so writing the parsed map back
 // would silently rename entries their author spelled otherwise.
 func (a *App) collectInitialEdits(edits *fileEdits, cfgPath string, apply []initialSuggestion) error {
 	if len(apply) == 0 {
@@ -259,7 +259,7 @@ func (a *App) collectInitialEdits(edits *fileEdits, cfgPath string, apply []init
 	}
 	for _, s := range apply {
 		next[s.pkg] = s.version.String()
-		// The in-memory view keys these the way viper would have, so a future
+		// The in-memory view keys these the way a load would have, so a future
 		// long-lived caller reads back what a reload would give it.
 		a.cfg.Initials[strings.ToLower(s.pkg)] = s.version.String()
 		a.cfg.InitialVersions[strings.ToLower(s.pkg)] = s.version

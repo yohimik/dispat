@@ -1,7 +1,7 @@
 package config
 
-// The static `env` objects and their one complication: viper lowercases every
-// map key when it decodes a config file. That is harmless — useful, even — for
+// The static `env` objects and their one complication: lowerTree lowercases
+// every map key on the way to the decode. That is harmless — useful, even — for
 // every other map in the model, because script names, spaces, packages and
 // initials all match case-insensitively. Environment variable names do not:
 // PATH and Path are two variables. So the env objects are read from the tree
@@ -72,8 +72,8 @@ func MergeEnv(base, over map[string]string) map[string]string {
 
 // validateEnv rejects the env keys that could never reach a script intact:
 // empty, carrying "=", claiming the DISPAT_ namespace the computed variables
-// own, or colliding case-insensitively — viper folds two such keys into one
-// before the exact-case pass can tell them apart, so the survivor would be
+// own, or colliding case-insensitively — lowerTree folds two such keys into
+// one before the exact-case pass can tell them apart, so the survivor would be
 // whichever the file happened to write last. Keys are checked in sorted order
 // so a config with several mistakes always reports the same one first.
 func validateEnv(label string, env map[string]string) error {
@@ -117,7 +117,7 @@ func envRestorerOf(t *tree) *envRestorer {
 // envAt returns the exact-case env object at a key path ("env" — or "spaces",
 // "libs", "env"), or nil when the path holds no object. Names along the path
 // are matched case-insensitively with the package's own lookupFold: the caller
-// looks them up with the lowercased keys viper produced, while this tree came
+// looks them up with the lowercased keys lowerTree produced, while this tree came
 // from the raw file, where a space may well be spelled "Libs".
 func (r *envRestorer) envAt(path ...string) map[string]string {
 	node := r.tree
@@ -137,7 +137,7 @@ func (r *envRestorer) envAt(path ...string) map[string]string {
 	return envFromTree(raw)
 }
 
-// restoreEnvCase replaces the root config's viper-lowercased env maps with
+// restoreEnvCase replaces the root config's lowercased env maps with
 // exact-case ones taken from the file's own tree, at all four levels the root
 // file can hold one.
 func restoreEnvCase(r *envRestorer, cfg *File) {
@@ -157,7 +157,7 @@ func restoreEnvCase(r *envRestorer, cfg *File) {
 }
 
 // envFromTree converts a raw env object to map[string]string with the same
-// weak typing viper's decode applies, so a bare 1 or true is a fine value and
+// weak typing decodeExact applies, so a bare 1 or true is a fine value and
 // means the same thing whichever pass read it.
 func envFromTree(v any) map[string]string {
 	m, ok := v.(map[string]any)
@@ -171,7 +171,9 @@ func envFromTree(v any) map[string]string {
 	return out
 }
 
-// weakEnvString renders a scalar the way viper's weakly typed decode would.
+// weakEnvString renders a scalar the way the weakly typed decode would. It is
+// also what a generic map's key becomes on the way into the lowered tree, so
+// the two renderings can never disagree.
 // The numeric cases go through strconv rather than fmt.Sprint: a large float
 // formatted with %v would come out in scientific notation, which is not what
 // the file said.

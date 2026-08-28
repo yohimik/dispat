@@ -382,7 +382,7 @@ func (a *App) lookupScript(name string, from Location, fallback bool) (public.Sc
 	if err != nil {
 		return nil, err
 	}
-	key := strings.ToLower(name) // viper lowercases the config's map keys
+	key := strings.ToLower(name) // the config's map keys arrive lowercased
 	for _, l := range levels {
 		if cmds, ok := l.scripts[key]; ok {
 			return cmds, nil

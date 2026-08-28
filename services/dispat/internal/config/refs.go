@@ -8,13 +8,13 @@ package config
 // probes the ascent classifies candidates with, and the readers behind
 // `dispat compute --write` all arrive here.
 //
-// Parsing the file rather than letting viper do it is what keeps every key
-// spelled the way the file wrote it. Viper lowercases every map key it reads,
-// which is what most of the configuration wants — script, space and package
-// names all match case-insensitively — and wrong for environment variable
-// names, so the tree is kept exact-case and viper is handed a lowercased copy
-// of it. One parse then serves both, where reading the file twice used to be
-// the price of an `env` object.
+// Parsing the file here is what keeps every key spelled the way the file wrote
+// it. The decode lowercases every map key, which is what most of the
+// configuration wants — script, space and package names all match
+// case-insensitively — and wrong for environment variable names, so the tree
+// is kept exact-case and lowerTree hands the decoder a lowercased copy of it.
+// One parse then serves both, where reading the file twice used to be the
+// price of an `env` object.
 //
 // A reference is resolved against the directory of the file that wrote it, and
 // the file it names may hold references of its own, resolved against theirs. A
@@ -34,7 +34,6 @@ import (
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
-	"github.com/spf13/viper"
 	yaml "gopkg.in/yaml.v3"
 
 	"github.com/spf13/pflag"
@@ -167,7 +166,7 @@ func (r *refResolver) object(node map[string]any, file, label string) (any, erro
 			return nil, err
 		}
 		// The overriding key is written whichever way the two files spell it:
-		// leaving both spellings in would hand viper two keys that fold
+		// leaving both spellings in would hand the decode two keys that fold
 		// together, and which one survived would be a matter of luck.
 		if existing, found := foldKey(object, key); found {
 			delete(object, existing)
@@ -214,8 +213,8 @@ func mergeFragments(base, next any, firstTarget, target string) (any, error) {
 		}
 		for _, key := range sortedKeys(object) {
 			// The later file's spelling of a key is the one that survives:
-			// leaving both in would hand viper two keys that fold together,
-			// and which one won would be a matter of luck.
+			// leaving both in would hand the decode two keys that fold
+			// together, and which one won would be a matter of luck.
 			if existing, found := foldKey(first, key); found {
 				delete(first, existing)
 			}
@@ -461,30 +460,42 @@ func decodeFile(path string) (any, error) {
 	}
 }
 
-// viperFromTree hands a parsed tree to viper, which is still what decodes the
-// model: the unknown-key refusal, the case-insensitive key matching and the
-// flag bindings are all its.
+// lowerTree is the second view of a parsed file: the same document with every
+// map key lowercased, which is what makes script, space and package names
+// match case-insensitively, and with the flags that override a config key
+// written over it.
 //
-// The copy is not an optimisation to skip. MergeConfigMap lowercases the map
-// it is given in place, recursively, and then keeps those very sub-maps — so
-// handing it the tree itself would rename the keys the env pass still has to
-// read exactly, and leave viper sharing memory with them.
-func viperFromTree(t *tree, flags *pflag.FlagSet) (*viper.Viper, error) {
-	v := viper.New()
-	if err := v.MergeConfigMap(cloneTree(t.root)); err != nil {
-		return nil, err
-	}
+// The copy is not an optimisation to skip. The lowering renames the keys the
+// env pass still has to read exactly, so it works on a copy and the tree keeps
+// every key as the file spelled it. One parse then serves both, where reading
+// the file twice used to be the price of an `env` object.
+func lowerTree(t *tree, flags *pflag.FlagSet) map[string]any {
+	raw := lowerMap(t.root)
 	if flags == nil {
-		return v, nil
+		return raw
 	}
 	for key, flagName := range boundFlags {
-		if f := flags.Lookup(flagName); f != nil {
-			if err := v.BindPFlag(key, f); err != nil {
-				return nil, fmt.Errorf("binding flag %s: %w", flagName, err)
-			}
+		f := flags.Lookup(flagName)
+		// Only a flag the caller actually passed overrides the file. An unset
+		// flag carries its default, and writing that over a configured value
+		// would make every run look like it had been asked for the default.
+		if f == nil || !f.Changed {
+			continue
 		}
+		raw[strings.ToLower(key)] = flagValue(f)
 	}
-	return v, nil
+	return raw
+}
+
+// flagValue renders an explicitly set flag as the value the decode reads. A
+// list-valued flag hands over its elements rather than its printed form:
+// --concurrency 4,2 prints as "[4,2]", which is a string no list field can be
+// weakly typed out of.
+func flagValue(f *pflag.Flag) any {
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		return sv.GetSlice()
+	}
+	return f.Value.String()
 }
 
 // boundFlags are the config keys an explicitly set flag overrides, and the
@@ -493,6 +504,51 @@ var boundFlags = map[string]string{
 	"concurrency": "concurrency",
 	"logLevel":    "log-level",
 	"logFormat":   "log-format",
+}
+
+// lowerMap copies a parsed tree with every key lowercased, deeply.
+func lowerMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[strings.ToLower(k)] = lowerValue(v)
+	}
+	return out
+}
+
+// lowerValue copies one node of the lowered view. A generic map — a yaml
+// mapping with a non-string key — becomes a string-keyed one on the way, so
+// everything below here is one kind of map and the decode never meets the
+// other. Typed containers today's parsers do not produce go through
+// cloneReflect, which copies without renaming: their keys are a Go type's, not
+// the config language's.
+func lowerValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return lowerMap(t)
+	case map[any]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[strings.ToLower(weakEnvString(k))] = lowerValue(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = lowerValue(val)
+		}
+		return out
+	case nil, string, bool, int, int64, float64:
+		return v
+	default:
+		return cloneReflect(v)
+	}
+}
+
+// isSet answers whether a lowered tree holds a value at a top-level key, which
+// is what the folder loaders ask before they refuse a key. A key written with
+// no value is not set: the file mentioned it and said nothing.
+func isSet(raw map[string]any, key string) bool {
+	return raw[key] != nil
 }
 
 // cloneTree copies a parsed tree, deeply.
@@ -532,9 +588,9 @@ func cloneValue(v any) any {
 }
 
 // cloneReflect copies the typed maps and slices today's parsers do not
-// produce, so that changing one of them can never quietly leave viper sharing
-// memory with the tree. Anything that is not a map or a slice is a scalar and
-// is returned as it came.
+// produce, so that changing one of them can never quietly leave the lowered
+// view sharing memory with the tree. Anything that is not a map or a slice is
+// a scalar and is returned as it came.
 func cloneReflect(v any) any {
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
