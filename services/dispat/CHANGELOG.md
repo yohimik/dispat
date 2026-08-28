@@ -1,5 +1,27 @@
 # Changelog
 
+## services/dispat/v1.3.1 (2026-08-28)
+
+### Fixes
+
+- catch-up records span the provider's movement
+A catch-up picks up a provider that published in an earlier run, so by the
+time its records are written the provider's own before-and-after have
+collapsed onto the published version — and the changelog entry, the GitHub
+release body and the DISPAT_UPDATED_* variables all said "1.3.0 -> 1.3.0",
+a movement line with no movement, which is what the docs leg of the 1.3.0
+release shipped. From is now what the package's previous release shipped
+against, reconstructed off the provider's tags at the package's own
+baseline, the same way a graduation spans its train; the step commands
+inherit the span through the plan they recompute.
+
+A ride catching up documents the movement it rode for by the same
+reconstruction: its provider is not releasing and nothing propagated, so
+the record loops found nothing at all, and the ride's entry stayed silent
+about the one thing it existed to ship — where the same ride in a
+single-run release names the provider's movement. An own-cause release's
+manifest-only pickup stays out of the record, as it always has.
+
 ## services/dispat/v1.3.0 (2026-08-28)
 
 ### Features
