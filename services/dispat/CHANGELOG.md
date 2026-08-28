@@ -1,5 +1,16 @@
 # Changelog
 
+## services/dispat/v1.3.0 (2026-08-28)
+
+### Features
+
+- changelogs and github releases authors
+
+
+### Dependencies
+
+- models: 1.2.0 -> 1.3.0
+
 ## services/dispat/v1.2.0 (2026-08-27)
 
 ### Features

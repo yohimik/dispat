@@ -44,8 +44,8 @@ github.com/yohimik/dispat/pkg/ccme v1.0.0 h1:1W9Jn33m4YY4NvHs5PLQNP6U8vje5nPhIoR
 github.com/yohimik/dispat/pkg/ccme v1.0.0/go.mod h1:8UxO6Pk3eSjs5g99B0At74CfvZpI+6yVCiHMsENuyPE=
 github.com/yohimik/dispat/pkg/manifest v1.1.1 h1:pEF5Un38v8fL/sSmWuCxo3Owxl6kL67K7O48uTBzZs0=
 github.com/yohimik/dispat/pkg/manifest v1.1.1/go.mod h1:DFkXSrUuECVXTNJPPF0GClKTBdWOpl5/sGjANqR49KU=
-github.com/yohimik/dispat/pkg/models v1.2.0 h1:w/cdkBV7KraBFFh+EjZBVaHUJ0w/1b2DppItetbhNfw=
-github.com/yohimik/dispat/pkg/models v1.2.0/go.mod h1:hZ5ww4R0SOA5zZqIFMGgG6qn/0j4/mIaPBJbkq05YiI=
+github.com/yohimik/dispat/pkg/models v1.3.0 h1:hnGOIdf5TufQMX678b7wcsPbm5gk/8NdpEUz/hGNseQ=
+github.com/yohimik/dispat/pkg/models v1.3.0/go.mod h1:hZ5ww4R0SOA5zZqIFMGgG6qn/0j4/mIaPBJbkq05YiI=
 github.com/yohimik/dispat/pkg/scanner v1.1.1 h1:g7Gi0pnRSTm9lYx8Idzqp4cjSgJ4iqbrBkscU4ZL9Q4=
 github.com/yohimik/dispat/pkg/scanner v1.1.1/go.mod h1:PZlsPxvdXQ1kHTRdAvL1xV/ma794emG3R3boUV2dc5k=
 github.com/yohimik/dispat/pkg/writer v1.1.1 h1:sTGc8GbldVTSnw+qVy5CuYqvn8Be2TRNnP/VofYDTmg=
