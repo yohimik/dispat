@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Forty-four goals across forty-six test files, one file each except goal 21, which the two shell helpers split
+Forty-five goals across forty-seven test files, one file each except goal 21, which the two shell helpers split
 between `if_test.go`, `if_changed_test.go` and `exec_test.go`. They are grouped by what they are about rather than by
 the order they were written in, so you land in one place when looking for how a plan gets computed or which command
 does what.
@@ -161,6 +161,12 @@ does what.
 22. **Self-update** (`selfupdate_test.go`): dispat replacing its own binary, which is the one thing no other area can
     witness, because it is the one command that overwrites the file it is running from. Two binaries are built at two
     versions and a fake releases API hands one out.
+45. **Downloading a tool** (`download_test.go`): the same machinery pointed at somebody else's repository. A fictional
+    tool is published as a release asset and installed onto a folder that stands in for one on `PATH`, which is what
+    makes "did the right file land" answerable by running it. What is pinned here is everything that could be assumed
+    about dispat and cannot be assumed about a stranger's binary: which repository the argument names, which of the
+    release's files is the binary, what the result is called and where it goes, whether it is a binary at all
+    (`--pipe`), and the idempotence the destination's own checksum decides.
 
 ### Manifests and editing
 
@@ -327,6 +333,7 @@ tests/integration/
   if_changed_test.go        goal 21 (dispat if --changed)
   exec_test.go              goal 21 (dispat exec)
   selfupdate_test.go        goal 22
+  download_test.go          goal 45
 
   manifests and editing
   compute_test.go           goal 23
@@ -814,6 +821,34 @@ binary-swapping flow on disk rather than mocking the filesystem.
 | `TestSelfUpdateNotesNeverBlockTheUpdate` | An empty body, a body that is only a footer, markup dispat reads nothing in, and a body far past the parser's cap all end with the new binary in place and the link left to carry the answer. The notes are a courtesy; the binary is the point. |
 | `TestSelfUpdateReadsTheNotesBeforeTheDownload` | The fake records the order it was asked, proving the notes ride off the response that chose the release rather than a second call afterwards, and that the binary is fetched exactly once. |
 | `TestSelfUpdateNotesReachTheJSONStream` | Under `--log-format json` every line is an event and the `update installed` event carries the notes and the changelog as fields, so a job that updates dispat can post what changed without scraping stdout. |
+
+### Goal 45: downloading a tool (`download_test.go`)
+
+dispat publishes a fictional tool as a release asset and installs it onto a folder standing in for one on `PATH`. The
+tool is a script that reports its own version, so every claim about which file landed is answered by running it.
+
+| Test | Claim proven |
+|------|--------------|
+| `TestDownloadInstallsAToolFromAnotherRepository` | The whole path over the process boundary: `--check` gates and touches nothing, then the file the release named is fetched, checked against the published size and checksum, and put on `PATH` under the repository's own name, where it runs and says which version it is. A first install keeps no backup, because there was nothing to keep. |
+| `TestDownloadIsIdempotent` | The destination is hashed against the checksum the release published, so a provisioning script may run the same line on every boot: the second run pays for no transfer, `--check` agrees by exiting 0, a destination somebody else overwrote is installed again, and `--force` installs over a match while keeping what it replaced. |
+| `TestDownloadKeepsAndRestoresWhatItReplaced` | The safety property self-update is built around, for a tool dispat knows nothing about: the replaced binary is kept, `--rollback --check` reports it without restoring it, and the restore rotates, so a second one returns and the folder is never left holding a parked file. |
+| `TestDownloadBackupExpiresOnItsOwn` | The kept copy survives six days and is cleared by the next download of that same tool after eight, with nothing else in the folder touched, and the refusal that follows says how to reach an old version anyway. |
+| `TestDownloadNamesTheFileAndTheFolder` | A project whose binary is not called after its repository, installed somewhere the reader chose: `--as` and `--bin-dir` are both honoured, the folder is created on the way, and a folder that is not on `PATH` is said out loud while one that is says nothing, because a tool the shell cannot find is a successful install that looks like a failed one. |
+| `TestDownloadRefusesToGuessWhichFileIsTheBinary` | Which of a release's files is the binary is never inferred: several files with no `--asset` is refused with all of them listed, exactly one needs no flag, a glob reaches a name nobody wants to type, a glob matching two is refused, and a release with nothing for this platform names what it does have. |
+| `TestDownloadRefusesWhatItCannotTrust` | A checksum that does not describe what arrived is refused with the folder untouched and the staged file cleaned up, and the failure names `download` rather than the package doing the work. |
+| `TestDownloadRefusesADestinationItMustNotReplace` | A name that is already a directory belongs to somebody. Installing over it would rename that directory aside to put a binary where it stood, so it is refused instead. |
+| `TestDownloadWithoutAPublishedChecksum` | A release publishing no digest is installed with the size check standing alone, said out loud, and never reported as already installed: the guess that skips the install is the one that leaves a machine on an old binary forever. |
+| `TestDownloadReachesAnyPublishedVersion` | A prerelease is not an update by default, `--prerelease` opts into the candidates, `--release` reaches any published version going backwards, and one nobody published changes nothing. |
+| `TestDownloadReadsTheRepositoryTagsHoweverTheyAreSpelled` | `--tag-prefix` is what makes a foreign repository legible: a prefix nothing carries is refused with both flags that would find a release named, an empty value reaches a repository tagging `1.2.3`, and a module path reaches one release of a monorepo. |
+| `TestDownloadPipesAnAssetThatIsNotABinary` | `--pipe` hands the verified file to a command in the install folder, so an archive unpacks where a binary would have landed, the same file is offered by path and by name for a command that has to seek, and a pipe that fails is a failed install leaving nothing behind. |
+| `TestDownloadPipeSeesTheAssetUnderItsOwnName` | The staged file carries the name the release published, so a command switching on `.tar.gz` sees both suffixes rather than the temporary name it arrived under. |
+| `TestDownloadPipeIsAlwaysSomethingToDo` | A pipe has no destination file to compare against, so the gate says so rather than inventing an answer, and `--check` still downloads nothing. |
+| `TestDownloadPipeOutputStaysOutOfTheJSONStream` | Under `--log-format json` every line of the output stream is an event, so a piped command's own chatter goes to the error stream, where a person still sees it. |
+| `TestDownloadKeepsTheTokenAwayFromAnotherHost` | The endpoint comes from an argument rather than from a flag set on purpose, so a URL naming another host is not enough to make dispat hand it the `GITHUB_TOKEN` in the environment; `--token-env` is how a token is sent deliberately. |
+| `TestDownloadEventsReachTheJSONStream` | The `download check` and `tool installed` events carry the repository, the tag, the asset and the destination, so a job that provisions a runner records what it installed without scraping stdout. |
+| `TestDownloadTracesTheDecisionsItMade` | Each of the choices a download makes is traced at debug level, which is what answers "why did it install that" after the fact. |
+| `TestDownloadRefusesABadCommandLineBeforeAnyRequest` | Every usage mistake is decided by the flags alone and costs the fake no question at all, a URL naming only a host among them, which used to read as the owner and send the request somewhere nobody asked for. |
+| `TestDownloadCommandWordKeepsItsScript` | Every command word permanently shadows a run script of the same name, and `download` is a name a repository might well have given one. The two-word spelling still reaches it. |
 
 ### Goal 23: the `compute` command (`compute_test.go`)
 
