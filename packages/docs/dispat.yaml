@@ -50,7 +50,7 @@ scripts:
     dispat if 'CI!=true' --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
     : "${DOCS_BUCKET:?DOCS_BUCKET is required (the bucket name is not committed; see infra/README.md)}"
     : "${DOCS_URL_MAP:?DOCS_URL_MAP is required (the URL map name is not committed; see infra/README.md)}"
-    dispat exec tools-image --for pkg:docs
+    dispat exec tools-image
     ROOT=$(git rev-parse --show-toplevel)
     docker run --rm -v "$ROOT:$ROOT" -w "$PWD" \
       -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

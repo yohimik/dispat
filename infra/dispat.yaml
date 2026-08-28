@@ -40,7 +40,7 @@ scripts:
   # when it exists.
   tf-plan: |
     set -eu
-    dispat exec tools-image --for pkg:infra
+    dispat exec tools-image
     ROOT=$(git rev-parse --show-toplevel)
     GCLOUD_CONFIG=""
     [ -n "${GOOGLE_GHA_CREDS_PATH:-}" ] || [ ! -d "$HOME/.config/gcloud" ] \
@@ -58,7 +58,7 @@ scripts:
   tf-apply: |
     set -eu
     dispat if 'CI!=true' --then 'echo "infra is written only from CI (set CI=true to override)" >&2; exit 1'
-    dispat exec tools-image --for pkg:infra
+    dispat exec tools-image
     ROOT=$(git rev-parse --show-toplevel)
     docker run --rm -v "$ROOT:$ROOT" -w "$PWD" \
       -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

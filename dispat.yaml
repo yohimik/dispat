@@ -35,11 +35,16 @@ scripts:
   # The gcloud+terraform image the deployment stages `docker run`: the one
   # image a release materialises (see infra/tools.Dockerfile for why those
   # stages cannot be build targets). Layer-cached, so the second caller in a
-  # run pays nothing.
-  tools-image: >-
-    docker buildx build --load --tag dispat-release-tools
-    --file infra/tools.Dockerfile
-    $(sh scripts/buildx-cache.sh release-tools) infra
+  # run pays nothing. The callers are package scripts, so `dispat exec` runs
+  # this in their folders; the repository root is read from git rather than
+  # assumed, exactly as go-mod-tidy does.
+  tools-image: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    docker buildx build --load --tag dispat-release-tools \
+      --file "$ROOT/infra/tools.Dockerfile" \
+      $(sh "$ROOT/scripts/buildx-cache.sh" release-tools) \
+      "$ROOT/infra"
 
   # The release workflow's own stages, as dispat scripts rather than workflow
   # bash, so the release logic lives here and the workflow stays plumbing.
