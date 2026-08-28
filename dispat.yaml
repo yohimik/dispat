@@ -32,6 +32,21 @@ scripts:
     docker buildx build --file Dockerfile.gotest --target gofmt
     $(sh scripts/buildx-cache.sh gofmt) --output type=cacheonly .
 
+  # The TinyGo spike, as a build like every other gate. Its targets never
+  # abort: the logs are what it produces, so the export lands them in
+  # coverage/tinygo-spike/ whatever they say, and the verdict is read from the
+  # files rather than from a build's exit code.
+  #
+  # Not a gate, and not in any sweep: TinyGo 0.41.1 cannot reach the network
+  # from a host operating system, which is every release path dispat has, so
+  # nothing is built with it. The script stays because the answer is a version
+  # number away from changing and re-asking must cost one command. See the
+  # header of Dockerfile.tinygo for what the spike found.
+  tinygo-spike: >-
+    docker buildx build --file Dockerfile.tinygo --target tinygo-spike-export
+    $(sh scripts/buildx-cache.sh tinygo-spike)
+    --output type=local,dest=coverage/tinygo-spike .
+
   # The gcloud+terraform image the deployment stages `docker run`: the one
   # image a release materialises (see infra/tools.Dockerfile for why those
   # stages cannot be build targets). Layer-cached, so the second caller in a

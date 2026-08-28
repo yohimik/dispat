@@ -1,0 +1,33 @@
+# The build context of Dockerfile.tinygo alone, the same widening
+# Dockerfile.gotest.dockerignore makes for the gc gates: BuildKit reads a
+# <dockerfile>.dockerignore in preference to the one at the repository root,
+# so this leaves the root file's deny-all — which keeps the four image
+# contexts down to install.sh — untouched.
+#
+# Nested re-inclusion needs every level spelled out: an exception cannot reach
+# into a folder the line above excluded, so services/ is let back in before
+# its children are filtered.
+*
+!go.work
+!go.work.sum
+!pkg
+!tools
+!tests
+!services
+services/*
+!services/dispat
+
+# The export folder of a release build: output rather than source.
+services/dispat/dist
+
+# What the dispat suite reads beyond its module: the installers and image
+# folders the selfupdate tests hold to the CLI's asset names, and the
+# architecture page the plan tests hold the diagnostic codes to.
+!install.sh
+!install.ps1
+!docker
+!packages
+packages/*
+!packages/docs
+packages/docs/*
+!packages/docs/docs

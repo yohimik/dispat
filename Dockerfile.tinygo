@@ -1,0 +1,339 @@
+# syntax=docker/dockerfile:1
+#
+# The TinyGo spike: whether TinyGo can build the dispat CLI, and what the
+# binaries it produces can actually do. A CI job needs a TinyGo toolchain for
+# none of it, exactly as Dockerfile.gotest needs no Go toolchain.
+#
+# THE ANSWER, AS OF TINYGO 0.41.1, IS NO, AND THE REASON IS THE NETWORK.
+# TinyGo does not use the host's `net`: it ships a port of the package over
+# netdev, its network *device driver* interface, which a driver from
+# tinygo.org/x/drivers installs at startup. On a host operating system there is
+# no such driver, so the default netdev is a stub — DNS resolution and TLS both
+# return "Netdev not set", and net/http dereferences nil and aborts. That is
+# every release path dispat has: the GitHub API, webhooks, self-update's
+# download, and the update check. tinygo-spike-net proves it a layer at a time,
+# with a gc binary built from the same source in the same container as the
+# control. Nothing here is a first-party fix; only TinyGo growing host sockets
+# is. The rest of the spike's answers were good — see the other stages — which
+# is why the file is kept: it is what to re-run when that changes.
+#
+# Separate from Dockerfile.gotest on purpose. The gc gates own race, fuzz,
+# coverage, the test report and the badge — none of which TinyGo implements —
+# so the two toolchains are two files rather than two halves of one, and churn
+# here can never bust the gc gates' layer cache.
+#
+# The layout is the cache strategy, mirroring Dockerfile.gotest: dependencies
+# download in one layer keyed on the lockfiles alone, each package's stage
+# copies only its own source and the workspace providers it imports, and every
+# probe is a RUN on top.
+#
+# No target here aborts. What a spike is for is the log, and a build that dies
+# on the first failure reports one fact where the kill matrix needs all of
+# them, so each step records its own exit status and the export stage collects
+# the logs whatever they say.
+#
+# The second finding, recorded here because nothing in the source carries it:
+# TinyGo's -X applies only to a string variable declared with no initialiser,
+# and silently ignores the flag for one declared with a value. dispat's
+# internal/cli.Version has an initialiser, so a TinyGo build of it reports
+# `dev` however it was stamped. Dropping the initialiser fixes it and changes
+# nothing under gc — selfupdate.Describe already reads the empty string as the
+# local build a "dev" names — but the source is left alone while the verdict
+# stands, and the ldflags row of tinygo-spike-net proves the rule with a
+# program of its own instead.
+#
+# tinygo/tinygo carries both toolchains: gc for `go mod download`, for the gc
+# baseline the sizes are measured against and for the control the network
+# probe needs, TinyGo for everything else. It is Debian-based, not alpine, so
+# package installs are apt-get.
+ARG TINYGO_VERSION=0.41.1
+
+# The pin, never passed as --build-arg, exactly as GO_VERSION is the pin in
+# Dockerfile.gotest. Re-asking the question is bumping this one number.
+FROM tinygo/tinygo:${TINYGO_VERSION} AS base
+
+# The same uid-1001 gopher the gc gates run as, for the same reason: the
+# suites inject failures by making folders read-only, and root does not honour
+# file permissions. The image ships a uid-1000 tinygo user, which is not that
+# user, so gopher is created rather than reused.
+USER root
+RUN useradd --create-home --uid 1001 gopher
+WORKDIR /src
+RUN chown gopher:gopher /src
+
+# The same bypass and the same kill switch the gc gates set: intra-repo modules
+# are fetched from their tags directly, and a stamped binary under test must
+# not phone the GitHub API on its own.
+ENV GOPRIVATE=github.com/yohimik/dispat
+ENV DISPAT_UPDATE_CHECK=false
+ENV HOME=/home/gopher
+ENV GOPATH=/home/gopher/go
+ENV GOCACHE=/home/gopher/.cache/go-build
+# TinyGo keeps its own build cache beside Go's, and writes it under $HOME.
+ENV GOTMPDIR=/home/gopher/.cache/tmp
+RUN mkdir -p /home/gopher/.cache/tmp /out \
+ && chown -R gopher:gopher /home/gopher/.cache /out
+USER gopher
+
+# The dependency layer every gate shares: the manifests alone, before any
+# source. Downloaded with the gc toolchain, which is what populates the module
+# cache TinyGo reads from as well.
+FROM base AS deps
+COPY --chown=gopher:gopher go.work go.work.sum ./
+# ccme, manifest and tools carry no go.sum: they have no module dependencies
+# to sum, and a COPY that names a file that does not exist fails the build.
+COPY --chown=gopher:gopher pkg/ccme/go.mod pkg/ccme/
+COPY --chown=gopher:gopher pkg/manifest/go.mod pkg/manifest/
+COPY --chown=gopher:gopher pkg/models/go.mod pkg/models/go.sum pkg/models/
+COPY --chown=gopher:gopher pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
+COPY --chown=gopher:gopher pkg/writer/go.mod pkg/writer/go.sum pkg/writer/
+COPY --chown=gopher:gopher services/dispat/go.mod services/dispat/go.sum services/dispat/
+COPY --chown=gopher:gopher tests/integration/go.mod tests/integration/go.sum tests/integration/
+COPY --chown=gopher:gopher tools/go.mod tools/
+RUN go mod download
+
+# One source stage per package: its own folder plus the workspace providers
+# its go.mod requires, and nothing else. What a stage copies is what busts its
+# cache, so the copy lists are the isolation. The lists mirror
+# Dockerfile.gotest's; tools is not copied, because nothing here runs through
+# testreport — TinyGo has no `go test -json`.
+FROM deps AS src-ccme
+COPY --chown=gopher:gopher pkg/ccme ./pkg/ccme
+
+FROM deps AS src-manifest
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+
+FROM deps AS src-models
+COPY --chown=gopher:gopher pkg/ccme ./pkg/ccme
+COPY --chown=gopher:gopher pkg/models ./pkg/models
+
+FROM deps AS src-scanner
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
+
+FROM deps AS src-writer
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+COPY --chown=gopher:gopher pkg/writer ./pkg/writer
+
+# The dispat suite reads beyond its module, exactly as it does under gc: the
+# selfupdate tests hold install.sh, install.ps1 and the four image folders to
+# the CLI's own asset names, and the plan tests hold the diagnostic codes to
+# the spec and the architecture page.
+FROM deps AS src-dispat
+COPY --chown=gopher:gopher pkg ./pkg
+COPY --chown=gopher:gopher services/dispat ./services/dispat
+COPY --chown=gopher:gopher install.sh install.ps1 ./
+COPY --chown=gopher:gopher docker ./docker
+COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packages/docs/docs/internals/architecture.md
+
+FROM src-dispat AS src-integration
+COPY --chown=gopher:gopher tests/integration ./tests/integration
+
+# ---------------------------------------------------------------------------
+# The probes. Every target below tees its own log and exits 0.
+# ---------------------------------------------------------------------------
+
+# The build probe and the size record. Both toolchains build the same four
+# unix targets from the same source in the same image, so the sizes compare
+# like with like: the gc column is the release pipeline's exact line
+# (-trimpath -s -w), the TinyGo column is the line a release would replace it
+# with. The kill row is a TinyGo binary within ~20% of its gc twin; the answer
+# was less than half the size, which is what made the network worth proving.
+FROM src-dispat AS tinygo-spike-build
+RUN <<'EOF'
+set -u
+mkdir -p /src/spike
+log=/src/spike/build.log
+: > "$log"
+cd /src/services/dispat
+V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+  GOOS="${target%/*}"; GOARCH="${target#*/}"
+  echo "=== tinygo build $GOOS/$GOARCH ===" >> "$log"
+  GOOS="$GOOS" GOARCH="$GOARCH" tinygo build -opt=z -no-debug \
+    -ldflags="-X $V=0.0.0-spike" \
+    -o "/out/tinygo-dispat-$GOOS-$GOARCH" . >> "$log" 2>&1
+  echo "exit=$?" >> "$log"
+  echo "=== gc build $GOOS/$GOARCH ===" >> "$log"
+  GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -X $V=0.0.0-spike" \
+    -o "/out/gc-dispat-$GOOS-$GOARCH" . >> "$log" 2>&1
+  echo "exit=$?" >> "$log"
+done
+{
+  echo "target                tinygo        gc            ratio"
+  for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+    GOOS="${target%/*}"; GOARCH="${target#*/}"
+    t=$(wc -c < "/out/tinygo-dispat-$GOOS-$GOARCH" 2>/dev/null || echo 0)
+    g=$(wc -c < "/out/gc-dispat-$GOOS-$GOARCH" 2>/dev/null || echo 0)
+    if [ "$g" -gt 0 ] && [ "$t" -gt 0 ]; then
+      r=$(awk -v t="$t" -v g="$g" 'BEGIN{printf "%.3f", t/g}')
+    else
+      r="n/a"
+    fi
+    printf '%-20s  %-12s  %-12s  %s\n' "$GOOS/$GOARCH" "$t" "$g" "$r"
+  done
+} | tee /src/spike/sizes.log
+cat "$log"
+exit 0
+EOF
+
+# The execution probe: does the binary run at all, does it report its own
+# platform, what does the linker make of the version, and does TinyGo's own net
+# stack reach api.github.com. The last is the kill row with no first-party
+# remedy — every release path (self-update, the GitHub API, webhooks) is HTTPS.
+# The version line reads `dev` however the build stamped it, for the reason the
+# header gives.
+#
+# `self-update --check` is the probe rather than the passive update notice: a
+# failed background check prints nothing by design, so it cannot tell a working
+# TLS stack from a broken one, while --check reports the error. The bare
+# net/tls probe beside it is what says whether an answer is about dispat or
+# about the toolchain: TinyGo's `net` is a port over its netdev driver
+# interface rather than over the host's sockets, so on a host OS there is no
+# device under it at all, and the four layers are asked one at a time.
+FROM tinygo-spike-build AS tinygo-spike-run
+ARG TARGETARCH
+COPY --chown=gopher:gopher <<'PROBE' /src/netprobe/main.go
+package main
+
+// The four network layers dispat needs, each asked on its own, so a failure
+// names the layer it happened at rather than the command that reached it, plus
+// the two ways a version can be declared for -X to find.
+
+import (
+	"crypto/tls"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"time"
+)
+
+// The two declarations -X can be pointed at. TinyGo applies the flag to the
+// bare one and silently ignores it for the one with an initialiser, which is
+// the difference this probe exists to report; gc stamps both.
+var (
+	Bare      string
+	Initialed = "dev"
+)
+
+func main() {
+	switch os.Args[1] {
+	case "ldflags":
+		fmt.Printf("bare=%q initialed=%q\n", Bare, Initialed)
+	case "tcp":
+		c, err := net.DialTimeout("tcp", "api.github.com:443", 15*time.Second)
+		fmt.Println("tcp err:", err)
+		if c != nil {
+			c.Close()
+		}
+	case "tls":
+		c, err := tls.Dial("tcp", "api.github.com:443", &tls.Config{ServerName: "api.github.com"})
+		fmt.Println("tls err:", err)
+		if c != nil {
+			c.Close()
+		}
+	case "http":
+		resp, err := (&http.Client{Timeout: 15 * time.Second}).Get("http://example.com")
+		fmt.Println("plain http err:", err)
+		if resp != nil {
+			fmt.Println("plain http status:", resp.Status)
+			resp.Body.Close()
+		}
+	case "https":
+		resp, err := (&http.Client{Timeout: 15 * time.Second}).Get("https://api.github.com/")
+		fmt.Println("https err:", err)
+		if resp != nil {
+			fmt.Println("https status:", resp.Status)
+			resp.Body.Close()
+		}
+	}
+}
+PROBE
+RUN <<'EOF'
+set -u
+log=/src/spike/run.log
+: > "$log"
+bin=/out/tinygo-dispat-linux-${TARGETARCH}
+echo "=== native arch: ${TARGETARCH} ===" >> "$log"
+echo "=== $bin --version ===" >> "$log"
+"$bin" --version >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+echo "=== https probe: self-update --check ===" >> "$log"
+DISPAT_UPDATE_CHECK=true "$bin" self-update --check --log-format json >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+echo "=== https probe: gc twin, for comparison ===" >> "$log"
+DISPAT_UPDATE_CHECK=true /out/gc-dispat-linux-${TARGETARCH} self-update --check --log-format json >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+cat "$log"
+exit 0
+EOF
+
+# The bare net stack and the linker's -X, both toolchains, one question at a
+# time. Its own stage because the module is written here rather than checked
+# in: it is the spike's instrument, not the repository's code, and asking about
+# -X with a program of its own is what keeps the answer independent of how
+# dispat happens to declare its own version today.
+FROM tinygo-spike-run AS tinygo-spike-net
+RUN <<'EOF'
+set -u
+log=/src/spike/net.log
+: > "$log"
+cd /src/netprobe
+printf 'module netprobe\n\ngo 1.24\n' > go.mod
+export GOWORK=off
+# The main package's symbols are addressed as main.<name> by both linkers,
+# whatever the module is called.
+X="-X main.Bare=1.2.3 -X main.Initialed=1.2.3"
+echo "=== tinygo build ===" >> "$log"
+tinygo build -ldflags "$X" -o /out/netprobe-tinygo . >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+echo "=== gc build ===" >> "$log"
+CGO_ENABLED=0 go build -ldflags "$X" -o /out/netprobe-gc . >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+for toolchain in tinygo gc; do
+  for layer in ldflags tcp tls http https; do
+    echo "=== $toolchain $layer ===" >> "$log"
+    "/out/netprobe-$toolchain" "$layer" >> "$log" 2>&1
+    echo "exit=$?" >> "$log"
+  done
+done
+cat "$log"
+exit 0
+EOF
+
+# The unit-test probe, one module per step. `tinygo test` is run from the
+# module folder so a workspace it may not honour is never the variable being
+# measured.
+FROM tinygo-spike-net AS tinygo-spike-test
+COPY --chown=gopher:gopher tests/integration ./tests/integration
+RUN <<'EOF'
+set -u
+mkdir -p /src/spike
+for entry in ccme:pkg/ccme manifest:pkg/manifest models:pkg/models \
+             scanner:pkg/scanner writer:pkg/writer dispat:services/dispat; do
+  name="${entry%%:*}"; dir="${entry#*:}"
+  log="/src/spike/test-$name.log"
+  echo "=== tinygo test $dir ===" > "$log"
+  # Redirected rather than piped: a pipeline's status is the last command's,
+  # and the status wanted here is the test run's.
+  ( cd "/src/$dir" && tinygo test ./... ) > "/tmp/$name.raw" 2>&1
+  status=$?
+  # One LLVM warning repeats once per inline asm block on arm64 — hundreds of
+  # identical lines that bury every answer below them. Counted, not kept.
+  noise="Reserved registers on the clobber list"
+  n=$(grep -c "$noise" "/tmp/$name.raw" || true)
+  grep -v "$noise" "/tmp/$name.raw" >> "$log"
+  [ "$n" -eq 0 ] || echo "($n identical \"$noise\" warnings elided)" >> "$log"
+  echo "exit=$status" >> "$log"
+  echo "--- $name ---"
+  tail -n 40 "$log"
+done
+exit 0
+EOF
+
+# The spike's whole answer, as files: the logs are the artefact, so this stage
+# holds nothing else.
+FROM scratch AS tinygo-spike-export
+COPY --from=tinygo-spike-test /src/spike /
