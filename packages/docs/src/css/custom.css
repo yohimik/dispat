@@ -48,19 +48,26 @@
 }
 
 /*
- * The footer's three columns spread across the row instead of clustering
- * left. `wrap` matters: flex-wrap is not inherited, so `unset` would compute
- * to nowrap and crush the columns into one unreadable line on a phone.
+ * The footer's columns pack an auto-fit grid rather than a flex row: a row
+ * either holds every column or crushes them, and wrapping a flex row under
+ * space-between flings a partial row to the edges. The grid degrades from
+ * three columns through two to a single stack as the viewport narrows, each
+ * column keeping the same measure as its neighbours at every step.
  */
 .footer__links {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 2rem 3rem;
   max-width: 100%;
-  flex-wrap: wrap;
+  /* The element also carries infima's `row`, whose negative side margins
+     would push the grid wider than its container. */
+  margin: 0;
 }
 
 .footer__col {
   --ifm-col-width: unset;
   width: unset;
   min-width: 0;
+  margin-bottom: 0;
+  padding: 0;
 }
