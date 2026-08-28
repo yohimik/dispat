@@ -18,6 +18,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/app"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/download"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
 )
@@ -48,6 +49,7 @@ type runner struct {
 	update   *notice
 
 	// What the flag-only phase parsed for the commands that asked for it.
+	repository download.Repository
 	write      writeRequest
 	reps       []writer.Replacement
 	execOpts   app.ExecOptions
@@ -152,6 +154,11 @@ func (r *runner) validateFlags() (int, bool) {
 		r.boot.Error().Msg("--drop-links and --link ask for opposite things; pick one")
 		r.usage(cmd)
 		return 2, true
+	}
+	if cmd == cmdDownload {
+		if code, done := r.validateDownload(); done {
+			return code, true
+		}
 	}
 	if cmd == cmdSelfUpdate && *r.o.suRollback {
 		// A rollback downloads nothing, so every flag that chooses something
@@ -364,7 +371,7 @@ func (r *runner) prepareExec() (int, bool) {
 // commands, which read nothing but the files named on the command line.
 func (r *runner) runPreConfig() (int, bool) {
 	cmd := r.inv.cmd
-	if cmd == cmdInit || manifestCommand(cmd) {
+	if cmd == cmdInit || cmd == cmdDownload || manifestCommand(cmd) {
 		// These have no updateCheck option to consult, so the environment
 		// variable is the whole of their opt-out. self-update is left out on
 		// purpose: it reports the answer itself.
@@ -375,6 +382,8 @@ func (r *runner) runPreConfig() (int, bool) {
 		return r.runInit(), true
 	case cmd == cmdSelfUpdate:
 		return r.runSelfUpdate(), true
+	case cmd == cmdDownload:
+		return r.runDownload(), true
 	case manifestCommand(cmd):
 		return r.runManifests(), true
 	}
@@ -410,6 +419,118 @@ func (r *runner) runSelfUpdate() int {
 	}
 	// --check exits 1 when the same invocation without it would change the
 	// binary, which is the gate a CI job puts in front of an update.
+	if *r.o.check && pending {
+		return 1
+	}
+	return 0
+}
+
+// validateDownload is everything `dispat download`'s flags decide on their
+// own, and where the repository is parsed: a mistyped URL is a usage mistake
+// and belongs beside the others, before a single request is made.
+func (r *runner) validateDownload() (int, bool) {
+	if *r.o.suRollback {
+		// A rollback restores what is already installed, so every flag that
+		// chooses something to download contradicts it. --as and --bin-dir do
+		// not: they are what says which tool is being restored.
+		for _, name := range []string{"release", "prerelease", "force", "asset", "pipe", "tag-prefix"} {
+			if r.fs.Changed(name) {
+				r.boot.Error().Msgf(
+					"--rollback restores the kept binary and downloads nothing, so --%s means nothing beside it", name)
+				r.usage(cmdDownload)
+				return 2, true
+			}
+		}
+		if r.inv.repository == "" && *r.o.dlName == "" {
+			// Neither says which tool to restore, and guessing is worse than
+			// asking.
+			r.boot.Error().Msg("--rollback needs to know which tool: name the repository, or name the file with --as")
+			r.usage(cmdDownload)
+			return 2, true
+		}
+	}
+	for _, name := range []string{"owner", "repo"} {
+		// The repository is the argument, so these two would be read and
+		// then silently overwritten, which is how a flag that never fires
+		// gets written into a script.
+		if r.fs.Changed(name) {
+			r.boot.Error().Msgf("download takes its repository as an argument, so --%s means nothing beside it", name)
+			r.usage(cmdDownload)
+			return 2, true
+		}
+	}
+	if err := download.ValidName(*r.o.dlName); *r.o.dlName != "" && err != nil {
+		r.boot.Error().Err(err).Msg("invalid --as")
+		r.usage(cmdDownload)
+		return 2, true
+	}
+	if r.inv.repository == "" {
+		if !*r.o.suRollback {
+			r.boot.Error().Msg("download requires a repository: dispat download https://github.com/owner/repo")
+			r.usage(cmdDownload)
+			return 2, true
+		}
+		// A rollback with only --as: there is no repository to parse, and the
+		// zero value carries no owner into anything that would use one.
+		return 0, false
+	}
+	repo, err := download.ParseRepository(r.inv.repository)
+	if err != nil {
+		r.boot.Error().Err(err).Msg("invalid repository")
+		r.usage(cmdDownload)
+		return 2, true
+	}
+	r.repository = repo
+	return 0, false
+}
+
+// runDownload performs `dispat download`. Its logger comes from the flags
+// alone, like every other command that reaches no config file.
+func (r *runner) runDownload() int {
+	format := orDefault(*r.o.logFormat, "pretty")
+	log := newLogger(orDefault(*r.o.logLevel, "info"), format, r.stdout)
+	ctx, stop := signalCtx()
+	defer stop()
+
+	src := updateSource(r.o, r.fs)
+	src.Owner, src.Repo = r.repository.Owner, r.repository.Repo
+	// The repository's own host decides the endpoint unless --api-url named
+	// one, which is what makes a GitHub Enterprise URL work with nothing else
+	// typed.
+	if !r.fs.Changed("api-url") {
+		src.APIURL = r.repository.APIURL()
+	}
+	// The conventional GITHUB_TOKEN is only ever sent to github.com. Here the
+	// host comes from an argument rather than from a flag the operator set on
+	// purpose, so a repository URL naming any other host would otherwise be
+	// enough to make dispat hand somebody's github.com credentials to it.
+	// --token-env is how a token is sent to an endpoint deliberately.
+	if src.APIURL != "" && !r.fs.Changed("token-env") {
+		if src.Token != "" {
+			log.Debug().Str("api", src.APIURL).
+				Msg("download: the endpoint is not github.com, so GITHUB_TOKEN is not sent; name one with --token-env")
+		}
+		src.Token = ""
+	}
+	src.Command = download.Command
+	src.TagPrefix = *r.o.dlTagPrefix
+	src.AnyTag = *r.o.dlTagPrefix == ""
+	src.Prerelease = *r.o.suPrerelease
+	src.Log = log
+
+	pending, err := app.Download(ctx, app.DownloadOptions{
+		Repository: r.repository, Source: src, Release: *r.o.suRelease,
+		Asset: *r.o.dlAsset, BinDir: *r.o.dlBinDir, Name: *r.o.dlName, Pipe: *r.o.dlPipe,
+		Check: *r.o.check, Force: *r.o.suForce, Rollback: *r.o.suRollback,
+		GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
+		JSON: format == "json", Out: r.stdout, Err: r.stderr, Log: log,
+	})
+	if err != nil {
+		return 1
+	}
+	// --check exits 1 when the same invocation without it would install
+	// something, which is the gate a provisioning script puts in front of a
+	// download it does not want to repeat.
 	if *r.o.check && pending {
 		return 1
 	}

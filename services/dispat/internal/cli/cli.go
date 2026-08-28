@@ -58,6 +58,10 @@ const (
 	// cmdSelfUpdate is about the binary rather than about any repository, so
 	// like init and the manifest commands it needs no config and no git.
 	cmdSelfUpdate = "self-update"
+	// cmdDownload is self-update pointed at somebody else's releases: it
+	// installs a tool from any GitHub repository, and needs no config and no
+	// git for the same reason.
+	cmdDownload = "download"
 )
 
 // manifestCommand reports the commands that need neither a config file nor a
@@ -192,12 +196,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // positional arguments.
 type invocation struct {
 	cmd     string
-	script  string   // run and exec: the script name
-	cond    string   // if: the leading condition
-	condSet bool     // if: a positional condition was given, even an empty one
-	dir     string   // scanner: the optional folder to scan
-	paths   []string // writer and replacer: the files to edit
-	args    []string // run and exec: what followed `--`, for the script
+	script  string // run and exec: the script name
+	cond    string // if: the leading condition
+	condSet bool   // if: a positional condition was given, even an empty one
+	dir     string // scanner: the optional folder to scan
+	// download: the repository to install from, as it was typed. Parsed in
+	// the flag phase, where every other usage mistake is caught.
+	repository string
+	paths      []string // writer and replacer: the files to edit
+	args       []string // run and exec: what followed `--`, for the script
 	// trigger: the raised event name, the progress value when the event is
 	// progress, and the optional free-text message.
 	event    string
@@ -248,6 +255,18 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return inv, true
+		}
+	case cmdDownload:
+		// One repository, or none: a rollback restores what is already
+		// installed and has no releases to read, so it takes --name instead.
+		if len(rest) > 2 {
+			log.Error().Strs("args", rest[2:]).
+				Msg("download takes one repository: dispat download https://github.com/owner/repo")
+			usage(inv.cmd)
+			return inv, true
+		}
+		if len(rest) == 2 {
+			inv.repository = rest[1]
 		}
 	case cmdRun:
 		if len(rest) != 2 {

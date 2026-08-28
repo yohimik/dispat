@@ -402,6 +402,51 @@ returns. Needs no config file and no git repository.`,
 			"owner", "repo", "api-url", "token-env"},
 	},
 	{
+		name:  cmdDownload,
+		args:  "<repo>",
+		short: "install a tool from any GitHub repository's releases",
+		long: `Install a tool published as a GitHub release asset, the way self-update
+installs dispat: the release is picked off the repository's listing, the file
+is downloaded, checked against the size and the checksum the release
+published, and only then moved into place. Anything already at the
+destination is kept beside it as <name>.backup and removed on its own after a
+week.
+
+The repository is named however it is at hand: https://github.com/owner/repo,
+the clone or SSH URL, a page inside it, or the owner/repo shorthand. A host
+that is not github.com is taken for a GitHub Enterprise install and its API
+derived from it, which --api-url overrides.
+
+--asset says which of the release's files to install, by name or by glob, with
+{os}, {arch}, {version}, {tag} and {name} expanded, so one invocation keeps
+working across releases. A release carrying exactly one file needs none; every
+other release is refused with its files listed, because guessing which of them
+is the binary is how the wrong thing gets installed.
+
+--bin-dir says where it goes and --as what it is called there. Without them
+the folder is $DISPAT_BIN_DIR, then /usr/local/bin when it is writable, then
+~/.local/bin, and the name is the repository's own.
+
+--pipe hands the verified file to a command's standard input instead of
+installing it, run in --bin-dir, which is how an asset that is not a bare
+binary is dealt with: --pipe 'tar -xz' unpacks an archive there, --pipe sh
+runs a release's own install script. $DISPAT_ASSET names the same file by
+path, for a command that has to seek.
+
+--release installs one named version, --prerelease considers the prereleases
+too, and --tag-prefix says what the tags carry before their version ("v" by
+default, empty for a repository tagging 1.2.3).
+
+--check reports what would be installed and exits 1 when the destination does
+not already hold that exact file, which is the gate a provisioning script
+puts in front of a download. --force installs it even when it does.
+--rollback puts the kept binary back and downloads nothing.
+
+Needs no config file and no git repository.`,
+		flags: []string{"asset", "bin-dir", "as", "pipe", "tag-prefix",
+			"check", "force", "prerelease", "release", "rollback", "api-url", "token-env"},
+	},
+	{
 		name:  cmdScanner,
 		args:  "[folder]",
 		short: "print what a folder's manifests declare",
