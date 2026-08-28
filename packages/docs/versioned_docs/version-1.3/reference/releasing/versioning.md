@@ -1,0 +1,345 @@
+# Shared versions
+
+Every package in a monorepo gets its own version by default, computed from its own history. That is usually what you
+want. When libraries release together, or a client and server must agree on a generation, dispat lets a set of packages
+hold part of their version in common.
+
+This page explains how shared versioning works, what happens to unchanged packages, and how to configure a set. You can
+find reference tables in [space options](../../configuration/spaces.md#versioning).
+
+## The two questions
+
+Every shared-versioning mode is an answer to two questions.
+
+**How much of the version is shared?** A version has three parts, `MAJOR.MINOR.PATCH`. A group can share the whole
+thing, or just the leading `MAJOR.MINOR`, or just the `MAJOR`. Whatever is shared is always equal across the group.
+Whatever is not shared belongs to each package alone, so a package can move it without anybody else moving.
+
+**What happens to a package that has not changed?** When the shared part moves, a package with nothing of its own
+either moves along with it, or stays where it is until it next has something to release. Modes that move it along are
+the plain ones; modes that leave it behind are the `Sparse` ones.
+
+Three answers to the first question, two to the second, and one mode that shares nothing at all:
+
+| Mode                    | Shared         | Each package's own | An unchanged package     |
+|-------------------------|----------------|--------------------|--------------------------|
+| `independent` *(default)* | nothing      | everything         | stays where it is        |
+| `fixed`                 | the whole version | nothing         | is released too          |
+| `fixedSparse`           | the whole version | nothing         | stays where it is        |
+| `fixedMajorMinor`       | major, minor   | patch              | is released too          |
+| `fixedMajorMinorSparse` | major, minor   | patch              | stays where it is        |
+| `fixedMajor`            | major          | minor, patch       | is released too          |
+| `fixedMajorSparse`      | major          | minor, patch       | stays where it is        |
+
+Which one to reach for:
+
+* `fixed` when the version number is a badge of the release itself, and readers expect every package of the set to
+  carry the same one. The cost is noise: a typo fix in one package publishes all of them.
+* `fixedMajorMinor` when the set ships features together but patches separately. A bugfix in one library is that
+  library's business; a new capability is the set's.
+* `fixedMajor` when only compatibility is shared. Everything with the same major works together; below that, each
+  package moves at whatever pace its own work demands.
+* A `Sparse` variant of any of those when you want the shared part respected but do not want empty releases.
+* `independent` when none of that applies, which is most of the time.
+
+## What actually moves the group
+
+The rule is short: **a release moves the whole group when it reaches the part the group shares.** A release that stays
+below the shared part is the package's own, and nobody else hears about it.
+
+| Mode              | A patch release moves | A minor release moves | A breaking release moves |
+|-------------------|-----------------------|-----------------------|--------------------------|
+| `fixed`           | the group             | the group             | the group                |
+| `fixedMajorMinor` | one package           | the group             | the group                |
+| `fixedMajor`      | one package           | one package           | the group                |
+
+When the group does move, every member lands on the same version, and the parts below the shared one restart at zero.
+Under `fixedMajor` a group going to major 2 lands on `2.0.0`, not on each package's own patch count carried forward.
+
+A group shares the version, not its spelling. Each member renders the shared version through its own
+[`tagFormat`](../../configuration/versions.md#tagformat) and [alias tags](../../configuration/alias-tags.md), so
+`lib1-v1.2.0` and `app1@1.2.0` can be the same group release.
+
+## A worked example
+
+A group of two packages, `core` and `ui`, with four commits arriving one after another. Only `core` ever changes.
+`core` starts at `1.4.2` and `ui` at `1.4.0`, which is a state only the partial modes can reach.
+
+| Commit             | `fixed`                 | `fixedMajorMinor`       | `fixedMajor`            |
+|--------------------|-------------------------|-------------------------|-------------------------|
+| `fix(core): ...`   | `core 1.4.3`, `ui 1.4.3` | `core 1.4.3`, ui unchanged | `core 1.4.3`, ui unchanged |
+| `fix(core): ...`   | `core 1.4.4`, `ui 1.4.4` | `core 1.4.4`, ui unchanged | `core 1.4.4`, ui unchanged |
+| `feat(core): ...`  | `core 1.5.0`, `ui 1.5.0` | `core 1.5.0`, `ui 1.5.0` | `core 1.5.0`, ui unchanged |
+| `feat(core)!: ...` | `core 2.0.0`, `ui 2.0.0` | `core 2.0.0`, `ui 2.0.0` | `core 2.0.0`, `ui 2.0.0` |
+
+Read the `fixedMajor` column downwards: `ui` sits still through two patches and a feature, then joins `core` on major 2
+because that is the only part it promised to share. Read the `fixedMajorMinor` column and `ui` also comes along for the
+feature. Read `fixed` and `ui` moves every single time.
+
+The `Sparse` variants are the same table with every "and `ui ...`" replaced by "and ui unchanged". `ui` catches up on
+its own next release instead.
+
+## Sparse: staying behind, then rejoining
+
+A plain mode keeps the promise by publishing. A sparse mode keeps it by waiting.
+
+Take `fixedMajorSparse` with `core` at `1.4.2` and `ui` at `1.4.0`. A breaking change in `core` publishes `core 2.0.0`
+and leaves `ui` alone: no tag, no changelog entry, no scripts run. The moment `ui` has changes to release, it joins the
+group's major at `ui 2.0.0` rather than continuing its old line at `ui 1.4.1`.
+
+That is the trade. Sparse gives you quiet release logs, but versions on disk do not match until trailing packages
+release.
+
+## The changelog entry a passenger gets
+
+Under a plain mode, a package released only because the group moved is a real release. dispat runs its version stage,
+runs its build and publish scripts, tags it, and creates a [changelog](../../configuration/records.md#changelog) entry.
+Because commit scopes determine release notes, the passenger gets a single line explaining the bump instead of another
+package's notes:
+
+```markdown
+## ui@2.0.0 (2026-08-11)
+
+No changes: a version bump to keep the versioning group on one major version.
+```
+
+The wording names the part that is actually shared, so a reader of a `fixedMajor` changelog is not told that the whole
+version is common when only the major is. The same line becomes the body of the package's GitHub release.
+
+## Putting packages in a group
+
+To create the simplest group, configure a space with `versioning`. Every package in that space will share versions:
+
+```json
+{
+  "spaces": {
+    "libs": {
+      "path": "packages",
+      "versioning": "fixedMajor"
+    }
+  }
+}
+```
+
+Packages across different directories can also share versions. Declare the group by name at the top level and assign
+spaces or packages to it:
+
+```json
+{
+  "versionGroups": {
+    "platform": {
+      "versioning": "fixedMajor"
+    }
+  },
+  "spaces": {
+    "libs": {
+      "path": "packages",
+      "versionGroup": "platform"
+    },
+    "apps": {
+      "path": "apps"
+    }
+  },
+  "packages": {
+    "shell": {
+      "versionGroup": "platform"
+    }
+  }
+}
+```
+
+Every package in `libs`, plus the `shell` package from `apps`, now shares a major under the `platform` group. The rest
+of `apps` remains independent.
+
+Keep three rules in mind when joining groups:
+
+* The declaration owns the mode. That is why `versionGroup` and `versioning` cannot both be set on the same space or
+  package: a member is not allowed to contradict the group it joined.
+* A `versionGroup` may also name another space, which joins that space's own implicit group. Group names and space
+  names share one namespace, so a declaration cannot shadow a space, and an unknown name is an error rather than a
+  silent no-op.
+* Setting `versioning` on a single package overrides its space's without leaving the space's group. That is how you opt
+  one package out entirely (`"versioning": "independent"`), and also how a group can end up with members asking to
+  share different amounts. When that happens the group uses the deepest sharing any member asked for, because sharing
+  the major and minor also shares the major, and reports it as `W237`.
+
+The full reference for all of this is under [versioning groups](../../configuration/spaces.md#versioning-groups).
+
+### What a member brings with it
+
+A package joining a group brings its own published version, and that version has a say in where the group goes next. A
+group always versions from its **newest** member, because no member may go backwards from something it has already
+published.
+
+Two cases follow from that, and they behave differently:
+
+* **A package with no version yet.** Nothing to disagree about. It joins at whatever version the group computes next
+  and its first release is that version, not `0.0.1`. The `W234` line on it is the whole story.
+* **A package already at a version of its own.** The higher of the two decides. If the newcomer is behind, it is caught
+  up to the group on the next run (`W234` again). If it is ahead, *the group moves up to meet it*.
+
+That second half is the one to watch, because it runs in the direction you cannot undo. A package tagged `9.0.0` by
+hand, joining a group sitting on `1.x`, takes every member of that group to `9.x` on the very next release, and
+[a published tag never moves](./steps.md). dispat reports it as `W233`, naming the member whose version decided the
+group's:
+
+```console
+WRN members of versioning group "platform" are on different major versions: core is at 1.2.0 while shell is at 9.0.0;
+    the group versions from the newest, so every member moves to major 9
+```
+
+It is a warning rather than an error because every one of those versions is genuinely published, so there is no other
+correct plan. If it is not what you meant, fix it before the release: correct the newcomer's tag, or keep it out of the
+group until its version lines up. Members apart by only a minor or a patch are not reported, because that is the
+ordinary state a failed ride leaves behind and `W234` already covers it.
+
+### Joining with a versioning of its own
+
+Setting `versioning` on a package overrides its space's without taking the package out of the space's group, so one
+group can hold members in different modes. That is the same override described above, seen from the group's side, and
+it splits the group's work between two different deciders:
+
+* **Where the group goes next** is decided by every member's published version, whatever mode that member is in.
+* **Which members release to get there** is decided by each member's own mode: a plain mode rides along, a sparse one
+  waits until it has changes of its own.
+
+Those two are easy to conflate, and the gap between them is where the surprise lives. A sparse member never rides, but
+its tag still votes. Take a `fixedMajor` space holding `core` at `1.2.0` and `tools` at `9.0.0`, with `tools`
+overridden to the sparse spelling of the same depth so that only the assignment differs:
+
+```json
+{
+  "spaces": {
+    "libs": {"path": "packages", "versioning": "fixedMajor"}
+  },
+  "packages": {
+    "tools": {"versioning": "fixedMajorSparse"}
+  }
+}
+```
+
+A fix in `core` takes the group to major 9, because `tools` is the newest member and no member goes backwards. `core`
+joins the new major line at `9.0.0`, not at `9.0.1`: the major it is moving to is one it has never published, so the
+line starts at its beginning. `tools` publishes nothing at all, having no changes of its own, which is exactly what its
+sparse mode promises. So the member that decided the version is the one member that did not move:
+
+```console
+$ dispat
+WRN members of versioning group "libs" are on different major versions: tools is at 9.0.0 while core is at 1.2.0;
+    the group versions from the newest, so every member moves to major 9  code=W233 package=group:libs
+INF ● changed bump=patch package=core reason=direct version="1.2.0 -> 9.0.0"
+INF unchanged package=tools version=9.0.0
+INF published package=core tag=core@9.0.0
+INF done published=1 failed=0 skipped=0 unchanged=1
+```
+
+Sparseness excuses trailing the group, not deciding it. A sparse member sitting *below* the group's major draws no
+`W233`, because that is the mode working as designed and `W234` catches it up the moment it has something to release. A
+sparse member *holding* the group's major is named like any other, because at that point it is not staying out of the
+way, it is choosing where everybody lands.
+
+## Acting on a group
+
+A group is a name you can point a command at, the same way you point one at a package or a space. That is `--group`,
+short `-g`:
+
+```sh
+dispat status -g platform         # what a release of the group would do
+dispat release -g platform        # release the group, and nothing else
+dispat run test -g platform       # run one script across the group
+dispat preview -g platform        # the pending notes of its members
+```
+
+It takes the same spellings as the other two selection flags: repeatable, comma separated, case insensitive, and `*`
+globs over group names. `-g '*'` is every package that versions in a group, which leaves out every package that
+versions on its own.
+
+Naming the group is the difference between a clean partial release and a noisy one. A group moves as a unit, so
+selecting one member of it releases a shared version that is briefly untrue for the others and dispat warns about it
+(`W231`). Selecting the group takes every member at once, so there is nothing to warn about, and it passes `--strict`
+where the single package would not. [Partial releases](./partial-releases.md) has the worked output.
+
+Two details worth remembering. A space that versions as a group is a group name too, so `-g libs` works with no
+`versionGroups` entry anywhere. And a group is a versioning relationship rather than a folder, so it can hold packages
+from several spaces, or a standalone package that belongs to no space at all, and standing in a folder never selects a
+group for you.
+
+## Prereleases and pinned versions
+
+Both follow the same rule as everything else: they move the group when they reach the shared part, and stay local when
+they do not.
+
+A prerelease train started by a breaking change in a `fixedMajor` group is the group's train. Every member goes to
+`2.0.0-beta.0` together, later work takes all of them to `beta.1`, and a graduation on any one member ends the train
+for all of them. A prerelease train started by a *patch* in the same group belongs to the package that started it, and
+nobody else joins.
+
+An exact [`Release-As`](../commits.md) works the same way. `Release-As: 2.0.0` in a `fixedMajor` group at major 1 names
+a different major, so it pins the whole group's version. `Release-As: 1.7.0` in the same group names the major it is
+already on, so it pins that one package and leaves the rest untouched.
+
+## What you see in the log
+
+| Code   | Meaning                                                                                                        |
+|--------|----------------------------------------------------------------------------------------------------------------|
+| `W234` | A package was released with nothing of its own, to keep the group together. Also raised when a package that fell behind is caught up to the shared part. |
+| `W235` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
+| `W236` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
+| `W237` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
+| `W233` | Members are on different major versions, so the newest one is about to take the rest of the group to its major. It names the member that decided, including a sparse one, which may not be a member that releases. |
+
+`W234` cannot be suppressed. Nothing in the commit log explains why that package is in the plan, so the warning is the
+only place a reader can find out.
+
+Two convergence properties hold under every mode, and are worth checking if something looks wrong. A group whose
+members already agree on the shared part releases nothing on a quiet run. And under a plain (non-sparse) mode, a member
+that fell behind the group, because an earlier release failed or because the group was formed out of unequal versions,
+is caught up on the next run rather than staying behind for ever.
+
+## Packages that never release (`none`)
+
+One versioning value is not a sharing mode at all. A space with `versioning: none` holds packages that stand outside
+the release flow entirely: they are never versioned, never tagged, never changelogged, never published. What they do
+instead is run scripts. Think of a folder of smoke tests, deployment tooling or generated sandboxes that you want swept
+by [`dispat run`](../../cli/run.md) alongside the real packages, without dispat ever trying to release them.
+
+```json
+{
+  "spaces": {
+    "packages": {
+      "path": "packages"
+    },
+    "tools": {
+      "path": "tools",
+      "versioning": "none"
+    }
+  }
+}
+```
+
+What this means in practice:
+
+* **The release plan skips them, permanently.** The plan graph reports each changed one as
+  `script-only (versioning: none)` instead of a version transition, and the summary counts them under `scriptOnly`.
+  This is not a hold waiting to be lifted; there is no version being withheld.
+* **They are always on the default run window.** A package leaves the window when a release consumes its changes, and
+  nothing ever consumes a `none` package's. Whenever it has pending commits, `dispat run` reaches it, which is the
+  point. `--since` narrows the window as usual when you want less.
+* **Dependencies point one way.** A `none` package may depend on releasable packages, and a
+  [permanent local link](../../editing/manifests.md) is the natural way to wire one up: the "remove links before
+  publishing" warning stays quiet when the link targets only `none` packages, because they never publish. A releasable
+  package cannot depend on a `none` package; the provider would never have a version for
+  [auto-versioning](../../configuration/autoversion.md) to write, so the edge is refused when the configuration loads.
+* **Directives aimed at them are inert.** A `Release-As` footer whose scope resolves to a `none` package moves nothing
+  and is reported as `W238`. Naming one in `dispat release --package` is answered with a log line instead of a silent
+  no-op.
+* **Release-only settings do nothing.** `tagFormat`, `aliasTags`, publish stages, changelog and GitHub blocks on a
+  `none` space load without error and never take effect. `none` also cannot join or form a
+  [versioning group](#putting-packages-in-a-group): a group exists to share versions, and these packages have none.
+
+## Where to go next
+
+* [Space options](../../configuration/spaces.md#versioning) for the reference table and the exact rules.
+* [Package options](../../configuration/packages.md#package-options) for overriding a single package's mode.
+* [Release records](../../configuration/records.md#changelog) for what lands in a changelog and a GitHub release.
+* [Commit messages](../commits.md) for `Release-As`, channels and the rest of the directive vocabulary.
