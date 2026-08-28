@@ -207,6 +207,17 @@ func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
 			s.Format.Header = []EntryLine{{Line: []string{"a"}, Package: []string{"core"},
 				Channels: []string{"beta"}}}
 		},
+		// Each of the six authors fields on its own. A releaser is shared
+		// between the packages whose keys match and carries the format it
+		// renders every body with, so a field missing from the key would give
+		// one package the other's attribution, silently and only when the two
+		// happened to differ.
+		"authors placement": func(s *GitHubSpec) { s.Format.AuthorsPlacement = "section" },
+		"authors format":    func(s *GitHubSpec) { s.Format.AuthorsFormat = "username" },
+		"authors commits":   func(s *GitHubSpec) { s.Format.AuthorsCommits = "all" },
+		"authors include":   func(s *GitHubSpec) { s.Format.AuthorsInclude = []string{"a*"} },
+		"authors exclude":   func(s *GitHubSpec) { s.Format.AuthorsExclude = []string{"*bot*"} },
+		"authors title":     func(s *GitHubSpec) { s.Format.AuthorsTitle = "Contributors" },
 	}
 	for name, change := range cases {
 		other := base
@@ -222,4 +233,32 @@ func TestGitHubSpecKeySeparatesFields(t *testing.T) {
 	a := GitHubSpec{Owner: "ac", Repo: "me"}
 	b := GitHubSpec{Owner: "a", Repo: "cme"}
 	assert.NotEqual(t, a.Key(), b.Key())
+
+	// The same for the authors pair either side of a boundary: two lists that
+	// concatenate alike must not key alike.
+	c := GitHubSpec{Format: RecordFormat{AuthorsInclude: []string{"a", "b"}}}
+	d := GitHubSpec{Format: RecordFormat{AuthorsInclude: []string{"a"}, AuthorsExclude: []string{"b"}}}
+	assert.NotEqual(t, c.Key(), d.Key())
+}
+
+// TestGitHubSpecKeySharesOnEqualAuthorPolicies: the other half of the claim.
+// Two packages that say the same thing about attribution must still share one
+// releaser, or every repository pays for a resolution and a verification per
+// package for nothing.
+func TestGitHubSpecKeySharesOnEqualAuthorPolicies(t *testing.T) {
+	spec := func() GitHubSpec {
+		return GitHubSpec{
+			Enabled: true, Owner: "acme", Repo: "mono",
+			Format: RecordFormat{
+				AuthorsPlacement: "both",
+				AuthorsFormat:    "username",
+				AuthorsCommits:   "all",
+				AuthorsInclude:   []string{"*"},
+				AuthorsExclude:   []string{"*bot*"},
+				AuthorsTitle:     "Contributors",
+			},
+		}
+	}
+	a, b := spec(), spec()
+	assert.Equal(t, a.Key(), b.Key())
 }

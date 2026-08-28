@@ -126,6 +126,20 @@ func (r *Repo) Commit(msg string) {
 	r.Git("commit", "-q", "-m", msg)
 }
 
+// CommitAs stages every change and commits it under a named git identity.
+//
+// New puts one fixed identity on the repository, which is the right default:
+// almost nothing a release does depends on who wrote a commit. Attribution
+// does, and it cannot be tested at all until two commits are by two different
+// people, so this is the one helper that steps around the fixture identity.
+// The identity is passed per invocation rather than configured, so a test can
+// alternate authors without leaving the repository in a changed state.
+func (r *Repo) CommitAs(name, email, msg string) {
+	r.T.Helper()
+	r.Git("add", "-A")
+	r.Git("-c", "user.name="+name, "-c", "user.email="+email, "commit", "-q", "-m", msg)
+}
+
 // CommitEmpty commits msg with no file changes — a directive-only unit that
 // needs no content of its own (a hold, a resume, a cancel, a graduation).
 func (r *Repo) CommitEmpty(msg string) {

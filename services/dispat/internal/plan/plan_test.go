@@ -35,6 +35,11 @@ type commit struct {
 	sha     string
 	message string
 	files   []string
+	// author and email are the commit's git identity. They are blank on most
+	// fixtures, which is the same thing a repository with one committer says
+	// about attribution, and set where the attribution is the claim.
+	author string
+	email  string
 }
 
 // fakeGit serves a linear history and a set of tags pointing into it.
@@ -109,7 +114,8 @@ func (f *fakeGit) Commits(_ context.Context, sinceTag string) ([]gitx.Commit, er
 	var out []gitx.Commit
 	for i := len(f.history) - 1; i >= from; i-- {
 		c := f.history[i]
-		gc := gitx.Commit{SHA: c.sha, Message: c.message, Files: c.files}
+		gc := gitx.Commit{SHA: c.sha, Message: c.message, Files: c.files,
+			AuthorName: c.author, AuthorEmail: c.email}
 		if i > 0 {
 			gc.Parents = []string{f.history[i-1].sha}
 		}

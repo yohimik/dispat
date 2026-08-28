@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Thirty-five goals across thirty-seven test files, one file each except goal 21, which the two shell helpers split
+Forty-four goals across forty-six test files, one file each except goal 21, which the two shell helpers split
 between `if_test.go`, `if_changed_test.go` and `exec_test.go`. They are grouped by what they are about rather than by
 the order they were written in, so you land in one place when looking for how a plan gets computed or which command
 does what.
@@ -65,6 +65,12 @@ does what.
 39. **A record entry is never empty** (`entrybodies_test.go`): the release shapes with nothing for their notes to group
     (a pin, a channel transition, work its reverts cancel out) each state their cause in the changelog entry and the
     GitHub body instead of rendering an empty record.
+44. **Authors in release records** (`authors_test.go`): the entry-format `authors` object, off by default and
+    attributing an entry to the people who wrote it from git's own identities alone. The two placements, the two
+    identity formats, `ccme` against `all` where the second reaches commits that carry no release record, the
+    include-then-exclude glob filters, the configuration ladder and the six flags that beat it, the narrowing that
+    keeps attribution aligned with the notes across a prerelease train, a correction and a revert, and the proof
+    that two packages configured differently do not share one GitHub releaser.
 40. **The e2e smoke walk** (`smoke_test.go`): the live release-verification protocol as a test: a toy polyglot monorepo
     (Go, npm, Docker; real manifests; a version group; edges in both ecosystems) released through six cycles with the
     full status graph, the tags, every entry and every manifest byte asserted at each step, and convergence proven
@@ -482,6 +488,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestOrderBuildDoesNotWaitForPublishByDefault`            | By default, the consumer build runs *during* the provider publish, while the consumer publish still waits for the provider publish to finish. |
 | `TestOrderDiamondDependencyConverges`                     | In a diamond dependency graph (`a -> b,c -> d`), packages `b` and `c` build in parallel, and `d` waits for both during build and publish stages. |
 | `TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv` | A `DueTo` consumer executes a version task where `DISPAT_UPDATED_*` points to the active provider. A directly released package in the *same space with the same versionScript* skips the task. |
+| `TestOrderProviderFailureSkipsTheWaitingConsumer`         | A failed `isBuildWaitingPublish` provider skips its consumers unconditionally (W194), their own work notwithstanding — the build consumes the publish that never happened — while without the flag the own-reason rule stands and the consumer releases. |
 
 ### Goal 8: interruption (`interrupt_test.go`)
 
@@ -734,7 +741,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestFilterReleaseSelectsPartOfTheGraph`        | A release takes the same terms: `-p core` tags and publishes core alone, `-s apps` that space's package, the graph marks what was left out, and a later unfiltered run releases the rest without re-releasing what is already out.                |
 | `TestFilterReleaseWithholdsWhatTheOrderCannotReach` | A selected consumer whose provider is releasing and unselected is withheld (`W230`, naming the provider) and nothing is released; naming the provider too releases both; once the provider is out, the consumer alone is a fine selection.    |
 | `TestFilterReleaseStrictRefusesBeforeAnythingRuns` | `--strict` turns the withholding into exit 1 with no tags, no stage scripts and the releasable half of the same selection untouched; without it that half releases; a clean selection is unaffected by the flag.                             |
-| `TestFilterReleaseSplitsAVersioningGroup`       | Taking part of a `fixed` group releases it and warns (`W231`) rather than refusing; `--strict` refuses the same selection with nothing released; the next run rides the member left behind up to the group's version (`W234`).                   |
+| `TestFilterReleaseSplitsAVersioningGroup`       | Taking part of a `fixed` group releases it and warns (`W231`) rather than refusing; `--strict` refuses the same selection with nothing released; the next run makes the group whole with the member left behind releasing the split-off work at the version that already carries it (no ride, no W234), and then converges.                   |
 | `TestFilterReleaseInfersFromTheInvocationFolder`| A release run from inside a package folder is that package's release; from the root it is still the whole monorepo.                                                                                                                              |
 | `TestFilterReleaseRecordsOnlyWhatReleased`      | The durable records follow the narrowed run: the release commit names only the created tag, only the released package's changelog is written, and no tag exists for a package left out.                                                          |
 | `TestFilterStatusSelects`                       | `status` narrows the same plan while still printing every package (`⊝ not selected`, `⊘ withheld until its providers release`), reports `W230` and exits 0, exits 1 under `--strict`, is clean when a space term brings the provider along, and fails on an unmatched term. |
@@ -921,7 +928,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 |--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestGuardAllowBranch`                     | Setting `run.allowBranch` restricts releases to listed branch patterns. Running on an unlisted branch prints the branch and configured globs, exits 1, and creates no tags. Wildcard `*` patterns match branch names with slashes like `release/v1`, while `dispat status` runs on any branch.             |
 | `TestGuardAllowBranchRefusesDetachedHead`  | A detached HEAD matches no branch patterns, including `*`. dispat aborts the run before creating tags.                                                                                                                     |
-| `TestGuardBehindRemote`                    | In push mode, dispat checks whether local branches lag behind the remote. If behind, the run aborts with "behind origin/main" before tagging. Running `git pull --rebase` allows the release to tag and push successfully.           |
+| `TestGuardBehindRemote`                    | In push mode, dispat checks whether local branches lag behind the remote. If behind, the run aborts with "behind origin/main" *before the plan is computed at all*: no build script runs and no planning diagnostic is reported, while the same window does report W131 once the checkout has caught up and a plan is actually built. Running `git pull --rebase` allows the release to tag and push successfully. |
 | `TestGuardBehindRemoteHonoursCommitVerify` | The behind check runs `git ls-remote`. Setting `commit.verify: false` disables this check alongside reachability checks, allowing the run to build, tag, and publish before git rejects the push.                   |
 | `TestGuardsAreUnsetByDefault`              | Guards remain inactive until configured. Unconfigured repositories on any branch name release and push to remotes without restrictions.                                                                                                                  |
 
@@ -931,6 +938,11 @@ The lock is a ref on the remote, so every claim here is read from the bare repos
 true *during* a run is read from a `beforeAll` hook, which runs while the lock is held. The harness disables the lock
 for every other scenario (`DISPAT_UNSAFE_DISABLE_LOCK=true` in `runBin`), since most fixtures have no remote at all;
 these tests ask for it back.
+
+The claim is taken before anything is planned, on every release and whatever flags it was given, because whether
+there is work to do is not known until after planning. A run whose plan turns out to be empty therefore round-trips
+the lock; the hook probe cannot witness that one, since `beforeAll` never runs on an empty plan, so it is read from
+the tag object on the remote instead.
 
 | Test                                       | Claim proven                                                                                                                                                                                                                              |
 |--------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -947,7 +959,7 @@ these tests ask for it back.
 | `TestReleaseLockCleanupFailureIsNotFatal`  | If a remote becomes unreachable at the end of a run, dispat prints remediation steps and returns the exit code of the release (0), leaving the lock tag on the remote.                                                       |
 | `TestReleaseLockAppliesOnlyToRelease`      | Commands like `status`, `preview`, `run`, `changelog`, `autoversion`, `commit`, and `scanner` acquire no remote locks and function in repositories without remotes.                                                                                  |
 | `TestReleaseLockIsNotAReleaseTag`          | The lock tag targets HEAD during plan computation. Broad tag formats like `{version}` still read 0.1.0 as the baseline and increment to 0.2.0.                                                                                |
-| `TestReleaseLockNotTakenWhenNothingToRelease` | When you pass `--require-release`, dispat checks the plan before taking the lock. Runs with nothing to publish exit before locking the remote. |
+| `TestReleaseLockTakenEvenWhenNothingToRelease` | The lock is unconditional. A `--require-release` run with nothing to publish takes the lock, gives it straight back and exits 3, building and tagging nothing. A lock already held refuses such a run on the lock rather than on the empty plan, which is what proves the lock precedes planning; `dispat status --require-release` remains the lock-free way to ask the same question. |
 
 ### Goal 31: corrections and reverted changelogs (`corrections_test.go`)
 
@@ -1044,6 +1056,12 @@ script-only members, and per-member tag spellings.
 | `TestVersionGroupSparseMemberPin`           | Under a sparse mode a pin moves the shared version without back-filling: the untouched member stays put, and its next change joins above the pin, skipping everything it sat out.                                    |
 | `TestVersionGroupNoneMemberIsScriptOnly`    | The polyglot shape: a `versioning: none` override on a package inside a group-joined space makes it script-only: it is never tagged, the group moves without it, the graph names it, and its work still runs through the run window. |
 | `TestVersionGroupMixedDepthTrain`           | Mixed shared depth (a member's `fixedMajorMinor` inside a `fixedMajor` space, the implicit-group shape) resolves to the deepest declaration with W237, and the resolution holds along a whole train: one shared counter, one graduation. |
+| `TestVersionGroupPartialReleaseCatchesUp`   | A run that dies between two members' publishes leaves the group split; the retry lands the laggard at the version that already carries the shared work, as its own release (no W234), without re-releasing the member that published, and a third run converges. |
+| `TestVersionGroupPartialReleaseCatchUpAcrossModes` | The same partial-release catch-up in every shared mode — `fixed`, `fixedSparse`, `fixedMajorMinor`, `fixedMajorMinorSparse`, and the major-only modes under a breaking change — with the holder never re-released and the group converged after one retry. |
+| `TestVersionGroupCauselessLaggardRidesToThePublishedVersion` | The other catch-up flavour: the failed leg was a ride, so the retry rides the cause-less laggard up to the group's published version with W234 explaining it. |
+| `TestVersionGroupPartialReleaseTwoLaggards` | One holder, two failed legs: both laggards catch up at the published version in a single retry.                                                                                                                     |
+| `TestVersionGroupPartialReleaseNewerWorkMovesOn` | The mask reaches exactly as far as the published tag: work landing after the partial release moves the prefix, the laggard releases everything at the next minor without ever landing on the version it skipped past, and the erstwhile holder rides up (W234). |
+| `TestVersionGroupTrainPartialReleaseAdvancesTheTrain` | On a prerelease train the stable-line masking stays out (§11.4 owns the window): the retry advances the train, the laggard boards at the next prerelease and the holder rides beside it.                       |
 
 ### Goal 37: step commands wired into a running release (`stepwiring_test.go`)
 
@@ -1093,7 +1111,7 @@ next cycle starts.
 
 | Test                     | Claim proven                                                                                                                                                                                                     |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `TestSmokeReleaseCycles` | Six cycles in sequence: bootstrap (everything direct, every manifest written); a shared minor riding the image with its FROM and compose tags following; a provider releasing alone with the consumer's manifest deliberately left behind; the consumer's own next release performing the reconciliation pickup (W197, manifest moves, changelog deliberately silent); a caret propagating the provider's fix (manifest and dependencies section both move); and a whole rc train over the group, with prerelease versions in the manifests, fresh-only rc entries, and a graduation whose entry documents the provider's movement over the whole train. |
+| `TestSmokeReleaseCycles` | Nine cycles in sequence: bootstrap (everything direct, every manifest written); a shared minor riding the image with its FROM and compose tags following; a provider releasing alone with the consumer's manifest deliberately left behind; the consumer's own next release performing the reconciliation pickup (W197, manifest moves, changelog deliberately silent); a caret propagating the provider's fix (manifest and dependencies section both move); a whole rc train over the group, with prerelease versions in the manifests, fresh-only rc entries, and a graduation whose entry documents the provider's movement over the whole train; a run dying between the group's publishes with the retry catching the failed leg up at the published version as its own release; a provider leg dying under `isBuildWaitingPublish` with the consumer skipped (W194) rather than shipping against the missing publish; and a dead ride with the retry riding the cause-less laggard up at the published version (W234), the manifest pickup intact throughout. |
 
 ### Goal 41: game engine manifests (`engines_test.go`)
 
@@ -1158,6 +1176,28 @@ the feature matrix.
 | Test                     | Claim proven                                                                                                                                                                                                     |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestSmokeKeyFeatures`   | One walk over the key commands: `init` creates a loadable starter and refuses to overwrite it; `status` reports the pending graph and `--require-release` answers 0 pending / 3 converged (the contract the release workflow's plan job gates on); `preview` names the pending tag; `compute` detects the edge the manifests express, fails `--check` while the config lags, and `--write` adopts it; the `if --changed` gate answers from the release window and an explicit one; `run` sweeps a window with `--consumers`; `exec` runs the named root script; the release itself tags, writes changelogs and rewrites manifests, and a caretless fix does not propagate; the post-release `changelog` step command is a logged no-op; and the scanner lists the workspace's manifests. |
+
+### Goal 44: authors in release records (`authors_test.go`)
+
+The attribution the entry-format `authors` object adds to a changelog entry and a GitHub release body. Every fixture
+commits under named identities through `harness.Repo.CommitAs`, because nothing about attribution can be observed
+until two commits are by two different people; the repository's own fixed identity stays the default everywhere else.
+
+| Test                                       | Claim proven                                                                                                                                                                                                                              |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestAuthorsOffByDefault`                  | The feature is invisible until asked for. A repository configuring nothing records exactly what it recorded before, and an explicit `placement: off` produces a byte-identical file — which is what lets a package defeat a broader layer without a fourth spelling of absence. |
+| `TestAuthorsInlinePlacement`               | The per-line suffix names that line's own people, the git author first and the `Co-authored-by` trailers after, and `inline` alone writes no section.                                                                                       |
+| `TestAuthorsSectionPlacement`              | The section is one deduplicated list under its configured title, written into the changelog file and into the GitHub body after the sections it attributes and before the footer, so self-update's `---` cut is unmoved. A non-ASCII name survives the whole path from git to the record. |
+| `TestAuthorsAllCommitsIncludeInvalid`      | `commits: ccme` names the people behind the entry's own lines; `commits: all` also credits the author of a commit whose message is not a release record at all.                                                                             |
+| `TestAuthorsOnlyInvalidCommitsStillCredits`| A package releasing on an exact pin has no grouped line to attribute, and under `all` still says who moved the repository.                                                                                                                  |
+| `TestAuthorsFiltersAndFormat`              | `exclude` wins over a wide-open `include`; patterns reach the full name, the username and the email alike; `format: username` writes the local part, and an address with no `@` is returned whole rather than attributed to nobody.          |
+| `TestAuthorsLadderAndFlags`                | The object rides the configuration ladder field by field — a package's `off` defeats the root's `both` while inheriting the title — and `--authors`, `--authors-format` and `--authors-title` beat whatever the ladder resolved.             |
+| `TestAuthorsGitHubCommandFlags`            | The same six flags on `dispat github`, where they must reach the release body the step command posts rather than a file it writes.                                                                                                           |
+| `TestAuthorsFlagRejectsAnUnknownValue`     | A bad enum flag on `changelog` or `github` is refused in the config validator's own words, before anything is planned or written.                                                                                                            |
+| `TestAuthorsSeparateReleasers`             | Two packages releasing to one GitHub repository under different attribution get different bodies. They share every field a releaser is addressed by, so this is the end-to-end proof that the six settings reach `GitHubSpec.Key`.           |
+| `TestAuthorsCorrectionsAndSuppression`     | A restatement is attributed to whoever restated it, not to the commit it corrects (§7.4.2); a revert takes both entries and their attribution out of the notes (§7.3).                                                                       |
+| `TestAuthorsPrereleaseFreshWindow`         | Attribution narrows exactly as the notes do: each prerelease credits its own changeset, and the stable graduation collecting the train credits the whole train.                                                                             |
+| `TestAuthorsPreviewRendersTheBlocks`       | `dispat preview` prints the record bodies a release would write, so it gains both blocks by construction.                                                                                                                                    |
 
 ## Regression fences
 

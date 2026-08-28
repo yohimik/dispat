@@ -17,8 +17,76 @@ at another repository.
 | `releaseName`       | none               | What the release is called. On GitHub it replaces the release name (the tag by default). In a changelog it writes a sub-header under the entry's date line. See [Your own words around an entry](#your-own-words-around-an-entry). |
 | `header`            | none               | Lines written inside every entry, above the sections.                                                                                          |
 | `footer`            | none               | Lines written inside every entry, after the sections.                                                                                          |
+| `authors`           | off                | Attributes the entry to the people who wrote it. See [Attributing an entry to its authors](#attributing-an-entry-to-its-authors).               |
 
 `releaseName`, `header` and `footer` are interpolated. See [Variables in record text](#variables-in-record-text).
+
+## Attributing an entry to its authors
+
+`authors` adds the commit authors to a changelog entry and a GitHub release body. It is off by default, so a
+repository that says nothing records exactly what it recorded before.
+
+| Key         | Default    | Description                                                                                                                                       |
+|-------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `placement` | `off`      | Where the authors appear: `off`, `inline` (a `(by ...)` suffix on each entry line), `section` (one list under its own heading) or `both`.          |
+| `format`    | `fullname` | How one author is written: `fullname`, or `username` for the local part of the email address.                                                      |
+| `commits`   | `ccme`     | Which commits the section counts: `ccme` for the ones behind the entry's own lines, `all` for every commit in the release window.                  |
+| `include`   | none       | Only authors matching one of these globs are listed. An empty list admits everyone.                                                                |
+| `exclude`   | none       | Authors matching one of these globs are dropped. Applied after `include`, and it wins.                                                             |
+| `title`     | `Authors`  | The heading of the section.                                                                                                                        |
+
+### Where the identity comes from
+
+The identity is git's own: the name and email a commit was authored under, plus everyone its `Co-authored-by`
+trailers name. No forge is asked who that is, so the attribution costs no API call, works on a repository that has
+never seen GitHub, and cannot change under a record that has already been published.
+
+dispat reads the *author* rather than the committer. A rebase, a cherry-pick or a squash-merge rewrites the committer
+and leaves the author alone, so the committer would credit whoever last moved the commit. A `Co-authored-by` trailer
+repeating the commit's own author adds nothing, which is the shape a squash-merge of one person's own branch produces.
+
+One person is one entry. Two commits under one address are one author, whatever the name beside each of them says,
+and the case of neither an address nor a name is significant.
+
+### `ccme` against `all`
+
+`commits: ccme` counts the commits behind the entry's own lines. The list and the lines above it then describe the
+same work, and everything that narrows the lines narrows the list with them: a prerelease is attributed to its own
+changeset, a graduation to the whole train it collects, and a reverted entry takes its attribution out with it.
+
+`commits: all` counts every commit in the release window instead, including those whose messages are not release
+records at all. This credits the person who wrote a build fix or a dependency bump outside the convention, at the
+cost of naming people no line above mentions. It changes the section alone. An inline suffix can only ever name the
+authors of a line that exists.
+
+### Filtering with `include` and `exclude`
+
+Both lists hold case-insensitive globs, where `*` matches any run of characters. Each pattern is tried against the
+full name, the username and the email address, and matches on any of the three, because an operator writing a filter
+is thinking of a person rather than of a field.
+
+`include` runs first and an empty list admits everyone. `exclude` runs afterwards and wins, which is the only order
+that lets a wide-open include coexist with a narrow refusal:
+
+```yaml
+changelog:
+  authors:
+    placement: both
+    include: ["*"]
+    exclude: ["*[bot]*"]
+```
+
+An entry whose authors are all filtered away is written without the section rather than with an empty one.
+
+### The section's place in an entry
+
+The section follows the sections it attributes and precedes both the `### Release` details a GitHub release carries
+and the entry's `footer`. The footer stays last on purpose: [self-update](../reference/self-update.md) reads release
+notes by cutting at the `---` a release footer conventionally opens with, so a block written after it would be cut
+away with the footer.
+
+Authors are listed in the order the release collected its commits, newest first, rather than by the size of the
+change each of them happened to make.
 
 ## `changelog`
 
@@ -258,6 +326,12 @@ Core writes `core only`. Every other package writes `shared`.
 There are no command-line flags for `header` and `footer`, because a filtered list of lines is not a flag-shaped thing.
 `releaseName` and `fileTitle` do have flags on the step commands, `--release-name` and `--file-title`. Each flag
 replaces the configured value for that one invocation.
+
+Every key of `authors` has a flag on both [`dispat changelog`](../cli/changelog.md) and
+[`dispat github`](../cli/github.md): `--authors`, `--authors-format`, `--authors-commits`, `--authors-include`,
+`--authors-exclude` and `--authors-title`. Each one replaces the configured value for that invocation, field by
+field, with the two lists replacing whole. A flag naming a value the setting does not admit is refused before
+anything is planned, in the words the configuration file would have been refused in.
 
 ## Variables in record text
 

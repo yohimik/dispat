@@ -25,6 +25,15 @@ import (
 // and a group minor bump 1.3.0, which is exactly the version every member
 // takes.
 
+// groupContrib is one direct contribution as the fixed-group aggregate needs
+// it: the bump and the commit that carried it. directBumps records them beside
+// OwnBump, which collapses the same tuples into a single maximum and loses the
+// commits the aggregate's re-measuring needs.
+type groupContrib struct {
+	key  string
+	bump ccme.Bump
+}
+
 // samePrefix reports whether two versions agree on their first d core
 // components. Prerelease identifiers are deliberately ignored, so 2.0.0-beta.0
 // and 2.1.0 share a major: the prefix is about which line a version belongs
@@ -183,6 +192,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 		cp.log.Trace().Str("group", groupName).Strs("members", members).
 			Int("depth", depth).Str("target", g.Next.String()).
 			Bool("moves", g.Changed() && groupMoves(g, depth)).
+			Bool("absorbed", g.absorbed).
 			Msg("plan: fixed group unified")
 	}
 
@@ -327,6 +337,26 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		g.Next = g.Baseline
 	}
 
+	// The commit the group's freshness is measured against: what the tag
+	// holding the group baseline names. Work at or behind it has already been
+	// versioned into the group's line — a run that died after one member
+	// published left the others still carrying the very commits that version
+	// contains — so counting it again would bump the shared prefix past a
+	// version the group has already published for that exact work (a G3
+	// violation the per-package computation cannot have). Confined to a
+	// stable group baseline: a train's window deliberately spans work its own
+	// prereleases shipped (§11.4), and re-measuring it here would fight that.
+	mask := ""
+	if g.HasBaseline && len(g.Baseline.Prerelease) == 0 {
+		for _, name := range members {
+			rel := cp.rel[name]
+			if rel.HasBaseline && rel.Baseline.Compare(g.Baseline) == 0 && rel.BaselineCommit != "" {
+				mask = rel.BaselineCommit
+				break
+			}
+		}
+	}
+
 	var channelCands []string // distinct member channels departing from the group baseline
 	seenChan := make(map[string]bool)
 	for _, name := range members {
@@ -334,9 +364,16 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		if rel.Held {
 			continue
 		}
-		g.OwnBump = ccme.MaxBump(g.OwnBump, rel.OwnBump)
-		g.PropagatedBump = ccme.MaxBump(g.PropagatedBump, rel.PropagatedBump)
-		if rel.NewWork {
+		own, propagated, fresh := rel.OwnBump, rel.PropagatedBump, rel.NewWork
+		if mask != "" {
+			own, propagated, fresh = cp.groupFresh(name, mask)
+			if own != rel.OwnBump || propagated != rel.PropagatedBump || fresh != rel.NewWork {
+				g.absorbed = true
+			}
+		}
+		g.OwnBump = ccme.MaxBump(g.OwnBump, own)
+		g.PropagatedBump = ccme.MaxBump(g.PropagatedBump, propagated)
+		if fresh {
 			g.NewWork = true
 		}
 		if rel.Channel != "" && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
@@ -349,6 +386,30 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		g.Channel = channelCands[0]
 	}
 	return g, channelCands
+}
+
+// groupFresh re-measures one member's pending contributions against the
+// group's published baseline commit rather than the member's own tag: the
+// bumps of its direct tuples and stale propagation sources whose commits the
+// mask does not contain, and whether anything at all survives. A member whose
+// whole window sits at or behind the mask contributes nothing — its work is
+// published, just not under its own tag yet — which is what lets the group
+// stay put and the member catch up at the version that already carries its
+// work, instead of the whole group burning the next prefix on a re-count.
+func (cp *computation) groupFresh(name, mask string) (own, propagated ccme.Bump, fresh bool) {
+	for _, c := range cp.ownContribs[name] {
+		if cp.ancestorOrSelf(c.key, mask) {
+			continue
+		}
+		own = ccme.MaxBump(own, c.bump)
+	}
+	for _, s := range cp.rel[name].Sources {
+		if cp.ancestorOrSelf(s.Commit, mask) {
+			continue
+		}
+		propagated = ccme.MaxBump(propagated, s.Bump)
+	}
+	return own, propagated, own != ccme.BumpNone || propagated != ccme.BumpNone
 }
 
 // fixedGroupPin selects the pin that applies to the group, if any: the newest
@@ -406,10 +467,14 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 // unfinished propagation. Sparse members are exempt from that second case:
 // staying behind until they change is the point of a sparse mode.
 //
-// Raising an already-computed version is confined to the partial modes. Under
-// the full depth this path is a rare transitional state rather than the
-// ordinary one, and moving a member's computed version there would rewrite
-// settled behaviour for a case the prefix rule does not need.
+// Raising an already-computed version is confined to the partial modes, with
+// one exception. Under the full depth this path is a rare transitional state
+// rather than the ordinary one, and moving a member's computed version there
+// would rewrite settled behaviour for a case the prefix rule does not need —
+// except when the aggregate absorbed pending work the group baseline already
+// published: then a member releasing that work computes its version from its
+// own smaller baseline, may land below the version the group already holds,
+// and the full sharing demands the raise.
 func (cp *computation) alignFixedGroup(groupName string, g *Release, members []string, depth int) {
 	if !g.HasBaseline {
 		return // the group has never published: nothing to align to
@@ -422,7 +487,7 @@ func (cp *computation) alignFixedGroup(groupName string, g *Release, members []s
 			continue
 		}
 		if rel.Releasing() {
-			if depth < model.SharedVersioningDepth && versionLess(rel.Next, target) {
+			if (depth < model.SharedVersioningDepth || g.absorbed) && versionLess(rel.Next, target) {
 				rel.Next, rel.Channel = target, channel
 			}
 			continue

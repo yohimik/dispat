@@ -421,6 +421,22 @@ type RecordFormat struct {
 	// Header and Footer bracket the sections of every entry.
 	Header []EntryLine
 	Footer []EntryLine
+
+	// The resolved authors policy, flattened from the config's nested
+	// `authors` object. Flat and by value so that two packages saying the same
+	// thing produce the same policy key; see writeKey.
+	//
+	// AuthorsPlacement is "off" (the renderer default), "inline", "section" or
+	// "both"; AuthorsFormat "fullname" or "username"; AuthorsCommits "ccme"
+	// (the entry's own lines) or "all" (every commit in the window).
+	AuthorsPlacement string
+	AuthorsFormat    string
+	AuthorsCommits   string
+	// AuthorsInclude and AuthorsExclude filter the authors by glob; include
+	// first, exclude wins.
+	AuthorsInclude []string
+	AuthorsExclude []string
+	AuthorsTitle   string
 }
 
 // ChannelsAdmit reports whether a channel restriction admits a release on
@@ -507,9 +523,17 @@ func (s GitHubSpec) Key() string {
 }
 
 // writeKey appends a format's contribution to a policy key.
+//
+// Every field of the format goes in, the authors policy included. Two packages
+// releasing to one GitHub repository share a releaser when their keys match,
+// and the releaser carries the format it renders every body with — so a field
+// left out here would give one package the other's attribution, silently and
+// only when the two happened to differ.
 func (f RecordFormat) writeKey(b *strings.Builder) {
 	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q\x00%q", f.DateFormat, f.BreakingTitle, f.FeaturesTitle,
 		f.FixesTitle, f.DependenciesTitle, f.ReleaseName)
+	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q\x00%q", f.AuthorsPlacement, f.AuthorsFormat,
+		f.AuthorsCommits, f.AuthorsInclude, f.AuthorsExclude, f.AuthorsTitle)
 	writeLinesKey(b, f.Header)
 	writeLinesKey(b, f.Footer)
 }

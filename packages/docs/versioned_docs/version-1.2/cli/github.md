@@ -57,3 +57,9 @@ Beside the [global flags](./README.md#global-flags):
 | `--owner`, `--repo`, `--api-url`, `--token-env` | from config | Override the matching `github.*` values for every package in the `github` command invocation.  |
 | `--target`            |             | Push the commit to the remote before you use this. It tells the `github` command to create the tag at this commit or branch (`target_commitish`).   |
 | `--release-name`      | from config | Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for the `changelog` and `github` commands. Environment variables like `$VAR` and `${VAR}` expand exactly as they do in the config. |
+| `--authors`           | from config | Override [`authors.placement`](../configuration/records.md#attributing-an-entry-to-its-authors) for the `changelog` and `github` commands: `off`, `inline`, `section` or `both`. Any other value is refused before anything is planned. |
+| `--authors-format`    | from config | Override `authors.format`: `fullname`, or `username` for the local part of the email address. |
+| `--authors-commits`   | from config | Override `authors.commits`: `ccme` for the commits behind the entry's own lines, or `all` for every commit in the release window. |
+| `--authors-include`   | from config | Override `authors.include`. This repeatable, comma-separated list of case-insensitive globs replaces the configured list whole, and each pattern is tried against the full name, the username and the email. |
+| `--authors-exclude`   | from config | Override `authors.exclude`, with the same spellings. It is applied after `--authors-include` and wins. |
+| `--authors-title`     | from config | Override `authors.title`, the heading of the authors section. |

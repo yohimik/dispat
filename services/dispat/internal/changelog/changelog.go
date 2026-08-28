@@ -36,6 +36,16 @@ type Format struct {
 	// own package filters, so one configured list serves a whole workspace.
 	Header []model.EntryLine
 	Footer []model.EntryLine
+
+	// The authors policy, resolved from the package's record format. Placement
+	// defaults to "off", which is what keeps an entry byte for byte what it
+	// was before attribution existed.
+	AuthorsPlacement string
+	AuthorsFormat    string
+	AuthorsCommits   string
+	AuthorsInclude   []string
+	AuthorsExclude   []string
+	AuthorsTitle     string
 }
 
 func (f Format) withDefaults() Format {
@@ -44,6 +54,10 @@ func (f Format) withDefaults() Format {
 	defaultStr(&f.FeaturesTitle, "Features")
 	defaultStr(&f.FixesTitle, "Fixes")
 	defaultStr(&f.DependenciesTitle, "Dependencies")
+	defaultStr(&f.AuthorsPlacement, AuthorsOff)
+	defaultStr(&f.AuthorsFormat, AuthorsFullName)
+	defaultStr(&f.AuthorsCommits, AuthorsCommitsCCME)
+	defaultStr(&f.AuthorsTitle, "Authors")
 	return f
 }
 
@@ -64,6 +78,12 @@ func SpecFormat(f model.RecordFormat) Format {
 		ReleaseName:       f.ReleaseName,
 		Header:            f.Header,
 		Footer:            f.Footer,
+		AuthorsPlacement:  f.AuthorsPlacement,
+		AuthorsFormat:     f.AuthorsFormat,
+		AuthorsCommits:    f.AuthorsCommits,
+		AuthorsInclude:    f.AuthorsInclude,
+		AuthorsExclude:    f.AuthorsExclude,
+		AuthorsTitle:      f.AuthorsTitle,
 	}
 }
 
@@ -137,7 +157,11 @@ func RenderSections(rel *plan.Release, f Format) string {
 		var lines []string
 		for _, c := range rel.NotesUnits() {
 			if c.Bump == kind {
-				lines = append(lines, "- "+c.Header.Description+correctionNote(rel, c)+"\n"+c.Body)
+				// The attribution follows the correction note: the note is part
+				// of what the line says about the work, and who did it comes
+				// after what was done.
+				lines = append(lines, "- "+c.Header.Description+correctionNote(rel, c)+
+					authorSuffix(rel, c, f)+"\n"+c.Body)
 			}
 		}
 		if len(lines) > 0 {
@@ -227,9 +251,16 @@ func RenderBody(rel *plan.Release, f Format, look Lookup, extra ...string) strin
 	if look == nil {
 		look = ReleaseLookup(rel)
 	}
-	blocks := make([]string, 0, len(extra)+3)
+	blocks := make([]string, 0, len(extra)+4)
 	blocks = appendBlock(blocks, RenderLines(f.Header, rel, look))
 	blocks = appendBlock(blocks, RenderSections(rel, f))
+	// The authors block sits after the sections it attributes and before
+	// anything the caller appends, so the GitHub recorder's "### Release"
+	// details stay the last thing before the footer. The footer staying last
+	// is load-bearing beyond taste: self-update reads release notes by cutting
+	// at the "---" a release footer conventionally opens with, and a block
+	// inserted after it would be read as part of the cut-away tail.
+	blocks = appendBlock(blocks, authorsSection(rel, f))
 	for _, e := range extra {
 		blocks = appendBlock(blocks, e)
 	}

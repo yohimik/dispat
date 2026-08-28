@@ -507,8 +507,11 @@ func TestFilterReleaseStrictRefusesBeforeAnythingRuns(t *testing.T) {
 // TestFilterReleaseSplitsAVersioningGroup: a versioning group is not an
 // ordering constraint, so a selection that takes part of one releases and says
 // so (W231). The group's shared version is untrue until the next run, which
-// rides the members left behind up to it (W234) with nothing for an operator
-// to do. --strict is how a repository opts out of ever being in that state.
+// makes it whole with nothing for an operator to do: the members left behind
+// release the split-off work at the version that already carries it — their
+// own release, not a ride, since re-counting work the group has published
+// would burn the next prefix on it a second time. --strict is how a
+// repository opts out of ever being in that state.
 func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
@@ -529,11 +532,17 @@ func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 	assert.True(t, harness.HasCode(res.Events, "W231"), "the split is reported, not refused")
 	assert.Equal(t, []string{"one@0.1.0"}, r.TagList())
 
-	// The next run puts the group back on one version: two releases at the
-	// group's version and one rides along to meet it.
+	// The next run puts the group back on one version: two catches up at the
+	// 0.1.0 that already carries the shared feat — its own release, with the
+	// feat in its own changeset — and one, which published that work, is not
+	// dragged into an empty re-release at the next minor.
 	res = r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "one"), "one rides to rejoin the group")
-	assert.ElementsMatch(t, []string{"one@0.1.0", "one@0.2.0", "two@0.2.0"}, r.TagList())
+	assert.False(t, harness.HasCode(res.Events, "W234"),
+		"nobody rides: two's own commits are the whole cause")
+	assert.ElementsMatch(t, []string{"one@0.1.0", "two@0.1.0"}, r.TagList())
+
+	r.ReleaseOK()
+	assert.ElementsMatch(t, []string{"one@0.1.0", "two@0.1.0"}, r.TagList(), "converged")
 }
 
 // TestFilterReleaseInfersFromTheInvocationFolder: with no terms the folder is

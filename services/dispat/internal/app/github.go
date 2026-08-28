@@ -29,6 +29,8 @@ type GitHubOptions struct {
 	// ReleaseName overrides github.releaseName, the release's name. It is
 	// interpolated like the configured value.
 	ReleaseName string
+	// Authors overrides the github.authors object, field by field.
+	Authors AuthorOptions
 }
 
 // GitHub creates each covered package's release now — the same release the
@@ -42,6 +44,10 @@ type GitHubOptions struct {
 // files to attach) is read from there, and DISPAT_PACKAGE says which package
 // it belongs to.
 func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
+	if err := opts.Authors.validate(); err != nil {
+		a.log.Error().Err(err).Msg("cannot create the github release")
+		return err
+	}
 	env, err := a.wireStep(&opts.Window)
 	if err != nil {
 		return err
@@ -142,6 +148,10 @@ func (a *App) githubSpec(spec model.GitHubSpec, opts GitHubOptions) model.GitHub
 	spec.APIURL = firstOf(opts.APIURL, spec.APIURL)
 	spec.TokenEnv = firstOf(opts.TokenEnv, spec.TokenEnv)
 	spec.Format.ReleaseName = firstOf(opts.ReleaseName, spec.Format.ReleaseName)
+	// The authors overrides land on the format before the spec is keyed, so
+	// two packages the flags now differentiate stop sharing one releaser
+	// exactly as two packages the configuration differentiates do.
+	spec.Format = opts.Authors.apply(spec.Format)
 	return spec
 }
 

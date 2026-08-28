@@ -89,11 +89,13 @@ func TestGuardAllowBranchRefusesDetachedHead(t *testing.T) {
 }
 
 // TestGuardBehindRemote: in push mode a checkout whose branch tip is behind
-// the remote refuses before any release work — the plan was computed against
-// stale tags — and releases normally once the checkout has caught up.
+// the remote refuses *before the plan is computed at all* — a plan built on
+// stale tags is wrong rather than merely useless, because it recomputes
+// versions somebody else has already published — and releases normally once
+// the checkout has caught up.
 func TestGuardBehindRemote(t *testing.T) {
 	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
+	cfg := libsConfig(markerBuild, 1)
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -102,22 +104,37 @@ func TestGuardBehindRemote(t *testing.T) {
 
 	r.ReleaseOK()
 	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.Equal(t, 1, buildRuns(r), "the first release built once")
 
 	// The remote moves on without this checkout.
 	pushClone(t, bare, "chore: pushed elsewhere")
 
 	r.WriteFile("packages/core/more.txt", "stale work\n")
 	r.Commit("feat(core): stale work")
+	// A unit addressing nothing: planning this window reports W131 against it.
+	// The code is therefore a witness that planning happened, and its absence
+	// below is what distinguishes "refused before the plan" from "refused
+	// after it".
+	r.CommitEmpty("feat(ghost): a scope no package answers to")
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "a stale checkout must refuse\nstdout:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, "behind origin/"+harness.DefaultBranch)
 	assert.False(t, r.HasTag("core@0.2.0"), "a refused run must not tag")
+	assert.Equal(t, 1, buildRuns(r), "a refused run runs no build script")
+	assert.False(t, harness.HasCode(res.Events, "W131"),
+		"the refusal precedes planning, so no planning diagnostic is reported: %v", res.Events)
 
 	// Catching up clears the guard and the release goes through, push and all.
 	r.Git("pull", "-q", "--rebase", "origin", harness.DefaultBranch)
-	r.ReleaseOK()
+	caught := r.ReleaseOK()
 	require.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
 	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.2.0")
+	// The witness, proved rather than assumed: the same window does report
+	// W131 once a plan is actually computed, so its absence above was the
+	// refusal's doing and not a code this repository never raises.
+	assert.True(t, harness.HasCode(caught.Events, "W131"),
+		"the inert unit is reported once planning happens: %v", caught.Events)
+	assert.Equal(t, 2, buildRuns(r), "and the caught-up run builds")
 }
 
 // TestGuardBehindRemoteHonoursCommitVerify: the behind check is another

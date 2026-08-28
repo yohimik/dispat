@@ -379,6 +379,24 @@ changelog:
   # release; ["stable"] keeps the file a history of the stable line, the betas
   # leaving nothing behind and the graduation writing the entry covering them.
   # channels: [stable]
+  # authors attributes the entry to the people who wrote it, from git's own
+  # identities (the commit author plus its Co-authored-by trailers); no forge
+  # is asked, so it costs no API call. Off by default.
+  authors:
+    # off (default), inline (a "(by ...)" suffix per line), section (a list of
+    # its own) or both.
+    placement: section
+    format: fullname          # or username, the local part of the email
+    # ccme (default) counts the commits behind the entry's own lines; all
+    # counts every commit in the window, including messages that are not
+    # release records. It affects the section only.
+    commits: ccme
+    title: Authors
+    # Case-insensitive globs, tried against the full name, the username and
+    # the email, matching on any of the three. include admits (empty admits
+    # everyone), exclude runs afterwards and wins.
+    include: ["*"]
+    exclude: ["*[bot]*"]
 
 # Optional finalize phase (disabled by default): one release commit capturing
 # changelog/manifest changes of all published packages (tags then point at
@@ -449,3 +467,11 @@ github:
   # prereleases are still tagged and published. A created release is flagged
   # as a prerelease whenever the version is one, whatever this says.
   # channels: [stable]
+  # The same authors object as changelog. The section lands after the entry's
+  # sections and before both the "### Release" details and the footer.
+  authors:
+    placement: both
+    format: username
+    commits: all
+    title: Contributors
+    exclude: ["*[bot]*"]

@@ -157,7 +157,12 @@ A provider that failed at any stage (version, build, or publish) or was skipped 
 unless they have a release reason of their own. This means they need either their own conventional commits or another
 changed provider that published successfully.
 
-This holds in both `isBuildWaitingPublish` modes, because a consumer's publish always waits for its providers'
+A provider whose space sets `isBuildWaitingPublish: true` outranks every reason of the consumer's own. The flag
+declares that consumers' builds take the provider's published release as their input, so when that publish never
+happened the input does not exist, and no pending work of the consumer's substitutes for it. Such consumers are
+skipped unconditionally and catch up on the next run.
+
+The publish half holds in both modes, because a consumer's publish always waits for its providers'
 publishes. Even a consumer that already built, which `isBuildWaitingPublish: false` allows while the provider is still
 publishing, gets skipped at its publish once the provider's publish failure is known. dispat never publishes against an
 unpublished provider version, and skips cascade down the dependency chain by the same rule.

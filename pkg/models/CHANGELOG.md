@@ -1,5 +1,33 @@
 # Changelog
 
+## pkg/models/v1.3.0 (2026-08-28)
+
+### Features
+
+- authors in release records
+New entry-format `authors` object, shared by `changelog` and `github` and
+riding the full configuration ladder, attributes a release record to the
+people who wrote it. The identity is git's own, the commit author plus its
+Co-authored-by trailers, so no forge is asked and the attribution costs no
+API call. Placement is off by default and can be an inline "(by ...)" suffix
+per entry line, a section of its own, or both; authors render as full names
+or as usernames; the section counts either the commits behind the entry's
+own lines or every commit in the window, which is what reaches work that
+carried no release record; and include/exclude globs filter the list. All six
+keys have flags on `dispat changelog` and `dispat github`, and all six join
+the GitHub releaser key so that two packages configured differently cannot
+share one releaser and one another's bodies. The DISPAT_* script variables
+stay description-only by contract.
+
+`dispat release` now takes the release lock unconditionally, then verifies
+the remote, then plans. The `--require-release` pre-plan exception is gone:
+whether there is work to do is not known until after planning, and planning
+is the thing the lock exists to serialise, so an empty run round-trips the
+lock and still exits 3. `dispat status --require-release` remains the
+lock-free probe a CI gate should call. The behind-remote check moves ahead of
+the plan for the same reason it exists, since a plan built on a stale
+checkout recomputes versions somebody else has already published.
+
 ## pkg/models/v1.2.0 (2026-08-27)
 
 No changes: a version bump to keep the versioning group on one major and minor version.

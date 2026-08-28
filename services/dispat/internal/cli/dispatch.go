@@ -625,7 +625,7 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 	case cmdChangelog:
 		if a.Changelog(ctx, app.ChangelogOptions{Window: window, OnError: *o.onError,
 			File: *o.clFile, FileTitle: *o.clFileTitle, DateFormat: *o.clDateFormat,
-			ReleaseName: *o.releaseName}) != nil {
+			ReleaseName: *o.releaseName, Authors: o.authorOptions()}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
@@ -670,7 +670,7 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 		if a.GitHub(ctx, app.GitHubOptions{Window: window, OnError: *o.onError,
 			Owner: *o.ghOwner, Repo: *o.ghRepo,
 			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget,
-			ReleaseName: *o.releaseName}) != nil {
+			ReleaseName: *o.releaseName, Authors: o.authorOptions()}) != nil {
 			return 1
 		}
 	case cmdTrigger:

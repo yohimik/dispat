@@ -624,3 +624,90 @@ func TestPartialModesNeverReleaseBelowTheirOwnBaseline(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Partial releases: a run that died after one member published leaves the
+// group split, and the retry must catch the laggards up to the version that
+// already carries their work instead of burning the next shared prefix
+// ---------------------------------------------------------------------------
+
+func TestFixedMajorMinorPartialReleaseCatchesUpAtThePublishedVersion(t *testing.T) {
+	// One feat scoped to both members; a's leg published 1.3.0 at that commit
+	// and b's leg failed. The retry must not re-count b's pending work
+	// against the group baseline that already contains it: 1.3.0 carries the
+	// feat, so b joins at 1.3.0 — with the feat in its own changeset, not as
+	// a ride — and a is not dragged into an empty re-release.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a, b): the shared feature"},
+	).tag("a", "1.3.0", "c1").tag("b", "1.2.0", "")
+	p := computeFixed(t, model.VersioningFixedMajorMinor, git)
+
+	b := p.Releases["b"]
+	require.True(t, b.Releasing(), "the failed leg must catch up")
+	assertVersion(t, v(1, 3, 0), b.Next, "the published version already carries b's work")
+	assert.False(t, b.FixedRide, "b releases its own commits; this is not a ride")
+	assert.NotEmpty(t, b.NotesUnits(), "the feat is b's own changeset")
+	assert.False(t, p.Releases["a"].Releasing(),
+		"a published this work already; re-counting it would drag a into an empty release")
+}
+
+func TestFixedMajorMinorPartialReleaseConvergesOnRerun(t *testing.T) {
+	// The G3 replay: once the catch-up lands b's tag beside a's, the next
+	// plan finds the group whole and releases nothing.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a, b): the shared feature"},
+	).tag("a", "1.3.0", "c1").tag("b", "1.3.0", "c1")
+	p := computeFixed(t, model.VersioningFixedMajorMinor, git)
+	assert.Empty(t, p.Releasing(), "a converged group has nothing left to do")
+}
+
+func TestFixedMajorMinorNewerWorkStillMovesThePrefix(t *testing.T) {
+	// The mask reaches exactly as far as the published tag: work landing
+	// after it is new by definition, so the prefix moves and the whole group
+	// takes the next minor — the pre-existing behaviour, now confined to
+	// work the group has not published.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a, b): released by a's 1.3.0"},
+		commit{sha: "c2", message: "feat(b): landed after the partial release"},
+	).tag("a", "1.3.0", "c1").tag("b", "1.2.0", "")
+	p := computeFixed(t, model.VersioningFixedMajorMinor, git)
+
+	assertVersion(t, v(1, 4, 0), p.Releases["b"].Next, "fresh work owns the next minor")
+	a := p.Releases["a"]
+	require.True(t, a.Releasing(), "the moved prefix takes a along")
+	assertVersion(t, v(1, 4, 0), a.Next)
+	assert.True(t, a.FixedRide)
+}
+
+func TestFixedPartialReleaseRaisesTheCatcherToThePublishedVersion(t *testing.T) {
+	// The full depth shares the whole version, so the catcher cannot be left
+	// on its own line: b's pending patch is contained in the 1.2.0 that a
+	// published, b's own computation says 1.1.1, and the alignment must
+	// raise it to the group's 1.2.0 — the one case a releasing member may be
+	// moved at the full depth.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a): the minor a published"},
+		commit{sha: "c2", message: "fix(b): b's patch, published by a's tag"},
+	).tag("a", "1.2.0", "c2").tag("b", "1.1.0", "")
+	p := computeFixed(t, model.VersioningFixed, git)
+
+	b := p.Releases["b"]
+	require.True(t, b.Releasing())
+	assertVersion(t, v(1, 2, 0), b.Next, "fixed: the whole version is shared")
+	assert.False(t, p.Releases["a"].Releasing())
+}
+
+func TestFixedMajorMinorSparsePartialReleaseCatchesUp(t *testing.T) {
+	// Sparseness exempts members from rides, not from their own work: b's
+	// commits are its own cause, so it releases — and it must still land on
+	// the 1.3.0 that already carries them rather than push the group to 1.4.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a, b): the shared feature"},
+	).tag("a", "1.3.0", "c1").tag("b", "1.2.0", "")
+	p := computeFixed(t, model.VersioningFixedMajorMinorSparse, git)
+
+	b := p.Releases["b"]
+	require.True(t, b.Releasing())
+	assertVersion(t, v(1, 3, 0), b.Next)
+	assert.False(t, p.Releases["a"].Releasing())
+}

@@ -79,24 +79,25 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	}
 	ev.Msg("release started")
 
-	// The lock comes before the plan, not before the publish: two runs that
-	// both got as far as planning have already read the same tags and decided
-	// on the same versions, and whichever of them notices second has wasted
-	// the work either way. checkGit runs first so a repository without git
-	// still fails in its own words rather than on a raw `git tag`.
+	// The lock comes before the plan, not before the publish, and it comes
+	// before it unconditionally: two runs that both got as far as planning
+	// have already read the same tags and decided on the same versions, and
+	// whichever of them notices second has wasted the work either way.
+	//
+	// There is no --require-release exception. Whether there is work to do is
+	// not known until after planning, so "do not lock when the plan is empty"
+	// is not a rule this function is in a position to follow — it would have
+	// to plan first, which is the thing the lock exists to serialise. A run
+	// that turns out to have nothing to publish therefore takes the lock,
+	// gives it straight back, and exits 3. The lock-free way to ask whether a
+	// release would do anything is `dispat status --require-release`, which
+	// plans without ever touching the remote, and is what a CI gate should
+	// call before it calls this.
+	//
+	// checkGit runs first so a repository without git still fails in its own
+	// words rather than on a raw `git tag`.
 	if err := a.checkGit(); err != nil {
 		return nil, err
-	}
-	// --require-release is the exception to that order: there the plan decides
-	// whether the run happens at all, so it is computed first. A run that will
-	// publish nothing must not take the remote lock tag — and must not make a
-	// concurrent release wait on one — to discover that it had nothing to do.
-	var pl *plan.Plan
-	if opts.RequireRelease {
-		var err error
-		if pl, err = a.selectedPlan(ctx, opts); err != nil {
-			return nil, err
-		}
 	}
 	if !a.lockDisabled() {
 		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
@@ -113,33 +114,18 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		defer lock.Release(context.WithoutCancel(ctx))
 	}
 
-	if pl == nil {
-		var err error
-		if pl, err = a.selectedPlan(ctx, opts); err != nil {
-			return nil, err
-		}
-	}
-	if blocked := a.releaseBlocked(pl); blocked != "" {
-		a.log.Error().Str("reason", blocked).Msg("refusing to release")
-		return nil, errors.New(blocked)
-	}
-	// The branch guard fires before any verification or hook: a run on the
-	// wrong branch is refused whatever its plan says.
-	if err := a.checkBranchAllowed(ctx); err != nil {
-		a.log.Error().Err(err).Msg("refusing to release")
-		return nil, err
-	}
-
 	commitMode := a.cfg.Commit.IsEnabled()
 	pushMode := a.cfg.Commit.PushEnabled()
 	remote := a.pushRemote()
 
-	// Resolve the GitHub releasers: one per distinct target the packages'
-	// resolved policies name — most runs resolve to a single one. Empty
-	// means every package is disabled or unresolvable.
-	gh := a.githubDispatch(pl)
-
-	// Verify external access up front, before any release work starts.
+	// Verify external access up front, before anything is planned. The order
+	// is the point: a plan is built from the repository's tags, so a checkout
+	// that has fallen behind the remote produces a plan that is wrong rather
+	// than a plan that fails — it recomputes versions somebody else already
+	// published. Refusing here means no such plan is ever built, and refusing
+	// under the held lock means the answer cannot go stale between the check
+	// and the release it guards.
+	//
 	// commit.verify (default true) can switch the git check off for remotes
 	// that reject ls-remote but accept pushes.
 	if pushMode && a.cfg.Commit.VerifyEnabled() {
@@ -155,6 +141,29 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 			return nil, err
 		}
 	}
+
+	pl, err := a.selectedPlan(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if blocked := a.releaseBlocked(pl); blocked != "" {
+		a.log.Error().Str("reason", blocked).Msg("refusing to release")
+		return nil, errors.New(blocked)
+	}
+	// The branch guard fires before any GitHub verification or hook: a run on
+	// the wrong branch is refused whatever its plan says. It sits after the
+	// plan only because a blocked plan is the more fundamental refusal of the
+	// two; the git verification above it guards the plan itself.
+	if err := a.checkBranchAllowed(ctx); err != nil {
+		a.log.Error().Err(err).Msg("refusing to release")
+		return nil, err
+	}
+
+	// Resolve the GitHub releasers: one per distinct target the packages'
+	// resolved policies name — most runs resolve to a single one. Empty
+	// means every package is disabled or unresolvable. It needs the plan, so
+	// it cannot move up with the git verification above.
+	gh := a.githubDispatch(pl)
 	for _, r := range gh.all {
 		if err := r.Verify(ctx); err != nil {
 			a.log.Error().Err(err).Msg("github verification failed")

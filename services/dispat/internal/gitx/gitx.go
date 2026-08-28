@@ -312,6 +312,13 @@ type Commit struct {
 	// pair.
 	Parents []string
 	Message string
+	// AuthorName and AuthorEmail are the commit's git author identity (%an and
+	// %ae), which is what a release record attributes the work to. They are the
+	// author rather than the committer on purpose: a rebase, a cherry-pick or a
+	// squash-merge rewrites the committer and leaves the author alone, so the
+	// committer would credit whoever last moved the commit.
+	AuthorName  string
+	AuthorEmail string
 	// Files are the paths the commit changed, used for file-derived scope
 	// resolution (§6.2). For a merge commit these are the changes against the
 	// first parent.
@@ -667,9 +674,19 @@ func (c *CLI) IsShallow(ctx context.Context) (bool, error) {
 // a parser that treats the first blank line as the end of the message
 // truncates almost every well-formed message and reads its body and footers as
 // file paths.
+//
+// The message is deliberately the *last* fixed field before the file list: it
+// is the only one that can contain anything, so everything of known shape is
+// read before it and the split width stays exact. Adding a field means moving
+// the message's index, which is why logCommitFields names it once.
 const (
 	logRecordSep = "\x1e"
 	logFieldSep  = "\x1f"
+	// logCommitFields is how many fields the format below emits before the
+	// --name-only file list: sha, parents, author name, author email, message.
+	// The file list is field logCommitFields, present only when the commit
+	// changed anything.
+	logCommitFields = 5
 )
 
 func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
@@ -680,7 +697,8 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 
 	out, err := c.run(ctx,
 		"log",
-		"--format="+logRecordSep+"%H"+logFieldSep+"%P"+logFieldSep+"%B"+logFieldSep,
+		"--format="+logRecordSep+"%H"+logFieldSep+"%P"+logFieldSep+
+			"%an"+logFieldSep+"%ae"+logFieldSep+"%B"+logFieldSep,
 		"--name-only",
 		// §6.2: a merge commit's changed-file list is its diff against the
 		// *first parent*. Without this git shows no diff for merges at all, so
@@ -702,17 +720,22 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 		if strings.TrimSpace(record) == "" {
 			continue
 		}
-		fields := strings.SplitN(record, logFieldSep, 4)
-		if len(fields) < 3 {
+		fields := strings.SplitN(record, logFieldSep, logCommitFields+1)
+		if len(fields) < logCommitFields {
 			continue
 		}
 		commit := Commit{
 			SHA:     strings.TrimSpace(fields[0]),
 			Parents: strings.Fields(fields[1]),
-			Message: strings.Trim(fields[2], "\n"),
+			// Trimmed because git pads neither, but a name is free text and a
+			// configured identity can carry trailing spaces the record would
+			// otherwise render.
+			AuthorName:  strings.TrimSpace(fields[2]),
+			AuthorEmail: strings.TrimSpace(fields[3]),
+			Message:     strings.Trim(fields[4], "\n"),
 		}
-		if len(fields) > 3 {
-			for _, line := range strings.Split(fields[3], "\n") {
+		if len(fields) > logCommitFields {
+			for _, line := range strings.Split(fields[logCommitFields], "\n") {
 				if line = strings.TrimRight(line, "\r"); line != "" {
 					commit.Files = append(commit.Files, line)
 				}

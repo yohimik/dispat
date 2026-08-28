@@ -150,6 +150,10 @@ How a level combines with the one below it depends on the setting:
   siblings, so a partial overlay cannot express what they mean. Write an empty `aliasTags: []` to make a package opt
   out.
 - **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.
+  Their nested [`authors`](./records.md#attributing-an-entry-to-its-authors) object overlays the same way, so a level
+  can rename the section and inherit the other five keys. Its `include` and `exclude` lists replace whole, because
+  adding to an inherited list could never take a pattern away again. A level turns attribution off with an explicit
+  `placement: off` rather than by omitting the key, since omitting it is how a level says nothing and inherits.
 - **Merged, never overridden.** `dependencies`. Every declaration at every level adds to one graph.
 - **Concatenated.** `ignore`. Later levels add patterns. A `!` pattern re-includes what an earlier level excluded.
 

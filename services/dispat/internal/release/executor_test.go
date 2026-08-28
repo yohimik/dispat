@@ -397,7 +397,10 @@ func TestRunFailureSkipsConsumer(t *testing.T) {
 func TestRunChannelChangeIsItsOwnReason(t *testing.T) {
 	// A package moving between channels is being released for something a
 	// failed provider cannot invalidate, so it proceeds rather than skipping.
-	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	// Without isBuildWaitingPublish: a waiting provider's failure skips its
+	// consumers whatever their reasons (see BuildWaitsPublish in shouldSkip);
+	// the own-reason rule is the non-waiting providers'.
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	b := p.Releases["b"]
 	b.OwnBump, b.Bump = ccme.BumpNone, ccme.BumpNone
 	b.BaselineChannel, b.Channel = "stable", "beta"
@@ -412,13 +415,33 @@ func TestRunChannelChangeIsItsOwnReason(t *testing.T) {
 }
 
 func TestRunFailureConsumerWithOwnChangesProceeds(t *testing.T) {
-	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	// Non-waiting provider: own changes proceed. The waiting counterpart is
+	// TestRunBuildWaitsPublishFailureSkipsTheOwnChangesConsumer.
+	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
 	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusPublished, res["b"].Status,
 		"b must proceed despite provider failure: %v", res["b"].Err)
+}
+
+// TestRunBuildWaitsPublishFailureSkipsTheOwnChangesConsumer: the waiting
+// counterpart of the test above. isBuildWaitingPublish names the consumer's
+// build input — the provider's published release — so when the provider
+// fails, own changes are no reason to build against an artifact that does
+// not exist, and the consumer is skipped with the provider named.
+func TestRunBuildWaitsPublishFailureSkipsTheOwnChangesConsumer(t *testing.T) {
+	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
+
+	require.Equal(t, StatusFailed, res["a"].Status)
+	require.Equal(t, StatusSkipped, res["b"].Status,
+		"own changes cannot substitute for the publish the build consumes")
+	assert.Equal(t, -1, r.indexOf("build b"), "the build against the missing artifact must never run")
+	assert.True(t, res["b"].Blocked)
+	assert.Equal(t, "a", res["b"].BlockedBy)
 }
 
 func TestRunSkipCascades(t *testing.T) {
@@ -784,9 +807,11 @@ func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {
 	// b has its own bump AND a provider bump; the provider fails. b still
 	// releases (own changes), but the version script must NOT run: there is
 	// no successfully updated provider to sync manifests to.
-	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	// Non-waiting provider, failed at its build so the consumer's version
+	// task, which waits on that build, sees the settled outcome.
+	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["a"].Pkg.Space.VersionScript = []string{"version"}
-	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
+	r := &fakeRunner{fail: map[string]bool{"build a": true}}
 	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
@@ -798,9 +823,11 @@ func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {
 func TestRunVersionFiltersFailedProviders(t *testing.T) {
 	// b consumes a1 (fails) and a2 (succeeds) and has its own bump: the
 	// version script runs, but only a2 appears in DISPAT_UPDATED_*.
-	p := mkPlan(planSpec{WaitPublish: true, OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a1", "a2"}}, Names: []string{"a1", "a2", "b"}})
+	// Non-waiting providers, a1 failed at its build so the consumer's
+	// version task, which waits on both builds, sees the settled outcome.
+	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a1", "a2"}}, Names: []string{"a1", "a2", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
-	r := &fakeRunner{fail: map[string]bool{"publish a1": true}}
+	r := &fakeRunner{fail: map[string]bool{"build a1": true}}
 	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a1"].Status)
@@ -1760,4 +1787,44 @@ func TestShouldSkipReadsTheFreshChangeset(t *testing.T) {
 	rel.Channel = "stable" // a graduation proceeds whatever the provider did
 	skip, _ = shouldSkip("app", p, results)
 	assert.False(t, skip)
+}
+
+// TestShouldSkipBuildWaitsPublishOutranksOwnWork: a failed provider whose
+// space sets isBuildWaitingPublish skips its consumers whatever their own
+// reasons — the flag declares their builds consume the provider's published
+// release, and no fresh bump or channel change conjures up an artifact the
+// publish never produced. This is the dispat-ubuntu incident: its own apt fix
+// let it proceed past the failed CLI leg and install a binary that did not
+// exist.
+func TestShouldSkipBuildWaitsPublishOutranksOwnWork(t *testing.T) {
+	units := []*ccme.Unit{{Bump: ccme.BumpMinor, Valid: true}}
+	rel := &plan.Release{
+		Pkg:        &model.Package{Name: "app", Space: &model.Space{Name: "apps"}},
+		OwnBump:    ccme.BumpMinor,
+		Units:      units,
+		FreshUnits: units, // the consumer's own fresh work
+		Next:       ccme.Version{Minor: 3},
+	}
+	core := &plan.Release{
+		Pkg: &model.Package{Name: "core", Space: &model.Space{Name: "libs", BuildWaitsPublish: true}},
+	}
+	p := &plan.Plan{
+		Releases:  map[string]*plan.Release{"app": rel, "core": core},
+		Providers: map[string][]string{"app": {"core"}},
+	}
+	results := map[string]*Result{"core": {Status: StatusFailed}}
+
+	skip, prov := shouldSkip("app", p, results)
+	assert.True(t, skip, "own work cannot substitute for the publish the build consumes")
+	assert.Equal(t, "core", prov)
+
+	rel.FreshUnits = nil
+	rel.BaselineChannel = "beta"
+	rel.Channel = "stable"
+	skip, _ = shouldSkip("app", p, results)
+	assert.True(t, skip, "a graduation is still a build against a missing artifact")
+
+	core.Pkg.Space.BuildWaitsPublish = false
+	skip, _ = shouldSkip("app", p, results)
+	assert.False(t, skip, "without the flag the own-reason rule stands unchanged")
 }

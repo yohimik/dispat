@@ -327,6 +327,38 @@ type EntryLine struct {
 	Channels []string `mapstructure:"channels" json:"channels,omitempty"`
 }
 
+// AuthorsConfig adds commit authors to a release entry. It is off by default,
+// so a repository that says nothing records exactly what it recorded before.
+//
+// The identity is git's own — the name and email a commit was authored under,
+// plus everyone its Co-authored-by trailers name — so no forge is asked who
+// that is and the attribution costs no API call.
+type AuthorsConfig struct {
+	// Placement decides where the authors appear: "off" (default), "inline"
+	// (a "(by ...)" suffix on each entry line), "section" (one list under its
+	// own heading) or "both". "off" is a value rather than an absence, so a
+	// package can switch off what its space turned on.
+	Placement string `mapstructure:"placement" json:"placement,omitempty"`
+	// Format is how one author is written: "fullname" (default) or
+	// "username", the local part of the email address.
+	Format string `mapstructure:"format" json:"format,omitempty"`
+	// Commits chooses which commits the section is built from: "ccme"
+	// (default) counts the commits behind the entry's own lines, "all" counts
+	// every commit in the release's window, including those whose messages are
+	// not release records at all. It has no effect on the inline suffix, which
+	// can only ever name the authors of a line that exists.
+	Commits string `mapstructure:"commits" json:"commits,omitempty"`
+	// Include and Exclude filter the authors by case-insensitive glob, tried
+	// against the full name, the username and the email address, and matching
+	// on any of the three. An empty Include admits everyone; Exclude is
+	// applied afterwards and wins, which is what keeps a bot out of a list its
+	// pattern would otherwise admit.
+	Include []string `mapstructure:"include" json:"include,omitempty"`
+	Exclude []string `mapstructure:"exclude" json:"exclude,omitempty"`
+	// Title heads the section, default "Authors".
+	Title string `mapstructure:"title" json:"title,omitempty"`
+}
+
 // EntryFormatConfig customises how a release entry is rendered; shared by the
 // changelog file and the GitHub release body. All fields are optional.
 //
@@ -348,6 +380,10 @@ type EntryFormatConfig struct {
 	// and after them.
 	Header []EntryLine `mapstructure:"header" json:"header,omitempty"`
 	Footer []EntryLine `mapstructure:"footer" json:"footer,omitempty"`
+	// Authors attributes the entry to the people behind it. Nil means the
+	// layer says nothing about attribution, which is what lets a nearer layer
+	// inherit a broader one field by field.
+	Authors *AuthorsConfig `mapstructure:"authors" json:"authors,omitempty"`
 }
 
 // ChangelogConfig customises (or disables) the per-package changelog file.

@@ -698,7 +698,47 @@ func overlayFormat(base, over EntryFormatConfig) EntryFormatConfig {
 	if len(over.Footer) > 0 {
 		base.Footer = over.Footer
 	}
+	base.Authors = overlayAuthors(base.Authors, over.Authors)
 	return base
+}
+
+// overlayAuthors folds one layer's authors object onto what it inherited.
+//
+// The object overlays field by field rather than replacing whole, which is
+// what makes the six keys independently inheritable: a space that turns
+// attribution on and a package that only renames the section should not have
+// to restate the other five. An empty string is the absence of a value — the
+// reason "off" is spelled out as a placement rather than expressed by leaving
+// the key out, since only a value can defeat a broader layer's "both". The two
+// lists replace whole, for the same reason header and footer do: adding to an
+// inherited list could never take a pattern away again.
+func overlayAuthors(base, over *AuthorsConfig) *AuthorsConfig {
+	if over == nil {
+		return base
+	}
+	out := AuthorsConfig{}
+	if base != nil {
+		out = *base
+	}
+	if over.Placement != "" {
+		out.Placement = over.Placement
+	}
+	if over.Format != "" {
+		out.Format = over.Format
+	}
+	if over.Commits != "" {
+		out.Commits = over.Commits
+	}
+	if over.Title != "" {
+		out.Title = over.Title
+	}
+	if len(over.Include) > 0 {
+		out.Include = over.Include
+	}
+	if len(over.Exclude) > 0 {
+		out.Exclude = over.Exclude
+	}
+	return &out
 }
 
 func overlayChangelog(base, over *ChangelogConfig) *ChangelogConfig {
@@ -763,7 +803,7 @@ func packageWeights(conc []int) (build, publish int) {
 
 // recordFormat maps the config entry-format options onto the resolved model.
 func recordFormat(f EntryFormatConfig) model.RecordFormat {
-	return model.RecordFormat{
+	out := model.RecordFormat{
 		DateFormat:        f.DateFormat,
 		BreakingTitle:     f.BreakingTitle,
 		FeaturesTitle:     f.FeaturesTitle,
@@ -773,6 +813,18 @@ func recordFormat(f EntryFormatConfig) model.RecordFormat {
 		Header:            entryLines(f.Header),
 		Footer:            entryLines(f.Footer),
 	}
+	// The nested object flattens here: the resolved model is a value the
+	// renderer and the releaser key both read field by field, and a pointer in
+	// it would make two policies that say the same thing compare unequal.
+	if a := f.Authors; a != nil {
+		out.AuthorsPlacement = a.Placement
+		out.AuthorsFormat = a.Format
+		out.AuthorsCommits = a.Commits
+		out.AuthorsInclude = a.Include
+		out.AuthorsExclude = a.Exclude
+		out.AuthorsTitle = a.Title
+	}
+	return out
 }
 
 // entryLines maps a configured line list onto the resolved model. Nil stays

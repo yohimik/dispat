@@ -44,3 +44,9 @@ Beside the [global flags](./README.md#global-flags):
 | `--on-error`          | `skip`      | Decide what a failed package does to its dependents during every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` for transitive skipping or `continue`. The command always exits `1` on any failure. |
 | `--file`, `-f`, `--file-title`, `--date-format` | from config | Override the matching `changelog.*` values for every package in a `changelog` invocation. Use `--file-title` to state the whole title as one line. |
 | `--release-name`      | from config | Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for a `changelog` or `github` invocation. Variables like `$VAR` and `${VAR}` expand exactly as they do in the config. |
+| `--authors`           | from config | Override [`authors.placement`](../configuration/records.md#attributing-an-entry-to-its-authors) for a `changelog` or `github` invocation: `off`, `inline`, `section` or `both`. Any other value is refused before anything is planned. |
+| `--authors-format`    | from config | Override `authors.format`: `fullname`, or `username` for the local part of the email address. |
+| `--authors-commits`   | from config | Override `authors.commits`: `ccme` for the commits behind the entry's own lines, or `all` for every commit in the release window. |
+| `--authors-include`   | from config | Override `authors.include`. This repeatable, comma-separated list of case-insensitive globs replaces the configured list whole, and each pattern is tried against the full name, the username and the email. |
+| `--authors-exclude`   | from config | Override `authors.exclude`, with the same spellings. It is applied after `--authors-include` and wins. |
+| `--authors-title`     | from config | Override `authors.title`, the heading of the authors section. |

@@ -45,9 +45,9 @@ invisible until a script fails to run. The error names the key, and anything dis
 
 **`unable to create the release lock tag`**. Another release is running against this repository, or one died without
 giving [the lock](./releasing/release-lock.md) back. Check that nothing else is releasing. If you are sure, run
-`git push <remote> --delete dispat-release-lock` to fix it. dispat takes the lock before planning, except under
-`--require-release`, where the plan decides whether the run happens at all and an empty one never queues behind the
-lock.
+`git push <remote> --delete dispat-release-lock` to fix it. dispat takes the lock before planning, on every release
+and whatever flags it was given, because whether there is work to do is not known until after planning. Use
+`dispat status --require-release` to ask whether a release would publish anything without touching the lock.
 
 ## After the plan, before any releasing
 

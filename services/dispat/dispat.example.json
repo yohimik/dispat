@@ -227,7 +227,15 @@
         "line": "This is a test build. Do not depend on it.",
         "channels": ["*"]
       }
-    ]
+    ],
+    "authors": {
+      "placement": "section",
+      "format": "fullname",
+      "commits": "ccme",
+      "title": "Authors",
+      "include": ["*"],
+      "exclude": ["*[bot]*"]
+    }
   },
   "commit": {
     "enabled": false,
@@ -246,6 +254,13 @@
     "releaseName": "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
     "footer": [
       "Changelog: https://github.com/acme/monorepo/blob/${DISPAT_TAG}/CHANGELOG.md"
-    ]
+    ],
+    "authors": {
+      "placement": "both",
+      "format": "username",
+      "commits": "all",
+      "title": "Contributors",
+      "exclude": ["*[bot]*"]
+    }
   }
 }

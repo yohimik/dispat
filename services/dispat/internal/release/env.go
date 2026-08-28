@@ -342,6 +342,13 @@ func dependencyLines(updates []providerUpdate) string {
 // uses for its breaking/features/fixes sections. NotesUnits keeps the
 // variables aligned with the changelog entry: a prerelease reports only its
 // own changeset, a stable release the whole pending window.
+//
+// Deliberately description-only, and deliberately unaffected by the authors
+// entry format. DISPAT_BREAKING_CHANGES, DISPAT_FEATURES and DISPAT_FIXES are
+// a contract with scripts that already parse them line by line, so appending
+// an attribution here would change what an existing announce or release-notes
+// script reads without that script asking for anything. The attribution
+// belongs to the rendered record, which is where the configuration puts it.
 func unitLines(rel *plan.Release, kind ccme.Bump) string {
 	var lines []string
 	for _, c := range rel.NotesUnits() {

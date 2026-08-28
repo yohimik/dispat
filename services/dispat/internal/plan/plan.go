@@ -629,6 +629,13 @@ type Release struct {
 	// solely to stay on the space's shared version. Its changelog receives a
 	// single "no changes" entry.
 	FixedRide bool
+	// absorbed is set only on a fixed group's aggregate, never on a real
+	// release: the group baseline's tag already contains some member's
+	// pending work, so the aggregate was measured against that tag and the
+	// alignment may raise a member's computed version even at the full
+	// shared depth — the one case where a releasing member can otherwise
+	// land below a version its group has already published.
+	absorbed bool
 
 	// Deselected is set by Narrow when the invocation's selection leaves the
 	// package out of this run. It is Held's twin: the package keeps its
@@ -664,6 +671,25 @@ type Release struct {
 	// Only the notes omit it, which NotesUnits is where that happens.
 	SuppressedNotes map[*ccme.Unit]bool
 
+	// UnitAuthors is who each unit is by: the carrying commit's git author and
+	// everyone its Co-authored-by trailers name. Keyed by unit pointer like
+	// Corrects, so the attribution travels with the unit to every consumer of
+	// the release, and only ever holds units that parsed — an invalid unit is
+	// not in Units and has no entry to attribute.
+	UnitAuthors map[*ccme.Unit][]Author
+	// WindowAuthors is every author of every commit in the package's pending
+	// window, deduplicated, newest commit first. It is deliberately wider than
+	// the union of UnitAuthors: a commit whose message is not a CCME record at
+	// all, or whose units all failed to parse, still changed the package and
+	// its author still worked on the release. Only the primary author is taken
+	// from such a commit, because a message that did not parse has no footers
+	// the planner is willing to read.
+	WindowAuthors []Author
+	// FreshWindowAuthors is WindowAuthors restricted to the commits an earlier
+	// prerelease of the train has not already published, the author-side twin
+	// of FreshUnits. AllAuthors picks between the two.
+	FreshWindowAuthors []Author
+
 	Diagnostics []Diagnostic
 }
 
@@ -674,6 +700,21 @@ func (r *Release) UnitCorrects(u *ccme.Unit) []string { return r.Corrects[u] }
 // UnitSuppressed reports a unit whose changelog entry a revert suppressed
 // (§7.3).
 func (r *Release) UnitSuppressed(u *ccme.Unit) bool { return r.SuppressedNotes[u] }
+
+// AuthorsFor returns who the unit is by, empty for a unit nothing attributed.
+func (r *Release) AuthorsFor(u *ccme.Unit) []Author { return r.UnitAuthors[u] }
+
+// AllAuthors returns every author of the release's window, narrowed exactly as
+// NotesUnits narrows the units it renders: a prerelease is attributed to the
+// people behind its own changeset alone, while a stable release collects the
+// whole pending window since the last stable tag. An entry that documents the
+// train has to credit the train.
+func (r *Release) AllAuthors() []Author {
+	if r.Next.IsPrerelease() {
+		return r.FreshWindowAuthors
+	}
+	return r.WindowAuthors
+}
 
 // GitHubExport is one of the outputs with a consumer inside dispat: a package
 // that exports it gets a GitHub release (when the recorder is enabled), with
@@ -1240,6 +1281,14 @@ type computation struct {
 	parents map[string][]string
 	linked  bool // whether parent pointers are available
 
+	// ownContribs is each package's direct contributions with the commits
+	// that carried them: what directBumps folded into OwnBump, kept apart so
+	// the fixed-group aggregate can re-measure a member's pending work
+	// against the group's published baseline instead of the member's own —
+	// the difference between a group whose prefix must move and a member
+	// catching up to a version the group has already published.
+	ownContribs map[string][]groupContrib
+
 	cancels []*cancelRec
 	held    map[string]bool
 	pinned  map[string]pin
@@ -1251,6 +1300,12 @@ type computation struct {
 	corrects  map[string]map[*ccme.Unit][]string
 	noteDrops map[string]map[*ccme.Unit]bool
 	shaCache  map[string]string
+
+	// unitAuthors is who each parsed unit is by, resolved once in §13.4 and
+	// shared by every release the unit reaches. One map for the whole
+	// computation rather than one per package: a unit's authors are a property
+	// of the commit that carried it, not of the package it resolved onto.
+	unitAuthors map[*ccme.Unit][]Author
 
 	// channel axis state, produced by §9.2 phase 1 and settled by §13.8.
 	proposed    map[string]channelPick
@@ -1307,6 +1362,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		rel:         make(map[string]*Release, len(pkgs)),
 		tags:        make(map[string]gitx.Tags, len(pkgs)),
 		window:      make(map[string]map[string]bool, len(pkgs)),
+		ownContribs: make(map[string][]groupContrib, len(pkgs)),
 		byKey:       make(map[string]*commitRec),
 		parents:     make(map[string][]string),
 		held:        make(map[string]bool),
@@ -1317,6 +1373,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		dropped:     make(map[dropKey]*correctionRec),
 		corrects:    make(map[string]map[*ccme.Unit][]string),
 		noteDrops:   make(map[string]map[*ccme.Unit]bool),
+		unitAuthors: make(map[*ccme.Unit][]Author),
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
@@ -1847,6 +1904,7 @@ func (cp *computation) parseAndResolve() error {
 
 		rec.units = data.ValidUnits()
 		rec.unitCount = len(data.Units)
+		cp.resolveAuthors(rec)
 		rec.scope = make([]map[string]bool, len(rec.units))
 		for i, u := range rec.units {
 			scopes, written := unitScopes(u)
@@ -2106,6 +2164,7 @@ func (cp *computation) directBumps() {
 				rel := cp.rel[name]
 				rel.Units = append(rel.Units, u)
 				rel.OwnBump = ccme.MaxBump(rel.OwnBump, bump)
+				cp.ownContribs[name] = append(cp.ownContribs[name], groupContrib{key: rec.key, bump: bump})
 				if !cp.containedInBaseline(name, rec.key) {
 					rel.NewWork = true
 					rel.FreshUnits = append(rel.FreshUnits, u)
@@ -2176,6 +2235,16 @@ func (cp *computation) finalise() {
 		// consumer of the release.
 		rel.Corrects = cp.corrects[name]
 		rel.SuppressedNotes = cp.noteDrops[name]
+		// The attribution, alongside the other two unit-keyed marks. The map is
+		// shared rather than copied per package for the same reason the units
+		// themselves are: it is read-only from here on, and a unit reaching two
+		// packages is by the same people in both.
+		rel.UnitAuthors = cp.unitAuthors
+		rel.WindowAuthors, rel.FreshWindowAuthors = cp.collectWindowAuthors(name)
+		if len(rel.WindowAuthors) > 0 {
+			cp.log.Debug().Str("package", name).Int("window", len(rel.WindowAuthors)).
+				Int("fresh", len(rel.FreshWindowAuthors)).Msg("release authors collected")
+		}
 		rel.Channel = cp.channel[name]
 		if rel.Channel == "" {
 			rel.Channel = rel.BaselineChannel

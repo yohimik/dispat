@@ -466,12 +466,16 @@ func TestReleaseLockAppliesOnlyToRelease(t *testing.T) {
 	}
 }
 
-// TestReleaseLockNotTakenWhenNothingToRelease: --require-release is the one
-// case where the plan decides whether the run happens at all, so it is
-// answered before the lock rather than after it. A run that will publish
-// nothing must not put the tag on the remote — and must not make a real
-// release queue behind it — only to discover it had nothing to do.
-func TestReleaseLockNotTakenWhenNothingToRelease(t *testing.T) {
+// TestReleaseLockTakenEvenWhenNothingToRelease: the lock is unconditional.
+//
+// Whether there is work to do is not known until after planning, and planning
+// is the thing the lock exists to serialise, so "do not lock when the plan is
+// empty" is not a rule `dispat release` is in a position to follow. A
+// --require-release run with nothing to publish therefore takes the lock,
+// gives it straight back, and exits 3. The lock-free way to ask the same
+// question is `dispat status --require-release`, which is what a CI gate
+// calls, and which TestReleaseLockAppliesOnlyToRelease pins.
+func TestReleaseLockTakenEvenWhenNothingToRelease(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(markerBuild, 1)
 	probeConfig(&cfg)
@@ -482,9 +486,23 @@ func TestReleaseLockNotTakenWhenNothingToRelease(t *testing.T) {
 
 	res := releaseLocked(r, "--require-release")
 	require.Equal(t, 3, res.Code, "stdout:\n%s", res.Stdout)
-	assert.NoFileExists(t, r.Path("lock.probe"),
-		"the run stopped before beforeAll, which only runs once the lock is held")
+	assert.Equal(t, 0, buildRuns(r), "an empty plan still builds nothing")
+	assert.Equal(t, 0, r.TagCount("core@"), "and tags nothing")
 	assertLockCleared(t, r, bare)
+
+	// The lock was genuinely taken and genuinely returned. The probe cannot
+	// answer this one — beforeAll never runs on an empty plan — so the proof
+	// is the tag object on the remote: a run that took the lock wrote one, and
+	// the next holder's lock is a different object.
+	held := holdLock(t, r, bare)
+	res = releaseLocked(r, "--require-release")
+	require.Equal(t, 1, res.Code,
+		"a held lock refuses the run before the plan can answer --require-release\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "unable to create the release lock tag")
+	assert.NotContains(t, res.Stdout, "nothing to release",
+		"the lock is reached first, so its refusal is the one reported")
+	assert.Equal(t, held, lockObject(t, bare), "the holder's lock is untouched")
+	bareGit(t, bare, "tag", "-d", lockTag)
 
 	// The control: the same flag on a run that does have something to release
 	// takes the lock exactly as before.

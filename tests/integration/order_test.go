@@ -228,3 +228,55 @@ func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 	assert.Contains(t, env, "DISPAT_UPDATED_PROVIDER_OLD_VERSION=0.0.0")
 	assert.Contains(t, env, "DISPAT_UPDATED_PROVIDER_NEW_VERSION=0.1.0")
 }
+
+// TestOrderProviderFailureSkipsTheWaitingConsumer: isBuildWaitingPublish is
+// not just an ordering, it names the consumer's build input — so when the
+// provider's publish never happens, the consumer is skipped (W194) whatever
+// work it carries of its own. Own work is a reason a failed provider cannot
+// invalidate only while the build does not consume the provider's artifact;
+// here it does, and proceeding would install a release that does not exist
+// or, quieter and worse, ship the previous one under the new version. The
+// dispat-ubuntu leg of the 1.3.0 release did exactly that: its own apt fix
+// let it run past the failed CLI leg into an installer 404.
+func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
+	failingRepo := func(isBuildWaitingPublish bool) *harness.Repo {
+		r := harness.New(t)
+		cfg := harness.BaseFile(2)
+		cfg.Scripts = map[string]models.Script{
+			"build":        {echoBuild},
+			"publish":      {"echo publishing"},
+			"fail-publish": {"exit 1"},
+		}
+		cfg.Spaces = map[string]models.SpaceConfig{
+			"provider": {Path: models.PathList{"packages/provider"},
+				IsBuildWaitingPublish: models.Bool(isBuildWaitingPublish),
+				Flow:                  &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"fail-publish"}}},
+			"consumer": {Path: models.PathList{"packages/consumer"},
+				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
+		}
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages/provider", "provider")
+		r.SeedPackage("packages/consumer", "consumer")
+		r.Commit("feat(provider,consumer): both carry work of their own")
+		return r
+	}
+
+	r := failingRepo(true)
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "the provider's publish fails the run\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W194", "consumer"),
+		"the consumer is skipped, its own work notwithstanding: %s", res.Stdout)
+	assert.Zero(t, r.TagCount("consumer@"),
+		"nothing may publish against the missing artifact; tags: %v", r.TagList())
+
+	// The control: without the flag the own-reason rule stands unchanged,
+	// and the consumer releases its own work against the provider's previous
+	// published state.
+	r = failingRepo(false)
+	res = r.Release()
+	require.Equal(t, 1, res.Code, "the provider still fails the run\nstdout:\n%s", res.Stdout)
+	assert.False(t, harness.HasCode(res.Events, "W194"),
+		"a fresh own bump proceeds when no build consumes the publish")
+	assert.True(t, r.HasTag("consumer@0.1.0"), "tags: %v", r.TagList())
+}

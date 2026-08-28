@@ -49,3 +49,4 @@ dependency: [`pkg/ccme`](../ccme), used for resolved parser configuration types.
 ## Licence
 
 MIT. See [LICENSE](./LICENSE).
+

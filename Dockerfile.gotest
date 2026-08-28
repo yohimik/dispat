@@ -214,9 +214,18 @@ COPY --from=test-integration /src/coverage/testlog /testlog
 # run just pushed, exactly as `go get` will serve them to a consumer — the
 # one thing no working-tree suite can prove. The go.mod-first copy keeps the
 # version rewrite's cache bust scoped to the releasing module.
+#
+# The repository files the dispat suite reads beyond its module ride along
+# for every module — see src-dispat for what holds what to what. Their
+# absence failed the 1.3.0 release's gate, which the working-tree suites
+# never could have caught: they run from stages that carry the files.
 FROM base AS release-test
 ARG MODULE
 ENV GOWORK=off
+COPY --chown=gopher:gopher install.sh install.ps1 /src/
+COPY --chown=gopher:gopher docker /src/docker
+COPY --chown=gopher:gopher pkg/ccme/SPEC.md /src/pkg/ccme/SPEC.md
+COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md /src/packages/docs/docs/internals/architecture.md
 COPY --chown=gopher:gopher ${MODULE}/go.mod ${MODULE}/go.su[m] /src/${MODULE}/
 RUN cd /src/${MODULE} && go mod download
 COPY --chown=gopher:gopher ${MODULE} /src/${MODULE}

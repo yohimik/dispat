@@ -73,7 +73,8 @@ WRN selection releases part of a versioning group; the rest catches up on the ne
 
 Nothing publishes out of order, so this is a warning rather than a refusal. The group's shared version is briefly
 untrue with `one` at 0.2.0 and `two` still at 0.1.0. The next full release fixes this automatically. A member that
-falls behind its group releases to catch up. This triggers the `W234` warning you might have seen.
+falls behind its group releases to catch up, at the group's published version when that version already carries its
+pending work. The catch-up is a ride (`W234`) only when the member has nothing pending of its own.
 
 You have two options to avoid this state entirely. Name the group instead of its members with `dispat release -g libs`
 to release every member at once. Or pass `--strict` to refuse the split outright.

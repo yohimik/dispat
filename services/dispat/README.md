@@ -201,3 +201,4 @@ Join the community to ask questions, report issues, or share projects:
 
 You can also submit bug reports and feature requests directly through
 [GitHub issues](https://github.com/yohimik/dispat/issues).
+

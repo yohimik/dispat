@@ -55,6 +55,9 @@ type options struct {
 
 	// shared by the changelog and github step commands
 	releaseName *string
+	// the authors entry-format options, shared by the same two commands
+	authors, authorsFormat, authorsCommits, authorsTitle *string
+	authorsInclude, authorsExclude                       *[]string
 
 	// autoversion and autowriter
 	avRange, avManifests                    *string
@@ -175,6 +178,19 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override the changelog.dateFormat entry date layout")
 	o.releaseName = fs.String("release-name", "",
 		"override the releaseName: the GitHub release's name, or the sub-header of a changelog entry ($VAR and ${VAR} are expanded)")
+	o.authors = fs.String("authors", "",
+		"override authors.placement, where the commit authors appear in the entry: off, inline (a \"(by ...)\" suffix per line), section (a list of its own) or both")
+	o.authorsFormat = fs.String("authors-format", "",
+		"override authors.format, how one author is written: fullname or username (the local part of the email)")
+	o.authorsCommits = fs.String("authors-commits", "",
+		"override authors.commits, which commits the authors section counts: ccme (the ones behind the entry's lines) or all (every commit in the window)")
+	o.authorsInclude = fs.StringSlice("authors-include", nil,
+		"override authors.include: only authors matching one of these case-insensitive globs are listed (matched against the full name, the username and the email)")
+	o.authorsExclude = fs.StringSlice("authors-exclude", nil,
+		"override authors.exclude: authors matching one of these globs are dropped, after --authors-include has been applied")
+	o.authorsTitle = fs.String("authors-title", "",
+		"override authors.title, the heading of the authors section")
+
 	o.avRange = fs.String("range", "",
 		"override the autoVersion.range write policy")
 	o.avMatch = fs.StringSlice("match", nil,
@@ -253,4 +269,19 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.showHelp = fs.BoolP("help", "h", false,
 		"print help for the command and exit")
 	return o
+}
+
+// authorOptions collects the six authors flags into the overlay the changelog
+// and github step commands both take. They are one struct rather than six
+// fields on each command's options because the two commands override exactly
+// the same entry-format object, and splitting them would let the two drift.
+func (o *options) authorOptions() app.AuthorOptions {
+	return app.AuthorOptions{
+		Placement: *o.authors,
+		Format:    *o.authorsFormat,
+		Commits:   *o.authorsCommits,
+		Include:   *o.authorsInclude,
+		Exclude:   *o.authorsExclude,
+		Title:     *o.authorsTitle,
+	}
 }

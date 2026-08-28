@@ -17,14 +17,23 @@ The claim is a git tag called `dispat-release-lock` that dispat pushes to your r
 git operation that depends on what another machine already did. If the name is taken, git rejects the push. That
 rejection acts as the lock.
 
-A release happens in three steps:
+A release happens in four steps:
 
 1. Create the `dispat-release-lock` tag and push it. Stop and exit `1` if the push is rejected for any reason.
-2. Do everything else: plan, build, publish, record, tag, push.
-3. Delete the tag from the remote and from your clone.
+2. Check that this checkout is not behind the remote, when `commit.push` and `commit.verify` are both on. A plan built
+   from a stale checkout recomputes versions somebody else has already published, so the check runs before the plan
+   exists and under the lock that keeps its answer from going stale.
+3. Do everything else: plan, build, publish, record, tag, push.
+4. Delete the tag from the remote and from your clone.
 
-Step 3 happens no matter what step 2 did. A failed package, a guard refusing the run, or an empty plan all trigger
-cleanup. dispat gives the lock back on the way out even if you press Ctrl-C halfway through a build.
+Step 4 happens no matter what steps 2 and 3 did. A failed package, a guard refusing the run, or an empty plan all
+trigger cleanup. dispat gives the lock back on the way out even if you press Ctrl-C halfway through a build.
+
+The claim is unconditional. No flag moves the plan ahead of it, because whether there is work to do is not known
+until after planning, and planning is the thing the lock exists to serialise. A run that turns out to have nothing to
+publish therefore takes the lock, gives it straight back, and exits as it otherwise would. To ask whether a release
+would publish anything without touching the lock, run `dispat status --require-release`, which plans without ever
+writing to the remote.
 
 ## What a blocked run looks like
 

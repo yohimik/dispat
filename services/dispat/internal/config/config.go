@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ type (
 	Script                   = public.Script
 	RunConfig                = public.RunConfig
 	EntryFormatConfig        = public.EntryFormatConfig
+	AuthorsConfig            = public.AuthorsConfig
 	EntryLine                = public.EntryLine
 	ChangelogConfig          = public.ChangelogConfig
 	GitHubConfig             = public.GitHubConfig
@@ -627,7 +629,76 @@ func validateEntryFormat(label string, f EntryFormatConfig) error {
 	if err := validateEntryLines(label, "header", f.Header); err != nil {
 		return err
 	}
-	return validateEntryLines(label, "footer", f.Footer)
+	if err := validateEntryLines(label, "footer", f.Footer); err != nil {
+		return err
+	}
+	return validateAuthors(label, f.Authors)
+}
+
+// The values the three authors enums accept. Each list is the error message's
+// own source, so a rejected value can never be told a set of alternatives the
+// validator does not actually admit.
+var (
+	authorsPlacements = []string{"off", "inline", "section", "both"}
+	authorsFormats    = []string{"fullname", "username"}
+	authorsCommits    = []string{"ccme", "all"}
+)
+
+// validateAuthors refuses an authors object naming something the renderer
+// cannot do. The three keys are closed sets, unlike a channel name, so a value
+// outside them is a mistake that would otherwise render nothing and say
+// nothing about why.
+func validateAuthors(label string, a *AuthorsConfig) error {
+	if a == nil {
+		return nil
+	}
+	if err := validateAuthorsEnum(label, "placement", a.Placement, authorsPlacements); err != nil {
+		return err
+	}
+	if err := validateAuthorsEnum(label, "format", a.Format, authorsFormats); err != nil {
+		return err
+	}
+	if err := validateAuthorsEnum(label, "commits", a.Commits, authorsCommits); err != nil {
+		return err
+	}
+	for _, key := range []struct {
+		name     string
+		patterns []string
+	}{{"include", a.Include}, {"exclude", a.Exclude}} {
+		for i, p := range key.patterns {
+			if strings.TrimSpace(p) == "" {
+				return fmt.Errorf("%s: authors.%s[%d]: pattern must not be empty", label, key.name, i)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateAuthorsEnum checks one of the three authors enums against its
+// allowed values, naming the key the way the configuration spells it. It is
+// exported so the `changelog` and `github` commands reject a bad flag in the
+// same words the config file would be rejected in.
+func ValidateAuthorsEnum(key, value string) error {
+	switch key {
+	case "placement":
+		return validateAuthorsEnum("authors", key, value, authorsPlacements)
+	case "format":
+		return validateAuthorsEnum("authors", key, value, authorsFormats)
+	case "commits":
+		return validateAuthorsEnum("authors", key, value, authorsCommits)
+	}
+	return nil
+}
+
+func validateAuthorsEnum(label, key, value string, allowed []string) error {
+	if value == "" {
+		return nil
+	}
+	if slices.Contains(allowed, value) {
+		return nil
+	}
+	return fmt.Errorf("%s: authors.%s: unknown value %q (want one of %s)",
+		label, key, value, strings.Join(allowed, ", "))
 }
 
 // validateEntryLines refuses a line carrying only filters. Such an entry

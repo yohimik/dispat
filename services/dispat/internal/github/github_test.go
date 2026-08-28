@@ -178,6 +178,48 @@ func TestRecordCustomFormat(t *testing.T) {
 	assert.Contains(t, gotBody.Body, "### New Stuff")
 }
 
+func TestRecordAuthorsSectionSitsBeforeTheReleaseBlockAndFooter(t *testing.T) {
+	// The recorder appends its "### Release" details as an extra block and the
+	// footer closes the body. The authors section goes in ahead of both: the
+	// release details belong to the release the entry describes, and a footer
+	// is the last word — self-update cuts release notes at the "---" a footer
+	// conventionally opens with, so anything after it would be cut away.
+	srv, gotBody := captureServer(t)
+
+	unit := &ccme.Unit{
+		Header: ccme.Header{Type: "feat", Description: "add streaming"},
+		Bump:   ccme.BumpMinor, Valid: true,
+	}
+	r := testRelease()
+	r.Units = []*ccme.Unit{unit}
+	r.FreshUnits = r.Units
+	r.UnitAuthors = map[*ccme.Unit][]plan.Author{unit: {{Name: "Ada Lovelace", Email: "ada@example.com"}}}
+	r.WindowAuthors = []plan.Author{{Name: "Ada Lovelace", Email: "ada@example.com"}}
+
+	rel := &Releaser{
+		APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		CommitSHA: "abc123def456",
+		Format: changelog.Format{
+			AuthorsPlacement: changelog.AuthorsBoth,
+			Footer:           []model.EntryLine{{Line: []string{"---", "Released by dispat."}}},
+		},
+	}
+	require.NoError(t, rel.Record(context.Background(), r))
+
+	body := gotBody.Body
+	assert.Contains(t, body, "- add streaming (by Ada Lovelace)", "the inline suffix rides the line")
+	assert.Contains(t, body, "### Authors\n\n- Ada Lovelace\n")
+
+	authors := strings.Index(body, "### Authors")
+	release := strings.Index(body, "### Release")
+	footer := strings.Index(body, "---")
+	require.Positive(t, authors)
+	require.Positive(t, release)
+	require.Positive(t, footer)
+	assert.Less(t, authors, release, "the authors section precedes the release details")
+	assert.Less(t, release, footer, "and both precede the footer")
+}
+
 func TestRecordWithCommitSHA(t *testing.T) {
 	srv, gotBody := captureServer(t)
 

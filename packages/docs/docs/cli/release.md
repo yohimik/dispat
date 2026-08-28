@@ -22,8 +22,9 @@ next run releases the withheld package. This rule is transitive, and a provider 
 wait for.
 
 A [versioning group](../reference/releasing/versioning.md) is a softer case. A selection that takes only part of a
-group releases and prints a warning (`W231`). Nothing goes out of order, and the members left behind ride up to the
-group's version on the next run (`W234`), so the split is temporary and needs no operator.
+group releases and prints a warning (`W231`). Nothing goes out of order, and the next run makes the group whole: a
+member left behind releases the work the group has already published at the version that carries it, and a member with
+no pending work of its own rides up to it (`W234`). The split is temporary and needs no operator.
 
 Pass the group name directly with `dispat release -g platform` to select every member at once and avoid splitting it.
 
@@ -60,4 +61,4 @@ Beside the [global flags](./README.md#global-flags):
 | `--space`, `-s`       |             | Narrows the same eleven commands to every package in the named spaces using the same spellings. A standalone package belongs to no space. Read [Choosing the packages](./run.md#choosing-the-packages). |
 | `--group`, `-g`       |             | Narrows the same eleven commands to every package in the named [versioning groups](../reference/releasing/versioning.md) using the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces. Read [Choosing the packages](./run.md#choosing-the-packages). |
 | `--strict`            |             | Turns a tolerated finding into a failure. For `release` and `status`, this refuses a selection the plan cannot release as it stands, like a package waiting for its providers or a split versioning group. The command fails before anything is published; read [Releasing part of the graph](./release.md). |
-| `--require-release`   |             | Exits `release` and `status` with `3` when the plan releases nothing, which helps gate a CI stage that exists purely to publish something. dispat computes the plan *before* taking the [release lock](#the-release-lock), so a run that publishes nothing never takes the tag and never runs `beforeAll`. Only packages this run actually publishes count, so held, withheld, or unselected packages do not; see [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan). |
+| `--require-release`   |             | Exits `release` and `status` with `3` when the plan releases nothing, which helps gate a CI stage that exists purely to publish something. On `release` the [lock](#the-release-lock) is still taken first and given straight back, because whether there is work to do is not known until after planning; `dispat status --require-release` answers the same question without touching the remote and is what a CI gate should call. Only packages this run actually publishes count, so held, withheld, or unselected packages do not; see [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan). |

@@ -12,6 +12,7 @@ package integration
 // at every step, with convergence proven between steps.
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,15 +32,25 @@ func smokeRepo(t *testing.T) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
+	// The build honours a per-package fail marker at the repository root, so a
+	// cycle can kill one leg of a run mid-flight (cycle 7) without a config
+	// rewrite; no marker exists until the cycle that plants one.
+	cfg.Scripts = map[string]models.Script{
+		"build":   {`[ ! -f "../../fail-$DISPAT_PACKAGE" ] || exit 1`, echoBuild},
+		"publish": {"echo publishing"},
+	}
 	cfg.VersionGroups = map[string]models.VersionGroupConfig{
 		"app": {Versioning: models.VersioningFixedMajorMinor},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"golibs": {Path: models.PathList{"golibs"}, Flow: buildPublish(),
 			AutoVersion: &models.AutoVersionConfig{Manifests: "root"}},
+		// isBuildWaitingPublish because the image is built FROM the published
+		// js: its build consumes the publish, exactly as the dispat images
+		// install the CLI release, so a failed js leg must skip img (cycle 8).
 		"web": {Path: models.PathList{"web"}, Flow: buildPublish(), VersionGroup: "app",
-			AutoVersion: &models.AutoVersionConfig{Manifests: "root"}},
+			IsBuildWaitingPublish: models.Bool(true),
+			AutoVersion:           &models.AutoVersionConfig{Manifests: "root"}},
 		"images": {Path: models.PathList{"images"}, Flow: buildPublish(), VersionGroup: "app",
 			AutoVersion: &models.AutoVersionConfig{Manifests: "root"}},
 	}
@@ -222,4 +233,79 @@ func TestSmokeReleaseCycles(t *testing.T) {
 
 	assertConverged(t, r, map[string]string{
 		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.3.0", "img": "0.3.0"})
+
+	// --- Cycle 7: a run dies between the group's publishes; the retry
+	// catches the failed leg up at the version that already carries its
+	// work, rather than burning the next minor on a re-count. ---
+	r.CommitEmpty("feat(js,img): work the whole group shares")
+	require.NoError(t, os.WriteFile(r.Path("fail-img"), nil, 0o644))
+	res = r.Release()
+	require.Equal(t, 1, res.Code, "img's leg must die\nstdout:\n%s", res.Stdout)
+	require.True(t, r.HasTag("js@0.4.0"), "js published before the death; tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("img@0.4.0"), "img's leg died; tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-img")))
+	res = r.ReleaseOK()
+	g = graphOf(res.Events, "js", "img")
+	assertGraph(t, g, "img", "0.3.0 -> 0.4.0", "direct")
+	assertGraph(t, g, "js", "0.4.0", "")
+	assert.Equal(t, 1, r.TagCount("js@0.4.0"),
+		"js published this work already and is not re-released; tags: %v", r.TagList())
+	assert.False(t, harness.HasCodeForPackage(res.Events, "W234", "img"),
+		"the catch-up is img's own release, not a ride")
+	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
+		"FROM registry.example.com/js:0.4.0", "the catch-up still performs the manifest pickup")
+
+	assertConverged(t, r, map[string]string{
+		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.4.0", "img": "0.4.0"})
+
+	// --- Cycle 8: the provider's leg dies; the consumer whose build takes
+	// its publish as input is skipped, its own pending work notwithstanding,
+	// and the retry releases both. ---
+	r.CommitEmpty("feat(js,img): more work the whole group shares")
+	require.NoError(t, os.WriteFile(r.Path("fail-js"), nil, 0o644))
+	res = r.Release()
+	require.Equal(t, 1, res.Code, "js's leg must die\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W194", "img"),
+		"img is skipped: its build installs the js publish that never happened")
+	require.Zero(t, r.TagCount("js@0.5.0"), "tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("img@0.5.0"),
+		"img must not ship a version that promises an unpublished js; tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-js")))
+	res = r.ReleaseOK()
+	g = graphOf(res.Events, "js", "img")
+	assertGraph(t, g, "js", "0.4.0 -> 0.5.0", "direct")
+	assertGraph(t, g, "img", "0.4.0 -> 0.5.0", "direct")
+	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
+		"FROM registry.example.com/js:0.5.0")
+
+	assertConverged(t, r, map[string]string{
+		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.5.0", "img": "0.5.0"})
+
+	// --- Cycle 9: a ride dies; the retry rides the cause-less laggard up to
+	// the published version instead of moving the group again. Cycle 7's
+	// catch-up was the laggard's own release; this one has no cause of its
+	// own, so it is a W234 ride at exactly the version js already holds. ---
+	r.CommitEmpty("feat(js): js moves the group; img's ride will die")
+	require.NoError(t, os.WriteFile(r.Path("fail-img"), nil, 0o644))
+	res = r.Release()
+	require.Equal(t, 1, res.Code, "img's ride must die\nstdout:\n%s", res.Stdout)
+	require.True(t, r.HasTag("js@0.6.0"), "tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("img@0.6.0"), "tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-img")))
+	res = r.ReleaseOK()
+	g = graphOf(res.Events, "js", "img")
+	assertGraph(t, g, "img", "0.5.0 -> 0.6.0", "fixed group versioning")
+	assertGraph(t, g, "js", "0.6.0", "")
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "img"),
+		"the cause-less catch-up is a ride, and the ride is explained")
+	assert.Equal(t, 1, r.TagCount("js@0.6.0"),
+		"js published this minor already and is not re-released; tags: %v", r.TagList())
+	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
+		"FROM registry.example.com/js:0.6.0")
+
+	assertConverged(t, r, map[string]string{
+		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.6.0", "img": "0.6.0"})
 }

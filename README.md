@@ -174,9 +174,6 @@ dispat stands on the shoulders of two things:
   `go install github.com/yohimik/dispat/services/dispat@latest` working. It also attached six cross-compiled binaries
   to the CLI's GitHub release, published the four container images, and released the versioned documentation site.
   Every package received its own tag, changelog entry, and GitHub release.
-- [webxash3d-fwgs](https://github.com/yohimik/webxash3d-fwgs): a WebAssembly port of the Xash3D-FWGS game engine. It
-  uses a real docker on docker on npm provider chain, four levels deep. It runs parallel builds from the engine package
-  up to the modded server image.
 
 ## Community
 

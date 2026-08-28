@@ -202,6 +202,11 @@ dispat preserves two convergence properties. A quiet group whose members agree o
 non-sparse member left behind by a failed ride or a mid-life adoption is re-released on the next run. It releases at
 exactly the group's published version under `fixed`, and at the start of its own line under a partial mode.
 
+The group's aggregate measures each member's pending work against the tag holding the group's baseline rather than the
+member's own. Work that tag already contains never moves the shared prefix a second time: a member whose leg failed
+after another member published their shared work catches up at the version that carries it, as its own release rather
+than a ride, and the member that published is not dragged into an empty re-release.
+
 ## Module map
 
 Read one line per package below. Each package's doc comment carries the full story, and the deeper design notes live in
@@ -279,6 +284,9 @@ precise rule.)
   covers the Docker case, where the consumer can only build after the base image is pushed.
 - A consumer's `publish` **always** waits for its providers' publishes. Publishing against an unpublished provider
   version would be broken regardless of the flag.
+- When a changed provider fails or is skipped, its consumers are skipped unless they have a fresh release reason of
+  their own. A provider under `isBuildWaitingPublish: true` skips them unconditionally: their builds consume the
+  publish that never happened, so a reason of their own cannot proceed them past the missing artifact.
 - The `syncLock` node sits between `version` and `build` in a scheduling class of its own.
 
 ### Drain: the one scheduling pump

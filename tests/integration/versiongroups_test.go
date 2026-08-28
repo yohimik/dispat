@@ -7,6 +7,7 @@ package integration
 // tag formats: one shared version, each member spelling it its own way.
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -364,4 +365,237 @@ func TestVersionGroupMixedDepthTrain(t *testing.T) {
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.HasTag("app1@0.1.0"), "the whole group graduates; tags: %v", r.TagList())
+}
+
+// TestVersionGroupPartialReleaseCatchesUp: a run that dies between two
+// members' publishes leaves the group split — one member's tag carries the
+// shared work, the other still has it pending. The retry must not re-count
+// that work against the group's published baseline: the laggard catches up at
+// the version that already contains it, as its own release rather than a
+// ride, and the member that published is not dragged into an empty re-release
+// at the next minor.
+func TestVersionGroupPartialReleaseCatchesUp(t *testing.T) {
+	cfg := groupConfig(models.VersioningFixedMajorMinor)
+	// The svc build fails while the marker exists, which is how the first run
+	// dies on app1's leg after lib1 published.
+	cfg.Scripts["flaky-build"] = models.Script{`[ ! -f ../../fail-app1 ] || exit 1`, echoBuild}
+	cfg.Spaces["svc"] = models.SpaceConfig{
+		Path: models.PathList{"services"}, VersionGroup: "platform",
+		Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
+	}
+	r := seedGroupRepo(t, cfg)
+	r.Commit("feat(lib1, app1): the shared feature")
+	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "app1's leg must fail the run\nstdout:\n%s", res.Stdout)
+	require.True(t, r.HasTag("lib1@0.1.0"), "lib1 published before the death; tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("app1@"), "app1's leg died; tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-app1")))
+	res = r.ReleaseOK()
+	assert.True(t, r.HasTag("app1@0.1.0"),
+		"app1 catches up at the version that already carries its work; tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("lib1@"),
+		"lib1 published this work already and must not be re-released; tags: %v", r.TagList())
+	assert.False(t, harness.HasCode(res.Events, "W234"),
+		"the catch-up releases app1's own commits; there is no ride to explain")
+
+	r.ReleaseOK()
+	assert.Len(t, r.TagList(), 2, "converged: nothing left once both tags exist")
+}
+
+// TestVersionGroupPartialReleaseCatchUpAcrossModes: the partial-release
+// catch-up in every shared-versioning mode. One commit scoped to both
+// members, the second leg killed after the first published, and the retry
+// must land the laggard at the version that already carries the shared work
+// — never burn the next shared prefix on a re-count, never drag the member
+// that published into an empty re-release. The commit is a feat where a
+// minor moves the shared part, and a breaking change for the major-only
+// modes, whose groups a minor never engages.
+func TestVersionGroupPartialReleaseCatchUpAcrossModes(t *testing.T) {
+	cases := []struct {
+		mode      string
+		incident  string // the commit whose ride fails halfway
+		published string // where the holder lands, and the laggard must join
+	}{
+		{models.VersioningFixed, "feat(lib1, app1): shared work", "0.2.0"},
+		{models.VersioningFixedSparse, "feat(lib1, app1): shared work", "0.2.0"},
+		{models.VersioningFixedMajorMinor, "feat(lib1, app1): shared work", "0.2.0"},
+		{models.VersioningFixedMajorMinorSparse, "feat(lib1, app1): shared work", "0.2.0"},
+		{models.VersioningFixedMajor, "feat(lib1, app1)!: shared break", "2.0.0"},
+		{models.VersioningFixedMajorSparse, "feat(lib1, app1)!: shared break", "2.0.0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			cfg := groupConfig(tc.mode)
+			cfg.Scripts["flaky-build"] = models.Script{`[ ! -f ../../fail-app1 ] || exit 1`, echoBuild}
+			cfg.Spaces["svc"] = models.SpaceConfig{
+				Path: models.PathList{"services"}, VersionGroup: "platform",
+				Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
+			}
+			if tc.published == "2.0.0" {
+				// The major-only modes need a shared major for the break to
+				// leave; initials put the group's first release onto 1.x.
+				cfg.Initials = map[string]string{"lib1": "1.0.0", "app1": "1.0.0"}
+			}
+			r := seedGroupRepo(t, cfg)
+			r.Commit("feat(lib1, app1): bootstrap")
+			r.ReleaseOK()
+
+			r.CommitEmpty(tc.incident)
+			require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+			res := r.Release()
+			require.Equal(t, 1, res.Code, "app1's leg must fail\nstdout:\n%s", res.Stdout)
+			require.True(t, r.HasTag("lib1@"+tc.published), "tags: %v", r.TagList())
+			require.Zero(t, r.TagCount("app1@"+tc.published), "tags: %v", r.TagList())
+
+			require.NoError(t, os.Remove(r.Path("fail-app1")))
+			res = r.ReleaseOK()
+			assert.True(t, r.HasTag("app1@"+tc.published),
+				"%s: the laggard joins at the published version; tags: %v", tc.mode, r.TagList())
+			assert.Equal(t, 1, r.TagCount("lib1@"+tc.published),
+				"%s: the holder is not re-released; tags: %v", tc.mode, r.TagList())
+			assert.False(t, harness.HasCode(res.Events, "W234"),
+				"%s: the laggard releases its own commits, nobody rides", tc.mode)
+
+			before := len(r.TagList())
+			r.ReleaseOK()
+			assert.Len(t, r.TagList(), before, "%s: converged", tc.mode)
+		})
+	}
+}
+
+// TestVersionGroupCauselessLaggardRidesToThePublishedVersion: the other
+// catch-up flavour, end to end. The laggard's failed leg was a *ride* — no
+// commits of its own — so the retry rides it up to the group's published
+// version with W234 explaining it, exactly as a member left behind by any
+// failed ride has always been re-aligned.
+func TestVersionGroupCauselessLaggardRidesToThePublishedVersion(t *testing.T) {
+	cfg := groupConfig(models.VersioningFixedMajorMinor)
+	cfg.Scripts["flaky-build"] = models.Script{`[ ! -f ../../fail-app1 ] || exit 1`, echoBuild}
+	cfg.Spaces["svc"] = models.SpaceConfig{
+		Path: models.PathList{"services"}, VersionGroup: "platform",
+		Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
+	}
+	r := seedGroupRepo(t, cfg)
+	r.Commit("feat(lib1, app1): bootstrap")
+	r.ReleaseOK()
+
+	r.CommitEmpty("feat(lib1): lib1 moves the group; app1's ride will die")
+	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "the ride must fail\nstdout:\n%s", res.Stdout)
+	require.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-app1")))
+	res = r.ReleaseOK()
+	assert.True(t, r.HasTag("app1@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+		"a cause-less catch-up is a ride, and the ride is explained")
+	assert.Equal(t, 1, r.TagCount("lib1@0.2.0"), "the holder is not re-released; tags: %v", r.TagList())
+}
+
+// TestVersionGroupPartialReleaseTwoLaggards: one holder, two failed legs.
+// Both laggards catch up at the published version in a single retry, so a
+// badly interrupted run needs exactly one more, not one per member.
+func TestVersionGroupPartialReleaseTwoLaggards(t *testing.T) {
+	cfg := groupConfig(models.VersioningFixedMajorMinor)
+	cfg.Scripts["flaky-build"] = models.Script{`[ ! -f "../../fail-$DISPAT_PACKAGE" ] || exit 1`, echoBuild}
+	cfg.Spaces["svc"] = models.SpaceConfig{
+		Path: models.PathList{"services"}, VersionGroup: "platform",
+		Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
+	}
+	r := seedGroupRepo(t, cfg)
+	r.SeedPackage("services", "app2")
+	r.Commit("feat(lib1, app1, app2): bootstrap")
+	r.ReleaseOK()
+
+	r.CommitEmpty("feat(lib1, app1, app2): shared work, two legs will die")
+	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+	require.NoError(t, os.WriteFile(r.Path("fail-app2"), nil, 0o644))
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	require.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-app1")))
+	require.NoError(t, os.Remove(r.Path("fail-app2")))
+	res = r.ReleaseOK()
+	assert.True(t, r.HasTag("app1@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("app2@0.2.0"), "tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("lib1@0.2.0"), "tags: %v", r.TagList())
+	assert.False(t, harness.HasCode(res.Events, "W234"), "both laggards carry their own commits")
+
+	before := len(r.TagList())
+	r.ReleaseOK()
+	assert.Len(t, r.TagList(), before, "converged")
+}
+
+// TestVersionGroupPartialReleaseNewerWorkMovesOn: the mask reaches exactly
+// as far as the published tag. Work that lands after the partial release is
+// new, so the retry moves the prefix for it — the laggard releases both its
+// caught-up and its new work at the next minor, and the erstwhile holder
+// rides up to it.
+func TestVersionGroupPartialReleaseNewerWorkMovesOn(t *testing.T) {
+	cfg := groupConfig(models.VersioningFixedMajorMinor)
+	cfg.Scripts["flaky-build"] = models.Script{`[ ! -f ../../fail-app1 ] || exit 1`, echoBuild}
+	cfg.Spaces["svc"] = models.SpaceConfig{
+		Path: models.PathList{"services"}, VersionGroup: "platform",
+		Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
+	}
+	r := seedGroupRepo(t, cfg)
+	r.Commit("feat(lib1, app1): bootstrap")
+	r.ReleaseOK()
+
+	r.CommitEmpty("feat(lib1, app1): shared work, app1's leg will die")
+	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+	require.Equal(t, 1, r.Release().Code)
+	require.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+	require.NoError(t, os.Remove(r.Path("fail-app1")))
+
+	r.CommitEmpty("feat(app1): new work since the partial release")
+	res := r.ReleaseOK()
+	assert.True(t, r.HasTag("app1@0.3.0"),
+		"fresh work owns the next minor; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("lib1@0.3.0"),
+		"the moved prefix takes the group along; tags: %v", r.TagList())
+	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "lib1"),
+		"lib1's re-release is a ride this time, and it is explained")
+	assert.Zero(t, r.TagCount("app1@0.2.0"),
+		"the laggard never lands on the version it skipped past; tags: %v", r.TagList())
+}
+
+// TestVersionGroupTrainPartialReleaseAdvancesTheTrain: a partial release on
+// a prerelease train. The catch-up masking is deliberately confined to
+// stable group baselines — a train's window spans work its own prereleases
+// shipped (§11.4), and re-measuring it against the holder's tag would fight
+// that. So the retry does what trains do: it advances, releasing the laggard
+// at the next prerelease with the holder riding beside it. A burned
+// prerelease counter is the train's ordinary currency, not the burned minor
+// the stable-line masking exists to prevent.
+func TestVersionGroupTrainPartialReleaseAdvancesTheTrain(t *testing.T) {
+	cfg := groupConfig(models.VersioningFixedMajorMinor)
+	cfg.Scripts["flaky-build"] = models.Script{`[ ! -f ../../fail-app1 ] || exit 1`, echoBuild}
+	cfg.Spaces["svc"] = models.SpaceConfig{
+		Path: models.PathList{"services"}, VersionGroup: "platform",
+		Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
+	}
+	r := seedGroupRepo(t, cfg)
+	r.Commit("feat(lib1, app1): bootstrap")
+	r.ReleaseOK()
+
+	r.CommitEmpty("feat(lib1, app1)%beta: the group boards a train, one leg dies")
+	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	require.True(t, r.HasTag("lib1@0.2.0-beta.0"), "tags: %v", r.TagList())
+
+	require.NoError(t, os.Remove(r.Path("fail-app1")))
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("app1@0.2.0-beta.1"),
+		"the laggard boards at the train's next stop; tags: %v", r.TagList())
+	assert.True(t, r.HasTag("lib1@0.2.0-beta.1"),
+		"the holder rides the advanced train beside it; tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("app1@0.2.0-beta.0"),
+		"the published prerelease is the holder's alone; tags: %v", r.TagList())
 }

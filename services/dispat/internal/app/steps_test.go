@@ -179,3 +179,63 @@ func TestGitHubSpecOverridesBeatTheConfiguredPolicy(t *testing.T) {
 	assert.Equal(t, "https://ghe.acme/api/v3", got.APIURL)
 	assert.True(t, got.Enabled, "the overrides are addressing, not policy")
 }
+
+// TestAuthorOptionsOverlayTheRecordFormat: the six authors flags override the
+// layered configuration field by field, the two lists replacing whole the way
+// a nearer configuration layer's list does.
+func TestAuthorOptionsOverlayTheRecordFormat(t *testing.T) {
+	base := model.RecordFormat{
+		FeaturesTitle:    "Features",
+		AuthorsPlacement: "section",
+		AuthorsFormat:    "fullname",
+		AuthorsCommits:   "ccme",
+		AuthorsInclude:   []string{"*"},
+		AuthorsExclude:   []string{"*bot*"},
+		AuthorsTitle:     "Authors",
+	}
+	assert.Equal(t, base, AuthorOptions{}.apply(base), "no flags change nothing")
+
+	got := AuthorOptions{Placement: "both", Title: "Contributors",
+		Include: []string{"team-*"}}.apply(base)
+	assert.Equal(t, "both", got.AuthorsPlacement)
+	assert.Equal(t, "Contributors", got.AuthorsTitle)
+	assert.Equal(t, []string{"team-*"}, got.AuthorsInclude, "a list replaces whole")
+	assert.Equal(t, "fullname", got.AuthorsFormat, "an unset flag leaves the configured value")
+	assert.Equal(t, []string{"*bot*"}, got.AuthorsExclude)
+	assert.Equal(t, "Features", got.FeaturesTitle, "nothing outside the authors policy moves")
+}
+
+// TestAuthorOptionsReachTheGitHubSpecKey: the overrides land on the format
+// before the spec is keyed, so two packages the flags differentiate stop
+// sharing one releaser exactly as two the configuration differentiates do.
+func TestAuthorOptionsReachTheGitHubSpecKey(t *testing.T) {
+	a, _, _ := stepApp(t)
+	base := model.GitHubSpec{Enabled: true, Owner: "acme", Repo: "mono"}
+
+	plain := a.githubSpec(base, GitHubOptions{})
+	withAuthors := a.githubSpec(base, GitHubOptions{Authors: AuthorOptions{Placement: "section"}})
+	assert.Equal(t, "section", withAuthors.Format.AuthorsPlacement)
+	assert.NotEqual(t, plain.Key(), withAuthors.Key(),
+		"a flag that changes every body must change the releaser key")
+}
+
+// TestAuthorOptionsValidateRejectsBadEnums: a flag and a config key naming the
+// same setting fail in the same words, so an operator who has read one error
+// recognises the other.
+func TestAuthorOptionsValidateRejectsBadEnums(t *testing.T) {
+	require.NoError(t, AuthorOptions{}.validate())
+	require.NoError(t, AuthorOptions{Placement: "both", Format: "username", Commits: "all"}.validate())
+
+	for _, tc := range []struct {
+		opts AuthorOptions
+		want string
+	}{
+		{AuthorOptions{Placement: "everywhere"}, "want one of off, inline, section, both"},
+		{AuthorOptions{Format: "handle"}, "want one of fullname, username"},
+		{AuthorOptions{Commits: "every"}, "want one of ccme, all"},
+	} {
+		err := tc.opts.validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), tc.want)
+	}
+}

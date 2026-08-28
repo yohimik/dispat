@@ -386,6 +386,122 @@ func TestCommitsCarrySHAsParentsAndFullMessages(t *testing.T) {
 		"the body must not leak into the changed-file list")
 
 	assert.Empty(t, commits[1].Parents, "the root commit has no parent")
+	assert.Equal(t, "Test", newest.AuthorName, "the git author travels with the commit")
+	assert.Equal(t, "test@example.com", newest.AuthorEmail)
+}
+
+// commitAs commits every change in root under a named identity. The repository
+// identity is fixed by initRepo, and the author fields are only interesting
+// when more than one person has written something.
+func commitAs(t *testing.T, root, name, email, msg string) {
+	t.Helper()
+	run := func(args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	run("add", "-A")
+	run("-c", "user.name="+name, "-c", "user.email="+email, "commit", "-qm", msg)
+}
+
+func TestCommitsCarryTheAuthorIdentity(t *testing.T) {
+	// The author fields feed release-record attribution, so the parse has to
+	// survive the shapes a real history contains: a name that is not ASCII, a
+	// merge (whose author is the person who merged, not either side), and a
+	// message whose text could be mistaken for another field.
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	pkg := filepath.Join(root, "packages", "core")
+
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "unicode.txt"), []byte("x"), 0o644))
+	commitAs(t, root, "Ada Lovelace", "ada@example.com", "feat(core): analytic engine")
+
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "accented.txt"), []byte("y"), 0o644))
+	commitAs(t, root, "Zoé Müller-O'Brien", "zoe@example.com", "fix(core): accented name")
+
+	commits, err := cli.Commits(ctx, "")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(commits), 3)
+
+	assert.Equal(t, "Zoé Müller-O'Brien", commits[0].AuthorName,
+		"a non-ASCII name survives the log format")
+	assert.Equal(t, "zoe@example.com", commits[0].AuthorEmail)
+	assert.Equal(t, "Ada Lovelace", commits[1].AuthorName)
+	assert.Equal(t, "ada@example.com", commits[1].AuthorEmail)
+	assert.Equal(t, []string{"packages/core/accented.txt"}, commits[0].Files,
+		"the author fields must not shift the file list")
+}
+
+func TestCommitsAuthorSurvivesSeparatorLikeMessages(t *testing.T) {
+	// The record is split on a fixed number of fields, so a message that looks
+	// like it contains more of them is the shape that would break the parse.
+	// The separators are control characters git will not emit from a message,
+	// but the text around them is exactly what a careless width would trip on.
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	pkg := filepath.Join(root, "packages", "core")
+
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "tricky.txt"), []byte("x"), 0o644))
+	msg := "feat(core): a message with an email <nobody@example.com> and paths\n\n" +
+		"packages/core/not-a-file.txt\nAnother Person <other@example.com>\n"
+	commitAs(t, root, "Real Author", "real@example.com", msg)
+
+	commits, err := cli.Commits(ctx, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, commits)
+
+	newest := commits[0]
+	assert.Equal(t, "Real Author", newest.AuthorName,
+		"the message text must not be read as the author")
+	assert.Equal(t, "real@example.com", newest.AuthorEmail)
+	assert.Contains(t, newest.Message, "Another Person <other@example.com>")
+	assert.Equal(t, []string{"packages/core/tricky.txt"}, newest.Files,
+		"a path-shaped line inside the message is not a changed file")
+}
+
+func TestCommitsAuthorOfAMergeCommit(t *testing.T) {
+	// A merge commit's author is whoever made the merge. It has two parents
+	// and, with --diff-merges=first-parent, a file list of its own, so it is
+	// the record whose field layout differs most from an ordinary one.
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	pkg := filepath.Join(root, "packages", "core")
+
+	git := func(args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	base, err := cli.HeadSHA(ctx)
+	require.NoError(t, err)
+
+	git("checkout", "-q", "-b", "side")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "side.txt"), []byte("s"), 0o644))
+	commitAs(t, root, "Side Worker", "side@example.com", "feat(core): side work")
+
+	git("checkout", "-q", "-")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "main.txt"), []byte("m"), 0o644))
+	commitAs(t, root, "Main Worker", "main@example.com", "fix(core): main work")
+
+	git("-c", "user.name=Merge Bot", "-c", "user.email=merge@example.com",
+		"merge", "-q", "--no-ff", "-m", "chore(core): merge side", "side")
+
+	commits, err := cli.Commits(ctx, base)
+	require.NoError(t, err)
+	require.NotEmpty(t, commits)
+
+	merge := commits[0]
+	require.Len(t, merge.Parents, 2, "the newest commit is the merge")
+	assert.Equal(t, "Merge Bot", merge.AuthorName,
+		"a merge is authored by whoever merged, not by either side")
+	assert.Equal(t, "merge@example.com", merge.AuthorEmail)
+
+	byEmail := map[string]string{}
+	for _, c := range commits {
+		byEmail[c.AuthorEmail] = c.AuthorName
+	}
+	assert.Equal(t, "Side Worker", byEmail["side@example.com"])
+	assert.Equal(t, "Main Worker", byEmail["main@example.com"])
 }
 
 func TestHeadSHA(t *testing.T) {

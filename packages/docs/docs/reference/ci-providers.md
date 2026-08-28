@@ -20,8 +20,10 @@ must change this setting.
 is read-only.
 
 **Concurrency is already handled.** A run claims the repository with a [release lock](./releasing/release-lock.md) tag
-on the remote before planning. The second pipeline stops with a clear message if two pipelines release at once. You do
-not need the provider's own concurrency groups for correctness.
+on the remote before planning, on every release and whatever flags it was given. The second pipeline stops with a
+clear message if two pipelines release at once. You do not need the provider's own concurrency groups for
+correctness. A job that only wants to know whether there is anything to release should call
+`dispat status --require-release`, which never takes the lock.
 
 Run this check once in your job before calling dispat. It catches the first two problems on any provider:
 
