@@ -5,22 +5,42 @@ isBuildWaitingPublish: true
 autoVersion:
   enabled: true
   syncLock: [go-mod-tidy]
-# The libraries publish as source, so they have no build stage of their
-# own. `build` still exists because the CI gate sweeps one name across the
-# whole monorepo: compiling is what building a Go library means here.
+# Every gate runs as a build of the shared Dockerfile.gotest at the repository
+# root, one target per package, so a CI job needs Docker and nothing else. The
+# libraries publish as source, so they have no build stage of their own;
+# `build` still exists because the CI gate sweeps one name across the whole
+# monorepo, and vet compiles what it analyses, so its target is what building
+# a Go library means here.
 scripts:
-  build: go build ./...
   # The lint gate sweeps one name across the monorepo (`dispat run vet --since
   # all`), so each Go space defines what vetting means for its modules and the
   # workflow never has to enumerate them.
-  vet: go vet ./...
-  # Through `testreport test` so the run leaves a machine-readable log beside
-  # its coverage profile: the documentation site's coverage and test-results
-  # pages are built from the pair, rather than from numbers typed by hand.
-  # The log is named after the package, as the profile already is.
+  vet: >-
+    docker buildx build --file ../../Dockerfile.gotest --target vet-$DISPAT_PACKAGE
+    $(sh ../../scripts/buildx-cache.sh vet-$DISPAT_PACKAGE)
+    --output type=cacheonly ../..
+  build: >-
+    docker buildx build --file ../../Dockerfile.gotest --target vet-$DISPAT_PACKAGE
+    $(sh ../../scripts/buildx-cache.sh vet-$DISPAT_PACKAGE)
+    --output type=cacheonly ../..
+  # Through `testreport test` (inside the target) so the run leaves a
+  # machine-readable log beside its coverage profile: the documentation site's
+  # coverage and test-results pages are built from the pair, rather than from
+  # numbers typed by hand. The export lands the profile and the log in
+  # coverage/, exactly where the host run always put them.
   tests: >-
-    go run github.com/yohimik/dispat/tools/testreport test "$DISPAT_PACKAGE" --
-    ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=../../coverage/$DISPAT_PACKAGE.out
+    docker buildx build --file ../../Dockerfile.gotest --target export-$DISPAT_PACKAGE
+    $(sh ../../scripts/buildx-cache.sh gotest-$DISPAT_PACKAGE)
+    --output type=local,dest=../../coverage ../..
+  # The post-version gate: the module as autoVersion rewrote it and syncLock
+  # tidied it, resolving its providers from the tags this run just pushed,
+  # with no workspace — exactly what `go get` will serve to a consumer. The
+  # working-tree suite cannot prove that; this is the one gate that can.
+  tests:release: >-
+    docker buildx build --file ../../Dockerfile.gotest --target release-test
+    --build-arg MODULE=pkg/$DISPAT_PACKAGE
+    $(sh ../../scripts/buildx-cache.sh release-$DISPAT_PACKAGE)
+    --output type=cacheonly ../..
 # Publishing a Go library IS the record: the changelog written, the folder
 # committed (its go.mod already rewritten to the released providers by
 # autoVersion), the tag created at that commit and pushed — which is what the
@@ -29,8 +49,14 @@ scripts:
 # so they record exactly what this run planned, and the finalize phase later
 # finds the tag done (W223) and the entry written (W226) and skips both. The
 # GitHub release page joins at finalize, hung on the tag pushed here.
+#
+# beforeBuild is the release-only hook: `dispat run build` executes the named
+# script and nothing else, so the CI sweep never pays for the gate, and the
+# release pays for it after version, syncLock and the providers' publishes —
+# the earliest moment the rewritten pins are real tags.
 flow:
   publish: [changelog, commit]
+  beforeBuild: [tests:release]
 packages:
   manifest:
     versionGroup: manifests

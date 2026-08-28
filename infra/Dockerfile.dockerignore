@@ -1,0 +1,11 @@
+# The build context of infra/Dockerfile alone: the configuration, not the
+# artefacts a local plan leaves behind. The state and plan files in
+# particular record identifiers this repository deliberately does not carry.
+.terraform
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+tfplan
+Dockerfile
+Dockerfile.dockerignore
+tools.Dockerfile

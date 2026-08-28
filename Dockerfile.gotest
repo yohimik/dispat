@@ -1,0 +1,327 @@
+# syntax=docker/dockerfile:1
+#
+# Every Go gate of the monorepo, containerised: one stage per package for vet
+# and tests, the post-version release gate, and the sweep-wide checks (gofmt,
+# the coverage badge, the test report, go.mod tidying). A CI job needs a Go
+# toolchain for none of them; the dispat scripts drive `docker buildx build`
+# against a target here and read the results back as exported files.
+#
+# The layout is the cache strategy. Dependencies download in one layer keyed
+# on nothing but the lockfiles, each package's stage copies only its own
+# source and the workspace providers it imports, and every gate is a RUN on
+# top. A package that did not change is a chain of cache hits even under a
+# `--since all` sweep; the packages that changed are the only ones that
+# re-execute. The release's version rewrite edits a released module's go.mod,
+# which busts exactly that module's layers, so the post-version gate always
+# runs for real on releasing code.
+#
+# debian-based golang, not alpine: the integration race pass needs cgo, and
+# the suites drive git, both of which this image carries already.
+ARG GO_VERSION=1.26
+
+# Everything below the user line runs as gopher, not root, and every COPY
+# hands its files to gopher. Not hygiene: the suites inject failures by
+# making folders read-only, and root does not honour file permissions, so a
+# root run turns those tests' expected errors into successes that fail them.
+FROM golang:${GO_VERSION} AS base
+RUN useradd --create-home --uid 1001 gopher
+WORKDIR /src
+RUN chown gopher:gopher /src
+# The same bypass the workflows and the smoke stage use: intra-repo modules
+# are fetched from their tags directly, not from a proxy that may not have
+# seen a tag dispat itself created moments ago. The update check would have
+# instrumented binaries under test phone the GitHub API.
+ENV GOPRIVATE=github.com/yohimik/dispat
+ENV DISPAT_UPDATE_CHECK=false
+ENV GOPATH=/home/gopher/go
+ENV GOCACHE=/home/gopher/.cache/go-build
+USER gopher
+
+# The dependency layer every workspace gate shares: the manifests alone,
+# before any source, so it survives every edit that does not change a
+# dependency. No cache mount on the download on purpose — a mount's contents
+# never leave the builder, and this layer is what the CI cache backend
+# carries between runs.
+FROM base AS deps
+COPY --chown=gopher:gopher go.work go.work.sum ./
+# ccme, manifest and tools carry no go.sum: they have no module dependencies
+# to sum, and a COPY that names a file that does not exist fails the build.
+COPY --chown=gopher:gopher pkg/ccme/go.mod pkg/ccme/
+COPY --chown=gopher:gopher pkg/manifest/go.mod pkg/manifest/
+COPY --chown=gopher:gopher pkg/models/go.mod pkg/models/go.sum pkg/models/
+COPY --chown=gopher:gopher pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
+COPY --chown=gopher:gopher pkg/writer/go.mod pkg/writer/go.sum pkg/writer/
+COPY --chown=gopher:gopher services/dispat/go.mod services/dispat/go.sum services/dispat/
+COPY --chown=gopher:gopher tests/integration/go.mod tests/integration/go.sum tests/integration/
+COPY --chown=gopher:gopher tools/go.mod tools/
+RUN go mod download
+
+# testreport rides along with every suite (each tests script runs through it),
+# so it sits between the dependency layer and the per-package sources: a
+# tooling change re-runs every suite, a package change re-runs one.
+FROM deps AS runner
+COPY --chown=gopher:gopher tools ./tools
+
+# One source stage per package: its own folder plus the workspace providers
+# its go.mod requires, and nothing else. What a stage copies is what busts
+# its cache, so the copy lists are the isolation.
+FROM runner AS src-ccme
+COPY --chown=gopher:gopher pkg/ccme ./pkg/ccme
+
+FROM runner AS src-manifest
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+
+FROM runner AS src-models
+COPY --chown=gopher:gopher pkg/ccme ./pkg/ccme
+COPY --chown=gopher:gopher pkg/models ./pkg/models
+
+FROM runner AS src-scanner
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
+
+FROM runner AS src-writer
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+COPY --chown=gopher:gopher pkg/writer ./pkg/writer
+
+# The dispat suite reads beyond its module: the selfupdate tests hold
+# install.sh, install.ps1 and the four image folders to the CLI's own asset
+# names, and the plan tests hold the diagnostic codes to the spec and the
+# architecture page. Those files are inputs to this suite as much as any
+# source file is, so they are copied — and a change to any of them re-runs
+# the suite, which is exactly what those tests are for.
+FROM runner AS src-dispat
+COPY --chown=gopher:gopher pkg ./pkg
+COPY --chown=gopher:gopher services/dispat ./services/dispat
+COPY --chown=gopher:gopher install.sh install.ps1 ./
+COPY --chown=gopher:gopher docker ./docker
+COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packages/docs/docs/internals/architecture.md
+
+FROM src-dispat AS src-integration
+COPY --chown=gopher:gopher tests/integration ./tests/integration
+
+# The lint gate, one target per module: what `dispat run vet --since all`
+# sweeps. vet compiles what it analyses, so these are the build gates too.
+# The go-build cache mounts speed the many sequential per-package builds one
+# CI job runs through a single builder; they are deliberately not part of the
+# cross-run cache story, the layers above are.
+FROM src-ccme AS vet-ccme
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C pkg/ccme ./...
+
+FROM src-manifest AS vet-manifest
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C pkg/manifest ./...
+
+FROM src-models AS vet-models
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C pkg/models ./...
+
+FROM src-scanner AS vet-scanner
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C pkg/scanner ./...
+
+FROM src-writer AS vet-writer
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C pkg/writer ./...
+
+FROM src-dispat AS vet-dispat
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C services/dispat ./...
+
+FROM runner AS vet-tools
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C tools ./...
+
+FROM src-integration AS vet-integration
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go vet -C tests/integration ./...
+
+# The test gates: the exact commands the packages' tests scripts have always
+# run, with /src/coverage as the profile destination the export stages read.
+# Identical inputs produce a cache hit, which replays the recorded result and
+# still exports the recorded profile — that is the sweep's incrementality,
+# not a gap in it.
+FROM src-ccme AS test-ccme
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/ccme && go run github.com/yohimik/dispat/tools/testreport test ccme -- \
+    ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/ccme.out
+FROM scratch AS export-ccme
+COPY --from=test-ccme /src/coverage /
+
+FROM src-manifest AS test-manifest
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/manifest && go run github.com/yohimik/dispat/tools/testreport test manifest -- \
+    ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/manifest.out
+FROM scratch AS export-manifest
+COPY --from=test-manifest /src/coverage /
+
+FROM src-models AS test-models
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/models && go run github.com/yohimik/dispat/tools/testreport test models -- \
+    ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/models.out
+FROM scratch AS export-models
+COPY --from=test-models /src/coverage /
+
+FROM src-scanner AS test-scanner
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/scanner && go run github.com/yohimik/dispat/tools/testreport test scanner -- \
+    ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/scanner.out
+FROM scratch AS export-scanner
+COPY --from=test-scanner /src/coverage /
+
+FROM src-writer AS test-writer
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/writer && go run github.com/yohimik/dispat/tools/testreport test writer -- \
+    ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/writer.out
+FROM scratch AS export-writer
+COPY --from=test-writer /src/coverage /
+
+FROM runner AS test-tools
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd tools && go run github.com/yohimik/dispat/tools/testreport test tools -- ./... -count=1
+FROM scratch AS export-tools
+COPY --from=test-tools /src/coverage /
+
+FROM src-dispat AS test-dispat
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd services/dispat && go run github.com/yohimik/dispat/tools/testreport test dispat -- \
+    ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=/src/coverage/dispat.out
+FROM scratch AS export-dispat
+COPY --from=test-dispat /src/coverage /
+
+# The black-box suite: the harness builds an instrumented dispat from the
+# workspace, drives it against disposable git repositories, and the covdata
+# folder becomes integration.out. The race pass keeps its own log, as it
+# always has. The export takes the profile and the logs and leaves the binary
+# covdata behind.
+FROM src-integration AS test-integration
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'EOF'
+set -eu
+cd services/dispat
+export DISPAT_COVERDIR=/src/coverage/covdata
+rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
+go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
+go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/integration.out
+go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
+EOF
+FROM scratch AS export-integration
+COPY --from=test-integration /src/coverage/integration.out /integration.out
+COPY --from=test-integration /src/coverage/testlog /testlog
+
+# The post-version release gate, run from flow.beforeBuild once autoVersion
+# has rewritten a releasing module's go.mod and syncLock has tidied it. No
+# workspace on purpose: the module resolves its providers from the tags the
+# run just pushed, exactly as `go get` will serve them to a consumer — the
+# one thing no working-tree suite can prove. The go.mod-first copy keeps the
+# version rewrite's cache bust scoped to the releasing module.
+FROM base AS release-test
+ARG MODULE
+ENV GOWORK=off
+COPY --chown=gopher:gopher ${MODULE}/go.mod ${MODULE}/go.su[m] /src/${MODULE}/
+RUN cd /src/${MODULE} && go mod download
+COPY --chown=gopher:gopher ${MODULE} /src/${MODULE}
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd /src/${MODULE} && go test ./... -count=1 -timeout 10m
+
+# The format sweep the lint job runs: every Go source folder, one gofmt.
+FROM runner AS src-all
+COPY --chown=gopher:gopher pkg ./pkg
+COPY --chown=gopher:gopher services/dispat ./services/dispat
+COPY --chown=gopher:gopher tests ./tests
+FROM src-all AS gofmt
+RUN out=$(gofmt -l .); [ -z "$out" ] || { printf '%s\n' "$out" >&2; exit 1; }
+
+# go.mod tidying as a build: the syncLock step regenerates a releasing
+# module's go.mod and go.sum in here and exports the pair back over the
+# working tree's. GOWORK off for the same reason as release-test — during a
+# release the pins being tidied are the providers' just-pushed tags.
+FROM base AS tidy
+ARG MODULE
+ENV GOWORK=off
+COPY --chown=gopher:gopher ${MODULE} /src/${MODULE}
+RUN cd /src/${MODULE} && go mod tidy
+FROM scratch AS tidy-export
+ARG MODULE
+COPY --from=tidy /src/${MODULE}/go.mod /src/${MODULE}/go.su[m] /
+
+# The coverage totals and the README badge, from the profiles a full suite
+# run left in coverage/. Only a `--since all` run produces a complete set,
+# which is why the release workflow is the one caller.
+#
+# Three views of the suite — the unit layer (the workspace modules' own
+# tests), the integration layer (the black-box suite's instrumented binary —
+# CLI module scope, since that is the binary) — with only the combined total
+# across every profile (go tool cover merges the overlapping blocks) becoming
+# the README badge. The summary table goes to coverage/summary.md rather than
+# $GITHUB_STEP_SUMMARY, which cannot cross a build boundary; the
+# coverage-badge script appends the file for the workflow.
+#
+# On src-all rather than base because `go tool cover -func` resolves every
+# profile line back to its source file: the whole workspace has to be here
+# for the totals to be about anything.
+FROM src-all AS badge
+COPY --chown=gopher:gopher coverage ./coverage
+RUN <<'EOF'
+set -eu
+merge() { out=$1; shift; { head -n 1 "$1"; tail -q -n +2 "$@"; } > "$out"; }
+pct() { go tool cover -func="$1" | tail -n 1 | awk '{print $3}'; }
+badge() { # <label> <percentage> <file>: shields.io endpoint JSON
+  COLOR=red
+  BAND=$(printf '%.0f' "${2%\%}")
+  if   [ "$BAND" -ge 92 ]; then COLOR=brightgreen
+  elif [ "$BAND" -ge 85 ]; then COLOR=green
+  elif [ "$BAND" -ge 75 ]; then COLOR=yellowgreen
+  elif [ "$BAND" -ge 60 ]; then COLOR=yellow
+  elif [ "$BAND" -ge 40 ]; then COLOR=orange
+  fi
+  printf '{"schemaVersion": 1, "label": "%s", "message": "%s", "color": "%s"}\n' \
+    "$1" "$2" "$COLOR" > "$3"
+  cat "$3"
+}
+
+# Whatever the run produced, rather than a list to keep in step with the
+# monorepo: every package's tests script writes one profile named after it,
+# and integration.out is the one that is not a unit layer. Collected into the
+# positional parameters rather than a variable, so a profile name never goes
+# through word splitting. The merge outputs are skipped explicitly: they land
+# in this folder too, and a re-run would otherwise fold them into themselves.
+cd coverage
+set --
+for f in *.out; do
+  case "$f" in integration.out|coverage.out|coverage-unit.out) continue ;; esac
+  set -- "$@" "$f"
+done
+echo "unit profiles: $*"
+merge coverage-unit.out "$@"
+merge coverage.out      "$@" integration.out
+UNIT=$(pct coverage-unit.out)
+INTEGRATION=$(pct integration.out)
+TOTAL=$(pct coverage.out)
+echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
+
+{
+  echo "### Test coverage"
+  echo ""
+  echo '| Layer | Statement coverage |'
+  echo '|---|---|'
+  echo "| unit (all modules) | ${UNIT} |"
+  echo "| integration (CLI module, via the instrumented binary) | ${INTEGRATION} |"
+  echo "| **combined total** | **${TOTAL}** |"
+} > summary.md
+
+badge "coverage" "$TOTAL" coverage.json
+EOF
+FROM scratch AS badge-export
+COPY --from=badge /src/coverage/coverage.json /src/coverage/coverage.out \
+     /src/coverage/coverage-unit.out /src/coverage/summary.md /
+
+# The site's report.json, from the same complete profile and log set. The
+# commit arrives as a build argument because a build has no $GITHUB_SHA of
+# its own.
+FROM runner AS report
+ARG COMMIT
+COPY --chown=gopher:gopher coverage ./coverage
+RUN mkdir -p packages/docs/data \
+ && go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT"
+FROM scratch AS report-export
+COPY --from=report /src/packages/docs/data/report.json /

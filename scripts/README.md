@@ -1,6 +1,6 @@
 # Release scripts
 
-You will find two standalone shell scripts here for release stages and CI checks with complex logic. Smaller scripts
+You will find two standalone shell scripts here for CI glue and checks shared across workflows. Smaller scripts
 live directly in dispat configuration files as script entries, such as `push-badge` in the root
 [`dispat.yaml`](../dispat.yaml), `deploy-docs` in [`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), the link
 bracket in [`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml), and `push-readme` in
@@ -15,10 +15,13 @@ exported by CI.
 
 | Script                                     | Called from                                            | Reads                                   | Produces |
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
-| [`coverage-badge.sh`](./coverage-badge.sh) | `coverage-badge` in the root `dispat.yaml`             | `coverage/*.out`, `GITHUB_STEP_SUMMARY` | The merged coverage profiles and the badge JSON in `coverage/`. |
+| [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its scope argument    | The `--cache-from`/`--cache-to` flags for that build's cache scope, or nothing outside Actions. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
 
-This repository omits build and docs-version scripts on purpose because builds happen inside Docker. The CLI produces
+Every gate and stage of this repository runs inside Docker, so a CI job needs Docker, git and dispat itself — no Go,
+Node or Terraform on the runner. The Go gates (vet, tests, gofmt, the coverage badge, the test report, `go mod tidy`)
+are targets of [`Dockerfile.gotest`](../Dockerfile.gotest) at the repository root; each dispat script drives one
+`docker buildx build` and reads results back as exported files. The CLI produces
 six release binaries from [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), where the `build` script in
 `services/dispat/dispat.yaml` brackets the build with `dispat autowriter --link-local` and `--unlink-local` so binaries
 carry the current checkout instead of the `pkg/*` versions pinned in `go.mod`. The documentation site and its snapshots
@@ -42,8 +45,10 @@ summary to your terminal. It displays full failure output so you do not lose det
 the exit status of the underlying test run. Pass a `<log-name>` that matches the target coverage profile (`ccme`,
 `dispat`, `integration`), and append `-race` to mark race-detector passes.
 
-Run [`coverage-badge.sh`](./coverage-badge.sh) to merge the generated profiles in `coverage/` and produce the badge
-JSON. The `test-report` root script (`testreport build`) then compiles those profiles and logs into
+Run `dispat exec coverage-badge` to merge the generated profiles in `coverage/` and produce the badge JSON — the merge
+logic lives in the `badge` target of [`Dockerfile.gotest`](../Dockerfile.gotest), and the summary table it writes to
+`coverage/summary.md` is what the script appends to the job summary. The `test-report` root script (the `report`
+target) then compiles those profiles and logs into
 `packages/docs/data/report.json`, which feeds the site [coverage](https://dispat.dev/internals/coverage/)
 and [test results](https://dispat.dev/internals/test-results/) pages. The
 [Release workflow](../.github/workflows/release.yml) runs both through `dispat exec` because only a `--since all` run

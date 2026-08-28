@@ -30,6 +30,16 @@ RUN --mount=type=cache,target=/pnpm-store \
     pnpm config set store-dir /pnpm-store \
  && pnpm install --frozen-lockfile
 
+# The lockfile sync the packages space runs after autoVersion rewrites a
+# package.json: pnpm regenerates the lockfile in here, and the export hands
+# it back over the working tree's. No host Node is involved, and no
+# node_modules leaves the build — the site build installs inside this
+# Dockerfile already.
+FROM deps AS lockfile
+RUN --mount=type=cache,target=/pnpm-store pnpm install --lockfile-only
+FROM scratch AS lockfile-export
+COPY --from=lockfile /src/pnpm-lock.yaml /
+
 FROM deps AS source
 
 # docusaurus.config.ts sets showLastUpdateTime, which reads the git history of

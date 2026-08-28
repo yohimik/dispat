@@ -7,4 +7,6 @@ autoVersion:
 # command is the space's rather than any one package's: a second Node
 # package brings a Dockerfile and needs no new script and no new CI step.
 scripts:
-  tests: docker buildx build --file Dockerfile --target typecheck --output type=cacheonly ../..
+  tests: >-
+    docker buildx build --file Dockerfile --target typecheck
+    $(sh ../../scripts/buildx-cache.sh docs) --output type=cacheonly ../..

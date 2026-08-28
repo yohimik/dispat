@@ -12,6 +12,11 @@ name: Release
 # tag-push workflow anyway, so the binary build and the GitHub release run
 # right here, after the dispat run, keyed off the tag it created.
 #
+# Every stage runs inside Docker — the gates as buildx builds, the deploys as
+# `docker run` against the release tools image — so the jobs install no Go,
+# Node or Terraform; what remains here is checkouts, Docker plumbing,
+# credentials and artifact transport.
+#
 # Four jobs, in order: is there anything to release, does the whole suite pass,
 # release it, then check that what was released installs. Each is a gate on the
 # next, so nothing is published by a run whose tests never ran.
@@ -57,11 +62,12 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26'
-          cache: true
+      # A docker-container builder for the bootstrap build, and the runtime
+      # action to hand the ACTIONS_* cache credentials into run steps: the
+      # gha cache backend that scripts/buildx-cache.sh emits flags for
+      # authenticates with them, and the runner only gives them to actions.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
 
       - name: Set up dispat
         uses: ./
@@ -71,7 +77,9 @@ jobs:
       # release, not from the release before it.
       - name: Build dispat from the checkout
         run: |
-          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # `status` computes the plan and prints it without building, tagging or
@@ -109,11 +117,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26'
-          cache: true
+      # See the plan job: the builder the suite's buildx builds run on, and
+      # the cache credentials for them.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
 
       - name: Set up dispat
         uses: ./
@@ -121,7 +128,9 @@ jobs:
       # The bootstrap-then-fresh pair, as in the plan job.
       - name: Build dispat from the checkout
         run: |
-          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The bracket the release binary build puts around itself, put around the
@@ -157,7 +166,7 @@ jobs:
 
       # The three steps below run through `dispat exec` so the release logic
       # they carry is dispat.yaml's, and this workflow stays plumbing: what
-      # remains here is checkouts, toolchains and artifact transport.
+      # remains here is checkouts, Docker plumbing and artifact transport.
       - name: Compute coverage totals
         run: dispat exec coverage-badge
 
@@ -206,28 +215,6 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26'
-          cache: true
-
-      # The docs package's version stage shells out to pnpm, as does the
-      # packages space's syncLock; the pnpm workspace at the repository root is
-      # the only Node in this project. The site build itself is containerised
-      # and needs none of this. action-setup takes its version from
-      # packageManager in package.json, and must run before setup-node, whose
-      # pnpm cache needs pnpm on PATH.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
-
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version-file: packages/docs/.nvmrc
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
       # The docker space builds two architectures per image, so the arm64 legs
       # run emulated. The containerd image store is what lets a multi-platform
       # `docker compose build` keep its manifest list locally for the push that
@@ -239,33 +226,23 @@ jobs:
             { "features": { "containerd-snapshotter": true } }
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
 
       # Google Cloud, for the infra package's terraform stages and the docs
       # deploy. auth trades the job's OIDC token for the releaser service
       # account through Workload Identity Federation, so no key exists
       # anywhere; the provider and account names are identifiers this
       # repository deliberately does not carry, hence the secrets. The
-      # credentials file it writes is what both gcloud (via setup-gcloud) and
-      # terraform (via GOOGLE_APPLICATION_CREDENTIALS) pick up.
+      # credential files it writes land in the workspace, and the stage
+      # scripts mount the workspace into the release tools image at the same
+      # absolute path, so the CLOUDSDK_*/GOOGLE_* variables it exports name
+      # paths that resolve in there unchanged — no gcloud or terraform is
+      # installed on the runner.
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_RELEASER_SA }}
-
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
-
-      # For the infra package's stages: no state is stored anywhere, so its
-      # build stage rebuilds one on this runner from the cloud, plans, and
-      # the publish stage applies the saved plan (see infra/rebuild.sh).
-      # wrapper off because the binary is invoked by dispat's stage scripts,
-      # not by workflow steps, and the wrapper's output capture only gets in
-      # their way.
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_wrapper: false
 
       - name: Set up dispat
         uses: ./
@@ -276,7 +253,9 @@ jobs:
       # not from the release before it.
       - name: Build dispat from the checkout
         run: |
-          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The test report from the job that gated this one, put where the docs
@@ -294,11 +273,12 @@ jobs:
       - name: Run the release
         id: dispat
         # dispat does the whole release itself: autoVersion rewrites, the
-        # release commit, tags, the push, and the GitHub release with the six
-        # cross-compiled binaries its containerised build stage exported. The
-        # dispat package's announce stage writes this step's cli-released /
-        # cli-version outputs, and only fires when that package published;
-        # see services/dispat/dispat.yaml.
+        # post-version test gates (flow.beforeBuild in the pkg and services
+        # spaces), the release commit, tags, the push, and the GitHub release
+        # with the six cross-compiled binaries its containerised build stage
+        # exported. The dispat package's announce stage writes this step's
+        # cli-released / cli-version outputs, and only fires when that package
+        # published; see services/dispat/dispat.yaml.
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

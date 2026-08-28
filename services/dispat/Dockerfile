@@ -178,3 +178,40 @@ RUN set -eu; \
 # dist/ beside the binaries.
 FROM scratch AS export
 COPY --from=staged /out /
+
+# The CI bootstrap: the fresh dispat every workflow job builds from its
+# checkout before any dispat command runs, exported as a single native-arch
+# binary. This is the containerised twin of the host build the jobs used to
+# run (`go build -C services/dispat`), so it resolves the pkg/* modules
+# through a workspace exactly as the checkout does — unlike the release
+# build above, whose whole point is the published module's workspace-less
+# environment — and it stays unstamped: an un-stamped build reports `dev`,
+# which is the honest answer for a gate binary that is not a release.
+#
+# The workspace is written rather than copied because the checkout's go.work
+# also names modules this context deliberately leaves out. Dependencies
+# download in a layer keyed on the manifests alone, so the CI cache carries
+# them across runs and a source edit re-runs only the compile.
+FROM golang:${GO_VERSION}-alpine AS bootstrap-deps
+WORKDIR /src
+# ccme and manifest carry no go.sum: they have no module dependencies to sum,
+# and a COPY that names a file that does not exist fails the build.
+COPY pkg/ccme/go.mod pkg/ccme/
+COPY pkg/manifest/go.mod pkg/manifest/
+COPY pkg/models/go.mod pkg/models/go.sum pkg/models/
+COPY pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
+COPY pkg/writer/go.mod pkg/writer/go.sum pkg/writer/
+COPY services/dispat/go.mod services/dispat/go.sum services/dispat/
+ARG GO_VERSION
+RUN printf 'go %s\n\nuse (\n\t./services/dispat\n\t./pkg/ccme\n\t./pkg/manifest\n\t./pkg/models\n\t./pkg/scanner\n\t./pkg/writer\n)\n' \
+      "$GO_VERSION" > /src/go.work
+RUN go mod download
+
+FROM bootstrap-deps AS bootstrap
+COPY pkg ./pkg
+COPY services/dispat ./services/dispat
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -C services/dispat -o /out/dispat .
+
+FROM scratch AS bootstrap-export
+COPY --from=bootstrap /out/dispat /dispat

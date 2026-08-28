@@ -67,25 +67,40 @@ scripts:
     # Checked here rather than on the way out, so a leak fails the
     # build, which is still ahead of anything being published.
     - dispat exec verify-unlinked --for pkg:dispat
+  # Both suites run as builds of the shared Dockerfile.gotest — the unit
+  # target and the black-box target — through `testreport test` inside, so
+  # each run leaves its machine-readable log beside its profile and the job
+  # needs Docker and nothing else. The exports land the profiles and logs in
+  # coverage/, exactly where the host runs always put them.
   tests:unit: >-
-    go run github.com/yohimik/dispat/tools/testreport test dispat --
-    ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=../../coverage/dispat.out
-  # The black-box suite of exactly this binary, so it belongs to this
-  # package rather than to a space of its own. DISPAT_COVERDIR makes
-  # the harness build dispat with -cover and point every invocation's
-  # GOCOVERDIR at the folder, which is the only coverage much of the
-  # app and cli packages get. The race pass runs the root package only,
-  # as it always has, and keeps its own log so the report can say the
-  # suite is race-clean rather than have someone assert it.
-  tests:integration: |
-    export DISPAT_COVERDIR="$PWD/../../coverage/covdata"
-    rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
-    go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
-    go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=../../coverage/integration.out
-    go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
+    docker buildx build --file ../../Dockerfile.gotest --target export-dispat
+    $(sh ../../scripts/buildx-cache.sh gotest-dispat)
+    --output type=local,dest=../../coverage ../..
+  # The black-box suite of exactly this checkout's dispat, so it belongs to
+  # this package rather than to a space of its own. Inside the target,
+  # DISPAT_COVERDIR makes the harness build dispat with -cover and point
+  # every invocation's GOCOVERDIR at the folder, which is the only coverage
+  # much of the app and cli packages get; the covdata is condensed to
+  # integration.out before export. The race pass runs the root package only,
+  # as it always has, and keeps its own log so the report can say the suite
+  # is race-clean rather than have someone assert it.
+  tests:integration: >-
+    docker buildx build --file ../../Dockerfile.gotest --target export-integration
+    $(sh ../../scripts/buildx-cache.sh gotest-integration)
+    --output type=local,dest=../../coverage ../..
   tests:
     - dispat exec tests:unit --for pkg:dispat
     - dispat exec tests:integration --for pkg:dispat
+  # The post-version gate the services space hooks into beforeBuild: the unit
+  # suite against this module as autoVersion rewrote it and syncLock tidied
+  # it, resolving the pkg/* tags the earlier legs of this run pushed, with no
+  # workspace and no link bracket. The bracketed binary build proves the
+  # checkout; this proves the published module a `go install` consumer gets.
+  tests:release: >-
+    docker buildx build --file ../../Dockerfile.gotest --target release-test
+    --build-arg MODULE=services/dispat
+    $(sh ../../scripts/buildx-cache.sh release-dispat)
+    --output type=cacheonly ../..
   # What the release did, as step outputs for the job that verifies the
   # composite action afterwards. An announce stage runs only after this
   # package's own publish succeeded, so the stage firing is the whole

@@ -19,21 +19,38 @@ changelog:
 github:
   enabled: false
 scripts:
-  # Swept by `dispat run vet` like every module, and skips cleanly on a
-  # machine without terraform so the sweep stays green everywhere.
-  vet: |
-    set -eu
-    command -v terraform >/dev/null || { echo "terraform is not installed; skipping"; exit 0; }
-    terraform fmt -check -recursive
-    terraform init -backend=false -input=false >/dev/null
-    terraform validate
+  # Swept by `dispat run vet` like every module: format and validity as a
+  # build of the Dockerfile beside this file, credential-free by
+  # construction, so the sweep needs Docker and nothing else.
+  vet: >-
+    docker buildx build --file Dockerfile --target validate
+    $(sh ../scripts/buildx-cache.sh infra-validate) --output type=cacheonly .
   # Rebuild the state from the cloud, then save the exact plan the publish
   # stage will apply. Read-only toward the infrastructure, so it runs both
   # as the release's build stage and locally for inspection.
+  #
+  # Both stages run inside the release tools image (gcloud for rebuild.sh's
+  # project lookup, terraform for everything else), so the job installs
+  # neither. The repository root is mounted at its own absolute path because
+  # the Workload Identity credential files the auth step wrote live under it
+  # and the CLOUDSDK_*/GOOGLE_* variables name them by that path; the state
+  # and the plan land in this folder through the same mount, which is how
+  # tf-apply finds what tf-plan saved. Locally there are no credential
+  # files, so the developer's own gcloud configuration is mounted instead
+  # when it exists.
   tf-plan: |
     set -eu
-    sh rebuild.sh
-    terraform plan -input=false -out=tfplan
+    dispat exec tools-image --for pkg:infra
+    ROOT=$(git rev-parse --show-toplevel)
+    GCLOUD_CONFIG=""
+    [ -n "${GOOGLE_GHA_CREDS_PATH:-}" ] || [ ! -d "$HOME/.config/gcloud" ] \
+      || GCLOUD_CONFIG="-v $HOME/.config/gcloud:/root/.config/gcloud"
+    docker run --rm -v "$ROOT:$ROOT" -w "$PWD" $GCLOUD_CONFIG \
+      -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \
+      -e CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE -e CLOUDSDK_CORE_PROJECT \
+      -e GOOGLE_CLOUD_PROJECT \
+      -e TF_VAR_project_id -e TF_VAR_bucket_name -e TF_VAR_dns_zone -e TF_VAR_domain \
+      dispat-release-tools sh -euc 'sh rebuild.sh && terraform plan -input=false -out=tfplan'
   # Applies the plan tf-plan saved, nothing else, so what runs is what the
   # plan showed. The one write, and it happens only in CI: without the
   # guard, `dispat run tf-apply` would rewrite the live footprint from a
@@ -41,7 +58,14 @@ scripts:
   tf-apply: |
     set -eu
     dispat if 'CI!=true' --then 'echo "infra is written only from CI (set CI=true to override)" >&2; exit 1'
-    terraform apply -input=false tfplan
+    dispat exec tools-image --for pkg:infra
+    ROOT=$(git rev-parse --show-toplevel)
+    docker run --rm -v "$ROOT:$ROOT" -w "$PWD" \
+      -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \
+      -e CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE -e CLOUDSDK_CORE_PROJECT \
+      -e GOOGLE_CLOUD_PROJECT \
+      -e TF_VAR_project_id -e TF_VAR_bucket_name -e TF_VAR_dns_zone -e TF_VAR_domain \
+      dispat-release-tools terraform apply -input=false tfplan
 flow:
   build: tf-plan
   publish: tf-apply

@@ -4,18 +4,59 @@
 # and infra) carry a package file beside their code — see
 # https://dispat.dev/examples/layout/.
 scripts:
-  go-mod-tidy: go mod tidy
-  pnpm-install: pnpm install
+  # The lock syncs run as builds of the shared Dockerfiles and export the
+  # regenerated files back over the working tree's, so neither needs a host
+  # toolchain. Package scripts run inside the releasing package's folder,
+  # which is why the repository root and the module's path under it are read
+  # from git rather than assumed.
+  go-mod-tidy: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    MODULE=$(git rev-parse --show-prefix); MODULE=${MODULE%/}
+    docker buildx build --file "$ROOT/Dockerfile.gotest" --target tidy-export \
+      --build-arg MODULE="$MODULE" \
+      $(sh "$ROOT/scripts/buildx-cache.sh" "tidy-$DISPAT_PACKAGE") \
+      --output type=local,dest=. "$ROOT"
+  pnpm-install: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    docker buildx build --file "$ROOT/packages/docs/Dockerfile" --target lockfile-export \
+      $(sh "$ROOT/scripts/buildx-cache.sh" docs-lockfile) \
+      --output "type=local,dest=$ROOT" "$ROOT"
   changelog: dispat changelog
   commit: dispat commit --tag --push
   github: dispat github
+
+  # The format sweep the lint job runs, as a build like every other gate.
+  gofmt-check: >-
+    docker buildx build --file Dockerfile.gotest --target gofmt
+    $(sh scripts/buildx-cache.sh gofmt) --output type=cacheonly .
+
+  # The gcloud+terraform image the deployment stages `docker run`: the one
+  # image a release materialises (see infra/tools.Dockerfile for why those
+  # stages cannot be build targets). Layer-cached, so the second caller in a
+  # run pays nothing.
+  tools-image: >-
+    docker buildx build --load --tag dispat-release-tools
+    --file infra/tools.Dockerfile
+    $(sh scripts/buildx-cache.sh release-tools) infra
 
   # The release workflow's own stages, as dispat scripts rather than workflow
   # bash, so the release logic lives here and the workflow stays plumbing.
   # Only a `--since all` suite run leaves the complete profile set the badge
   # is a number about, which is why the release workflow is their one caller.
-  coverage-badge: sh scripts/coverage-badge.sh
-  test-report: go run github.com/yohimik/dispat/tools/testreport build -commit "$GITHUB_SHA"
+  # Both are builds of Dockerfile.gotest over the profiles in coverage/; the
+  # badge target writes its summary table to coverage/summary.md because a
+  # build cannot reach $GITHUB_STEP_SUMMARY, so the append happens here.
+  coverage-badge:
+    - >-
+      docker buildx build --file Dockerfile.gotest --target badge-export
+      $(sh scripts/buildx-cache.sh badge) --output type=local,dest=coverage .
+    - cat coverage/summary.md >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  test-report: >-
+    docker buildx build --file Dockerfile.gotest --target report-export
+    --build-arg COMMIT="$GITHUB_SHA"
+    $(sh scripts/buildx-cache.sh report) --output type=local,dest=packages/docs/data .
 
   # Publish the coverage badge: force-push coverage/coverage.json to an orphan
   # badges branch, a single commit with no history, the same mechanism
@@ -63,14 +104,24 @@ packages:
   tools:
     path: tools
     versioning: none
+    # One folder deep rather than a space's two, hence the shorter relative
+    # paths. vet doubles as the build gate: it compiles what it analyses,
+    # and a compile gate must leave no artifact in the checkout, which a
+    # cacheonly build never does.
     scripts:
-      vet: go vet ./...
-      # Into a throwaway directory: `go build` writes a lone main package's
-      # binary into the working folder, where `testreport` is a directory.
-      build: go build -o "$(mktemp -d)" ./...
-      # Through `testreport test` like every Go suite, so the repository
-      # tooling's own runs land in the site's test-results page too.
-      tests: go run github.com/yohimik/dispat/tools/testreport test tools -- ./... -count=1
+      vet: >-
+        docker buildx build --file ../Dockerfile.gotest --target vet-tools
+        $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
+      build: >-
+        docker buildx build --file ../Dockerfile.gotest --target vet-tools
+        $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
+      # Through `testreport test` (inside the target) like every Go suite, so
+      # the repository tooling's own runs land in the site's test-results
+      # page too.
+      tests: >-
+        docker buildx build --file ../Dockerfile.gotest --target export-tools
+        $(sh ../scripts/buildx-cache.sh gotest-tools)
+        --output type=local,dest=../coverage ..
   integration:
     path: tests/integration
     versioning: none
@@ -81,10 +132,12 @@ packages:
     # second name for the same run would execute it twice per sweep.
     dependencies: [models]
     scripts:
-      vet: go vet ./...
-      # The same throwaway target as the tools build, for the same reason:
-      # a compile gate must leave no artifact in the checkout.
-      build: go build -o "$(mktemp -d)" ./...
+      vet: >-
+        docker buildx build --file ../../Dockerfile.gotest --target vet-integration
+        $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
+      build: >-
+        docker buildx build --file ../../Dockerfile.gotest --target vet-integration
+        $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
   # The Google Cloud footprint that serves dispat.dev, released like code.
   # Only the existence and the folder live here; everything the package says
   # about itself lives in infra/dispat.yaml, beside the Terraform it

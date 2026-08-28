@@ -3,6 +3,12 @@
 # its own — so both the file and its name (what the README badge renders) say
 # "tests" rather than the generic "CI".
 #
+# Every gate runs inside Docker: the dispat scripts underneath these steps are
+# buildx builds of Dockerfile.gotest and the package Dockerfiles, so a job
+# needs Docker, git and dispat itself — no Go toolchain on the runner. The
+# only build driven from this file is the bootstrap, because no dispat exists
+# yet to drive it.
+#
 # What is deliberately not here: the coverage badge. A run selected by --since
 # tests part of the monorepo, so a merged total from it would be a number about
 # whichever packages happened to change. The badge is computed from the full
@@ -39,25 +45,31 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26'
-          cache: true
+      # A docker-container builder for the buildx builds every gate runs, and
+      # the runtime action to hand the ACTIONS_* cache credentials into run
+      # steps: the gha cache backend that scripts/buildx-cache.sh emits flags
+      # for authenticates with them, and the runner only gives them to
+      # actions.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
 
       - name: Set up dispat
         uses: ./
 
-      # The bootstrap-then-fresh pair (see the workflow's env comment).
+      # The bootstrap-then-fresh pair (see the workflow's env comment), as a
+      # build of the checkout's own Dockerfile: the exported binary is native
+      # to the runner and reports `dev`.
       - name: Build dispat from the checkout
         run: |
-          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
-      # The negated grep fails the step exactly when gofmt lists a file, and
-      # the list itself is the message.
+      # The gofmt target of Dockerfile.gotest: the failing files are the
+      # build log's message.
       - name: gofmt
-        run: "! gofmt -l . | grep ."
+        run: dispat exec gofmt-check
 
       # One name swept across the monorepo instead of a module list to keep in
       # step by hand: each Go space defines what `vet` means for its packages,
@@ -96,11 +108,10 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26'
-          cache: true
+      # See the lint job: the builder the suite's buildx builds run on, and
+      # the cache credentials for them.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
 
       - name: Set up dispat
         uses: ./
@@ -108,7 +119,9 @@ jobs:
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
         run: |
-          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # The bracket the release binary build puts around itself, put around the
@@ -156,18 +169,13 @@ jobs:
         with:
           fetch-depth: 0      # dispat reads tags to work out the plan
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: '1.26'
-          cache: true
-
       # The docker space builds two architectures per image, so the arm64 legs
       # run emulated. The alternative is a second job on a native arm64 runner
       # and a digest merge, which is a lot of moving parts for a gate that only
       # has to answer "does this still build".
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
 
       - name: Set up dispat
         uses: ./
@@ -175,7 +183,9 @@ jobs:
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
         run: |
-          go build -C services/dispat -o "$RUNNER_TEMP/dispat-fresh/dispat" .
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
       # No link bracket here, unlike the test job: every package this gate

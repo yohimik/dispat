@@ -38,20 +38,34 @@ scripts:
   # happen inside the release run: without the `dispat if` guard on the first
   # line, `dispat run deploy-docs` would publish a developer's working tree to
   # the live site.
+  #
+  # gcloud runs inside the release tools image rather than on the runner, so
+  # the job installs nothing for it. The repository root is mounted at its own
+  # absolute path because the Workload Identity credential files the auth
+  # step wrote live under it, and every CLOUDSDK_*/GOOGLE_* variable names
+  # them by that path; gcloud picks the credentials up from
+  # CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE with no login step.
   deploy-docs: |
     set -eu
     dispat if 'CI!=true' --then 'echo "refusing to deploy outside CI (set CI=true to override)" >&2; exit 1'
     : "${DOCS_BUCKET:?DOCS_BUCKET is required (the bucket name is not committed; see infra/README.md)}"
     : "${DOCS_URL_MAP:?DOCS_URL_MAP is required (the URL map name is not committed; see infra/README.md)}"
-    gcloud storage rsync --recursive --delete-unmatched-destination-objects \
-      --checksums-only \
-      --cache-control='public, max-age=300, must-revalidate' \
-      build "gs://${DOCS_BUCKET}"
-    gcloud storage objects update --recursive \
-      --cache-control='public, max-age=31536000, immutable' \
-      "gs://${DOCS_BUCKET}/assets/**"
-    gcloud compute url-maps invalidate-cdn-cache "${DOCS_URL_MAP}" \
-      --path '/*' --async
+    dispat exec tools-image --for pkg:docs
+    ROOT=$(git rev-parse --show-toplevel)
+    docker run --rm -v "$ROOT:$ROOT" -w "$PWD" \
+      -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \
+      -e CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE -e CLOUDSDK_CORE_PROJECT \
+      -e GOOGLE_CLOUD_PROJECT -e DOCS_BUCKET -e DOCS_URL_MAP \
+      dispat-release-tools sh -euc '
+        gcloud storage rsync --recursive --delete-unmatched-destination-objects \
+          --checksums-only \
+          --cache-control="public, max-age=300, must-revalidate" \
+          build "gs://${DOCS_BUCKET}"
+        gcloud storage objects update --recursive \
+          --cache-control="public, max-age=31536000, immutable" \
+          "gs://${DOCS_BUCKET}/assets/**"
+        gcloud compute url-maps invalidate-cdn-cache "${DOCS_URL_MAP}" \
+          --path "/*" --async'
     echo "deployed ${DISPAT_NEW_VERSION} to gs://${DOCS_BUCKET}"
   # The site, and the version snapshot that goes in it, from one build.
   #
@@ -91,6 +105,7 @@ scripts:
     docker buildx build --file Dockerfile --target export \
       --build-arg DOCS_VERSION="$DOCS_VERSION" \
       --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
+      $(sh ../../scripts/buildx-cache.sh docs) \
       --output "type=local,dest=$PWD" ../..
 # No record steps: the docs package's changelog, tag and GitHub release are
 # the finalize phase's. The site deploy is the publish; the records follow at
