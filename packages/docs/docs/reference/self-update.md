@@ -325,3 +325,11 @@ permission errors, or unsupported build types.
 
 `self-update` operates directly on the binary itself. You can run it anywhere
 without a configuration file or Git repository.
+
+## Installing other tools
+
+The same engine installs tools that are not dispat. Run
+[`dispat download`](../cli/download.md) to fetch a binary from any GitHub
+repository's releases, verified against the size and checksum the release
+published and installed onto a folder on your `PATH`. A runner that already has
+dispat therefore needs no second downloader for the rest of its tools.

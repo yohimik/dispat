@@ -413,6 +413,11 @@
         },
         {
           "type": "doc",
+          "id": "cli/download",
+          "label": "download"
+        },
+        {
+          "type": "doc",
           "id": "cli/scanner",
           "label": "scanner"
         },

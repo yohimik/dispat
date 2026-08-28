@@ -52,6 +52,7 @@ $ dispat run build --since all -p core   # try the build script in packages/core
 $ dispat release -g platform        # release one versioning group; -s libs releases one space
 $ dispat lint                       # run a script in every changed package that has it, in graph order
 $ dispat self-update                # replace this binary with the latest release; --rollback puts the old one back
+$ dispat download acme/tool --asset 'tool-{os}-{arch}'   # install a tool from any GitHub release, verified
 $ git commit -m "feat(core)%beta: try it out"
 $ dispat                            # releases core@1.6.0-beta.0; graduate later with release(core)%stable:
 ```
@@ -141,6 +142,7 @@ needed:
 | [dispat in CI](https://dispat.dev/reference/ci/)                                        | The GitHub Action, the container images, the install script: getting dispat onto a runner, and gating a pipeline on the plan with `--require-release`.                                      |
 | [Pipeline patterns](https://dispat.dev/reference/pipelines/)                            | Testing only what a commit changed, the local-link bracket, and the gated release pipeline with `-p`/`-s`/`-g` passed from CI.                                                              |
 | [Updating dispat](https://dispat.dev/reference/self-update/)                            | `dispat self-update`: how the binary replaces itself, what it reads out about the release, the backup and the rollback, the update notice.                                                 |
+| [The download command](https://dispat.dev/cli/download/)                                | `dispat download`: installing a tool from any GitHub repository's releases, choosing the asset and the destination, piping an archive, and the idempotence gate.                            |
 | [Architecture](https://dispat.dev/internals/architecture/)                              | Modules, algorithms, execution model, design decisions, testing.                                                                                                                           |
 | [Test coverage](https://dispat.dev/internals/coverage/)                                 | What the suite reaches, per package, measured by the release that published the page.                                                                                                      |
 | [Test results](https://dispat.dev/internals/test-results/)                              | What the suite did: the counts, the timings, the race pass, and what each area covers.                                                                                                     |
@@ -166,13 +168,14 @@ Every release calculates fresh test metrics and publishes them directly to the d
 These planned features outline future development. Nothing described below exists yet, and current releases do not
 depend on them.
 
-**Managing the tools a release needs.** Stage scripts currently assume required CLI tools already exist on the runner
-or host machine. You must install them using CI setup steps, Dockerfile layers, package managers, or setup scripts.
+**Managing the tools a release needs.** [`dispat download`](https://dispat.dev/cli/download/) already fetches one tool
+from any GitHub release, verifies it, and installs it, which is the same engine
+[`dispat self-update`](https://dispat.dev/cli/self-update/) replaces dispat with. A setup step therefore needs no
+package manager and no second downloader.
 
-The goal is to let your configuration declare required CLI tools so dispat can fetch them from a **GitHub release** or
-a **URL you provide**, pinned to an exact version. dispat already uses this logic internally for
-[`dispat self-update`](https://dispat.dev/cli/self-update/), which resolves releases, verifies checksums,
-and installs binaries. Future releases will extend that engine to external tools.
+What is still missing is the declarative half. Your configuration cannot yet list the tools a stage needs, so each one
+is a line in a setup script rather than a pinned entry dispat resolves and installs on its own, and a tool published
+anywhere other than a GitHub release still has to be fetched by hand.
 
 **A native package in every ecosystem.** dispat currently ships as a standalone static binary, requiring manual
 installation outside of standard language managers. The goal is to distribute wrapper packages across native

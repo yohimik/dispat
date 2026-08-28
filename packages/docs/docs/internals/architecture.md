@@ -31,8 +31,8 @@ back as a release tag.
    The controller runs its work in phases ordered by how much each needs to know. It refuses what the flags alone can
    refuse first, so a usage mistake never costs you a configuration error. Commands that read no config file run next,
    then the config loads, and finally everything that needs it runs. The commands that answer before loading any config
-   are `init`, `self-update`, and the three manifest commands (`scanner`, `writer`, `replacer`). The `if` command joins
-   them because a condition checks the environment rather than the repository.
+   are `init`, `self-update`, `download`, and the three manifest commands (`scanner`, `writer`, `replacer`). The `if`
+   command joins them because a condition checks the environment rather than the repository.
 
    Run `init` to write a starter config and exit before anything else. It refuses a `--root` that is not a git
    repository root. The `run` command computes the plan and stops. It runs the script inside each changed package that

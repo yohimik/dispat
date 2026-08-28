@@ -263,6 +263,23 @@ RUN sh /tmp/install.sh --version 1.2.3 && rm /tmp/install.sh
 The dispat images run this script in a throwaway first stage and copy the binary out. This keeps the downloader out of
 the published image. Read [docker/README.md](https://github.com/yohimik/dispat/tree/main/docker) to see how this works.
 
+## The other tools a job needs
+
+Once dispat is on the runner, [`dispat download`](../cli/download.md) puts the rest of the job's tools there too. It
+reads any GitHub repository's releases, verifies the file against the size and checksum the release published, and
+installs it onto a folder on `PATH`, so a setup step needs no package manager and no second downloader:
+
+```yaml
+- name: Install the tools the release needs
+  run: |
+    dispat download acme/deployer --asset 'deployer-{os}-{arch}' --release 2.1.0
+    dispat download cli/cli --asset 'gh_{version}_{os}_{arch}.tar.gz' \
+      --pipe 'tar -xz --strip-components=2 --wildcards "*/bin/gh"'
+```
+
+Pin the version with `--release` for a reproducible job, and put `--check` in front of it on a cached runner: it exits
+`1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
+
 ## Somewhere other than GitHub Actions
 
 Read [The release job on other providers](./ci-providers.md) for full release jobs on GitLab CI, CircleCI, Jenkins,
