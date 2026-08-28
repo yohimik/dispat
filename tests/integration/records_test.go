@@ -1282,3 +1282,54 @@ func TestRecordsAliasTagFailureIsOnlyAWarning(t *testing.T) {
 	assert.NotContains(t, res.Stdout, `"critical":1`,
 		"an alias is not a record, so its loss is not a critical")
 }
+
+// TestRecordsCatchUpGithubBodySpansTheProvidersMovement: the GitHub release
+// body of a catch-up carries the provider's movement spanned from this
+// package's previous release. By catch-up time the provider's own before and
+// after have collapsed onto the published version, and a body reading them
+// would say "0.1.1 -> 0.1.1" — the movement line the docs leg of the 1.3.0
+// release actually shipped.
+func TestRecordsCatchUpGithubBodySpansTheProvidersMovement(t *testing.T) {
+	type ghRelease struct {
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
+	}
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Dependencies = models.Dependencies{{Consumer: "app", Provider: "core"}}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core)^: reaches app; both release once")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(core)^: published alone; app catches up next run")
+	res := r.Command("release", "-p", "core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+
+	res = r.ReleaseOK()
+	require.True(t, harness.HasCodeForPackage(res.Events, "W193", "app"), "the catch-up is labelled")
+	require.True(t, r.HasTag("app@0.0.2"), "tags: %v", r.TagList())
+
+	var body string
+	for _, rel := range decodeAll[ghRelease](t, bodies()) {
+		if rel.TagName == "app@0.0.2" {
+			body = rel.Body
+		}
+	}
+	require.NotEmpty(t, body, "the catch-up must have a GitHub release")
+	assert.Contains(t, body, "- core: 0.1.0 -> 0.1.1",
+		"the body spans from app's previous release")
+	assert.NotContains(t, body, "0.1.1 -> 0.1.1",
+		"a movement line with no movement is the bug this spans away")
+}

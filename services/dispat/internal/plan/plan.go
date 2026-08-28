@@ -2490,7 +2490,20 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			return
 		}
 		seen[prov] = true
-		out = append(out, ProviderUpdate{Name: prov, From: pr.Previous(), To: pr.Next})
+		u := ProviderUpdate{Name: prov, From: pr.Previous(), To: pr.Next}
+		if u.From.Compare(u.To) == 0 {
+			// The catch-up shape: the provider published in an earlier run,
+			// so its own before-and-after have already collapsed onto the
+			// version this release picks up, and "1.3.0 -> 1.3.0" tells the
+			// reader nothing moved when everything did. What the record
+			// means by From is what this package last shipped against — the
+			// provider's version as of this package's own baseline tag,
+			// reconstructed from tags exactly as a graduation's span is.
+			if from, ok := cp.versionAt(prov, rel.BaselineCommit); ok {
+				u.From = from
+			}
+		}
+		out = append(out, u)
 	}
 	for _, prov := range rel.DueTo {
 		// A blast origin hops away answers "why is this package releasing";
@@ -2509,6 +2522,28 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 		// earlier run published it and this one is the catch-up (§13.7a).
 		if pr := cp.rel[prov]; pr != nil && pr.Releasing() {
 			add(prov)
+		}
+	}
+	// A ride's whole cause is the group moving for somebody else's work, and
+	// when that work published in an earlier run its provider is not
+	// releasing here: the loops above find nothing, and the ride's entry
+	// would stay silent about the movement it exists to ship. The same ride
+	// in a single-run release documents the provider's movement — the
+	// provider releases beside it — so the catch-up reconstructs the same
+	// span off the tags, from what this package's previous release shipped
+	// against.
+	if rel.FixedRide {
+		for _, prov := range provs {
+			pr := cp.rel[prov]
+			if pr == nil || seen[prov] {
+				continue
+			}
+			from, ok := cp.versionAt(prov, rel.BaselineCommit)
+			if !ok || from.Compare(pr.Previous()) == 0 {
+				continue
+			}
+			seen[prov] = true
+			out = append(out, ProviderUpdate{Name: prov, From: from, To: pr.Previous()})
 		}
 	}
 	// A graduation's entry is what readers of the stable line actually see,

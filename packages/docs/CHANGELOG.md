@@ -19,7 +19,7 @@ take the row and packs future additions into columns on their own.
 
 ### Dependencies
 
-- dispat: 1.3.0 -> 1.3.0
+- dispat: 1.2.0 -> 1.3.0
 
 ## packages/docs/v1.2.0 (2026-08-27)
 

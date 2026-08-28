@@ -255,6 +255,9 @@ func TestSmokeReleaseCycles(t *testing.T) {
 		"the catch-up is img's own release, not a ride")
 	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
 		"FROM registry.example.com/js:0.4.0", "the catch-up still performs the manifest pickup")
+	imgCatch := entryOf(t, spacedChangelog(t, r, "images", "img"), "img@0.4.0")
+	assert.NotContains(t, imgCatch, "### Dependencies",
+		"an own-cause release's manifest-only pickup stays out of the record, as in cycle 4")
 
 	assertConverged(t, r, map[string]string{
 		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.4.0", "img": "0.4.0"})
@@ -305,6 +308,9 @@ func TestSmokeReleaseCycles(t *testing.T) {
 		"js published this minor already and is not re-released; tags: %v", r.TagList())
 	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
 		"FROM registry.example.com/js:0.6.0")
+	imgRide := entryOf(t, spacedChangelog(t, r, "images", "img"), "img@0.6.0")
+	assert.Contains(t, imgRide, "- js: 0.5.0 -> 0.6.0",
+		"the ride's entry spans the movement it rode for, from img's last release")
 
 	assertConverged(t, r, map[string]string{
 		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.6.0", "img": "0.6.0"})

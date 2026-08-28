@@ -15,7 +15,7 @@
 
 ### Dependencies
 
-- dispat: 1.2.0 -> 1.2.0
+- dispat: 1.1.1 -> 1.2.0
 
 ## docker/dispat-ubuntu/v1.1.1 (2026-08-26)
 

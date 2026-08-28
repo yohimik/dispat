@@ -711,3 +711,29 @@ func TestFixedMajorMinorSparsePartialReleaseCatchesUp(t *testing.T) {
 	assertVersion(t, v(1, 3, 0), b.Next)
 	assert.False(t, p.Releases["a"].Releasing())
 }
+
+func TestRideCatchUpUpdatesSpanTheMovementItRodeFor(t *testing.T) {
+	// a published 1.3.0 in a run whose ride of b died; the retry rides b up
+	// with no cause of its own, so no provider is releasing and no DueTo
+	// exists — yet the ride ships a's movement, and its record must span it
+	// exactly as the same ride does when a releases beside it in one run.
+	pkgs := fixedPkgs(model.VersioningFixedMajorMinor)
+	deps := []model.Dependency{{Consumer: "b", Provider: "a"}}
+	git := newFakeGit(
+		commit{sha: "c0", message: "chore: baseline"},
+		commit{sha: "c1", message: "feat(a): a's minor; b's ride died"},
+	).tag("a", "1.2.0", "c0").tag("a", "1.3.0", "c1").
+		tag("b", "1.2.0", "c0")
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+
+	b := p.Releases["b"]
+	require.True(t, b.Releasing(), "the ride catches up")
+	assertVersion(t, v(1, 3, 0), b.Next)
+	require.True(t, b.FixedRide)
+	require.Len(t, b.Updates, 1, "the ride documents the movement it rode for")
+	assert.Equal(t, "a", b.Updates[0].Name)
+	assert.Equal(t, "1.2.0", b.Updates[0].From.String(), "From is what b's last release shipped against")
+	assert.Equal(t, "1.3.0", b.Updates[0].To.String())
+}

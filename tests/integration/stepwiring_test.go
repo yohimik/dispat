@@ -293,3 +293,61 @@ func TestStepsGithubBeforeCommitWarns(t *testing.T) {
 	assert.Equal(t, []string{"core@0.1.0"}, creates, "one release created, at the run's tag")
 	assert.True(t, r.HasTag("core@0.1.0"))
 }
+
+// TestStepsCatchUpEntrySpansTheProvidersMovement: the record steps write a
+// catch-up entry whose dependencies line spans from the consumer's last
+// release, not the provider's collapsed before-and-after. The step commands
+// recompute the plan (stepPlan) rather than inherit the executor's, so the
+// span must survive that second computation — the docs leg of the 1.3.0
+// release wrote "1.3.0 -> 1.3.0" through exactly this path.
+func TestStepsCatchUpEntrySpansTheProvidersMovement(t *testing.T) {
+	r := harness.New(t)
+	bin, _ := harness.Build(t)
+	r.AddBareRemote()
+
+	cfg := harness.BaseFile(1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true,
+		Name: "steps-test", Email: "steps@example.com"}
+	cfg.Scripts = map[string]models.Script{
+		"build":  {echoBuild},
+		"record": {bin + " changelog", bin + " commit --tag --push"},
+		// The span reaches scripts through DISPAT_UPDATED_* too; the log
+		// proves what a consumer's build actually reads in a catch-up.
+		"span-log": {`echo "core: $DISPAT_UPDATED_CORE_OLD_VERSION -> $DISPAT_UPDATED_CORE_NEW_VERSION" >> ../../span.log`, echoBuild},
+	}
+	// Both spaces record through the wired steps, so the consumer's catch-up
+	// entry is the step command's own writing.
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, IsBuildWaitingPublish: models.Bool(true),
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
+		"svc": {Path: models.PathList{"services"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"span-log"}, Publish: []string{"record"}}},
+	}
+	cfg.Dependencies = models.Dependencies{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("services", "web")
+	r.Commit("feat(core)^: both release once")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("web@0.0.1"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(core)^: published alone; web catches up next run")
+	res := r.Command("release", "-p", "core")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("web@0.0.2"), "tags: %v", r.TagList())
+
+	r.ReleaseOK()
+	require.True(t, r.HasTag("web@0.0.2"), "the catch-up; tags: %v", r.TagList())
+	entry := entryOf(t, spacedChangelog(t, r, "services", "web"), "web@0.0.2")
+	assert.Contains(t, entry, "- core: 0.1.0 -> 0.1.1",
+		"the step-written entry spans from web's last release")
+	assert.NotContains(t, entry, "0.1.1 -> 0.1.1",
+		"a movement line with no movement is the bug this spans away")
+
+	spanLog, err := os.ReadFile(r.Path("span.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(spanLog), "core: 0.1.0 -> 0.1.1",
+		"the script environment reads the same span the records carry")
+}

@@ -478,6 +478,10 @@ func TestVersionGroupCauselessLaggardRidesToThePublishedVersion(t *testing.T) {
 		Path: models.PathList{"services"}, VersionGroup: "platform",
 		Flow: &models.SpaceFlowConfig{Build: []string{"flaky-build"}, Publish: []string{"publish"}},
 	}
+	// The dependency beside the group membership is the production shape
+	// (the docs site depends on the CLI it groups with), and it is what the
+	// ride's entry documents its movement through.
+	cfg.Dependencies = models.Dependencies{{Consumer: "app1", Provider: "lib1"}}
 	r := seedGroupRepo(t, cfg)
 	r.Commit("feat(lib1, app1): bootstrap")
 	r.ReleaseOK()
@@ -494,6 +498,11 @@ func TestVersionGroupCauselessLaggardRidesToThePublishedVersion(t *testing.T) {
 	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
 		"a cause-less catch-up is a ride, and the ride is explained")
 	assert.Equal(t, 1, r.TagCount("lib1@0.2.0"), "the holder is not re-released; tags: %v", r.TagList())
+
+	entry := entryOf(t, spacedChangelog(t, r, "services", "app1"), "app1@0.2.0")
+	assert.Contains(t, entry, "- lib1: 0.1.0 -> 0.2.0",
+		"the ride's entry spans the movement it rode for, from app1's last release")
+	assert.NotContains(t, entry, "0.2.0 -> 0.2.0")
 }
 
 // TestVersionGroupPartialReleaseTwoLaggards: one holder, two failed legs.

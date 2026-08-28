@@ -1754,6 +1754,31 @@ func TestGraduationUpdatesSpanTheTrain(t *testing.T) {
 	assert.Equal(t, "1.4.1", app.Updates[0].To.String())
 }
 
+func TestCatchUpUpdatesSpanFromTheConsumersLastRelease(t *testing.T) {
+	// core published 1.4.1 in a run app's leg missed, so by the catch-up
+	// core's own before-and-after have collapsed onto 1.4.1 — and a record
+	// reading them says "1.4.1 -> 1.4.1", a movement line with no movement
+	// (the docs leg of the 1.3.0 release wrote exactly that). From is what
+	// app's previous release shipped against, reconstructed off core's tags
+	// at app's own baseline, the same way a graduation spans its train.
+	git := newFakeGit(
+		commit{sha: "c0", message: "chore: baseline"},
+		commit{sha: "c1", message: "fix(core)^: reaches app, whose leg died"},
+	).tag("core", "1.4.0", "c0").tag("core", "1.4.1", "c1").
+		tag("app", "1.2.3", "c0")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	require.True(t, app.Changed(), "the missed blast is still owed")
+	assert.True(t, app.CatchUp, "and it is a catch-up: core is not in the plan")
+	require.Len(t, app.Updates, 1)
+	assert.Equal(t, "core", app.Updates[0].Name)
+	assert.Equal(t, "1.4.0", app.Updates[0].From.String(),
+		"From is the version app's last release shipped against")
+	assert.Equal(t, "1.4.1", app.Updates[0].To.String())
+}
+
 func TestSpentCancelIsNotReported(t *testing.T) {
 	// The cancel did its work in an earlier run: it discarded core's pending
 	// feat, and core then released past it. The discard is invisible now (the

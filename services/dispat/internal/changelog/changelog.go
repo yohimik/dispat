@@ -175,7 +175,10 @@ func RenderSections(rel *plan.Release, f Format) string {
 		// One line per provider whose version this release picks up, carrying
 		// the movement — a bare name would leave the reader to hunt the
 		// provider's own changelog for what actually changed underneath. On a
-		// catch-up From equals To: the provider's version was already out.
+		// catch-up the provider's version was already out, so the plan spans
+		// the movement from what this package's previous release shipped
+		// against (§13.10, providerUpdates), not from the provider's own
+		// collapsed before-and-after.
 		//
 		// Updates rather than DueTo, so the section appears whenever a
 		// provider moved rather than only when it propagated a bump. A
