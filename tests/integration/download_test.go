@@ -44,22 +44,30 @@ const (
 
 // dlRepo is the fixture: a folder standing in for a folder on PATH, and a fake
 // API publishing a tool for it.
+//
+// The fake answers on the server's own goroutines while the scenario driving
+// it changes what it publishes, so everything a request reads is behind the
+// mutex and every change goes through a method that takes it. Nothing here is
+// decoration: without it the race detector fails the suite, which is exactly
+// what it is for.
 type dlRepo struct {
 	*harness.Repo
 	bin string // the install folder under test
 	api string
+
+	mu sync.Mutex
 	// bodies maps a version to the bytes its asset serves, which is what lets
 	// a scenario ask for a version and get that version.
 	bodies map[string][]byte
 	// assets maps a version to the file names its release attaches.
 	assets map[string][]string
-	// digests switches the published checksum off, for the GitHub Enterprise
-	// versions that send none.
+	// digests is whether a release publishes a checksum, which the GitHub
+	// Enterprise versions predating asset digests do not.
 	digests bool
 	// tagPrefix is what the fake's tags carry before their version.
 	tagPrefix string
-
-	mu   sync.Mutex
+	// hits records the paths the fake answered, in order, which is how a test
+	// proves a repeated invocation paid for no transfer.
 	hits []string
 }
 
@@ -83,14 +91,49 @@ func newDLRepo(t *testing.T) *dlRepo {
 	return r
 }
 
+// publish adds a version to what the fake offers, with the files its release
+// attaches.
+func (r *dlRepo) publish(version string, assets ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bodies[version] = dlScript(version)
+	r.assets[version] = assets
+}
+
+// attach replaces the files one version's release carries, which is how a
+// scenario puts whichever shape of release it is about in front of the
+// command.
+func (r *dlRepo) attach(version string, assets ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.assets[version] = assets
+}
+
+// withoutDigests stops the fake publishing a checksum, as the GitHub
+// Enterprise versions predating asset digests do.
+func (r *dlRepo) withoutDigests() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.digests = false
+}
+
+// tagsAs sets what the fake writes before the version in its tags.
+func (r *dlRepo) tagsAs(prefix string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tagPrefix = prefix
+}
+
 // platform is how the fixture spells this machine in an asset name, which is
 // what --asset renders {os} and {arch} into.
 func platform() string { return runtime.GOOS + "-" + runtime.GOARCH }
 
-// serve stands up the fake API over whatever the fixture currently declares.
+// serve stands up the fake API. Everything it answers is read under the lock,
+// so a scenario may change what is published while the command is running.
 func (r *dlRepo) serve(t *testing.T) {
 	t.Helper()
 	var base string
+	// release renders one version. The caller holds the lock.
 	release := func(version string) map[string]any {
 		body := r.bodies[version]
 		sum := sha256.Sum256(body)
@@ -114,8 +157,8 @@ func (r *dlRepo) serve(t *testing.T) {
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.hits = append(r.hits, req.URL.Path)
-		r.mu.Unlock()
 		if version, ok := strings.CutPrefix(req.URL.Path, "/dl/"); ok {
 			body, known := r.bodies[version]
 			if !known {
@@ -362,14 +405,14 @@ func TestDownloadRefusesToGuessWhichFileIsTheBinary(t *testing.T) {
 
 	// A release carrying exactly one file has one answer, and asking for a
 	// pattern to state the obvious would be ceremony.
-	r.assets[dlNew] = []string{"tool-" + platform()}
+	r.attach(dlNew, "tool-"+platform())
 	res = r.bare("--check")
 	assert.Equal(t, 1, res.Code, "still a gate: there is something to install")
 	assert.Contains(t, res.Stdout, "asset      tool-"+platform())
 
 	// A glob reaches a name nobody wants to type, and one reaching two files
 	// is a pattern that has not chosen.
-	r.assets[dlNew] = []string{"tool-" + platform(), "tool-" + platform() + ".sha256"}
+	r.attach(dlNew, "tool-"+platform(), "tool-"+platform()+".sha256")
 	assert.Contains(t, r.bare("--asset", "tool-*", "--check").Stdout, "matches 2")
 
 	res = r.bare("--asset", "*"+runtime.GOARCH, "--check")
@@ -377,7 +420,7 @@ func TestDownloadRefusesToGuessWhichFileIsTheBinary(t *testing.T) {
 	assert.Contains(t, res.Stdout, "asset      tool-"+platform())
 
 	// A release with nothing for this platform names what it does have.
-	r.assets[dlNew] = []string{"tool-plan9-386"}
+	r.attach(dlNew, "tool-plan9-386")
 	res = r.bare("--asset", "tool-{os}-{arch}", "--check")
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stdout, "tool-"+platform(), "the one it wanted")
@@ -423,6 +466,28 @@ func TestDownloadRefusesWhatItCannotTrust(t *testing.T) {
 	assert.Empty(t, entries, "the refused download is cleaned up: %v", entries)
 }
 
+// TestDownloadRefusesAFolderItCannotWriteTo: /usr/local/bin belongs to root on
+// most machines, so this is the first failure a real install meets. It has to
+// arrive before the transfer rather than after it, and it has to say what to
+// do about it.
+func TestDownloadRefusesAFolderItCannotWriteTo(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	r := newDLRepo(t)
+	require.NoError(t, os.Chmod(r.bin, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(r.bin, 0o700) })
+
+	before := countDownloads(r.requests())
+	res := r.download()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "not writable")
+	assert.Contains(t, res.Stdout, "re-run with the rights")
+	assert.Equal(t, before, countDownloads(r.requests()),
+		"the refusal costs no transfer, which is the whole point of staging in the target folder")
+	assert.NoFileExists(t, r.installed())
+}
+
 // TestDownloadWithoutAPublishedChecksum: GitHub Enterprise versions before
 // asset digests existed send none. That is a check that cannot be made, not a
 // reason to refuse, and it is said out loud because it is also what makes the
@@ -430,7 +495,7 @@ func TestDownloadRefusesWhatItCannotTrust(t *testing.T) {
 func TestDownloadWithoutAPublishedChecksum(t *testing.T) {
 	requireShell(t)
 	r := newDLRepo(t)
-	r.digests = false
+	r.withoutDigests()
 
 	res := r.download()
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -450,8 +515,7 @@ func TestDownloadReachesAnyPublishedVersion(t *testing.T) {
 	requireShell(t)
 	const candidate = "1.2.0-rc.1"
 	r := newDLRepo(t)
-	r.bodies[candidate] = dlScript(candidate)
-	r.assets[candidate] = []string{"tool-" + platform()}
+	r.publish(candidate, "tool-"+platform())
 
 	require.Equal(t, 0, r.download().Code)
 	assert.Equal(t, dlNew, r.version(r.installed()), "the candidate is passed over")
@@ -476,7 +540,7 @@ func TestDownloadReachesAnyPublishedVersion(t *testing.T) {
 func TestDownloadReadsTheRepositoryTagsHoweverTheyAreSpelled(t *testing.T) {
 	requireShell(t)
 	r := newDLRepo(t)
-	r.tagPrefix = ""
+	r.tagsAs("")
 
 	res := r.download("--check")
 	assert.Equal(t, 1, res.Code)
@@ -491,7 +555,7 @@ func TestDownloadReadsTheRepositoryTagsHoweverTheyAreSpelled(t *testing.T) {
 	// A monorepo publishing a release per module is the other end of the
 	// same idea, and the prefix is what filters the listing down to one.
 	r2 := newDLRepo(t)
-	r2.tagPrefix = "tool/v"
+	r2.tagsAs("tool/v")
 	res = r2.download("--tag-prefix", "tool/v")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, dlNew, r2.version(r2.installed()))
@@ -575,7 +639,7 @@ func TestDownloadRefusesADestinationItMustNotReplace(t *testing.T) {
 func TestDownloadPipeSeesTheAssetUnderItsOwnName(t *testing.T) {
 	requireShell(t)
 	r := newDLRepo(t)
-	r.assets[dlNew] = []string{"tool_1.1.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"}
+	r.attach(dlNew, "tool_1.1.0_"+runtime.GOOS+"_"+runtime.GOARCH+".tar.gz")
 
 	res := r.bare("--asset", "tool_{version}_{os}_{arch}.tar.gz",
 		"--pipe", `case "$DISPAT_ASSET" in *.tar.gz) echo "suffix kept";; *) echo "suffix lost: $DISPAT_ASSET";; esac`)
