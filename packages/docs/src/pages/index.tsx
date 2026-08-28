@@ -342,7 +342,7 @@ function Projects(): React.ReactElement {
         The first monorepo dispat releases is its own: every tag, changelog, GitHub release and container image of this
         project, and this documentation site, ship through a dispat run.
       </p>
-      <div className={styles.features}>
+      <div className={styles.projects}>
         {repository.users.map((user, i) => (
           <div className={styles.feature} key={i}>
             <p>

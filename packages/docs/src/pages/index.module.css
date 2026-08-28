@@ -89,6 +89,15 @@
   gap: 1.5rem;
 }
 
+/* The README's projects list is sized by its content, not by a fixed column
+   count: one project takes the whole row rather than leaving an empty half
+   beside it, and each addition packs into columns on its own. */
+.projects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 1.5rem;
+}
+
 @media (max-width: 996px) {
   .features {
     grid-template-columns: 1fr;
