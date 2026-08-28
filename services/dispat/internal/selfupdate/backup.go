@@ -2,12 +2,11 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 )
 
 // BackupVersion is the version the kept binary reports, or an error when
@@ -48,59 +47,32 @@ func parseVersionOutput(out string) string {
 
 // Rollback restores the backup over the running binary.
 //
-// It rotates rather than moves: the binary being replaced becomes the new
-// backup, so a rollback is itself reversible and no version is ever lost. The
-// backup is run before any of that, for the same reason a download is: a
-// corrupt file must not be discovered after it is the only dispat left.
+// The backup is run before any of that, for the same reason a download is: a
+// corrupt file must not be discovered after it is the only dispat left. The
+// rotation itself is Restore's, which the download command shares.
 func Rollback(ctx context.Context, exe string) (from, to string, err error) {
 	if exe == "" {
 		if exe, err = Executable(); err != nil {
 			return "", "", fmt.Errorf("selfupdate: locating the running binary: %w", err)
 		}
 	}
-	backup := BackupPath(exe)
 	to, err = BackupVersion(ctx, exe)
 	if err != nil {
 		return "", "", err
 	}
 	from = parseVersionOutput(runVersion(ctx, exe))
-
-	dir := filepath.Dir(exe)
-	parked, err := os.CreateTemp(dir, tempPattern(exe, "rollback"))
-	if err != nil {
-		return "", "", fmt.Errorf("selfupdate: %s is not writable (%w); "+
-			"re-run with the rights to replace %s", dir, err, exe)
-	}
-	parkedName := parked.Name()
-	parked.Close()
-	// CreateTemp made the file so the name is ours; the rename needs it gone
-	// on the platforms that will not rename onto an existing file.
-	if err := os.Remove(parkedName); err != nil {
-		return "", "", fmt.Errorf("selfupdate: %s: %w", parkedName, err)
-	}
-
-	if err := os.Rename(exe, parkedName); err != nil {
-		return "", "", fmt.Errorf("selfupdate: moving %s aside: %w", exe, err)
-	}
-	if err := os.Rename(backup, exe); err != nil {
-		if back := os.Rename(parkedName, exe); back != nil {
-			return "", "", fmt.Errorf("selfupdate: restoring %s failed (%w) and putting the current binary "+
-				"back failed too (%v): it is at %s", exe, err, back, parkedName)
+	if err := Restore(exe); err != nil {
+		if errors.Is(err, ErrNoBackup) {
+			return "", "", err
 		}
-		return "", "", fmt.Errorf("selfupdate: restoring %s: %w", exe, err)
+		// A rotation that put the backup in place and then failed to keep the
+		// replaced binary is a rollback that happened, so it is reported as
+		// one, with the leg that did not.
+		if _, statErr := os.Stat(exe); statErr == nil && strings.Contains(err.Error(), "as the new backup failed") {
+			return from, to, err
+		}
+		return "", "", err
 	}
-	// The third leg of the rotate, and a plain rename rather than Replace:
-	// Replace puts a file in exe's place, which is what the leg above already
-	// did, and running it here would swap the two straight back.
-	if err := os.Rename(parkedName, backup); err != nil {
-		// exe is the rolled-back binary either way, which is what was asked
-		// for; only the new backup is missing. Say so rather than report a
-		// rollback that did happen as a failure.
-		return from, to, fmt.Errorf("selfupdate: rolled back to %s, but keeping %s as the new backup failed: %w",
-			to, from, err)
-	}
-	now := time.Now()
-	_ = os.Chtimes(backup, now, now)
 	return from, to, nil
 }
 

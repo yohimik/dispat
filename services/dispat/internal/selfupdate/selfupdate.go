@@ -169,5 +169,16 @@ func PruneBackup(exe string, now time.Time) bool {
 	return os.Remove(backup) == nil
 }
 
+// commandOr is the command word a Source or an Installer names in what it
+// reports. It is the word the operator typed rather than the package doing the
+// work, because "selfupdate: listing releases" under `dispat download` names
+// the wrong thing entirely, and self-update is the one that needs no answer.
+func commandOr(command string) string {
+	if command == "" {
+		return "selfupdate"
+	}
+	return command
+}
+
 // CurrentAssetName is AssetName for the platform this binary runs on.
 func CurrentAssetName() string { return AssetName(runtime.GOOS, runtime.GOARCH) }

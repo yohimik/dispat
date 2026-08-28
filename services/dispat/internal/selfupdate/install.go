@@ -27,13 +27,46 @@ const (
 	smokeTimeout = 30 * time.Second
 )
 
-// Installer puts a downloaded release in the running binary's place.
+// Validator inspects a downloaded file before an installer commits to it.
+//
+// It is a strategy rather than a step because the two callers can trust
+// different things: replacing dispat with dispat can insist the new binary
+// runs and reports the version the release promised, and installing an
+// unknown tool can insist on nothing at all, since a foreign binary need not
+// answer --version and one downloaded for another platform cannot run here.
+type Validator interface {
+	Validate(ctx context.Context, path string) error
+}
+
+// VersionValidator runs the downloaded binary and requires its output to name
+// the version that was asked for. A file that downloaded intact can still be
+// the wrong thing entirely, and finding that out after the swap means finding
+// it out with no working binary left.
+type VersionValidator struct{ Want string }
+
+// Validate runs path and reports what it found, if anything is wrong with it.
+func (v VersionValidator) Validate(ctx context.Context, path string) error {
+	return smokeTest(ctx, path, v.Want)
+}
+
+// Installer puts a downloaded release asset in a binary's place.
 type Installer struct {
-	// Exe is the binary to replace. Empty means the running one.
+	// Exe is the binary to replace. Empty means the running one. A path
+	// nothing occupies yet is a first install rather than a replacement.
 	Exe    string
 	Client *http.Client // default: a 10m-timeout client
-	Log    zerolog.Logger
+	// Validator is what the downloaded file has to satisfy before anything is
+	// moved. Nil accepts whatever arrived, which is all an installer can do
+	// for a binary it knows nothing about.
+	Validator Validator
+	// Command is the command word this installer's failures name. Empty is
+	// "selfupdate"; see commandOr.
+	Command string
+	Log     zerolog.Logger
 }
+
+// what names this installer in the errors it returns.
+func (i *Installer) what() string { return commandOr(i.Command) }
 
 func (i *Installer) exe() (string, error) {
 	if i.Exe != "" {
@@ -49,32 +82,25 @@ func (i *Installer) client() *http.Client {
 	return &http.Client{Timeout: downloadTimeout}
 }
 
-// Install downloads the asset, satisfies itself that what arrived is the
-// binary it asked for, and puts it in place. It answers where the outgoing
-// binary was kept.
+// Fetch downloads the asset into dir and answers the file it wrote.
 //
-// Nothing is moved until every check has passed, so a failed update leaves the
-// working binary exactly where it was.
-func (i *Installer) Install(ctx context.Context, a Asset, want string) (backup string, err error) {
-	exe, err := i.exe()
+// The file is staged in dir rather than in the system temp folder for two
+// reasons: a rename out of it must not cross a filesystem, and a directory
+// that cannot be written to should cost a refusal rather than fifteen
+// megabytes. On every failure the staged file is removed; on success it
+// belongs to the caller, to move, to read or to delete.
+//
+// target is the file the download is destined for. Only its extension is read,
+// and it matters on Windows: the staged file keeps it, because Windows will
+// not execute a file that carries none, and both the version check and the
+// pipe run what was staged.
+func (i *Installer) Fetch(ctx context.Context, a Asset, dir, target string) (path string, err error) {
+	tmp, err := os.CreateTemp(dir, tempPattern(target, "download"))
 	if err != nil {
-		return "", fmt.Errorf("selfupdate: locating the running binary: %w", err)
-	}
-	dir := filepath.Dir(exe)
-
-	// The temp file is created before the download and in the install
-	// directory, for two reasons: a rename across filesystems fails, and a
-	// directory that cannot be written to should cost a refusal rather than
-	// fifteen megabytes.
-	tmp, err := os.CreateTemp(dir, tempPattern(exe, "update"))
-	if err != nil {
-		return "", fmt.Errorf("selfupdate: %s is not writable (%w); "+
-			"re-run with the rights to replace %s", dir, err, exe)
+		return "", fmt.Errorf("%s: %s is not writable (%w)", i.what(), dir, err)
 	}
 	tmpName := tmp.Name()
 	defer func() {
-		// On every failure path the download is removed; on success it has
-		// been renamed away and this finds nothing.
 		if err != nil {
 			_ = os.Remove(tmpName)
 		}
@@ -85,22 +111,58 @@ func (i *Installer) Install(ctx context.Context, a Asset, want string) (backup s
 		return "", err
 	}
 	if err = tmp.Close(); err != nil {
-		return "", fmt.Errorf("selfupdate: %s: %w", tmpName, err)
+		return "", fmt.Errorf("%s: %s: %w", i.what(), tmpName, err)
 	}
+	i.Log.Debug().Str("asset", a.Name).Str("staged", tmpName).
+		Msg(i.what() + ": asset downloaded and verified")
+	return tmpName, nil
+}
+
+// Install downloads the asset, satisfies itself that what arrived is the
+// binary it asked for, and puts it in place. It answers where the outgoing
+// binary was kept, which is empty when the path held nothing to keep.
+//
+// Nothing is moved until every check has passed, so a failed update leaves the
+// working binary exactly where it was.
+func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err error) {
+	exe, err := i.exe()
+	if err != nil {
+		return "", fmt.Errorf("%s: locating the running binary: %w", i.what(), err)
+	}
+	dir := filepath.Dir(exe)
+
+	tmpName, err := i.Fetch(ctx, a, dir, exe)
+	if err != nil {
+		if os.IsPermission(err) || strings.Contains(err.Error(), "is not writable") {
+			return "", fmt.Errorf("%w; re-run with the rights to replace %s", err, exe)
+		}
+		return "", err
+	}
+	defer func() {
+		// On every failure path below the download is removed; on success it
+		// has been renamed away and this finds nothing.
+		if err != nil {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
 	// The replacement inherits the mode of the binary it replaces, so an
 	// install that was deliberately group-only stays that way rather than
 	// being widened to whatever the umask allows. Owner-execute is the one
 	// bit forced on, because the next step runs the file; the binary being
-	// replaced is running, so in practice its mode already carries it.
+	// replaced is running, so in practice its mode already carries it. A path
+	// nothing occupies yet has no mode to inherit and takes 0755.
 	mode := os.FileMode(0o755)
 	if info, statErr := os.Stat(exe); statErr == nil {
 		mode = info.Mode().Perm() | 0o100
 	}
 	if err = os.Chmod(tmpName, mode); err != nil {
-		return "", fmt.Errorf("selfupdate: %s: %w", tmpName, err)
+		return "", fmt.Errorf("%s: %s: %w", i.what(), tmpName, err)
 	}
-	if err = smokeTest(ctx, tmpName, want); err != nil {
-		return "", err
+	if i.Validator != nil {
+		if err = i.Validator.Validate(ctx, tmpName); err != nil {
+			return "", err
+		}
 	}
 	return Replace(exe, tmpName)
 }
@@ -115,36 +177,43 @@ func (i *Installer) Install(ctx context.Context, a Asset, want string) (backup s
 func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
 	if err != nil {
-		return fmt.Errorf("selfupdate: %w", err)
+		return fmt.Errorf("%s: %w", i.what(), err)
 	}
 	resp, err := i.client().Do(req)
 	if err != nil {
-		return fmt.Errorf("selfupdate: downloading %s: %w", a.Name, err)
+		return fmt.Errorf("%s: downloading %s: %w", i.what(), a.Name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("selfupdate: downloading %s: unexpected status %s", a.Name, resp.Status)
+		return fmt.Errorf("%s: downloading %s: unexpected status %s", i.what(), a.Name, resp.Status)
 	}
 
 	sum := sha256.New()
 	n, err := io.Copy(f, io.LimitReader(io.TeeReader(resp.Body, sum), maxAsset+1))
 	if err != nil {
-		return fmt.Errorf("selfupdate: downloading %s: %w", a.Name, err)
+		return fmt.Errorf("%s: downloading %s: %w", i.what(), a.Name, err)
 	}
 	if n > maxAsset {
-		return fmt.Errorf("selfupdate: %s is larger than %d bytes", a.Name, int64(maxAsset))
+		return fmt.Errorf("%s: %s is larger than %d bytes", i.what(), a.Name, int64(maxAsset))
 	}
 	if a.Size > 0 && n != a.Size {
-		return fmt.Errorf("selfupdate: %s is %d bytes, the release says %d: the download is incomplete",
-			a.Name, n, a.Size)
+		return fmt.Errorf("%s: %s is %d bytes, the release says %d: the download is incomplete",
+			i.what(), a.Name, n, a.Size)
 	}
-	if want, ok := strings.CutPrefix(a.Digest, "sha256:"); ok {
-		if got := hex.EncodeToString(sum.Sum(nil)); !strings.EqualFold(got, want) {
-			return fmt.Errorf("selfupdate: %s hashes to %s, the release says %s: refusing to install it",
-				a.Name, got, want)
-		}
-		i.Log.Debug().Str("asset", a.Name).Msg("selfupdate: checksum matches the release digest")
+	want, ok := strings.CutPrefix(a.Digest, "sha256:")
+	if !ok {
+		// Older GitHub Enterprise versions publish no digest. The size check
+		// above is then the whole of what stands between a truncated transfer
+		// and an install, which is worth saying out loud.
+		i.Log.Warn().Str("asset", a.Name).
+			Msg(i.what() + ": the release publishes no checksum for this asset; only its size is verified")
+		return nil
 	}
+	if got := hex.EncodeToString(sum.Sum(nil)); !strings.EqualFold(got, want) {
+		return fmt.Errorf("%s: %s hashes to %s, the release says %s: refusing to install it",
+			i.what(), a.Name, got, want)
+	}
+	i.Log.Debug().Str("asset", a.Name).Msg(i.what() + ": checksum matches the release digest")
 	return nil
 }
 

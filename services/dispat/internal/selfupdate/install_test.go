@@ -74,8 +74,8 @@ func TestInstallReplacesTheBinaryAndKeepsTheOldOne(t *testing.T) {
 	newBinary := []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n")
 	asset, _ := assetServer(t, newBinary)
 
-	i := &Installer{Exe: exe}
-	backup, err := i.Install(context.Background(), asset, "1.1.0")
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	backup, err := i.Install(context.Background(), asset)
 	require.NoError(t, err)
 
 	assert.Equal(t, filepath.Join(dir, "dispat.backup"), backup)
@@ -128,8 +128,8 @@ func TestInstallRefusesWhatDoesNotMatchTheRelease(t *testing.T) {
 				want = "2.0.0"
 			}
 
-			i := &Installer{Exe: exe}
-			_, err := i.Install(context.Background(), asset, want)
+			i := &Installer{Exe: exe, Validator: VersionValidator{Want: want}}
+			_, err := i.Install(context.Background(), asset)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 
@@ -152,8 +152,8 @@ func TestInstallRefusesABinaryThatDoesNotRun(t *testing.T) {
 	fakeBinary(t, exe, "1.0.0")
 
 	asset, _ := assetServer(t, []byte("\x00\x01not a program"))
-	i := &Installer{Exe: exe}
-	_, err := i.Install(context.Background(), asset, "1.1.0")
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), asset)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not run")
 	assert.Contains(t, string(read(t, exe)), "1.0.0")
@@ -177,8 +177,8 @@ func TestInstallRefusesBeforeDownloadingWhenItCannotWrite(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits++ }))
 	defer srv.Close()
 
-	i := &Installer{Exe: exe}
-	_, err := i.Install(context.Background(), Asset{Name: "dispat", URL: srv.URL}, "1.1.0")
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), Asset{Name: "dispat", URL: srv.URL})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not writable")
 	assert.Contains(t, err.Error(), "re-run with the rights")
@@ -198,8 +198,8 @@ func TestInstallReportsADownloadThatFails(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	i := &Installer{Exe: exe}
-	_, err := i.Install(context.Background(), Asset{Name: "dispat-x", URL: srv.URL}, "1.1.0")
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), Asset{Name: "dispat-x", URL: srv.URL})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "404")
 }
@@ -215,8 +215,8 @@ func TestInstallAcceptsAReleaseWithoutADigest(t *testing.T) {
 
 	asset, _ := assetServer(t, []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n"))
 	asset.Digest = ""
-	i := &Installer{Exe: exe}
-	_, err := i.Install(context.Background(), asset, "1.1.0")
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), asset)
 	require.NoError(t, err)
 	assert.Contains(t, string(read(t, exe)), "1.1.0")
 }
@@ -280,15 +280,75 @@ func TestInstallerDefaultsToTheRunningBinary(t *testing.T) {
 // nothing to undo, and the message has to name what it could not move.
 func TestReplaceReportsAFirstRenameThatFails(t *testing.T) {
 	requireExec(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "dispat")
 	incoming := filepath.Join(dir, "incoming")
+	fakeBinary(t, exe, "1.0.0")
 	fakeBinary(t, incoming, "1.1.0")
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	_, err := Replace(exe, incoming)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "moving "+exe+" aside")
 	assert.FileExists(t, incoming, "and the file that would have replaced it is still there")
+	assert.Contains(t, string(read(t, exe)), "1.0.0", "the binary it could not move is untouched")
+}
+
+// TestReplaceInstallsWhereNothingWasBefore: a path nothing occupies yet is a
+// first install rather than a replacement. There is nothing to step aside, so
+// the single rename is the whole of it and no backup is reported: `dispat
+// download` puts a tool somewhere for the first time through exactly this.
+func TestReplaceInstallsWhereNothingWasBefore(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tool")
+	incoming := filepath.Join(dir, "incoming")
+	fakeBinary(t, incoming, "1.1.0")
+
+	backup, err := Replace(exe, incoming)
+	require.NoError(t, err)
+	assert.Empty(t, backup, "there was nothing to keep")
+	assert.Contains(t, string(read(t, exe)), "1.1.0")
+	assert.NoFileExists(t, BackupPath(exe), "and none was invented")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "nothing is left beside it: %v", names(entries))
+}
+
+// TestRestoreRotatesWithoutRunningAnything: the rotation the two restores
+// share. It asks nothing of either file, which is what lets `dispat download`
+// use it for a tool that answers no --version at all, and it rotates rather
+// than moves, so a second call returns.
+func TestRestoreRotatesWithoutRunningAnything(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tool")
+	require.NoError(t, os.WriteFile(exe, []byte("current"), 0o755))
+	require.NoError(t, os.WriteFile(BackupPath(exe), []byte("previous"), 0o755))
+
+	require.NoError(t, Restore(exe))
+	assert.Equal(t, "previous", string(read(t, exe)))
+	assert.Equal(t, "current", string(read(t, BackupPath(exe))))
+
+	require.NoError(t, Restore(exe))
+	assert.Equal(t, "current", string(read(t, exe)), "a second restore returns")
+	assert.Equal(t, "previous", string(read(t, BackupPath(exe))))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "nothing is parked and forgotten between the renames: %v", names(entries))
+
+	// The backup's clock starts at the rotation, so the week PruneBackup
+	// counts is the week since it became one.
+	info, err := os.Stat(BackupPath(exe))
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), info.ModTime(), time.Minute)
+
+	assert.ErrorIs(t, Restore(filepath.Join(dir, "absent")), ErrNoBackup)
 }
 
 // TestReplaceReportsAnUnremovableBackup: the previous backup is removed first

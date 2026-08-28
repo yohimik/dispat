@@ -18,6 +18,21 @@ type Runner interface {
 	Run(ctx context.Context, dir, command string, env []string, stdout, stderr io.Writer) error
 }
 
+// DefaultShell is the shell a runner falls back to when none is configured.
+// It is a function rather than a slice so no caller can edit the default out
+// from under the others.
+func DefaultShell() []string { return []string{"/bin/sh", "-c"} }
+
+// SetProcessGroup puts a command in a process group of its own, where the
+// platform has them, so cancelling it signals the children it left behind
+// rather than only the shell holding their output pipes.
+//
+// Exported for the one command outside this package that runs a shell string
+// of its own: `dispat download --pipe` feeds the command it is given on the
+// standard input, which no Runner does, and an interrupt reaching an unpacker
+// halfway through a folder on PATH has to reach all of it.
+func SetProcessGroup(cmd *exec.Cmd) { setSysProcAttr(cmd) }
+
 // ShellRunner runs commands through a shell, like npm scripts do.
 type ShellRunner struct {
 	// Shell is the command prefix the script is appended to, e.g.
@@ -37,7 +52,7 @@ var _ Runner = (*ShellRunner)(nil)
 func (r *ShellRunner) Run(ctx context.Context, dir, command string, env []string, stdout, stderr io.Writer) error {
 	shell := r.Shell
 	if len(shell) == 0 {
-		shell = []string{"/bin/sh", "-c"}
+		shell = DefaultShell()
 	}
 	args := append(append([]string{}, shell[1:]...), command)
 	cmd := exec.CommandContext(ctx, shell[0], args...)

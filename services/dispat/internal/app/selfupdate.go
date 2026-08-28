@@ -133,8 +133,12 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 	if !opts.JSON {
 		fmt.Fprintf(opts.Out, "downloading %s (%s)\n", asset.Name, humanBytes(asset.Size))
 	}
-	installer := &selfupdate.Installer{Client: opts.Source.Client, Log: opts.Log}
-	backup, err := installer.Install(ctx, asset, rel.Version.String())
+	installer := &selfupdate.Installer{
+		Client:    opts.Source.Client,
+		Validator: selfupdate.VersionValidator{Want: rel.Version.String()},
+		Log:       opts.Log,
+	}
+	backup, err := installer.Install(ctx, asset)
 	if err != nil {
 		opts.Log.Error().Err(err).Msg("self-update failed")
 		return false, err

@@ -44,10 +44,18 @@ type Source struct {
 	Owner     string // default DefaultOwner
 	Repo      string // default DefaultRepo
 	TagPrefix string // default DefaultTagPrefix
+	// AnyTag drops the tag filter: every tag whose whole text parses as a
+	// version is a release. It is what a repository tagging "1.2.3" needs and
+	// what no TagPrefix can express, since the empty string is how a Source
+	// asks for the default prefix rather than for none.
+	AnyTag bool
 	// Prerelease keeps prereleases in the running. It means "consider them
 	// too", not "prefer them": ordering still decides, so a released 1.1.0
 	// still beats its own 1.1.0-rc.1.
 	Prerelease bool
+	// Command is the command word this source's failures name. Empty is
+	// "selfupdate"; see commandOr.
+	Command string
 	// Token authenticates the API calls, which only raises the rate limit:
 	// the releases of a public repository are readable without one.
 	Token  string
@@ -142,11 +150,17 @@ func (s *Source) repo() string {
 }
 
 func (s *Source) prefix() string {
+	if s.AnyTag {
+		return ""
+	}
 	if s.TagPrefix == "" {
 		return DefaultTagPrefix
 	}
 	return s.TagPrefix
 }
+
+// what names this source in the errors it returns.
+func (s *Source) what() string { return commandOr(s.Command) }
 
 func (s *Source) client() *http.Client {
 	if s.Client != nil {
@@ -162,7 +176,7 @@ func (s *Source) client() *http.Client {
 func (s *Source) get(ctx context.Context, url string, tolerate int, what string) ([]byte, http.Header, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("selfupdate: %w", err)
+		return nil, nil, 0, fmt.Errorf("%s: %w", s.what(), err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	if s.Token != "" {
@@ -170,7 +184,7 @@ func (s *Source) get(ctx context.Context, url string, tolerate int, what string)
 	}
 	resp, err := s.client().Do(req)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("selfupdate: %s: %w", what, err)
+		return nil, nil, 0, fmt.Errorf("%s: %s: %w", s.what(), what, err)
 	}
 	defer resp.Body.Close()
 	// One byte past the cap, so a body that reaches it is recognised as
@@ -178,15 +192,15 @@ func (s *Source) get(ctx context.Context, url string, tolerate int, what string)
 	// error about a document that was fine until it was cut.
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxListBody+1))
 	if err != nil {
-		return nil, nil, resp.StatusCode, fmt.Errorf("selfupdate: %s: reading response: %w", what, err)
+		return nil, nil, resp.StatusCode, fmt.Errorf("%s: %s: reading response: %w", s.what(), what, err)
 	}
 	if len(data) > maxListBody {
 		return nil, nil, resp.StatusCode, fmt.Errorf(
-			"selfupdate: %s: the response is larger than %d bytes", what, int64(maxListBody))
+			"%s: %s: the response is larger than %d bytes", s.what(), what, int64(maxListBody))
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != tolerate {
-		return nil, nil, resp.StatusCode, fmt.Errorf("selfupdate: %s: unexpected status %s: %s",
-			what, resp.Status, strings.TrimSpace(string(data)))
+		return nil, nil, resp.StatusCode, fmt.Errorf("%s: %s: unexpected status %s: %s",
+			s.what(), what, resp.Status, strings.TrimSpace(string(data)))
 	}
 	return data, resp.Header, resp.StatusCode, nil
 }
@@ -207,7 +221,7 @@ func (s *Source) Latest(ctx context.Context) (Release, error) {
 		}
 		var list []apiRelease
 		if err := json.Unmarshal(data, &list); err != nil {
-			return Release{}, fmt.Errorf("selfupdate: listing releases: %w", err)
+			return Release{}, fmt.Errorf("%s: listing releases: %w", s.what(), err)
 		}
 		for _, raw := range list {
 			rel, ok := s.convert(raw)
@@ -224,7 +238,7 @@ func (s *Source) Latest(ctx context.Context) (Release, error) {
 		return Release{}, ErrNoRelease
 	}
 	s.Log.Debug().Str("tag", best.Tag).Int("notes", len(best.Body)).
-		Msg("selfupdate: highest release selected")
+		Msg(s.what() + ": highest release selected")
 	return best, nil
 }
 
@@ -235,7 +249,7 @@ func (s *Source) At(ctx context.Context, version string) (Release, error) {
 	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
 	parsed, err := ccme.ParseVersion(version)
 	if err != nil {
-		return Release{}, fmt.Errorf("selfupdate: %q is not a version: %w", version, err)
+		return Release{}, fmt.Errorf("%s: %q is not a version: %w", s.what(), version, err)
 	}
 	tag := s.prefix() + parsed.String()
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", s.api(), s.owner(), s.repo(), tag)
@@ -248,7 +262,7 @@ func (s *Source) At(ctx context.Context, version string) (Release, error) {
 	}
 	var raw apiRelease
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return Release{}, fmt.Errorf("selfupdate: looking up %s: %w", tag, err)
+		return Release{}, fmt.Errorf("%s: looking up %s: %w", s.what(), tag, err)
 	}
 	if raw.Draft {
 		return Release{}, fmt.Errorf("%w: %s is a draft", ErrNoRelease, tag)
@@ -325,14 +339,14 @@ func (s *Source) convert(raw apiRelease) (Release, bool) {
 	}
 	version, err := ccme.ParseVersion(rest)
 	if err != nil {
-		s.Log.Debug().Str("tag", raw.TagName).Msg("selfupdate: tag carries no version")
+		s.Log.Debug().Str("tag", raw.TagName).Msg(s.what() + ": tag carries no version")
 		return Release{}, false
 	}
 	if !s.Prerelease && (raw.Prerelease || version.IsPrerelease()) {
 		return Release{}, false
 	}
 	s.Log.Trace().Str("tag", raw.TagName).Int("notes", len(raw.Body)).
-		Msg("selfupdate: release considered")
+		Msg(s.what() + ": release considered")
 	return toRelease(raw, version), true
 }
 
