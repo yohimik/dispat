@@ -1,5 +1,20 @@
 # Changelog
 
+## packages/docs/v1.3.1 (2026-08-28)
+
+### Fixes
+
+- the footer columns wrap through a grid
+The flex row either held every column or crushed them, and wrapping under
+space-between flung a partial row to the edges. The auto-fit grid degrades
+from three columns through two to a single stack, every column keeping the
+same measure as its neighbours at every step; infima's row margins and col
+padding are neutralised since the grid gap owns the spacing now.
+- the projects grid is sized by its content
+The section reused the two-column features grid, so the single project the
+README lists today rendered beside an empty half. auto-fit lets one card
+take the row and packs future additions into columns on their own.
+
 ## packages/docs/v1.3.0 (2026-08-28)
 
 ### Dependencies
