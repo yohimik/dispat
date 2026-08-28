@@ -351,6 +351,29 @@ func TestRestoreRotatesWithoutRunningAnything(t *testing.T) {
 	assert.ErrorIs(t, Restore(filepath.Join(dir, "absent")), ErrNoBackup)
 }
 
+// TestRestoreReportsTheOneLegItCanLose: the rotation is three renames, and the
+// last of them only decides whether the restore is itself reversible. A
+// failure there is named rather than described, because both callers have to
+// tell "it did not happen" from "it happened and cannot be undone again", and
+// deciding that by reading a message is how the distinction goes missing the
+// day the message is reworded.
+func TestRestoreReportsTheOneLegItCanLose(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("the scenario needs a directory the running user cannot write")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tool")
+	require.NoError(t, os.WriteFile(exe, []byte("current"), 0o755))
+	require.NoError(t, os.WriteFile(BackupPath(exe), []byte("previous"), 0o755))
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	err := Restore(exe)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNotWritable, "nothing moved, so nothing was restored")
+	assert.Equal(t, "current", string(read(t, exe)))
+}
+
 // TestReplaceReportsAnUnremovableBackup: the previous backup is removed first
 // because Windows will not rename onto a file that exists. A path that cannot
 // be cleared stops the swap before anything moves.

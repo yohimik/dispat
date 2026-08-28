@@ -374,11 +374,19 @@ func downloadRollback(opts DownloadOptions, target download.Target) (bool, error
 		}
 		return true, nil
 	}
-	if err := selfupdate.Restore(target.Path()); err != nil {
-		if errors.Is(err, selfupdate.ErrNoBackup) {
-			err = fmt.Errorf("%w; a copy is kept for a week after a download, "+
-				"and any version can be installed with --release <version>", err)
-		}
+	switch err := selfupdate.Restore(target.Path()); {
+	case errors.Is(err, selfupdate.ErrBackupNotKept):
+		// The tool is restored, which is what was asked for; only the copy
+		// that would make this reversible again is missing. Reporting that as
+		// a failure would send somebody looking for a rollback that happened.
+		opts.Log.Warn().Err(err).Str("path", target.Path()).
+			Msg("rolled back, but the binary it replaced is not kept as the new backup")
+	case errors.Is(err, selfupdate.ErrNoBackup):
+		err = fmt.Errorf("%w; a copy is kept for a week after a download, "+
+			"and any version can be installed with --release <version>", err)
+		opts.Log.Error().Err(err).Msg("rollback failed")
+		return false, err
+	case err != nil:
 		opts.Log.Error().Err(err).Msg("rollback failed")
 		return false, err
 	}

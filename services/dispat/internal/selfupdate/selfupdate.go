@@ -41,6 +41,20 @@ const (
 // ErrNoBackup is what a rollback with nothing to roll back to reports.
 var ErrNoBackup = errors.New("no backup to roll back to")
 
+// ErrNotWritable is a directory that will not take the file an install has to
+// stage in it. Named rather than left as text because the advice the caller
+// adds ("re-run with the rights to replace ...") is about this failure and no
+// other, and matching on a message to decide that is how the advice goes
+// missing the day the message is reworded.
+var ErrNotWritable = errors.New("the install directory is not writable")
+
+// ErrBackupNotKept reports a restore that happened while the binary it
+// replaced could not be kept as the new backup. It is the one partial outcome
+// either restore has: what was asked for is done, and only the copy that would
+// have made it reversible is missing, so a caller reports a success with a
+// caveat rather than a failure.
+var ErrBackupNotKept = errors.New("the replaced binary was not kept as the new backup")
+
 // Origin is how the running binary was produced, which decides how it is
 // updated: a release binary is replaced in place, a `go install` build is
 // replaced by another `go install`, and a local build is not replaced at all.

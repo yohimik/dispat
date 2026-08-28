@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,7 +98,7 @@ func (i *Installer) client() *http.Client {
 func (i *Installer) Fetch(ctx context.Context, a Asset, dir, target string) (path string, err error) {
 	tmp, err := os.CreateTemp(dir, tempPattern(target, "download"))
 	if err != nil {
-		return "", fmt.Errorf("%s: %s is not writable (%w)", i.what(), dir, err)
+		return "", fmt.Errorf("%s: %s: %w (%v)", i.what(), dir, ErrNotWritable, err)
 	}
 	tmpName := tmp.Name()
 	defer func() {
@@ -133,7 +134,7 @@ func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err er
 
 	tmpName, err := i.Fetch(ctx, a, dir, exe)
 	if err != nil {
-		if os.IsPermission(err) || strings.Contains(err.Error(), "is not writable") {
+		if errors.Is(err, ErrNotWritable) {
 			return "", fmt.Errorf("%w; re-run with the rights to replace %s", err, exe)
 		}
 		return "", err

@@ -69,8 +69,8 @@ func Restore(exe string) (err error) {
 	dir := filepath.Dir(exe)
 	parked, err := os.CreateTemp(dir, tempPattern(exe, "rollback"))
 	if err != nil {
-		return fmt.Errorf("selfupdate: %s is not writable (%w); "+
-			"re-run with the rights to replace %s", dir, err, exe)
+		return fmt.Errorf("selfupdate: %s: %w (%v); re-run with the rights to replace %s",
+			dir, ErrNotWritable, err, exe)
 	}
 	parkedName := parked.Name()
 	parked.Close()
@@ -95,10 +95,9 @@ func Restore(exe string) (err error) {
 	// did, and running it here would swap the two straight back.
 	if err := os.Rename(parkedName, backup); err != nil {
 		// exe is the restored binary either way, which is what was asked for;
-		// only the new backup is missing. The caller reports a restore that
-		// did happen rather than a failure.
-		return fmt.Errorf("selfupdate: restored %s, but keeping the replaced binary as the new backup failed: %w",
-			exe, err)
+		// only the new backup is missing. The sentinel is what lets the caller
+		// report a restore that did happen rather than a failure.
+		return fmt.Errorf("selfupdate: restored %s, but %w: %v", exe, ErrBackupNotKept, err)
 	}
 	touch(backup)
 	return nil

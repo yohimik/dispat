@@ -62,13 +62,10 @@ func Rollback(ctx context.Context, exe string) (from, to string, err error) {
 	}
 	from = parseVersionOutput(runVersion(ctx, exe))
 	if err := Restore(exe); err != nil {
-		if errors.Is(err, ErrNoBackup) {
-			return "", "", err
-		}
 		// A rotation that put the backup in place and then failed to keep the
 		// replaced binary is a rollback that happened, so it is reported as
 		// one, with the leg that did not.
-		if _, statErr := os.Stat(exe); statErr == nil && strings.Contains(err.Error(), "as the new backup failed") {
+		if errors.Is(err, ErrBackupNotKept) {
 			return from, to, err
 		}
 		return "", "", err
