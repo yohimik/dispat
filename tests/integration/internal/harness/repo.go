@@ -288,6 +288,40 @@ func (r *Repo) DispatCommand(args ...string) string {
 	return shQuote(r.dispatBin) + " " + strings.Join(args, " ")
 }
 
+// Shell runs a shell script with the binary under test first on PATH as
+// `dispat`, which is what a provisioning script or an install manifest actually
+// is: a file of ordinary command lines, run by sh rather than by a test. The
+// script is written exactly as its author would write it, and the symlink is
+// what makes the name resolve to the binary under test.
+//
+// The environment is every other invocation's, coverage wiring included, so the
+// dispat processes the script spawns contribute their counters like any other
+// run's. A script writes its own `set -e` when it wants one: whether a manifest
+// stops at the first failure is exactly what some of these scenarios are about.
+func (r *Repo) Shell(script string) RunResult {
+	r.T.Helper()
+	binDir := r.T.TempDir()
+	require.NoError(r.T, os.Symlink(r.dispatBin, filepath.Join(binDir, "dispat")))
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Dir = r.Root
+	cmd.Env = append(append(baseEnv(), defaultEnv...),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if dir := coverDir(); dir != "" {
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	code := 0
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			r.T.Fatalf("launching the shell: %v", err)
+		}
+		code = exitErr.ExitCode()
+	}
+	return RunResult{Code: code, Stdout: stdout.String(), Stderr: stderr.String(), Events: ParseEvents(stdout.String())}
+}
+
 // CommandBin runs an arbitrary invocation of a *different* dispat binary —
 // one BuildVersioned stamped with a version, or one a self-update just put in
 // place. Everything else is the ordinary path, so the counters of the binary

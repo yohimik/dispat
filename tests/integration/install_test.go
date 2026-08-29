@@ -815,6 +815,52 @@ func TestInstallNamesAFlagThatIsNotIts(t *testing.T) {
 	assert.NoFileExists(t, r.installed())
 }
 
+// TestInstallManifestIsAShellScript: the property the install command is meant
+// to carry, asserted as a script rather than as a sequence of assertions. A
+// list of pinned installs is a shell script, and a shell script under `set -e`
+// is only usable if every line either does its work or stops the file: the
+// installs are idempotent, so re-running the manifest costs no transfer, and a
+// usage mistake exits 2 rather than being ignored, so a mistyped line can never
+// be mistaken for a completed one.
+func TestInstallManifestIsAShellScript(t *testing.T) {
+	requireShell(t)
+	r := newToolRepo(t)
+	r.publish("2.0.0", "other-"+platform(), "checksums.txt")
+
+	manifest := func() string {
+		return "set -e\n" +
+			"dispat install acme/tool --release " + toolOld +
+			" --api-url " + r.api + " --bin-dir " + r.bin + " --asset 'tool-{os}-{arch}'\n" +
+			"dispat install acme/tool --release 2.0.0" +
+			" --api-url " + r.api + " --bin-dir " + r.bin + " --asset 'other-{os}-{arch}' --as other\n"
+	}
+
+	res := r.Shell(manifest())
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, toolOld, r.version(r.installed()))
+	assert.Equal(t, "2.0.0", r.version(filepath.Join(r.bin, "other"+exeSuffix())))
+
+	// Run it again, the way a provisioning script runs on every boot: both
+	// lines are satisfied already, so the file exits 0 having downloaded
+	// nothing.
+	before := countDownloads(r.requests())
+	res = r.Shell(manifest())
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, before, countDownloads(r.requests()), "a second run pays for no transfer")
+
+	// A line asking for the version with commit's --tag stops the file instead
+	// of installing something else, which is what makes `set -e` worth writing.
+	before = countDownloads(r.requests())
+	res = r.Shell("set -e\n" +
+		"dispat install acme/tool --tag 1.2.0 --api-url " + r.api + " --bin-dir " + r.bin + "\n" +
+		"dispat install acme/tool --release " + toolNew +
+		" --api-url " + r.api + " --bin-dir " + r.bin + " --asset 'tool-{os}-{arch}'\n")
+	assert.Equal(t, 2, res.Code, "the usage exit reaches the shell")
+	assert.Contains(t, res.Stdout+res.Stderr, "--tag is not an install flag")
+	assert.Equal(t, before, countDownloads(r.requests()), "and the line after it never ran")
+	assert.Equal(t, toolOld, r.version(r.installed()), "so the manifest's own version is still installed")
+}
+
 // TestInstallCommandWordKeepsItsScript: every command word permanently
 // shadows a run script of the same name, and "install" is a name a repository
 // might well have given one. The two-word spelling still reaches it.

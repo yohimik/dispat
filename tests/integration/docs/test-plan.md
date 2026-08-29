@@ -171,7 +171,8 @@ does what.
     makes "did the right file land" answerable by running it. What is pinned here is everything that could be assumed
     about dispat and cannot be assumed about a stranger's binary: which repository the argument names, which of the
     release's files is the binary, what the result is called and where it goes, whether it is a binary at all
-    (`--pipe`), and the idempotence the destination's own checksum decides.
+    (`--pipe`), and the idempotence the destination's own checksum decides. The idempotence and the usage exits are
+    what make a list of pinned installs a shell script, which one scenario runs as one.
 
 ### Manifests and editing
 
@@ -864,6 +865,7 @@ tool is a script that reports its own version, so every claim about which file l
 | `TestInstallTracesTheDecisionsItMade` | Each of the choices a download makes is traced at debug level, which is what answers "why did it install that" after the fact. |
 | `TestInstallRefusesABadCommandLineBeforeAnyRequest` | Every usage mistake is decided by the flags alone and costs the fake no question at all, a URL naming only a host among them, which used to read as the owner and send the request somewhere nobody asked for, and a flag belonging to another command. |
 | `TestInstallNamesAFlagThatIsNotIts` | `--tag 1.2.0` is the mistake anyone pinning a version makes, and used to read as commit's boolean `--tag` with `1.2.0` becoming a second repository. The refusal names the flag, says whose it is, points at `--release`, and arrives before a single request. |
+| `TestInstallManifestIsAShellScript` | A list of pinned installs is a shell script, run by `sh` with the binary on `PATH`: two `--release` lines under `set -e` install two tools that run and report their versions, running the same file again downloads nothing, and a line carrying a foreign flag exits 2 so the manifest stops there instead of installing something else. |
 | `TestInstallCommandWordKeepsItsScript` | Every command word permanently shadows a run script of the same name, and `install` is a name a repository might well have given one. The two-word spelling still reaches it. |
 
 ### Goal 23: the `compute` command (`compute_test.go`)
