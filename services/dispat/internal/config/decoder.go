@@ -55,24 +55,30 @@ import (
 type setter func(val any, at string) error
 
 // fields is one struct's whole config surface: every key a file may write
-// under the object, spelled the way the lowered tree spells it, and what
-// writing it does. A struct's table is built against a particular destination
-// (see fields.go), so a setter writes into that value and nowhere else.
+// under the object, spelled in lower case, and what writing it does. A file
+// spells the key however it likes and decodeObject folds it to find the setter.
+// A struct's table is built against a particular destination (see fields.go),
+// so a setter writes into that value and nowhere else.
 type fields map[string]setter
 
 // decodeObject fills one object from the map written for it.
 //
 // It is the only place the language's object rules live: the value has to be
-// an object, its keys are visited in order, a key the table does not hold is
-// unknown, and a key holding nothing says nothing.
+// an object, no two of its keys may fold together, its keys are visited in
+// order, a key the table does not hold is unknown, and a key holding nothing
+// says nothing. The table is keyed in lower case and the key is folded to find
+// its setter, which is what lets `logLevel` and `loglevel` both load.
 func decodeObject(val any, at string, f fields) error {
 	m, ok := val.(map[string]any)
 	if !ok {
 		return wants(at, "an object")
 	}
+	if err := refuseFoldDuplicates(m, at); err != nil {
+		return err
+	}
 	for _, key := range sortedKeys(m) {
 		path := keyPath(at, key)
-		set, known := f[key]
+		set, known := f[strings.ToLower(key)]
 		if !known {
 			return fmt.Errorf("unknown key %q", path)
 		}
@@ -84,6 +90,35 @@ func decodeObject(val any, at string, f fields) error {
 		}
 	}
 	return nil
+}
+
+// refuseFoldDuplicates refuses an object holding two keys that fold together.
+//
+// Every name in the configuration is matched case-insensitively, so `Build` and
+// `build` in one `scripts` object are one name written twice, and which of the
+// two a lookup found would be whatever the map iteration happened to hand it.
+// The keys are checked in order, so a file with several collisions in it always
+// reports the same one first. The wording is validateEnv's, because it is the
+// same mistake: env has always refused this, and now every object does.
+func refuseFoldDuplicates(m map[string]any, at string) error {
+	seen := make(map[string]string, len(m))
+	for _, key := range sortedKeys(m) {
+		fold := strings.ToLower(key)
+		if prev, dup := seen[fold]; dup {
+			return fmt.Errorf("%s: keys %q and %q collide case-insensitively", objectAt(at), prev, key)
+		}
+		seen[fold] = key
+	}
+	return nil
+}
+
+// objectAt names the object a whole-object error is about. The root has no key
+// path of its own, so it is named for what it is.
+func objectAt(at string) string {
+	if at == "" {
+		return "the document"
+	}
+	return at
 }
 
 // merge folds a squashed embed's table into the table of the object that
@@ -354,14 +389,17 @@ func stringItems(list []string) []any {
 }
 
 // strMap fills a map of names to plain values — an env layer, the initial
-// versions, the parser's type table. The keys are copied exactly as they
-// arrive: the lowered tree has already folded them, and folding them twice is
-// how a key that legitimately holds capitals would lose them.
+// versions, the parser's type table. The keys are copied exactly as the file
+// wrote them, which is what an env layer needs (PATH and Path are two
+// variables) and what every other name gets for free.
 func strMap(dst *map[string]string) setter {
 	return func(val any, at string) error {
 		m, ok := val.(map[string]any)
 		if !ok {
 			return wants(at, "an object")
+		}
+		if err := refuseFoldDuplicates(m, at); err != nil {
+			return err
 		}
 		out := make(map[string]string, len(m))
 		for _, k := range sortedKeys(m) {
@@ -379,7 +417,9 @@ func strMap(dst *map[string]string) setter {
 // rawMap fills a free-form object dispat never reads. Its contents are the
 // repository's own, so nothing inside it is a key the model has to know: the
 // unknown-key refusal stops at its edge, by construction rather than by an
-// exemption someone has to maintain.
+// exemption someone has to maintain. The fold-duplicate refusal stops there
+// too, and for the same reason: dispat looks nothing up in here, so two keys
+// that fold together are the repository's own business.
 func rawMap(dst *map[string]any) setter {
 	return func(val any, at string) error {
 		m, ok := val.(map[string]any)
@@ -409,15 +449,18 @@ func obj[T any](dst **T, table func(*T) fields) setter {
 }
 
 // objMap fills a map of named objects — spaces, package entries, version
-// groups. The keys are the names the rest of dispat resolves against, arriving
-// folded from the lowered tree and copied from there untouched. An entry
-// written with no body is still an entry: the file named the space, and naming
-// it is what puts it in the map.
+// groups. The keys are the names the rest of dispat resolves against, copied
+// exactly as the file wrote them and matched case-insensitively wherever they
+// are looked up. An entry written with no body is still an entry: the file
+// named the space, and naming it is what puts it in the map.
 func objMap[T any](dst *map[string]T, table func(*T) fields) setter {
 	return func(val any, at string) error {
 		m, ok := val.(map[string]any)
 		if !ok {
 			return wants(at, "an object")
+		}
+		if err := refuseFoldDuplicates(m, at); err != nil {
+			return err
 		}
 		out := make(map[string]T, len(m))
 		for _, k := range sortedKeys(m) {
@@ -483,12 +526,17 @@ func script(dst *Script) setter {
 }
 
 // scriptMap fills a whole `scripts` object, at any of the four levels that
-// carry one.
+// carry one. The names keep the case the level's own file wrote; the overlay
+// that merges the levels is what decides which spelling survives a name two of
+// them declare.
 func scriptMap(dst *map[string]Script) setter {
 	return func(val any, at string) error {
 		m, ok := val.(map[string]any)
 		if !ok {
 			return wants(at, "an object")
+		}
+		if err := refuseFoldDuplicates(m, at); err != nil {
+			return err
 		}
 		out := make(map[string]Script, len(m))
 		for _, k := range sortedKeys(m) {
@@ -538,8 +586,8 @@ func pathList(dst *PathList) setter {
 // deps fills a `dependencies` object keyed by consumer, at the file or space
 // level. The expansion lives in pkg/models, so this and the public type's own
 // UnmarshalJSON cannot come to disagree about what the key accepts. Consumer
-// names arrive folded, exactly like the keys of `packages` and `spaces`, and
-// are resolved back onto the packages they name in discovery.
+// names arrive as written, exactly like the keys of `packages` and `spaces`,
+// and are resolved onto the packages they name in discovery, which folds.
 func deps(dst *Dependencies) setter {
 	return func(val any, _ string) error {
 		out, err := public.NormalizeDependencies(val)

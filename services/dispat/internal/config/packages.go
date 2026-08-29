@@ -296,13 +296,15 @@ func sortedKeys[V any](m map[string]V) []string {
 // given. Anything that is not a map of objects yields nothing: decoding is
 // what reports a malformed shape, in its own words.
 func rawEntries(raw map[string]any, keyPath ...string) map[string]any {
-	cur := raw[keyPath[0]]
+	// Every step folds: the tree holds the keys the file wrote, and this walk
+	// is spelled with the language's own lowercase names.
+	cur, _ := lookupFold(raw, keyPath[0])
 	for _, key := range keyPath[1:] {
 		m, ok := cur.(map[string]any)
 		if !ok {
 			return nil
 		}
-		cur = m[key]
+		cur, _ = lookupFold(m, key)
 	}
 	m, _ := cur.(map[string]any)
 	return m
@@ -905,24 +907,23 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 
 // openFolderConfig probes a folder for its in-folder dispat config file — the
 // same names and formats the root config resolves through, minus what the
-// folder's .dispatexclude excludes — and returns both views of it: the tree it
-// parsed into, keys spelled as written, and the lowered copy the model is
-// decoded from. An absent file yields an empty path and a nil tree, which
+// folder's .dispatexclude excludes — and returns the document it holds, keys
+// spelled as written. An absent file yields an empty path and a nil map, which
 // every caller reads as "this folder says nothing".
-func openFolderConfig(dir string) (map[string]any, *tree, string, error) {
+func openFolderConfig(dir string) (map[string]any, string, error) {
 	names, err := configCandidates(dir)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
+		return nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
 	}
 	if len(names) == 0 {
-		return nil, nil, "", nil
+		return nil, "", nil
 	}
 	p := filepath.Join(dir, names[0])
 	t, err := readTree(p)
 	if err != nil {
-		return nil, nil, p, err
+		return nil, p, err
 	}
-	return lowerTree(t, nil), t, p, nil
+	return normalizeTree(t, nil), p, nil
 }
 
 // refuseNestedRoot rejects a folder file declaring one of the keys only a
@@ -944,7 +945,7 @@ func refuseNestedRoot(raw map[string]any, path, role, remedy string, keys ...str
 // file and decodes it as a PackageConfig, the file's top-level object.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
 	var pc PackageConfig
-	raw, t, p, err := openFolderConfig(dir)
+	raw, p, err := openFolderConfig(dir)
 	if err != nil || raw == nil {
 		return pc, p, err
 	}
@@ -959,8 +960,6 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		return pc, p, fmt.Errorf(
 			"%s: %s", p, pathRefused("a package folder's config file"))
 	}
-	// Env keys must keep their exact case; the lowered tree folded them.
-	pc.Env = envRestorerOf(t).envAt("env")
 	return pc, p, nil
 }
 
@@ -971,7 +970,7 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 // name rather than as a bare unknown key.
 func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	var sf SpaceFile
-	raw, t, p, err := openFolderConfig(dir)
+	raw, p, err := openFolderConfig(dir)
 	if err != nil || raw == nil {
 		return sf, p, err
 	}
@@ -988,21 +987,7 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	if err := decodeSpaceFile(settings(raw), &sf); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
-	// The space folder's own env layer and those of the packages entries next
-	// to it, with their keys spelled as written.
-	restoreSpaceFileEnvCase(envRestorerOf(t), &sf)
 	return sf, p, nil
-}
-
-// restoreSpaceFileEnvCase replaces a space folder file's lowercased env
-// maps — the space's own and each of its packages entries' — with exact-case
-// ones taken from the file's own tree.
-func restoreSpaceFileEnvCase(r *envRestorer, sf *SpaceFile) {
-	sf.Env = r.envAt("env")
-	for name, pc := range sf.Packages {
-		pc.Env = r.envAt("packages", name, "env")
-		sf.Packages[name] = pc
-	}
 }
 
 // pathRefused is the one sentence every layer that may not set `path` gives,

@@ -151,8 +151,9 @@ type Space struct {
 	VersionGroup string
 	// Scripts is the effective script map of the package this Space was
 	// derived for: the file's scripts, overlaid with the space's, overlaid
-	// with the package's, keyed by lowercased name and holding the commands
-	// each name binds — one, or a sequence run in order.
+	// with the package's, keyed by the name the nearest layer that declared it
+	// wrote and holding the commands each name binds — one, or a sequence run
+	// in order. Script resolves a name against it, folding.
 	// It is what every script name resolves through — the flow entries below
 	// were resolved from it, and `dispat run <name>` looks the name up here,
 	// executing its commands inside each changed package that has one, in

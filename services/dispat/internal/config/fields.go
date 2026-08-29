@@ -15,10 +15,10 @@ package config
 // disagreement in either direction, so a field added to a struct without a
 // line here fails the build's tests rather than a user's release.
 //
-// The keys are spelled as the lowered tree spells them, which is lowercase
-// throughout. The json tags they mirror are camelCase, because a config file
-// is written by hand and reads better that way, and matching them
-// case-insensitively is what lets both spellings load.
+// The keys are spelled in lower case throughout, and decodeObject folds a
+// file's key to find its line. The json tags they mirror are camelCase, because
+// a config file is written by hand and reads better that way; folding at the
+// lookup is what lets both spellings load without either being renamed.
 
 // decodeRootConfig fills the root configuration from the settings map.
 func decodeRootConfig(src map[string]any, dst *File) error {

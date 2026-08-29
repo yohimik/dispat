@@ -303,11 +303,11 @@ func renderDocument(format string, data []byte, value any) ([]byte, error) {
 }
 
 // StringMapAt reads the string map at keyPath of the config file at path,
-// exactly as the file spells it. It exists because the loaded *File cannot be
-// written back: lowerTree lowercases every map key, so round-tripping the parsed
-// `initials` through a write would rename the user's entries. A key the file
-// does not carry is no error and returns a nil map; a value that is not a map
-// of scalars is.
+// exactly as the file spells it. It exists because the loaded *File is a
+// merged, validated view rather than the file: a write has to start from what
+// the file holds, key for key, so the entries it already carries come back
+// untouched. A key the file does not carry is no error and returns a nil map; a
+// value that is not a map of scalars is.
 //
 // Unlike the writers this reads TOML too: a TOML config still needs its
 // current entries to render the paste-ready block.

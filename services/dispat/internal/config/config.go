@@ -428,7 +428,7 @@ func classifyTree(root map[string]any) configClass {
 
 // declares reports that a file states a key and gives it a value. Keys are
 // matched case-insensitively, because the tree is spelled as the file wrote it
-// while everything reading it thinks in lowercase.
+// while the probe asking about it is spelled in the language's own lowercase.
 func declares(root map[string]any, key string) bool {
 	v, ok := lookupFold(root, key)
 	return ok && v != nil
@@ -482,7 +482,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	raw := lowerTree(t, flags)
+	raw := normalizeTree(t, flags)
 
 	// The keys a package entry may never hold are refused by name, at every
 	// map that holds entries, before decoding drops them into an unknown-key
@@ -505,10 +505,6 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	if err := decodeRootConfig(settings(raw), &cfg); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
-	// Env keys must keep their exact case; the lowered tree folded them along
-	// with every other map key. This runs before validation so the keys it
-	// reports on are the ones the file actually wrote.
-	restoreEnvCase(envRestorerOf(t), &cfg)
 	cfg.SourceFiles = t.files
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -1654,12 +1650,14 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 // canonicaliseEndpoints rewrites every declared edge's endpoints to the exact
 // name of the package they mean.
 //
-// The `dependencies` map is keyed by consumer, and lowerTree folds the keys
-// of every map in the config, so a package folder named "Web" is declared as
-// "web" by the time discovery sees it. That is the same fold `packages` and
-// `spaces` entries already go through, and it is resolved the same way: keys
-// are matched case-insensitively, and a key matching two packages is
-// ambiguous rather than arbitrarily assigned.
+// The `dependencies` map is keyed by consumer, spelled however the file wrote
+// it, so an edge may name "web" where the folder is "Web". Every name in the
+// configuration is matched case-insensitively, and this is where an endpoint
+// stops being the author's spelling and becomes the package's own, so that
+// everything downstream compares names rather than capitals. A name matching
+// two packages is ambiguous rather than arbitrarily assigned; discovery refuses
+// such a pair before this runs, and `dispat compute` loads configs discovery
+// would refuse.
 //
 // An endpoint matching no package is left exactly as it was written. Discover
 // reports it as unknown, and `dispat compute` — which loads configs Discover

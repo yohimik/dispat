@@ -3,10 +3,10 @@ package config
 // The shape a parsed config file is handed over in, and the two rules that
 // shape carries.
 //
-// Reading the file is refs.go's, folding its keys is lowerTree's, and turning
-// the result into the model is decoder.go's. What is left in between is this:
-// the settings map, which is the lowered tree flattened to delimited key paths
-// and rebuilt from them. The round trip is not a detour. It is where an object
+// Reading the file is refs.go's, copying it into the decode's own view is
+// normalizeTree's, and turning the result into the model is decoder.go's. What
+// is left in between is this: the settings map, which is that view flattened to
+// delimited key paths and rebuilt from them. The round trip is not a detour. It is where an object
 // with no keys stops being a key at all, and where a key spelled with the
 // delimiter becomes the levels it names, and both of those are part of the
 // config language rather than an implementation detail of whoever reads it

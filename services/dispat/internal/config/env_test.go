@@ -244,35 +244,34 @@ func TestEnvRefusedAtEveryLayer(t *testing.T) {
 	})
 }
 
-// TestEnvRestorerReadsEveryLevel: a config carrying env at four levels is read
-// and parsed once, and each level is a lookup in the tree that parse produced.
-func TestEnvRestorerReadsEveryLevel(t *testing.T) {
+// TestEnvKeepsItsExactCaseAtEveryLevel: PATH and Path are two variables, so
+// the one thing an env object may never suffer is a renamed key. Four levels
+// carry one, and the load reads all four straight out of the parsed document.
+//
+// This used to be a second pass reading the tree back to undo the lowercasing
+// the decode applied. There is no lowercasing to undo, and this is the pin that
+// says so at the level that matters: what Load hands back.
+func TestEnvKeepsItsExactCaseAtEveryLevel(t *testing.T) {
 	cfg := minimalConfig()
-	cfg.Env = map[string]string{"A": "1"}
+	cfg.Env = map[string]string{"A_Key": "1"}
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Env = map[string]string{"B": "2"}
-		s.Packages = map[string]PackageConfig{"core": {Env: map[string]string{"C": "3"}}}
+		s.Env = map[string]string{"B_Key": "2"}
+		s.Packages = map[string]PackageConfig{"core": {Env: map[string]string{"C_Key": "3"}}}
 	})
-	cfg.Packages = map[string]PackageConfig{"core": {Env: map[string]string{"D": "4"}}}
+	cfg.Packages = map[string]PackageConfig{"core": {Env: map[string]string{"D_Key": "4"}}}
 	root := writeModelRepo(t, cfg, "pkgs/core")
 
-	tree, err := readTree(filepath.Join(root, "dispat.json"))
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	r := envRestorerOf(tree)
-	assert.Equal(t, map[string]string{"A": "1"}, r.envAt("env"))
-	assert.Equal(t, map[string]string{"B": "2"}, r.envAt("spaces", "libs", "env"))
-	assert.Equal(t, map[string]string{"C": "3"}, r.envAt("spaces", "libs", "packages", "core", "env"))
-	assert.Equal(t, map[string]string{"D": "4"}, r.envAt("packages", "core", "env"))
-	// A path that is not there, and one whose value is not an object.
-	assert.Nil(t, r.envAt("nope"))
-	assert.Nil(t, r.envAt("spaces", "missing", "env"))
-	assert.Nil(t, r.envAt("scripts", "build", "env"))
+	assert.Equal(t, map[string]string{"A_Key": "1"}, loaded.Env)
+	assert.Equal(t, map[string]string{"B_Key": "2"}, loaded.Spaces["libs"].Env)
+	assert.Equal(t, map[string]string{"C_Key": "3"}, loaded.Spaces["libs"].Packages["core"].Env)
+	assert.Equal(t, map[string]string{"D_Key": "4"}, loaded.Packages["core"].Env)
 }
 
-// TestEnvRestorerMatchesNamesCaseInsensitively: the caller looks entries up by
-// the lowercased keys the folding produced, while the tree came from the raw file,
-// where a space may be spelled "Libs".
-func TestEnvRestorerMatchesNamesCaseInsensitively(t *testing.T) {
+// TestEnvOfASpaceSpelledWithCapitals: the space's own key keeps its case too,
+// and the env under it is still that space's.
+func TestEnvOfASpaceSpelledWithCapitals(t *testing.T) {
 	root := writeRawRepo(t, map[string]any{
 		"scripts": map[string]any{"build": "echo b"},
 		"spaces": map[string]any{
@@ -286,8 +285,11 @@ func TestEnvRestorerMatchesNamesCaseInsensitively(t *testing.T) {
 
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"SpaceKey": "s"}, loaded.Spaces["libs"].Env,
-		"the space is keyed lowercase but spelled Libs in the file")
+	assert.Equal(t, map[string]string{"SpaceKey": "s"}, loaded.Spaces["Libs"].Env,
+		"the space is keyed as the file spelled it")
+	sc, ok := loaded.Space("libs")
+	require.True(t, ok, "and still resolves under any other spelling")
+	assert.Equal(t, map[string]string{"SpaceKey": "s"}, sc.Env)
 }
 
 // writeJSON marshals a model into a config file at path.

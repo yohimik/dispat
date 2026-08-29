@@ -297,11 +297,12 @@ func (a *App) releaseBlocked(pl *plan.Plan) string {
 }
 
 // initialVersions maps the configured initials onto discovered package names.
-// Viper lowercases map keys, so matching is case-insensitive; keys that match
-// no discovered package are warned about and ignored. Two packages differing
-// only in case make a lowercased key genuinely ambiguous — last-writer-wins
-// would route the initial to whichever the map iteration favored — so their
-// entries are refused with the candidates named.
+// Matching is case-insensitive, like every other name in the configuration;
+// keys that match no discovered package are warned about and ignored. Two
+// packages differing only in case would leave an entry with no single package
+// to route to, so their entries are refused with the candidates named —
+// discovery refuses such a pair outright, and this stays as the reading that
+// cannot be surprised by one.
 func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 	if len(a.cfg.InitialVersions) == 0 {
 		return nil

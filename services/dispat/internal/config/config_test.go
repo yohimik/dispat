@@ -1407,6 +1407,25 @@ func TestLoadParserOptions(t *testing.T) {
 	assert.Equal(t, []string{"beta", "rc"}, pc.AllowedChannels)
 }
 
+// TestParserTypesReachTheParserFolded: the map keeps the case the file wrote,
+// and the table the commit parser is handed is folded into lower case, because
+// the parser matches a commit's type byte for byte and a commit writes `feat:`.
+// A `types: {Feat: minor}` that quietly stopped bumping anything would be the
+// worst kind of silent failure: every release would simply be smaller.
+func TestParserTypesReachTheParserFolded(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Parser = &ParserConfig{Types: map[string]string{"Feat": "major"}}
+	root := writeModelRepo(t, cfg, "pkgs/core")
+
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"Feat": "major"}, loaded.Parser.Types,
+		"the config map keeps the author's spelling")
+	assert.Equal(t, ccme.BumpMajor, loaded.ResolvedParser.Types["feat"],
+		"and the parser is told about `feat:`, which is what a commit writes")
+	assert.NotContains(t, loaded.ResolvedParser.Types, "Feat")
+}
+
 func TestLoadParserInvalidValues(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1415,8 +1434,9 @@ func TestLoadParserInvalidValues(t *testing.T) {
 	}{
 		{"bad_type_bump", ParserConfig{Types: map[string]string{"docs": "huge"}},
 			`types["docs"]: unknown bump "huge"`},
-		// dispat lowercases map keys, so an uppercase name self-heals; a digit
-		// survives lowercasing and must be rejected.
+		// The map keeps the case its author wrote and the table handed to the
+		// parser is folded, so an uppercase name self-heals; a digit survives
+		// folding and must be rejected.
 		{"bad_type_name", ParserConfig{Types: map[string]string{"docs2": "patch"}},
 			"must consist of a-z only"},
 		{"bad_prop_bump", ParserConfig{Propagation: &ParserPropagationConfig{Bump: "massive"}},

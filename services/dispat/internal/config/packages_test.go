@@ -638,6 +638,39 @@ func TestVersionGroupNameCollidesWithASpaceWhicheverCase(t *testing.T) {
 	assert.Contains(t, err.Error(), `the space "libs"`)
 }
 
+// TestScriptLayersLeaveOneSpellingPerName: the same rule through the loader,
+// where the three layers are three files that never agreed on capitals.
+//
+// This is the silent failure the overlay exists to prevent: two keys of one
+// effective map that fold together, with the resolution picking whichever the
+// runtime handed it first, so a package would run its space's build script on
+// some runs and its own on others.
+func TestScriptLayersLeaveOneSpellingPerName(t *testing.T) {
+	cfg := validConfig()
+	cfg.Scripts = map[string]Script{"build": {"echo root"}, "publish": {"echo publish"}}
+	withLibs(&cfg, func(s *SpaceConfig) { s.Scripts = map[string]Script{"Build": {"echo space"}} })
+	cfg.Packages = map[string]PackageConfig{"core": {Scripts: map[string]Script{"BUILD": {"echo package"}}}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	core := byName["core"].Space
+	assert.Equal(t, Script{"echo package"}, core.Scripts["BUILD"], "the nearest layer's spelling and value")
+	assert.NotContains(t, core.Scripts, "build")
+	assert.NotContains(t, core.Scripts, "Build")
+	cmds, ok := core.Script("build")
+	require.True(t, ok, "and the name resolves however a flow entry or a command line asks for it")
+	assert.Equal(t, Script{"echo package"}, cmds)
+
+	// A package that overrode nothing still sees the space's spelling, and the
+	// root's for the name the space said nothing about.
+	app := byName["app"].Space
+	assert.Equal(t, Script{"echo root"}, app.Scripts["build"], "another space keeps the root's")
+	assert.Contains(t, core.Scripts, "publish", "a name no nearer layer touched is the root's")
+}
+
 // TestOverlayScriptsReplacesTheSpellingItOverrides: the nearer layer decides
 // both the value and the name.
 //
@@ -911,12 +944,14 @@ func TestPackageOverrideCaseInsensitiveKey(t *testing.T) {
 	assert.Equal(t, "v{version}", packagesByName(pkgs)["CoreLib"].Space.TagFormat)
 }
 
-// TestPackageOverrideMixedCaseEntryKey: the other half of the same rule, and
-// the load-bearing one. A package name is derived from the entry key, and the
-// environment variables a package's scripts run with are derived from the
-// name, so an entry key that reached the model with its capitals intact would
-// produce a second package name for the same folder. The key is folded on the
-// way in; the folder keeps its own spelling.
+// TestPackageOverrideMixedCaseEntryKey: the other half of the same rule. The
+// entry key keeps the capitals its author wrote, and matches the folder anyway,
+// because the match folds rather than the key.
+//
+// The hazard this used to guard against — an entry key becoming a second
+// package name for one folder — is closed elsewhere now: the package's name is
+// the folder's, and discovery refuses two folders whose names fold together, so
+// one entry can only ever mean one package.
 func TestPackageOverrideMixedCaseEntryKey(t *testing.T) {
 	cfg := validConfig()
 	cfg.Packages = map[string]PackageConfig{"CoreLib": {TagFormat: "v{version}"}}
@@ -924,13 +959,37 @@ func TestPackageOverrideMixedCaseEntryKey(t *testing.T) {
 
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	assert.Contains(t, loaded.Packages, "corelib", "the entry key arrives folded")
-	assert.NotContains(t, loaded.Packages, "CoreLib")
+	assert.Contains(t, loaded.Packages, "CoreLib", "the entry key arrives as it was written")
+	assert.NotContains(t, loaded.Packages, "corelib")
+	_, ok := loaded.Package("corelib")
+	assert.True(t, ok, "and resolves under any other spelling")
 
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	assert.Equal(t, "v{version}", packagesByName(pkgs)["CoreLib"].Space.TagFormat,
 		"and still matches the folder it names")
+}
+
+// TestPackageOverrideMatchesTheFolderAndKeepsItsSpelling: the entry names the
+// folder however the two are spelled, and the errors and the write-back that
+// mention the entry use the author's spelling rather than one dispat invented.
+func TestPackageOverrideMatchesTheFolderAndKeepsItsSpelling(t *testing.T) {
+	cfg := validConfig()
+	// An entry with a path may not name a package that lives in a space: the
+	// refusal names the entry, which is what makes the spelling visible.
+	cfg.Packages = map[string]PackageConfig{"CoreLib": {Path: "elsewhere"}}
+	root := writeModelRepo(t, cfg, "packages/libs/corelib", "packages/apps/app", "elsewhere")
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `packages["CoreLib"]`,
+		"the error quotes the key the author wrote, not a folded one")
+
+	// And an entry naming nothing at all is reported the same way.
+	cfg.Packages = map[string]PackageConfig{"GhosT": {TagFormat: "v{version}"}}
+	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	_, err = discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `packages["GhosT"]`)
 }
 
 // TestVersionGroupEmptyName: an empty group name can only be a mistake — it
@@ -1112,6 +1171,36 @@ func TestStandalonePackage(t *testing.T) {
 	assert.Equal(t, 1, cli.BuildWeight)
 	assert.True(t, cli.Changelog.Enabled, "global record policy applies")
 	assert.Len(t, pkgs, 3, "space packages are unaffected")
+}
+
+// TestStandalonePackageKeepsItsCapitals: a standalone package's name is its
+// entry key, and the entry key is now whatever the author wrote. That name is
+// the package's, its synthetic space's, and its versioning group's, and it is
+// what every tag, environment variable and event downstream is derived from, so
+// the whole chain is pinned here rather than left to the first thing that
+// noticed.
+func TestStandalonePackageKeepsItsCapitals(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{
+		"MyLib": {
+			Path:      "tools/mylib",
+			Flow:      &SpaceFlowConfig{Build: []string{"build"}},
+			TagFormat: "{name}@{version}",
+		},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/mylib")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	lib := byName["MyLib"]
+	require.NotNil(t, lib, "the package is named as the entry spelled it")
+	assert.NotContains(t, byName, "mylib")
+	assert.Equal(t, "MyLib", lib.Space.Name, "and so is the space it is its own")
+	assert.Equal(t, "MyLib", lib.Space.VersionGroup)
+	assert.Equal(t, "{name}@{version}", string(lib.Space.TagFormat))
+	assert.Equal(t, filepath.Join(root, "tools/mylib"), lib.Dir,
+		"the folder is where the entry's path says, whatever either is called")
 }
 
 // TestStandalonePackageInFolderLayer: the in-folder config file overrides the
@@ -1967,7 +2056,7 @@ func TestSpaceFileUnknownKey(t *testing.T) {
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), filepath.Join("packages/libs", "dispat.json"))
-	assert.Contains(t, err.Error(), "tagformats", "the key is reported as the folding spells it")
+	assert.Contains(t, err.Error(), "tagFormats", "the key is reported as the file spelled it")
 }
 
 // TestSpaceFileInvalidValue: the merged space is held to the space rules, so

@@ -61,9 +61,9 @@ func TestHooksLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 	for _, iv := range tl {
 		names[iv.Label] = true
 	}
-	// dispat lowercases map keys, so $DISPAT_SPACE reports "spacea"/"spaceb"
-	// even though the config wrote "spaceA"/"spaceB".
-	assert.True(t, names["spacea"] && names["spaceb"], "each space logs in under its own name: %v", tl)
+	// A map key keeps the case its file wrote, so $DISPAT_SPACE reports the
+	// space exactly as the config spelled it.
+	assert.True(t, names["spaceA"] && names["spaceB"], "each space logs in under its own name: %v", tl)
 }
 
 // assertRanIn checks that a script recording its working directory with `pwd`

@@ -1,15 +1,7 @@
 package config
 
-// The static `env` objects and their one complication: lowerTree lowercases
-// every map key on the way to the decode. That is harmless — useful, even — for
-// every other map in the model, because script names, spaces, packages and
-// initials all match case-insensitively. Environment variable names do not:
-// PATH and Path are two variables. So the env objects are read from the tree
-// the file was parsed into, where the keys are still spelled as written, and
-// those maps replace the lowercased ones at every level that can hold one.
-//
-// There are five such levels, and they merge key by key with the most local
-// winning:
+// The static `env` objects: five layers of KEY=value, merged key by key with
+// the most local winning.
 //
 //	the root file's `env`
 //	  the root file's `spaces.<space>.env`
@@ -17,9 +9,12 @@ package config
 //	      the root file's `packages.<pkg>.env` and `spaces.<s>.packages.<p>.env`
 //	        the package folder's own config file `env`
 //
-// The root file's four paths are restored in one pass by restoreEnvCase; the
-// two in-folder files are restored by their loaders. Each file is parsed once,
-// whether or not it configures env at all.
+// The keys arrive spelled exactly as their file wrote them, like every other
+// map key in the configuration, and here that is not a nicety: PATH and Path
+// are two variables, and a script handed one when it asked for the other would
+// fail in a way nothing here could explain. There used to be a second pass
+// reading the parsed tree back to undo the lowercasing the decode applied; the
+// decode does not lowercase, so there is nothing to undo.
 
 import (
 	"fmt"
@@ -72,10 +67,12 @@ func MergeEnv(base, over map[string]string) map[string]string {
 
 // validateEnv rejects the env keys that could never reach a script intact:
 // empty, carrying "=", claiming the DISPAT_ namespace the computed variables
-// own, or colliding case-insensitively — lowerTree folds two such keys into
-// one before the exact-case pass can tell them apart, so the survivor would be
-// whichever the file happened to write last. Keys are checked in sorted order
-// so a config with several mistakes always reports the same one first.
+// own, or colliding case-insensitively. The last one is the decode's own rule
+// for every object (see refuseFoldDuplicates) applied once more here, because
+// an env layer is also merged with the layers around it, and two keys that fold
+// together across layers would leave the survivor to luck. Keys are checked in
+// sorted order so a config with several mistakes always reports the same one
+// first.
 func validateEnv(label string, env map[string]string) error {
 	keys := make([]string, 0, len(env))
 	for k := range env {
@@ -101,79 +98,9 @@ func validateEnv(label string, env map[string]string) error {
 	return nil
 }
 
-// envRestorer hands back the env objects a parsed config file holds, with
-// their keys spelled as written. It reads the tree the file was already parsed
-// into, so a file carrying env at four levels costs four lookups and no
-// further parsing.
-type envRestorer struct {
-	tree map[string]any
-}
-
-// envRestorerOf reads the env objects of an already parsed file.
-func envRestorerOf(t *tree) *envRestorer {
-	return &envRestorer{tree: t.root}
-}
-
-// envAt returns the exact-case env object at a key path ("env" — or "spaces",
-// "libs", "env"), or nil when the path holds no object. Names along the path
-// are matched case-insensitively with the package's own lookupFold: the caller
-// looks them up with the lowercased keys lowerTree produced, while this tree came
-// from the raw file, where a space may well be spelled "Libs".
-func (r *envRestorer) envAt(path ...string) map[string]string {
-	node := r.tree
-	for _, name := range path[:len(path)-1] {
-		child, ok := lookupFold(node, name)
-		if !ok {
-			return nil
-		}
-		if node, ok = child.(map[string]any); !ok {
-			return nil
-		}
-	}
-	raw, ok := lookupFold(node, path[len(path)-1])
-	if !ok {
-		return nil
-	}
-	return envFromTree(raw)
-}
-
-// restoreEnvCase replaces the root config's lowercased env maps with
-// exact-case ones taken from the file's own tree, at all four levels the root
-// file can hold one.
-func restoreEnvCase(r *envRestorer, cfg *File) {
-	cfg.Env = r.envAt("env")
-	for name, sc := range cfg.Spaces {
-		sc.Env = r.envAt("spaces", name, "env")
-		for pkg, pc := range sc.Packages {
-			pc.Env = r.envAt("spaces", name, "packages", pkg, "env")
-			sc.Packages[pkg] = pc
-		}
-		cfg.Spaces[name] = sc
-	}
-	for name, pc := range cfg.Packages {
-		pc.Env = r.envAt("packages", name, "env")
-		cfg.Packages[name] = pc
-	}
-}
-
-// envFromTree converts a raw env object to map[string]string with the same
-// weak typing decodeExact applies, so a bare 1 or true is a fine value and
-// means the same thing whichever pass read it.
-func envFromTree(v any) map[string]string {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, val := range m {
-		out[k] = weakEnvString(val)
-	}
-	return out
-}
-
 // weakEnvString renders a scalar the way the weakly typed decode would. It is
-// also what a generic map's key becomes on the way into the lowered tree, so
-// the two renderings can never disagree.
+// also what a generic map's key becomes on the way into the decode's view of
+// the tree, so the two renderings can never disagree.
 // The numeric cases go through strconv rather than fmt.Sprint: a large float
 // formatted with %v would come out in scientific notation, which is not what
 // the file said.

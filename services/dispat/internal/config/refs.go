@@ -9,12 +9,12 @@ package config
 // `dispat compute --write` all arrive here.
 //
 // Parsing the file here is what keeps every key spelled the way the file wrote
-// it. The decode lowercases every map key, which is what most of the
-// configuration wants — script, space and package names all match
-// case-insensitively — and wrong for environment variable names, so the tree
-// is kept exact-case and lowerTree hands the decoder a lowercased copy of it.
-// One parse then serves both, where reading the file twice used to be the
-// price of an `env` object.
+// it, and nothing downstream renames one. A name is matched case-insensitively
+// wherever it is looked up — a script, a space, a package, a commit scope — so
+// the folding happens at the lookup, where the two spellings actually meet, and
+// never at the key, where it would rename what the author wrote. Two keys of
+// one object that fold together are refused as it is decoded, because a name
+// with two spellings in one place has no lookup that could answer for it.
 //
 // A reference is resolved against the directory of the file that wrote it, and
 // the file it names may hold references of its own, resolved against theirs. A
@@ -460,17 +460,15 @@ func decodeFile(path string) (any, error) {
 	}
 }
 
-// lowerTree is the second view of a parsed file: the same document with every
-// map key lowercased, which is what makes script, space and package names
-// match case-insensitively, and with the flags that override a config key
-// written over it.
+// normalizeTree is the decode's view of a parsed file: the same document with
+// every map turned into a string-keyed one, and with the flags that override a
+// config key written over it. Keys are copied, never renamed.
 //
-// The copy is not an optimisation to skip. The lowering renames the keys the
-// env pass still has to read exactly, so it works on a copy and the tree keeps
-// every key as the file spelled it. One parse then serves both, where reading
-// the file twice used to be the price of an `env` object.
-func lowerTree(t *tree, flags *pflag.FlagSet) map[string]any {
-	raw := lowerMap(t.root)
+// It is a copy rather than the tree itself because the flag overlay writes into
+// it, and a config file the loader edited on its way past would be a surprise
+// to every reader that goes back to the tree.
+func normalizeTree(t *tree, flags *pflag.FlagSet) map[string]any {
+	raw := normalizeMap(t.root)
 	if flags == nil {
 		return raw
 	}
@@ -482,7 +480,14 @@ func lowerTree(t *tree, flags *pflag.FlagSet) map[string]any {
 		if f == nil || !f.Changed {
 			continue
 		}
-		raw[strings.ToLower(key)] = flagValue(f)
+		// The overlay replaces the file's spelling rather than sitting beside
+		// it: a file writing `logLevel` and an overlay writing `loglevel` would
+		// otherwise be two keys the decode refuses as a collision, over a flag
+		// the operator passed correctly.
+		if existing, found := foldKey(raw, key); found && existing != key {
+			delete(raw, existing)
+		}
+		raw[key] = flagValue(f)
 	}
 	return raw
 }
@@ -506,16 +511,16 @@ var boundFlags = map[string]string{
 	"logFormat":   "log-format",
 }
 
-// lowerMap copies a parsed tree with every key lowercased, deeply.
-func lowerMap(m map[string]any) map[string]any {
+// normalizeMap copies a parsed tree, deeply, with every key as it was written.
+func normalizeMap(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		out[strings.ToLower(k)] = lowerValue(v)
+		out[k] = normalizeValue(v)
 	}
 	return out
 }
 
-// lowerValue copies one node of the lowered view. A generic map — a yaml
+// normalizeValue copies one node of the decode's view. A generic map — a yaml
 // mapping with a non-string key — becomes a string-keyed one on the way, so
 // everything below here is one kind of map and the decode never meets the
 // other.
@@ -526,20 +531,20 @@ func lowerMap(m map[string]any) map[string]any {
 // is immutable and shared safely and no other typed container is ever built. A
 // parser that began producing one would be a case to add here, which is a
 // smaller thing to get right than the reflection that used to copy them all.
-func lowerValue(v any) any {
+func normalizeValue(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
-		return lowerMap(t)
+		return normalizeMap(t)
 	case map[any]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			out[strings.ToLower(weakEnvString(k))] = lowerValue(val)
+			out[weakEnvString(k)] = normalizeValue(val)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, val := range t {
-			out[i] = lowerValue(val)
+			out[i] = normalizeValue(val)
 		}
 		return out
 	case []string:
@@ -556,11 +561,13 @@ func copyStrings(s []string) []string {
 	return append([]string(nil), s...)
 }
 
-// isSet answers whether a lowered tree holds a value at a top-level key, which
-// is what the folder loaders ask before they refuse a key. A key written with
+// isSet answers whether a parsed tree holds a value at a top-level key, which
+// is what the folder loaders ask before they refuse a key. The key is matched
+// case-insensitively, like every other key of the language. A key written with
 // no value is not set: the file mentioned it and said nothing.
 func isSet(raw map[string]any, key string) bool {
-	return raw[key] != nil
+	value, ok := lookupFold(raw, key)
+	return ok && value != nil
 }
 
 // cloneTree copies a parsed tree, deeply.

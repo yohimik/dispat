@@ -31,21 +31,21 @@ import (
 func decodeRoot(t *testing.T, doc map[string]any) (File, error) {
 	t.Helper()
 	var cfg File
-	return cfg, decodeRootConfig(settings(lowerTree(&tree{root: doc}, nil)), &cfg)
+	return cfg, decodeRootConfig(settings(normalizeTree(&tree{root: doc}, nil)), &cfg)
 }
 
 // decodePackage is decodeRoot for a package folder's own file.
 func decodePackage(t *testing.T, doc map[string]any) (PackageConfig, error) {
 	t.Helper()
 	var pc PackageConfig
-	return pc, decodePackageConfig(settings(lowerTree(&tree{root: doc}, nil)), &pc)
+	return pc, decodePackageConfig(settings(normalizeTree(&tree{root: doc}, nil)), &pc)
 }
 
 // decodeSpace is decodeRoot for a space folder's own file.
 func decodeSpace(t *testing.T, doc map[string]any) (SpaceFile, error) {
 	t.Helper()
 	var sf SpaceFile
-	return sf, decodeSpaceFile(settings(lowerTree(&tree{root: doc}, nil)), &sf)
+	return sf, decodeSpaceFile(settings(normalizeTree(&tree{root: doc}, nil)), &sf)
 }
 
 // TestDecodeUnknownKeyWithNoValueStillErrors: a key written with nothing after
@@ -266,24 +266,68 @@ func TestDecodeErrorNamesTheKeyAtEveryDepth(t *testing.T) {
 	}
 }
 
-// TestDecodeFoldsMapKeysAndNeverTheirValues: every map key the config language
-// owns arrives folded, which is what makes a package entry match a folder
-// spelled any way at all. The values are untouched: a package name derived
-// from a key is lowercase by construction, and a tag format or a path is the
-// text the file wrote.
-func TestDecodeFoldsMapKeysAndNeverTheirValues(t *testing.T) {
+// TestDecodeFoldsFieldKeysAndKeepsEntryKeys: the two halves of the rule, in one
+// place because they are easy to confuse.
+//
+// A field key names something the model has — `Packages`, `Path` — and the
+// fields table is keyed in lower case, so the key is folded to find its setter
+// and the file may spell it however it likes. An entry key names something the
+// repository has — a package, a space, a script — and is kept exactly as the
+// file wrote it, matched case-insensitively wherever it is looked up. Values
+// are never touched either way.
+func TestDecodeFoldsFieldKeysAndKeepsEntryKeys(t *testing.T) {
 	cfg, err := decodeRoot(t, map[string]any{
 		"Packages": map[string]any{"CoreLib": map[string]any{"tagFormat": "V{Version}"}},
 		"Spaces":   map[string]any{"Libs": map[string]any{"Path": "Pkgs"}},
 		"Scripts":  map[string]any{"Build": "echo Build"},
 	})
 	require.NoError(t, err)
-	require.Contains(t, cfg.Packages, "corelib", "an entry key is folded, like every map key")
-	assert.Equal(t, "V{Version}", cfg.Packages["corelib"].TagFormat, "its value is not")
-	require.Contains(t, cfg.Spaces, "libs")
-	assert.Equal(t, PathList{"Pkgs"}, cfg.Spaces["libs"].Path)
-	require.Contains(t, cfg.Scripts, "build")
-	assert.Equal(t, Script{"echo Build"}, cfg.Scripts["build"])
+	require.Contains(t, cfg.Packages, "CoreLib", "an entry key is the name the author wrote")
+	assert.NotContains(t, cfg.Packages, "corelib")
+	assert.Equal(t, "V{Version}", cfg.Packages["CoreLib"].TagFormat, "and its value is untouched")
+	require.Contains(t, cfg.Spaces, "Libs")
+	assert.Equal(t, PathList{"Pkgs"}, cfg.Spaces["Libs"].Path,
+		"`Path` found its setter folded, and `Pkgs` is the folder the file named")
+	require.Contains(t, cfg.Scripts, "Build")
+	assert.Equal(t, Script{"echo Build"}, cfg.Scripts["Build"])
+
+	// And the lookups that make the kept spelling usable.
+	pc, ok := cfg.Package("corelib")
+	require.True(t, ok)
+	assert.Equal(t, "V{Version}", pc.TagFormat)
+	_, ok = cfg.Script("build")
+	assert.True(t, ok)
+}
+
+// TestDecodeRefusesTwoSpellingsOfOneKey: a name written twice in one object has
+// no lookup that could choose between them, so the load says so instead of
+// letting the map iteration decide. Free-form `custom` is exempt: dispat looks
+// nothing up in there.
+func TestDecodeRefusesTwoSpellingsOfOneKey(t *testing.T) {
+	for name, doc := range map[string]map[string]any{
+		"field keys": {"logLevel": "info", "loglevel": "warn"},
+		"scripts": {"scripts": map[string]any{
+			"Build": "echo one", "build": "echo two"}},
+		"packages": {"packages": map[string]any{
+			"Core": map[string]any{"src": "a"}, "core": map[string]any{"src": "b"}}},
+		"spaces": {"spaces": map[string]any{
+			"Libs": map[string]any{"path": "a"}, "libs": map[string]any{"path": "b"}}},
+		"initials": {"initials": map[string]any{"Core": "1.0.0", "core": "2.0.0"}},
+		"parser types": {"parser": map[string]any{"types": map[string]any{
+			"Feat": "minor", "feat": "patch"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeRoot(t, doc)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "collide case-insensitively")
+		})
+	}
+
+	cfg, err := decodeRoot(t, map[string]any{
+		"custom": map[string]any{"Team": "a", "team": "b"},
+	})
+	require.NoError(t, err, "custom is the repository's own data, not a namespace dispat resolves in")
+	assert.Len(t, cfg.Custom, 2)
 }
 
 // TestDecodeReportsTheSameKeyEveryTime: a map has no order, so a document with
@@ -319,6 +363,7 @@ func TestDecodeFolderFilesShareTheRootStance(t *testing.T) {
 	assert.Equal(t, Providers("core"), pc.Dependencies,
 		"a package's own list names providers, the consumer being the package")
 	require.Len(t, pc.AliasTags, 1)
+	assert.Contains(t, pc.Scripts, "build")
 
 	_, err = decodePackage(t, map[string]any{"tagfromat": "v"})
 	require.Error(t, err)
@@ -332,7 +377,7 @@ func TestDecodeFolderFilesShareTheRootStance(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Dependencies{{Consumer: "app", Provider: "core"}}, sf.Dependencies,
 		"a space's object is keyed by consumer, like the root's")
-	assert.Contains(t, sf.Packages, "core")
+	assert.Contains(t, sf.Packages, "Core", "an entry key keeps its spelling one folder down too")
 
 	_, err = decodeSpace(t, map[string]any{"tagfromat": "v"})
 	require.Error(t, err)
@@ -454,8 +499,8 @@ func TestDecodeRefusesAValueOfTheWrongShape(t *testing.T) {
 		{"object where a path belongs", map[string]any{
 			"spaces": map[string]any{"libs": map[string]any{"path": map[string]any{"a": 1}}}},
 			"spaces.libs.path"},
-		{"text where a boolean belongs", map[string]any{"unsafeDisableLock": "yes"}, "unsafedisablelock"},
-		{"object where a boolean belongs", map[string]any{"updateCheck": map[string]any{"a": 1}}, "updatecheck"},
+		{"text where a boolean belongs", map[string]any{"unsafeDisableLock": "yes"}, "unsafeDisableLock"},
+		{"object where a boolean belongs", map[string]any{"updateCheck": map[string]any{"a": 1}}, "updateCheck"},
 		{"scalar where a record line belongs", map[string]any{
 			"changelog": map[string]any{"header": []any{42}}}, "changelog.header[0]"},
 		{"scalar where an object belongs", map[string]any{"changelog": 4}, "changelog"},
@@ -468,7 +513,8 @@ func TestDecodeRefusesAValueOfTheWrongShape(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := decodeRoot(t, c.doc)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), c.key, "the refusal names the key by its path")
+			assert.Contains(t, err.Error(), c.key,
+				"the refusal names the key by its path, spelled as the file wrote it")
 		})
 	}
 }
