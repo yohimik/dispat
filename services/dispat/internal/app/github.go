@@ -26,6 +26,11 @@ type GitHubOptions struct {
 	// exactly that commit or branch. Only safe once the commit exists on the
 	// remote; empty leaves the choice to GitHub (the default branch head).
 	Target string
+	// Draft overrides github.draft, whether the release is created as a
+	// draft for a human to publish. Nil is the flag left unpassed, which
+	// leaves every package its configured policy; a value set forces the
+	// policy either way over the configuration.
+	Draft *bool
 	// ReleaseName overrides github.releaseName, the release's name. It is
 	// interpolated like the configured value.
 	ReleaseName string
@@ -147,6 +152,12 @@ func (a *App) githubSpec(spec model.GitHubSpec, opts GitHubOptions) model.GitHub
 	spec.Repo = firstOf(opts.Repo, spec.Repo)
 	spec.APIURL = firstOf(opts.APIURL, spec.APIURL)
 	spec.TokenEnv = firstOf(opts.TokenEnv, spec.TokenEnv)
+	// Draft is a tri-state rather than a string override: --draft turns
+	// drafting on and --draft=false turns it off over a configured true, so
+	// the flag reads the same way the configuration key does.
+	if opts.Draft != nil {
+		spec.Draft = *opts.Draft
+	}
 	spec.Format.ReleaseName = firstOf(opts.ReleaseName, spec.Format.ReleaseName)
 	// The authors overrides land on the format before the spec is keyed, so
 	// two packages the flags now differentiate stop sharing one releaser

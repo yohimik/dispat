@@ -427,6 +427,7 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 	return &github.Releaser{
 		APIURL:      spec.APIURL,
 		AllPackages: spec.AllPackages,
+		Draft:       spec.Draft,
 		Owner:       owner,
 		Repo:        repo,
 		Token:       token,

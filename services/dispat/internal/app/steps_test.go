@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
@@ -178,6 +179,30 @@ func TestGitHubSpecOverridesBeatTheConfiguredPolicy(t *testing.T) {
 	assert.Equal(t, "mono", got.Repo, "an unset flag leaves the configured value")
 	assert.Equal(t, "https://ghe.acme/api/v3", got.APIURL)
 	assert.True(t, got.Enabled, "the overrides are addressing, not policy")
+}
+
+// TestGitHubDraftOverrideIsTriState: --draft is a policy the flag can set
+// either way, so an invocation drafts a repository that publishes straight
+// away and publishes from one that drafts. Unpassed, the configuration
+// stands. Because the flag decides what the releaser sends, it has to reach
+// the key as well: two packages the flag now differentiates must stop sharing
+// one releaser.
+func TestGitHubDraftOverrideIsTriState(t *testing.T) {
+	a, _, _ := stepApp(t)
+	drafting := model.GitHubSpec{Enabled: true, Owner: "acme", Repo: "mono", Draft: true}
+	publishing := model.GitHubSpec{Enabled: true, Owner: "acme", Repo: "mono"}
+
+	assert.True(t, a.githubSpec(drafting, GitHubOptions{}).Draft, "an unpassed flag leaves the policy")
+	assert.False(t, a.githubSpec(publishing, GitHubOptions{}).Draft)
+
+	assert.True(t, a.githubSpec(publishing, GitHubOptions{Draft: models.Bool(true)}).Draft,
+		"--draft holds a configured publish back")
+	assert.False(t, a.githubSpec(drafting, GitHubOptions{Draft: models.Bool(false)}).Draft,
+		"--draft=false publishes over a configured draft")
+
+	assert.NotEqual(t, a.githubSpec(publishing, GitHubOptions{}).Key(),
+		a.githubSpec(publishing, GitHubOptions{Draft: models.Bool(true)}).Key(),
+		"a flag that changes every release must change the releaser key")
 }
 
 // TestAuthorOptionsOverlayTheRecordFormat: the six authors flags override the
