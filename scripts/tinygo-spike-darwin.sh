@@ -266,7 +266,13 @@ for arch in $runnable; do
 		echo "=== $toolchain build dispat $ver darwin/$arch ===" >>"$log"
 		if [ "$toolchain" = tinygo ]; then
 			GOOS=darwin GOARCH="$arch" tinygo build -opt=z -no-debug \
-				-ldflags="-X $V=$ver" -o "$out/su-tinygo-$arch-$ver" . >>"$log" 2>&1
+				-ldflags="-X $V=$ver" -o "$out/su-tinygo-$arch-$ver" . >"$work/tinygo.raw" 2>&1
+			status=$?
+			noise="Reserved registers on the clobber list"
+			n=$(grep -c "$noise" "$work/tinygo.raw" || true)
+			grep -v "$noise" "$work/tinygo.raw" >>"$log"
+			[ "$n" -eq 0 ] || echo "($n identical \"$noise\" warnings elided)" >>"$log"
+			(exit $status)
 		else
 			GOOS=darwin GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
 				-ldflags "-s -w -X $V=$ver" -o "$out/su-gc-$arch-$ver" . >>"$log" 2>&1
@@ -274,6 +280,16 @@ for arch in $runnable; do
 		echo "exit=$?" >>"$log"
 	done
 done
+
+# version_of reads the one line of --version that carries the version, so the
+# terminal logo does not land in the log squashed onto one line.
+version_of() {
+	if [ -x "$1" ]; then
+		"$1" --version 2>&1 | grep '^dispat ' | tail -n 1
+	else
+		echo "(absent)"
+	fi
+}
 
 start_fake() {
 	: >"$work/sufake.out"
@@ -313,9 +329,9 @@ case_run() {
 	kill "$fake_pid" 2>/dev/null
 	wait "$fake_pid" 2>/dev/null
 	cat "$work/sufake.out" >>"$log"
-	echo "--- exe: $("$su/dispat" --version 2>&1 | tr '\n' ' ')" >>"$log"
+	echo "--- exe: $(version_of "$su/dispat")" >>"$log"
 	if [ -f "$su/dispat.backup" ]; then
-		echo "--- backup: $("$su/dispat.backup" --version 2>&1 | tr '\n' ' ')" >>"$log"
+		echo "--- backup: $(version_of "$su/dispat.backup")" >>"$log"
 	else
 		echo "--- backup: none" >>"$log"
 	fi
@@ -338,7 +354,7 @@ for arch in $runnable; do
 	echo "=== C2 fork --rollback darwin/$arch, sufake stopped ===" >>"$log"
 	"$su/dispat" self-update --rollback >>"$log" 2>&1
 	echo "exit=$?" >>"$log"
-	echo "--- exe: $("$su/dispat" --version 2>&1 | tr '\n' ' ')" >>"$log"
+	echo "--- exe: $(version_of "$su/dispat")" >>"$log"
 
 	# The two verifier-independent rows. D must fail with a certificate error
 	# however darwin decides to trust, because the CA is withheld either way,

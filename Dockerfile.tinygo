@@ -41,10 +41,6 @@
 # and the ldflags row of tinygo-spike-net still proves the rule with a program
 # of its own, beside the self-update matrix that depends on it.
 #
-# tinygo/tinygo carries both toolchains: gc for `go mod download`, for the gc
-# baseline the sizes are measured against and for the control the network
-# probe needs, TinyGo for everything else. It is Debian-based, not alpine, so
-# package installs are apt-get.
 # ADDENDUM, AS OF THE FORK 0.42.0-net.1 (2026-08-30). The verdict above stands
 # for upstream TinyGo and is left as it was: 0.41.1 is still the base image,
 # and every stage up to and including tinygo-spike-net still measures it.
@@ -60,6 +56,11 @@
 # must actually verify, a run with that CA withheld that must fail, a plaintext
 # request the TLS listener must refuse, and a connection log taken from the far
 # end of the wire.
+#
+# tinygo/tinygo carries both toolchains: gc for `go mod download`, for the gc
+# baseline the sizes are measured against and for the control the network
+# probe needs, TinyGo for everything else. It is Debian-based, not alpine, so
+# package installs are apt-get.
 ARG TINYGO_VERSION=0.41.1
 
 # The fork's release, fetched at build time by the gc-built dispat the build
@@ -754,13 +755,50 @@ RUN <<'EOF'
 set -u
 log=/src/spike/selfupdate.log
 : > "$log"
-export PATH=/home/gopher/fork/tinygo/bin:$PATH
 fake=/out/sufake
 ca=/home/gopher/sufake-ca.pem
 work=/home/gopher/su
 mkdir -p "$work"
 V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
 asset="dispat-linux-${TARGETARCH}"
+
+# Which toolchain the rows below are actually about. The fork is used when
+# tinygo-spike-fork installed it and upstream when it did not, and the label
+# every row carries says which — a log that calls an upstream row a fork row
+# is worse than no log at all.
+if [ -x /home/gopher/fork/tinygo/bin/tinygo ]; then
+  export PATH=/home/gopher/fork/tinygo/bin:$PATH
+  tc=fork
+else
+  tc="upstream (the fork did not install; see fork.log)"
+fi
+echo "=== toolchain under test: $tc ===" >> "$log"
+tinygo version >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+
+# One LLVM warning repeats once per inline asm block on arm64 — hundreds of
+# identical lines that bury every answer below them, exactly as they do in the
+# test stage. Counted, not kept.
+tinygo_build() {
+  out="$1"; shift
+  tinygo build "$@" -o "$out" . > /tmp/tinygo.raw 2>&1
+  status=$?
+  noise="Reserved registers on the clobber list"
+  n=$(grep -c "$noise" /tmp/tinygo.raw || true)
+  grep -v "$noise" /tmp/tinygo.raw >> "$log"
+  [ "$n" -eq 0 ] || echo "($n identical \"$noise\" warnings elided)" >> "$log"
+  return $status
+}
+
+# versionOf reads the one line of --version that carries the version, so the
+# terminal logo does not land in the log squashed onto one line.
+versionOf() {
+  if [ -x "$1" ]; then
+    "$1" --version 2>&1 | grep '^dispat ' | tail -n 1
+  else
+    echo "(absent)"
+  fi
+}
 
 # The instrument, gc-built, so the thing measuring TLS is never the thing
 # under measurement.
@@ -777,8 +815,7 @@ for pair in tinygo:1.0.0 tinygo:1.1.0 gc:1.0.0 gc:1.1.0; do
   toolchain="${pair%%:*}"; ver="${pair#*:}"
   echo "=== $toolchain build dispat $ver ===" >> "$log"
   if [ "$toolchain" = tinygo ]; then
-    tinygo build -opt=z -no-debug -ldflags="-X $V=$ver" \
-      -o "/out/su-tinygo-$ver" . >> "$log" 2>&1
+    tinygo_build "/out/su-tinygo-$ver" -opt=z -no-debug -ldflags="-X $V=$ver"
   else
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X $V=$ver" \
       -o "/out/su-gc-$ver" . >> "$log" 2>&1
@@ -789,7 +826,7 @@ done
 # Row zero: the stamping acceptance the whole matrix rests on. A fork binary
 # that still reports `dev` is a local build to self-update, which refuses
 # before it reaches the network, and every row below it would be vacuous.
-echo "=== row zero: su-tinygo-1.0.0 --version ===" >> "$log"
+echo "=== row zero: $tc su-tinygo-1.0.0 --version ===" >> "$log"
 /out/su-tinygo-1.0.0 --version >> "$log" 2>&1
 echo "exit=$?" >> "$log"
 
@@ -833,9 +870,9 @@ case_run() {
   fi
   echo "exit=$?" >> "$log"
   stop_fake
-  echo "--- exe: $("$work/dispat" --version 2>&1 | tr '\n' ' ')" >> "$log"
+  echo "--- exe: $(versionOf "$work/dispat")" >> "$log"
   if [ -f "$work/dispat.backup" ]; then
-    echo "--- backup: $("$work/dispat.backup" --version 2>&1 | tr '\n' ' ')" >> "$log"
+    echo "--- backup: $(versionOf "$work/dispat.backup")" >> "$log"
   else
     echo "--- backup: none" >> "$log"
   fi
@@ -848,51 +885,53 @@ case_run "A gc control, CA trusted, full update" gc localhost trusted https
 # B: the fork against the real listing over real TLS, reporting only. Nothing
 # is downloaded, so what this proves is the API half: resolver, handshake,
 # x509 verification against a root read off disk, and HTTP over the result.
-case_run "B fork --check, CA trusted" tinygo localhost trusted https --check
+case_run "B $tc --check, CA trusted" tinygo localhost trusted https --check
 
 # B2: the same by IP literal. SNI is waived by the client for an IP dial, so
 # the leaf's IPAddresses entry is what carries it — and the row documents
 # whether the fork resolves `localhost` at all by contrast with B.
-case_run "B2 fork --check by IP literal" tinygo 127.0.0.1 trusted https --check
+case_run "B2 $tc --check by IP literal" tinygo 127.0.0.1 trusted https --check
 
 # C: the whole update under the fork — download, size and digest check, a
 # smoke execution of the downloaded binary, and the atomic swap that keeps the
 # old one as .backup.
-case_run "C fork full update, CA trusted" tinygo localhost trusted https
+case_run "C $tc full update, CA trusted" tinygo localhost trusted https
 
 # C2: rollback, offline. The exe left by C is put back, with no server running
 # at all, which is exec and rename under TinyGo and nothing else.
-echo "=== C2 fork --rollback, sufake stopped ===" >> "$log"
+echo "=== C2 $tc --rollback, sufake stopped ===" >> "$log"
 "$work/dispat" self-update --rollback >> "$log" 2>&1
 echo "exit=$?" >> "$log"
-echo "--- exe: $("$work/dispat" --version 2>&1 | tr '\n' ' ')" >> "$log"
+echo "--- exe: $(versionOf "$work/dispat")" >> "$log"
 
 # D: the stub-killer. The same setup as C with the CA withheld, which a real
 # verification against real roots must refuse. A stubbed crypto/tls cannot
 # produce a certificate error, because it never verified anything.
-case_run "D fork full update, SSL_CERT_FILE unset" tinygo localhost untrusted https
+case_run "D $tc full update, SSL_CERT_FILE unset" tinygo localhost untrusted https
 
 # E: plaintext at the TLS port. The refusal is the listener's, by
 # construction, and the connection line records the method bytes rather than a
 # ClientHello.
-case_run "E fork plaintext http at the TLS port" tinygo localhost trusted http --check
+case_run "E $tc plaintext http at the TLS port" tinygo localhost trusted http --check
 
 # F: the net stage's own rows, re-asked with the fork. Every verdict above
 # tinygo-spike-net was measured against upstream 0.41.1, so the layers are
 # walked again here — the same probe, the same assertion server, one toolchain
 # newer — and the tls-reality round is read from the far end of the wire as it
 # always is.
-echo "=== F fork netprobe build ===" >> "$log"
+echo "=== F $tc netprobe build ===" >> "$log"
 cd /src/netprobe
-GOWORK=off tinygo build -ldflags "-X main.Bare=1.2.3 -X main.Initialed=1.2.3" \
-  -o /out/netprobe-fork . >> "$log" 2>&1
+# Exported rather than prefixed: a variable assignment in front of a shell
+# function is not the one-command scope it is in front of a program.
+export GOWORK=off
+tinygo_build /out/netprobe-fork -ldflags "-X main.Bare=1.2.3 -X main.Initialed=1.2.3"
 echo "exit=$?" >> "$log"
 for layer in ldflags tcp tls http https; do
-  echo "=== F fork netprobe $layer ===" >> "$log"
+  echo "=== F $tc netprobe $layer ===" >> "$log"
   /out/netprobe-fork "$layer" >> "$log" 2>&1
   echo "exit=$?" >> "$log"
 done
-echo "=== F fork tls-reality ===" >> "$log"
+echo "=== F $tc tls-reality ===" >> "$log"
 : > /tmp/reality-fork
 /out/tlsreality 127.0.0.1:14443 > /tmp/reality-fork 2>&1 &
 server=$!
