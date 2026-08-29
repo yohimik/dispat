@@ -1,4 +1,4 @@
-package download
+package install
 
 import (
 	"testing"
@@ -65,7 +65,7 @@ func TestParseRepositoryRefusesWhatIsNotOne(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseRepository(in)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "download: ")
+			assert.Contains(t, err.Error(), "install: ")
 		})
 	}
 }

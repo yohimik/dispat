@@ -413,8 +413,8 @@
         },
         {
           "type": "doc",
-          "id": "cli/download",
-          "label": "download"
+          "id": "cli/install",
+          "label": "install"
         },
         {
           "type": "doc",

@@ -1,4 +1,5 @@
-// Package download installs a tool published as a GitHub release asset.
+// Package install puts a tool published as a GitHub release asset onto the
+// machine, which is the work behind `dispat install`.
 //
 // It is `dispat self-update` pointed at somebody else's repository: the same
 // listing walk that picks a release, the same streamed download checked
@@ -11,7 +12,7 @@
 // The package prints nothing and reads no configuration. The app layer turns
 // what it returns into log events and text, exactly as it does for
 // self-update.
-package download
+package install
 
 import (
 	"context"
@@ -26,12 +27,12 @@ import (
 )
 
 // Command is the command word this package's failures name.
-const Command = "download"
+const Command = "install"
 
 // stagePattern names the folder a piped download is staged in. A folder of its
 // own, removed whatever happens, because a pipe never renames the file into
 // place and a half-read archive must not be left sitting on PATH.
-const stagePattern = "dispat-download-"
+const stagePattern = "dispat-install-"
 
 // Fetcher stages a verified asset in a folder and answers where it put it.
 //
@@ -64,7 +65,7 @@ func NewInstaller(exe string, client *http.Client, log zerolog.Logger) *selfupda
 func Stage(ctx context.Context, f Fetcher, a selfupdate.Asset, fn func(path string) error) error {
 	dir, err := os.MkdirTemp("", stagePattern)
 	if err != nil {
-		return fmt.Errorf("download: cannot stage the download: %w", err)
+		return fmt.Errorf("install: cannot stage the download: %w", err)
 	}
 	defer os.RemoveAll(dir)
 	path, err := f.Fetch(ctx, a, dir, filepath.Join(dir, a.Name))

@@ -1,4 +1,4 @@
-package download
+package install
 
 import (
 	"testing"

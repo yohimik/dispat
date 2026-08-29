@@ -265,15 +265,15 @@ the published image. Read [docker/README.md](https://github.com/yohimik/dispat/t
 
 ## The other tools a job needs
 
-Once dispat is on the runner, [`dispat download`](../cli/download.md) puts the rest of the job's tools there too. It
+Once dispat is on the runner, [`dispat install`](../cli/install.md) puts the rest of the job's tools there too. It
 reads any GitHub repository's releases, verifies the file against the size and checksum the release published, and
 installs it onto a folder on `PATH`, so a setup step needs no package manager and no second downloader:
 
 ```yaml
 - name: Install the tools the release needs
   run: |
-    dispat download acme/deployer --asset 'deployer-{os}-{arch}' --release 2.1.0
-    dispat download cli/cli --asset 'gh_{version}_{os}_{arch}.tar.gz' \
+    dispat install acme/deployer --asset 'deployer-{os}-{arch}' --release 2.1.0
+    dispat install cli/cli --asset 'gh_{version}_{os}_{arch}.tar.gz' \
       --pipe 'tar -xz --strip-components=2 --wildcards "*/bin/gh"'
 ```
 

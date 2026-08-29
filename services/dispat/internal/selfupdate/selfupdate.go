@@ -185,7 +185,7 @@ func PruneBackup(exe string, now time.Time) bool {
 
 // commandOr is the command word a Source or an Installer names in what it
 // reports. It is the word the operator typed rather than the package doing the
-// work, because "selfupdate: listing releases" under `dispat download` names
+// work, because "selfupdate: listing releases" under `dispat install` names
 // the wrong thing entirely, and self-update is the one that needs no answer.
 func commandOr(command string) string {
 	if command == "" {

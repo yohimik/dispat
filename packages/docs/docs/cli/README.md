@@ -27,7 +27,7 @@ dispat [command] [flags]
 | `if [cond]`               | Run one of several shell scripts. dispat chooses the script based on a condition matching the environment, the filesystem, or the changed packages; see [The if command](./if.md). |
 | `exec <script>`           | Run one declared script here exactly once. You can run it for a named subject or the folder you are in; see [The exec command](./exec.md). |
 | `self-update`             | Replace this binary with the latest release; see [The self-update command](./self-update.md).                             |
-| `download <repo>`         | Install a tool from any GitHub repository's releases; see [The download command](./download.md).                          |
+| `install <repo>`          | Install a tool from any GitHub repository's releases; see [The install command](./install.md).                            |
 | `scanner [folder]`        | Print what a folder's manifests declare; see [The scanner command](./scanner.md).                     |
 | `writer <manifest>...`    | Edit manifests in place while preserving their format; see [The writer command](./writer.md).                  |
 | `replacer <file>...`      | Replace literal text in any file without parsing it; see [The replacer command](./replacer.md).                             |

@@ -1,6 +1,6 @@
 package app
 
-// The `dispat download` command: dispat installing somebody else's release
+// The `dispat install` command: dispat installing somebody else's release
 // binary the way it installs its own.
 //
 // Like self-update and the manifest commands it reads no config file and needs
@@ -20,15 +20,15 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/yohimik/dispat/services/dispat/internal/download"
+	"github.com/yohimik/dispat/services/dispat/internal/install"
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
 )
 
-// DownloadOptions is one `dispat download` invocation.
-type DownloadOptions struct {
+// InstallOptions is one `dispat install` invocation.
+type InstallOptions struct {
 	// Repository is whose releases are read. It is the command's one
 	// positional argument, already parsed.
-	Repository download.Repository
+	Repository install.Repository
 	// Source is the release listing, pointed at that repository.
 	Source selfupdate.Source
 	// Release names an exact version to install instead of the latest one.
@@ -49,7 +49,7 @@ type DownloadOptions struct {
 	Check bool
 	// Force installs the file even when the destination already carries it.
 	Force bool
-	// Rollback puts the binary the last download replaced back, without
+	// Rollback puts the binary the last install replaced back, without
 	// downloading anything.
 	Rollback bool
 	// GOOS and GOARCH are the platform an asset pattern renders for. Fields
@@ -58,7 +58,7 @@ type DownloadOptions struct {
 	GOOS, GOARCH string
 	// Env answers the three questions the install folder depends on. Nil is
 	// the real machine.
-	Env download.Environment
+	Env install.Environment
 	// JSON renders events through Log instead of the report.
 	JSON bool
 	// Out receives the report.
@@ -72,17 +72,17 @@ type DownloadOptions struct {
 }
 
 // env is the machine the install folder is resolved against.
-func (o DownloadOptions) env() download.Environment {
+func (o InstallOptions) env() install.Environment {
 	if o.Env != nil {
 		return o.Env
 	}
-	return download.OSEnvironment{OS: o.GOOS}
+	return install.OSEnvironment{OS: o.GOOS}
 }
 
 // pipeOut is where a piped command's own output goes. In JSON mode it must not
 // reach Out, whose every line is an event a machine parses; anywhere else it
 // belongs exactly where the report does.
-func (o DownloadOptions) pipeOut() io.Writer {
+func (o InstallOptions) pipeOut() io.Writer {
 	if o.JSON && o.Err != nil {
 		return o.Err
 	}
@@ -92,51 +92,51 @@ func (o DownloadOptions) pipeOut() io.Writer {
 // piping reports whether this invocation hands the file to a command rather
 // than installing it. The two paths differ in what they can know, not only in
 // what they do: a pipe has no destination file to compare against.
-func (o DownloadOptions) piping() bool { return o.Pipe != "" }
+func (o InstallOptions) piping() bool { return o.Pipe != "" }
 
-// Download performs, or merely reports, one download.
+// Install performs, or merely reports, one install.
 //
 // pending is whether the same invocation without Check would change anything,
 // which is the one question Check answers and the only thing that decides its
 // exit code. It is false whenever the command actually did the work, so an
 // ordinary run never looks like a failed gate.
-func Download(ctx context.Context, opts DownloadOptions) (pending bool, err error) {
-	target, err := download.ResolveTarget(opts.BinDir, opts.Name, opts.Repository, opts.env())
+func Install(ctx context.Context, opts InstallOptions) (pending bool, err error) {
+	target, err := install.ResolveTarget(opts.BinDir, opts.Name, opts.Repository, opts.env())
 	if err != nil {
-		opts.Log.Error().Err(err).Msg("download failed")
+		opts.Log.Error().Err(err).Msg("install failed")
 		return false, err
 	}
 	opts.Log.Debug().Str("repository", opts.Repository.String()).Str("dir", target.Dir).
-		Str("name", target.Name).Bool("pipe", opts.piping()).Msg("download: destination resolved")
+		Str("name", target.Name).Bool("pipe", opts.piping()).Msg("install: destination resolved")
 	// Housekeeping, on every invocation and before anything else: the copy an
 	// earlier download of this tool kept is deleted once it is a week old,
 	// exactly as dispat's own is at the top of every run.
 	if selfupdate.PruneBackup(target.Path(), time.Now()) {
 		opts.Log.Debug().Str("backup", selfupdate.BackupPath(target.Path())).
-			Msg("download: the previous copy of this tool has expired and was removed")
+			Msg("install: the previous copy of this tool has expired and was removed")
 	}
 	// Whatever stands at the destination has to be a file a download may take
 	// the place of, and it is asked before anything else so a refusal costs no
 	// request. A pipe never touches it, so a pipe never asks.
 	if !opts.piping() {
-		if err := download.Replaceable(target.Path()); err != nil {
-			opts.Log.Error().Err(err).Msg("download failed")
+		if err := install.Replaceable(target.Path()); err != nil {
+			opts.Log.Error().Err(err).Msg("install failed")
 			return false, err
 		}
 	}
 	if opts.Rollback {
-		return downloadRollback(opts, target)
+		return installRollback(opts, target)
 	}
 
-	rel, err := resolveDownload(ctx, opts)
+	rel, err := resolveInstall(ctx, opts)
 	if err != nil {
-		opts.Log.Error().Err(err).Msg("download failed")
+		opts.Log.Error().Err(err).Msg("install failed")
 		return false, err
 	}
 	opts.Log.Debug().Str("tag", rel.Tag).Str("version", rel.Version.String()).
-		Int("assets", len(rel.Assets)).Msg("download: release selected")
+		Int("assets", len(rel.Assets)).Msg("install: release selected")
 
-	asset, err := download.SelectAsset(rel, opts.Asset, download.Fields{
+	asset, err := install.SelectAsset(rel, opts.Asset, install.Fields{
 		OS: opts.GOOS, Arch: opts.GOARCH, Version: rel.Version.String(),
 		Tag: rel.Tag, Name: opts.Repository.Repo,
 	})
@@ -145,7 +145,7 @@ func Download(ctx context.Context, opts DownloadOptions) (pending bool, err erro
 		return false, err
 	}
 	opts.Log.Debug().Str("asset", asset.Name).Int64("bytes", asset.Size).
-		Bool("digest", asset.Digest != "").Msg("download: asset selected")
+		Bool("digest", asset.Digest != "").Msg("install: asset selected")
 
 	var change bool
 	switch {
@@ -154,13 +154,13 @@ func Download(ctx context.Context, opts DownloadOptions) (pending bool, err erro
 	default:
 		installed, err := alreadyInstalled(opts, target, rel, asset)
 		if err != nil {
-			opts.Log.Error().Err(err).Msg("download failed")
+			opts.Log.Error().Err(err).Msg("install failed")
 			return false, err
 		}
 		change = !installed
 	}
 	if opts.Check {
-		reportDownload(opts, target, rel, asset, change)
+		reportInstall(opts, target, rel, asset, change)
 		return change, nil
 	}
 	if !change {
@@ -174,8 +174,8 @@ func Download(ctx context.Context, opts DownloadOptions) (pending bool, err erro
 		return false, nil
 	}
 
-	if err := download.EnsureDir(target.Dir); err != nil {
-		opts.Log.Error().Err(err).Msg("download failed")
+	if err := install.EnsureDir(target.Dir); err != nil {
+		opts.Log.Error().Err(err).Msg("install failed")
 		return false, err
 	}
 	if !opts.JSON {
@@ -183,9 +183,9 @@ func Download(ctx context.Context, opts DownloadOptions) (pending bool, err erro
 			asset.Name, humanBytes(asset.Size), opts.Repository.String())
 	}
 	if opts.piping() {
-		return false, runDownloadPipe(ctx, opts, target, rel, asset)
+		return false, runInstallPipe(ctx, opts, target, rel, asset)
 	}
-	return false, installDownload(ctx, opts, target, rel, asset)
+	return false, installAsset(ctx, opts, target, rel, asset)
 }
 
 // alreadyInstalled answers whether the destination already holds this exact
@@ -197,11 +197,11 @@ func Download(ctx context.Context, opts DownloadOptions) (pending bool, err erro
 // and the guess that skips the install is the one that leaves a machine on an
 // old binary forever. A destination dispat cannot read at all is a different
 // thing entirely and is reported rather than guessed past.
-func alreadyInstalled(opts DownloadOptions, target download.Target,
+func alreadyInstalled(opts InstallOptions, target install.Target,
 	rel selfupdate.Release, asset selfupdate.Asset) (bool, error) {
-	installed, err := download.Installed(target.Path(), asset.Digest)
+	installed, err := install.Installed(target.Path(), asset.Digest)
 	switch {
-	case errors.Is(err, download.ErrNoDigest):
+	case errors.Is(err, install.ErrNoDigest):
 		opts.Log.Warn().Str("asset", asset.Name).Str("tag", rel.Tag).
 			Msg("the release publishes no checksum, so dispat cannot tell whether this tool is already installed")
 		return false, nil
@@ -213,18 +213,18 @@ func alreadyInstalled(opts DownloadOptions, target download.Target,
 		return false, err
 	}
 	opts.Log.Debug().Str("path", target.Path()).Str("tag", rel.Tag).Bool("installed", installed).
-		Msg("download: the destination was compared against the release digest")
+		Msg("install: the destination was compared against the release digest")
 	return installed, nil
 }
 
-// installDownload puts the verified file where the target says, keeping
+// installAsset puts the verified file where the target says, keeping
 // whatever was there as its backup.
-func installDownload(ctx context.Context, opts DownloadOptions, target download.Target,
+func installAsset(ctx context.Context, opts InstallOptions, target install.Target,
 	rel selfupdate.Release, asset selfupdate.Asset) error {
-	installer := download.NewInstaller(target.Path(), opts.Source.Client, opts.Log)
+	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Log)
 	backup, err := installer.Install(ctx, asset)
 	if err != nil {
-		opts.Log.Error().Err(err).Msg("download failed")
+		opts.Log.Error().Err(err).Msg("install failed")
 		return err
 	}
 	if opts.JSON {
@@ -240,28 +240,28 @@ func installDownload(ctx context.Context, opts DownloadOptions, target download.
 	fmt.Fprintf(opts.Out, "installed %s %s at %s\n", target.Name, rel.Version.String(), target.Path())
 	if backup != "" {
 		fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", backup)
-		fmt.Fprintf(opts.Out, "put it back with \"dispat download %s --rollback\"\n", opts.Repository)
+		fmt.Fprintf(opts.Out, "put it back with \"dispat install %s --rollback\"\n", opts.Repository)
 	}
-	writeDownloadPathNote(opts, target)
+	writeInstallPathNote(opts, target)
 	return nil
 }
 
-// runDownloadPipe hands the verified file to the command that was named for
+// runInstallPipe hands the verified file to the command that was named for
 // it, in the install folder, and reports what the command made of it.
-func runDownloadPipe(ctx context.Context, opts DownloadOptions, target download.Target,
+func runInstallPipe(ctx context.Context, opts InstallOptions, target install.Target,
 	rel selfupdate.Release, asset selfupdate.Asset) error {
-	installer := download.NewInstaller(target.Path(), opts.Source.Client, opts.Log)
-	pipe := download.Pipe{
+	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Log)
+	pipe := install.Pipe{
 		Command: opts.Pipe, Dir: target.Dir,
 		Stdout: opts.pipeOut(), Stderr: opts.pipeOut(), Log: opts.Log,
 	}
-	err := download.Stage(ctx, installer, asset, func(path string) error {
+	err := install.Stage(ctx, installer, asset, func(path string) error {
 		opts.Log.Debug().Str("command", opts.Pipe).Str("dir", target.Dir).
-			Msg("download: handing the asset to the pipe")
+			Msg("install: handing the asset to the pipe")
 		return pipe.Run(ctx, path, asset.Name)
 	})
 	if err != nil {
-		opts.Log.Error().Err(err).Msg("download failed")
+		opts.Log.Error().Err(err).Msg("install failed")
 		return err
 	}
 	if opts.JSON {
@@ -271,13 +271,13 @@ func runDownloadPipe(ctx context.Context, opts DownloadOptions, target download.
 		return nil
 	}
 	fmt.Fprintf(opts.Out, "piped %s (%s) through: %s\n", asset.Name, rel.Tag, opts.Pipe)
-	writeDownloadPathNote(opts, target)
+	writeInstallPathNote(opts, target)
 	return nil
 }
 
-// reportDownload is what --check prints: what would be installed, from where,
+// reportInstall is what --check prints: what would be installed, from where,
 // and whether it would change anything.
-func reportDownload(opts DownloadOptions, target download.Target, rel selfupdate.Release,
+func reportInstall(opts InstallOptions, target install.Target, rel selfupdate.Release,
 	asset selfupdate.Asset, change bool) {
 	if opts.JSON {
 		ev := opts.Log.Info().Str("repository", opts.Repository.String()).
@@ -288,7 +288,7 @@ func reportDownload(opts DownloadOptions, target download.Target, rel selfupdate
 		} else {
 			ev = ev.Str("path", target.Path())
 		}
-		ev.Msg("download check")
+		ev.Msg("install check")
 		return
 	}
 	fmt.Fprintf(opts.Out, "repository %s\n", opts.Repository)
@@ -297,7 +297,7 @@ func reportDownload(opts DownloadOptions, target download.Target, rel selfupdate
 	if opts.piping() {
 		fmt.Fprintf(opts.Out, "pipe       %s\n", opts.Pipe)
 		fmt.Fprintf(opts.Out, "in         %s\n", target.Dir)
-		fmt.Fprintln(opts.Out, "\nrun it with: dispat download")
+		fmt.Fprintln(opts.Out, "\nrun it with: dispat install")
 		return
 	}
 	fmt.Fprintf(opts.Out, "install to %s\n", target.Path())
@@ -305,13 +305,13 @@ func reportDownload(opts DownloadOptions, target download.Target, rel selfupdate
 		fmt.Fprintln(opts.Out, "\nnothing to install: that file is already there")
 		return
 	}
-	fmt.Fprintln(opts.Out, "\ninstall it with: dispat download")
+	fmt.Fprintln(opts.Out, "\ninstall it with: dispat install")
 }
 
-// writeDownloadPathNote says so when the install folder is not on PATH, which
+// writeInstallPathNote says so when the install folder is not on PATH, which
 // is the one thing that makes a successful install look like a failed one: the
 // tool is there and the shell cannot find it.
-func writeDownloadPathNote(opts DownloadOptions, target download.Target) {
+func writeInstallPathNote(opts InstallOptions, target install.Target) {
 	if onPath(opts.env().Getenv("PATH"), target.Dir) {
 		return
 	}
@@ -352,9 +352,9 @@ func sameDirPath(a, b string) bool {
 	return ra == rb
 }
 
-// downloadRollback restores the copy the last download of this tool kept, or
+// installRollback restores the copy the last install of this tool kept, or
 // reports that there is one to restore.
-func downloadRollback(opts DownloadOptions, target download.Target) (bool, error) {
+func installRollback(opts InstallOptions, target install.Target) (bool, error) {
 	backup := selfupdate.BackupPath(target.Path())
 	if opts.Check {
 		if _, err := os.Stat(backup); err != nil {
@@ -370,7 +370,7 @@ func downloadRollback(opts DownloadOptions, target download.Target) (bool, error
 			opts.Log.Info().Str("backup", backup).Bool("pending", true).Msg("a backup is available")
 		} else {
 			fmt.Fprintf(opts.Out, "the backup of %s is at %s\n", target.Name, backup)
-			fmt.Fprintln(opts.Out, "\nrestore it with: dispat download --rollback")
+			fmt.Fprintln(opts.Out, "\nrestore it with: dispat install --rollback")
 		}
 		return true, nil
 	}
@@ -399,9 +399,9 @@ func downloadRollback(opts DownloadOptions, target download.Target) (bool, error
 	return false, nil
 }
 
-// resolveDownload picks the release to install: the one named, or the highest
+// resolveInstall picks the release to install: the one named, or the highest
 // the repository offers.
-func resolveDownload(ctx context.Context, opts DownloadOptions) (selfupdate.Release, error) {
+func resolveInstall(ctx context.Context, opts InstallOptions) (selfupdate.Release, error) {
 	if opts.Release != "" {
 		return opts.Source.At(ctx, opts.Release)
 	}

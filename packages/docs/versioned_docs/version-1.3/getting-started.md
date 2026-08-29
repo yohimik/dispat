@@ -108,9 +108,9 @@ beside the new one for a week in case you want it back. Every command mentions a
 find out without going looking. See [Updating dispat](./reference/self-update.md).
 
 The same machinery installs tools that are not dispat. Run
-`dispat download https://github.com/owner/repo --asset '<file>'` to fetch a binary from any GitHub repository's
+`dispat install https://github.com/owner/repo --asset '<file>'` to fetch a binary from any GitHub repository's
 releases, verified and put on your `PATH`, which is how a runner gets the rest of the tools a release needs. See
-[The download command](./cli/download.md).
+[The install command](./cli/install.md).
 
 ## First configuration
 

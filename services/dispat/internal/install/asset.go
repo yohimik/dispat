@@ -1,4 +1,4 @@
-package download
+package install
 
 import (
 	"fmt"
@@ -52,11 +52,11 @@ func Expand(pattern string, f Fields) (string, error) {
 		}
 		name, remainder, closed := strings.Cut(after, "}")
 		if !closed {
-			return "", fmt.Errorf("download: %q has a %q that is never closed", pattern, "{")
+			return "", fmt.Errorf("install: %q has a %q that is never closed", pattern, "{")
 		}
 		value, known := values[name]
 		if !known {
-			return "", fmt.Errorf("download: %q is not something an asset name can carry; it knows %s",
+			return "", fmt.Errorf("install: %q is not something an asset name can carry; it knows %s",
 				"{"+name+"}", strings.Join(placeholderNames(values), ", "))
 		}
 		b.WriteString(value)
@@ -85,14 +85,14 @@ func placeholderNames(values map[string]string) []string {
 // binary is how the wrong thing gets installed globally.
 func SelectAsset(rel selfupdate.Release, pattern string, f Fields) (selfupdate.Asset, error) {
 	if len(rel.Assets) == 0 {
-		return selfupdate.Asset{}, fmt.Errorf("download: %s carries no files to download", rel.Tag)
+		return selfupdate.Asset{}, fmt.Errorf("install: %s carries no files to download", rel.Tag)
 	}
 	if pattern == "" {
 		if len(rel.Assets) == 1 {
 			return rel.Assets[0], nil
 		}
 		return selfupdate.Asset{}, fmt.Errorf(
-			"download: %s carries %d files, so --asset has to say which one: %s",
+			"install: %s carries %d files, so --asset has to say which one: %s",
 			rel.Tag, len(rel.Assets), strings.Join(rel.AssetNames(), ", "))
 	}
 	want, err := Expand(pattern, f)
@@ -114,10 +114,10 @@ func SelectAsset(rel selfupdate.Release, pattern string, f Fields) (selfupdate.A
 	case 1:
 		return matched[0], nil
 	case 0:
-		return selfupdate.Asset{}, fmt.Errorf("download: %s carries no %s: it has %s",
+		return selfupdate.Asset{}, fmt.Errorf("install: %s carries no %s: it has %s",
 			rel.Tag, want, strings.Join(rel.AssetNames(), ", "))
 	default:
-		return selfupdate.Asset{}, fmt.Errorf("download: %s matches %d of %s's files: %s",
+		return selfupdate.Asset{}, fmt.Errorf("install: %s matches %d of %s's files: %s",
 			want, len(matched), rel.Tag, strings.Join(names(matched), ", "))
 	}
 }

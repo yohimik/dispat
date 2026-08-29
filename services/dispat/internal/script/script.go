@@ -28,7 +28,7 @@ func DefaultShell() []string { return []string{"/bin/sh", "-c"} }
 // rather than only the shell holding their output pipes.
 //
 // Exported for the one command outside this package that runs a shell string
-// of its own: `dispat download --pipe` feeds the command it is given on the
+// of its own: `dispat install --pipe` feeds the command it is given on the
 // standard input, which no Runner does, and an interrupt reaching an unpacker
 // halfway through a folder on PATH has to reach all of it.
 func SetProcessGroup(cmd *exec.Cmd) { setSysProcAttr(cmd) }

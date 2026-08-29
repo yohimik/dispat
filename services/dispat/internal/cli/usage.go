@@ -402,7 +402,7 @@ returns. Needs no config file and no git repository.`,
 			"owner", "repo", "api-url", "token-env"},
 	},
 	{
-		name:  cmdDownload,
+		name:  cmdInstall,
 		args:  "<repo>",
 		short: "install a tool from any GitHub repository's releases",
 		long: `Install a tool published as a GitHub release asset, the way self-update
@@ -439,7 +439,7 @@ default, empty for a repository tagging 1.2.3).
 
 --check reports what would be installed and exits 1 when the destination does
 not already hold that exact file, which is the gate a provisioning script
-puts in front of a download. --force installs it even when it does.
+puts in front of an install. --force installs it even when it does.
 --rollback puts the kept binary back and downloads nothing.
 
 Needs no config file and no git repository.`,

@@ -1,4 +1,4 @@
-package download
+package install
 
 import (
 	"crypto/sha256"
@@ -112,7 +112,7 @@ func resolveDir(dir string, env Environment) (string, error) {
 		// and the write must name the same one however the process moves.
 		abs, err := filepath.Abs(dir)
 		if err != nil {
-			return "", fmt.Errorf("download: %s is not a folder dispat can resolve: %w", dir, err)
+			return "", fmt.Errorf("install: %s is not a folder dispat can resolve: %w", dir, err)
 		}
 		return abs, nil
 	}
@@ -127,7 +127,7 @@ func resolveDir(dir string, env Environment) (string, error) {
 	if profile := env.Getenv("USERPROFILE"); profile != "" {
 		return filepath.Join(profile, UserBinDir), nil
 	}
-	return "", fmt.Errorf("download: nowhere to install: %s is not writable and no home folder is set; "+
+	return "", fmt.Errorf("install: nowhere to install: %s is not writable and no home folder is set; "+
 		"name one with --bin-dir or %s", SystemBinDir, BinDirEnv)
 }
 
@@ -141,10 +141,10 @@ func resolveDir(dir string, env Environment) (string, error) {
 // package is correct whoever calls it.
 func ValidName(name string) error {
 	if name == "." || name == ".." {
-		return fmt.Errorf("download: %q is not a name for a tool", name)
+		return fmt.Errorf("install: %q is not a name for a tool", name)
 	}
 	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
-		return fmt.Errorf("download: --as takes a file name, not a path: %q; --bin-dir says where it goes", name)
+		return fmt.Errorf("install: --as takes a file name, not a path: %q; --bin-dir says where it goes", name)
 	}
 	return nil
 }
@@ -153,7 +153,7 @@ func ValidName(name string) error {
 // bin folder does not have to be preceded by a mkdir.
 func EnsureDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("download: cannot create %s: %w", dir, err)
+		return fmt.Errorf("install: cannot create %s: %w", dir, err)
 	}
 	return nil
 }
@@ -172,7 +172,7 @@ func Replaceable(path string) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("download: %s cannot be read: %w", path, err)
+		return fmt.Errorf("install: %s cannot be read: %w", path, err)
 	}
 	if info.Mode().IsRegular() {
 		return nil
@@ -185,7 +185,7 @@ func Replaceable(path string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("download: %s is a %s, not a file dispat may replace", path, kindOf(info.Mode()))
+	return fmt.Errorf("install: %s is a %s, not a file dispat may replace", path, kindOf(info.Mode()))
 }
 
 // kindOf names what stands in the way, because "not a regular file" tells a
@@ -228,21 +228,21 @@ func Installed(path, digest string) (bool, error) {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("download: reading %s: %w", path, err)
+		return false, fmt.Errorf("install: reading %s: %w", path, err)
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return false, fmt.Errorf("download: reading %s: %w", path, err)
+		return false, fmt.Errorf("install: reading %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return false, fmt.Errorf("download: %s is a folder, not a file dispat can replace", path)
+		return false, fmt.Errorf("install: %s is a folder, not a file dispat can replace", path)
 	}
 	sum := sha256.New()
 	// Streamed rather than read: the file on the other end of this is a
 	// binary, and one that is already installed is read on every check.
 	if _, err := io.Copy(sum, f); err != nil {
-		return false, fmt.Errorf("download: reading %s: %w", path, err)
+		return false, fmt.Errorf("install: reading %s: %w", path, err)
 	}
 	return strings.EqualFold(hex.EncodeToString(sum.Sum(nil)), want), nil
 }

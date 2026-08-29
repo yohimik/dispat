@@ -1,6 +1,6 @@
-# The download command
+# The install command
 
-Run `dispat download https://github.com/owner/repo` to install a tool published as a GitHub release asset. You do not
+Run `dispat install https://github.com/owner/repo` to install a tool published as a GitHub release asset. You do not
 need a config file or a git repository. This command installs somebody else's binary the way
 [`self-update`](./self-update.md) installs dispat's own, so a CI job that already has dispat has a release downloader
 as well.
@@ -11,7 +11,7 @@ as `<name>.backup` and removed during a later run a week afterwards. Because not
 failed download leaves the folder exactly as it found it.
 
 ```console
-$ dispat download https://github.com/acme/tool --asset 'tool-{os}-{arch}'
+$ dispat install https://github.com/acme/tool --asset 'tool-{os}-{arch}'
 downloading tool-linux-amd64 (8.4 MiB) from acme/tool
 installed tool 1.4.0 at /usr/local/bin/tool
 ```
@@ -22,10 +22,10 @@ Name the repository however it is already at hand. dispat accepts the page URL, 
 SSH remote, and the `owner/repo` shorthand:
 
 ```sh
-dispat download https://github.com/acme/tool
-dispat download https://github.com/acme/tool/releases/tag/v1.4.0
-dispat download git@github.com:acme/tool.git
-dispat download acme/tool
+dispat install https://github.com/acme/tool
+dispat install https://github.com/acme/tool/releases/tag/v1.4.0
+dispat install git@github.com:acme/tool.git
+dispat install acme/tool
 ```
 
 A host that is not `github.com` is treated as a GitHub Enterprise install, and dispat derives its API endpoint as
@@ -42,14 +42,14 @@ Most releases attach more than one file, and installing the wrong one globally i
 so one invocation keeps working as releases come and go:
 
 ```sh
-dispat download acme/tool --asset 'tool-{os}-{arch}'
-dispat download cli/cli   --asset 'gh_{version}_{os}_{arch}.tar.gz'
+dispat install acme/tool --asset 'tool-{os}-{arch}'
+dispat install cli/cli   --asset 'gh_{version}_{os}_{arch}.tar.gz'
 ```
 
 The value also matches as a glob, which reaches an asset whose exact spelling nobody wants to write out:
 
 ```sh
-dispat download acme/tool --asset '*linux-amd64'
+dispat install acme/tool --asset '*linux-amd64'
 ```
 
 An exact name always wins over a glob. A pattern matching two files is refused with both listed, and so is a release
@@ -72,10 +72,10 @@ file to a command's standard input instead of installing it. The command runs in
 lands where a binary would have:
 
 ```sh
-dispat download cli/cli --asset 'gh_{version}_{os}_{arch}.tar.gz' \
+dispat install cli/cli --asset 'gh_{version}_{os}_{arch}.tar.gz' \
   --pipe 'tar -xz --strip-components=2 --wildcards "*/bin/gh"'
 
-dispat download acme/tool --asset install.sh --pipe sh
+dispat install acme/tool --asset install.sh --pipe sh
 ```
 
 The verification is the same either way, so what reaches your command has already been checked against the size and
@@ -86,11 +86,11 @@ its own.
 
 ## Running it more than once
 
-`dispat download` is idempotent. It hashes the file already at the destination against the checksum the release
+`dispat install` is idempotent. It hashes the file already at the destination against the checksum the release
 published, so running the same line again costs no transfer and says so:
 
 ```console
-$ dispat download acme/tool --asset 'tool-{os}-{arch}'
+$ dispat install acme/tool --asset 'tool-{os}-{arch}'
 tool at /usr/local/bin/tool is already v1.4.0
 install it again anyway with --force
 ```
@@ -110,8 +110,8 @@ every project. Pass an empty value for a repository tagging `1.2.3`, or the modu
 release per package:
 
 ```sh
-dispat download acme/tool --tag-prefix ''
-dispat download yohimik/dispat --tag-prefix 'services/dispat/v' --asset 'dispat-{os}-{arch}'
+dispat install acme/tool --tag-prefix ''
+dispat install yohimik/dispat --tag-prefix 'services/dispat/v' --asset 'dispat-{os}-{arch}'
 ```
 
 ## Undoing it
@@ -124,7 +124,7 @@ A rollback reads no releases, so it needs only to know which tool: name the repo
 `--as`.
 
 ```console
-$ dispat download acme/tool --rollback
+$ dispat install acme/tool --rollback
 rolled back tool at /usr/local/bin/tool
 the binary it replaced is now the backup, so another --rollback returns to it
 ```

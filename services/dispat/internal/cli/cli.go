@@ -58,10 +58,10 @@ const (
 	// cmdSelfUpdate is about the binary rather than about any repository, so
 	// like init and the manifest commands it needs no config and no git.
 	cmdSelfUpdate = "self-update"
-	// cmdDownload is self-update pointed at somebody else's releases: it
+	// cmdInstall is self-update pointed at somebody else's releases: it
 	// installs a tool from any GitHub repository, and needs no config and no
 	// git for the same reason.
-	cmdDownload = "download"
+	cmdInstall = "install"
 )
 
 // manifestCommand reports the commands that need neither a config file nor a
@@ -200,7 +200,7 @@ type invocation struct {
 	cond    string // if: the leading condition
 	condSet bool   // if: a positional condition was given, even an empty one
 	dir     string // scanner: the optional folder to scan
-	// download: the repository to install from, as it was typed. Parsed in
+	// install: the repository to install from, as it was typed. Parsed in
 	// the flag phase, where every other usage mistake is caught.
 	repository string
 	paths      []string // writer and replacer: the files to edit
@@ -256,12 +256,12 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return inv, true
 		}
-	case cmdDownload:
+	case cmdInstall:
 		// One repository, or none: a rollback restores what is already
-		// installed and has no releases to read, so it takes --name instead.
+		// installed and has no releases to read, so it takes --as instead.
 		if len(rest) > 2 {
 			log.Error().Strs("args", rest[2:]).
-				Msg("download takes one repository: dispat download https://github.com/owner/repo")
+				Msg("install takes one repository: dispat install https://github.com/owner/repo")
 			usage(inv.cmd)
 			return inv, true
 		}

@@ -1,4 +1,4 @@
-package download
+package install
 
 import (
 	"context"
@@ -60,7 +60,7 @@ type Pipe struct {
 func (p Pipe) Run(ctx context.Context, path, assetName string) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("download: reading the downloaded file: %w", err)
+		return fmt.Errorf("install: reading the downloaded file: %w", err)
 	}
 	defer f.Close()
 
@@ -88,9 +88,9 @@ func (p Pipe) Run(ctx context.Context, path, assetName string) error {
 	started := time.Now()
 	err = cmd.Run()
 	p.Log.Debug().Str("command", p.Command).Str("dir", p.Dir).
-		Dur("took", time.Since(started)).Err(err).Msg("download: the pipe finished")
+		Dur("took", time.Since(started)).Err(err).Msg("install: the pipe finished")
 	if err != nil {
-		return fmt.Errorf("download: the pipe failed: %w", err)
+		return fmt.Errorf("install: the pipe failed: %w", err)
 	}
 	return nil
 }

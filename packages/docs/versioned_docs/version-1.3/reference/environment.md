@@ -19,7 +19,7 @@ These variables come from the release plan, so a release ordinarily produces the
 script written against `$DISPAT_VERSION` on its own without releasing anything.
 
 One command hands its script two variables no release plan computes.
-[`dispat download --pipe`](../cli/download.md#assets-that-are-not-binaries) gives the command it runs `DISPAT_ASSET`,
+[`dispat install --pipe`](../cli/install.md#assets-that-are-not-binaries) gives the command it runs `DISPAT_ASSET`,
 the verified file's path, and `DISPAT_ASSET_NAME`, the file's name as the release published it. Both are documented on
 that page, because they exist only inside that one command.
 

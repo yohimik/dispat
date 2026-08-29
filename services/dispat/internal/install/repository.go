@@ -1,4 +1,4 @@
-package download
+package install
 
 import (
 	"fmt"
@@ -67,7 +67,7 @@ const githubHost = "github.com"
 func ParseRepository(raw string) (Repository, error) {
 	ref := strings.TrimSpace(raw)
 	if ref == "" {
-		return Repository{}, fmt.Errorf("download: no repository given: %s", usageHint)
+		return Repository{}, fmt.Errorf("install: no repository given: %s", usageHint)
 	}
 	ref, scheme := cutScheme(ref)
 	// The credentials of a clone URL, which name no part of the repository.
@@ -87,12 +87,12 @@ func ParseRepository(raw string) (Repository, error) {
 	// it is a host only when something follows the two the shorthand needs.
 	if scheme || (len(segments) > 2 && strings.Contains(segments[0], ".")) {
 		if len(segments) < 3 {
-			return Repository{}, fmt.Errorf("download: %q names a host but no repository: %s", raw, usageHint)
+			return Repository{}, fmt.Errorf("install: %q names a host but no repository: %s", raw, usageHint)
 		}
 		host, segments = segments[0], segments[1:]
 	}
 	if len(segments) < 2 {
-		return Repository{}, fmt.Errorf("download: %q names no repository: %s", raw, usageHint)
+		return Repository{}, fmt.Errorf("install: %q names no repository: %s", raw, usageHint)
 	}
 	repo := Repository{Owner: segments[0], Repo: strings.TrimSuffix(segments[1], ".git"), Host: host}
 	if err := validSegment("owner", repo.Owner); err != nil {
@@ -132,17 +132,17 @@ const usageHint = "name one as https://github.com/owner/repo or as owner/repo"
 // injection check.
 func validSegment(what, s string) error {
 	if s == "" {
-		return fmt.Errorf("download: the %s is empty: %s", what, usageHint)
+		return fmt.Errorf("install: the %s is empty: %s", what, usageHint)
 	}
 	if s == "." || s == ".." {
-		return fmt.Errorf("download: %q is not a name for the %s", s, what)
+		return fmt.Errorf("install: %q is not a name for the %s", s, what)
 	}
 	for _, r := range s {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 		case r == '-', r == '_', r == '.':
 		default:
-			return fmt.Errorf("download: the %s %q carries %q, which no GitHub name may", what, s, string(r))
+			return fmt.Errorf("install: the %s %q carries %q, which no GitHub name may", what, s, string(r))
 		}
 	}
 	return nil
@@ -156,7 +156,7 @@ func validHost(host string) error {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 		case r == '-', r == '.', r == ':':
 		default:
-			return fmt.Errorf("download: the host %q carries %q, which no host name may", host, string(r))
+			return fmt.Errorf("install: the host %q carries %q, which no host name may", host, string(r))
 		}
 	}
 	return nil

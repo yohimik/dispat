@@ -321,7 +321,7 @@ func TestReplaceInstallsWhereNothingWasBefore(t *testing.T) {
 }
 
 // TestRestoreRotatesWithoutRunningAnything: the rotation the two restores
-// share. It asks nothing of either file, which is what lets `dispat download`
+// share. It asks nothing of either file, which is what lets `dispat install`
 // use it for a tool that answers no --version at all, and it rotates rather
 // than moves, so a second call returns.
 func TestRestoreRotatesWithoutRunningAnything(t *testing.T) {

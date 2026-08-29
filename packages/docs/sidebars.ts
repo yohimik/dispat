@@ -163,7 +163,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'cli/exec', label: 'exec'},
         {type: 'doc', id: 'cli/locations', label: 'Naming a place'},
         {type: 'doc', id: 'cli/self-update', label: 'self-update'},
-        {type: 'doc', id: 'cli/download', label: 'download'},
+        {type: 'doc', id: 'cli/install', label: 'install'},
         {type: 'doc', id: 'cli/scanner', label: 'scanner'},
         {type: 'doc', id: 'cli/writer', label: 'writer'},
         {type: 'doc', id: 'cli/replacer', label: 'replacer'},

@@ -38,10 +38,10 @@ type options struct {
 	suRelease                         *string
 	suForce, suPrerelease, suRollback *bool
 
-	// download, which shares --release, --prerelease, --force and --rollback
+	// install, which shares --release, --prerelease, --force and --rollback
 	// with self-update: the same four questions about the same kind of
 	// release, asked of another repository.
-	dlAsset, dlBinDir, dlName, dlPipe, dlTagPrefix *string
+	instAsset, instBinDir, instName, instPipe, instTagPrefix *string
 
 	// check is compute's CI gate and self-update's "would this change
 	// anything": one flag, because it answers the same question for both.
@@ -138,25 +138,25 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.computeInteractive = fs.BoolP("interactive", "i", false,
 		"confirm each suggestion before applying it")
 	o.check = fs.Bool("check", false,
-		"report only, changing nothing, and exit 1 when there is something to do: for compute, config suggestions; for self-update, a release it would install; for download, a file the destination does not already hold (CI gate)")
+		"report only, changing nothing, and exit 1 when there is something to do: for compute, config suggestions; for self-update, a release it would install; for install, a file the destination does not already hold (CI gate)")
 	o.suRelease = fs.String("release", "",
-		"self-update and download: install exactly this version instead of the latest one, downgrades included")
+		"self-update and install: install exactly this version instead of the latest one, downgrades included")
 	o.suForce = fs.Bool("force", false,
-		"self-update: install the selected release even when it is not newer, which repairs a damaged binary and leaves a prerelease line; download: install it even when the destination already carries it")
+		"self-update: install the selected release even when it is not newer, which repairs a damaged binary and leaves a prerelease line; install: install it even when the destination already carries it")
 	o.suPrerelease = fs.Bool("prerelease", false,
-		"self-update and download: consider prereleases too; ordering still decides, so a released 1.1.0 still wins over 1.1.0-rc.1")
+		"self-update and install: consider prereleases too; ordering still decides, so a released 1.1.0 still wins over 1.1.0-rc.1")
 	o.suRollback = fs.Bool("rollback", false,
-		"self-update and download: put the binary the last install replaced back, without downloading anything")
-	o.dlAsset = fs.String("asset", "",
-		"download: which of the release's files to install, by name or glob; {os}, {arch}, {version}, {tag} and {name} are expanded (e.g. 'gh_{version}_{os}_{arch}.tar.gz'). A release carrying exactly one file needs none")
-	o.dlBinDir = fs.String("bin-dir", "",
-		"download: the folder to install into; without it $DISPAT_BIN_DIR, then /usr/local/bin when it is writable, then ~/.local/bin")
-	o.dlName = fs.String("as", "",
-		"download: what to call the installed tool; without it the repository's own name (--name is the commit committer)")
-	o.dlPipe = fs.String("pipe", "",
-		"download: hand the verified file to this command's standard input instead of installing it, run in --bin-dir, which is how an archive is unpacked ('tar -xz') or a release's install script run ('sh'); $DISPAT_ASSET names the same file by path")
-	o.dlTagPrefix = fs.String("tag-prefix", "v",
-		"download: what a release tag carries before its version; empty considers every tag whose whole name is a version")
+		"self-update and install: put the binary the last install replaced back, without downloading anything")
+	o.instAsset = fs.String("asset", "",
+		"install: which of the release's files to install, by name or glob; {os}, {arch}, {version}, {tag} and {name} are expanded (e.g. 'gh_{version}_{os}_{arch}.tar.gz'). A release carrying exactly one file needs none")
+	o.instBinDir = fs.String("bin-dir", "",
+		"install: the folder to install into; without it $DISPAT_BIN_DIR, then /usr/local/bin when it is writable, then ~/.local/bin")
+	o.instName = fs.String("as", "",
+		"install: what to call the installed tool; without it the repository's own name (--name is the commit committer)")
+	o.instPipe = fs.String("pipe", "",
+		"install: hand the verified file to this command's standard input instead of installing it, run in --bin-dir, which is how an archive is unpacked ('tar -xz') or a release's install script run ('sh'); $DISPAT_ASSET names the same file by path")
+	o.instTagPrefix = fs.String("tag-prefix", "v",
+		"install: what a release tag carries before its version; empty considers every tag whose whole name is a version")
 	o.commitTag = fs.Bool("tag", false,
 		"also create the annotated release tag at the resulting commit; an identical existing tag is skipped")
 	o.commitPush = fs.Bool("push", false,
