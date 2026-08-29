@@ -58,11 +58,12 @@ Write `$$` to escape a literal dollar sign. An unknown name expands to nothing, 
 
 ## Two things you cannot do
 
-Keys keep the exact case you write them in. The rest of the configuration is case-insensitive, so script names, space
-names, and package names match regardless of case. Environment variables are case-sensitive.
+Keys keep the exact case you write them in, like every config map key, and here that is not a nicety: `PATH` and
+`Path` are two variables. Elsewhere the spelling is preserved and the matching folds, so a script, space or package
+name is reached however it is written; an environment variable is only ever the key itself.
 
-dispat reads the `env` objects back from your file to preserve your exact spelling. It rejects two keys that differ
-only in case because it cannot determine which one you meant.
+dispat rejects two keys that differ only in case because it cannot tell which one you meant. It asks this of every
+object it reads, and of an `env` object once more, because the layers merge key by key.
 
 You cannot override a computed variable with a static one. The `DISPAT_` prefix is reserved, so setting a key that
 starts with it throws a configuration error instead of failing quietly. This strictness means your scripts can read

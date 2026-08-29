@@ -57,11 +57,13 @@ back as a release tag.
    override and does not end the ascent.
 
    dispat parses the file using its own format's parser, so every key keeps the case you wrote it in. It replaces each
-   `$ref` with the file it names relative to the file that wrote it, and refuses cycles with the chain. A lowercased
-   copy of the result carries the flag bindings, and dispat's own decoder reads that copy into the model and validates
-   it, refusing any key the model has no field for. dispat reads the `env` objects back from the exact-case tree.
+   `$ref` with the file it names relative to the file that wrote it, and refuses cycles with the chain. A copy of the
+   result carries the flag bindings, and dispat's own decoder reads that copy into the model and validates it, folding
+   a key to find the field it names, refusing any key the model has no field for, and refusing two keys of one object
+   that differ only by case. Nothing is renamed on the way, so a map key reaches the model as its author wrote it.
 3. Discover packages across every direct sub-folder of each space path not excluded by the space's `.dispatexclude`.
-   Package names must be unique across spaces, and discovery includes every standalone `packages` entry with a `path`.
+   Package names must be unique across spaces, case included, because every name in dispat is matched
+   case-insensitively. Discovery includes every standalone `packages` entry with a `path`.
    Per-package configuration resolves here through a seven-layer ladder. It reads the root file's own defaults, the
    space, the space folder's config file, then the top-level `packages` entry. It continues through the space's
    `packages` entry, the space file's `packages` entry, and the package folder's own file.

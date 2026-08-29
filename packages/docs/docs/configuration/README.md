@@ -19,9 +19,14 @@ loading a different file.
 
 **Unknown keys are rejected** as typo protection. Put keys dispat does not know in [`custom`](./custom.md).
 
-**Case.** dispat matches keys case-insensitively and lowercases map keys. This makes script and space names effectively
-case-insensitive. The [`env`](./env.md) objects are the exception because environment variable names are
-case-sensitive. Their keys keep the exact spelling you write.
+**Case.** Every key keeps the spelling you write, and dispat matches keys case-insensitively. A script, space, package
+or versioning group is therefore named once, in the case you chose, and reached from anywhere by any spelling: a
+`--package` flag, a commit scope, a flow entry and a dependency edge all match without being asked to agree with the
+map. The name itself travels as written, so it is what a tag, an event and the `DISPAT_*` variables report.
+
+Two keys of one object that differ only by case are refused when the file loads, and the error names both. There is no
+lookup anywhere in dispat that could choose between them. The one exception is [`custom`](./custom.md), whose contents
+dispat never reads.
 
 **Splitting the file.** Any value may be a [`$ref`](./refs.md) naming another file. You can use this to spread a long
 configuration across several files. The referenced file's content becomes the value, and everything on this page holds

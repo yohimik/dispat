@@ -1,8 +1,9 @@
 # Packages
 
-A `packages` map holds per-package configuration. You key these entries by package name, and dispat matches them
-case-insensitively like every config map key. You can write this map at the top level of your root file, inside a space
-for [its own packages](./spaces.md#the-spaces-packages-map), or in a
+A `packages` map holds per-package configuration. You key these entries by package name. The key keeps the spelling you
+write, and dispat matches it against the package folder case-insensitively, like every config map key. You can write
+this map at the top level of your root file, inside a space for
+[its own packages](./spaces.md#the-spaces-packages-map), or in a
 [space configuration file](./spaces.md#the-space-configuration-file). All three places take the same entry shape, and
 [the override ladder](#the-override-ladder) decides which one wins.
 
@@ -10,6 +11,8 @@ A top-level entry plays one of two roles:
 
 - **An override for a space package.** An entry *without* a `path` adjusts the configuration of the package whose
   folder name matches the entry key. This key must match exactly one package folder across all [spaces](./spaces.md).
+  Two package folders whose names differ only by case are refused, because a name matched case-insensitively cannot
+  address either of them.
   dispat rejects an unmatched key as a typo, and rejects a key matching a
   [`.dispatexclude`](./spaces.md#dispatexclude)d folder with the exclusion spelled out. You can handle one-off
   exceptions this way without carving the package out into a space of its own.
@@ -251,8 +254,9 @@ Having no space has three consequences:
   it in `flow.beforePublish`.
 - `.dispatexclude` does not apply. The entry alone decides that the folder is a package.
 
-The loader lowercases config map keys. This means a standalone package's name is effectively lowercase, like space
-names.
+A standalone package's name is the entry key exactly as you wrote it, capitals included. That name is what its tags,
+its events and its `DISPAT_*` variables carry, so [renaming it](./versions.md#renaming-a-package) is a decision about
+its release history rather than a change of spelling.
 
 ## Package dependencies
 

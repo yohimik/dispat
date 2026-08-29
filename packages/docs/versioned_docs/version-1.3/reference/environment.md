@@ -83,11 +83,12 @@ version stage is where manifests are reconciled. A build baking versions into ar
 dist-tags read the same state. Identical environments keep a script movable between stages.
 
 Both listings address packages through a `<KEY>`. This is the package name uppercased with everything outside
-`[A-Z0-9]` replaced by `_`. For example, `@acme/ui` becomes `_ACME_UI`. This happens because a package name may contain
-bytes a variable name cannot. The raw name always travels in the `_NAME` field. To look up a package by name, write
-`for k in $DISPAT_WORKSPACE_PACKAGES`, compare `_NAME`, and read the fields. Two names might sanitise to the same key,
-like `core-utils` and `core.utils`. The first in plan order keeps the key, and dispat omits the loser from the listings
-with a warning. Rename one of the pair if you hit this.
+`[A-Z0-9]` replaced by `_`. For example, `@acme/ui` becomes `_ACME_UI`, and a package named `MyLib` becomes `MYLIB`.
+This happens because a package name may contain bytes a variable name cannot. The raw name always travels in the
+`_NAME` field, spelled exactly as the package is named, so `DISPAT_WORKSPACE_MYLIB_NAME` reads `MyLib`. To look up a
+package by name, write `for k in $DISPAT_WORKSPACE_PACKAGES`, compare `_NAME`, and read the fields. Two names might
+sanitise to the same key, like `core-utils` and `core.utils`. The first in plan order keeps the key, and dispat omits
+the loser from the listings with a warning. Rename one of the pair if you hit this.
 
 The **workspace listing** covers **every** workspace package with the version it will carry at the end of the run. This
 is its planned version where it is releasing, or its baseline otherwise.

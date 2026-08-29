@@ -83,8 +83,8 @@ This is a map of package name to a `MAJOR.MINOR.PATCH` version that dispat valid
 Take `"initials": {"core": "1.0.0"}` with an unparseable newest tag. If one `fix(core)` commit exists since that tag,
 dispat releases `core@1.0.1`. Packages without an entry fall back to `0.0.0` as usual.
 
-A parseable latest tag always beats initials. dispat matches keys case-insensitively against discovered packages
-because dispat lowercases map keys. It warns about and ignores entries that match no package.
+A parseable latest tag always beats initials. dispat matches keys case-insensitively against discovered packages, like
+every config map key. It warns about and ignores entries that match no package.
 
 You rarely have to write these by hand. Run [`dispat compute`](../cli/compute.md) to read the version each package's
 manifests declare. It proposes entries for the exact packages in the two situations above.
@@ -94,3 +94,22 @@ transcription job. The command never overwrites an entry that is already there. 
 question for good.
 
 An entry of `"core": "0.0.0"` says "this package starts from zero" and stays that way.
+
+## Renaming a package
+
+A package's name is its folder name, or the key of its standalone [`packages`](./packages.md) entry, spelled exactly as
+you wrote it. Everything a release records carries that spelling: the tag, the changelog heading, the GitHub release,
+the webhook payloads and the `DISPAT_*` variables the scripts read.
+
+Changing the case of a name is therefore a rename, not a formatting change. dispat finds no tag under the new spelling,
+plans the package as a first release, and starts again from `0.0.0` while the old tags stay in the repository under the
+old name. Renaming a package is a decision to make deliberately:
+
+- Keep the name as it is, and rely on case-insensitive matching everywhere else. A `--package` flag, a commit scope, a
+  dependency edge and a `packages` entry all reach the package however they spell it, so nothing forces a rename.
+- Or rename it on purpose, and give the new name a baseline. An [`initials`](#initials) entry under the new spelling
+  continues from the version the old name reached, so the first release after the rename bumps from there rather than
+  from zero.
+
+A [`tagFormat`](#tagformat) that renders `{name}` carries the rename into the tags. Renaming a package whose old tags
+you still need is best done in a commit of its own, so the two histories are easy to tell apart afterwards.
