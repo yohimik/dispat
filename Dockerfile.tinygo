@@ -411,6 +411,21 @@ echo "exit=$?" >> "$log"
 echo "=== gc build ===" >> "$log"
 CGO_ENABLED=0 go build -ldflags "$X" -o /out/netprobe-gc . >> "$log" 2>&1
 echo "exit=$?" >> "$log"
+# The darwin rows, build-only: a linux container cannot execute a darwin
+# binary, so proving these compile is the whole question it can ask — the
+# other half, running them, is scripts/tinygo-spike-darwin.sh on a Mac. The
+# same four unix targets as the build probe, so the matrices read alike.
+for target in darwin/amd64 darwin/arm64; do
+  GOOS="${target%/*}"; GOARCH="${target#*/}"
+  echo "=== tinygo build $GOOS/$GOARCH ===" >> "$log"
+  GOOS="$GOOS" GOARCH="$GOARCH" tinygo build -ldflags "$X" \
+    -o "/out/netprobe-tinygo-$GOOS-$GOARCH" . >> "$log" 2>&1
+  echo "exit=$?" >> "$log"
+  echo "=== gc build $GOOS/$GOARCH ===" >> "$log"
+  GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -ldflags "$X" \
+    -o "/out/netprobe-gc-$GOOS-$GOARCH" . >> "$log" 2>&1
+  echo "exit=$?" >> "$log"
+done
 for toolchain in tinygo gc; do
   for layer in ldflags tcp tls http https; do
     echo "=== $toolchain $layer ===" >> "$log"

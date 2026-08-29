@@ -114,8 +114,13 @@ cat "$log" "$spike/darwin-sizes.log"
 # The arches this host can execute: its own always, the other through
 # Rosetta when installed. A skipped arch is recorded, not silent.
 runnable=$host_arch
+skipped=""
 if [ "$host_arch" = arm64 ] && arch -x86_64 /usr/bin/true 2>/dev/null; then
 	runnable="arm64 amd64"
+elif [ "$host_arch" = arm64 ]; then
+	skipped="darwin/amd64 skipped: Rosetta not installed"
+else
+	skipped="darwin/arm64 skipped: an amd64 host cannot run it"
 fi
 
 # --- the execution probe (mirrors tinygo-spike-run) ---------------------------
@@ -123,6 +128,7 @@ fi
 log="$spike/darwin-run.log"
 : >"$log"
 echo "=== host arch: $host_arch, runnable: $runnable ===" >>"$log"
+[ -z "$skipped" ] || echo "=== $skipped ===" >>"$log"
 for arch in $runnable; do
 	bin="$out/tinygo-dispat-darwin-$arch"
 	echo "=== $bin --version ===" >>"$log"
@@ -153,6 +159,7 @@ sed -n '/^COPY --chown=gopher:gopher <<.TLSREALITY. /,/^TLSREALITY$/p' "$root/Do
 
 log="$spike/darwin-net.log"
 : >"$log"
+[ -z "$skipped" ] || echo "=== $skipped ===" >>"$log"
 export GOWORK=off
 cd "$work/netprobe"
 printf 'module netprobe\n\ngo 1.24\n' >go.mod
