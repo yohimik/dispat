@@ -79,8 +79,8 @@ func TestEnabledDefaults(t *testing.T) {
 }
 
 func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
-	// Viper lowercases map keys when a file is loaded, so lookups match
-	// case-insensitively against lowercased keys.
+	// A map key holds the case its file wrote, and a name is matched against it
+	// case-insensitively, so neither side has to remember the other's spelling.
 	f := File{Scripts: map[string]Script{"build": {"make"}}}
 	if s, ok := f.Script("BUILD"); !ok || len(s) != 1 || s[0] != "make" {
 		t.Errorf("Script(BUILD) = %q, %v", s, ok)
@@ -130,6 +130,52 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	}
 	if _, ok := sfile.Space("apps"); ok {
 		t.Error("spaces without an entry do not resolve")
+	}
+}
+
+// TestLookupsMatchWhicheverCaseIsWritten: a map key spelled with capitals is
+// found by a name spelled without them, and the other way round, which is what
+// makes the config language case-insensitive without renaming anything. The
+// entry variants answer with the key as well, because a caller recording what
+// it consumed, or editing it, has to name it the way the author did.
+func TestLookupsMatchWhicheverCaseIsWritten(t *testing.T) {
+	f := File{
+		Scripts:  map[string]Script{"Build": {"make"}},
+		Packages: map[string]PackageConfig{"MyLib": {TagFormat: "v{version}"}},
+		Spaces:   map[string]SpaceConfig{"Libs": {Path: PathList{"packages"}}},
+	}
+	if s, ok := f.Script("build"); !ok || s[0] != "make" {
+		t.Errorf("Script(build) against a Build key = %q, %v", s, ok)
+	}
+	if pc, ok := f.Package("mylib"); !ok || pc.TagFormat != "v{version}" {
+		t.Errorf("Package(mylib) against a MyLib key = %+v, %v", pc, ok)
+	}
+	if key, pc, ok := f.PackageEntry("MYLIB"); !ok || key != "MyLib" || pc.TagFormat != "v{version}" {
+		t.Errorf("PackageEntry(MYLIB) = %q, %+v, %v; want the author's spelling", key, pc, ok)
+	}
+	if key, sc, ok := f.SpaceEntry("libs"); !ok || key != "Libs" || sc.Path.First() != "packages" {
+		t.Errorf("SpaceEntry(libs) = %q, %+v, %v; want the author's spelling", key, sc, ok)
+	}
+	if key, _, ok := f.PackageEntry("absent"); ok || key != "" {
+		t.Errorf("PackageEntry(absent) = %q, %v; want no key at all", key, ok)
+	}
+
+	sc := SpaceConfig{Packages: map[string]PackageConfig{"MyLib": {TagFormat: "s{version}"}}}
+	if key, pc, ok := sc.PackageEntry("mylib"); !ok || key != "MyLib" || pc.TagFormat != "s{version}" {
+		t.Errorf("SpaceConfig.PackageEntry(mylib) = %q, %+v, %v", key, pc, ok)
+	}
+	sf := SpaceFile{Packages: map[string]PackageConfig{"MyLib": {TagFormat: "f{version}"}}}
+	if key, pc, ok := sf.PackageEntry("MYLIB"); !ok || key != "MyLib" || pc.TagFormat != "f{version}" {
+		t.Errorf("SpaceFile.PackageEntry(MYLIB) = %q, %+v, %v", key, pc, ok)
+	}
+
+	// The exact key wins before the scan begins, which is what keeps the common
+	// lookup one map read.
+	if key, _, ok := FoldLookup(map[string]int{"a": 1}, "a"); !ok || key != "a" {
+		t.Errorf("FoldLookup(a) = %q, %v", key, ok)
+	}
+	if _, _, ok := FoldLookup(map[string]int{"a": 1}, "b"); ok {
+		t.Error("a name nothing spells does not resolve")
 	}
 }
 

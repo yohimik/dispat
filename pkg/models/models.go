@@ -7,9 +7,10 @@
 //
 // Every field carries one json tag, and it says both things: which key of a
 // config file fills the field, and which key the model marshals back into a
-// loadable file. dispat matches those keys case-insensitively and lowercases
-// every map key it reads, so script, space and package names are matched
-// case-insensitively too.
+// loadable file. dispat matches those keys case-insensitively, and matches the
+// keys of a map — a script, space or package name — case-insensitively too,
+// through the helpers below rather than by renaming anything: a map key holds
+// the case the file wrote it in.
 //
 // `scripts` is one shape at three levels — the file, a space and a package —
 // and a package resolves a name through its own map first, then its space's,
@@ -1176,10 +1177,32 @@ func (c *File) UpdateCheckEnabled() bool {
 	return c == nil || c.UpdateCheck == nil || *c.UpdateCheck
 }
 
-// Script resolves a script reference case-insensitively, because dispat
-// lowercases the keys of the scripts map.
+// FoldLookup finds what a config map holds under a name, whatever case either
+// side spells it with. It answers with the map's own key as well as the value,
+// for the callers that have to record which entry they read.
+//
+// The exact key is tried first, which is both the common case and the cheap
+// one; only a name spelled differently pays for the scan. Two keys of one map
+// that fold together would make the scan's answer a matter of luck, so loading
+// refuses them, and every map reaching here holds at most one.
+func FoldLookup[T any](m map[string]T, name string) (string, T, bool) {
+	if value, ok := m[name]; ok {
+		return name, value, true
+	}
+	for key, value := range m {
+		if strings.EqualFold(key, name) {
+			return key, value, true
+		}
+	}
+	var zero T
+	return "", zero, false
+}
+
+// Script resolves a script reference case-insensitively, because a script is
+// named in a config file and again in a command line, and the two spellings
+// are not asked to agree.
 func (c *File) Script(ref string) (Script, bool) {
-	s, ok := c.Scripts[strings.ToLower(ref)]
+	_, s, ok := FoldLookup(c.Scripts, ref)
 	return s, ok
 }
 
@@ -1187,29 +1210,49 @@ func (c *File) Script(ref string) (Script, bool) {
 // same reason as File.Script. It looks no further than this level: the
 // fallback to the file's scripts belongs to the layer that knows the package.
 func (s SpaceConfig) Script(name string) (Script, bool) {
-	cmd, ok := s.Scripts[strings.ToLower(name)]
+	_, cmd, ok := FoldLookup(s.Scripts, name)
 	return cmd, ok
 }
 
 // Package resolves a `packages` entry by package name case-insensitively,
 // for the same reason as Script.
 func (c *File) Package(name string) (PackageConfig, bool) {
-	pc, ok := c.Packages[strings.ToLower(name)]
+	_, pc, ok := FoldLookup(c.Packages, name)
 	return pc, ok
+}
+
+// PackageEntry is Package with the key it matched, for the callers that record
+// what a configuration was read under: an entry written `MyLib` is consumed,
+// reported and edited under `MyLib`, whatever the name reaching here looked
+// like.
+func (c *File) PackageEntry(name string) (string, PackageConfig, bool) {
+	return FoldLookup(c.Packages, name)
 }
 
 // Space resolves a `spaces` entry by space name case-insensitively, for the
 // same reason as Package.
 func (c *File) Space(name string) (SpaceConfig, bool) {
-	sc, ok := c.Spaces[strings.ToLower(name)]
+	_, sc, ok := FoldLookup(c.Spaces, name)
 	return sc, ok
+}
+
+// SpaceEntry is Space with the key it matched, for the same reason as
+// PackageEntry.
+func (c *File) SpaceEntry(name string) (string, SpaceConfig, bool) {
+	return FoldLookup(c.Spaces, name)
 }
 
 // Package resolves one of the space file's `packages` entries by package
 // name, case-insensitively for the same reason as File.Package.
 func (f SpaceFile) Package(name string) (PackageConfig, bool) {
-	pc, ok := f.Packages[strings.ToLower(name)]
+	_, pc, ok := FoldLookup(f.Packages, name)
 	return pc, ok
+}
+
+// PackageEntry is Package with the key it matched, for the same reason as
+// File.PackageEntry.
+func (f SpaceFile) PackageEntry(name string) (string, PackageConfig, bool) {
+	return FoldLookup(f.Packages, name)
 }
 
 // Package resolves one of the space's own `packages` entries by package name,
@@ -1217,8 +1260,14 @@ func (f SpaceFile) Package(name string) (PackageConfig, bool) {
 // further than this level: the file's entry is a separate layer, applied
 // before this one.
 func (s SpaceConfig) Package(name string) (PackageConfig, bool) {
-	pc, ok := s.Packages[strings.ToLower(name)]
+	_, pc, ok := FoldLookup(s.Packages, name)
 	return pc, ok
+}
+
+// PackageEntry is Package with the key it matched, for the same reason as
+// File.PackageEntry.
+func (s SpaceConfig) PackageEntry(name string) (string, PackageConfig, bool) {
+	return FoldLookup(s.Packages, name)
 }
 
 // Commands resolves a sequence of script references into the shell commands
