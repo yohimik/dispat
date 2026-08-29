@@ -191,7 +191,10 @@ EOF
 # net/tls probe beside it is what says whether an answer is about dispat or
 # about the toolchain: TinyGo's `net` is a port over its netdev driver
 # interface rather than over the host's sockets, so on a host OS there is no
-# device under it at all, and the four layers are asked one at a time.
+# device under it at all, and the four layers are asked one at a time. A fifth
+# question, the tls-reality check in the net stage, asks it from the other end
+# of the wire: whether what reaches a local server is a TLS handshake at all,
+# because a stubbed crypto/tls answers the first four cheerfully in plaintext.
 FROM tinygo-spike-build AS tinygo-spike-run
 ARG TARGETARCH
 COPY --chown=gopher:gopher <<'PROBE' /src/netprobe/main.go
@@ -199,7 +202,8 @@ package main
 
 // The four network layers dispat needs, each asked on its own, so a failure
 // names the layer it happened at rather than the command that reached it, plus
-// the two ways a version can be declared for -X to find.
+// the two ways a version can be declared for -X to find, plus the client half
+// of the tls-reality check (the server half lives in the net stage).
 
 import (
 	"crypto/tls"
@@ -248,6 +252,26 @@ func main() {
 			fmt.Println("https status:", resp.Status)
 			resp.Body.Close()
 		}
+	case "tlslocal":
+		// The client half of the TLS reality check: dial the local assertion
+		// server (tlsreality, gc-built), which reports what actually arrived
+		// on its socket. The error printed here proves nothing on its own — a
+		// stubbed crypto/tls returns nil errors all the way to a plaintext
+		// socket — which is exactly why the server holds the verdict.
+		// InsecureSkipVerify keeps the question to the record layer;
+		// verification against real roots is the https layer's job.
+		addr := "127.0.0.1:14443"
+		if len(os.Args) > 2 {
+			addr = os.Args[2]
+		}
+		c, err := tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", addr, &tls.Config{InsecureSkipVerify: true})
+		fmt.Println("tlslocal err:", err)
+		if c != nil {
+			// A real TLS client encrypts this; a stub leaks it verbatim. The
+			// server names the bytes it saw either way.
+			c.Write([]byte("PLAINTEXT-LEAK"))
+			c.Close()
+		}
 	}
 }
 PROBE
@@ -276,6 +300,101 @@ EOF
 # -X with a program of its own is what keeps the answer independent of how
 # dispat happens to declare its own version today.
 FROM tinygo-spike-run AS tinygo-spike-net
+# The TLS reality assertion. The tls/https layers above ask the client whether
+# it is happy, and a stubbed crypto/tls — a no-op handshake over a socket its
+# netdev quietly downgraded from TLS to TCP — is happy sending plaintext to
+# port 443. Only the far end of the wire can tell those apart, so this server
+# holds the socket itself: it records the connection's first bytes (a
+# ClientHello opens 0x16 0x03), then runs a real gc handshake over a
+# self-signed certificate, and prints both facts. Built with gc, the control
+# toolchain, so the instrument is never made of the thing it measures. The
+# exit status says whether a ClientHello arrived; the log records it like
+# every other step, and nothing gates on it.
+COPY --chown=gopher:gopher <<'TLSREALITY' /src/tlsreality/main.go
+package main
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"fmt"
+	"math/big"
+	"net"
+	"os"
+	"time"
+)
+
+// peekConn records the first bytes the client sends before handing them on to
+// the TLS server, so the verdict does not depend on the handshake getting far
+// enough to classify the failure.
+type peekConn struct {
+	net.Conn
+	first []byte
+}
+
+func (p *peekConn) Read(b []byte) (int, error) {
+	n, err := p.Conn.Read(b)
+	if len(p.first) < 3 && n > 0 {
+		keep := 3 - len(p.first)
+		if keep > n {
+			keep = n
+		}
+		p.first = append(p.first, b[:keep]...)
+	}
+	return n, err
+}
+
+func selfSigned() tls.Certificate {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "tlsreality"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+func main() {
+	addr := "127.0.0.1:14443"
+	if len(os.Args) > 1 {
+		addr = os.Args[1]
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		fmt.Println("reality: listen err:", err)
+		os.Exit(2)
+	}
+	// The caller waits for this line before starting the client.
+	fmt.Println("reality: listening", addr)
+	ln.(*net.TCPListener).SetDeadline(time.Now().Add(15 * time.Second))
+	conn, err := ln.Accept()
+	if err != nil {
+		fmt.Println("reality: no connection:", err)
+		os.Exit(1)
+	}
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	peek := &peekConn{Conn: conn}
+	herr := tls.Server(peek, &tls.Config{Certificates: []tls.Certificate{selfSigned()}}).Handshake()
+	hello := len(peek.first) >= 2 && peek.first[0] == 0x16 && peek.first[1] == 0x03
+	fmt.Printf("reality: first-bytes=%x clienthello=%v handshake-err=%v\n", peek.first, hello, herr)
+	conn.Close()
+	if !hello {
+		os.Exit(1)
+	}
+}
+TLSREALITY
 RUN <<'EOF'
 set -u
 log=/src/spike/net.log
@@ -298,6 +417,32 @@ for toolchain in tinygo gc; do
     "/out/netprobe-$toolchain" "$layer" >> "$log" 2>&1
     echo "exit=$?" >> "$log"
   done
+done
+# The reality rounds: one server per client, sequentially on one port, since
+# the server answers for exactly one connection and then reports. The gc
+# round is the control that proves the instrument — a real client must read
+# clienthello=true, or the tinygo row means nothing. The exit recorded is the
+# server's verdict, not the client's opinion.
+echo "=== tls-reality build (gc) ===" >> "$log"
+cd /src/tlsreality
+printf 'module tlsreality\n\ngo 1.24\n' > go.mod
+CGO_ENABLED=0 go build -o /out/tlsreality . >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+for toolchain in tinygo gc; do
+  echo "=== $toolchain tls-reality ===" >> "$log"
+  : > "/tmp/reality-$toolchain"
+  /out/tlsreality 127.0.0.1:14443 > "/tmp/reality-$toolchain" 2>&1 &
+  server=$!
+  i=0
+  until grep -q listening "/tmp/reality-$toolchain" || [ "$i" -ge 50 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  "/out/netprobe-$toolchain" tlslocal 127.0.0.1:14443 >> "$log" 2>&1
+  wait "$server"
+  status=$?
+  cat "/tmp/reality-$toolchain" >> "$log"
+  echo "exit=$status" >> "$log"
 done
 cat "$log"
 exit 0
