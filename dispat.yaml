@@ -40,8 +40,11 @@ scripts:
   # Not a gate, and not in any sweep: TinyGo 0.41.1 cannot reach the network
   # from a host operating system, which is every release path dispat has, so
   # nothing is built with it. The script stays because the answer is a version
-  # number away from changing and re-asking must cost one command. See the
-  # header of Dockerfile.tinygo for what the spike found.
+  # number away from changing and re-asking must cost one command, and the
+  # fork stages are that re-asking: they fetch github.com/yohimik/tinygo and
+  # run dispat's own self-update against a fake release server over real TLS.
+  # See the header of Dockerfile.tinygo for what the spike found and what the
+  # fork changes; the answer is still read from the logs.
   tinygo-spike: >-
     docker buildx build --file Dockerfile.tinygo --target tinygo-spike-export
     $(sh scripts/buildx-cache.sh tinygo-spike)

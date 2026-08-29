@@ -45,7 +45,27 @@
 # baseline the sizes are measured against and for the control the network
 # probe needs, TinyGo for everything else. It is Debian-based, not alpine, so
 # package installs are apt-get.
+# ADDENDUM, AS OF THE FORK 0.42.0-net.1 (2026-08-30). The verdict above stands
+# for upstream TinyGo and is left as it was: 0.41.1 is still the base image,
+# and every stage up to and including tinygo-spike-net still measures it.
+# github.com/yohimik/tinygo closes both gaps the verdict rests on — a real
+# crypto/tls and a netdev that speaks to the host's sockets — so the question
+# the spike could not ask before is now askable, and tinygo-spike-fork and
+# tinygo-spike-selfupdate ask it: dispat's own self-update, built by the fork,
+# updating itself against a fake GitHub release server over real TLS.
+#
+# Real TLS is the whole point of that pairing. A stubbed crypto/tls answers
+# "did https work" cheerfully while sending plaintext, so the matrix is built
+# out of the things a stub cannot fake: a certificate signed by a CA the client
+# must actually verify, a run with that CA withheld that must fail, a plaintext
+# request the TLS listener must refuse, and a connection log taken from the far
+# end of the wire.
 ARG TINYGO_VERSION=0.41.1
+
+# The fork's release, fetched at build time by the gc-built dispat the build
+# stage already produced. A pin like TINYGO_VERSION, never passed as a
+# --build-arg: re-asking the question is bumping this one number.
+ARG TINYGO_FORK_VERSION=0.42.0-net.1
 
 # The pin, never passed as --build-arg, exactly as GO_VERSION is the pin in
 # Dockerfile.gotest. Re-asking the question is bumping this one number.
@@ -462,10 +482,439 @@ cat "$log"
 exit 0
 EOF
 
+# The fork, fetched with dispat's own install command — the gc binary the build
+# stage already produced, so the fetch is dogfooding rather than a curl. Its own
+# stage because a toolchain download must not be re-run every time a heredoc
+# below it changes, and because "did the fork install and report its version"
+# is a question worth answering on its own before anything is built with it.
+FROM tinygo-spike-net AS tinygo-spike-fork
+ARG TARGETARCH
+ARG TINYGO_FORK_VERSION
+RUN <<'EOF'
+set -u
+log=/src/spike/fork.log
+: > "$log"
+echo "=== dispat install yohimik/tinygo $TINYGO_FORK_VERSION ===" >> "$log"
+/out/gc-dispat-linux-${TARGETARCH} install yohimik/tinygo \
+  --prerelease --release "$TINYGO_FORK_VERSION" \
+  --asset 'tinygo{version}.{os}-{arch}.tar.gz' \
+  --bin-dir /home/gopher/fork --pipe 'tar -xz' >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+echo "=== fork tinygo version ===" >> "$log"
+/home/gopher/fork/tinygo/bin/tinygo version >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+cat "$log"
+exit 0
+EOF
+
+# The acceptance test the fork exists for: dispat updating itself over real
+# TLS. Every earlier stage asks whether a layer works; this one asks whether
+# the product does, end to end, through the one release path that touches all
+# of them at once — listing, download, digest, a smoke execution of the new
+# binary, and the atomic swap.
+#
+# The instrument is gc-built, like tlsreality and for the same reason: a
+# measurement made of the thing it measures answers nothing. sufake is the
+# suRepo fixture of tests/integration/selfupdate_test.go rendered as a server —
+# the same listing, the same tag lookup, the same streamed asset with a
+# computed sha256 — with two things that fixture has no need of: a certificate
+# chain it generates and hands the client through SSL_CERT_FILE, and a log of
+# what actually arrived on each connection.
+#
+# The cases a stub could not survive are the point. D withholds the CA and must
+# fail with a certificate error, which no no-op handshake can produce. E speaks
+# plaintext at the TLS port and must be refused by the listener itself. Every
+# other case's `req` lines carry the negotiated version, cipher and SNI from
+# Request.TLS, which only a real handshake fills in.
+FROM tinygo-spike-fork AS tinygo-spike-selfupdate
+ARG TARGETARCH
+COPY --chown=gopher:gopher <<'SUFAKE' /src/sufake/main.go
+package main
+
+// The fake GitHub releases API the self-update matrix runs against, served
+// over real TLS from a certificate chain generated per run.
+//
+// It mirrors suRepo in tests/integration/selfupdate_test.go: the listing with
+// another module's higher release in it, the tag lookup, and /dl/<version>
+// streaming the asset with the sha256 the release advertised. What it adds is
+// the wire: a CA whose PEM the client is pointed at with SSL_CERT_FILE, a leaf
+// valid for localhost and 127.0.0.1, and a line per connection and per request
+// saying what arrived. The connection line is taken before the handshake, so a
+// client that never sent a ClientHello is caught by the bytes rather than by
+// its own opinion of how the request went.
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"flag"
+	"fmt"
+	"math/big"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+// peekConn records the first bytes of a connection before the TLS server sees
+// them, exactly as tlsreality does: a ClientHello opens 0x16 0x03, and a
+// plaintext request opens with its method.
+type peekConn struct {
+	net.Conn
+	first  []byte
+	logged bool
+}
+
+func (p *peekConn) Read(b []byte) (int, error) {
+	n, err := p.Conn.Read(b)
+	if len(p.first) < 3 && n > 0 {
+		keep := 3 - len(p.first)
+		if keep > n {
+			keep = n
+		}
+		p.first = append(p.first, b[:keep]...)
+	}
+	if !p.logged && len(p.first) >= 3 {
+		p.logged = true
+		hello := p.first[0] == 0x16 && p.first[1] == 0x03
+		fmt.Printf("sufake: conn first-bytes=%x clienthello=%v\n", p.first, hello)
+	}
+	return n, err
+}
+
+// peekListener wraps every accepted connection, so the record is of the wire
+// rather than of whatever the TLS layer decided to report.
+type peekListener struct{ net.Listener }
+
+func (l peekListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &peekConn{Conn: c}, nil
+}
+
+// chain generates the root the client is asked to trust and the leaf the
+// server presents, writes the root's PEM where the shell can point
+// SSL_CERT_FILE at it, and returns the leaf.
+//
+// The root is written 0644 because the build runs as the unprivileged gopher
+// user and the reader is a separate process; there is no secret here, the key
+// never leaves this process, and the chain lives as long as one server does.
+func chain(caPath string) tls.Certificate {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "sufake root"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		panic(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		panic(err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+	if err := os.WriteFile(caPath, pemBytes, 0o644); err != nil {
+		panic(err)
+	}
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	leafTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		panic(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{leafDER, caDER}, PrivateKey: leafKey}
+}
+
+func main() {
+	addr := flag.String("addr", "127.0.0.1:0", "listen address")
+	caPath := flag.String("ca", "", "where to write the root certificate PEM")
+	assetPath := flag.String("asset", "", "the file the release serves")
+	assetName := flag.String("asset-name", "", "the name the release gives it")
+	version := flag.String("version", "1.1.0", "the version the release publishes")
+	flag.Parse()
+
+	asset, err := os.ReadFile(*assetPath)
+	if err != nil {
+		fmt.Println("sufake: asset:", err)
+		os.Exit(2)
+	}
+	sum := sha256.Sum256(asset)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	tag := "services/dispat/v" + *version
+	leaf := chain(*caPath)
+
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		fmt.Println("sufake: listen:", err)
+		os.Exit(2)
+	}
+	// The download URL has to name this server, so it is built from the
+	// address the listener actually took. localhost rather than the IP,
+	// because that is the name the leaf is issued for and the name whose
+	// resolution the fork's own resolver is under test for.
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	base := "https://localhost:" + port
+
+	release := func() map[string]any {
+		return map[string]any{
+			"tag_name": tag, "draft": false, "prerelease": strings.Contains(*version, "-"),
+			"body":     "### Features\n\n- a release to update to\n",
+			"html_url": base + "/o/r/releases/tag/" + strings.ReplaceAll(tag, "/", "%2F"),
+			"assets": []map[string]any{{
+				"name": *assetName, "size": len(asset),
+				"browser_download_url": base + "/dl/" + *version,
+				"digest":               digest,
+			}},
+		}
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		state := req.TLS
+		if state == nil {
+			fmt.Printf("sufake: req path=%s handshake=false\n", req.URL.Path)
+		} else {
+			fmt.Printf("sufake: req path=%s handshake=%v tlsver=%x cipher=%x sni=%q tls12plus=%v\n",
+				req.URL.Path, state.HandshakeComplete, state.Version, state.CipherSuite,
+				state.ServerName, state.Version >= tls.VersionTLS12)
+		}
+		if v, ok := strings.CutPrefix(req.URL.Path, "/dl/"); ok {
+			if v != *version {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprint(len(asset)))
+			_, _ = w.Write(asset)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, wanted, ok := strings.Cut(req.URL.Path, "/releases/tags/"); ok {
+			if wanted != tag {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(release())
+			return
+		}
+		// The listing of a monorepo that publishes one release per package:
+		// another module's release, higher than any of dispat's, which is what
+		// makes /releases/latest useless and this listing the real path.
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"tag_name": "pkg/ccme/v9.9.9", "draft": false, "prerelease": false,
+				"assets": []map[string]any{}},
+			release(),
+		})
+	})
+
+	srv := &http.Server{Handler: handler, TLSConfig: &tls.Config{
+		Certificates: []tls.Certificate{leaf},
+		MinVersion:   tls.VersionTLS12,
+	}}
+	// The caller waits for these two lines before starting the client.
+	fmt.Println("sufake: listening", base)
+	fmt.Println("sufake: ca", *caPath)
+	if err := srv.ServeTLS(peekListener{ln}, "", ""); err != nil {
+		fmt.Println("sufake: serve:", err)
+	}
+}
+SUFAKE
+RUN <<'EOF'
+set -u
+log=/src/spike/selfupdate.log
+: > "$log"
+export PATH=/home/gopher/fork/tinygo/bin:$PATH
+fake=/out/sufake
+ca=/home/gopher/sufake-ca.pem
+work=/home/gopher/su
+mkdir -p "$work"
+V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
+asset="dispat-linux-${TARGETARCH}"
+
+# The instrument, gc-built, so the thing measuring TLS is never the thing
+# under measurement.
+echo "=== sufake build (gc) ===" >> "$log"
+cd /src/sufake
+printf 'module sufake\n\ngo 1.24\n' > go.mod
+GOWORK=off CGO_ENABLED=0 go build -o "$fake" . >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+
+# The four binaries the matrix moves between: an old and a new dispat from
+# each toolchain, stamped through the ldflags the fork can finally honour.
+cd /src/services/dispat
+for pair in tinygo:1.0.0 tinygo:1.1.0 gc:1.0.0 gc:1.1.0; do
+  toolchain="${pair%%:*}"; ver="${pair#*:}"
+  echo "=== $toolchain build dispat $ver ===" >> "$log"
+  if [ "$toolchain" = tinygo ]; then
+    tinygo build -opt=z -no-debug -ldflags="-X $V=$ver" \
+      -o "/out/su-tinygo-$ver" . >> "$log" 2>&1
+  else
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X $V=$ver" \
+      -o "/out/su-gc-$ver" . >> "$log" 2>&1
+  fi
+  echo "exit=$?" >> "$log"
+done
+
+# Row zero: the stamping acceptance the whole matrix rests on. A fork binary
+# that still reports `dev` is a local build to self-update, which refuses
+# before it reaches the network, and every row below it would be vacuous.
+echo "=== row zero: su-tinygo-1.0.0 --version ===" >> "$log"
+/out/su-tinygo-1.0.0 --version >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+
+# A fresh server per case, so a case's connection and request lines are its
+# own. Each returns once the fake has printed its two ready lines.
+start_fake() {
+  : > /tmp/sufake.out
+  "$fake" -addr 127.0.0.1:0 -ca "$ca" -asset "/out/su-$1-1.1.0" \
+    -asset-name "$asset" -version 1.1.0 > /tmp/sufake.out 2>&1 &
+  fake_pid=$!
+  i=0
+  until grep -q "sufake: ca" /tmp/sufake.out || [ "$i" -ge 100 ]; do
+    i=$((i + 1))
+    sleep 0.1
+  done
+  base=$(sed -n 's/^sufake: listening //p' /tmp/sufake.out | head -n 1)
+}
+stop_fake() {
+  kill "$fake_pid" 2>/dev/null
+  wait "$fake_pid" 2>/dev/null
+  cat /tmp/sufake.out >> "$log"
+}
+
+# One case: a fresh copy of the old binary, a run against a fresh fake, and
+# the versions the exe and its backup report afterwards.
+case_run() {
+  label="$1"; toolchain="$2"; host="$3"; trust="$4"; scheme="$5"
+  shift 5
+  echo "=== $label ===" >> "$log"
+  rm -f "$work/dispat" "$work/dispat.backup"
+  cp "/out/su-$toolchain-1.0.0" "$work/dispat"
+  chmod 0755 "$work/dispat"
+  start_fake "$toolchain"
+  port=${base##*:}
+  if [ "$trust" = trusted ]; then
+    SSL_CERT_FILE="$ca" "$work/dispat" self-update \
+      --api-url "$scheme://$host:$port" --owner o --repo r "$@" >> "$log" 2>&1
+  else
+    "$work/dispat" self-update \
+      --api-url "$scheme://$host:$port" --owner o --repo r "$@" >> "$log" 2>&1
+  fi
+  echo "exit=$?" >> "$log"
+  stop_fake
+  echo "--- exe: $("$work/dispat" --version 2>&1 | tr '\n' ' ')" >> "$log"
+  if [ -f "$work/dispat.backup" ]; then
+    echo "--- backup: $("$work/dispat.backup" --version 2>&1 | tr '\n' ' ')" >> "$log"
+  else
+    echo "--- backup: none" >> "$log"
+  fi
+}
+
+# A: the control. The fixture and the CA are sound, or nothing below means
+# anything.
+case_run "A gc control, CA trusted, full update" gc localhost trusted https
+
+# B: the fork against the real listing over real TLS, reporting only. Nothing
+# is downloaded, so what this proves is the API half: resolver, handshake,
+# x509 verification against a root read off disk, and HTTP over the result.
+case_run "B fork --check, CA trusted" tinygo localhost trusted https --check
+
+# B2: the same by IP literal. SNI is waived by the client for an IP dial, so
+# the leaf's IPAddresses entry is what carries it — and the row documents
+# whether the fork resolves `localhost` at all by contrast with B.
+case_run "B2 fork --check by IP literal" tinygo 127.0.0.1 trusted https --check
+
+# C: the whole update under the fork — download, size and digest check, a
+# smoke execution of the downloaded binary, and the atomic swap that keeps the
+# old one as .backup.
+case_run "C fork full update, CA trusted" tinygo localhost trusted https
+
+# C2: rollback, offline. The exe left by C is put back, with no server running
+# at all, which is exec and rename under TinyGo and nothing else.
+echo "=== C2 fork --rollback, sufake stopped ===" >> "$log"
+"$work/dispat" self-update --rollback >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+echo "--- exe: $("$work/dispat" --version 2>&1 | tr '\n' ' ')" >> "$log"
+
+# D: the stub-killer. The same setup as C with the CA withheld, which a real
+# verification against real roots must refuse. A stubbed crypto/tls cannot
+# produce a certificate error, because it never verified anything.
+case_run "D fork full update, SSL_CERT_FILE unset" tinygo localhost untrusted https
+
+# E: plaintext at the TLS port. The refusal is the listener's, by
+# construction, and the connection line records the method bytes rather than a
+# ClientHello.
+case_run "E fork plaintext http at the TLS port" tinygo localhost trusted http --check
+
+# F: the net stage's own rows, re-asked with the fork. Every verdict above
+# tinygo-spike-net was measured against upstream 0.41.1, so the layers are
+# walked again here — the same probe, the same assertion server, one toolchain
+# newer — and the tls-reality round is read from the far end of the wire as it
+# always is.
+echo "=== F fork netprobe build ===" >> "$log"
+cd /src/netprobe
+GOWORK=off tinygo build -ldflags "-X main.Bare=1.2.3 -X main.Initialed=1.2.3" \
+  -o /out/netprobe-fork . >> "$log" 2>&1
+echo "exit=$?" >> "$log"
+for layer in ldflags tcp tls http https; do
+  echo "=== F fork netprobe $layer ===" >> "$log"
+  /out/netprobe-fork "$layer" >> "$log" 2>&1
+  echo "exit=$?" >> "$log"
+done
+echo "=== F fork tls-reality ===" >> "$log"
+: > /tmp/reality-fork
+/out/tlsreality 127.0.0.1:14443 > /tmp/reality-fork 2>&1 &
+server=$!
+i=0
+until grep -q listening /tmp/reality-fork || [ "$i" -ge 50 ]; do
+  i=$((i + 1))
+  sleep 0.1
+done
+/out/netprobe-fork tlslocal 127.0.0.1:14443 >> "$log" 2>&1
+wait "$server"
+status=$?
+cat /tmp/reality-fork >> "$log"
+echo "exit=$status" >> "$log"
+
+cat "$log"
+exit 0
+EOF
+
 # The unit-test probe, one module per step. `tinygo test` is run from the
 # module folder so a workspace it may not honour is never the variable being
 # measured.
-FROM tinygo-spike-net AS tinygo-spike-test
+FROM tinygo-spike-selfupdate AS tinygo-spike-test
 COPY --chown=gopher:gopher tests/integration ./tests/integration
 RUN <<'EOF'
 set -u
