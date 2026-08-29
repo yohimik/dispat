@@ -32,15 +32,14 @@
 # them, so each step records its own exit status and the export stage collects
 # the logs whatever they say.
 #
-# The second finding, recorded here because nothing in the source carries it:
-# TinyGo's -X applies only to a string variable declared with no initialiser,
-# and silently ignores the flag for one declared with a value. dispat's
-# internal/cli.Version has an initialiser, so a TinyGo build of it reports
-# `dev` however it was stamped. Dropping the initialiser fixes it and changes
-# nothing under gc — selfupdate.Describe already reads the empty string as the
-# local build a "dev" names — but the source is left alone while the verdict
-# stands, and the ldflags row of tinygo-spike-net proves the rule with a
-# program of its own instead.
+# The second finding, which the source now carries: TinyGo's -X applies only
+# to a string variable declared with no initialiser, and silently ignores the
+# flag for one declared with a value. dispat's internal/cli.Version used to
+# have an initialiser, so a TinyGo build of it reported `dev` however it was
+# stamped. It is declared bare now — identical under gc, since
+# selfupdate.Describe reads the empty string as the local build a "dev" names —
+# and the ldflags row of tinygo-spike-net still proves the rule with a program
+# of its own, beside the self-update matrix that depends on it.
 #
 # tinygo/tinygo carries both toolchains: gc for `go mod download`, for the gc
 # baseline the sizes are measured against and for the control the network

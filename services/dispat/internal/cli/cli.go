@@ -82,15 +82,23 @@ func sweepCommand(cmd string) bool {
 	return false
 }
 
-// Version is the dispat version `--version` reports. The default marks a
-// local build; releases override it at build time from the release tag:
+// Version is the dispat version `--version` reports. Releases stamp it at
+// build time from the release tag:
 //
 //	go build -ldflags "-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=$DISPAT_VERSION"
 //
 // It is a flag, not a command, because a bare word after `dispat` is the run
 // shorthand — a `version` command would shadow a run script named after the
 // version stage.
-var Version = "dev"
+//
+// It is declared without an initialiser, and that is load-bearing rather than
+// a style choice: TinyGo's -X applies only to a string variable declared with
+// no value, and silently ignores the flag for one declared with a value, so a
+// `var Version = "dev"` would leave every TinyGo build reporting a local build
+// however it was stamped. Under gc the two spellings are the same binary:
+// selfupdate.Describe reads the empty string and "dev" alike as the local
+// build, and every reader goes through it.
+var Version string
 
 // versionLine is what --version reports: the version, and the platform the
 // binary was built for. The platform is there because "dispat 1.4.0" alone
