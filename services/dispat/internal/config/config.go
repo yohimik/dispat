@@ -687,25 +687,6 @@ func validateEntryLines(label, key string, lines []EntryLine) error {
 	return nil
 }
 
-// stringKeyMap normalizes the two map shapes config formats decode into.
-func stringKeyMap(v any) (map[string]any, bool) {
-	switch m := v.(type) {
-	case map[string]any:
-		return m, true
-	case map[any]any:
-		out := make(map[string]any, len(m))
-		for k, val := range m {
-			s, ok := k.(string)
-			if !ok {
-				return nil, false
-			}
-			out[s] = val
-		}
-		return out, true
-	}
-	return nil, false
-}
-
 // stringList reads the config's recurring "one name or an array of names"
 // shape: a record line's text.
 func stringList(v any) ([]string, bool) {

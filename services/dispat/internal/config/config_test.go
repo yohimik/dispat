@@ -1566,22 +1566,6 @@ func TestCommitIncludeValidation(t *testing.T) {
 	assert.Equal(t, []string{"package-lock.json", "locks/go.work.sum"}, loaded.Commit.Include)
 }
 
-func TestStringKeyMap(t *testing.T) {
-	m, ok := stringKeyMap(map[string]any{"a": 1})
-	require.True(t, ok)
-	assert.Equal(t, map[string]any{"a": 1}, m)
-
-	m, ok = stringKeyMap(map[any]any{"a": 1, "b": "x"})
-	require.True(t, ok, "YAML's map shape converts when every key is a string")
-	assert.Equal(t, map[string]any{"a": 1, "b": "x"}, m)
-
-	_, ok = stringKeyMap(map[any]any{1: "x"})
-	assert.False(t, ok, "a non-string key refuses the whole map")
-
-	_, ok = stringKeyMap([]any{"not", "a", "map"})
-	assert.False(t, ok)
-}
-
 // TestAutoVersionStrategies: the two strategies resolve independently, and a
 // block with neither still resolves — that is how a space asks for syncLock
 // and nothing else.
