@@ -78,6 +78,18 @@ dispat install yohimik/tinygo --prerelease --release 0.42.0-net.1 \
 The base image stays at upstream 0.41.1 and every stage up to `tinygo-spike-net` still measures it, so the verdict
 above keeps its evidence. The two fork stages are the re-asking.
 
+The fetch is a build-time network step, and it sits in a stage of its own so that editing a probe below it never
+re-downloads a toolchain. That cuts both ways: no target here aborts, so a *failed* fetch exits 0 like every other
+step and is cached as a perfectly valid layer. Re-asking after a release lands wants the layer thrown away:
+
+```sh
+docker buildx build --file Dockerfile.tinygo --target tinygo-spike-export \
+  --no-cache-filter tinygo-spike-fork --output type=local,dest=coverage/tinygo-spike .
+```
+
+`fork.log` says which toolchain was installed, and `selfupdate.log` opens by naming the toolchain its rows are about,
+so a run served from a cached failure reports upstream rather than silently passing them off as the fork's.
+
 ## The self-update matrix
 
 `tinygo-spike-selfupdate` is the acceptance test the fork exists for: dispat updating *itself*, through the one release

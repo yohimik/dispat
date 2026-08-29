@@ -227,8 +227,12 @@ mkdir -p "$su"
 echo "=== sufake build (gc) ===" >>"$log"
 cd "$work/sufake"
 printf 'module sufake\n\ngo 1.24\n' >go.mod
-CGO_ENABLED=0 go build -o "$fake" . >>"$log" 2>&1
+# sufake is a module of its own in a temp folder, so it is built with the
+# workspace off; the dispat builds below need it back on, and the net section
+# above left it off for its own standalone modules.
+GOWORK=off CGO_ENABLED=0 go build -o "$fake" . >>"$log" 2>&1
 echo "exit=$?" >>"$log"
+unset GOWORK
 
 # The open point, asked before anything is read against it. Go consults
 # SSL_CERT_FILE on unix and hands verification to the platform verifier on
@@ -247,14 +251,27 @@ until grep -q "sufake: ca" "$work/trust.out" || [ "$i" -ge 100 ]; do
 done
 trust_base=$(sed -n 's/^sufake: listening //p' "$work/trust.out" | head -n 1)
 if SSL_CERT_FILE="$ca" curl -fsS -o /dev/null "$trust_base/repos/o/r/releases" 2>>"$log"; then
-	ssl_cert_file=honoured
+	curl_trust=honoured
 else
-	ssl_cert_file=ignored
+	curl_trust=ignored
 fi
+# And the client whose answer actually decides the rows below: a Go binary,
+# the gc dispat this script already built. --check exits 1 when there is
+# something to install, which is not a trust failure, so the verdict is read
+# from the error rather than from the exit code.
+SSL_CERT_FILE="$ca" "$out/gc-dispat-darwin-$host_arch" self-update \
+	--api-url "$trust_base" --owner o --repo r --check >"$work/trust.go" 2>&1
+if grep -q "certificate" "$work/trust.go"; then
+	go_trust=ignored
+else
+	go_trust=honoured
+fi
+cat "$work/trust.go" >>"$log"
 kill "$trust_pid" 2>/dev/null
 wait "$trust_pid" 2>/dev/null
 cat "$work/trust.out" >>"$log"
-echo "SSL_CERT_FILE=$ssl_cert_file (curl is the reference client; Go on darwin uses the platform verifier)" >>"$log"
+echo "SSL_CERT_FILE: curl=$curl_trust go=$go_trust" >>"$log"
+echo "(curl reads the file directly; Go on darwin hands verification to the platform verifier, so the two may disagree and the Go answer is the one the rows below are read against)" >>"$log"
 
 # The four binaries the matrix moves between, per runnable arch.
 V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
