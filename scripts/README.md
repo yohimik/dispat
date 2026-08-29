@@ -1,6 +1,8 @@
 # Release scripts
 
-You will find two standalone shell scripts here for CI glue and checks shared across workflows. Smaller scripts
+You will find three standalone shell scripts here: two for CI glue and checks shared across workflows, and one
+host-run half of the TinyGo spike, which is not CI glue at all — buildx reaches only linux, so the darwin probes run
+on a Mac by hand. Smaller scripts
 live directly in dispat configuration files as script entries, such as `push-badge` in the root
 [`dispat.yaml`](../dispat.yaml), `deploy-docs` in [`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), the link
 bracket in [`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml), and `push-readme` in
@@ -17,6 +19,7 @@ exported by CI.
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
 | [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its scope argument    | The `--cache-from`/`--cache-to` flags for that build's cache scope, or nothing outside Actions. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
+| [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike — build, run and net probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`. |
 
 Every gate and stage of this repository runs inside Docker, so a CI job needs Docker, git and dispat itself — no Go,
 Node or Terraform on the runner. The Go gates (vet, tests, gofmt, the coverage badge, the test report, `go mod tidy`)
