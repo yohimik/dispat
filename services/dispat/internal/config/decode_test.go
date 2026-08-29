@@ -1,0 +1,361 @@
+package config
+
+// The conventions decoding keeps, pinned at the decoder rather than through a
+// loaded repository.
+//
+// Everything else in this package tests the loader, which is the right level
+// for what a configuration means. These tests are at the level below, because
+// the rules here are not about meaning at all: they are the shape of the
+// config language — which scalar stands in for which container, which key is
+// refused, which absence is a nil and which is an empty list — and a rule of
+// that kind is only visible in the one call that applies it.
+//
+// Each test names a convention rather than an implementation, so the decoder
+// underneath can be replaced without any of them being rewritten. Error
+// wording is deliberately never asserted whole: a test asserts that the
+// message names the key the file got wrong, which is the promise the
+// documentation makes (reference/plan-errors.md), and nothing more.
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// decodeRoot runs one raw document through exactly the path Load takes: the
+// lowered view of the tree, the settings shape, then the decoder. Tests write
+// the document the way a file writes it — mixed case included — so the case
+// folding every convention below sits on top of is part of what they exercise.
+func decodeRoot(t *testing.T, doc map[string]any) (File, error) {
+	t.Helper()
+	var cfg File
+	return cfg, decodeExact(settings(lowerTree(&tree{root: doc}, nil)), &cfg, weakDecode)
+}
+
+// decodePackage is decodeRoot for a package folder's own file.
+func decodePackage(t *testing.T, doc map[string]any) (PackageConfig, error) {
+	t.Helper()
+	var pc PackageConfig
+	return pc, decodeExact(settings(lowerTree(&tree{root: doc}, nil)), &pc, weakDecode)
+}
+
+// decodeSpace is decodeRoot for a space folder's own file.
+func decodeSpace(t *testing.T, doc map[string]any) (SpaceFile, error) {
+	t.Helper()
+	var sf SpaceFile
+	return sf, decodeExact(settings(lowerTree(&tree{root: doc}, nil)), &sf, weakDecode)
+}
+
+// TestDecodeUnknownKeyWithNoValueStillErrors: a key written with nothing after
+// it is still a key the author wrote. The flattening keeps it (refs_test.go
+// pins that), and the typo it usually is has to be refused even though the
+// value it carries is nothing at all.
+func TestDecodeUnknownKeyWithNoValueStillErrors(t *testing.T) {
+	_, err := decodeRoot(t, map[string]any{"tagFormat": "v{version}", "tagfromat": nil})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tagfromat", "the message names the key the file got wrong")
+}
+
+// TestDecodeNilValueIsAKeyThatSaidNothing: the same shape on a key the model
+// does have. It is used — no unknown-key error — and it leaves the field at
+// its zero value, which is what lets validation apply the default.
+func TestDecodeNilValueIsAKeyThatSaidNothing(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"tagFormat": nil, "concurrency": nil})
+	require.NoError(t, err)
+	assert.Equal(t, "", cfg.TagFormat)
+	assert.Nil(t, cfg.Concurrency)
+}
+
+// TestDecodeResolvedFieldsAreNotConfigKeys: the model carries fields the
+// loader and validation fill in — the source file list, the resolved
+// concurrencies, the parsed initial versions, the built parser. They are not
+// part of the config language, so naming one in a file is a typo like any
+// other rather than a way to write over a computed value.
+func TestDecodeResolvedFieldsAreNotConfigKeys(t *testing.T) {
+	for _, key := range []string{
+		"sourceFiles", "buildConcurrency", "publishConcurrency",
+		"initialVersions", "resolvedParser",
+	} {
+		t.Run(key, func(t *testing.T) {
+			_, err := decodeRoot(t, map[string]any{key: nil})
+			require.Error(t, err, "%s is not a key a file may write", key)
+			assert.Contains(t, strings.ToLower(err.Error()), strings.ToLower(key))
+		})
+	}
+}
+
+// TestDecodeSquashedEntryFormatIsOneObject: `changelog` is its own fields plus
+// the shared entry-format ones, and the file writes them side by side with no
+// sign of the boundary. Both halves fill from one object, and a typo lands in
+// neither, which is the case a squashed embed is easiest to get wrong in: the
+// key belongs to no half, and an implementation that asks each half separately
+// can decide the other one used it.
+func TestDecodeSquashedEntryFormatIsOneObject(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"changelog": map[string]any{
+		"file":          "NOTES.md",
+		"breakingTitle": "Breaking",
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	assert.Equal(t, "NOTES.md", cfg.Changelog.File, "the object's own field")
+	assert.Equal(t, "Breaking", cfg.Changelog.BreakingTitle, "and the shared one, from one object")
+
+	_, err = decodeRoot(t, map[string]any{"changelog": map[string]any{"breakingtitel": "Breaking"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "breakingtitel", "a key belonging to neither half is unknown")
+}
+
+// TestDecodeRecordLineScalarIsOneLine: a record line holds prose, and prose
+// contains commas. The scalar shorthand `"header": "a, b"` is one line of text
+// and must not become two — the shorthand exists to save writing an object,
+// not to introduce a separator the author never agreed to.
+func TestDecodeRecordLineScalarIsOneLine(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"changelog": map[string]any{
+		"header":    "released by dispat, on the runner",
+		"fileTitle": "# Changelog, of everything",
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	require.Len(t, cfg.Changelog.Header, 1, "one string is one record line, commas and all")
+	assert.Equal(t, []string{"released by dispat, on the runner"}, cfg.Changelog.Header[0].Line)
+	require.Len(t, cfg.Changelog.FileTitle, 1)
+	assert.Equal(t, []string{"# Changelog, of everything"}, cfg.Changelog.FileTitle[0].Line)
+}
+
+// TestDecodeRecordLineShorthandsInsideAList: the same shorthand one level
+// down. An element is a full object, a bare string, or a bare array of
+// strings, and the three mix freely inside one list.
+func TestDecodeRecordLineShorthandsInsideAList(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"changelog": map[string]any{
+		"footer": []any{
+			"one, still one",
+			[]any{"two", "three"},
+			map[string]any{"line": "four", "package": "core"},
+		},
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	require.Len(t, cfg.Changelog.Footer, 3)
+	assert.Equal(t, []string{"one, still one"}, cfg.Changelog.Footer[0].Line)
+	assert.Equal(t, []string{"two", "three"}, cfg.Changelog.Footer[1].Line)
+	assert.Equal(t, []string{"four"}, cfg.Changelog.Footer[2].Line)
+	assert.Equal(t, []string{"core"}, cfg.Changelog.Footer[2].Package)
+}
+
+// TestDecodeGenericListSplitsAScalarOnCommas: the other side of the same rule.
+// A plain list of names — script references, ignore patterns, channels — does
+// take the comma shorthand, which is what makes `--concurrency 4,2` and
+// `"build": "lint,build"` mean what they read as. The two rules are pinned
+// together because the bug is always one leaking into the other.
+func TestDecodeGenericListSplitsAScalarOnCommas(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"spaces": map[string]any{"libs": map[string]any{
+			"path": "pkgs",
+			"flow": map[string]any{"build": "lint,build"},
+		}},
+		"ignore": "docs,fixtures",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"lint", "build"}, cfg.Spaces["libs"].Flow.Build)
+	assert.Equal(t, []string{"docs", "fixtures"}, cfg.Ignore)
+}
+
+// TestDecodeScriptAndPathScalarsNeverSplit: a script is shell text and a path
+// is a folder name, and both may hold a comma the file means literally. They
+// take the same scalar shorthand as a list of names and must not take its
+// splitting with it.
+func TestDecodeScriptAndPathScalarsNeverSplit(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"scripts": map[string]any{"build": `docker build --output type=local,dest=out .`},
+		"spaces":  map[string]any{"libs": map[string]any{"path": "pkgs,with,commas"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, Script{`docker build --output type=local,dest=out .`}, cfg.Scripts["build"])
+	assert.Equal(t, PathList{"pkgs,with,commas"}, cfg.Spaces["libs"].Path)
+}
+
+// TestDecodeEmptyListsKeepTheirEmptiness: the three ways a list can hold
+// nothing are three different statements, and downstream reads them as such —
+// an empty channels list records every release, an absent one inherits. A
+// decoder that folded the empty forms into nil would silently move a
+// configuration from one to the other.
+func TestDecodeEmptyListsKeepTheirEmptiness(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"changelog": map[string]any{
+		"channels": "",
+		"file":     "CHANGELOG.md",
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	assert.NotNil(t, cfg.Changelog.Channels, "an empty string is an empty list, not an absence")
+	assert.Empty(t, cfg.Changelog.Channels)
+
+	cfg, err = decodeRoot(t, map[string]any{"changelog": map[string]any{"channels": []any{}}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	assert.NotNil(t, cfg.Changelog.Channels, "and so is an empty array")
+	assert.Empty(t, cfg.Changelog.Channels)
+
+	cfg, err = decodeRoot(t, map[string]any{"changelog": map[string]any{"file": "CHANGELOG.md"}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	assert.Nil(t, cfg.Changelog.Channels, "a key nobody wrote stays nil")
+}
+
+// TestDecodeWeakScalarsFillTypedFields: the config language has no types of
+// its own — a bare number is a fine string, a quoted one a fine number, and
+// both spellings of a boolean are a boolean. It is what lets one value be
+// written the way its format writes it, and what makes a config authored by a
+// template loadable.
+func TestDecodeWeakScalarsFillTypedFields(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"parser":                map[string]any{"maxDescriptionLength": "72"},
+		"tagFormat":             42,
+		"updateCheck":           "true",
+		"isBuildWaitingPublish": 1,
+		"initials":              map[string]any{"core": 3, "utils": 1.5},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Parser)
+	assert.Equal(t, 72, cfg.Parser.MaxDescriptionLength, "a quoted number is a number")
+	assert.Equal(t, "42", cfg.TagFormat, "and a bare number is a string")
+	require.NotNil(t, cfg.UpdateCheck)
+	assert.True(t, *cfg.UpdateCheck, `"true" is true`)
+	require.NotNil(t, cfg.IsBuildWaitingPublish)
+	assert.True(t, *cfg.IsBuildWaitingPublish, "and so is 1")
+	assert.Equal(t, map[string]string{"core": "3", "utils": "1.5"}, cfg.Initials,
+		"a generic map's values render the way the env pass renders them")
+}
+
+// TestDecodeSingleObjectLiftsIntoAList: the one-element shorthand reaches
+// lists of objects too, so a repository with exactly one alias tag or one
+// webhook writes the object rather than an array around it.
+func TestDecodeSingleObjectLiftsIntoAList(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"aliasTags": map[string]any{"format": "v{major}", "moving": true},
+	})
+	require.NoError(t, err)
+	require.Len(t, cfg.AliasTags, 1)
+	assert.Equal(t, "v{major}", cfg.AliasTags[0].Format)
+	assert.True(t, cfg.AliasTags[0].Moving)
+}
+
+// TestDecodeErrorNamesTheKeyAtEveryDepth: what the documentation promises
+// about an unknown key is that the message names it, wherever in the file it
+// sits (reference/plan-errors.md). The wording is not pinned; the name is.
+func TestDecodeErrorNamesTheKeyAtEveryDepth(t *testing.T) {
+	cases := map[string]map[string]any{
+		"root": {"typokey": 1},
+		"space": {"spaces": map[string]any{"libs": map[string]any{
+			"path": "pkgs", "typokey": 1,
+		}}},
+		"package": {"packages": map[string]any{"core": map[string]any{"typokey": 1}}},
+		"nested":  {"parser": map[string]any{"limits": map[string]any{"typokey": 1}}},
+		"list_element": {"webhooks": []any{
+			map[string]any{"url": "https://example.com"},
+			map[string]any{"url": "https://example.com", "typokey": 1},
+		}},
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeRoot(t, doc)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "typokey")
+		})
+	}
+}
+
+// TestDecodeFoldsMapKeysAndNeverTheirValues: every map key the config language
+// owns arrives folded, which is what makes a package entry match a folder
+// spelled any way at all. The values are untouched: a package name derived
+// from a key is lowercase by construction, and a tag format or a path is the
+// text the file wrote.
+func TestDecodeFoldsMapKeysAndNeverTheirValues(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"Packages": map[string]any{"CoreLib": map[string]any{"tagFormat": "V{Version}"}},
+		"Spaces":   map[string]any{"Libs": map[string]any{"Path": "Pkgs"}},
+		"Scripts":  map[string]any{"Build": "echo Build"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, cfg.Packages, "corelib", "an entry key is folded, like every map key")
+	assert.Equal(t, "V{Version}", cfg.Packages["corelib"].TagFormat, "its value is not")
+	require.Contains(t, cfg.Spaces, "libs")
+	assert.Equal(t, PathList{"Pkgs"}, cfg.Spaces["libs"].Path)
+	require.Contains(t, cfg.Scripts, "build")
+	assert.Equal(t, Script{"echo Build"}, cfg.Scripts["build"])
+}
+
+// TestDecodeReportsTheSameKeyEveryTime: a map has no order, so a document with
+// two mistakes in it could report either one. It reports the same one on every
+// load, because a build that fails differently from one run to the next is a
+// build nobody can fix.
+func TestDecodeReportsTheSameKeyEveryTime(t *testing.T) {
+	doc := map[string]any{"aaatypo": 1, "zzztypo": 2}
+	_, first := decodeRoot(t, doc)
+	require.Error(t, first)
+	assert.Contains(t, first.Error(), "aaatypo", "the first key in order is the one reported")
+	for i := 0; i < 32; i++ {
+		_, err := decodeRoot(t, doc)
+		require.Error(t, err)
+		assert.Equal(t, first.Error(), err.Error(), "and the message never varies")
+	}
+}
+
+// TestDecodeFolderFilesShareTheRootStance: a package folder's file and a space
+// folder's file are the same config language as the root, decoded into
+// different top-level objects. A shorthand the root accepts is not a syntax
+// error one folder down, and an unknown key is refused there too.
+func TestDecodeFolderFilesShareTheRootStance(t *testing.T) {
+	pc, err := decodePackage(t, map[string]any{
+		"scripts":      map[string]any{"build": "echo a,b"},
+		"flow":         map[string]any{"build": "build"},
+		"dependencies": "core",
+		"aliasTags":    map[string]any{"format": "v{version}"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, Script{"echo a,b"}, pc.Scripts["build"])
+	assert.Equal(t, []string{"build"}, pc.Flow.Build)
+	assert.Equal(t, Providers("core"), pc.Dependencies,
+		"a package's own list names providers, the consumer being the package")
+	require.Len(t, pc.AliasTags, 1)
+
+	_, err = decodePackage(t, map[string]any{"tagfromat": "v"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tagfromat")
+
+	sf, err := decodeSpace(t, map[string]any{
+		"scripts":      map[string]any{"build": "echo b"},
+		"dependencies": map[string]any{"app": "core"},
+		"packages":     map[string]any{"Core": map[string]any{"src": "src"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, Dependencies{{Consumer: "app", Provider: "core"}}, sf.Dependencies,
+		"a space's object is keyed by consumer, like the root's")
+	assert.Contains(t, sf.Packages, "core")
+
+	_, err = decodeSpace(t, map[string]any{"tagfromat": "v"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tagfromat")
+}
+
+// TestDecodeAllocatesAnObjectOnlyWhenTheFileWroteOne: the optional sub-objects
+// are pointers because nil and an empty object mean different things — nil is
+// "this layer says nothing", so a nearer layer's value survives and the
+// defaults apply. An object written with no keys at all is pruned before the
+// decoder sees it (refs_test.go pins the pruning), so it says nothing either.
+func TestDecodeAllocatesAnObjectOnlyWhenTheFileWroteOne(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"tagFormat": "v{version}"})
+	require.NoError(t, err)
+	assert.Nil(t, cfg.Changelog, "an absent object stays absent")
+	assert.Nil(t, cfg.AutoVersion)
+
+	cfg, err = decodeRoot(t, map[string]any{"autoVersion": map[string]any{}})
+	require.NoError(t, err)
+	assert.Nil(t, cfg.AutoVersion, "and so does an empty one, which the flattening prunes")
+
+	cfg, err = decodeRoot(t, map[string]any{"autoVersion": map[string]any{"enabled": true}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.AutoVersion, "one key is enough to make the object present")
+	assert.True(t, cfg.AutoVersion.IsEnabled())
+}

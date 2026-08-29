@@ -796,6 +796,28 @@ func TestPackageOverrideCaseInsensitiveKey(t *testing.T) {
 	assert.Equal(t, "v{version}", packagesByName(pkgs)["CoreLib"].Space.TagFormat)
 }
 
+// TestPackageOverrideMixedCaseEntryKey: the other half of the same rule, and
+// the load-bearing one. A package name is derived from the entry key, and the
+// environment variables a package's scripts run with are derived from the
+// name, so an entry key that reached the model with its capitals intact would
+// produce a second package name for the same folder. The key is folded on the
+// way in; the folder keeps its own spelling.
+func TestPackageOverrideMixedCaseEntryKey(t *testing.T) {
+	cfg := validConfig()
+	cfg.Packages = map[string]PackageConfig{"CoreLib": {TagFormat: "v{version}"}}
+	root := writeModelRepo(t, cfg, "packages/libs/CoreLib", "packages/apps/app")
+
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	assert.Contains(t, loaded.Packages, "corelib", "the entry key arrives folded")
+	assert.NotContains(t, loaded.Packages, "CoreLib")
+
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	assert.Equal(t, "v{version}", packagesByName(pkgs)["CoreLib"].Space.TagFormat,
+		"and still matches the folder it names")
+}
+
 // TestVersionGroupEmptyName: an empty group name can only be a mistake — it
 // could never be referenced.
 func TestVersionGroupEmptyName(t *testing.T) {

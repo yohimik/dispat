@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,10 +48,41 @@ func TestConfigUnknownKeyIsRejected(t *testing.T) {
 	res := r.Status()
 	assert.Equal(t, 1, res.Code,
 		"an unknown key must fail config loading, not be silently ignored\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	// What the operator needs from the failure is which key to go and fix, so
+	// the misspelling itself has to reach the terminal. The wording around it
+	// is not pinned here; the name is.
+	assert.Contains(t, res.Stderr, "conncurrency",
+		"the error names the key the file got wrong\nstderr:\n%s", res.Stderr)
 
 	res = r.Status("--require-release")
 	assert.Equal(t, 1, res.Code,
 		"a broken configuration is exit 1, never the exit 3 of --require-release's clean-but-empty plan")
+}
+
+// TestConfigUnknownKeyInsideASpaceIsRejected: the same refusal one level down,
+// where a mistyped key is easier to miss and its effect — a space that quietly
+// keeps the defaults — is harder to attribute. The message names the key
+// wherever in the file it sits.
+func TestConfigUnknownKeyInsideASpaceIsRejected(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigRaw(map[string]any{
+		"scripts": map[string]any{"build": "echo building", "publish": "echo publishing"},
+		"spaces": map[string]any{
+			"libs": map[string]any{
+				"path":      "packages",
+				"flow":      map[string]any{"build": "build", "publish": "publish"},
+				"tagFromat": "v{version}",
+			},
+		},
+	})
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	res := r.Status()
+	assert.Equal(t, 1, res.Code,
+		"an unknown key inside a space fails the load too\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, strings.ToLower(res.Stderr), "tagfromat",
+		"the error names the key\nstderr:\n%s", res.Stderr)
 }
 
 // TestConfigFileFallbackResolution: without --config the binary resolves the
