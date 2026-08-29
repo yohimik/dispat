@@ -17,8 +17,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-viper/mapstructure/v2"
-
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -220,7 +218,7 @@ func collectObjectDeps(declared []DeclaredDependency, deps Dependencies, src Dep
 
 // packageEntryKeys are the keys a `packages` entry may never hold. A package
 // entry configures one package, so it holds neither spaces nor packages of
-// its own; decodeExact would refuse them as unknown keys, and naming them
+// its own; the decoder would refuse them as unknown keys, and naming them
 // here says why and points at the levels that do take them.
 var packageEntryKeys = []string{"spaces", "packages"}
 
@@ -902,22 +900,6 @@ func openFolderConfig(dir string) (map[string]any, *tree, string, error) {
 	return lowerTree(t, nil), t, p, nil
 }
 
-// weakDecode is the decoding stance every in-folder file shares with the root
-// config: unknown keys are rejected, weak typing lifts a scalar flow entry
-// into its slice, and the shorthand hooks expand the abbreviated shapes.
-//
-// It is one stance rather than two on purpose. An in-folder package file may
-// carry the same changelog and github objects the root config does, and a
-// shorthand the root accepts must not be a syntax error one folder down.
-func weakDecode(dc *mapstructure.DecoderConfig) {
-	dc.WeaklyTypedInput = true
-	hooks := []mapstructure.DecodeHookFunc{dependencyFormHook, entryLinesHook, scriptFormHook, pathFormHook}
-	if dc.DecodeHook != nil {
-		hooks = append(hooks, dc.DecodeHook)
-	}
-	dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(hooks...)
-}
-
 // refuseNestedRoot rejects a folder file declaring one of the keys only a
 // monorepo root may declare. The folder holds a repository of its own, and a
 // nested root must be ignored rather than half-merged; role and remedy name
@@ -945,7 +927,7 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		"exclude the folder with "+DispatexcludeName, "spaces", "packages"); err != nil {
 		return pc, p, err
 	}
-	if err := decodeExact(settings(raw), &pc, weakDecode); err != nil {
+	if err := decodePackageConfig(settings(raw), &pc); err != nil {
 		return pc, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
 	if pc.Path != "" {
@@ -978,7 +960,7 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	if err := refusePackageEntryKeys(p+": packages", rawEntries(raw, "packages")); err != nil {
 		return sf, p, err
 	}
-	if err := decodeExact(settings(raw), &sf, weakDecode); err != nil {
+	if err := decodeSpaceFile(settings(raw), &sf); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
 	}
 	// The space folder's own env layer and those of the packages entries next

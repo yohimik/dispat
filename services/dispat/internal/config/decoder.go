@@ -168,10 +168,13 @@ func weakInt(val any, at string) (int, error) {
 // weakBool reads a flag. Both spellings a format offers are accepted, and so
 // is a number, which is how a value that travelled through an environment
 // variable or a template arrives.
+//
+// Nothing is not one of them, unlike the other two readers: a boolean is only
+// ever one key's whole value, and a key holding nothing is skipped before any
+// setter runs. There is no list or map of booleans in the language for a null
+// element to arrive in.
 func weakBool(val any, at string) (bool, error) {
 	switch t := val.(type) {
-	case nil:
-		return false, nil
 	case bool:
 		return t, nil
 	case int:

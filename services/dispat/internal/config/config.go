@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"slices"
 	"sort"
@@ -505,11 +504,11 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	}
 
 	var cfg File
-	// decodeExact rejects unknown keys, catching config typos early. Weak
-	// typing lets a scalar concurrency value decode into the slice, and the
-	// shorthand hooks expand {consumer: provider(s)} dependency items and bare
-	// record lines into full entries before decoding.
-	if err := decodeExact(settings(raw), &cfg, weakDecode); err != nil {
+	// The decoder rejects unknown keys, catching config typos early, and takes
+	// the shorthands the language admits: a scalar concurrency lifts into its
+	// pair, a {consumer: provider(s)} object expands into dependency edges, and
+	// a bare record line becomes a full entry.
+	if err := decodeRootConfig(settings(raw), &cfg); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
 	// Env keys must keep their exact case; the lowered tree folded them along
@@ -521,33 +520,6 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return &cfg, nil
-}
-
-// dependenciesType is the decode target the dependency hook watches for: the
-// top-level `dependencies` key.
-var dependenciesType = reflect.TypeOf(public.Dependencies(nil))
-
-// providerListType is the same hook's other target: a package's own list.
-var providerListType = reflect.TypeOf(public.ProviderList(nil))
-
-// dependencyFormHook expands the `dependencies` key into the flat edge list
-// before decoding, whichever of its forms the file used.
-//
-// The expansion itself lives in pkg/models, so this and the public type's own
-// UnmarshalJSON cannot come to disagree about what the config language is.
-// The one thing that differs here is the input: lowerTree has already folded
-// every map key by the time the hook sees it, so consumer names arrive lowercased
-// — exactly like the keys of `packages` and `spaces`, and resolved back onto
-// the packages they name in discovery.
-func dependencyFormHook(_, to reflect.Type, data any) (any, error) {
-	switch to {
-	case dependenciesType:
-		return public.NormalizeDependencies(data)
-	case providerListType:
-		return public.NormalizeProviders(data, "dependencies")
-	default:
-		return data, nil
-	}
 }
 
 // validateRecords checks the record-line lists of every layer that may carry
@@ -713,89 +685,6 @@ func validateEntryLines(label, key string, lines []EntryLine) error {
 		}
 	}
 	return nil
-}
-
-// entryLinesType is the decode target the record-line hook watches for: the
-// fileTitle, header and footer lists.
-var entryLinesType = reflect.TypeOf([]public.EntryLine(nil))
-
-// scriptType is the decode target the script hook watches for: one `scripts`
-// entry, at any of the four levels that carry the key.
-var scriptType = reflect.TypeOf(public.Script(nil))
-
-// scriptFormHook lifts a script written as a scalar into the one-element
-// sequence models.NormalizeScript defines it to be.
-//
-// It exists because WeaklyTypedInput would otherwise get there first, and its
-// string-to-slice conversion splits on commas: `echo "a,b"` would decode as
-// the two commands `echo "a` and `b"`, each an unbalanced shell fragment. That
-// is silent — the file is valid, the commands are wrong — and a comma is
-// ordinary in the shell text a script holds (`--output type=local,dest=out`).
-//
-// Only the scalar form is handled here; a list decodes element by element as
-// it always did, and anything else is passed through untouched so mapstructure
-// reports it against the key the user actually wrote.
-func scriptFormHook(_, to reflect.Type, data any) (any, error) {
-	if to != scriptType {
-		return data, nil
-	}
-	if s, ok := data.(string); ok {
-		return []string{s}, nil
-	}
-	return data, nil
-}
-
-// pathListType is the decode target the path hook watches for: a space's
-// `path`, one folder or a list of them.
-var pathListType = reflect.TypeOf(public.PathList(nil))
-
-// pathFormHook lifts a path written as a scalar into the one-element list
-// PathList defines it to be, for the same reason scriptFormHook exists:
-// WeaklyTypedInput's string-to-slice conversion splits on commas, and a
-// folder name may legitimately carry one.
-func pathFormHook(_, to reflect.Type, data any) (any, error) {
-	if to != pathListType {
-		return data, nil
-	}
-	if s, ok := data.(string); ok {
-		return []string{s}, nil
-	}
-	return data, nil
-}
-
-// entryLinesHook expands the shorthand element shapes of a record-line list
-// before decoding. An element is a full object, a bare string, or a bare array
-// of strings; the two bare shapes are the common case — text with no filters —
-// and become a `line` holding it. A whole list given as a single string is the
-// same shorthand one level up ("header": "one line").
-//
-// Anything else is passed through untouched so that mapstructure reports it
-// against the field the user actually wrote, rather than this hook inventing a
-// message for a shape it does not understand.
-func entryLinesHook(_, to reflect.Type, data any) (any, error) {
-	if to != entryLinesType {
-		return data, nil
-	}
-	if s, ok := data.(string); ok {
-		return []any{map[string]any{"line": []string{s}}}, nil
-	}
-	items, ok := data.([]any)
-	if !ok {
-		return data, nil
-	}
-	out := make([]any, 0, len(items))
-	for _, item := range items {
-		if _, isMap := stringKeyMap(item); isMap {
-			out = append(out, item)
-			continue
-		}
-		if lines, ok := stringList(item); ok {
-			out = append(out, map[string]any{"line": lines})
-			continue
-		}
-		out = append(out, item)
-	}
-	return out, nil
 }
 
 // stringKeyMap normalizes the two map shapes config formats decode into.

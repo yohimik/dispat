@@ -1449,7 +1449,8 @@ func TestLoadParserInvalidValues(t *testing.T) {
 		}, "pkgs/core")
 		_, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid keys")
+		assert.Contains(t, err.Error(), `unknown key "parser.colour"`,
+			"the message names the key by its path from the root")
 	})
 }
 

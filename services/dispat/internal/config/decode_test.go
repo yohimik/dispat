@@ -31,21 +31,21 @@ import (
 func decodeRoot(t *testing.T, doc map[string]any) (File, error) {
 	t.Helper()
 	var cfg File
-	return cfg, decodeExact(settings(lowerTree(&tree{root: doc}, nil)), &cfg, weakDecode)
+	return cfg, decodeRootConfig(settings(lowerTree(&tree{root: doc}, nil)), &cfg)
 }
 
 // decodePackage is decodeRoot for a package folder's own file.
 func decodePackage(t *testing.T, doc map[string]any) (PackageConfig, error) {
 	t.Helper()
 	var pc PackageConfig
-	return pc, decodeExact(settings(lowerTree(&tree{root: doc}, nil)), &pc, weakDecode)
+	return pc, decodePackageConfig(settings(lowerTree(&tree{root: doc}, nil)), &pc)
 }
 
 // decodeSpace is decodeRoot for a space folder's own file.
 func decodeSpace(t *testing.T, doc map[string]any) (SpaceFile, error) {
 	t.Helper()
 	var sf SpaceFile
-	return sf, decodeExact(settings(lowerTree(&tree{root: doc}, nil)), &sf, weakDecode)
+	return sf, decodeSpaceFile(settings(lowerTree(&tree{root: doc}, nil)), &sf)
 }
 
 // TestDecodeUnknownKeyWithNoValueStillErrors: a key written with nothing after
@@ -358,4 +358,197 @@ func TestDecodeAllocatesAnObjectOnlyWhenTheFileWroteOne(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AutoVersion, "one key is enough to make the object present")
 	assert.True(t, cfg.AutoVersion.IsEnabled())
+}
+
+// TestDecodeRefusesWhatItCannotHonestlyRead pins the refusals the first-party
+// decoder introduced, which is the whole of what it changed about the language.
+//
+// Each of these used to produce a value: a truncated number, an empty list, a
+// command that was never a command. None of those values was what the file
+// said, and every one of them fails somewhere far from the line that caused
+// it — a concurrency of 2, a level that silently opted out of its webhooks, a
+// shell invocation of the string "42". A refusal at load time names the key
+// instead.
+func TestDecodeRefusesWhatItCannotHonestlyRead(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		doc  map[string]any
+		key  string
+	}{
+		{
+			name: "a fraction is not a whole number",
+			doc:  map[string]any{"parser": map[string]any{"maxDescriptionLength": 1.5}},
+			key:  "maxdescriptionlength",
+		},
+		{
+			name: "a scalar is not a list of objects",
+			doc:  map[string]any{"webhooks": ""},
+			key:  "webhooks",
+		},
+		{
+			name: "a number is not a shell command",
+			doc:  map[string]any{"scripts": map[string]any{"build": 42}},
+			key:  "build",
+		},
+		{
+			name: "nor is one inside a list of commands",
+			doc:  map[string]any{"scripts": map[string]any{"build": []any{"npm ci", 42}}},
+			key:  "build",
+		},
+		{
+			name: "an object is not a name",
+			doc:  map[string]any{"tagFormat": map[string]any{"a": 1}},
+			key:  "tagformat",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := decodeRoot(t, c.doc)
+			require.Error(t, err)
+			assert.Contains(t, strings.ToLower(err.Error()), c.key, "the refusal names the key")
+		})
+	}
+}
+
+// TestDecodeSpellsABooleanAsItIsWritten: a boolean written where text belongs
+// renders as the word, not as the digit a C-shaped conversion would produce.
+// It is the same rendering the env pass gives the same value, which is what
+// keeps one configuration from meaning two things depending on which pass read
+// it.
+func TestDecodeSpellsABooleanAsItIsWritten(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"tagFormat": true,
+		"initials":  map[string]any{"core": false},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "true", cfg.TagFormat)
+	assert.Equal(t, map[string]string{"core": "false"}, cfg.Initials)
+}
+
+// TestDecodeRefusesAValueOfTheWrongShape sweeps the refusals from the other
+// side: for every kind of key the language has — an object, a free-form
+// object, a map of names, a list of names, a list of numbers, a path, a
+// boolean — a value that is not one of those is named rather than coerced into
+// something.
+//
+// It is one table because the failure it guards against is a single missing
+// branch: a setter that falls through its shape check writes a zero value and
+// says nothing, which is the silent config the unknown-key refusal exists to
+// prevent, arriving by another door.
+func TestDecodeRefusesAValueOfTheWrongShape(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		doc  map[string]any
+		key  string
+	}{
+		{"free-form object", map[string]any{"custom": "x"}, "custom"},
+		{"map of objects", map[string]any{"spaces": "x"}, "spaces"},
+		{"map of names", map[string]any{"initials": map[string]any{"core": []any{1}}}, "initials.core"},
+		{"element of a list of names", map[string]any{"ignore": []any{map[string]any{"a": 1}}}, "ignore[0]"},
+		{"scalar where names belong", map[string]any{"ignore": map[string]any{"a": 1}}, "ignore"},
+		{"element of a list of numbers", map[string]any{"concurrency": []any{map[string]any{"a": 1}}}, "concurrency[0]"},
+		{"scalar where numbers belong", map[string]any{"concurrency": map[string]any{"a": 1}}, "concurrency"},
+		{"text where a number belongs", map[string]any{"concurrency": "two"}, "concurrency[0]"},
+		{"element of a path", map[string]any{
+			"spaces": map[string]any{"libs": map[string]any{"path": []any{map[string]any{"a": 1}}}}},
+			"spaces.libs.path[0]"},
+		{"object where a path belongs", map[string]any{
+			"spaces": map[string]any{"libs": map[string]any{"path": map[string]any{"a": 1}}}},
+			"spaces.libs.path"},
+		{"text where a boolean belongs", map[string]any{"unsafeDisableLock": "yes"}, "unsafedisablelock"},
+		{"object where a boolean belongs", map[string]any{"updateCheck": map[string]any{"a": 1}}, "updatecheck"},
+		{"scalar where a record line belongs", map[string]any{
+			"changelog": map[string]any{"header": []any{42}}}, "changelog.header[0]"},
+		{"scalar where an object belongs", map[string]any{"changelog": 4}, "changelog"},
+		{"text where a map of names belongs", map[string]any{"initials": "x"}, "initials"},
+		{"text where the scripts object belongs", map[string]any{"scripts": "x"}, "scripts"},
+		{"number where a package's providers belong", map[string]any{
+			"packages": map[string]any{"core": map[string]any{"dependencies": 42}}},
+			"packages.core.dependencies"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := decodeRoot(t, c.doc)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.key, "the refusal names the key by its path")
+		})
+	}
+}
+
+// TestDecodeReadsEveryFormatsSpellingOfANumber: each parser hands back its own
+// Go type for a number — JSON a float64, YAML an int, TOML an int64 — and a
+// flag hands over the text the operator typed. The four are the same number
+// here, and a boolean is the 1 or 0 a shell-shaped value arrives as, so one
+// configuration cannot mean different things depending on the file extension
+// it was written under.
+func TestDecodeReadsEveryFormatsSpellingOfANumber(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{"parser": map[string]any{
+		"maxDescriptionLength": int64(72),
+		"limits": map[string]any{
+			"unitsPerMessage":   64,
+			"scopeTermsPerUnit": 256.0,
+			"messageBytes":      "1024",
+		},
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Parser)
+	require.NotNil(t, cfg.Parser.Limits)
+	assert.Equal(t, 72, cfg.Parser.MaxDescriptionLength)
+	assert.Equal(t, 64, cfg.Parser.Limits.UnitsPerMessage)
+	assert.Equal(t, 256, cfg.Parser.Limits.ScopeTermsPerUnit)
+	assert.Equal(t, 1024, cfg.Parser.Limits.MessageBytes)
+
+	cfg, err = decodeRoot(t, map[string]any{
+		"parser":      map[string]any{"maxDescriptionLength": true},
+		"concurrency": []any{int64(4), "2", false, nil},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Parser)
+	assert.Equal(t, 1, cfg.Parser.MaxDescriptionLength, "a boolean counts as one")
+	assert.Equal(t, []int{4, 2, 0, 0}, cfg.Concurrency,
+		"and inside a list, false and nothing at all both count as none")
+}
+
+// TestDecodeReadsEveryFormatsSpellingOfABoolean is the same rule for the
+// booleans: both words, both digits, and whichever numeric type the format
+// produced.
+func TestDecodeReadsEveryFormatsSpellingOfABoolean(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		val  any
+		want bool
+	}{
+		{"true", true, true},
+		{"the word", "true", true},
+		{"the digit", 1, true},
+		{"a whole number", int64(0), false},
+		{"a fractional number", 2.5, true},
+		{"nothing at all", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := decodeRoot(t, map[string]any{"updateCheck": c.val})
+			require.NoError(t, err)
+			require.NotNil(t, cfg.UpdateCheck, "the file wrote the key, so the option is stated")
+			assert.Equal(t, c.want, *cfg.UpdateCheck)
+		})
+	}
+}
+
+// TestDecodeLiftsALoneScalarIntoItsContainer: the one-element shorthand, on
+// the keys whose container is not a list of objects. A channel written on its
+// own is the one channel, a folder written on its own is the space's one
+// folder, and a number written where either belongs is the text of that
+// number, because the config language has no types of its own to object with.
+func TestDecodeLiftsALoneScalarIntoItsContainer(t *testing.T) {
+	cfg, err := decodeRoot(t, map[string]any{
+		"changelog": map[string]any{"channels": 42, "header": []any{nil}},
+		"spaces":    map[string]any{"libs": map[string]any{"path": 42}},
+		"parser":    map[string]any{"maxDescriptionLength": ""},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Changelog)
+	assert.Equal(t, []string{"42"}, cfg.Changelog.Channels)
+	assert.Equal(t, []EntryLine{{}}, cfg.Changelog.Header,
+		"a record line written as nothing is a line that says nothing, not a missing element")
+	assert.Equal(t, PathList{"42"}, cfg.Spaces["libs"].Path)
+	require.NotNil(t, cfg.Parser)
+	assert.Equal(t, 0, cfg.Parser.MaxDescriptionLength, "and an empty string is no number at all")
 }

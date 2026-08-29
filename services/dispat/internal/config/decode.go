@@ -1,88 +1,32 @@
 package config
 
-// How a parsed config file becomes the model, and the conventions that
-// decoding keeps.
+// The shape a parsed config file is handed over in, and the two rules that
+// shape carries.
 //
-// This used to be viper's job, and the conventions are still the ones viper
-// applied, because the configuration language is defined by them: every map
-// key is lowercased, so script, space and package names match
-// case-insensitively; field names match case-insensitively too; scalars are
-// weakly typed, so a bare number is a fine string and a bare string is a fine
-// one-element list; and an unknown key is refused rather than dropped, which
-// is what turns a config typo into an error instead of a silent no-op.
+// Reading the file is refs.go's, folding its keys is lowerTree's, and turning
+// the result into the model is decoder.go's. What is left in between is this:
+// the settings map, which is the lowered tree flattened to delimited key paths
+// and rebuilt from them. The round trip is not a detour. It is where an object
+// with no keys stops being a key at all, and where a key spelled with the
+// delimiter becomes the levels it names, and both of those are part of the
+// config language rather than an implementation detail of whoever reads it
+// next.
 //
-// dispat used two lines of viper and paid for a config file reader it never
-// called, a filesystem abstraction, a file watcher and a cast library. What it
-// used is here: the lowered tree (lowerTree), the shape the decoder reads
-// (settings) and the decoder itself (decodeExact). The 214 mapstructure tags
-// and the four decode hooks are unchanged — they were always
-// go-viper/mapstructure hooks, and viper only ever composed them.
+// The pruning is load-bearing: an opt-in block written as a bare `{}` says
+// nothing rather than enabling itself at its defaults, which is what lets a
+// pointer sub-object mean "this layer did not speak". The kept rules are the
+// ones viper applied when viper did this, and they are kept because a config
+// that loads today has to load the same way tomorrow.
 
-import (
-	"reflect"
-	"strings"
-
-	"github.com/go-viper/mapstructure/v2"
-)
+import "strings"
 
 // keyDelim is the separator a nested key path is spelled with. It is the
 // decoder's own convention, not the config language's: settings flattens the
 // tree to delimited paths and rebuilds it from them, which is where a key
-// containing the delimiter becomes two levels. Kept as it was rather than
-// changed, because a config that loads today must load the same way tomorrow.
+// containing the delimiter becomes two levels. It is also the separator an
+// error names a nested key with, so the path a message prints is the path the
+// flattening speaks in.
 const keyDelim = "."
-
-// decodeOption adjusts the decoder before it runs. weakDecode is the one the
-// package passes; the signature is a function of the config so a caller can
-// add a hook without this file knowing what for.
-type decodeOption func(*mapstructure.DecoderConfig)
-
-// decodeExact decodes a settings map into the model, refusing any key the
-// model has no field for.
-//
-// The stance is fixed here rather than at each call site: unknown keys are an
-// error, input is weakly typed, field names match case-insensitively, and the
-// two conversions every config file relies on — a duration written as a
-// string, and a scalar written where a list belongs — run before the caller's
-// own hooks in the chain the options build.
-func decodeExact(src map[string]any, dst any, opts ...decodeOption) error {
-	dc := &mapstructure.DecoderConfig{
-		TagName:          "mapstructure",
-		MatchName:        strings.EqualFold,
-		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			stringToWeakSliceHook(","),
-		),
-	}
-	for _, opt := range opts {
-		opt(dc)
-	}
-	dc.ErrorUnused = true
-	dc.Result = dst
-	dec, err := mapstructure.NewDecoder(dc)
-	if err != nil {
-		return err
-	}
-	return dec.Decode(src)
-}
-
-// stringToWeakSliceHook splits a string into a list when a list is what the
-// field holds. mapstructure's own StringToSliceHookFunc refuses anything but a
-// []string destination, which would leave a scalar written where a list of
-// records or of flow steps belongs undecodable.
-func stringToWeakSliceHook(sep string) mapstructure.DecodeHookFunc {
-	return func(from, to reflect.Type, data any) (any, error) {
-		if from.Kind() != reflect.String || to.Kind() != reflect.Slice {
-			return data, nil
-		}
-		raw := data.(string)
-		if raw == "" {
-			return []string{}, nil
-		}
-		return strings.Split(raw, sep), nil
-	}
-}
 
 // settings renders the lowered tree as the map the decoder reads. It is the
 // tree flattened to delimited key paths and rebuilt from them, which is what
