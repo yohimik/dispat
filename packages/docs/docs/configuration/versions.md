@@ -84,7 +84,7 @@ Take `"initials": {"core": "1.0.0"}` with an unparseable newest tag. If one `fix
 dispat releases `core@1.0.1`. Packages without an entry fall back to `0.0.0` as usual.
 
 A parseable latest tag always beats initials. dispat matches keys case-insensitively against discovered packages
-because viper lowercases map keys. It warns about and ignores entries that match no package.
+because dispat lowercases map keys. It warns about and ignores entries that match no package.
 
 You rarely have to write these by hand. Run [`dispat compute`](../cli/compute.md) to read the version each package's
 manifests declare. It proposes entries for the exact packages in the two situations above.

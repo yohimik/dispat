@@ -32,9 +32,9 @@ data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 
 ## The contract
 
-Every field carries a `mapstructure` tag to help the CLI decode the file. They also carry a `json` tag with the exact
-same key to handle marshaling. This guarantees that **a marshalled model is a loadable configuration**, so your
-generators can round-trip through Go types without needing hand-written templates.
+Every field carries one `json` tag, and that tag is both halves of the contract: the key the CLI decodes the file by,
+and the key the model marshals back into. This guarantees that **a marshalled model is a loadable configuration**, so
+your generators can round-trip through Go types without needing hand-written templates.
 
 Optional sub-objects are pointers. An unset object marshals as an absent key instead of printing `{}` noise to your
 file.

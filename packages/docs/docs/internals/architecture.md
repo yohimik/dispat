@@ -57,9 +57,9 @@ back as a release tag.
    override and does not end the ascent.
 
    dispat parses the file using its own format's parser, so every key keeps the case you wrote it in. It replaces each
-   `$ref` with the file it names relative to the file that wrote it, and refuses cycles with the chain. Viper receives
-   a lowercased copy of the result to decode and validate, rejecting unknown keys and applying flag bindings. dispat
-   reads the `env` objects back from the exact-case tree.
+   `$ref` with the file it names relative to the file that wrote it, and refuses cycles with the chain. A lowercased
+   copy of the result carries the flag bindings, and dispat's own decoder reads that copy into the model and validates
+   it, refusing any key the model has no field for. dispat reads the `env` objects back from the exact-case tree.
 3. Discover packages across every direct sub-folder of each space path not excluded by the space's `.dispatexclude`.
    Package names must be unique across spaces, and discovery includes every standalone `packages` entry with a `path`.
    Per-package configuration resolves here through a seven-layer ladder. It reads the root file's own defaults, the

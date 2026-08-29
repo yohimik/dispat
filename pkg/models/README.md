@@ -23,10 +23,11 @@ Packages: map[string]models.PackageConfig{
 data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 ```
 
-Every field carries a `mapstructure` tag for decoding and a matching `json` tag for encoding, so **a marshalled model
-is a loadable config**. Optional sub-objects use pointers so unset fields are omitted from output instead of emitting
-empty `{}` blocks. Tri-state options use `*bool` with nil-safe accessors and a `Bool()` helper, which covers `enabled`,
-`verify`, `writeVersion`, and every scalar in a `PackageConfig` override where absent means "inherit".
+Every field carries one `json` tag, naming both the key the config file is decoded by and the key the model is encoded
+back into, so **a marshalled model is a loadable config**. Optional sub-objects use pointers so unset fields are
+omitted from output instead of emitting empty `{}` blocks. Tri-state options use `*bool` with nil-safe accessors and a
+`Bool()` helper, which covers `enabled`, `verify`, `writeVersion`, and every scalar in a `PackageConfig` override where
+absent means "inherit".
 
 A `Packages` entry plays one of two roles: without `Path` it overrides the space configuration for the matching package
 folder, and with `Path` it declares a standalone package outside every space. The model stores dependency edges as a
