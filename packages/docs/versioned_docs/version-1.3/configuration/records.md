@@ -142,6 +142,7 @@ release stage's own recorder finds it and skips.
 |------------|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`  | `true`                    | Create a GitHub release per published package that exported [`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs).                                                                                                                                                |
 | `allPackages`  | `false`                  | Create a release for every published package, even when no script exported `DISPAT_EXPORT_GITHUB`. The export then only adds assets. Default: the export is the per-package opt-in. |
+| `draft`    | `false`                   | Create every release as a draft, for a person to publish after reading it. A draft carries no tag ref until it is published, so nothing that resolves a release by its tag sees it meanwhile: [`dispat install`](../cli/install.md), [self-update](../cli/self-update.md) and the alias-tag chain all skip it. A re-run finds the draft through the repository's release listing and skips it (`W224`), so a flow converges on one draft rather than a stack of them. Turning this off again leaves any draft already created where it is: dispat creates the published release beside it, and the stale draft is yours to delete. |
 | `channels` | every release             | Which releases get a GitHub release. See [Choosing the channels that record](#choosing-the-channels-that-record). A created release is flagged as a prerelease on GitHub whenever the version is one, whatever this says.             |
 | `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                      |
 | `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                       |
@@ -178,6 +179,11 @@ head and the released commit coincide. They can differ if the run released anoth
 With `commit` enabled, releases move to the end of the run and, under `push`, are created after the push, when the SHA
 exists on the remote.
 
+A draft is the one release that points at nothing yet. GitHub stores the `target_commitish` on the draft and creates
+the tag ref when the release is published, so the table above describes where the tag lands at that moment rather than
+when dispat created the release. The commit a pushed release commit names is still the commit the published draft
+attaches to.
+
 The export's value names the **release assets**. This is a whitespace-separated list of absolute paths to existing
 files. dispat uploads each one (named after the file, `application/octet-stream`) right after the release is created,
 even in `commit` mode where the release itself moves to the finalize phase. An invalid entry (a relative path, a
@@ -186,7 +192,8 @@ upload of a valid file still fails the package like any other recording failure.
 
 **Creating a release twice.** A release the repository already carries for the planned tag is a skip (`W224`), not the
 API's duplicate-tag rejection. Run a release again after a later stage failed, and the
-[`dispat github`](../cli/github.md) step command converges instead of failing.
+[`dispat github`](../cli/github.md) step command converges instead of failing. A draft is recognised the same way,
+through the repository's release listing rather than the tag it names, which dispat reads only when `draft` is on.
 
 ## Your own words around an entry
 

@@ -250,6 +250,7 @@
     "repo": "monorepo",
     "apiUrl": "https://api.github.com",
     "tokenEnv": "GITHUB_TOKEN",
+    "draft": false,
     "featuresTitle": "Features",
     "releaseName": "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
     "footer": [

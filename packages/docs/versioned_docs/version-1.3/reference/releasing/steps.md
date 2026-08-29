@@ -34,12 +34,12 @@ with code `0`. This keeps custom scripts from failing on unchanged packages, tho
 **Running one twice changes nothing the second time.** Each step checks whether its target changes already exist before
 writing:
 
-| Command       | Already done means                          | Reported as |
-|---------------|---------------------------------------------|-------------|
-| `changelog`   | the file already has an entry for the tag   | `W226`      |
-| `commit`      | the tag already exists at that commit       | `W223`      |
-| `github`      | the tag already has a release               | `W224`      |
-| `autoversion` | the manifests already say the right version | nothing     |
+| Command       | Already done means                               | Reported as |
+|---------------|--------------------------------------------------|-------------|
+| `changelog`   | the file already has an entry for the tag        | `W226`      |
+| `commit`      | the tag already exists at that commit            | `W223`      |
+| `github`      | the tag already has a release (a draft included) | `W224`      |
+| `autoversion` | the manifests already say the right version      | nothing     |
 
 This idempotency lets later release stages detect completed work and skip duplicate writes or duplicate tag errors. It
 also ensures you can safely re-run failed release jobs.

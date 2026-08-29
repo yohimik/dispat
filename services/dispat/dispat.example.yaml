@@ -458,6 +458,11 @@ github:
   repo: monorepo
   apiUrl: https://api.github.com
   tokenEnv: GITHUB_TOKEN
+  # Create every release as a draft for a person to publish after reading it.
+  # A draft carries no tag ref until then, so nothing that resolves a release
+  # by its tag (dispat install, self-update, the alias-tag chain) sees it
+  # meanwhile; a re-run finds the draft and skips it (W224).
+  draft: false
   featuresTitle: "Features"
   releaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}"   # default: the tag
   footer:

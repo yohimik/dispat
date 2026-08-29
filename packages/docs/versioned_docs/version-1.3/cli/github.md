@@ -6,6 +6,10 @@ recorder would create: a release named after the package tag, or after
 its body. If the repository already has the release, dispat skips it and logs `W224`. This means a repeated run, and
 the release that follows it, converge instead of failing when the API rejects a duplicate tag.
 
+With [`github.draft`](../configuration/records.md#github), or with `--draft` on this command, the release is created
+for a person to publish after reading it. It carries no tag ref until they do, so nothing that resolves a release by
+its tag sees it meanwhile.
+
 You opt in exactly as you do for the recorder. dispat releases a package when its scripts export
 [`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs) or when
 [`github.allPackages`](../configuration/records.md#github) covers it.
@@ -56,6 +60,7 @@ Beside the [global flags](./README.md#global-flags):
 | `--on-error`          | `skip`      | Decide what a failed package does to its dependents for every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` (transitive) or `continue`. The command exits `1` on any failure regardless of this setting.                                         |
 | `--owner`, `--repo`, `--api-url`, `--token-env` | from config | Override the matching `github.*` values for every package in the `github` command invocation.  |
 | `--target`            |             | Push the commit to the remote before you use this. It tells the `github` command to create the tag at this commit or branch (`target_commitish`).   |
+| `--draft`             | from config | Override [`github.draft`](../configuration/records.md#github) for every package in the invocation. `--draft` creates the release for a person to publish, and `--draft=false` publishes straight away over a configured draft. |
 | `--release-name`      | from config | Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for the `changelog` and `github` commands. Environment variables like `$VAR` and `${VAR}` expand exactly as they do in the config. |
 | `--authors`           | from config | Override [`authors.placement`](../configuration/records.md#attributing-an-entry-to-its-authors) for the `changelog` and `github` commands: `off`, `inline`, `section` or `both`. Any other value is refused before anything is planned. |
 | `--authors-format`    | from config | Override `authors.format`: `fullname`, or `username` for the local part of the email address. |
