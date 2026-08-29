@@ -5,10 +5,11 @@
 // can author configurations as typed values and marshal them to JSON instead
 // of hand-writing raw config strings.
 //
-// Every field carries both a mapstructure tag (how viper decodes the file) and
-// a json tag with the same key (how a model marshals back into a loadable
-// file). Viper treats keys case-insensitively and lowercases map keys, so
-// script and space names are matched case-insensitively.
+// Every field carries one json tag, and it says both things: which key of a
+// config file fills the field, and which key the model marshals back into a
+// loadable file. dispat matches those keys case-insensitively and lowercases
+// every map key it reads, so script, space and package names are matched
+// case-insensitively too.
 //
 // `scripts` is one shape at three levels — the file, a space and a package —
 // and a package resolves a name through its own map first, then its space's,
@@ -24,46 +25,46 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 )
 
-// File mirrors the configuration at the monorepo root. Viper infers the
-// format from the file extension (yaml, json, toml, ...).
+// File mirrors the configuration at the monorepo root. The file extension
+// decides the format (yaml, json, toml, ...).
 type File struct {
-	Scripts map[string]Script      `mapstructure:"scripts" json:"scripts,omitempty"`
-	Spaces  map[string]SpaceConfig `mapstructure:"spaces" json:"spaces,omitempty"`
+	Scripts map[string]Script      `json:"scripts,omitempty"`
+	Spaces  map[string]SpaceConfig `json:"spaces,omitempty"`
 	// Packages holds per-package configuration, keyed by package name. An
 	// entry without `path` adjusts the configuration of a package discovered
 	// in one of the space folders, matched by folder name (every key must
 	// match exactly one folder across all spaces). An entry with `path`
 	// declares a standalone package living outside every space, at that
 	// root-relative path; see PackageConfig.
-	Packages map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
+	Packages map[string]PackageConfig `json:"packages,omitempty"`
 	// VersionGroups declares shared-versioning groups that cut across the
 	// filesystem, keyed by group name. Spaces and packages join a group by
 	// naming it in their versionGroup key; see VersionGroupConfig.
-	VersionGroups map[string]VersionGroupConfig `mapstructure:"versionGroups" json:"versionGroups,omitempty"`
+	VersionGroups map[string]VersionGroupConfig `json:"versionGroups,omitempty"`
 	// Dependencies declares consumer -> provider edges, as an object keyed by
 	// consumer. See the Dependencies type. Spaces and packages may declare
 	// their own; see SpaceConfig.Dependencies and PackageConfig.Dependencies.
 	// All declarations merge into one list.
-	Dependencies Dependencies `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	Dependencies Dependencies `json:"dependencies,omitempty"`
 	// Concurrency accepts a single value applied to both stages
 	// (concurrency: 4) or a [build, publish] pair (concurrency: [4, 2]).
 	// 0 entries mean "number of CPUs".
-	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
+	Concurrency []int `json:"concurrency,omitempty"`
 	// LogLevel is the minimum level: trace, debug, info, warn or error.
-	LogLevel string `mapstructure:"logLevel" json:"logLevel,omitempty"`
+	LogLevel string `json:"logLevel,omitempty"`
 	// LogFormat selects the logger output: "pretty" (human console output)
 	// or "json" (machine-readable lines for CI ingestion).
-	LogFormat string `mapstructure:"logFormat" json:"logFormat,omitempty"`
+	LogFormat string `json:"logFormat,omitempty"`
 	// The optional sub-objects are pointers so that an unset object marshals
 	// as an absent key rather than as "{}" — omitempty has no effect on a
 	// struct value. nil means "all defaults"; the CLI's config loader fills
 	// the pointers in after decoding, so code past validation never sees nil.
-	Changelog *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
-	GitHub    *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
-	Commit    *CommitConfig    `mapstructure:"commit" json:"commit,omitempty"`
+	Changelog *ChangelogConfig `json:"changelog,omitempty"`
+	GitHub    *GitHubConfig    `json:"github,omitempty"`
+	Commit    *CommitConfig    `json:"commit,omitempty"`
 	// Shell is the command prefix scripts are appended to, e.g.
 	// ["bash", "-c"] or ["cmd", "/C"]. Default: ["/bin/sh", "-c"].
-	Shell []string `mapstructure:"shell" json:"shell,omitempty"`
+	Shell []string `json:"shell,omitempty"`
 	// Env is static environment added to every script the run executes,
 	// exported with the keys spelled exactly as the file writes them. Spaces
 	// and packages declare their own `env` objects; the layers merge key by
@@ -71,31 +72,31 @@ type File struct {
 	// and the computed DISPAT_* variables always win over static env. Values
 	// may reference other variables ($NAME, ${NAME}), resolved against the
 	// computed set first and the process environment second.
-	Env map[string]string `mapstructure:"env" json:"env,omitempty"`
+	Env map[string]string `json:"env,omitempty"`
 	// Custom is an optional free-form object dispat itself never reads: a
 	// place for anything the repository's own tooling wants to keep in the
 	// config file without tripping the unknown-key guard. Spaces and package
 	// entries have their own independent `custom` objects; nothing merges.
-	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
+	Custom map[string]any `json:"custom,omitempty"`
 	// Initials maps package names to the baseline version used when the
 	// package's latest release tag is missing or unparseable (e.g. a stray
 	// "pkg@0.0.1.0" tag). The next release bumps on top of this value.
 	// Keys are matched case-insensitively against discovered packages.
-	Initials map[string]string `mapstructure:"initials" json:"initials,omitempty"`
+	Initials map[string]string `json:"initials,omitempty"`
 	// TagFormat is the repository-wide release tag template, overridable per
 	// space. Placeholders are {name}, {version} and the optional prerelease
 	// pair {channel}/{counter}; every other byte is literal, so
 	// "{name}@v{version}" and "services/{name}@v{version}" both work.
 	// Default: "{name}@{version}", the form §14 makes normative.
-	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	TagFormat string `json:"tagFormat,omitempty"`
 	// AliasTags are extra tags each release is written under, beside the one
 	// tagFormat produces; see AliasTagConfig. Overridable per space and per
 	// package, where a list replaces the inherited one rather than adding to it.
-	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	AliasTags []AliasTagConfig `json:"aliasTags,omitempty"`
 	// Webhooks are HTTP endpoints notified of release progress; see
 	// WebhookConfig. Deliveries are asynchronous and observe only: a failed or
 	// unreachable endpoint warns and never affects the release.
-	Webhooks []WebhookConfig `mapstructure:"webhooks" json:"webhooks,omitempty"`
+	Webhooks []WebhookConfig `json:"webhooks,omitempty"`
 
 	// The repository-wide defaults for the space-shaped keys. Each is the
 	// bottom of the same ladder a package's configuration is folded through —
@@ -106,27 +107,27 @@ type File struct {
 	// Flow includes `login`: it still runs once per space, in the space
 	// folder, and declaring it here only saves repeating it. A package
 	// override may still not touch it.
-	Flow *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
+	Flow *SpaceFlowConfig `json:"flow,omitempty"`
 	// AutoVersion is the default manifest-rewriting policy. Like every other
 	// autoVersion, a level that states one replaces it wholesale rather than
 	// merging into it: its empty fields carry meaning against their siblings.
-	AutoVersion           *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
-	IsBuildWaitingPublish *bool              `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool              `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
+	AutoVersion           *AutoVersionConfig `json:"autoVersion,omitempty"`
+	IsBuildWaitingPublish *bool              `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool              `json:"revertOnFail,omitempty"`
 	// Versioning is the default versioning mode. It applies under each
 	// space's own implicit group, so `fixed` here means every space versions
 	// its own packages as one, not that all spaces share a version. Joining
 	// spaces into one group is what versionGroups is for, and versionGroup
 	// stays a space-and-package key for that reason.
-	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	Versioning string `json:"versioning,omitempty"`
 	// Src is the default scope folder, resolved against each package's own
 	// folder exactly as a package's own src is; see PackageConfig.Src. A
 	// package that has no such folder fails the load, because the alternative
 	// is a package that silently owns no files and quietly stops releasing.
-	Src string `mapstructure:"src" json:"src,omitempty"`
+	Src string `json:"src,omitempty"`
 	// Ignore are change-scope ignore patterns for every package, matched
 	// against paths relative to the repository root; see PackageConfig.Ignore.
-	Ignore []string `mapstructure:"ignore" json:"ignore,omitempty"`
+	Ignore []string `json:"ignore,omitempty"`
 	// CommitErrors decides what an error in a commit message does to the run
 	// (§16):
 	//
@@ -139,12 +140,12 @@ type File struct {
 	// version that goes backwards, a dependency cycle — abort the run under
 	// either setting, because §16 requires it: they mean no correct plan
 	// exists, so no partial release may be emitted.
-	CommitErrors string `mapstructure:"commitErrors" json:"commitErrors,omitempty"`
+	CommitErrors string `json:"commitErrors,omitempty"`
 	// NonPackageScopes are scope names that are deliberately not packages, so
 	// naming one is not the typo E130 exists to catch. Default: ["release"],
 	// which is the scope of dispat's own release commit — without the
 	// exemption every run would poison the next one.
-	NonPackageScopes []string `mapstructure:"nonPackageScopes" json:"nonPackageScopes,omitempty"`
+	NonPackageScopes []string `json:"nonPackageScopes,omitempty"`
 
 	// UpdateCheck asks dispat whether a newer stable release of dispat itself
 	// exists, and prints a one-line suggestion when there is one (default
@@ -152,7 +153,7 @@ type File struct {
 	// not answered by the time the command is done, so it can never slow a
 	// run down; it is skipped entirely when logFormat is "json", since a
 	// machine reading the output cannot act on the suggestion.
-	UpdateCheck *bool `mapstructure:"updateCheck" json:"updateCheck,omitempty"`
+	UpdateCheck *bool `json:"updateCheck,omitempty"`
 
 	// UnsafeDisableLock turns the release lock off (default false): the tag
 	// `dispat release` pushes to the remote before it plans, so that a second
@@ -163,29 +164,29 @@ type File struct {
 	// local experiment — where the alternative is not an unguarded release but
 	// no release at all. DISPAT_UNSAFE_DISABLE_LOCK=true says the same thing
 	// for one invocation, and either saying it is enough.
-	UnsafeDisableLock bool `mapstructure:"unsafeDisableLock" json:"unsafeDisableLock,omitempty"`
+	UnsafeDisableLock bool `json:"unsafeDisableLock,omitempty"`
 
 	// Run is the run-level hooks object; see RunConfig.
-	Run *RunConfig `mapstructure:"run" json:"run,omitempty"`
+	Run *RunConfig `json:"run,omitempty"`
 
 	// Parser holds the commit-message parser options; see ParserConfig. Every
 	// field is optional and defaults to the specification value.
-	Parser *ParserConfig `mapstructure:"parser" json:"parser,omitempty"`
+	Parser *ParserConfig `json:"parser,omitempty"`
 
 	// SourceFiles are the files this configuration was read from: the config
 	// file itself, followed by every file a `$ref` in it named, in the order
 	// they were read. Populated by the loader, so that a configuration split
 	// across files can say what it was made of.
-	SourceFiles []string `mapstructure:"-" json:"-"`
+	SourceFiles []string `json:"-"`
 
 	// Resolved values, populated by validation.
-	BuildConcurrency   int                     `mapstructure:"-" json:"-"`
-	PublishConcurrency int                     `mapstructure:"-" json:"-"`
-	InitialVersions    map[string]ccme.Version `mapstructure:"-" json:"-"`
+	BuildConcurrency   int                     `json:"-"`
+	PublishConcurrency int                     `json:"-"`
+	InitialVersions    map[string]ccme.Version `json:"-"`
 	// ResolvedParser is the ccme parser configuration the `parser` object
 	// resolves to. (Its type is deliberately not ParserConfig: that struct is
 	// the file's raw shape, this is the parser's.)
-	ResolvedParser ccme.Config `mapstructure:"-" json:"-"`
+	ResolvedParser ccme.Config `json:"-"`
 }
 
 // ParserConfig is the top-level `parser` object: the commit-message parser
@@ -195,47 +196,47 @@ type File struct {
 type ParserConfig struct {
 	// Separator is the unit separator line. Default "---"; repositories that
 	// exchange patches by mail typically set "%%%".
-	Separator string `mapstructure:"separator" json:"separator,omitempty"`
+	Separator string `json:"separator,omitempty"`
 	// Types maps a commit type to its direct bump: "none", "patch", "minor"
 	// or "major". A non-empty map REPLACES the standard table wholesale
 	// (feat=minor, fix/perf/revert=patch, the rest none), so list every type
 	// you want to keep.
-	Types map[string]string `mapstructure:"types" json:"types,omitempty"`
+	Types map[string]string `json:"types,omitempty"`
 	// StrictTypes turns an unknown commit type into an error (E140) instead
 	// of a warning.
-	StrictTypes bool `mapstructure:"strictTypes" json:"strictTypes,omitempty"`
+	StrictTypes bool `json:"strictTypes,omitempty"`
 	// Quiet hides the parser's own diagnostics — the E0xx/E1xx errors and
 	// W0xx/W1xx warnings a commit message earns — from the log. It is a
 	// display decision alone: a hidden error still counts, still blocks the
 	// run under commitErrors "error", and is still summarised, so a
 	// repository with a noisy history can read its plan without losing the
 	// signal that something is wrong.
-	Quiet bool `mapstructure:"quiet" json:"quiet,omitempty"`
+	Quiet bool `json:"quiet,omitempty"`
 	// Lenient downgrades selected authoring errors to warnings: an uppercase
 	// type is lowercased, a missing space after ':' is accepted, and a footer
 	// contradicting an inline directive wins instead of erroring.
-	Lenient bool `mapstructure:"lenient" json:"lenient,omitempty"`
+	Lenient bool `json:"lenient,omitempty"`
 	// MaxDescriptionLength is the long-description warning threshold, in
 	// Unicode scalar values. Default 100; negative disables the check.
-	MaxDescriptionLength int `mapstructure:"maxDescriptionLength" json:"maxDescriptionLength,omitempty"`
+	MaxDescriptionLength int `json:"maxDescriptionLength,omitempty"`
 	// Propagation holds the propagation defaults units inherit when they
 	// carry no directive of their own. nil means all defaults.
-	Propagation *ParserPropagationConfig `mapstructure:"propagation" json:"propagation,omitempty"`
+	Propagation *ParserPropagationConfig `json:"propagation,omitempty"`
 	// Limits are the always-enforced parser bounds; exceeding one voids the
 	// whole message. Defaults: 64 units, 256 scope terms, 1 MiB. nil keeps
 	// every default.
-	Limits *ParserLimitsConfig `mapstructure:"limits" json:"limits,omitempty"`
+	Limits *ParserLimitsConfig `json:"limits,omitempty"`
 	// AllowedChannels restricts prerelease channel names; empty means
 	// unrestricted. "stable" is always accepted.
-	AllowedChannels []string `mapstructure:"allowedChannels" json:"allowedChannels,omitempty"`
+	AllowedChannels []string `json:"allowedChannels,omitempty"`
 	// MessageLevelTrailers are the authorship/review trailers ignored
 	// wherever they appear (Signed-off-by, Co-authored-by, ...). Setting the
 	// key replaces the default list.
-	MessageLevelTrailers []string `mapstructure:"messageLevelTrailers" json:"messageLevelTrailers,omitempty"`
+	MessageLevelTrailers []string `json:"messageLevelTrailers,omitempty"`
 	// IssueTrailers are the issue-reference trailers (Closes, Fixes, ...),
 	// ignored for versioning but surfaced for changelog use. Setting the key
 	// replaces the default list.
-	IssueTrailers []string `mapstructure:"issueTrailers" json:"issueTrailers,omitempty"`
+	IssueTrailers []string `json:"issueTrailers,omitempty"`
 }
 
 // ParserPropagationConfig is the `parser.propagation` object: what a unit
@@ -244,28 +245,28 @@ type ParserConfig struct {
 type ParserPropagationConfig struct {
 	// Bump is the default propagated bump: "none", "patch" (default),
 	// "minor", "major" or "inherit" (copy the unit's own bump).
-	Bump string `mapstructure:"bump" json:"bump,omitempty"`
+	Bump string `json:"bump,omitempty"`
 	// Depth is the default propagation depth: a number of edges, or "all"
 	// for the transitive closure. Default 0 — nothing propagates unless a
 	// unit opts in. Repositories that bundle their dependencies usually set 1.
-	Depth string `mapstructure:"depth" json:"depth,omitempty"`
+	Depth string `json:"depth,omitempty"`
 	// ChannelDepth is the channel axis counterpart of Depth. Default 0.
-	ChannelDepth string `mapstructure:"channelDepth" json:"channelDepth,omitempty"`
+	ChannelDepth string `json:"channelDepth,omitempty"`
 	// Kinds are the dependency edges propagation follows: "dependencies",
 	// "peerDependencies", "optionalDependencies", "devDependencies" or
 	// "all". Default: every kind except devDependencies.
-	Kinds []string `mapstructure:"kinds" json:"kinds,omitempty"`
+	Kinds []string `json:"kinds,omitempty"`
 	// Channel is the default propagated channel: "inherit" (default),
 	// "none", "stable" or a channel name.
-	Channel string `mapstructure:"channel" json:"channel,omitempty"`
+	Channel string `json:"channel,omitempty"`
 }
 
 // ParserLimitsConfig is the `parser.limits` object. Zero values keep the
 // defaults; a negative value disables that bound (trusted input only).
 type ParserLimitsConfig struct {
-	UnitsPerMessage   int `mapstructure:"unitsPerMessage" json:"unitsPerMessage,omitempty"`
-	ScopeTermsPerUnit int `mapstructure:"scopeTermsPerUnit" json:"scopeTermsPerUnit,omitempty"`
-	MessageBytes      int `mapstructure:"messageBytes" json:"messageBytes,omitempty"`
+	UnitsPerMessage   int `json:"unitsPerMessage,omitempty"`
+	ScopeTermsPerUnit int `json:"scopeTermsPerUnit,omitempty"`
+	MessageBytes      int `json:"messageBytes,omitempty"`
 }
 
 // RunConfig is the top-level `run` object: the hooks that observe the run as
@@ -292,14 +293,14 @@ type ParserLimitsConfig struct {
 // guarded, and neither are the step commands, which run inside a release
 // stage the guard has already cleared.
 type RunConfig struct {
-	AllowBranch  []string `mapstructure:"allowBranch" json:"allowBranch,omitempty"`
-	BeforeAll    []string `mapstructure:"beforeAll" json:"beforeAll,omitempty"`
-	PostAll      []string `mapstructure:"postAll" json:"postAll,omitempty"`
-	BeforeCommit []string `mapstructure:"beforeCommit" json:"beforeCommit,omitempty"`
-	AfterCommit  []string `mapstructure:"afterCommit" json:"afterCommit,omitempty"`
-	PostCommit   []string `mapstructure:"postCommit" json:"postCommit,omitempty"`
-	BeforePush   []string `mapstructure:"beforePush" json:"beforePush,omitempty"`
-	AfterPush    []string `mapstructure:"afterPush" json:"afterPush,omitempty"`
+	AllowBranch  []string `json:"allowBranch,omitempty"`
+	BeforeAll    []string `json:"beforeAll,omitempty"`
+	PostAll      []string `json:"postAll,omitempty"`
+	BeforeCommit []string `json:"beforeCommit,omitempty"`
+	AfterCommit  []string `json:"afterCommit,omitempty"`
+	PostCommit   []string `json:"postCommit,omitempty"`
+	BeforePush   []string `json:"beforePush,omitempty"`
+	AfterPush    []string `json:"afterPush,omitempty"`
 }
 
 // EntryLine is one block of record text — a file title, a header or a footer
@@ -313,18 +314,18 @@ type RunConfig struct {
 // every package.
 type EntryLine struct {
 	// Line is the text: one line, or several written consecutively.
-	Line []string `mapstructure:"line" json:"line,omitempty"`
+	Line []string `json:"line,omitempty"`
 	// Package, Space and Group restrict which packages the line is written
 	// for. Group names a versioning group.
-	Package []string `mapstructure:"package" json:"package,omitempty"`
-	Space   []string `mapstructure:"space" json:"space,omitempty"`
-	Group   []string `mapstructure:"group" json:"group,omitempty"`
+	Package []string `json:"package,omitempty"`
+	Space   []string `json:"space,omitempty"`
+	Group   []string `json:"group,omitempty"`
 	// Channels restricts which releases the line is written for: "stable",
 	// "*" for any prerelease channel, or a channel name such as "beta",
 	// matched case-insensitively. An empty list writes the line for every
 	// release. It is not allowed on a changelog's fileTitle, which is written
 	// once and must not vary from one release to the next.
-	Channels []string `mapstructure:"channels" json:"channels,omitempty"`
+	Channels []string `json:"channels,omitempty"`
 }
 
 // AuthorsConfig adds commit authors to a release entry. It is off by default,
@@ -338,25 +339,25 @@ type AuthorsConfig struct {
 	// (a "(by ...)" suffix on each entry line), "section" (one list under its
 	// own heading) or "both". "off" is a value rather than an absence, so a
 	// package can switch off what its space turned on.
-	Placement string `mapstructure:"placement" json:"placement,omitempty"`
+	Placement string `json:"placement,omitempty"`
 	// Format is how one author is written: "fullname" (default) or
 	// "username", the local part of the email address.
-	Format string `mapstructure:"format" json:"format,omitempty"`
+	Format string `json:"format,omitempty"`
 	// Commits chooses which commits the section is built from: "ccme"
 	// (default) counts the commits behind the entry's own lines, "all" counts
 	// every commit in the release's window, including those whose messages are
 	// not release records at all. It has no effect on the inline suffix, which
 	// can only ever name the authors of a line that exists.
-	Commits string `mapstructure:"commits" json:"commits,omitempty"`
+	Commits string `json:"commits,omitempty"`
 	// Include and Exclude filter the authors by case-insensitive glob, tried
 	// against the full name, the username and the email address, and matching
 	// on any of the three. An empty Include admits everyone; Exclude is
 	// applied afterwards and wins, which is what keeps a bot out of a list its
 	// pattern would otherwise admit.
-	Include []string `mapstructure:"include" json:"include,omitempty"`
-	Exclude []string `mapstructure:"exclude" json:"exclude,omitempty"`
+	Include []string `json:"include,omitempty"`
+	Exclude []string `json:"exclude,omitempty"`
 	// Title heads the section, default "Authors".
-	Title string `mapstructure:"title" json:"title,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 // EntryFormatConfig customises how a release entry is rendered; shared by the
@@ -367,36 +368,36 @@ type AuthorsConfig struct {
 // falling back to the process environment, so one configured line can name the
 // package and tag it belongs to.
 type EntryFormatConfig struct {
-	DateFormat        string `mapstructure:"dateFormat" json:"dateFormat,omitempty"`               // Go time layout, default "2006-01-02"
-	BreakingTitle     string `mapstructure:"breakingTitle" json:"breakingTitle,omitempty"`         // default "Breaking Changes"
-	FeaturesTitle     string `mapstructure:"featuresTitle" json:"featuresTitle,omitempty"`         // default "Features"
-	FixesTitle        string `mapstructure:"fixesTitle" json:"fixesTitle,omitempty"`               // default "Fixes"
-	DependenciesTitle string `mapstructure:"dependenciesTitle" json:"dependenciesTitle,omitempty"` // default "Dependencies"
+	DateFormat        string `json:"dateFormat,omitempty"`        // Go time layout, default "2006-01-02"
+	BreakingTitle     string `json:"breakingTitle,omitempty"`     // default "Breaking Changes"
+	FeaturesTitle     string `json:"featuresTitle,omitempty"`     // default "Features"
+	FixesTitle        string `json:"fixesTitle,omitempty"`        // default "Fixes"
+	DependenciesTitle string `json:"dependenciesTitle,omitempty"` // default "Dependencies"
 	// ReleaseName is what the release is called. On GitHub it replaces the
 	// release name, which defaults to the tag; in a changelog it writes a
 	// sub-header under the entry's date line, and nothing when empty.
-	ReleaseName string `mapstructure:"releaseName" json:"releaseName,omitempty"`
+	ReleaseName string `json:"releaseName,omitempty"`
 	// Header and Footer are written inside every entry, above the sections
 	// and after them.
-	Header []EntryLine `mapstructure:"header" json:"header,omitempty"`
-	Footer []EntryLine `mapstructure:"footer" json:"footer,omitempty"`
+	Header []EntryLine `json:"header,omitempty"`
+	Footer []EntryLine `json:"footer,omitempty"`
 	// Authors attributes the entry to the people behind it. Nil means the
 	// layer says nothing about attribution, which is what lets a nearer layer
 	// inherit a broader one field by field.
-	Authors *AuthorsConfig `mapstructure:"authors" json:"authors,omitempty"`
+	Authors *AuthorsConfig `json:"authors,omitempty"`
 }
 
 // ChangelogConfig customises (or disables) the per-package changelog file.
 type ChangelogConfig struct {
-	Enabled *bool  `mapstructure:"enabled" json:"enabled,omitempty"` // default true
-	File    string `mapstructure:"file" json:"file,omitempty"`       // default "CHANGELOG.md"
+	Enabled *bool  `json:"enabled,omitempty"` // default true
+	File    string `json:"file,omitempty"`    // default "CHANGELOG.md"
 	// FileTitle heads the file, above every entry. An absent list means the
 	// default "# Changelog"; [""] writes a blank first line instead. It takes
 	// the same shapes as Header and Footer, so a file can open with several
 	// lines and say something different per package — but unlike them it is
 	// written once and matched against on the next release, so it must not
 	// contain anything that varies from one release to the next.
-	FileTitle []EntryLine `mapstructure:"fileTitle" json:"fileTitle,omitempty"`
+	FileTitle []EntryLine `json:"fileTitle,omitempty"`
 	// Channels restricts which releases get an entry: "stable", "*" for any
 	// prerelease channel, or a channel name such as "beta", matched
 	// case-insensitively. An empty list writes an entry for every release.
@@ -406,8 +407,8 @@ type ChangelogConfig struct {
 	// the one entry covering the whole window. A package under a space that
 	// restricts the channels opts back in with ["stable", "*"], which the two
 	// values together cover.
-	Channels          []string `mapstructure:"channels" json:"channels,omitempty"`
-	EntryFormatConfig `mapstructure:",squash"`
+	Channels []string `json:"channels,omitempty"`
+	EntryFormatConfig
 }
 
 // IsEnabled reports whether the changelog file is written (default true). It
@@ -425,15 +426,15 @@ func (c *ChangelogConfig) RecordChannels() []string {
 
 // GitHubConfig customises (or disables) GitHub release creation.
 type GitHubConfig struct {
-	Enabled  *bool  `mapstructure:"enabled" json:"enabled,omitempty"`   // default true
-	Owner    string `mapstructure:"owner" json:"owner,omitempty"`       // default: derived from $GITHUB_REPOSITORY
-	Repo     string `mapstructure:"repo" json:"repo,omitempty"`         // default: derived from $GITHUB_REPOSITORY
-	APIURL   string `mapstructure:"apiUrl" json:"apiUrl,omitempty"`     // default https://api.github.com
-	TokenEnv string `mapstructure:"tokenEnv" json:"tokenEnv,omitempty"` // env var holding the token, default GITHUB_TOKEN
+	Enabled  *bool  `json:"enabled,omitempty"`  // default true
+	Owner    string `json:"owner,omitempty"`    // default: derived from $GITHUB_REPOSITORY
+	Repo     string `json:"repo,omitempty"`     // default: derived from $GITHUB_REPOSITORY
+	APIURL   string `json:"apiUrl,omitempty"`   // default https://api.github.com
+	TokenEnv string `json:"tokenEnv,omitempty"` // env var holding the token, default GITHUB_TOKEN
 	// AllPackages creates a GitHub release for every published package, even
 	// when no script exported DISPAT_EXPORT_GITHUB (the export then only adds
 	// assets). Default false: the export stays the per-package opt-in.
-	AllPackages *bool `mapstructure:"allPackages" json:"allPackages,omitempty"`
+	AllPackages *bool `json:"allPackages,omitempty"`
 	// Channels restricts which releases get a GitHub release: "stable", "*"
 	// for any prerelease channel, or a channel name such as "beta", matched
 	// case-insensitively. An empty list creates a release for every release.
@@ -442,8 +443,8 @@ type GitHubConfig struct {
 	// releases alone, while the betas are still tagged and still published by
 	// the flow. This chooses which releases are created; the prerelease flag
 	// GitHub shows on a created release always follows the version itself.
-	Channels          []string `mapstructure:"channels" json:"channels,omitempty"`
-	EntryFormatConfig `mapstructure:",squash"`
+	Channels []string `json:"channels,omitempty"`
+	EntryFormatConfig
 }
 
 // IsEnabled reports whether GitHub releases are created (default true; still
@@ -473,13 +474,13 @@ func (c *GitHubConfig) AllPackagesEnabled() bool {
 // the push when push is enabled, so they reference commits and tags that
 // exist on the remote.
 type CommitConfig struct {
-	Enabled *bool `mapstructure:"enabled" json:"enabled,omitempty"` // default false
+	Enabled *bool `json:"enabled,omitempty"` // default false
 	// MessageFormat supports {tags} and {packages} placeholders (comma-
 	// separated lists). Default: "chore(release): {tags}".
-	MessageFormat string `mapstructure:"messageFormat" json:"messageFormat,omitempty"`
+	MessageFormat string `json:"messageFormat,omitempty"`
 	// Push pushes the release commit and tags.
-	Push   bool   `mapstructure:"push" json:"push,omitempty"`     // default false
-	Remote string `mapstructure:"remote" json:"remote,omitempty"` // default "origin"
+	Push   bool   `json:"push,omitempty"`   // default false
+	Remote string `json:"remote,omitempty"` // default "origin"
 	// Force writes tags that the repository or the remote already carries,
 	// instead of leaving them as they are. Default true.
 	//
@@ -490,24 +491,24 @@ type CommitConfig struct {
 	// The branch is never force pushed under either setting, and a release tag
 	// found sitting at a different commit is still left alone: force means
 	// "do not fail because the ref exists", not "overwrite whatever is there".
-	Force *bool `mapstructure:"force" json:"force,omitempty"` // default true
+	Force *bool `json:"force,omitempty"` // default true
 	// Verify controls the upfront remote-access check (git ls-remote) run
 	// before any release work when Push is enabled. Default true; set false
 	// to skip it, e.g. for a remote that rejects ls-remote but accepts
 	// pushes.
-	Verify *bool `mapstructure:"verify" json:"verify,omitempty"` // default true
+	Verify *bool `json:"verify,omitempty"` // default true
 	// Include lists extra repo-relative paths the release commit stages on
 	// top of the published packages' folders: the shared artifacts a version
 	// stage or an autoVersion syncLock regenerates outside every package
 	// folder, a workspace-level package-lock.json first among them. Paths
 	// must stay inside the repository (no absolute paths, no "..") and may
 	// name files that do not exist yet.
-	Include []string `mapstructure:"include" json:"include,omitempty"`
+	Include []string `json:"include,omitempty"`
 	// Name and Email, when set, are the git identity every commit and
 	// annotated tag dispat creates is authored under, so a CI run needs no
 	// `git config` step. Empty values fall back to git's own configuration.
-	Name  string `mapstructure:"name" json:"name,omitempty"`
-	Email string `mapstructure:"email" json:"email,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // IsEnabled reports whether the release commit is created (default false).
@@ -585,7 +586,7 @@ const (
 // invalid, because a group exists to share — so every member moves under one
 // rule and a member cannot contradict it.
 type VersionGroupConfig struct {
-	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	Versioning string `json:"versioning,omitempty"`
 }
 
 // PathList is a space's `path` key: one folder or a list of folders, each
@@ -632,74 +633,74 @@ func (p *PathList) UnmarshalJSON(data []byte) error {
 // SpaceConfig is the raw configuration of one space. Everything the space
 // runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
-	Path PathList `mapstructure:"path" json:"path,omitempty"`
+	Path PathList `json:"path,omitempty"`
 	// The scalar booleans are pointers for the same reason SpaceFile's and
 	// PackageConfig's are: the root file now states defaults for them, and a
 	// space that cannot say "false" could not override a root "true".
-	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
+	IsBuildWaitingPublish *bool            `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
-	TagFormat string `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	TagFormat string `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
-	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	AliasTags []AliasTagConfig `json:"aliasTags,omitempty"`
 	// Webhooks replaces the inherited webhook list for this level's packages;
 	// see WebhookConfig. A stated list replaces the whole inherited one, so an
 	// empty list declared here means "no webhooks", which is how a level opts
 	// out. The run-bracket events (release.started, release.finished) always
 	// deliver to the top-level list alone: they describe the run, which no one
 	// package speaks for.
-	Webhooks []WebhookConfig `mapstructure:"webhooks" json:"webhooks,omitempty"`
+	Webhooks []WebhookConfig `json:"webhooks,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
 	// "independent" (default) or one of the shared modes. See the Versioning*
 	// constants.
-	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	Versioning string `json:"versioning,omitempty"`
 	// VersionGroup names the shared-versioning group the space's packages
 	// join: an entry of the top-level versionGroups map, or the name of
 	// another space whose own versioning is shared. Empty means the
 	// space's own implicit group (its name) when its versioning is shared.
 	// A declared group's versioning mode is authoritative, so a space naming
 	// one must not set versioning itself.
-	VersionGroup string `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
+	VersionGroup string `json:"versionGroup,omitempty"`
 	// Scripts are the space's named shell commands, the same shape as the
 	// file's own `scripts` and layered over it name by name: the space's
 	// packages resolve a name here before falling back to the top level.
 	// `flow` entries name them, and `dispat run <name>` executes the one it
 	// resolves inside each changed package of the space, in topological order,
 	// with the package's full DISPAT_* environment.
-	Scripts map[string]Script `mapstructure:"scripts" json:"scripts,omitempty"`
+	Scripts map[string]Script `json:"scripts,omitempty"`
 	// AutoVersion enables native manifest rewriting at the version stage:
 	// dispat itself updates the declared ranges of workspace dependencies
 	// (and the package's own version field) in package.json and go.mod,
 	// before any flow.version script runs. nil means off. See
 	// AutoVersionConfig.
-	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	AutoVersion *AutoVersionConfig `json:"autoVersion,omitempty"`
 	// Env is static environment for every script of the space's packages —
 	// its stages, hooks, run scripts and its login script — merged over the
 	// top-level map key by key; see File.Env.
-	Env map[string]string `mapstructure:"env" json:"env,omitempty"`
+	Env map[string]string `json:"env,omitempty"`
 	// Custom is an optional free-form object dispat itself never reads; see
 	// File.Custom.
-	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
+	Custom map[string]any `json:"custom,omitempty"`
 	// Changelog and GitHub overlay the top-level objects field by field for
 	// this space's packages, and a package's own overlay sits on top of the
 	// result; see File.Changelog.
-	Changelog *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
-	GitHub    *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
+	Changelog *ChangelogConfig `json:"changelog,omitempty"`
+	GitHub    *GitHubConfig    `json:"github,omitempty"`
 	// Src is the scope folder for this space's packages, resolved against
 	// each package's own folder; see PackageConfig.Src. It is the usual place
 	// for it, since a layout tends to be a property of a space.
-	Src string `mapstructure:"src" json:"src,omitempty"`
+	Src string `json:"src,omitempty"`
 	// Concurrency is the stage-budget weight this space's packages occupy,
 	// the same meaning as PackageConfig.Concurrency and deliberately not the
 	// top-level key's, which is the budget itself.
-	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
+	Concurrency []int `json:"concurrency,omitempty"`
 	// Ignore are change-scope ignore patterns for this space's packages,
 	// matched against paths relative to the space folder; see
 	// PackageConfig.Ignore.
-	Ignore []string `mapstructure:"ignore" json:"ignore,omitempty"`
+	Ignore []string `json:"ignore,omitempty"`
 	// Dependencies declares consumer -> provider edges next to the space they
 	// describe, in the same object-keyed-by-consumer shape as File.Dependencies
 	// — a space is not a package, so there is no consumer to leave implicit.
@@ -714,7 +715,7 @@ type SpaceConfig struct {
 	//
 	// Like every other declaration, these merge into one list rather than
 	// overriding anything.
-	Dependencies Dependencies `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	Dependencies Dependencies `json:"dependencies,omitempty"`
 	// Packages holds per-package configuration for this space's packages
 	// alone, keyed by folder name — the same entry shape as the file's own
 	// `packages` map, scoped to the space that owns the folders. Every key
@@ -723,7 +724,7 @@ type SpaceConfig struct {
 	// outside every space is declared in the top-level map instead. An entry
 	// here outranks the top-level entry for the same package, being the
 	// nearer statement about it.
-	Packages map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
+	Packages map[string]PackageConfig `json:"packages,omitempty"`
 }
 
 // SpaceFile is the top-level object of a dispat config file placed inside a
@@ -742,33 +743,33 @@ type SpaceConfig struct {
 // the scalar booleans are pointers here where SpaceConfig's are plain: an
 // override must be able to say nothing.
 type SpaceFile struct {
-	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
-	TagFormat             string           `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	IsBuildWaitingPublish *bool            `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
+	TagFormat             string           `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
-	AliasTags    []AliasTagConfig   `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
-	Webhooks     []WebhookConfig    `mapstructure:"webhooks" json:"webhooks,omitempty"`
-	Versioning   string             `mapstructure:"versioning" json:"versioning,omitempty"`
-	VersionGroup string             `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
-	Scripts      map[string]Script  `mapstructure:"scripts" json:"scripts,omitempty"`
-	AutoVersion  *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
-	Env          map[string]string  `mapstructure:"env" json:"env,omitempty"`
-	Custom       map[string]any     `mapstructure:"custom" json:"custom,omitempty"`
+	AliasTags    []AliasTagConfig   `json:"aliasTags,omitempty"`
+	Webhooks     []WebhookConfig    `json:"webhooks,omitempty"`
+	Versioning   string             `json:"versioning,omitempty"`
+	VersionGroup string             `json:"versionGroup,omitempty"`
+	Scripts      map[string]Script  `json:"scripts,omitempty"`
+	AutoVersion  *AutoVersionConfig `json:"autoVersion,omitempty"`
+	Env          map[string]string  `json:"env,omitempty"`
+	Custom       map[string]any     `json:"custom,omitempty"`
 	// Changelog, GitHub, Src and Concurrency are this space's; see
 	// SpaceConfig.
-	Changelog   *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
-	GitHub      *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
-	Src         string           `mapstructure:"src" json:"src,omitempty"`
-	Concurrency []int            `mapstructure:"concurrency" json:"concurrency,omitempty"`
-	Ignore      []string         `mapstructure:"ignore" json:"ignore,omitempty"`
+	Changelog   *ChangelogConfig `json:"changelog,omitempty"`
+	GitHub      *GitHubConfig    `json:"github,omitempty"`
+	Src         string           `json:"src,omitempty"`
+	Concurrency []int            `json:"concurrency,omitempty"`
+	Ignore      []string         `json:"ignore,omitempty"`
 	// Dependencies are this space's own edges; see SpaceConfig.Dependencies.
 	// They add to what the root file's space entry declares rather than
 	// replacing it, because dependency declarations never override.
-	Dependencies Dependencies             `mapstructure:"dependencies" json:"dependencies,omitempty"`
-	Packages     map[string]PackageConfig `mapstructure:"packages" json:"packages,omitempty"`
+	Dependencies Dependencies             `json:"dependencies,omitempty"`
+	Packages     map[string]PackageConfig `json:"packages,omitempty"`
 }
 
 // PackageConfig is one entry of a `packages` map. Without `path` it overrides
@@ -811,7 +812,7 @@ type PackageConfig struct {
 	// entry whose key matches no space folder: a space package's location is
 	// its folder and cannot be redefined, so neither a space's own `packages`
 	// entry nor a config file inside a folder may set it.
-	Path string `mapstructure:"path" json:"path,omitempty"`
+	Path string `json:"path,omitempty"`
 	// Src narrows which of the package's files count as changes to it: a
 	// folder-relative path, so only what sits under <packageFolder>/<src>
 	// makes a scopeless commit address the package. Everything outside it —
@@ -825,7 +826,7 @@ type PackageConfig struct {
 	// manifest discovery is deliberately untouched: a manifest usually sits
 	// at the package root, outside src, and auto-versioning must still find
 	// it.
-	Src string `mapstructure:"src" json:"src,omitempty"`
+	Src string `json:"src,omitempty"`
 	// Ignore keeps some of the package's own files from counting as changes
 	// to it: folder-relative patterns, matched against every changed file
 	// that would otherwise make a scopeless commit address the package.
@@ -846,36 +847,36 @@ type PackageConfig struct {
 	// Like `src` it narrows file-derived scope resolution alone: a commit
 	// naming the package by scope still addresses it, the release commit
 	// still stages the whole folder, and manifest discovery is untouched.
-	Ignore                []string         `mapstructure:"ignore" json:"ignore,omitempty"`
-	IsBuildWaitingPublish *bool            `mapstructure:"isBuildWaitingPublish" json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool            `mapstructure:"revertOnFail" json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig `mapstructure:"flow" json:"flow,omitempty"`
-	TagFormat             string           `mapstructure:"tagFormat" json:"tagFormat,omitempty"`
+	Ignore                []string         `json:"ignore,omitempty"`
+	IsBuildWaitingPublish *bool            `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
+	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
+	TagFormat             string           `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
-	AliasTags []AliasTagConfig `mapstructure:"aliasTags" json:"aliasTags,omitempty"`
+	AliasTags []AliasTagConfig `json:"aliasTags,omitempty"`
 	// Webhooks replaces the inherited webhook list for this level's packages;
 	// see WebhookConfig. A stated list replaces the whole inherited one, so an
 	// empty list declared here means "no webhooks", which is how a level opts
 	// out. The run-bracket events (release.started, release.finished) always
 	// deliver to the top-level list alone: they describe the run, which no one
 	// package speaks for.
-	Webhooks []WebhookConfig `mapstructure:"webhooks" json:"webhooks,omitempty"`
+	Webhooks []WebhookConfig `json:"webhooks,omitempty"`
 	// Versioning overrides how the package relates to its space's shared
 	// version — most usefully "independent", opting one package out of a
 	// fixed space. Mutually exclusive with naming a declared versionGroup,
 	// whose mode is authoritative.
-	Versioning string `mapstructure:"versioning" json:"versioning,omitempty"`
+	Versioning string `json:"versioning,omitempty"`
 	// VersionGroup names the shared-versioning group this package joins; see
 	// SpaceConfig.VersionGroup.
-	VersionGroup string `mapstructure:"versionGroup" json:"versionGroup,omitempty"`
+	VersionGroup string `json:"versionGroup,omitempty"`
 	// Scripts are merged into the space's map name by name; a name set here
 	// wins over the space's, which wins over the file's. A name only this
 	// package defines is the package's alone: `dispat run <name>` reaches no
 	// other package with it.
-	Scripts     map[string]Script  `mapstructure:"scripts" json:"scripts,omitempty"`
-	AutoVersion *AutoVersionConfig `mapstructure:"autoVersion" json:"autoVersion,omitempty"`
+	Scripts     map[string]Script  `json:"scripts,omitempty"`
+	AutoVersion *AutoVersionConfig `json:"autoVersion,omitempty"`
 	// ManifestNames are the manifest names this package is known by, stated
 	// here rather than read from its files. They exist for the packages whose
 	// manifests declare no name the workspace can learn — a Gradle module, a
@@ -885,33 +886,33 @@ type PackageConfig struct {
 	//
 	// A stated name outranks one a manifest declares, and no two packages may
 	// state the same name.
-	ManifestNames []string `mapstructure:"manifestNames" json:"manifestNames,omitempty"`
+	ManifestNames []string `json:"manifestNames,omitempty"`
 	// Changelog and GitHub overlay the top-level objects field by field for
 	// this package's release records — flip enabled, rename the file, target
 	// another repository — leaving unset fields at the global values.
-	Changelog *ChangelogConfig `mapstructure:"changelog" json:"changelog,omitempty"`
-	GitHub    *GitHubConfig    `mapstructure:"github" json:"github,omitempty"`
+	Changelog *ChangelogConfig `json:"changelog,omitempty"`
+	GitHub    *GitHubConfig    `json:"github,omitempty"`
 	// Concurrency is the number of stage-budget slots the package's tasks
 	// occupy: a single value for both stages or a [build, publish] pair.
 	// Absent or 0 means 1, the ordinary cost; a package whose value reaches
 	// the stage's budget runs that stage alone. (Deliberately unlike the
 	// top-level key, where 0 means "number of CPUs" — a weight has no CPU
 	// reading.)
-	Concurrency []int `mapstructure:"concurrency" json:"concurrency,omitempty"`
+	Concurrency []int `json:"concurrency,omitempty"`
 	// Dependencies names the provider packages this package depends on: one
 	// name, or an array of names and objects, exactly as a consumer lists
 	// them in the top-level object. The consumer is the package itself.
 	// Entry-layer and in-folder-layer lists both count: all declarations
 	// merge with the top-level object.
-	Dependencies ProviderList `mapstructure:"dependencies" json:"dependencies,omitempty"`
+	Dependencies ProviderList `json:"dependencies,omitempty"`
 	// Env is static environment for this package's scripts, merged key by key
 	// over the space's map (and the in-folder layer over the entry layer);
 	// see File.Env.
-	Env map[string]string `mapstructure:"env" json:"env,omitempty"`
+	Env map[string]string `json:"env,omitempty"`
 	// Custom is an optional free-form object dispat itself never reads; see
 	// File.Custom. Like every other field it belongs to its layer: an entry's
 	// object and an in-folder file's object are independent, not merged.
-	Custom map[string]any `mapstructure:"custom" json:"custom,omitempty"`
+	Custom map[string]any `json:"custom,omitempty"`
 }
 
 // AliasTagConfig is one extra tag a release is written under, beside the tag
@@ -929,21 +930,21 @@ type AliasTagConfig struct {
 	// Format is the template. It takes everything tagFormat takes plus
 	// {major}, {minor} and {patch}, and needs at least one of those or
 	// {version}: "v{version}", "v{major}", "{name}-{major}.{minor}".
-	Format string `mapstructure:"format" json:"format"`
+	Format string `json:"format"`
 	// Moving says the alias is re-pointed on every release it applies to,
 	// rather than written once and left. "v1" means "the newest 1.x", which is
 	// only true if each 1.x release moves it. A moving alias must be allowed
 	// to force (see Force).
-	Moving bool `mapstructure:"moving" json:"moving,omitempty"`
+	Moving bool `json:"moving,omitempty"`
 	// Channels restricts the alias to releases on these channels. Empty means
 	// every channel. A moving major alias almost always wants ["stable"]: a
 	// "v1" that follows release candidates is not what anyone pinning it
 	// expects.
-	Channels []string `mapstructure:"channels" json:"channels,omitempty"`
+	Channels []string `json:"channels,omitempty"`
 	// Force overrides commit.force for this alias alone. Defaults to the
 	// run's setting; false on a moving alias is refused, since an alias that
 	// cannot overwrite its own previous ref cannot move.
-	Force *bool `mapstructure:"force" json:"force,omitempty"`
+	Force *bool `json:"force,omitempty"`
 }
 
 // ForceEnabled reports whether this alias overwrites an existing ref, given
@@ -976,24 +977,24 @@ type AutoVersionConfig struct {
 	// block sets any key at all. A completely empty {} block is treated as
 	// absent (the config loader's flattening prunes empty objects), so the
 	// minimal opt-in is {"enabled": true}.
-	Enabled *bool `mapstructure:"enabled" json:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
 	// Manifests selects which manifests of a package are parsed and
 	// rewritten: "root" (default) — only manifests directly in the package
 	// folder — "all", every manifest found under it, or "none", which turns
 	// the parsing strategy off entirely and leaves the work to `replace` and
 	// `syncLock`.
-	Manifests string `mapstructure:"manifests" json:"manifests,omitempty"`
+	Manifests string `json:"manifests,omitempty"`
 	// Replace are the literal text substitutions applied to the package's
 	// files after (or instead of) the manifest rewriting: the strategy for
 	// the versions no manifest writer can reach. Empty means off.
-	Replace []AutoVersionReplaceConfig `mapstructure:"replace" json:"replace,omitempty"`
+	Replace []AutoVersionReplaceConfig `json:"replace,omitempty"`
 	// Kinds restricts rewriting to the named manifest fields
 	// ("dependencies", "devDependencies", "peerDependencies",
 	// "optionalDependencies"). Empty means all four.
-	Kinds []string `mapstructure:"kinds" json:"kinds,omitempty"`
+	Kinds []string `json:"kinds,omitempty"`
 	// Only restricts rewriting to declarations of the named provider
 	// packages. Empty means every workspace provider.
-	Only []string `mapstructure:"only" json:"only,omitempty"`
+	Only []string `json:"only,omitempty"`
 	// NameMatch selects how a declared dependency name is matched onto a
 	// workspace package when neither a manifest-declared name nor a local
 	// path already matches:
@@ -1005,11 +1006,11 @@ type AutoVersionConfig struct {
 	//	                   declared "@core/app", "com.acme:app" or a bare
 	//	                   "app" line, even when the app package has no
 	//	                   parseable manifest of its own
-	NameMatch string `mapstructure:"nameMatch" json:"nameMatch,omitempty"`
+	NameMatch string `json:"nameMatch,omitempty"`
 	// Match restricts rewriting to declared ranges matching one of the
 	// globs, e.g. ["workspace:*"] — so a range the user pinned by hand is
 	// never overridden. Empty means any declared range is rewritten.
-	Match []string `mapstructure:"match" json:"match,omitempty"`
+	Match []string `json:"match,omitempty"`
 	// Range is the write policy — what the new declared range looks like,
 	// built from the provider's end-of-run version:
 	//
@@ -1021,20 +1022,20 @@ type AutoVersionConfig struct {
 	//
 	// go.mod requires exact canonical versions, so Go manifests always
 	// receive vX.Y.Z regardless of this policy.
-	Range string `mapstructure:"range" json:"range,omitempty"`
+	Range string `json:"range,omitempty"`
 	// WriteVersion also writes the package's own new version into its
 	// manifest's version field (§12.4; a drifted manifest version is W192).
 	// Default true.
-	WriteVersion *bool `mapstructure:"writeVersion" json:"writeVersion,omitempty"`
+	WriteVersion *bool `json:"writeVersion,omitempty"`
 	// SyncLock names top-level scripts run inside the package folder after
 	// its manifests were rewritten (e.g. "npm install" to sync the lock
 	// file), between the version and build stages.
-	SyncLock []string `mapstructure:"syncLock" json:"syncLock,omitempty"`
+	SyncLock []string `json:"syncLock,omitempty"`
 	// SyncLockConcurrency caps how many syncLock scripts run at the same
 	// moment across the whole run — shared lock files corrupt under
 	// parallel writers, so the default is 1. When spaces disagree, the
 	// smallest configured value wins.
-	SyncLockConcurrency int `mapstructure:"syncLockConcurrency" json:"syncLockConcurrency,omitempty"`
+	SyncLockConcurrency int `json:"syncLockConcurrency,omitempty"`
 }
 
 // AutoVersionReplaceConfig is one entry of an `autoVersion.replace` list: a
@@ -1055,13 +1056,13 @@ type AutoVersionReplaceConfig struct {
 	// included, so "*.gradle" reaches nested build scripts. Dependency,
 	// virtual-environment and build-output folders are never entered.
 	// Required.
-	Files []string `mapstructure:"files" json:"files,omitempty"`
+	Files []string `json:"files,omitempty"`
 	// Find is the literal text to look for, after the placeholders in it are
 	// filled in. Required.
-	Find string `mapstructure:"find" json:"find,omitempty"`
+	Find string `json:"find,omitempty"`
 	// Write is the literal text to put in its place, after the placeholders
 	// in it are filled in. Required.
-	Write string `mapstructure:"write" json:"write,omitempty"`
+	Write string `json:"write,omitempty"`
 }
 
 // IsEnabled reports whether the autoVersion block is active (default true
@@ -1083,33 +1084,33 @@ func (c *AutoVersionConfig) WriteVersionEnabled() bool {
 // decoding lifts the scalar into a one-element slice, the same way a scalar
 // concurrency becomes a pair).
 type SpaceFlowConfig struct {
-	Build   []string `mapstructure:"build" json:"build,omitempty"`
-	Publish []string `mapstructure:"publish" json:"publish,omitempty"`
-	Version []string `mapstructure:"version" json:"version,omitempty"`
+	Build   []string `json:"build,omitempty"`
+	Publish []string `json:"publish,omitempty"`
+	Version []string `json:"version,omitempty"`
 	// Login runs once per space before its first publish; every other
 	// publish of the space waits for it, and its failure fails them all.
-	Login []string `mapstructure:"login" json:"login,omitempty"`
+	Login []string `json:"login,omitempty"`
 	// Announce is a fourth stage after a successful publish: pushing the
 	// release out to update channels, with the release-notes variables in its
 	// environment. The whole frame — hooks included — only warns on failure.
-	Announce []string `mapstructure:"announce" json:"announce,omitempty"`
+	Announce []string `json:"announce,omitempty"`
 	// Hooks around the package stages. The before*/post* hooks up to
 	// beforePublish fail the package's release when they fail; postPublish and
 	// the announce hooks only warn, because by then the release is out.
-	BeforeAll      []string `mapstructure:"beforeAll" json:"beforeAll,omitempty"`
-	BeforeVersion  []string `mapstructure:"beforeVersion" json:"beforeVersion,omitempty"`
-	PostVersion    []string `mapstructure:"postVersion" json:"postVersion,omitempty"`
-	BeforeBuild    []string `mapstructure:"beforeBuild" json:"beforeBuild,omitempty"`
-	PostBuild      []string `mapstructure:"postBuild" json:"postBuild,omitempty"`
-	BeforePublish  []string `mapstructure:"beforePublish" json:"beforePublish,omitempty"`
-	PostPublish    []string `mapstructure:"postPublish" json:"postPublish,omitempty"`
-	BeforeAnnounce []string `mapstructure:"beforeAnnounce" json:"beforeAnnounce,omitempty"`
-	PostAnnounce   []string `mapstructure:"postAnnounce" json:"postAnnounce,omitempty"`
+	BeforeAll      []string `json:"beforeAll,omitempty"`
+	BeforeVersion  []string `json:"beforeVersion,omitempty"`
+	PostVersion    []string `json:"postVersion,omitempty"`
+	BeforeBuild    []string `json:"beforeBuild,omitempty"`
+	PostBuild      []string `json:"postBuild,omitempty"`
+	BeforePublish  []string `json:"beforePublish,omitempty"`
+	PostPublish    []string `json:"postPublish,omitempty"`
+	BeforeAnnounce []string `json:"beforeAnnounce,omitempty"`
+	PostAnnounce   []string `json:"postAnnounce,omitempty"`
 	// Outcome scripts, both warn-only: onFail runs when a package of the
 	// space fails at any stage, onSkip when it is skipped because a provider
 	// failed.
-	OnFail []string `mapstructure:"onFail" json:"onFail,omitempty"`
-	OnSkip []string `mapstructure:"onSkip" json:"onSkip,omitempty"`
+	OnFail []string `json:"onFail,omitempty"`
+	OnSkip []string `json:"onSkip,omitempty"`
 }
 
 // DependencyConfig is one consumer -> provider relation: the decoded form of
@@ -1122,19 +1123,19 @@ type SpaceFlowConfig struct {
 type DependencyConfig struct {
 	// Consumer is filled in from the key the entry sits under, never from the
 	// entry itself: a `consumer` key inside a provider object is refused.
-	Consumer string `mapstructure:"consumer" json:"consumer,omitempty" yaml:"consumer"`
-	Provider string `mapstructure:"provider" json:"provider,omitempty" yaml:"provider"`
+	Consumer string `json:"consumer,omitempty" yaml:"consumer"`
+	Provider string `json:"provider,omitempty" yaml:"provider"`
 	// Kind is the manifest dependency field the edge stands for:
 	// "dependencies" (the default when empty), "devDependencies",
 	// "peerDependencies" or "optionalDependencies". Propagation follows or
 	// ignores the edge according to parser.propagation.kinds, whose default
 	// is every kind except devDependencies.
-	Kind string `mapstructure:"kind" json:"kind,omitempty" yaml:"kind,omitempty"`
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
 	// Keep marks an edge `dispat compute` must never suggest removing: the
 	// declaration is deliberate even though no manifest declares it (a Docker
 	// image chain, a codegen coupling). Purely a compute-command annotation —
 	// the planner treats kept edges like any other.
-	Keep bool `mapstructure:"keep" json:"keep,omitempty" yaml:"keep,omitempty"`
+	Keep bool `json:"keep,omitempty" yaml:"keep,omitempty"`
 }
 
 // Values of the commitErrors key.
@@ -1164,7 +1165,7 @@ func (c *File) UpdateCheckEnabled() bool {
 	return c == nil || c.UpdateCheck == nil || *c.UpdateCheck
 }
 
-// Script resolves a script reference case-insensitively, because viper
+// Script resolves a script reference case-insensitively, because dispat
 // lowercases the keys of the scripts map.
 func (c *File) Script(ref string) (Script, bool) {
 	s, ok := c.Scripts[strings.ToLower(ref)]
@@ -1172,7 +1173,7 @@ func (c *File) Script(ref string) (Script, bool) {
 }
 
 // Script resolves one of the space's own scripts case-insensitively, for the
-// same viper reason as File.Script. It looks no further than this level: the
+// same reason as File.Script. It looks no further than this level: the
 // fallback to the file's scripts belongs to the layer that knows the package.
 func (s SpaceConfig) Script(name string) (Script, bool) {
 	cmd, ok := s.Scripts[strings.ToLower(name)]
@@ -1180,28 +1181,28 @@ func (s SpaceConfig) Script(name string) (Script, bool) {
 }
 
 // Package resolves a `packages` entry by package name case-insensitively,
-// for the same viper reason as Script.
+// for the same reason as Script.
 func (c *File) Package(name string) (PackageConfig, bool) {
 	pc, ok := c.Packages[strings.ToLower(name)]
 	return pc, ok
 }
 
 // Space resolves a `spaces` entry by space name case-insensitively, for the
-// same viper reason as Package.
+// same reason as Package.
 func (c *File) Space(name string) (SpaceConfig, bool) {
 	sc, ok := c.Spaces[strings.ToLower(name)]
 	return sc, ok
 }
 
 // Package resolves one of the space file's `packages` entries by package
-// name, case-insensitively for the same viper reason as File.Package.
+// name, case-insensitively for the same reason as File.Package.
 func (f SpaceFile) Package(name string) (PackageConfig, bool) {
 	pc, ok := f.Packages[strings.ToLower(name)]
 	return pc, ok
 }
 
 // Package resolves one of the space's own `packages` entries by package name,
-// case-insensitively for the same viper reason as File.Package. It looks no
+// case-insensitively for the same reason as File.Package. It looks no
 // further than this level: the file's entry is a separate layer, applied
 // before this one.
 func (s SpaceConfig) Package(name string) (PackageConfig, bool) {

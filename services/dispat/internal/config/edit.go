@@ -164,7 +164,7 @@ func RenderDependenciesTOML(deps Dependencies) (string, error) {
 	for consumer, providers := range grouped {
 		for _, p := range providers {
 			// Lowercase keys, because DependencyConfig has no toml tags and
-			// the file's keys are the mapstructure ones.
+			// the file's keys are the json ones.
 			row := map[string]any{"provider": p.Provider}
 			if p.Kind != "" {
 				row["kind"] = p.Kind

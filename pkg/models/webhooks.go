@@ -18,37 +18,37 @@ type WebhookConfig struct {
 	// Name labels the webhook in log lines. Default: the URL's host. When
 	// set, it must be unique across the list, so a warning names exactly one
 	// endpoint.
-	Name string `mapstructure:"name" json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
 	// URL is the endpoint the event payloads are sent to. Required; the
 	// scheme must be http or https.
-	URL string `mapstructure:"url" json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
 	// Method is the HTTP method: POST (default), PUT or PATCH.
-	Method string `mapstructure:"method" json:"method,omitempty"`
+	Method string `json:"method,omitempty"`
 	// Events are the event names this webhook subscribes to, from the
 	// vocabulary WebhookEvents lists. "*" matches every event and a
 	// "<prefix>.*" pattern such as "package.*" matches the whole family. An
 	// empty list subscribes to every event.
-	Events []string `mapstructure:"events" json:"events,omitempty"`
+	Events []string `json:"events,omitempty"`
 	// Headers are extra request headers, sent with every delivery. A list of
 	// name/value objects rather than a map, so header names keep their case:
-	// viper lowercases every map key it decodes. Values may reference
+	// dispat lowercases every map key it decodes. Values may reference
 	// environment variables ($NAME, ${NAME}), resolved once per run against
 	// the process environment, so a bearer token stays out of the file.
-	Headers []WebhookHeader `mapstructure:"headers" json:"headers,omitempty"`
+	Headers []WebhookHeader `json:"headers,omitempty"`
 	// SecretEnv names an environment variable holding the signing secret.
 	// When set, every delivery carries an X-Dispat-Signature header:
 	// "sha256=" followed by the hex HMAC-SHA256 of the request body. The
 	// variable's name goes in the file, never the secret itself.
-	SecretEnv string `mapstructure:"secretEnv" json:"secretEnv,omitempty"`
+	SecretEnv string `json:"secretEnv,omitempty"`
 	// Timeout bounds one delivery attempt, in seconds. Default 10.
-	Timeout int `mapstructure:"timeout" json:"timeout,omitempty"`
+	Timeout int `json:"timeout,omitempty"`
 	// Env gates the webhook on the process environment, in the condition
 	// grammar `dispat if` uses: NAME, !NAME, NAME=value, NAME!=value,
 	// NAME~glob or NAME!~glob. `env: CI=true` keeps a webhook silent on
 	// every laptop and active on the runner. The condition is evaluated once
 	// per run; an unmet condition disables the webhook exactly as if it were
 	// not declared. Empty means always active.
-	Env string `mapstructure:"env" json:"env,omitempty"`
+	Env string `json:"env,omitempty"`
 	// Format replaces the default JSON payload with a rendered template, for
 	// endpoints that want their own shape (a Slack message, say). A {field}
 	// token — letters only, from the names WebhookFormatFields lists — is
@@ -56,13 +56,13 @@ type WebhookConfig struct {
 	// other byte is literal, so a template may itself be JSON. An empty
 	// Format sends the default payload. The signature, when configured, is
 	// computed over the body actually sent.
-	Format string `mapstructure:"format" json:"format,omitempty"`
+	Format string `json:"format,omitempty"`
 }
 
 // WebhookHeader is one extra request header of a webhook.
 type WebhookHeader struct {
-	Name  string `mapstructure:"name" json:"name,omitempty"`
-	Value string `mapstructure:"value" json:"value,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 // The webhook event vocabulary. The `release.` events bracket the run, the

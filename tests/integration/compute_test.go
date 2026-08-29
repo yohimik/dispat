@@ -247,7 +247,7 @@ func TestComputeSeedsInitialsFromManifests(t *testing.T) {
 func TestComputeKeepsExistingInitials(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
-	// Mixed case on purpose: viper lowercases map keys when it loads them, so
+	// Mixed case on purpose: dispat lowercases map keys when it loads them, so
 	// a config written back from the parsed map would rename this entry.
 	cfg.Initials = map[string]string{"Core": "3.0.0", "web": "0.0.0"}
 	r.WriteConfigModel(cfg)

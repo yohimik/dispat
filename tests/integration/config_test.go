@@ -28,8 +28,8 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// TestConfigUnknownKeyIsRejected: viper's UnmarshalExact rejects unknown
-// keys rather than silently ignoring them — the one config mistake that is
+// TestConfigUnknownKeyIsRejected: the decoder rejects unknown keys rather
+// than silently ignoring them — the one config mistake that is
 // otherwise invisible until a script that should have run never does. An
 // unknown key is exactly the shape the typed model cannot express, so this
 // one config is authored as a raw map[string]any.

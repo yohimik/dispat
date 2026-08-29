@@ -129,8 +129,8 @@ func TestExpandWebhookFormat(t *testing.T) {
 
 func TestWebhookConfigRoundTripKeepsHeaderCase(t *testing.T) {
 	// Headers are a list of name/value objects precisely so the name's case
-	// survives the trip through the file; a map's keys would be lowercased by
-	// viper before the model ever saw them.
+	// survives the trip through the file; a map's keys would be lowercased
+	// before the model ever saw them.
 	in := WebhookConfig{
 		Name:      "tracker",
 		URL:       "https://tracker.internal/dispat",

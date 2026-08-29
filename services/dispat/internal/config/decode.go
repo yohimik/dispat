@@ -14,9 +14,9 @@ package config
 //
 // The pruning is load-bearing: an opt-in block written as a bare `{}` says
 // nothing rather than enabling itself at its defaults, which is what lets a
-// pointer sub-object mean "this layer did not speak". The kept rules are the
-// ones viper applied when viper did this, and they are kept because a config
-// that loads today has to load the same way tomorrow.
+// pointer sub-object mean "this layer did not speak". Both rules predate the
+// first-party decoder and are kept unchanged, because a config that loads
+// today has to load the same way tomorrow.
 
 import "strings"
 

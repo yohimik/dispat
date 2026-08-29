@@ -61,7 +61,7 @@ func TestHooksLoginOncePerSpaceAcrossSpaces(t *testing.T) {
 	for _, iv := range tl {
 		names[iv.Label] = true
 	}
-	// viper lowercases map keys, so $DISPAT_SPACE reports "spacea"/"spaceb"
+	// dispat lowercases map keys, so $DISPAT_SPACE reports "spacea"/"spaceb"
 	// even though the config wrote "spaceA"/"spaceB".
 	assert.True(t, names["spacea"] && names["spaceb"], "each space logs in under its own name: %v", tl)
 }

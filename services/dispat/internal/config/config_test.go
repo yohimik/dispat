@@ -2,7 +2,7 @@ package config
 
 // Configs are authored as typed models (config aliases the public pkg/models
 // structs) and marshalled to JSON — one format everywhere, because the file
-// formats themselves are viper's concern, smoke-tested once in
+// formats themselves are the reader's concern, smoke-tested once in
 // TestLoadFormats. Raw shapes appear only where a marshaller cannot express
 // what the test needs: an unknown key, and the weak-typing scalars (a bare
 // `concurrency: 3`, a scalar script reference) that the typed slices cannot
@@ -127,7 +127,7 @@ func TestLoadValid(t *testing.T) {
 // model's own key spellings (model -> JSON -> generic map -> format), so the
 // test never hand-writes config text; everything beyond this — options,
 // validation, errors — is exercised through JSON alone, because the formats
-// are viper's concern, not this package's.
+// are the reader's concern, not the decoder's.
 func TestLoadFormats(t *testing.T) {
 	cfg := validConfig()
 	// One multi-command script, so each format is shown carrying both value
@@ -358,7 +358,7 @@ func TestLoadFlagDefaultsDoNotOverride(t *testing.T) {
 }
 
 func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
-	// Viper lowercases map keys; mixed-case references must still resolve.
+	// dispat lowercases map keys; mixed-case references must still resolve.
 	cfg := File{
 		Scripts: map[string]Script{"buildAll": {"echo b"}, "publishAll": {"echo p"}},
 		Spaces: map[string]SpaceConfig{
@@ -602,7 +602,7 @@ func setBuild(c *File, ref string) {
 }
 
 func TestLoadUnknownKeyRejected(t *testing.T) {
-	// UnmarshalExact rejects unknown keys, catching config typos early. An
+	// The decoder rejects unknown keys, catching config typos early. An
 	// unknown key is the shape the typed model cannot express, so the config
 	// is a raw map.
 	root := writeRawRepo(t, map[string]any{
@@ -1008,7 +1008,7 @@ func TestQuotedNames(t *testing.T) {
 
 func TestLoadSpaceScripts(t *testing.T) {
 	// A space's scripts hold shell commands, the same shape as the file's own;
-	// keys are lowercased by viper and resolved case-insensitively; an empty
+	// keys are lowercased on the way in and resolved case-insensitively; an empty
 	// command is rejected.
 	cfg := minimalConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
@@ -1081,7 +1081,7 @@ func TestMultiCommandScripts(t *testing.T) {
 }
 
 // TestSingleCommandScriptsStayScalar: a scalar is a one-element sequence, which
-// is what viper's weak decoding makes of it. This is the shape almost every
+// is what the weak decoding makes of it. This is the shape almost every
 // script in almost every config has, so it is worth stating that the array
 // support did not change what it decodes to.
 func TestSingleCommandScriptsStayScalar(t *testing.T) {
@@ -1415,7 +1415,7 @@ func TestLoadParserInvalidValues(t *testing.T) {
 	}{
 		{"bad_type_bump", ParserConfig{Types: map[string]string{"docs": "huge"}},
 			`types["docs"]: unknown bump "huge"`},
-		// Viper lowercases map keys, so an uppercase name self-heals; a digit
+		// dispat lowercases map keys, so an uppercase name self-heals; a digit
 		// survives lowercasing and must be rejected.
 		{"bad_type_name", ParserConfig{Types: map[string]string{"docs2": "patch"}},
 			"must consist of a-z only"},
@@ -1459,7 +1459,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		// The minimal opt-in block enables everything at its documented
 		// defaults: all four kinds, root manifests only, exact name matching,
 		// writeVersion on, no syncLock. ({"enabled": true} rather than {}:
-		// viper prunes empty objects while flattening, so a bare {} is
+		// the flattening prunes empty objects, so a bare {} is
 		// indistinguishable from an absent key by decode time.)
 		cfg := minimalConfig()
 		libs := cfg.Spaces["libs"]
@@ -2235,7 +2235,7 @@ func TestLoadCustomObjectIsCarriedButNeverRead(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err, "a free-form object must not be an unknown key")
-	// Keys arrive lowercased, like every viper map key: the object is opaque
+	// Keys arrive lowercased, like every map key: the object is opaque
 	// data, so nothing re-reads it the way the env objects are re-read.
 	assert.Equal(t, "platform", loaded.Custom["team"])
 	assert.Equal(t, float64(3), loaded.Custom["budget"], "JSON numbers decode as float64")

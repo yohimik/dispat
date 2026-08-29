@@ -100,7 +100,7 @@ func TestMultiRefConcatenatesLineFragments(t *testing.T) {
 // TestMultiRefSiblingOverrideAndEnvCase: the keys beside a reference outrank
 // every file it named, and an environment variable merged out of two fragments
 // reaches a script spelled exactly as the file spelled it. Key case is the
-// thing a merge could plausibly lose, since the loader hands viper a
+// thing a merge could plausibly lose, since the loader hands the decoder a
 // lowercased copy of the tree.
 func TestMultiRefSiblingOverrideAndEnvCase(t *testing.T) {
 	r := harness.New(t)

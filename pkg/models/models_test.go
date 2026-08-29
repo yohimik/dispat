@@ -7,8 +7,8 @@ import (
 
 // The models are data; what is worth testing here is the pure helpers and
 // the one contract external tooling relies on: a marshalled model is a
-// loadable config (keys match the mapstructure names — the CLI's own config
-// tests load marshalled models end to end).
+// loadable config (the json tags are the config file's own keys — the CLI's
+// own config tests load marshalled models end to end).
 
 func TestEnabledDefaults(t *testing.T) {
 	if !(&ChangelogConfig{}).IsEnabled() {
@@ -123,7 +123,7 @@ func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 		t.Error("packages without an entry do not resolve")
 	}
 
-	// Spaces resolve by name the same way, for the same viper reason.
+	// Spaces resolve by name the same way, for the same folding reason.
 	sfile := File{Spaces: map[string]SpaceConfig{"libs": {Path: PathList{"packages"}}}}
 	if s, ok := sfile.Space("LIBS"); !ok || s.Path.First() != "packages" {
 		t.Errorf("Space(LIBS) = %+v, %v", s, ok)
@@ -192,7 +192,7 @@ func TestPathListRoundTrip(t *testing.T) {
 }
 
 func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
-	// The json tags mirror the mapstructure keys, so a marshalled model is a
+	// The json tag is the config file's key, so a marshalled model is a
 	// loadable dispat.json; resolved fields never leak into the file.
 	f := File{
 		Scripts: map[string]Script{"build": {"make"}},

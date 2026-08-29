@@ -1,7 +1,7 @@
 package config
 
 // The static env objects: the layering, the refusals, and the exact-case
-// re-read that exists because viper lowercases every map key it reads.
+// re-read that exists because dispat lowercases every map key it reads.
 
 import (
 	"encoding/json"
@@ -100,7 +100,7 @@ func TestValidateEnvReportsTheFirstMistakeDeterministically(t *testing.T) {
 	}
 }
 
-// TestEnvKeyCaseSurvivesEveryFormat: viper lowercases map keys, so the env
+// TestEnvKeyCaseSurvivesEveryFormat: dispat lowercases map keys, so the env
 // objects are re-read with the format's own parser. All three formats the
 // config loader accepts must come back with the spelling the file used.
 func TestEnvKeyCaseSurvivesEveryFormat(t *testing.T) {
@@ -137,8 +137,8 @@ func TestEnvKeyCaseSurvivesEveryFormat(t *testing.T) {
 	}
 }
 
-// TestEnvValuesAreWeaklyTyped: the second parse must agree with viper's weak
-// decoding, so a bare number or boolean means the same thing whichever pass
+// TestEnvValuesAreWeaklyTyped: the second parse must agree with the decoder's
+// weak typing, so a bare number or boolean means the same thing whichever pass
 // read it. Large floats go through strconv rather than %v, which would render
 // them in scientific notation the file never wrote.
 func TestEnvValuesAreWeaklyTyped(t *testing.T) {
@@ -270,7 +270,7 @@ func TestEnvRestorerReadsEveryLevel(t *testing.T) {
 }
 
 // TestEnvRestorerMatchesNamesCaseInsensitively: the caller looks entries up by
-// the lowercased keys viper produced, while the tree came from the raw file,
+// the lowercased keys the folding produced, while the tree came from the raw file,
 // where a space may be spelled "Libs".
 func TestEnvRestorerMatchesNamesCaseInsensitively(t *testing.T) {
 	root := writeRawRepo(t, map[string]any{

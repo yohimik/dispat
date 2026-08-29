@@ -30,7 +30,7 @@ func TestLoadWebhooksValid(t *testing.T) {
 	assert.Equal(t, "POST", loaded.Webhooks[0].Method)
 	assert.Equal(t, "PUT", loaded.Webhooks[1].Method)
 	// Header names come through the load verbatim: a list of objects, so
-	// viper's map-key lowercasing never touches them.
+	// the map-key lowercasing never touches them.
 	assert.Equal(t, "X-Api-Key", loaded.Webhooks[1].Headers[0].Name)
 }
 
@@ -126,8 +126,8 @@ func TestWebhookEmptyListOptsOut(t *testing.T) {
 	// `webhooks: []` written at a package is the opt-out: stated, so it
 	// replaces the inherited list with nothing. The typed model cannot
 	// express it — omitempty drops an empty list at marshal — so this goes
-	// through the raw shape a real file writes, which also pins that viper
-	// carries an empty array through where it prunes an empty object.
+	// through the raw shape a real file writes, which also pins that an empty
+	// array is carried through where an empty object is pruned.
 	root := writeRawRepo(t, map[string]any{
 		"scripts":  map[string]any{"build": "echo b"},
 		"webhooks": []any{map[string]any{"url": "https://root.example.com"}},

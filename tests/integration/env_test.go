@@ -4,7 +4,7 @@ package integration
 // environment variables at the top level, on a space and on a package, and
 // they merge with the most local layer winning. What only the running binary
 // can witness is the part that matters: that a key arrives in a script's
-// environment with its case intact (viper lowercases every map key it reads,
+// environment with its case intact (dispat lowercases every map key it reads,
 // so the exact spelling has to be restored on the way out), that a value
 // referring to `$DISPAT_VERSION` expands against the package the script is
 // running for, and that the keys which could never reach a script intact are

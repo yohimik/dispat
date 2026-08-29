@@ -785,7 +785,7 @@ func TestPackagesKeyAmbiguous(t *testing.T) {
 	assert.Contains(t, err.Error(), "ambiguously")
 }
 
-// TestPackageOverrideCaseInsensitiveKey: viper lowercases the packages map's
+// TestPackageOverrideCaseInsensitiveKey: dispat lowercases the packages map's
 // keys, so a folder with uppercase letters still matches its entry.
 func TestPackageOverrideCaseInsensitiveKey(t *testing.T) {
 	cfg := validConfig()
@@ -1365,7 +1365,7 @@ func TestPackageDependenciesScalarAndSelfReference(t *testing.T) {
 
 // TestDependencyMapForm: the canonical shape — one object keyed by consumer,
 // each value a provider name or an object saying more about the edge —
-// through the real loader, viper's key folding and all.
+// through the real loader, the key folding and all.
 func TestDependencyMapForm(t *testing.T) {
 	root := writeRawRepo(t, map[string]any{
 		"scripts": map[string]any{"build": "echo b"},
@@ -1393,7 +1393,7 @@ func TestDependencyMapForm(t *testing.T) {
 	assert.Len(t, deps, 4)
 }
 
-// TestDependencyMapFormMatchesPackageNamesCaseInsensitively: viper lowercases
+// TestDependencyMapFormMatchesPackageNamesCaseInsensitively: dispat lowercases
 // every map key, so a consumer keyed by a package whose folder carries capital
 // letters arrives folded. It has to resolve back onto the package it names —
 // the same rule `packages` and `spaces` entry keys already follow — or the
@@ -1850,7 +1850,7 @@ func TestSpaceFileUnknownKey(t *testing.T) {
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), filepath.Join("packages/libs", "dispat.json"))
-	assert.Contains(t, err.Error(), "tagformats", "viper lowercases the key it reports")
+	assert.Contains(t, err.Error(), "tagformats", "the key is reported as the folding spells it")
 }
 
 // TestSpaceFileInvalidValue: the merged space is held to the space rules, so
@@ -1866,7 +1866,7 @@ func TestSpaceFileInvalidValue(t *testing.T) {
 
 // TestPackageEntryHoldsNoSpaces: a package entry configures one package, so
 // spaces and packages are refused by name at every map that holds entries —
-// mapstructure's unknown-key error could not say why.
+// a bare unknown-key error could not say why.
 func TestPackageEntryHoldsNoSpaces(t *testing.T) {
 	nested := map[string]any{
 		"core": map[string]any{"packages": map[string]any{"inner": map[string]any{}}},
