@@ -617,13 +617,22 @@ func (r *runner) runConfigured() int {
 	// like a configuration bug until you can see them. Logged here rather than
 	// at resolution because this is the first moment the configured level is
 	// known.
+	//
+	// The counts are the second thing worth knowing, for the same reason: they
+	// say what the loader made of the file, and a configuration that read as
+	// nothing — a `$ref` that resolved to an empty fragment, a `spaces` object
+	// under a key nobody meant — is otherwise a run that finds no work and
+	// explains itself no further.
+	scale := configScaleOf(cfg)
 	log.Debug().
 		Str("config", cfgPath).
 		Str("root", resolvedRoot).
 		Bool("explicitConfig", r.fs.Changed("config")).
 		Int("configFiles", len(cfg.SourceFiles)).
 		Int("spaces", len(cfg.Spaces)).
-		Int("packages", len(cfg.Packages)).
+		Int("packageEntries", scale.packageEntries).
+		Int("scripts", scale.scripts).
+		Int("webhooks", scale.webhooks).
 		Msg("configuration loaded")
 	// Which files a configuration was actually made of is only interesting
 	// once it is made of more than one, and then it is the first question:
@@ -839,4 +848,44 @@ func sameDir(a, b string) bool {
 		return p
 	}
 	return canon(a) == canon(b)
+}
+
+// configScale is how much configuration a loaded file turned out to hold: the
+// package entries it names, the scripts it binds and the webhooks it notifies,
+// counted across every level of the root file that may declare one.
+//
+// It exists for the debug line alone, and for one question that line has to be
+// able to answer: whether the file dispat read is the file the operator meant.
+// A run that finds no work looks the same whether the configuration is empty
+// or the repository simply has nothing to release, and three numbers tell
+// those apart at a glance.
+type configScale struct {
+	packageEntries int
+	scripts        int
+	webhooks       int
+}
+
+// configScaleOf counts one loaded configuration. In-folder files are not
+// included: they are read during discovery, after this line is written, and a
+// count that grew later would describe a configuration nobody had yet.
+func configScaleOf(cfg *config.File) configScale {
+	s := configScale{
+		packageEntries: len(cfg.Packages),
+		scripts:        len(cfg.Scripts),
+		webhooks:       len(cfg.Webhooks),
+	}
+	for _, entry := range cfg.Packages {
+		s.scripts += len(entry.Scripts)
+		s.webhooks += len(entry.Webhooks)
+	}
+	for _, space := range cfg.Spaces {
+		s.packageEntries += len(space.Packages)
+		s.scripts += len(space.Scripts)
+		s.webhooks += len(space.Webhooks)
+		for _, entry := range space.Packages {
+			s.scripts += len(entry.Scripts)
+			s.webhooks += len(entry.Webhooks)
+		}
+	}
+	return s
 }
