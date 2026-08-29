@@ -119,14 +119,18 @@ func TestLowerTreeLeavesTheTreeAlone(t *testing.T) {
 
 // TestLowerTreeFoldsEveryKindOfMap: the lowered view is what makes the config
 // language case-insensitive, so it has to reach every map a parser can
-// produce. A yaml mapping with a non-string key parses as a generic map, and a
-// typed container is not the config language's map at all — its keys are a Go
-// type's, and renaming them would corrupt the value rather than fold it.
+// produce. A yaml mapping with a non-string key parses as a generic map. A list
+// of strings is the flag overlay's, and is copied rather than shared so that
+// nothing here can write through into the flag set. Anything else is a value no
+// parser builds, and passes through as it came: this is the contract the
+// reflected deep copy used to cover, narrowed to the containers that exist.
 func TestLowerTreeFoldsEveryKindOfMap(t *testing.T) {
+	strs := []string{"one", "two"}
 	typed := map[string][]string{"Keep": {"As-Is"}}
 	tree := &tree{root: map[string]any{
 		"Generic": map[any]any{"MiXed": "v", 1: "one", true: "yes"},
 		"List":    []any{map[any]any{"Nested": "v"}},
+		"Strings": strs,
 		"Typed":   typed,
 	}}
 
@@ -134,10 +138,11 @@ func TestLowerTreeFoldsEveryKindOfMap(t *testing.T) {
 	assert.Equal(t, map[string]any{"mixed": "v", "1": "one", "true": "yes"}, raw["generic"],
 		"a generic map becomes a string-keyed one, folded, so the decode meets one kind of map")
 	assert.Equal(t, []any{map[string]any{"nested": "v"}}, raw["list"])
+	assert.Equal(t, strs, raw["strings"], "a list of strings arrives as it was written")
 	assert.Equal(t, typed, raw["typed"], "a typed container keeps its own keys")
 
-	raw["typed"].(map[string][]string)["Keep"][0] = "changed"
-	assert.Equal(t, "As-Is", typed["Keep"][0], "and is copied rather than shared")
+	raw["strings"].([]string)[0] = "changed"
+	assert.Equal(t, "one", strs[0], "and the flag overlay's list is copied rather than shared")
 }
 
 // TestSettingsPrunesEmptyObjectsAndSplitsPaths pins the two rules the decode
@@ -761,13 +766,15 @@ func TestRefRefusalsSurviveAReference(t *testing.T) {
 }
 
 // TestCloneValueCopiesEveryContainer: the parsers in use produce string-keyed
-// maps, generic maps and slices, and a typed container is copied by the
-// reflect fallback rather than shared.
+// maps, generic maps and lists, the flag overlay adds a list of strings, and
+// every one of them is copied rather than shared. A value of any other type is
+// passed through, which is what the clone now says instead of reflecting over
+// containers nothing builds.
 func TestCloneValueCopiesEveryContainer(t *testing.T) {
 	original := map[string]any{
 		"generic": map[any]any{1: map[string]any{"deep": "v"}},
 		"list":    []any{map[string]any{"deep": "v"}},
-		"typed":   map[string][]string{"a": {"one"}},
+		"strings": []string{"one"},
 		"nils":    []any{nil},
 		"scalar":  "v",
 	}
@@ -776,11 +783,11 @@ func TestCloneValueCopiesEveryContainer(t *testing.T) {
 
 	clone["generic"].(map[any]any)[1].(map[string]any)["deep"] = "changed"
 	clone["list"].([]any)[0].(map[string]any)["deep"] = "changed"
-	clone["typed"].(map[string][]string)["a"][0] = "changed"
+	clone["strings"].([]string)[0] = "changed"
 
 	assert.Equal(t, "v", original["generic"].(map[any]any)[1].(map[string]any)["deep"])
 	assert.Equal(t, "v", original["list"].([]any)[0].(map[string]any)["deep"])
-	assert.Equal(t, "one", original["typed"].(map[string][]string)["a"][0])
+	assert.Equal(t, "one", original["strings"].([]string)[0])
 }
 
 // TestRefEmptyFileInEveryFormat: "this file is empty" is one answer across the

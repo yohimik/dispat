@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -518,9 +517,14 @@ func lowerMap(m map[string]any) map[string]any {
 // lowerValue copies one node of the lowered view. A generic map — a yaml
 // mapping with a non-string key — becomes a string-keyed one on the way, so
 // everything below here is one kind of map and the decode never meets the
-// other. Typed containers today's parsers do not produce go through
-// cloneReflect, which copies without renaming: their keys are a Go type's, not
-// the config language's.
+// other.
+//
+// The arms name every container that can reach here. The three parsers produce
+// string-keyed maps, generic maps, lists and scalars, and the flag overlay adds
+// a list of strings; everything else falls through as it came, because a scalar
+// is immutable and shared safely and no other typed container is ever built. A
+// parser that began producing one would be a case to add here, which is a
+// smaller thing to get right than the reflection that used to copy them all.
 func lowerValue(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -537,11 +541,18 @@ func lowerValue(v any) any {
 			out[i] = lowerValue(val)
 		}
 		return out
-	case nil, string, bool, int, int64, float64:
-		return v
+	case []string:
+		return copyStrings(t)
 	default:
-		return cloneReflect(v)
+		return v
 	}
+}
+
+// copyStrings copies the one typed container that reaches the tree: a
+// list-valued flag hands over its elements as they are stored, and copying them
+// keeps a view of the config from sharing a slice with the flag set.
+func copyStrings(s []string) []string {
+	return append([]string(nil), s...)
 }
 
 // isSet answers whether a lowered tree holds a value at a top-level key, which
@@ -560,10 +571,11 @@ func cloneTree(m map[string]any) map[string]any {
 	return out
 }
 
-// cloneValue copies one node. The three parsers in use produce string-keyed
-// maps, generic maps (a yaml mapping with a non-string key) and slices;
-// everything else they produce is a scalar, which is immutable and shared
-// safely.
+// cloneValue copies one node, naming the same containers lowerValue does: the
+// three parsers produce string-keyed maps, generic maps (a yaml mapping with a
+// non-string key), lists and scalars, and the flag overlay adds a list of
+// strings. Everything else falls through as it came, a scalar being immutable
+// and shared safely.
 func cloneValue(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -580,44 +592,9 @@ func cloneValue(v any) any {
 			out[i] = cloneValue(val)
 		}
 		return out
-	case nil, string, bool, int, int64, float64:
-		return v
-	default:
-		return cloneReflect(v)
-	}
-}
-
-// cloneReflect copies the typed maps and slices today's parsers do not
-// produce, so that changing one of them can never quietly leave the lowered
-// view sharing memory with the tree. Anything that is not a map or a slice is
-// a scalar and is returned as it came.
-func cloneReflect(v any) any {
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Map:
-		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
-		iter := rv.MapRange()
-		for iter.Next() {
-			out.SetMapIndex(iter.Key(), clonedElem(iter.Value().Interface(), rv.Type().Elem()))
-		}
-		return out.Interface()
-	case reflect.Slice:
-		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			out.Index(i).Set(clonedElem(rv.Index(i).Interface(), rv.Type().Elem()))
-		}
-		return out.Interface()
+	case []string:
+		return copyStrings(t)
 	default:
 		return v
 	}
-}
-
-// clonedElem is one element of a reflected map or slice, as a value the
-// element's own type accepts: a nil holds no type to build one from.
-func clonedElem(v any, typ reflect.Type) reflect.Value {
-	cloned := cloneValue(v)
-	if cloned == nil {
-		return reflect.Zero(typ)
-	}
-	return reflect.ValueOf(cloned)
 }
