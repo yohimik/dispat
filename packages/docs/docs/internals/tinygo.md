@@ -50,10 +50,12 @@ host operating system there is no such driver, so the default netdev is a stub: 
 That is every release path dispat has: the GitHub API, webhooks, self-update's download, the update check. So nothing
 is built with it. The other answers were good, which is why the file is kept rather than deleted.
 
-The spike also found the linker difference the CLI's own source now records: TinyGo's `-X` applies only to a string
-variable declared with no value, and silently ignores the flag for one declared with a value. `internal/cli.Version` is
-therefore declared bare. A stamped version matters more than it looks: a binary reporting `dev` is a local build to
-[self-update](../reference/self-update.md), which refuses one before it reaches the network.
+The spike also found the linker difference the CLI's own source now records: upstream TinyGo's `-X` applies only to a
+string variable declared with no value, and silently ignores the flag for one declared with a value.
+`internal/cli.Version` is therefore declared bare. A stamped version matters more than it looks: a binary reporting
+`dev` is a local build to [self-update](../reference/self-update.md), which refuses one before it reaches the network,
+so nothing below could be asked at all until this was fixed. The fork stamps both declarations, which the `ldflags` row
+records; the bare one is what both toolchains agree on.
 
 ### Why a "does https work" check is not enough
 
@@ -117,10 +119,12 @@ Rows D and E are the ones a stub cannot survive. D fails only if the client real
 which a no-op handshake never does; E is refused by the listener itself, and the connection log shows the request
 method's bytes where a ClientHello belongs.
 
-On macOS, Go hands certificate verification to the platform verifier rather than reading `SSL_CERT_FILE`, so a
-generated CA may be invisible to the trusted rows there. The darwin script probes that and records the answer instead
-of assuming it, and never modifies the keychain: trusting a generated root to make a row pass would measure the
-modification rather than the toolchain. D and E hold either way.
+On macOS the two toolchains need not agree about where roots come from: a darwin build from the Go compiler hands
+certificate verification to the platform verifier rather than reading `SSL_CERT_FILE`, so a generated CA can be
+invisible to a trusted row even though the file is perfectly good. The darwin script probes that with both a Go client
+and curl, records what each said, and never modifies the keychain: trusting a generated root to make a row pass would
+measure the modification rather than the toolchain. Read the trusted rows against that answer, and compare the gc
+control with the fork row to tell a verifier's refusal from a toolchain's failure. D and E hold either way.
 
 ## Reading the logs
 
