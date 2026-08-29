@@ -133,6 +133,7 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         {type: 'doc', id: 'internals/architecture', label: 'Architecture'},
+        {type: 'doc', id: 'internals/tinygo', label: 'The TinyGo spike'},
         {type: 'doc', id: 'internals/coverage', label: 'Test coverage'},
         {type: 'doc', id: 'internals/test-results', label: 'Test results'},
       ],

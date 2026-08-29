@@ -304,6 +304,11 @@
         },
         {
           "type": "doc",
+          "id": "internals/tinygo",
+          "label": "The TinyGo spike"
+        },
+        {
+          "type": "doc",
           "id": "internals/coverage",
           "label": "Test coverage"
         },
