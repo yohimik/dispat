@@ -188,7 +188,7 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 		if !av.Kinds[model.DepKind(d.Kind)] {
 			continue
 		}
-		if av.Only != nil && !av.Only[provider] {
+		if av.Only != nil && !av.Only[strings.ToLower(provider)] {
 			continue
 		}
 		if !matchAny(av.Match, d.Range) {

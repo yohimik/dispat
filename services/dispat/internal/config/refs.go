@@ -36,6 +36,8 @@ import (
 	yaml "gopkg.in/yaml.v3"
 
 	"github.com/spf13/pflag"
+
+	public "github.com/yohimik/dispat/pkg/models"
 )
 
 // errUnsupportedFormat is what a file dispat has no parser for returns. The
@@ -366,14 +368,13 @@ func identity(path string) string {
 	return filepath.Clean(path)
 }
 
-// foldKey finds the key an object already spells some way or another.
-func foldKey(node map[string]any, key string) (string, bool) {
-	for name := range node {
-		if strings.EqualFold(name, key) {
-			return name, true
-		}
-	}
-	return "", false
+// foldKey finds the key a map already spells some way or another, for the
+// callers that want the key alone: to replace what is there, or to refuse a
+// second spelling of it. It is public.FoldLookup with the value dropped, so
+// the tree and the decoded model agree about what "the same name" means.
+func foldKey[T any](node map[string]T, key string) (string, bool) {
+	name, _, ok := public.FoldLookup(node, key)
+	return name, ok
 }
 
 // joinLabel extends a node's label with one more key.

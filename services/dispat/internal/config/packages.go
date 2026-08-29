@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 
+	public "github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -75,8 +77,12 @@ func validateVersionGroups(c *File) error {
 		if name == "" {
 			return errors.New("versionGroups: group name must not be empty")
 		}
-		if _, taken := c.Spaces[name]; taken {
-			return fmt.Errorf("versionGroups[%q]: a space has the same name; group and space names share one namespace", name)
+		// One namespace means one namespace whatever the two files capitalise:
+		// a `Libs` space and a `libs` group are the same name to every
+		// reference that could reach either.
+		if taken, ok := foldKey(c.Spaces, name); ok {
+			return fmt.Errorf("versionGroups[%q]: the space %q has the same name; group and space names share one namespace",
+				name, taken)
 		}
 		mode, ok := normalizeVersioning(g.Versioning)
 		if !ok || !model.Versioning(mode).Shared() {
@@ -92,16 +98,20 @@ func validateVersionGroups(c *File) error {
 // resolveVersionGroup resolves a versionGroup reference onto the group key
 // and versioning mode it stands for: a declared versionGroups entry, or a
 // space whose own versioning is shared (its implicit group). The lookup is
-// case-insensitive because the lowered tree folds both maps' keys.
+// case-insensitive, like every other name in the configuration.
+//
+// The key it answers with is the map's own, not the reference's: two packages
+// reaching one group through `Libs` and `libs` have to land in the same
+// bucket, and the space whose implicit group this may be is keyed by the
+// spelling its own entry carries.
 func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
-	low := strings.ToLower(ref)
-	if g, ok := c.VersionGroups[low]; ok {
-		return low, g.Versioning, nil
+	if name, g, ok := public.FoldLookup(c.VersionGroups, ref); ok {
+		return name, g.Versioning, nil
 	}
-	if s, ok := c.Spaces[low]; ok {
+	if name, s, ok := public.FoldLookup(c.Spaces, ref); ok {
 		if s.VersionGroup != "" {
 			return "", "", fmt.Errorf("versionGroup %q: space %q is itself a member of group %q; name that group directly",
-				ref, low, s.VersionGroup)
+				ref, name, s.VersionGroup)
 		}
 		// A space that states no mode of its own versions by the root's, so
 		// that is the mode its implicit group shares.
@@ -114,9 +124,9 @@ func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
 				mode = VersioningIndependent
 			}
 			return "", "", fmt.Errorf("versionGroup %q: space %q does not version as a group (its versioning is %q)",
-				ref, low, mode)
+				ref, name, mode)
 		}
-		return low, mode, nil
+		return name, mode, nil
 	}
 	return "", "", fmt.Errorf("versionGroup %q matches no versionGroups entry and no space", ref)
 }
@@ -156,6 +166,29 @@ func validatePackageEntries(c *File) error {
 		}
 	}
 	return nil
+}
+
+// overlayScripts writes one layer of scripts over another and answers with the
+// result, the nearer layer winning.
+//
+// A plain map write would not be enough. Each layer keeps the case its own file
+// wrote, so a space declaring `build` and a package declaring `Build` are two
+// keys of one merged map, and a lookup that folds would find whichever the
+// runtime handed it first. The nearer layer's entry replaces the one it
+// overrides, spelling included, which is the same rule a key beside a `$ref`
+// follows: the nearer file decides both the value and the name.
+func overlayScripts(base, over map[string]Script) map[string]Script {
+	merged := make(map[string]Script, len(base)+len(over))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range over {
+		if existing, found := foldKey(merged, k); found && existing != k {
+			delete(merged, existing)
+		}
+		merged[k] = v
+	}
+	return merged
 }
 
 // collectPackageDeps appends one package layer's providers to the declared-edge
@@ -395,14 +428,7 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		sc.Flow = mergeFlow(sc.Flow, po.Flow)
 	}
 	if len(po.Scripts) > 0 {
-		merged := make(map[string]Script, len(sc.Scripts)+len(po.Scripts))
-		for k, v := range sc.Scripts {
-			merged[k] = v
-		}
-		for k, v := range po.Scripts {
-			merged[k] = v
-		}
-		sc.Scripts = merged
+		sc.Scripts = overlayScripts(sc.Scripts, po.Scripts)
 	}
 	sc.Env = MergeEnv(sc.Env, po.Env)
 	if po.AutoVersion != nil {
@@ -648,14 +674,9 @@ type packageExtras struct {
 // apply folds one layer's package-only keys in.
 func (ex *packageExtras) apply(po PackageConfig) {
 	if len(po.Scripts) > 0 {
-		if ex.ownScripts == nil {
-			ex.ownScripts = make(map[string]Script, len(po.Scripts))
-		}
-		// Nearer layers come later, so a plain overwrite is the same
-		// precedence mergePackageOverride gives the layered map.
-		for k, v := range po.Scripts {
-			ex.ownScripts[k] = v
-		}
+		// Nearer layers come later, so overlaying is the same precedence
+		// mergePackageOverride gives the layered map.
+		ex.ownScripts = overlayScripts(ex.ownScripts, po.Scripts)
 	}
 	ex.ignore = append(ex.ignore, po.Ignore...)
 	if len(po.ManifestNames) > 0 {

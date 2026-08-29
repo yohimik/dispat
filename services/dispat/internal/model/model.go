@@ -240,6 +240,16 @@ type Space struct {
 	AutoVersion *AutoVersion
 }
 
+// Script resolves one of the package's effective scripts by name, matching
+// case-insensitively. The map keeps the case each layer's file wrote, and the
+// name reaching here comes from somewhere else again — a command line, a flow
+// entry, another file's autoVersion.syncLock — so the two are never asked to
+// agree on capitals.
+func (s *Space) Script(name string) (public.Script, bool) {
+	_, cmds, ok := public.FoldLookup(s.Scripts, name)
+	return cmds, ok
+}
+
 // ManifestScope is how much of a package the parsing strategy covers.
 type ManifestScope string
 
@@ -270,7 +280,8 @@ type AutoVersion struct {
 	// populated (all four kinds when the config named none).
 	Kinds map[DepKind]bool
 	// Only restricts rewriting to declarations of these provider packages;
-	// nil means every workspace provider.
+	// nil means every workspace provider. The names are folded, so a lookup
+	// folds the provider's name too.
 	Only map[string]bool
 	// OnlyUpdated restricts rewriting to declarations naming a provider this
 	// run releases. Without it a declaration that had fallen behind a provider

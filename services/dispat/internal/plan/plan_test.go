@@ -427,6 +427,23 @@ func TestGlobMatchingNothingWarns(t *testing.T) {
 	assert.False(t, p.HasErrors(), "a glob that matches nothing is not the E130 typo")
 }
 
+// TestScopesMatchAPackageWhicheverCase: a scope is typed into a commit message
+// and a package name comes from a folder, so the two are matched
+// case-insensitively, the way every selector in dispat matches a name. Both a
+// plain name and a glob fold, and the package is addressed under its own
+// spelling, so nothing downstream sees the commit's.
+func TestScopesMatchAPackageWhicheverCase(t *testing.T) {
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(Core): the header spells it another way"},
+		commit{sha: "c2", message: "fix(UTIL*): and so does a glob"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+	assert.False(t, p.HasErrors(), "a folded match is a match, not the E130 typo: %v", codes(p))
+	assert.True(t, p.Releases["core"].Changed(), "the exact term addressed core")
+	assert.True(t, p.Releases["utils"].Changed(), "and the glob addressed utils")
+}
+
 func TestGlobalIsAnOrdinaryScopeName(t *testing.T) {
 	// "global" is an ordinary scope name like any other, not an alias of "*",
 	// so writing it where no package carries it is exactly the E130 typo the

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -92,9 +93,13 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		}
 
 	case t.IsGlob():
+		// A scope is written in a commit message and a package name in a folder
+		// or a config file, so the two are matched case-insensitively, the way
+		// every other selector in dispat matches a name.
 		matched := false
+		pattern := strings.ToLower(t.Name)
 		for _, p := range cp.pkgs {
-			if GlobMatch(t.Name, p.Name) {
+			if GlobMatch(pattern, strings.ToLower(p.Name)) {
 				out[p.Name] = true
 				matched = true
 			}
@@ -104,8 +109,8 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		}
 
 	default:
-		if _, ok := cp.byName[t.Name]; ok {
-			out[t.Name] = true
+		if name, p, ok := public.FoldLookup(cp.byName, t.Name); ok && p != nil {
+			out[name] = true
 			return
 		}
 		// A scope declared as deliberately not a package is not the typo E130

@@ -79,7 +79,7 @@ func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []m
 	// An entry already in the config is the operator's own statement, and the
 	// way to silence this suggestion for good: 0.0.0 included, it is never
 	// rewritten. Matching is case-insensitive, the way App.initialVersions
-	// matches them, because the config's map keys arrive lowercased.
+	// matches them: a key keeps the case its file wrote.
 	decided := make(map[string]bool, len(a.cfg.Initials))
 	for key := range a.cfg.Initials {
 		decided[strings.ToLower(key)] = true
@@ -238,8 +238,8 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 // map, leaving every entry already there exactly as it is.
 //
 // The current map is re-read from the file rather than taken from the loaded
-// config: every map key arrives lowercased, so writing the parsed map back
-// would silently rename entries their author spelled otherwise.
+// config, so the entries already there are written back exactly as the file
+// holds them, comments and spelling included.
 func (a *App) collectInitialEdits(edits *fileEdits, cfgPath string, apply []initialSuggestion) error {
 	if len(apply) == 0 {
 		return nil
@@ -260,9 +260,10 @@ func (a *App) collectInitialEdits(edits *fileEdits, cfgPath string, apply []init
 	for _, s := range apply {
 		next[s.pkg] = s.version.String()
 		// The in-memory view keys these the way a load would have, so a future
-		// long-lived caller reads back what a reload would give it.
-		a.cfg.Initials[strings.ToLower(s.pkg)] = s.version.String()
-		a.cfg.InitialVersions[strings.ToLower(s.pkg)] = s.version
+		// long-lived caller reads back what a reload would give it: under the
+		// package's own name, which is the key the edit just wrote.
+		a.cfg.Initials[s.pkg] = s.version.String()
+		a.cfg.InitialVersions[s.pkg] = s.version
 	}
 	return edits.add(cfgPath, config.Edit{KeyPath: []string{"initials"}, Value: next})
 }

@@ -590,6 +590,78 @@ func TestVersionGroupPackageReference(t *testing.T) {
 	assert.Contains(t, err.Error(), "name that group directly")
 }
 
+// TestVersionGroupUnifiesWhicheverSpellingReachesIt: a versionGroup reference
+// matches its entry case-insensitively, like every other name, and both sides
+// land under the entry's own key.
+//
+// The key is what the planner buckets by, so this is the difference between one
+// group and two: `versionGroup: "Core-Group"` and `versionGroup: "core-group"`
+// naming one declared group have to bucket together, and a reference to a
+// space's implicit group has to bucket with the packages of that space, which
+// are keyed by the spaces entry's own spelling.
+func TestVersionGroupUnifiesWhicheverSpellingReachesIt(t *testing.T) {
+	cfg := validConfig()
+	cfg.VersionGroups = map[string]VersionGroupConfig{"core-group": {Versioning: VersioningFixed}}
+	withLibs(&cfg, func(s *SpaceConfig) { s.VersionGroup = "Core-Group" })
+	cfg.Packages = map[string]PackageConfig{"app": {VersionGroup: "CORE-GROUP"}}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+	assert.Equal(t, "core-group", byName["core"].Space.VersionGroup)
+	assert.Equal(t, "core-group", byName["app"].Space.VersionGroup,
+		"two spellings of one group are one bucket, under the key the group was declared with")
+
+	// The other direction: a space's implicit group, reached by a reference
+	// spelling the space's name another way.
+	cfg = validConfig()
+	withLibs(&cfg, func(s *SpaceConfig) { s.Versioning = VersioningFixed })
+	cfg.Packages = map[string]PackageConfig{"app": {VersionGroup: "LIBS"}}
+	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+	pkgs, err = discoverPackages(t, root)
+	require.NoError(t, err)
+	byName = packagesByName(pkgs)
+	assert.Equal(t, byName["core"].Space.VersionGroup, byName["app"].Space.VersionGroup,
+		"a package joining a space's implicit group joins the bucket that space's own packages are in")
+	assert.Equal(t, model.VersioningFixed, byName["app"].Space.Versioning)
+}
+
+// TestVersionGroupNameCollidesWithASpaceWhicheverCase: group and space names
+// share one namespace, and a namespace that folds cannot hold `Libs` and
+// `libs` as two different things.
+func TestVersionGroupNameCollidesWithASpaceWhicheverCase(t *testing.T) {
+	cfg := validConfig()
+	cfg.VersionGroups = map[string]VersionGroupConfig{"LIBS": {Versioning: VersioningFixed}}
+	_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "share one namespace")
+	assert.Contains(t, err.Error(), `the space "libs"`)
+}
+
+// TestOverlayScriptsReplacesTheSpellingItOverrides: the nearer layer decides
+// both the value and the name.
+//
+// Two layers keep the case their own files wrote, so a space declaring `build`
+// and a package declaring `Build` would otherwise leave two keys in one merged
+// map, and a fold-matching lookup would answer with whichever the runtime
+// handed it first. This is the same rule a key beside a `$ref` follows.
+func TestOverlayScriptsReplacesTheSpellingItOverrides(t *testing.T) {
+	merged := overlayScripts(
+		map[string]Script{"build": {"space"}, "test": {"kept"}},
+		map[string]Script{"Build": {"package"}})
+
+	assert.Equal(t, map[string]Script{"Build": {"package"}, "test": {"kept"}}, merged,
+		"the nearer layer's spelling survives and the one it overrode is gone")
+	assert.Len(t, merged, 2, "never both spellings of one name")
+
+	// A layer that overrides nothing adds itself, and the base is never
+	// written through.
+	base := map[string]Script{"build": {"space"}}
+	merged = overlayScripts(base, map[string]Script{"lint": {"own"}})
+	assert.Equal(t, map[string]Script{"build": {"space"}, "lint": {"own"}}, merged)
+	assert.Equal(t, map[string]Script{"build": {"space"}}, base, "the base layer is left as it was")
+}
+
 // TestPackageConcurrencyValidation: the override is a weight — scalar or
 // [build, publish] pair, 0 and absence meaning 1 — validated for shape like
 // the top-level key but never defaulted to the CPU count.
@@ -786,8 +858,15 @@ func TestResolveFileSkipsPackageConfig(t *testing.T) {
 	assert.Equal(t, broken, resolvedRoot)
 }
 
-// TestPackagesKeyAmbiguous: one lowercased packages key matching two folders
-// differing only by case has no single package to configure.
+// TestPackagesKeyAmbiguous: two package folders differing only by case are
+// refused, and refused where they are found rather than where they are first
+// noticed to be ambiguous.
+//
+// Every name in dispat is matched case-insensitively — a packages entry, a
+// dependency endpoint, a --package filter, an autoVersion.only list — so a pair
+// like this has no lookup anywhere that could answer with one of them. It used
+// to be reported later, by the entry that could not choose between them, which
+// only said so when an entry happened to name them.
 func TestPackagesKeyAmbiguous(t *testing.T) {
 	cfg := validConfig()
 	cfg.Packages = map[string]PackageConfig{"core": {TagFormat: "v{version}"}}
@@ -802,7 +881,23 @@ func TestPackagesKeyAmbiguous(t *testing.T) {
 	}
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ambiguously")
+	assert.Contains(t, err.Error(), "package names must be unique, case included")
+	assert.Contains(t, err.Error(), `packages "Core" and "core"`,
+		"both spellings are named, or the reader sees one name colliding with itself")
+}
+
+// TestDiscoveryRefusesTwoSpacesSpellingOnePackage: the same rule across two
+// spaces, which is the other way a fold-colliding pair can arrive.
+func TestDiscoveryRefusesTwoSpacesSpellingOnePackage(t *testing.T) {
+	cfg := validConfig()
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/Core")
+	if entries, err := os.ReadDir(filepath.Join(root, "packages/apps")); err != nil || len(entries) != 1 {
+		t.Skip("case-insensitive filesystem")
+	}
+	_, err := discoverPackages(t, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "package names must be unique, case included")
+	assert.Contains(t, err.Error(), `exists in both space`)
 }
 
 // TestPackageOverrideCaseInsensitiveKey: dispat lowercases the packages map's

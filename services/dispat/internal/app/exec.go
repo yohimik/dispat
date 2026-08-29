@@ -382,9 +382,10 @@ func (a *App) lookupScript(name string, from Location, fallback bool) (public.Sc
 	if err != nil {
 		return nil, err
 	}
-	key := strings.ToLower(name) // the config's map keys arrive lowercased
+	// A map key holds the case its own file wrote, and the name here came from
+	// a command line, so the two are matched case-insensitively.
 	for _, l := range levels {
-		if cmds, ok := l.scripts[key]; ok {
+		if _, cmds, ok := public.FoldLookup(l.scripts, name); ok {
 			return cmds, nil
 		}
 	}

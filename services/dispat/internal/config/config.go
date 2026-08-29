@@ -184,14 +184,8 @@ type scriptScope struct {
 // merged, so its own map carries both of the lower two levels and this only
 // has to add the top one underneath.
 func packageScope(c *File, sc SpaceConfig) scriptScope {
-	scripts := make(map[string]Script, len(c.Scripts)+len(sc.Scripts))
-	for k, v := range c.Scripts {
-		scripts[k] = v
-	}
-	for k, v := range sc.Scripts {
-		scripts[k] = v
-	}
-	return scriptScope{scripts, "no scripts entry in the package, its space or the top level"}
+	return scriptScope{overlayScripts(c.Scripts, sc.Scripts),
+		"no scripts entry in the package, its space or the top level"}
 }
 
 // rootScope is the scope of the run hooks: they execute once at the
@@ -213,7 +207,7 @@ func (s scriptScope) commands(refs []string) []string {
 	}
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		if cmds, ok := s.scripts[strings.ToLower(ref)]; ok {
+		if _, cmds, ok := public.FoldLookup(s.scripts, ref); ok {
 			out = append(out, cmds...)
 		}
 	}
@@ -236,7 +230,7 @@ func (s scriptScope) check(refs map[string][]string, prefix string) error {
 			if ref == "" {
 				return fmt.Errorf("%s%s contains an empty script reference", prefix, field)
 			}
-			if _, ok := s.scripts[strings.ToLower(ref)]; !ok {
+			if _, _, ok := public.FoldLookup(s.scripts, ref); !ok {
 				return fmt.Errorf("%s%s references unknown script %q (%s)", prefix, field, ref, s.hint)
 			}
 		}
@@ -734,7 +728,13 @@ func resolveParser(p *public.ParserConfig) (ccme.Config, error) {
 			if !ok {
 				return cfg, fmt.Errorf("parser: types[%q]: unknown bump %q (want none, patch, minor or major)", name, raw)
 			}
-			cfg.Types[name] = bump
+			// The parser matches a commit's type byte for byte, and a commit
+			// writes its type in lower case, so the table it is handed is keyed
+			// that way whatever the config file capitalised. The config's own
+			// map keeps the spelling its author chose; this is the one place the
+			// two meet, and folding here is what keeps `types: {Feat: minor}`
+			// a rule about `feat:` commits.
+			cfg.Types[strings.ToLower(name)] = bump
 		}
 	}
 	if p.Propagation.Bump != "" {
@@ -1274,9 +1274,14 @@ func resolveAutoVersion(scope scriptScope, av *public.AutoVersionConfig) *model.
 	}
 	var only map[string]bool
 	if len(av.Only) > 0 {
+		// Folded, like every other selector: the list is written in a config
+		// file and held against package names that come from folders, and the
+		// two are not asked to agree on capitals. Discovery has already refused
+		// two packages whose names fold together, so one entry means one
+		// package.
 		only = make(map[string]bool, len(av.Only))
 		for _, name := range av.Only {
-			only[name] = true
+			only[strings.ToLower(name)] = true
 		}
 	}
 	manifests := model.ScopeRoot

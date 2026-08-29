@@ -27,9 +27,14 @@ type discovery struct {
 	declared []DeclaredDependency
 	pkgs     []*model.Package
 	// owner maps a package name onto the space that holds it, "" for a
-	// standalone one. It doubles as the uniqueness check and as the set every
-	// name reference is resolved against once discovery is done.
-	owner      map[string]string
+	// standalone one. It is the set every name reference is resolved against
+	// once discovery is done.
+	owner map[string]string
+	// ownerFold indexes the same names by their folded form, which is what
+	// makes a reference match a package however either is spelled, and what
+	// refuses two packages whose names differ only by case: one such pair
+	// would give every fold-matched lookup in dispat two answers.
+	ownerFold  map[string]string   // folded name -> the name as it was discovered
 	consumed   map[string][]string // top-level packages key -> matching folders
 	excluded   []excludedDir
 	baseIgnore ignore.Chain
@@ -98,6 +103,7 @@ func newDiscovery(c *File, root string) (*discovery, error) {
 		// list in discovery order.
 		declared:     collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
 		owner:        make(map[string]string),
+		ownerFold:    make(map[string]string),
 		consumed:     make(map[string][]string),
 		baseIgnore:   appendLayer(nil, rootIgnore),
 		spaceConfigs: make(map[string]SpaceConfig, len(c.Spaces)),
@@ -248,9 +254,11 @@ func (d *discovery) scanSpace(sn string) error {
 	if err != nil {
 		return err
 	}
-	// Which configured path each package came from, for the collision message
-	// two folders of one space would otherwise leave to the cross-space one.
-	foundIn := make(map[string]string)
+	// Which configured path each package came from, and how it was spelled
+	// there, for the collision message two folders of one space would otherwise
+	// leave to the cross-space one. Keyed by the folded name, like every other
+	// index of package names.
+	foundIn := make(map[string]foundFolder)
 	for pi, dir := range s.dirs {
 		exclude, err := loadExclude(dir)
 		if err != nil {
@@ -269,18 +277,20 @@ func (d *discovery) scanSpace(sn string) error {
 				s.excluded = append(s.excluded, excludedDir{sn, name})
 				continue
 			}
-			if prevPath, dup := foundIn[name]; dup {
+			fold := strings.ToLower(name)
+			if prev, dup := foundIn[fold]; dup {
 				return fmt.Errorf(
-					"config: package %q exists in two folders of space %q (%s and %s); package names must be unique",
-					name, sn, prevPath, s.sc.Path[pi])
+					"config: %s exists in two folders of space %q (%s and %s); package names must be unique, case included",
+					bothNames(prev.name, name), sn, prev.path, s.sc.Path[pi])
 			}
-			if prev, dup := d.owner[name]; dup {
+			if prev, dup := d.ownerFold[fold]; dup {
 				return fmt.Errorf(
-					"config: package %q exists in both space %q and space %q; package names must be unique",
-					name, prev, sn)
+					"config: %s exists in both space %q and space %q; package names must be unique, case included",
+					bothNames(prev, name), d.owner[prev], sn)
 			}
 			d.owner[name] = sn
-			foundIn[name] = s.sc.Path[pi]
+			d.ownerFold[fold] = name
+			foundIn[fold] = foundFolder{name: name, path: s.sc.Path[pi]}
 			pkg, err := d.spacePackage(s, pi, name)
 			if err != nil {
 				return err
@@ -312,6 +322,20 @@ func (d *discovery) scanSpace(sn string) error {
 	}
 	d.excluded = append(d.excluded, s.excluded...)
 	return nil
+}
+
+// foundFolder is one package folder a space has already claimed: how it was
+// spelled and which configured path it was found under.
+type foundFolder struct{ name, path string }
+
+// bothNames names the packages a collision involves: one when the two folders
+// agree on the spelling, both when they differ only by case, so the reader is
+// never told two identical-looking names collide without being shown why.
+func bothNames(previous, current string) string {
+	if previous == current {
+		return fmt.Sprintf("package %q", current)
+	}
+	return fmt.Sprintf("packages %q and %q", previous, current)
 }
 
 // spacePackage builds one package of a space: the space's own answers when
@@ -378,9 +402,11 @@ func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Pack
 // space, nearest last: the top-level `packages` entry, the space's own
 // `packages` entry, the space file's, and the file in the package folder.
 func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]overrideLayer, error) {
-	key := strings.ToLower(name)
 	var layers []overrideLayer
-	if entryPO, ok := d.c.Package(name); ok {
+	// Each layer is recorded, and written back to, under the key its own file
+	// wrote: an entry spelled `MyLib` is consumed as `MyLib`, named that way in
+	// its errors, and edited there by `dispat compute --write`.
+	if key, entryPO, ok := d.c.PackageEntry(name); ok {
 		if entryPO.Path != "" {
 			return nil, fmt.Errorf(
 				"config: packages[%q]: package %q belongs to space %q, its location is the space folder, so path cannot be set",
@@ -390,13 +416,13 @@ func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]over
 		layers = append(layers, overrideLayer{entryPO, label,
 			DepSource{KeyPath: []string{"packages", key, "dependencies"}}})
 	}
-	if spacePO, ok := s.sc.Package(name); ok {
+	if key, spacePO, ok := s.sc.PackageEntry(name); ok {
 		s.spaceConsumed[key] = append(s.spaceConsumed[key], name)
 		layers = append(layers, overrideLayer{spacePO, label + ": the space's packages entry",
 			DepSource{KeyPath: []string{"spaces", s.name, "packages", key, "dependencies"}}})
 	}
 	for i, f := range s.files {
-		filePO, ok := f.Package(name)
+		key, filePO, ok := f.PackageEntry(name)
 		if !ok {
 			continue
 		}
@@ -448,6 +474,7 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 		return nil, fmt.Errorf("config: %s: path %q is not a folder", label, po.Path)
 	}
 	d.owner[key] = ""
+	d.ownerFold[strings.ToLower(key)] = key
 	pkg := &model.Package{
 		Name:          key,
 		Dir:           dir,
@@ -534,7 +561,7 @@ func (d *discovery) checkAutoVersionOnly(spaceNames []string) error {
 			continue
 		}
 		for _, name := range av.Only {
-			if _, ok := d.owner[name]; !ok {
+			if _, ok := d.ownerFold[strings.ToLower(name)]; !ok {
 				return fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
 			}
 		}
@@ -544,7 +571,7 @@ func (d *discovery) checkAutoVersionOnly(spaceNames []string) error {
 			continue
 		}
 		for _, name := range chk.av.Only {
-			if _, ok := d.owner[name]; !ok {
+			if _, ok := d.ownerFold[strings.ToLower(name)]; !ok {
 				return fmt.Errorf("config: %s: autoVersion.only: unknown package %q", chk.label, name)
 			}
 		}

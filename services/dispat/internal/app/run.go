@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	public "github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -159,9 +161,8 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 			return true
 		}
 	}
-	key := strings.ToLower(name)
 	for _, po := range a.cfg.Packages {
-		if _, ok := po.Scripts[key]; ok {
+		if _, _, ok := public.FoldLookup(po.Scripts, name); ok {
 			return true
 		}
 	}
@@ -182,7 +183,7 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 		return false
 	}
 	for _, p := range pkgs {
-		if _, ok := p.Space.Scripts[key]; ok {
+		if _, ok := p.Space.Script(name); ok {
 			return true
 		}
 	}
@@ -227,7 +228,7 @@ func (w *scriptWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 	// The one resolution: the package's own scripts over its space's over the
 	// top level's, already merged into the effective map when the package's
 	// space was built.
-	cmds, ok := rel.Pkg.Space.Scripts[strings.ToLower(w.name)]
+	cmds, ok := rel.Pkg.Space.Script(w.name)
 	if !ok {
 		w.app.log.Debug().Str("package", pkg).Str("space", rel.Pkg.Space.Name).
 			Msgf("package does not define script %q, skipping", w.name)

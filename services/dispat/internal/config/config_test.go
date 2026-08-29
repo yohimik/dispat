@@ -1523,6 +1523,26 @@ func TestAutoVersionResolution(t *testing.T) {
 		assert.Equal(t, map[string]bool{"core": true}, av.Only)
 	})
 
+	t.Run("only_matches_a_package_whichever_case", func(t *testing.T) {
+		// The list is written in a config file and held against names that come
+		// from folders, so it folds like every other selector. It is checked
+		// against the discovered packages here and consulted per declaration in
+		// the version stage, and both ends have to fold or a name that passed
+		// validation would rewrite nothing.
+		cfg := minimalConfig()
+		libs := cfg.Spaces["libs"]
+		libs.AutoVersion = &AutoVersionConfig{Manifests: "all", Only: []string{"CoRe"}}
+		cfg.Spaces["libs"] = libs
+		root := writeModelRepo(t, cfg, "pkgs/core")
+		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+		require.NoError(t, err)
+		pkgs, _, _, err := Discover(loaded, root)
+		require.NoError(t, err, "a name spelled another way is not an unknown package")
+		require.NotNil(t, pkgs[0].Space.AutoVersion)
+		assert.Equal(t, map[string]bool{"core": true}, pkgs[0].Space.AutoVersion.Only,
+			"the set is folded, so the version stage's own lookup can fold too")
+	})
+
 	t.Run("disabled_block_is_inert", func(t *testing.T) {
 		// enabled:false yields no AutoVersion at all — and its `only` list is
 		// not validated, because a disabled block is dormant configuration.
