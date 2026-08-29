@@ -33,8 +33,9 @@ import (
 func TestVersionFlag(t *testing.T) {
 	// --version answers before anything else — no config file is read, so it
 	// works outside a monorepo. The output is the terminal logo followed by
-	// the version line; the default "dev" marks a local build, releases
-	// override Version at build time from the release tag.
+	// the version line. Version itself is empty in a build nothing stamped,
+	// and selfupdate.Describe is what renders that as the "dev" of a local
+	// build; a release stamps the variable from the release tag.
 	platform := "(" + runtime.GOOS + "_" + runtime.GOARCH + ")"
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--version"}, &stdout, &stderr)
