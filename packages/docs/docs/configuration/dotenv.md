@@ -53,7 +53,8 @@ way a misspelled `--config` does. Asking for a file and silently getting nothing
 ## Dispat's own variables
 
 The file reaches the variables dispat reads for itself. You can set the GitHub token for
-[`github`](./records.md#github), `DISPAT_UPDATE_CHECK`, `DISPAT_UNSAFE_DISABLE_LOCK`, and any variable a record line or
+[`github`](./records.md#github), `DISPAT_UPDATE_CHECK`, `DISPAT_UNSAFE_DISABLE_LOCK`,
+[`DISPAT_BIN_DIR`](../cli/download.md#choosing-the-destination), and any variable a record line or
 an `env` value refers to with `$NAME`. Keeping `GITHUB_TOKEN` in `.env` instead of a shell profile works perfectly.
 
 The config's `env` object refuses keys starting with `DISPAT_`. A computed variable could never be shadowed anyway. The
