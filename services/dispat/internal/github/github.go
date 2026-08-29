@@ -61,6 +61,18 @@ const (
 	defaultRetryDelay = 500 * time.Millisecond
 	// maxRetryAfter caps how long a Retry-After header can hold a run hostage.
 	maxRetryAfter = 30 * time.Second
+	// draftLookupPages and draftLookupPerPage bound the draft search: three
+	// pages of a hundred releases, newest first. Deep enough that a draft a
+	// previous attempt left behind is found, shallow enough that the search
+	// costs a run less than the duplicate draft it prevents.
+	draftLookupPages   = 3
+	draftLookupPerPage = 100
+	// listMaxBody bounds a release listing, which is legitimately far larger
+	// than the error messages and single releases maxErrorBody was sized for:
+	// a page carries a hundred rendered release bodies. A listing beyond even
+	// this fails the release (the truncated JSON does not parse) rather than
+	// reading as "no draft yet", which is the safe direction.
+	listMaxBody = 8 << 20
 )
 
 // uploadClient carries no client-level timeout: an upload's deadline is the
@@ -83,8 +95,16 @@ type Releaser struct {
 	// AllPackages creates a release for every recorded package, even without
 	// the DISPAT_EXPORT_GITHUB export (which then only adds assets).
 	AllPackages bool
-	Format      changelog.Format
-	Client      *http.Client // default: 30s-timeout client
+	// Draft creates every release as a draft, for a human to publish after
+	// reading the rendered notes. A draft carries no tag ref until then, so
+	// it is invisible to everything that resolves a release by its tag —
+	// `dispat install`, self-update, the alias-tag chain — and invisible to
+	// the by-tag lookup this recorder itself skips on, which is why a draft
+	// releaser recognises its own earlier draft through the release listing
+	// instead (lookupDraft).
+	Draft  bool
+	Format changelog.Format
+	Client *http.Client // default: 30s-timeout client
 	// Log carries the skip notices and the invalid-attachment warnings. The
 	// zero value discards them.
 	Log zerolog.Logger
@@ -116,6 +136,10 @@ type releaseRequest struct {
 	// release. It is always sent: a graduation has to be able to clear the
 	// flag as well as set it.
 	Prerelease bool `json:"prerelease"`
+	// Draft holds the release back for a human to publish. Always sent, for
+	// the same reason as Prerelease: a repository that stops drafting has to
+	// be able to clear the flag as well as set it.
+	Draft bool `json:"draft"`
 }
 
 // endpoint joins a path onto the configured API base (DefaultAPIURL when
@@ -147,7 +171,11 @@ type apiCall struct {
 	// than a failure — a 404 from the tag probe means "no such release",
 	// which is exactly what the probe asked. do reports which one arrived.
 	TolerateStatus int
-	What           string
+	// MaxBody overrides maxErrorBody for a response that is legitimately
+	// bigger than an error message or one created release; 0 means the
+	// default bound.
+	MaxBody int64
+	What    string
 	// Timeout, when non-zero, bounds this one call through its context
 	// instead of the client's own timeout — how an upload gets a deadline
 	// sized to its asset.
@@ -245,7 +273,11 @@ func (r *Releaser) once(ctx context.Context, call apiCall, attempt int) ([]byte,
 	}
 	defer resp.Body.Close()
 	r.logCall(call, resp.StatusCode, attempt, start)
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	limit := call.MaxBody
+	if limit <= 0 {
+		limit = maxErrorBody
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		// A truncated success body would corrupt what the caller parses out
 		// of it (a created release's upload URL), so it fails the call even
@@ -323,7 +355,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		return err
 	case existing != nil:
 		r.Log.Warn().Str("code", plan.CodeGitHubReleaseExists).
-			Str("package", rel.Pkg.Name).Str("tag", tag).
+			Str("package", rel.Pkg.Name).Str("tag", tag).Bool("draft", existing.Draft).
 			Msg("github release already exists, skipped")
 		return r.reconcileAssets(ctx, existing, export, tag)
 	}
@@ -350,6 +382,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		Body:            body,
 		TargetCommitish: commitish,
 		Prerelease:      rel.IsPrerelease(),
+		Draft:           r.Draft,
 	})
 	if err != nil {
 		return fmt.Errorf("github: %w", err)
@@ -366,7 +399,15 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	if err != nil {
 		return err
 	}
-	r.Log.Info().Str("package", rel.Pkg.Name).Str("tag", tag).Msg("github release created")
+	r.Log.Info().Str("package", rel.Pkg.Name).Str("tag", tag).Bool("draft", r.Draft).
+		Msg("github release created")
+	if r.Draft {
+		// Said out loud, because the tag the release names does not exist as
+		// a ref until someone publishes it: an installer or a self-update
+		// pointed at that tag finds nothing in the meantime.
+		r.Log.Info().Str("package", rel.Pkg.Name).Str("tag", tag).
+			Msg("the release is a draft: it stays invisible at its tag until it is published")
+	}
 	paths := r.attachmentPaths(export, tag)
 	if len(paths) == 0 {
 		return nil
@@ -382,7 +423,12 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 // repository already carries: where assets go, and which ones arrived.
 type existingRelease struct {
 	UploadURL string `json:"upload_url"`
-	Assets    []struct {
+	// TagName and Draft are what a listing entry is recognised by: the by-tag
+	// endpoint was asked about one tag and needs neither, but the draft search
+	// reads every release the repository carries and has to pick its own.
+	TagName string `json:"tag_name"`
+	Draft   bool   `json:"draft"`
+	Assets  []struct {
 		Name  string `json:"name"`
 		State string `json:"state"`
 	} `json:"assets"`
@@ -406,6 +452,13 @@ func (r *Releaser) lookup(ctx context.Context, tag string) (*existingRelease, er
 		return nil, err
 	}
 	if status == http.StatusNotFound {
+		// A draft has no tag ref, so the by-tag endpoint answers 404 for one
+		// even when it is sitting in the repository. Only a releaser that
+		// creates drafts goes looking further: for everyone else this stays
+		// the single call it has always been.
+		if r.Draft {
+			return r.lookupDraft(ctx, tag)
+		}
 		return nil, nil
 	}
 	var release existingRelease
@@ -413,6 +466,52 @@ func (r *Releaser) lookup(ctx context.Context, tag string) (*existingRelease, er
 		return nil, fmt.Errorf("github: release %s: parsing lookup: %w", tag, err)
 	}
 	return &release, nil
+}
+
+// lookupDraft searches the repository's release listing for a draft carrying
+// tag, nil when there is none. It is how a re-run recognises the draft it
+// created last time, which the by-tag lookup cannot see.
+//
+// The listing is newest first, so the draft a previous attempt left behind is
+// on the first page unless the repository created draftLookupPerPage releases
+// since. draftLookupPages bounds the search rather than following the listing
+// to its end: an unbounded walk over a repository with thousands of releases
+// would cost a run more than the duplicate it prevents. A page short of full
+// is the last page, and stops the walk early.
+//
+// Anything but a 200 is a hard error, for the same reason a failed by-tag
+// lookup is: treating an unreadable listing as "no draft yet" would turn a
+// permissions problem into a second draft on every run.
+func (r *Releaser) lookupDraft(ctx context.Context, tag string) (*existingRelease, error) {
+	base := r.endpoint("/repos/" + r.Owner + "/" + r.Repo + "/releases")
+	for page := 1; page <= draftLookupPages; page++ {
+		data, _, err := r.do(ctx, apiCall{
+			Method:     http.MethodGet,
+			URL:        fmt.Sprintf("%s?per_page=%d&page=%d", base, draftLookupPerPage, page),
+			WantStatus: http.StatusOK,
+			MaxBody:    listMaxBody,
+			What:       "looking up draft release " + tag,
+			Retryable:  true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var releases []existingRelease
+		if err := json.Unmarshal(data, &releases); err != nil {
+			return nil, fmt.Errorf("github: release %s: parsing release listing: %w", tag, err)
+		}
+		for i := range releases {
+			if releases[i].Draft && releases[i].TagName == tag {
+				return &releases[i], nil
+			}
+		}
+		if len(releases) < draftLookupPerPage {
+			return nil, nil
+		}
+	}
+	r.Log.Debug().Str("tag", tag).Int("pages", draftLookupPages).
+		Msg("no draft found within the searched pages of the release listing")
+	return nil, nil
 }
 
 // reconcileAssets uploads whatever an existing release is missing of the

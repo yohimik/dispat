@@ -55,16 +55,22 @@ func releaseProbe(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// captureServer serves the two calls these tests care about — the tag probe
-// and the create-release POST — by decoding the payload and replying 201. It
-// is for the tests whose only interest is what the recorder sent; servers
-// that assert on paths, headers or uploads, or inject errors, stay bespoke
-// next to their tests.
+// captureServer serves the calls these tests care about — the tag probe, the
+// empty release listing a draft releaser searches, and the create-release
+// POST — by decoding the payload and replying 201. It is for the tests whose
+// only interest is what the recorder sent; servers that assert on paths,
+// headers or uploads, or inject errors, stay bespoke next to their tests.
 func captureServer(t *testing.T) (*httptest.Server, *releaseRequest) {
 	t.Helper()
 	got := &releaseRequest{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if releaseProbe(w, r) {
+			return
+		}
+		if isReleaseListing(r) {
+			// A repository carrying no drafts: nothing for the search to
+			// find, so the release goes on to be created.
+			_, _ = w.Write([]byte("[]"))
 			return
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(got))
@@ -799,6 +805,243 @@ func TestUploadContinuesPastAFailedAsset(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "asset rejected")
 	assert.Equal(t, []string{"bad.bin", "good.bin"}, uploads, "the sound asset is still uploaded")
+}
+
+// isReleaseListing reports whether a request is the paged release listing the
+// draft search reads — a GET of the collection itself, which the create POST
+// shares a path with and the by-tag probe does not.
+func isReleaseListing(r *http.Request) bool {
+	return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/releases")
+}
+
+// listingPage renders a page of the release listing: n drafts of some other
+// tag, with entry prepended when it is not empty. The filler entries exist to
+// make a page full, which is what tells the search to look at the next one.
+func listingPage(entry string, n int) string {
+	entries := make([]string, 0, n+1)
+	if entry != "" {
+		entries = append(entries, entry)
+	}
+	for range n {
+		entries = append(entries, `{"tag_name": "other@1.0.0", "draft": true}`)
+	}
+	return "[" + strings.Join(entries, ",") + "]"
+}
+
+// TestRecordCreatesDrafts: github.draft holds the release back for a human to
+// publish, and the log says so — the tag it names resolves to nothing until
+// then, so an operator watching the run must not read "created" as "out".
+func TestRecordCreatesDrafts(t *testing.T) {
+	srv, gotBody := captureServer(t)
+
+	var logs strings.Builder
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Draft: true, Log: zerolog.New(&logs)}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+
+	assert.True(t, gotBody.Draft, "the release is created as a draft")
+	assert.Contains(t, logs.String(), `"draft":true`, "the create line carries the flag")
+	assert.Contains(t, logs.String(), "invisible at its tag")
+}
+
+// TestRecordSendsDraftFalse: the flag is always in the payload, never elided
+// by an omitempty — a repository that stops drafting has to be able to clear
+// it on a release re-created after the draft was deleted.
+func TestRecordSendsDraftFalse(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&raw))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+
+	value, ok := raw["draft"]
+	require.True(t, ok, "the key is sent even when false")
+	assert.Equal(t, false, value)
+}
+
+// TestRecordDoesNotListReleasesWithoutDrafts: a releaser that publishes
+// straight away makes exactly the calls it always made. The draft search
+// costs an extra GET per release, and nobody who is not drafting pays it.
+func TestRecordDoesNotListReleasesWithoutDrafts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isReleaseListing(r) {
+			t.Errorf("the release listing was read without github.draft: %s", r.URL)
+		}
+		if releaseProbe(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client()}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+}
+
+// TestRecordSkipsAnExistingDraft: the by-tag lookup cannot see a draft (it
+// has no tag ref), so without the listing search every re-run would create
+// another one. Found, it is the same W224 skip as a published release, and
+// its assets are reconciled — that is how a half-uploaded draft heals.
+func TestRecordSkipsAnExistingDraft(t *testing.T) {
+	dir := t.TempDir()
+	asset := filepath.Join(dir, "b.bin")
+	require.NoError(t, os.WriteFile(asset, []byte("b"), 0o644))
+
+	var created int
+	var uploads []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case releaseProbe(w, r):
+		case isReleaseListing(r):
+			_, _ = w.Write([]byte(listingPage(`{"tag_name": "core@1.3.0", "draft": true,
+				"upload_url": "`+srv.URL+`/uploads{?name,label}"}`, 0)))
+		case r.URL.Path == "/uploads":
+			uploads = append(uploads, r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusCreated)
+		default:
+			created++
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	defer srv.Close()
+
+	rel := testRelease()
+	rel.Outputs = []plan.Output{{Name: plan.GitHubExport, Value: asset}}
+
+	var logs strings.Builder
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Draft: true, Log: zerolog.New(&logs)}
+	require.NoError(t, r.Record(context.Background(), rel))
+
+	assert.Zero(t, created, "the draft is never created twice")
+	assert.Equal(t, []string{"b.bin"}, uploads, "the draft's missing asset still arrives")
+	assert.Contains(t, logs.String(), plan.CodeGitHubReleaseExists)
+	assert.Contains(t, logs.String(), `"draft":true`, "the skip names what it found")
+}
+
+// TestRecordCreatesPastForeignDrafts: the search matches on both halves of
+// what it is looking for. Another package's draft, and this tag's published
+// release listed alongside it, leave this release still to create.
+func TestRecordCreatesPastForeignDrafts(t *testing.T) {
+	var created int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case releaseProbe(w, r):
+		case isReleaseListing(r):
+			_, _ = w.Write([]byte(`[{"tag_name": "utils@2.0.0", "draft": true},
+				{"tag_name": "core@1.3.0", "draft": false}]`))
+		default:
+			created++
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Draft: true}
+	require.NoError(t, r.Record(context.Background(), testRelease()))
+	assert.Equal(t, 1, created, "neither listed release is this package's draft")
+}
+
+// TestLookupDraftWalksFullPagesOnly: a page short of full is the last one, so
+// the search stops there; full pages are followed to the documented cap and
+// no further, whether or not the draft turns up.
+func TestLookupDraftWalksFullPagesOnly(t *testing.T) {
+	cases := []struct {
+		name      string
+		perPage   int // entries the fake serves per page
+		match     string
+		wantPages []string
+		wantSkip  bool
+	}{
+		{"a short page ends the search", 2, "", []string{"1"}, false},
+		{"a full page leads to the next", draftLookupPerPage, "", []string{"1", "2", "3"}, false},
+		{"the draft is found on the last page", draftLookupPerPage, "3", []string{"1", "2", "3"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var pages []string
+			var created int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case releaseProbe(w, r):
+				case isReleaseListing(r):
+					page := r.URL.Query().Get("page")
+					pages = append(pages, page)
+					entry := ""
+					if page == c.match {
+						entry = `{"tag_name": "core@1.3.0", "draft": true}`
+					}
+					_, _ = w.Write([]byte(listingPage(entry, c.perPage)))
+				default:
+					created++
+					w.WriteHeader(http.StatusCreated)
+				}
+			}))
+			defer srv.Close()
+
+			r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn",
+				Client: srv.Client(), Draft: true}
+			require.NoError(t, r.Record(context.Background(), testRelease()))
+
+			assert.Equal(t, c.wantPages, pages)
+			if c.wantSkip {
+				assert.Zero(t, created, "the draft that was found is not created again")
+			} else {
+				assert.Equal(t, 1, created, "no draft was found, so the release is created")
+			}
+		})
+	}
+}
+
+// TestRecordDraftListingFailureIsAnError: an unreadable listing must not read
+// as "no draft yet" — that would turn a permissions problem into a second
+// draft on every run, which is exactly what the search exists to prevent.
+func TestRecordDraftListingFailureIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
+		require.True(t, isReleaseListing(r), "nothing is created past a failed listing")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible"}`))
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Draft: true}
+	err := r.Record(context.Background(), testRelease())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "looking up draft release core@1.3.0")
+	assert.Contains(t, err.Error(), "403")
+}
+
+// TestRecordDraftListingGarbageIsAnError: a listing that does not parse is a
+// failure for the same reason, truncation included — the response bound is
+// generous, but a listing past it fails the release instead of duplicating
+// its draft.
+func TestRecordDraftListingGarbageIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if releaseProbe(w, r) {
+			return
+		}
+		_, _ = w.Write([]byte(`[{"tag_name": "core@1.3.0", "dra`))
+	}))
+	defer srv.Close()
+
+	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+		Draft: true}
+	err := r.Record(context.Background(), testRelease())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing release listing")
 }
 
 // TestUploadTimeoutScalesWithTheAsset: the floor covers any small file, and a
