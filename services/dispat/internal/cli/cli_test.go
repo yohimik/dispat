@@ -90,7 +90,7 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 		},
 		"github": {
 			args: []string{"github", "--help"}, usage: "usage: dispat github [flags]",
-			has:    []string{"--owner", "--repo", "--api-url", "--token-env", "--target"},
+			has:    []string{"--owner", "--repo", "--api-url", "--token-env", "--target", "--draft"},
 			hasNot: []string{"--tag", "--file"},
 		},
 		"autowriter": {

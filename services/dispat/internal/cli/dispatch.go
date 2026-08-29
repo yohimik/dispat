@@ -797,10 +797,17 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 			return 1
 		}
 	case cmdGithub:
-		if a.GitHub(ctx, app.GitHubOptions{Window: window, OnError: *o.onError,
+		ghOpts := app.GitHubOptions{Window: window, OnError: *o.onError,
 			Owner: *o.ghOwner, Repo: *o.ghRepo,
 			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget,
-			ReleaseName: *o.releaseName, Authors: o.authorOptions()}) != nil {
+			ReleaseName: *o.releaseName, Authors: o.authorOptions()}
+		// Only a flag actually passed overrides the configured policy: the
+		// default of a bool flag says nothing about what the configuration
+		// holds, and --draft=false has to be able to mean it.
+		if r.fs.Changed("draft") {
+			ghOpts.Draft = o.ghDraft
+		}
+		if a.GitHub(ctx, ghOpts) != nil {
 			return 1
 		}
 	case cmdTrigger:

@@ -262,8 +262,13 @@ the end of the run. A release the repository already carries is skipped
 
 Meant for a stage script: the opt-in and the files to attach are read from
 DISPAT_EXPORT_GITHUB in the environment the stage handed the command, and
-github.allPackages is the configuration-level opt-in for everything else.`,
-		flags: append([]string{"owner", "repo", "api-url", "token-env", "target", "release-name",
+github.allPackages is the configuration-level opt-in for everything else.
+
+--draft overrides github.draft: the release is created for a human to
+publish, and carries no tag ref until they do, so nothing that resolves a
+release by its tag sees it meanwhile. --draft=false publishes straight
+away over a configured draft.`,
+		flags: append([]string{"owner", "repo", "api-url", "token-env", "target", "draft", "release-name",
 			"authors", "authors-format", "authors-commits", "authors-include",
 			"authors-exclude", "authors-title"}, windowFlags...),
 	},

@@ -54,6 +54,7 @@ type options struct {
 
 	// github
 	ghOwner, ghRepo, ghAPIURL, ghTokenEnv, ghTarget *string
+	ghDraft                                         *bool
 
 	// changelog
 	clFile, clFileTitle, clDateFormat *string
@@ -185,6 +186,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override the github.tokenEnv variable the token is read from")
 	o.ghTarget = fs.String("target", "",
 		"create the tag at this commit or branch (target_commitish); only safe once the commit is on the remote")
+	o.ghDraft = fs.Bool("draft", false,
+		"override github.draft: create the release as a draft for a human to publish (--draft=false publishes it)")
 	o.clFile = fs.StringP("file", "f", "",
 		"changelog: override the changelog.file name; if: the leading condition holds when this path exists and is a regular file")
 	o.clFileTitle = fs.String("file-title", "",
