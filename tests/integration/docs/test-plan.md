@@ -133,6 +133,11 @@ does what.
     take it back: a tag (E220), a tag at a foreign commit (E221), a record (E222), the release commit (E223) and the
     push (E224) each failing there, plus the alias tag (W232) that deliberately is not one of them. None of them fails
     a package or stops the run; each is recorded and the run finishes what else it owed.
+46. **Draft GitHub releases** (`draft_test.go`): `github.draft` and the `--draft` flag that overrides it either way.
+    What is pinned here is the half a draft makes hard: a draft carries no tag ref, so GitHub's by-tag lookup cannot
+    see one, and the re-run skip every other release relies on has to come from the release listing instead. The fake
+    keeps drafts apart from published releases for exactly that reason, which is what makes the skip, and the flip
+    that abandons a stale draft rather than searching for it, claims about behaviour rather than about the fixture.
 17. **The `init` and `preview` commands** (`commands_test.go`): the starter config the very next `status` can load, the
     pending release notes on stdout, and the CLI surface itself (per-command `--help`, the platform in `--version`).
 18. **The `dispat run` command** (`run_test.go`): a script executed inside changed packages over the dependency graph
@@ -325,6 +330,7 @@ tests/integration/
 
   the commands
   records_test.go           goal 16
+  draft_test.go             goal 46
   commands_test.go          goal 17
   run_test.go               goal 18
   standalone_test.go        goal 19
@@ -655,6 +661,14 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRecordsForceRewritesAnUnreachableTag` | A tag on a commit this branch cannot reach is invisible to the planner, so it records nothing dispat can plan around: with force on (the default) the write succeeds and the tag names this release. Force means "do not fail because the ref exists", not "overwrite whatever is there". |
 | `TestRecordsPushForceReplacesExistingRemoteTags` | A tag the remote already carries is overwritten rather than skipped forever, closing the window between the check and the push and giving a moving tag its only way to move. The replacement is reported, not silent. |
 | `TestRecordsTagFailureDoesNotUnpublishTheRelease` | The post-publish failure model end to end: the run publishes, says so, refuses to move a tag sitting at a foreign commit, carries on through the packages after it, and exits non-zero, without ever calling the published package failed. |
+
+### Goal 46: draft GitHub releases (`draft_test.go`)
+
+| Test | Claim proven |
+|------|--------------|
+| `TestDraftReleasesWaitForAHumanToPublish` | `github.draft` creates the release as a draft, and every later pass over it skips (W224) instead of leaving a second draft: the by-tag lookup cannot see a draft, so the skip is the release listing's answer, end to end through the binary. |
+| `TestDraftFlagHoldsBackAndTheFlipAbandonsTheDraft` | `--draft` drafts a release the configuration would have published; turning drafting off again creates the published release beside the stale draft rather than searching for it, which is what keeps the calls of everybody who does not draft exactly as they were. |
+| `TestDraftFlagPublishesOverAConfiguredDraft` | `--draft=false` publishes over `github.draft`, and the release it created is what the run's own drafting recorder finds through the ordinary by-tag lookup. |
 
 ### Goal 17: the `init` and `preview` commands (`commands_test.go`)
 

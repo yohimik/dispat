@@ -151,38 +151,55 @@ func githubTagProbe(w http.ResponseWriter, req *http.Request, published map[stri
 	return true
 }
 
-// githubFake serves the three calls the GitHub recorder makes — the upfront
-// verification GET (200), the release lookup (404, nothing published yet)
-// and the create-release POST (201) — recording every POST body. Each test
-// decodes the bodies into whatever shape it asserts on, so one fake serves
-// tests with different views of the payload; the attachment test keeps its
-// own server (it also serves the upload endpoint).
+// githubFake serves the four calls the GitHub recorder makes — the upfront
+// verification GET (200), the release lookup (404, nothing published yet),
+// the release listing the draft search reads, and the create-release POST
+// (201) — recording every POST body. Each test decodes the bodies into
+// whatever shape it asserts on, so one fake serves tests with different views
+// of the payload; the attachment test keeps its own server (it also serves
+// the upload endpoint).
 //
 // Every created tag is remembered, so a second run over the same plan sees
-// the release it already made and skips it, exactly as GitHub would.
+// the release it already made and skips it, exactly as GitHub would. A draft
+// is remembered apart: GitHub creates no tag ref for one, so the by-tag
+// lookup keeps answering 404 and only the listing knows about it.
 func githubFake(t *testing.T) (srv *httptest.Server, bodies func() [][]byte) {
 	t.Helper()
 	var mu sync.Mutex
 	var recorded [][]byte
 	published := map[string]bool{}
+	var drafts []string
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		if githubTagProbe(w, req, published) {
 			return
 		}
-		switch req.Method {
-		case http.MethodGet: // upfront verification
+		switch {
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/releases"):
+			entries := make([]map[string]any, 0, len(drafts))
+			for _, tag := range drafts {
+				entries = append(entries, map[string]any{"tag_name": tag, "draft": true})
+			}
+			data, err := json.Marshal(entries)
+			require.NoError(t, err)
+			_, _ = w.Write(data)
+		case req.Method == http.MethodGet: // upfront verification
 			w.WriteHeader(http.StatusOK)
-		case http.MethodPost:
+		case req.Method == http.MethodPost:
 			data, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
 			recorded = append(recorded, data)
 			var created struct {
 				TagName string `json:"tag_name"`
+				Draft   bool   `json:"draft"`
 			}
 			if json.Unmarshal(data, &created) == nil && created.TagName != "" {
-				published[created.TagName] = true
+				if created.Draft {
+					drafts = append(drafts, created.TagName)
+				} else {
+					published[created.TagName] = true
+				}
 			}
 			w.WriteHeader(http.StatusCreated)
 		}
