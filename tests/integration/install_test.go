@@ -772,14 +772,15 @@ func TestInstallTracesTheDecisionsItMade(t *testing.T) {
 func TestInstallRefusesABadCommandLineBeforeAnyRequest(t *testing.T) {
 	r := newToolRepo(t)
 	for name, args := range map[string][]string{
-		"a URL naming only a host": {"install", "https://github.com/onlyowner"},
-		"no repository at all":     {"install"},
-		"two repositories":         {"install", "acme/tool", "acme/other"},
-		"a name that is a path":    {"install", "acme/tool", "--as", "../evil"},
-		"a rollback that installs": {"install", "acme/tool", "--rollback", "--release", "1.0.0"},
-		"a placeholder nobody has": {"install", "acme/tool", "--asset", "tool-{arch64}"},
-		"an owner beside the URL":  {"install", "acme/tool", "--owner", "other"},
-		"a repo beside the URL":    {"install", "acme/tool", "--repo", "other"},
+		"a URL naming only a host":  {"install", "https://github.com/onlyowner"},
+		"no repository at all":      {"install"},
+		"two repositories":          {"install", "acme/tool", "acme/other"},
+		"a name that is a path":     {"install", "acme/tool", "--as", "../evil"},
+		"a rollback that installs":  {"install", "acme/tool", "--rollback", "--release", "1.0.0"},
+		"a placeholder nobody has":  {"install", "acme/tool", "--asset", "tool-{arch64}"},
+		"an owner beside the URL":   {"install", "acme/tool", "--owner", "other"},
+		"a repo beside the URL":     {"install", "acme/tool", "--repo", "other"},
+		"a flag of another command": {"install", "acme/tool", "--tag", "1.2.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := len(r.requests())
@@ -790,6 +791,28 @@ func TestInstallRefusesABadCommandLineBeforeAnyRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstallNamesAFlagThatIsNotIts: the refusal a provisioning script's
+// author reads. `--tag 1.2.0` is the mistake anyone pinning a version makes —
+// --tag is commit's, and the value beside it used to become a second
+// repository, so install answered by complaining about an argument nobody
+// typed. The message must name the flag, say whose it is, and point at
+// install's own way of asking, all before a single request.
+func TestInstallNamesAFlagThatIsNotIts(t *testing.T) {
+	r := newToolRepo(t)
+	before := len(r.requests())
+
+	res := r.Command("install", "acme/tool", "--tag", "1.2.0", "--api-url", r.api, "--bin-dir", r.bin)
+	require.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	out := res.Stdout + res.Stderr
+	assert.Contains(t, out, "--tag is not an install flag")
+	assert.Contains(t, out, "dispat commit")
+	assert.Contains(t, out, "--release")
+	assert.NotContains(t, out, "install takes one repository",
+		"the flag is named, not the argument the mis-parse invented")
+	assert.Equal(t, before, len(r.requests()), "and nothing was asked")
+	assert.NoFileExists(t, r.installed())
 }
 
 // TestInstallCommandWordKeepsItsScript: every command word permanently

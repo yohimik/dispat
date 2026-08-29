@@ -862,7 +862,8 @@ tool is a script that reports its own version, so every claim about which file l
 | `TestInstallKeepsTheTokenAwayFromAnotherHost` | The endpoint comes from an argument rather than from a flag set on purpose, so a URL naming another host is not enough to make dispat hand it the `GITHUB_TOKEN` in the environment; `--token-env` is how a token is sent deliberately. |
 | `TestInstallEventsReachTheJSONStream` | The `install check` and `tool installed` events carry the repository, the tag, the asset and the destination, so a job that provisions a runner records what it installed without scraping stdout. |
 | `TestInstallTracesTheDecisionsItMade` | Each of the choices a download makes is traced at debug level, which is what answers "why did it install that" after the fact. |
-| `TestInstallRefusesABadCommandLineBeforeAnyRequest` | Every usage mistake is decided by the flags alone and costs the fake no question at all, a URL naming only a host among them, which used to read as the owner and send the request somewhere nobody asked for. |
+| `TestInstallRefusesABadCommandLineBeforeAnyRequest` | Every usage mistake is decided by the flags alone and costs the fake no question at all, a URL naming only a host among them, which used to read as the owner and send the request somewhere nobody asked for, and a flag belonging to another command. |
+| `TestInstallNamesAFlagThatIsNotIts` | `--tag 1.2.0` is the mistake anyone pinning a version makes, and used to read as commit's boolean `--tag` with `1.2.0` becoming a second repository. The refusal names the flag, says whose it is, points at `--release`, and arrives before a single request. |
 | `TestInstallCommandWordKeepsItsScript` | Every command word permanently shadows a run script of the same name, and `install` is a name a repository might well have given one. The two-word spelling still reaches it. |
 
 ### Goal 23: the `compute` command (`compute_test.go`)
