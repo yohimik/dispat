@@ -779,6 +779,9 @@ func overlayGitHub(base, over *GitHubConfig) *GitHubConfig {
 	if over.AllPackages != nil {
 		out.AllPackages = over.AllPackages
 	}
+	if over.Draft != nil {
+		out.Draft = over.Draft
+	}
 	out.EntryFormatConfig = overlayFormat(out.EntryFormatConfig, over.EntryFormatConfig)
 	return &out
 }
@@ -870,6 +873,7 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 		Enabled:     gc.IsEnabled(),
 		Channels:    gc.RecordChannels(),
 		AllPackages: gc.AllPackagesEnabled(),
+		Draft:       gc.DraftEnabled(),
 		Owner:       gc.Owner,
 		Repo:        gc.Repo,
 		APIURL:      gc.APIURL,

@@ -190,6 +190,7 @@ func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
 		"enabled":     func(s *GitHubSpec) { s.Enabled = false },
 		"channels":    func(s *GitHubSpec) { s.Channels = []string{"stable"} },
 		"allPackages": func(s *GitHubSpec) { s.AllPackages = true },
+		"draft":       func(s *GitHubSpec) { s.Draft = true },
 		"owner":       func(s *GitHubSpec) { s.Owner = "other" },
 		"repo":        func(s *GitHubSpec) { s.Repo = "other" },
 		"apiUrl":      func(s *GitHubSpec) { s.APIURL = "https://ghe" },

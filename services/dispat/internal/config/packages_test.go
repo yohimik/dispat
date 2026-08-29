@@ -735,6 +735,26 @@ func TestPackageGitHubAllPackagesOverride(t *testing.T) {
 	assert.True(t, byName["utils"].GitHub.AllPackages, "the sibling keeps the repository policy")
 }
 
+// TestPackageGitHubDraftOverride: `github.draft` is a tri-state like
+// allPackages, so a package can hold its own releases back for review (or
+// opt out of a repository that holds every release back) while every other
+// field inherits.
+func TestPackageGitHubDraftOverride(t *testing.T) {
+	cfg := validConfig()
+	cfg.GitHub = &GitHubConfig{Owner: "acme", Repo: "mono", Draft: models.Bool(true)}
+	cfg.Packages = map[string]PackageConfig{
+		"core": {GitHub: &GitHubConfig{Draft: models.Bool(false)}},
+	}
+	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
+	pkgs, err := discoverPackages(t, root)
+	require.NoError(t, err)
+	byName := packagesByName(pkgs)
+
+	assert.False(t, byName["core"].GitHub.Draft, "the package publishes straight away")
+	assert.Equal(t, "acme", byName["core"].GitHub.Owner, "everything else still inherits")
+	assert.True(t, byName["utils"].GitHub.Draft, "the sibling keeps the repository policy")
+}
+
 // TestPackagesEntryEmptyKey: a nameless `packages` key configures nothing and
 // can match no folder, so it is rejected at load rather than silently ignored.
 func TestPackagesEntryEmptyKey(t *testing.T) {
@@ -901,13 +921,15 @@ func TestOverlayRecordFields(t *testing.T) {
 	assert.Equal(t, baseFormat, cl.EntryFormatConfig)
 
 	gh := overlayGitHub(
-		&GitHubConfig{Owner: "acme", Repo: "mono", APIURL: "https://ghe", TokenEnv: "T1"},
+		&GitHubConfig{Owner: "acme", Repo: "mono", APIURL: "https://ghe", TokenEnv: "T1",
+			Draft: models.Bool(true)},
 		&GitHubConfig{Repo: "other", APIURL: "https://ghe2", TokenEnv: "T2", Enabled: models.Bool(false)})
 	assert.Equal(t, "acme", gh.Owner)
 	assert.Equal(t, "other", gh.Repo)
 	assert.Equal(t, "https://ghe2", gh.APIURL)
 	assert.Equal(t, "T2", gh.TokenEnv)
 	assert.False(t, gh.IsEnabled())
+	assert.True(t, gh.DraftEnabled(), "an unset draft inherits the base policy")
 }
 
 // TestPackageOverrideScriptsUnion: scripts merge name by name across all

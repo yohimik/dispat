@@ -435,6 +435,11 @@ type GitHubConfig struct {
 	// when no script exported DISPAT_EXPORT_GITHUB (the export then only adds
 	// assets). Default false: the export stays the per-package opt-in.
 	AllPackages *bool `json:"allPackages,omitempty"`
+	// Draft creates every release as a draft, so a human publishes it after
+	// reading the rendered notes. Default false. A draft carries no tag ref
+	// until it is published, so nothing that looks a release up by its tag
+	// (dispat install, self-update, the alias-tag chain) sees it meanwhile.
+	Draft *bool `json:"draft,omitempty"`
 	// Channels restricts which releases get a GitHub release: "stable", "*"
 	// for any prerelease channel, or a channel name such as "beta", matched
 	// case-insensitively. An empty list creates a release for every release.
@@ -464,6 +469,12 @@ func (c *GitHubConfig) RecordChannels() []string {
 // release regardless of the DISPAT_EXPORT_GITHUB export. Nil-safe.
 func (c *GitHubConfig) AllPackagesEnabled() bool {
 	return c != nil && c.AllPackages != nil && *c.AllPackages
+}
+
+// DraftEnabled reports whether releases are created as drafts, left for a
+// human to publish. Nil-safe.
+func (c *GitHubConfig) DraftEnabled() bool {
+	return c != nil && c.Draft != nil && *c.Draft
 }
 
 // CommitConfig customises the finalize phase: a single release commit created

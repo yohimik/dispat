@@ -228,6 +228,7 @@ func gitHubFields(dst *GitHubConfig) fields {
 		"apiurl":      str(&dst.APIURL),
 		"tokenenv":    str(&dst.TokenEnv),
 		"allpackages": flagPtr(&dst.AllPackages),
+		"draft":       flagPtr(&dst.Draft),
 		"channels":    strs(&dst.Channels),
 	}, entryFormatFields(&dst.EntryFormatConfig))
 }

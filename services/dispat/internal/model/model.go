@@ -493,11 +493,15 @@ type GitHubSpec struct {
 	// AllPackages creates a release for every published package, even without
 	// the DISPAT_EXPORT_GITHUB export (which then only adds assets).
 	AllPackages bool
-	Owner       string
-	Repo        string
-	APIURL      string // empty means the public GitHub API
-	TokenEnv    string // empty means GITHUB_TOKEN
-	Format      RecordFormat
+	// Draft creates the release as a draft, left for a human to publish. A
+	// draft has no tag ref, so nothing that looks a release up by its tag
+	// sees it until it is published.
+	Draft    bool
+	Owner    string
+	Repo     string
+	APIURL   string // empty means the public GitHub API
+	TokenEnv string // empty means GITHUB_TOKEN
+	Format   RecordFormat
 }
 
 // Records reports whether a release on this policy is created at all, the
@@ -516,8 +520,8 @@ func (s GitHubSpec) Records(channel string) bool {
 // contain, so no two distinct policies can encode alike.
 func (s GitHubSpec) Key() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%t\x00%q\x00%t\x00%q\x00%q\x00%q\x00%q", s.Enabled, s.Channels, s.AllPackages,
-		s.Owner, s.Repo, s.APIURL, s.TokenEnv)
+	fmt.Fprintf(&b, "%t\x00%q\x00%t\x00%t\x00%q\x00%q\x00%q\x00%q", s.Enabled, s.Channels, s.AllPackages,
+		s.Draft, s.Owner, s.Repo, s.APIURL, s.TokenEnv)
 	s.Format.writeKey(&b)
 	return b.String()
 }

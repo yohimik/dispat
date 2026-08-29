@@ -331,6 +331,22 @@ func TestGitHubAllPackagesEnabled(t *testing.T) {
 	}
 }
 
+func TestGitHubDraftEnabled(t *testing.T) {
+	var nilCfg *GitHubConfig
+	if nilCfg.DraftEnabled() {
+		t.Error("nil config: disabled")
+	}
+	if (&GitHubConfig{}).DraftEnabled() {
+		t.Error("unset field: disabled")
+	}
+	if !(&GitHubConfig{Draft: Bool(true)}).DraftEnabled() {
+		t.Error("set true: enabled")
+	}
+	if (&GitHubConfig{Draft: Bool(false)}).DraftEnabled() {
+		t.Error("set false: disabled")
+	}
+}
+
 func TestSpaceFileRoundTrip(t *testing.T) {
 	// A space folder's config file marshals under the config keys and keeps
 	// its tri-state pointers, for the same reason a package override does: an
