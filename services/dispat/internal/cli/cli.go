@@ -173,6 +173,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 
+	// Then, before the arity checks: a flag belonging to another command. Its
+	// errors are the ones a mis-parsed flag hides behind, so naming the flag has
+	// to come first.
+	if code, done := r.refuseForeignFlags(); done {
+		return code
+	}
+
 	inv, badArgs := parseInvocation(fs.Args(), fs.ArgsLenAtDash(), r.usage, r.boot)
 	if badArgs {
 		return 2

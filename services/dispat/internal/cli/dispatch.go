@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/rs/zerolog"
@@ -104,6 +105,124 @@ func (r *runner) versionOrHelp() (int, bool) {
 		return 0, true
 	}
 	return 0, false
+}
+
+// refuseForeignFlags refuses a flag that belongs to another command.
+//
+// pflag knows one flag set, so every flag parses for every command word, and a
+// flag the command does not read used to be accepted and then ignored. That is
+// how `dispat install acme/tool --tag 1.2.0` came to mean commit's boolean
+// --tag with a stray `1.2.0` beside it, and to be reported as "install takes
+// one repository": the reader is told about the argument they did not type
+// instead of the flag they did. Refusing it here says which command owns the
+// flag, and the command line either means what it says or does not run.
+//
+// It runs after the version and the help, which must answer whatever else was
+// typed, and before the arity checks, whose errors are the ones the mistake
+// hides behind. The command's own list from the table is what it is measured
+// against, so the flags a command's help offers are exactly the flags it takes.
+func (r *runner) refuseForeignFlags() (int, bool) {
+	// Everything after `--` belongs to a script and was never parsed as a flag,
+	// so the command word is read from the positional arguments alone.
+	rest := r.fs.Args()
+	if dash := r.fs.ArgsLenAtDash(); dash >= 0 && dash <= len(rest) {
+		rest = rest[:dash]
+	}
+	cmd := commandWord(rest)
+	if cmd == "" {
+		cmd = cmdRelease // a bare `dispat` is a release
+	}
+	c, ok := lookupCommand(cmd)
+	if !ok {
+		// commandWord answers with a table entry or the run shorthand, so this
+		// is unreachable; refusing nothing is the safe reading of a word the
+		// table lost.
+		return 0, false
+	}
+	allowed := make(map[string]bool, len(c.flags)+len(globalFlags)+len(updateCheckFlags))
+	for _, list := range [][]string{c.flags, globalFlags, updateCheckFlags} {
+		for _, name := range list {
+			allowed[name] = true
+		}
+	}
+
+	// Visit walks the flags the caller actually set, in lexical order, so a
+	// command line with two foreign flags always reports them the same way
+	// round.
+	var foreign []*pflag.Flag
+	r.fs.Visit(func(f *pflag.Flag) {
+		if !allowed[f.Name] {
+			foreign = append(foreign, f)
+		}
+	})
+	if len(foreign) == 0 {
+		return 0, false
+	}
+	for _, f := range foreign {
+		r.boot.Error().Str("flag", "--"+f.Name).Str("command", cmd).Msg(foreignFlagRefusal(cmd, f.Name))
+	}
+	// One usage block for the command, however many flags were refused: the
+	// list of what it does take is the same answer to all of them.
+	r.usage(cmd)
+	return 2, true
+}
+
+// foreignFlagRefusal is what one refused flag is told: that it is not this
+// command's, whose it is, and where the answer the caller wanted lives.
+//
+// Naming the owner is the whole point — a flag typed on the wrong command is
+// almost always a flag remembered from the right one — so a handful of owners
+// are listed and a flag half the commands share is left to that command's own
+// help, which is shorter than reading nine command names.
+func foreignFlagRefusal(cmd, name string) string {
+	text := fmt.Sprintf("--%s is not %s %s flag", name, article(cmd), cmd)
+	owners := flagOwners(name)
+	if len(owners) == 0 || len(owners) > 3 {
+		text += fmt.Sprintf("; run dispat %s --help for its flags", cmd)
+	} else {
+		text += "; it belongs to " + namedCommands(owners)
+	}
+	if hint := foreignFlagHints[foreignFlag{cmd: cmd, flag: name}]; hint != "" {
+		text += hint
+	}
+	return text
+}
+
+// article is the one the command word takes. Seven of them begin with a vowel
+// (install, init, if, exec and the three auto- commands), and "not a install
+// flag" reads as a bug in the sentence rather than a mistake in the command
+// line.
+func article(word string) string {
+	if word != "" && strings.ContainsRune("aeiou", rune(word[0])) {
+		return "an"
+	}
+	return "a"
+}
+
+// namedCommands writes a short list of commands the way a sentence would.
+func namedCommands(names []string) string {
+	spelled := make([]string, len(names))
+	for i, n := range names {
+		spelled[i] = "dispat " + n
+	}
+	if len(spelled) == 1 {
+		return spelled[0]
+	}
+	return strings.Join(spelled[:len(spelled)-1], ", ") + " or " + spelled[len(spelled)-1]
+}
+
+// foreignFlag is one command and one flag it does not take.
+type foreignFlag struct{ cmd, flag string }
+
+// foreignFlagHints add what the owner alone does not say: where the answer the
+// caller was reaching for actually is on this command. Only the mistakes worth
+// anticipating are here — a hint for every pair would be a second command
+// table, and a wrong guess is worse than none.
+var foreignFlagHints = map[foreignFlag]string{
+	// The mistake the refusal was written for: --tag is commit's, and install's
+	// own way of asking for one version is --release.
+	{cmd: cmdInstall, flag: "tag"}:    "; pin a version with --release",
+	{cmd: cmdSelfUpdate, flag: "tag"}: "; pin a version with --release",
 }
 
 // validateFlags is everything the flags alone decide, before any config is

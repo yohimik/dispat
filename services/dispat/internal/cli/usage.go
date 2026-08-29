@@ -78,6 +78,16 @@ var helperFlags = []string{"on-failure", "in"}
 var globalFlags = []string{"root", "config", "env-file", "concurrency", "log-level", "log-format",
 	"quiet-parser", "version", "help"}
 
+// updateCheckFlags are read on every command without being any command's own:
+// the background update check asks dispat's repository about dispat, and these
+// four say where to ask (see updateSource). They are not rendered anywhere,
+// because --api-url on `dispat status` redirects that check rather than the
+// command, which is a detail of the check and not a flag of the command. They
+// are named here so the check's own reading is not refused as a foreign flag,
+// and here rather than in a file of its own because this is where "what may a
+// command be given" is written down.
+var updateCheckFlags = []string{"owner", "repo", "api-url", "token-env"}
+
 // commands is the table. Order is the order the command list prints in:
 // the everyday commands, then the step commands, then the manifest tools.
 var commands = []command{
@@ -503,6 +513,26 @@ func lookupCommand(name string) (command, bool) {
 		}
 	}
 	return command{}, false
+}
+
+// flagOwners names the commands whose help lists a flag, in table order.
+//
+// It is the command table read backwards, and deliberately so: the lists that
+// render the help are the same lists that decide which command a flag belongs
+// to, so a flag can never be documented for one command and accepted by
+// another. A flag no entry claims has no owner to name, which the drift guard
+// in cli_test.go makes impossible.
+func flagOwners(name string) []string {
+	var owners []string
+	for _, c := range commands {
+		for _, n := range c.flags {
+			if n == name {
+				owners = append(owners, c.name)
+				break
+			}
+		}
+	}
+	return owners
 }
 
 // flagBlock renders the named flags of the master set. Building a scratch

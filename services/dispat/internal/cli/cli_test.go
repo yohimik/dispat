@@ -12,6 +12,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -184,6 +186,206 @@ func TestEveryFlagIsClaimedByACommand(t *testing.T) {
 	for _, c := range commands {
 		for _, n := range append(append([]string{}, c.flags...), globalFlags...) {
 			assert.NotNil(t, fs.Lookup(n), "command %q names --%s, which is declared nowhere", c.name, n)
+		}
+	}
+}
+
+// foreignFlagMarker is the phrase one command's foreign-flag refusal contains.
+// It names the command, because "is not a" alone also opens "is not a git
+// repository root" and a paragraph of install's own help. The drift tests below
+// are the same assertion from either side: it must fire for a flag of another
+// command, and never for a flag the command's own help offers.
+func foreignFlagMarker(cmd string) string {
+	return "is not " + article(cmd) + " " + cmd + " flag"
+}
+
+// TestForeignFlagIsRefusedWithItsOwner: a flag belonging to another command is
+// a usage error naming the command that owns it, before the arity checks whose
+// errors it used to hide behind.
+func TestForeignFlagIsRefusedWithItsOwner(t *testing.T) {
+	root := t.TempDir()
+	for name, tc := range map[string]struct {
+		args        []string
+		has, hasNot []string
+	}{
+		"the mistake this was written for": {
+			// `--tag 1.2.0` used to set commit's boolean --tag and leave 1.2.0 a
+			// second positional, so install complained about an argument nobody
+			// typed. The flag is named now, and so is install's own way to pin.
+			args: []string{"install", "acme/tool", "--tag", "1.2.0"},
+			has: []string{"--tag is not an install flag", "it belongs to dispat commit",
+				"pin a version with --release"},
+			hasNot: []string{"install takes one repository"},
+		},
+		"two owners are both named": {
+			args: []string{"status", "--set-version", "1.0.0"},
+			has:  []string{"--set-version is not a status flag", "dispat autowriter or dispat writer"},
+		},
+		"one owner, on the run shorthand": {
+			args: []string{"lint", "--then", "echo hi"},
+			has:  []string{"--then is not a run flag", "it belongs to dispat if"},
+		},
+		"a flag half the commands share sends the reader to the help": {
+			args:   []string{"init", "--strict"},
+			has:    []string{"--strict is not an init flag", "run dispat init --help for its flags"},
+			hasNot: []string{"it belongs to"},
+		},
+		"a bare dispat is a release": {
+			args: []string{"--asset", "tool.tar.gz"},
+			has:  []string{"--asset is not a release flag", "it belongs to dispat install"},
+		},
+		"every offender is named once, and the usage once": {
+			args: []string{"preview", "--push", "--asset", "x"},
+			has:  []string{"--asset is not a preview flag", "--push is not a preview flag"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(append(tc.args, "--root", root), &stdout, &stderr)
+			require.Equal(t, 2, code, "stderr:\n%s", stderr.String())
+			out := stderr.String()
+			for _, want := range tc.has {
+				assert.Contains(t, out, want)
+			}
+			for _, unwanted := range tc.hasNot {
+				assert.NotContains(t, out, unwanted)
+			}
+			assert.Equal(t, 1, strings.Count(out, "usage: dispat"),
+				"one usage block answers however many flags were refused")
+		})
+	}
+}
+
+// TestForeignFlagRefusalStaysOutOfTheWay: the other side of the guard. It must
+// not reach a script's own arguments, must not answer before the help or the
+// version, and must not refuse the four flags the background update check reads
+// on every command.
+func TestForeignFlagRefusalStaysOutOfTheWay(t *testing.T) {
+	t.Setenv(updateCheckEnv, "0")
+	root := t.TempDir()
+	for name, tc := range map[string]struct {
+		args []string
+		cmd  string
+		code int
+	}{
+		// Everything after `--` is the script's, and pflag never parsed it as a
+		// flag: exit 1 is the missing config file, which proves the line parsed.
+		"a flag after the dash belongs to the script": {
+			args: []string{"run", "lint", "--root", root, "--", "--tag"}, cmd: cmdRun, code: 1,
+		},
+		// Help answers whatever else was typed, which is what makes it the way
+		// out of a refusal.
+		"--help still helps": {
+			args: []string{"install", "--tag", "--help"}, cmd: cmdInstall, code: 0,
+		},
+		"--version still answers": {
+			args: []string{"--version", "--api-url", "http://127.0.0.1:1"}, cmd: cmdRelease, code: 0,
+		},
+		// The four flags the background update check reads are nobody's command
+		// flags and are refused on none: --api-url points that check at another
+		// endpoint whatever is being run.
+		"the update check's flags": {
+			args: []string{"status", "--api-url", "http://127.0.0.1:1", "--root", root}, cmd: cmdStatus, code: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, tc.code, Run(tc.args, &stdout, &stderr), "stderr:\n%s", stderr.String())
+			assert.NotContains(t, stderr.String(), foreignFlagMarker(tc.cmd))
+		})
+	}
+}
+
+// TestEveryDocumentedFlagIsAccepted is the positive half of the drift guard: a
+// flag a command's help offers must reach that command. The command table
+// decides both, so the two can never disagree — but a flag moved between
+// entries, or a command reading one its entry does not list, would turn a
+// documented invocation into exit 2, and nothing else would notice.
+//
+// Only the refusal is asserted on. These invocations run for real against a
+// folder with no config file in it, so most of them fail for their own reasons;
+// what may never happen is failing because the flag was not the command's.
+func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
+	t.Setenv(updateCheckEnv, "0")
+	// The two commands that reach a releases API get a server that answers
+	// nothing, so no case here can leave the machine.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	root := t.TempDir()
+	absent := filepath.Join(root, "nothing.json") // never written: the writers fail reading it
+
+	// A minimal invocation of each command that gets as far as the refusal: the
+	// positional arguments it requires, and the flags without which it stops
+	// earlier for a reason of its own.
+	bases := map[string][]string{
+		cmdRelease:      {"release"},
+		cmdStatus:       {"status"},
+		cmdRun:          {"run", "lint"},
+		cmdInit:         {"init"},
+		cmdPreview:      {"preview"},
+		cmdChangelog:    {"changelog"},
+		cmdAutoversion:  {"autoversion"},
+		cmdAutowriter:   {"autowriter", "--set-version", "1.0.0"},
+		cmdAutoreplacer: {"autoreplacer", "--replace", "a=>b", "--files", "*"},
+		cmdCommit:       {"commit"},
+		cmdGithub:       {"github"},
+		cmdTrigger:      {"trigger", "deployed"},
+		cmdCompute:      {"compute"},
+		cmdIf:           {"if", "CI", "--then", "true"},
+		cmdExec:         {"exec", "build"},
+		cmdSelfUpdate:   {"self-update", "--api-url", srv.URL},
+		cmdInstall:      {"install", "acme/tool", "--api-url", srv.URL},
+		cmdScanner:      {"scanner"},
+		cmdWriter:       {"writer", absent, "--set-version", "1.0.0"},
+		cmdReplacer:     {"replacer", absent, "--replace", "a=>b"},
+	}
+	// The values a flag has to be given to parse, or to be validated rather
+	// than refused for its own reasons. Everything else takes a placeholder.
+	values := map[string]string{
+		"concurrency": "1",
+		"on-error":    "skip",
+		"manifests":   "root",
+		"env":         "static",
+		"for":         "root",
+		"script-from": "root",
+		"release":     "1.0.0",
+		"format":      "json",
+		"log-level":   "info",
+		"log-format":  "pretty",
+		"api-url":     srv.URL,
+		"root":        root,
+		"set":         "core=1.0.0",
+		"link":        "core=../core",
+		"replace":     "a=>b",
+	}
+
+	master := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	declareFlags(master)
+	for _, c := range commands {
+		base, ok := bases[c.name]
+		require.True(t, ok, "command %q has no base invocation here", c.name)
+		for _, name := range append(append([]string{}, c.flags...), globalFlags...) {
+			t.Run(c.name+" "+name, func(t *testing.T) {
+				f := master.Lookup(name)
+				require.NotNil(t, f)
+				arg := "--" + name
+				if f.Value.Type() != "bool" {
+					value, ok := values[name]
+					if !ok {
+						value = "x"
+					}
+					arg += "=" + value
+				}
+				args := append(append([]string{}, base...), "--root", root, arg)
+				var stdout, stderr bytes.Buffer
+				Run(args, &stdout, &stderr)
+				assert.NotContains(t, stderr.String(), foreignFlagMarker(c.name),
+					"a documented flag was refused: %v", args)
+				assert.NotContains(t, stderr.String(), "unknown flag",
+					"the case never reached the refusal: %v", args)
+			})
 		}
 	}
 }
