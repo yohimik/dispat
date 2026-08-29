@@ -100,6 +100,38 @@ already hold that exact file. Use `--force` to install anyway, which is how a da
 release that publishes no checksum cannot be compared, and dispat says so and installs, rather than guessing that your
 machine is up to date.
 
+## Install manifests as shell scripts
+
+The list of tools a machine needs is a shell script: one `dispat install` line per tool, run in order. No line takes a
+lock, reads a config file or touches a git repository, so the lines are independent of each other and of wherever the
+script runs.
+
+```sh
+#!/bin/sh
+set -e
+
+dispat install acme/tool --release 1.4.0 --asset 'tool-{os}-{arch}'
+dispat install jqlang/jq --release 1.7.1 --asset 'jq-{os}-{arch}'
+dispat install cli/cli --release 2.62.0 --asset 'gh_{version}_{os}_{arch}.tar.gz' --pipe 'tar -xz'
+```
+
+Pin every line with `--release`. A manifest whose versions float installs something different on each machine it runs
+on, which is the outcome a manifest exists to prevent.
+
+`set -e` belongs at the top, because every line either does its work or stops the file. Running the manifest again
+costs no transfer, since each line compares what is already installed against the checksum the release published, so a
+provisioning script may run on every boot. A mistake in the command line exits `2` before any request is made, and a
+flag belonging to another dispat command is one of those mistakes:
+
+```console
+$ dispat install acme/tool --tag 1.4.0
+ERR --tag is not an install flag; it belongs to dispat commit; pin a version with --release  command=install flag=--tag
+```
+
+Keep `--check` out of a manifest that runs under `set -e`. It exits `1` whenever the destination does not already hold
+that exact file, which is what makes it a gate and what would make it stop the script at the first tool that has
+something to install. Ask it in a CI gate of its own, and let the manifest install.
+
 ## Versions and tags
 
 `--release <version>` installs one named version, downgrades included. `--prerelease` considers the prereleases too,

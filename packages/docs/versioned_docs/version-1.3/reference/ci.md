@@ -78,7 +78,9 @@ jobs:
 ```
 
 Set up your stage scripts in steps before this one. If your scripts shell out to `node`, `go`, `cargo`, or `docker`,
-you must install those tools first. dispat itself needs only `git` and a POSIX shell.
+you must install those tools first. dispat itself needs only `git` and a POSIX shell. A runner that needs several of
+them can install them with dispat as well: a list of pinned `dispat install` lines is a shell script, and it is safe to
+run on every boot. See [Install manifests as shell scripts](../cli/install.md#install-manifests-as-shell-scripts).
 
 Grant `contents: write` even for a job that pushes nothing. The run claims the repository with a
 [release lock](../reference/releasing/release-lock.md) tag on the remote before it plans. This refuses a second job

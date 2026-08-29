@@ -74,7 +74,7 @@ dispat uses four exit codes:
 |------|---------|
 | `0` | Success. This includes a run where nothing had changed. |
 | `1` | A configuration or planning error, a refused release, or an interrupted run. This also covers runs where at least one package failed or a step failed after its release was already out. See [`commitErrors`](../configuration/parser.md#commiterrors) and the [release lock](./release.md#the-release-lock). |
-| `2` | A bad command line. |
+| `2` | A bad command line, including a flag that belongs to another command. |
 | `3` | `--require-release` was passed to `release` or `status` and the plan had nothing to release. |
 
 dispat refuses a release only *before* any of it happens, because once the first build script runs, nothing aborts the
