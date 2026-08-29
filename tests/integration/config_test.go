@@ -730,3 +730,93 @@ func TestConfigRefMissingFragmentIsNamed(t *testing.T) {
 	assert.Contains(t, res.Stderr, "cfg/spaces.json", "and what it pointed at")
 	assert.Contains(t, res.Stderr, "cannot read")
 }
+
+// TestConfigNamesKeepTheirCaseEndToEnd: the whole chain a name travels, for a
+// configuration that writes its names with capitals.
+//
+// A map key keeps the case its file wrote, and matching folds instead. That
+// makes the name the author chose the name everything downstream reports:
+// the package, its synthetic space, the tag it publishes under, the DISPAT_*
+// variables its scripts read, and the selectors that address it — from a
+// command line, from a commit scope, from an autoVersion.only list — all of
+// which may spell it any way at all.
+func TestConfigNamesKeepTheirCaseEndToEnd(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]models.Script{
+		"Build":   {"env > \"../../$DISPAT_PACKAGE.env\""},
+		"publish": {"echo publishing"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"Libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
+			Build: []string{"build"}, Publish: []string{"publish"}}},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"MyLib": {Path: "tools/mylib", Flow: &models.SpaceFlowConfig{Build: []string{"BUILD"}},
+			TagFormat: "{name}@{version}"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "Core")
+	r.WriteFile("tools/mylib/main.txt", "mylib\n")
+	r.Commit("feat(core,mylib): two packages spelled with capitals")
+
+	// A selector spelled another way still addresses the package, and the plan
+	// reports it under its own name.
+	res := r.Command("status", "--package", "mylib")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, res.Stdout, `"releasing":["MyLib"]`,
+		"the selection resolved to the package, reported under its own spelling")
+	assert.Contains(t, res.Stdout, `"package":"Core","space":"Libs"`,
+		"and the space is reported as the config spells it")
+
+	r.ReleaseOK()
+
+	// The tags carry the names the config wrote, not folded ones.
+	assert.True(t, r.HasTag("Core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.HasTag("MyLib@0.1.0"), "tags: %v", r.TagList())
+
+	// The environment a script runs with reports the same names. The build
+	// script is declared as `Build` and referenced as `build` and `BUILD`, so
+	// the flow entries resolved through the fold on their way here.
+	env, err := os.ReadFile(r.Path("Core.env"))
+	require.NoError(t, err, "the script's own $DISPAT_PACKAGE named the file")
+	text := string(env)
+	assert.Contains(t, text, "DISPAT_PACKAGE=Core")
+	assert.Contains(t, text, "DISPAT_SPACE=Libs")
+	assert.Contains(t, text, "DISPAT_WORKSPACE_MYLIB_NAME=MyLib",
+		"the workspace listing uppercases the variable name and keeps the package's own")
+
+	env, err = os.ReadFile(r.Path("MyLib.env"))
+	require.NoError(t, err)
+	assert.Contains(t, string(env), "DISPAT_PACKAGE=MyLib")
+	assert.Contains(t, string(env), "DISPAT_SPACE=MyLib", "a standalone package is its own space")
+	assert.Contains(t, string(env), "DISPAT_TAG=MyLib@0.1.0")
+
+	// A commit scope addresses it the same way.
+	r.CommitEmpty("fix(MYLIB): addressed by a third spelling")
+	r.ReleaseOK()
+	assert.True(t, r.HasTag("MyLib@0.1.1"), "tags: %v", r.TagList())
+	assert.False(t, r.HasTag("Core@0.1.1"), "and nothing else was dragged along")
+}
+
+// TestConfigRefusesTwoSpellingsOfOneName: the other half of the rule at the
+// process boundary. Two keys of one object that fold together have no lookup
+// that could choose between them, so the load says so and nothing runs.
+func TestConfigRefusesTwoSpellingsOfOneName(t *testing.T) {
+	r := harness.New(t)
+	// Two spellings of one script name cannot be authored through the typed
+	// model, which is a Go map: the raw JSON is the only way to write them.
+	r.WriteConfig(`{
+  "logLevel": "info",
+  "logFormat": "json",
+  "scripts": {"build": "echo one", "Build": "echo two"},
+  "spaces": {"libs": {"path": "packages", "flow": {"build": ["build"]}}}
+}`)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+
+	res := r.Release()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "collide case-insensitively")
+	assert.Empty(t, r.TagList(), "nothing ran")
+}

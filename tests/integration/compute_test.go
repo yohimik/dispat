@@ -539,3 +539,46 @@ func TestComputeRefusesAComposedKey(t *testing.T) {
 	assert.NoFileExists(t, r.Path("dispat.json.backup"))
 	assert.NoFileExists(t, r.Path("cfg", "deps.json.backup"))
 }
+
+// TestComputeEditsTheEntryTheAuthorSpelled: a `packages` entry keeps the case
+// its author wrote, and `dispat compute` has to name and edit that key rather
+// than a folded one it invented.
+//
+// The write is the load-bearing half. compute splices its edit into the file at
+// the key path discovery recorded, so a key path carrying "mylib" where the
+// file says "MyLib" would either edit nothing or add a second entry beside the
+// first — and a second entry that folds together with the first is a config
+// that no longer loads.
+func TestComputeEditsTheEntryTheAuthorSpelled(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
+	}
+	cfg.Packages = map[string]models.PackageConfig{
+		"MyLib": {Dependencies: models.Providers("ghost")},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "MyLib")
+	r.SeedPackage("packages", "ghost")
+	r.WriteFile("packages/MyLib/package.json", `{"name": "@acme/mylib"}`)
+	r.Commit("feat(mylib,ghost): bootstrap")
+
+	res := r.Command("compute")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, `packages["MyLib"]: dependencies[0]`,
+		"the listing names the entry the way the file spells it")
+
+	require.Equal(t, 0, r.Command("compute", "--write").Code)
+
+	after, err := os.ReadFile(r.Path("dispat.json"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(after), "ghost", "the stale edge is gone")
+	assert.Contains(t, string(after), `"MyLib"`, "and the entry keeps its own spelling")
+	assert.NotContains(t, string(after), `"mylib"`, "with no folded twin beside it")
+
+	// The edited config still loads, which is the proof no second entry was
+	// added: two keys that fold together are refused at load.
+	r.StatusOK()
+}
