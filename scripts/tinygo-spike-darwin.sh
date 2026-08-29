@@ -12,6 +12,15 @@
 # the spike can never drift apart and the instruments stay what they are
 # there: the spike's, not the repository's code.
 #
+# The self-update half of the matrix runs here too, against the same sufake
+# server, with one darwin difference the script probes rather than assumes:
+# Go's crypto/x509 consults SSL_CERT_FILE on unix and hands verification to
+# the platform verifier on darwin, so the CA a run generates may or may not be
+# trusted by an unmodified system. The script asks that question first,
+# records the answer, and reads the trusted rows against it. It never touches
+# the keychain: the rows that matter to the fork's TLS — a withheld CA and a
+# plaintext request — hold whichever way the answer goes.
+#
 # Toolchains are fetched on first use into a cache folder and reused after:
 # Go from go.dev, pinned below with its published checksums, and TinyGo from
 # the fork's GitHub release through `dispat install yohimik/tinygo` — the
@@ -149,13 +158,16 @@ work=$(mktemp -d) || die "mktemp failed"
 trap 'rm -rf "$work"' EXIT
 
 # The instruments, verbatim from Dockerfile.tinygo.
-mkdir "$work/netprobe" "$work/tlsreality"
+mkdir "$work/netprobe" "$work/tlsreality" "$work/sufake"
 sed -n '/^COPY --chown=gopher:gopher <<.PROBE. /,/^PROBE$/p' "$root/Dockerfile.tinygo" \
 	| sed '1d;$d' >"$work/netprobe/main.go"
 sed -n '/^COPY --chown=gopher:gopher <<.TLSREALITY. /,/^TLSREALITY$/p' "$root/Dockerfile.tinygo" \
 	| sed '1d;$d' >"$work/tlsreality/main.go"
+sed -n '/^COPY --chown=gopher:gopher <<.SUFAKE. /,/^SUFAKE$/p' "$root/Dockerfile.tinygo" \
+	| sed '1d;$d' >"$work/sufake/main.go"
 [ -s "$work/netprobe/main.go" ] || die "failed to extract the netprobe heredoc from Dockerfile.tinygo"
 [ -s "$work/tlsreality/main.go" ] || die "failed to extract the tlsreality heredoc from Dockerfile.tinygo"
+[ -s "$work/sufake/main.go" ] || die "failed to extract the sufake heredoc from Dockerfile.tinygo"
 
 log="$spike/darwin-net.log"
 : >"$log"
@@ -199,6 +211,140 @@ for arch in $runnable; do
 		cat "$work/reality.out" >>"$log"
 		echo "exit=$status" >>"$log"
 	done
+done
+cat "$log"
+
+# --- the self-update matrix (mirrors tinygo-spike-selfupdate) -----------------
+
+log="$spike/darwin-selfupdate.log"
+: >"$log"
+[ -z "$skipped" ] || echo "=== $skipped ===" >>"$log"
+fake="$out/sufake"
+ca="$work/sufake-ca.pem"
+su="$work/su"
+mkdir -p "$su"
+
+echo "=== sufake build (gc) ===" >>"$log"
+cd "$work/sufake"
+printf 'module sufake\n\ngo 1.24\n' >go.mod
+CGO_ENABLED=0 go build -o "$fake" . >>"$log" 2>&1
+echo "exit=$?" >>"$log"
+
+# The open point, asked before anything is read against it. Go consults
+# SSL_CERT_FILE on unix and hands verification to the platform verifier on
+# darwin, so a CA this script generates may be invisible to a trusted row.
+# The answer is recorded either way and never worked around: modifying the
+# keychain to make a test pass would be measuring the modification.
+echo "=== darwin trust: SSL_CERT_FILE honoured? ===" >>"$log"
+: >"$work/trust.out"
+"$fake" -addr 127.0.0.1:0 -ca "$ca" -asset "$out/gc-dispat-darwin-$host_arch" \
+	-asset-name "dispat-darwin-$host_arch" -version 1.1.0 >"$work/trust.out" 2>&1 &
+trust_pid=$!
+i=0
+until grep -q "sufake: ca" "$work/trust.out" || [ "$i" -ge 100 ]; do
+	i=$((i + 1))
+	sleep 0.1
+done
+trust_base=$(sed -n 's/^sufake: listening //p' "$work/trust.out" | head -n 1)
+if SSL_CERT_FILE="$ca" curl -fsS -o /dev/null "$trust_base/repos/o/r/releases" 2>>"$log"; then
+	ssl_cert_file=honoured
+else
+	ssl_cert_file=ignored
+fi
+kill "$trust_pid" 2>/dev/null
+wait "$trust_pid" 2>/dev/null
+cat "$work/trust.out" >>"$log"
+echo "SSL_CERT_FILE=$ssl_cert_file (curl is the reference client; Go on darwin uses the platform verifier)" >>"$log"
+
+# The four binaries the matrix moves between, per runnable arch.
+V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
+cd "$root/services/dispat"
+for arch in $runnable; do
+	for pair in tinygo:1.0.0 tinygo:1.1.0 gc:1.0.0 gc:1.1.0; do
+		toolchain="${pair%%:*}"
+		ver="${pair#*:}"
+		echo "=== $toolchain build dispat $ver darwin/$arch ===" >>"$log"
+		if [ "$toolchain" = tinygo ]; then
+			GOOS=darwin GOARCH="$arch" tinygo build -opt=z -no-debug \
+				-ldflags="-X $V=$ver" -o "$out/su-tinygo-$arch-$ver" . >>"$log" 2>&1
+		else
+			GOOS=darwin GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+				-ldflags "-s -w -X $V=$ver" -o "$out/su-gc-$arch-$ver" . >>"$log" 2>&1
+		fi
+		echo "exit=$?" >>"$log"
+	done
+done
+
+start_fake() {
+	: >"$work/sufake.out"
+	"$fake" -addr 127.0.0.1:0 -ca "$ca" -asset "$1" \
+		-asset-name "dispat-darwin-$2" -version 1.1.0 >"$work/sufake.out" 2>&1 &
+	fake_pid=$!
+	i=0
+	until grep -q "sufake: ca" "$work/sufake.out" || [ "$i" -ge 100 ]; do
+		i=$((i + 1))
+		sleep 0.1
+	done
+	base=$(sed -n 's/^sufake: listening //p' "$work/sufake.out" | head -n 1)
+}
+
+case_run() {
+	label="$1"
+	toolchain="$2"
+	arch="$3"
+	host="$4"
+	trust="$5"
+	scheme="$6"
+	shift 6
+	echo "=== $label ===" >>"$log"
+	rm -f "$su/dispat" "$su/dispat.backup"
+	cp "$out/su-$toolchain-$arch-1.0.0" "$su/dispat"
+	chmod 0755 "$su/dispat"
+	start_fake "$out/su-$toolchain-$arch-1.1.0" "$arch"
+	port=${base##*:}
+	if [ "$trust" = trusted ]; then
+		SSL_CERT_FILE="$ca" "$su/dispat" self-update \
+			--api-url "$scheme://$host:$port" --owner o --repo r "$@" >>"$log" 2>&1
+	else
+		"$su/dispat" self-update \
+			--api-url "$scheme://$host:$port" --owner o --repo r "$@" >>"$log" 2>&1
+	fi
+	echo "exit=$?" >>"$log"
+	kill "$fake_pid" 2>/dev/null
+	wait "$fake_pid" 2>/dev/null
+	cat "$work/sufake.out" >>"$log"
+	echo "--- exe: $("$su/dispat" --version 2>&1 | tr '\n' ' ')" >>"$log"
+	if [ -f "$su/dispat.backup" ]; then
+		echo "--- backup: $("$su/dispat.backup" --version 2>&1 | tr '\n' ' ')" >>"$log"
+	else
+		echo "--- backup: none" >>"$log"
+	fi
+}
+
+for arch in $runnable; do
+	echo "=== row zero: su-tinygo-$arch-1.0.0 --version ===" >>"$log"
+	"$out/su-tinygo-$arch-1.0.0" --version >>"$log" 2>&1
+	echo "exit=$?" >>"$log"
+
+	# The trusted rows. Read them against the SSL_CERT_FILE answer above: on a
+	# darwin where the platform verifier decides, a failure here is the
+	# verifier refusing an untrusted root, not the fork failing at TLS, and
+	# the two are told apart by comparing the gc control against the fork row.
+	case_run "A gc control darwin/$arch, CA offered, full update" gc "$arch" localhost trusted https
+	case_run "B fork --check darwin/$arch, CA offered" tinygo "$arch" localhost trusted https --check
+	case_run "B2 fork --check darwin/$arch by IP literal" tinygo "$arch" 127.0.0.1 trusted https --check
+	case_run "C fork full update darwin/$arch, CA offered" tinygo "$arch" localhost trusted https
+
+	echo "=== C2 fork --rollback darwin/$arch, sufake stopped ===" >>"$log"
+	"$su/dispat" self-update --rollback >>"$log" 2>&1
+	echo "exit=$?" >>"$log"
+	echo "--- exe: $("$su/dispat" --version 2>&1 | tr '\n' ' ')" >>"$log"
+
+	# The two verifier-independent rows. D must fail with a certificate error
+	# however darwin decides to trust, because the CA is withheld either way,
+	# and E must be refused by the TLS listener itself.
+	case_run "D fork full update darwin/$arch, CA withheld" tinygo "$arch" localhost untrusted https
+	case_run "E fork plaintext http at the TLS port darwin/$arch" tinygo "$arch" localhost trusted http --check
 done
 cat "$log"
 

@@ -19,7 +19,7 @@ exported by CI.
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
 | [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its scope argument    | The `--cache-from`/`--cache-to` flags for that build's cache scope, or nothing outside Actions. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
-| [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike — build, run and net probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`. |
+| [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike — build, run, net and self-update probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`, with `darwin-selfupdate.log` carrying the real-TLS update matrix and the platform verifier's answer about `SSL_CERT_FILE`. |
 
 Every gate and stage of this repository runs inside Docker, so a CI job needs Docker, git and dispat itself — no Go,
 Node or Terraform on the runner. The Go gates (vet, tests, gofmt, the coverage badge, the test report, `go mod tidy`)
