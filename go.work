@@ -2,6 +2,7 @@ go 1.26
 
 use (
 	pkg/ccme
+	pkg/config
 	pkg/manifest
 	pkg/models
 	pkg/scanner

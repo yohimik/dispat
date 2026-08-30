@@ -47,6 +47,7 @@ COPY --chown=gopher:gopher go.work go.work.sum ./
 # ccme, manifest and tools carry no go.sum: they have no module dependencies
 # to sum, and a COPY that names a file that does not exist fails the build.
 COPY --chown=gopher:gopher pkg/ccme/go.mod pkg/ccme/
+COPY --chown=gopher:gopher pkg/config/go.mod pkg/config/go.sum pkg/config/
 COPY --chown=gopher:gopher pkg/manifest/go.mod pkg/manifest/
 COPY --chown=gopher:gopher pkg/models/go.mod pkg/models/go.sum pkg/models/
 COPY --chown=gopher:gopher pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
