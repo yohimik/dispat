@@ -202,6 +202,7 @@ const sidebars: SidebarsConfig = {
       link: {type: 'doc', id: 'go/README'},
       items: [
         {type: 'doc', id: 'go/ccme', label: 'ccme'},
+        {type: 'doc', id: 'go/config', label: 'config'},
         {type: 'doc', id: 'go/scanner', label: 'scanner'},
         {type: 'doc', id: 'go/writer', label: 'writer'},
         {type: 'doc', id: 'go/manifest', label: 'manifest'},

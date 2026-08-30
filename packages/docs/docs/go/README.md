@@ -1,17 +1,18 @@
 # Go packages
 
-dispat is assembled from five Go modules, and you can import each one on its own. Parsing commit messages and rewriting
-dependency manifests are problems older than releases. These modules are packages first and dispat internals second, so
-none of them needs the CLI, a git repository, or a network.
+dispat is assembled from six Go modules, and you can import each one on its own. Parsing commit messages, reading
+configuration files and rewriting dependency manifests are problems older than releases. These modules are packages
+first and dispat internals second, so none of them needs the CLI, a git repository, or a network.
 
 Everything else the CLI does lives under `services/dispat/internal`. Go makes this unreachable from outside the module.
-The five packages below are the whole of the importable surface.
+The six packages below are the whole of the importable surface.
 
 ## The packages
 
 | Module | Import path | What it does |
 |--------|-------------|--------------|
 | [ccme](./ccme.md) | `github.com/yohimik/dispat/pkg/ccme` | Parses commit messages in the Conventional Commits Monorepo Extension format |
+| [config](./config.md) | `github.com/yohimik/dispat/pkg/config` | Loads JSON, YAML and TOML configuration without reflection |
 | [scanner](./scanner.md) | `github.com/yohimik/dispat/pkg/scanner` | Reads dependency manifests into one ecosystem-neutral shape |
 | [writer](./writer.md) | `github.com/yohimik/dispat/pkg/writer` | Rewrites those manifests in place, byte for byte |
 | [manifest](./manifest.md) | `github.com/yohimik/dispat/pkg/manifest` | The vocabulary the reader and the writer share |
@@ -21,12 +22,14 @@ The five packages below are the whole of the importable surface.
 
 The dependency shape is deliberately shallow, and `ccme` depends on nothing outside the standard library. Both
 `scanner` and `writer` import `manifest` to keep them covering exactly the same formats. `models` imports `ccme`
-because a resolved configuration carries a parser configuration inside it.
+because a resolved configuration carries a parser configuration inside it. `config` imports neither: it is a loader
+for any Go program's configuration, and it knows nothing about dispat's own model.
 
-That leaves two natural pairs. `scanner` and `writer` are the manifest halves, where one reads a version and the other
-writes it, and both agree byte for byte on where the value sits because `manifest` decides for them. `ccme` and
-`models` are the input halves, where one reads the commit messages and the other describes the file configuring how
-they are read.
+That leaves two natural pairs and one that stands alone. `scanner` and `writer` are the manifest halves, where one
+reads a version and the other writes it, and both agree byte for byte on where the value sits because `manifest`
+decides for them. `ccme` and `models` are the input halves, where one reads the commit messages and the other
+describes the file configuring how they are read. `config` is what reads that file: `models` says what a
+configuration means, and `config` says how a configuration is loaded at all.
 
 ## Installing
 
@@ -35,6 +38,7 @@ reads `pkg/ccme/v1.0.0` rather than a repository-wide version:
 
 ```sh
 go get github.com/yohimik/dispat/pkg/ccme
+go get github.com/yohimik/dispat/pkg/config
 go get github.com/yohimik/dispat/pkg/scanner
 go get github.com/yohimik/dispat/pkg/writer
 go get github.com/yohimik/dispat/pkg/manifest

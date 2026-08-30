@@ -522,6 +522,11 @@
         },
         {
           "type": "doc",
+          "id": "go/config",
+          "label": "config"
+        },
+        {
+          "type": "doc",
           "id": "go/scanner",
           "label": "scanner"
         },
