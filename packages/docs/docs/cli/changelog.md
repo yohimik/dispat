@@ -11,7 +11,8 @@ dispat writes these entries inside each package's own folder. The command rides 
 
 One entry has one shape, whichever door writes it. Items inside a section are separated by a single blank line, a
 commit body is indented two spaces under the bullet it belongs to so that it stays part of that item, and every section
-ends the same way whether or not its last line carried a body. In the file, the new entry is separated from the entry
+ends the same way whether or not its last line carried a body. The dependencies section is the one exception: its
+lines are a table of movements and render as one tight block, with no blank lines between them. In the file, the new entry is separated from the entry
 below it by [`changelog.entrySpacing`](../configuration/records.md#the-seam-between-entries) blank lines, two by
 default.
 

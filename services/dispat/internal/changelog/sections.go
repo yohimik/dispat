@@ -184,7 +184,16 @@ func renderSections(rel *plan.Release, f Format, look Lookup) string {
 		// ends with is not the reader's business, and it used to be: a section
 		// of bodiless bullets left a second blank line behind it and one whose
 		// last bullet carried a body did not.
-		parts = append(parts, "### "+sectionTitle(s, f)+"\n\n"+strings.Join(items[i], "\n\n")+"\n")
+		//
+		// Dependencies stay tight. Its lines are a table of movements, never
+		// carry bodies, and have always read as one block; airing them out
+		// would change every existing changelog's next entry for no reader's
+		// benefit.
+		sep := "\n\n"
+		if s.Builtin == model.SectionDependencies {
+			sep = "\n"
+		}
+		parts = append(parts, "### "+sectionTitle(s, f)+"\n\n"+strings.Join(items[i], sep)+"\n")
 	}
 	// Sections are never empty: a release can be admitted to the plan with
 	// nothing to group (a pin, a channel transition, work its reverts cancel

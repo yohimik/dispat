@@ -27,8 +27,10 @@ reading.
 The body is rendered exactly as the release stage's recorder renders it, so a release created from a stage script and
 one created by the release itself carry the same text. Items inside a section are separated by a single blank line, a
 commit body is indented two spaces under the bullet it belongs to so that it stays part of that item, and every section
-ends the same way whether or not its last line carried a body. A release body is one document with no entry beneath it,
-so the changelog file's [entry seam](../configuration/records.md#the-seam-between-entries) does not apply here.
+ends the same way whether or not its last line carried a body. The dependencies section is the one exception: its
+lines are a table of movements and render as one tight block, with no blank lines between them. A release body is one
+document with no entry beneath it, so the changelog file's
+[entry seam](../configuration/records.md#the-seam-between-entries) does not apply here.
 
 See [Release records](../configuration/records.md) for the entry format options the body is rendered under.
 
