@@ -73,7 +73,7 @@ measurement.
 [install command](../cli/install.md), which is also how you would install it:
 
 ```sh
-dispat install yohimik/tinygo --prerelease --release 0.42.0-net.1 \
+dispat install yohimik/tinygo --prerelease --release 0.42.0-net.2 \
   --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
 ```
 
@@ -91,6 +91,39 @@ docker buildx build --file Dockerfile.tinygo --target tinygo-spike-export \
 
 `fork.log` says which toolchain was installed, and `selfupdate.log` opens by naming the toolchain its rows are about,
 so a run served from a cached failure reports upstream rather than silently passing them off as the fork's.
+
+## Sizes
+
+The size question is what made the network worth proving, so it is measured the same way every time: the same source,
+the same four unix targets, both toolchains in one environment, and both stamped. The gc column is the release
+pipeline's exact line (`-trimpath -s -w`), the TinyGo column the line a release would replace it with (`-opt=z
+-no-debug`). There are two datasets, because the two toolchain generations answer differently and only one of them can
+reach a network.
+
+Upstream TinyGo 0.41.1, measured by `tinygo-spike-build` inside the spike's container, whose binaries cannot resolve a
+name or open a TLS connection:
+
+```
+target                tinygo        gc            ratio
+linux/amd64           4628472       10666146      0.434
+linux/arm64           4707712       9699490       0.485
+darwin/amd64          4787896       10863904      0.441
+darwin/arm64          4361072       9912290       0.440
+```
+
+The fork at 0.42.0-net.2, which carries a real `net`, `crypto/tls`, `crypto/x509` and process spawning, cross-built for
+all four targets from one macOS host, its own toolchain over go1.26.7:
+
+```
+target                tinygo        gc            ratio
+linux/amd64           6462688       10686626      0.605
+linux/arm64           6095688       9699490       0.628
+darwin/amd64          6687464       10884416      0.614
+darwin/arm64          5749616       9928850       0.579
+```
+
+The fork's binaries are the larger of the two TinyGo columns by about 1.5 MB, which is what a real TLS stack and a real
+certificate verifier weigh. They are still around 60% of their gc twins.
 
 ## The self-update matrix
 
