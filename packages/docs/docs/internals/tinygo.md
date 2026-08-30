@@ -159,6 +159,34 @@ and curl, records what each said, and never modifies the keychain: trusting a ge
 measure the modification rather than the toolchain. Read the trusted rows against that answer, and compare the gc
 control with the fork row to tell a verifier's refusal from a toolchain's failure. D and E hold either way.
 
+## What 0.42.0-net.2 answered, and what still blocks a release
+
+The matrix passes at 0.42.0-net.2, which is the first release where it can: the fork implements `os.StartProcess` over
+`posix_spawn`, so C downloads the release, executes the new binary as its own smoke check, swaps it in and keeps the
+old one, and C2 puts the old one back with nothing listening. It passes on `linux/arm64` in the container and on both
+`darwin/arm64` and `darwin/amd64` on a Mac. Rows D and E hold, and F walks the network layers again with a real
+handshake read from the far end of the wire.
+
+The matrix is not the whole product, though, and the wider validation runs found three things a release built with this
+toolchain would carry. The self-update path does not meet any of them, which is why the matrix is green.
+
+**Redirects are not followed.** TinyGo's `net/http` keeps the `Client.CheckRedirect` field and the documentation for it
+but not the loop that uses it, so a 302 comes back as a 302 rather than as the resource. Every GitHub release asset
+redirects to a content host, so `dispat install` and self-update's download step fail against real GitHub while passing
+against the spike's own server, which never redirects. The spike's fetches are made by the gc binary, so they say
+nothing about this.
+
+**`SysProcAttr` is not implemented.** `os.StartProcess` refuses any non-nil `ProcAttr.Sys` with "sys setting not
+implemented", and dispat puts every script it runs into its own process group so that an interrupt reaches the whole
+tree. So every build, publish and `dispat run` script fails under a fork-built binary.
+
+**A goroutine deadlock.** A fork-built dispat intermittently stops in the concurrent dispatch and never exits: its
+threads park in `sync.WaitGroup.Wait`, `sync.RWMutex` and TinyGo's own `task.Mutex` with nothing left running, and the
+process is left behind for whoever started it.
+
+Until those are closed, the release binaries stay gc's. What the fork already gives is the harder half: real sockets,
+real TLS, real certificate verification and real process spawning, in a binary around 60% of gc's size.
+
 ## Reading the logs
 
 The logs are the artefact. Each is a sequence of `=== what ===` headers followed by the step's output and its
