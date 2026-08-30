@@ -136,6 +136,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'internals/tinygo', label: 'The TinyGo spike'},
         {type: 'doc', id: 'internals/coverage', label: 'Test coverage'},
         {type: 'doc', id: 'internals/test-results', label: 'Test results'},
+        {type: 'doc', id: 'internals/benchmarks', label: 'Benchmarks'},
       ],
     },
   ],

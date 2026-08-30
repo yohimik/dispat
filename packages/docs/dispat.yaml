@@ -67,6 +67,33 @@ scripts:
         gcloud compute url-maps invalidate-cdn-cache "${DOCS_URL_MAP}" \
           --path "/*" --async'
     echo "deployed ${DISPAT_NEW_VERSION} to gs://${DOCS_BUCKET}"
+  # The numbers the site carries, measured by the run that is about to publish
+  # it.
+  #
+  # A beforeBuild hook rather than a step in the workflow, because the job
+  # that gates a release is a different checkout on a different runner: what
+  # used to travel between the two as a CI artifact now travels no distance at
+  # all. The buildx cache is what makes that cheap — the gating job built the
+  # same stages from the same inputs minutes earlier, so asking for them again
+  # replays them.
+  #
+  # dest is data/ rather than the package folder: the report and the list of
+  # modules it measured are the only things this target produces, and data/ is
+  # where the site's plugin reads them from.
+  #
+  # What it measured goes out as an output, so the build after it knows which
+  # packages this release re-measured. Outputs accumulate across a package's
+  # own stages and hooks, which is exactly the distance this has to travel.
+  test-report: |
+    set -eu
+    docker buildx build --file ../../Dockerfile.gotest --target measured-export \
+      --build-arg COMMIT="${GITHUB_SHA:-}" \
+      $(sh ../../scripts/buildx-cache.sh measured) \
+      --output type=local,dest=data ../..
+    echo "REPORT_BENCHMARKS=$(tr '\n' ' ' < data/benchmarked.txt)" >> "$DISPAT_OUTPUT"
+    echo "REPORT_COMMIT=${GITHUB_SHA:-}" >> "$DISPAT_OUTPUT"
+    echo "measured $(wc -l < data/benchmarked.txt) modules into data/report.json"
+
   # The site, and the version snapshot that goes in it, from one build.
   #
   # `docs` and `dispat` share the `cli` version group, so they release
@@ -87,12 +114,17 @@ scripts:
   # what comes back is source rather than output.
   #
   # DOCS_REQUIRE_REPORT is set for a release and nothing else. The
-  # coverage and test-results pages are built from a report the run
-  # that gated this release measured, handed over as a CI artifact;
-  # a release that lost it would publish those pages with the figures
-  # silently missing, so the build refuses instead. DISPAT_STAGE is
-  # "build" only in a real release — the CI build gate is "run:build",
-  # has no report, and renders the pages without figures on purpose.
+  # coverage, test-results and benchmarks pages are built from a report
+  # the beforeBuild hook above measured moments earlier; a release that
+  # lost it would publish those pages with the figures silently
+  # missing, so the build refuses instead. DISPAT_STAGE is "build" only
+  # in a real release — the CI build gate is "run:build", has no report,
+  # and renders the pages without figures on purpose.
+  #
+  # DOCS_BENCH_PACKAGES is the hook's own output read back: the modules
+  # this release measured, which the build checks the report against
+  # package by package. An empty value is what a run with no hook has,
+  # and the check stands down for it.
   build: |
     DOCS_VERSION=""
     if [ "${DISPAT_IS_PRERELEASE:-false}" != "true" ]; then
@@ -105,11 +137,13 @@ scripts:
     docker buildx build --file Dockerfile --target export \
       --build-arg DOCS_VERSION="$DOCS_VERSION" \
       --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
+      --build-arg DOCS_BENCH_PACKAGES="${DISPAT_OUTPUT_REPORT_BENCHMARKS:-}" \
       $(sh ../../scripts/buildx-cache.sh docs) \
       --output "type=local,dest=$PWD" ../..
 # No record steps: the docs package's changelog, tag and GitHub release are
 # the finalize phase's. The site deploy is the publish; the records follow at
 # the end of the run.
 flow:
+  beforeBuild: test-report
   build: build
   publish: deploy-docs

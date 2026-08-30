@@ -196,3 +196,60 @@ func TestCountsAdd(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", total, want)
 	}
 }
+
+// TestReadLogRecordsFuzzTargetsAndTheirCorpus: a fuzz target under a plain
+// `go test` runs its corpus — the f.Add seeds and whatever testdata/fuzz
+// holds — and each entry arrives as a subtest of the target. Counting them
+// there is what makes the corpus a measured number rather than a claim, and
+// it costs no second walk of the tree.
+func TestReadLogRecordsFuzzTargetsAndTheirCorpus(t *testing.T) {
+	const log = `
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse/seed#0","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse/seed#1","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse/d03d5667d745b3ab","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse","Elapsed":0.30}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse/one","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse","Elapsed":0.02}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Elapsed":1.0}
+`
+	parsed, err := readLog("ccme", strings.NewReader(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := parsed.group().FuzzTargets
+	if len(targets) != 1 {
+		t.Fatalf("targets = %#v", targets)
+	}
+	want := FuzzTarget{Name: "FuzzParse", Package: "pkg/ccme", Seeds: 3}
+	if targets[0] != want {
+		t.Errorf("target = %#v, want %#v", targets[0], want)
+	}
+	if parsed.Subtests != 4 {
+		t.Errorf("subtests = %d: a corpus entry is still a subtest", parsed.Subtests)
+	}
+	if parsed.Fuzz != 1 || parsed.Tests != 1 {
+		t.Errorf("fuzz = %d, tests = %d", parsed.Fuzz, parsed.Tests)
+	}
+}
+
+// TestReadLogKeepsBenchmarksOutOfTheTestCount: a benchmark is a measurement,
+// and a suite that reports it as a test inflates the one number this tool
+// exists to keep honest. It reaches a test log only when somebody ran the
+// suite with -bench, and it is counted apart when it does.
+func TestReadLogKeepsBenchmarksOutOfTheTestCount(t *testing.T) {
+	const log = `
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/config","Test":"BenchmarkFold","Elapsed":1.2}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/config","Test":"TestFold","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/config","Elapsed":1.5}
+`
+	parsed, err := readLog("config", strings.NewReader(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Tests != 1 || parsed.Benchmarks != 1 {
+		t.Errorf("tests = %d, benchmarks = %d", parsed.Tests, parsed.Benchmarks)
+	}
+	if parsed.Passed+parsed.Failed+parsed.Skipped != parsed.Tests+parsed.Fuzz {
+		t.Errorf("the outcomes do not tally with the functions: %+v", parsed.Counts)
+	}
+}

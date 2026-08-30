@@ -13,8 +13,10 @@ import (
 )
 
 const usage = `usage:
-  testreport test <log-name> -- <go test args...>               run go test -json, keep the log, print a summary
-  testreport build  [-coverage dir] [-out file] [-commit sha]   build the report from a full test run
+  testreport test  <log-name> -- <go test args...>              run go test -json, keep the log, print a summary
+  testreport bench <log-name> -- <go test args...>              run go test -bench -json, keep the stream, summarise it
+  testreport build  [-coverage dir] [-out file] [-commit sha] [-keep file] [-modules file]
+                                                                build the report from a full test run
   testreport render <log>                                       summarise one go test -json log
 `
 
@@ -29,6 +31,12 @@ func main() {
 		// The exit code is the test run's own rather than a flat 1, so the
 		// gates driving this stay transparent to what go test reported.
 		code, err := goTest(os.Args[2:])
+		if err != nil {
+			logf(levelError, "%v", err)
+		}
+		os.Exit(code)
+	case "bench":
+		code, err := goBench(os.Args[2:])
 		if err != nil {
 			logf(levelError, "%v", err)
 		}
@@ -55,6 +63,8 @@ func build(args []string) error {
 	dir := fs.String("coverage", "coverage", "folder holding the coverage profiles and testlog/")
 	out := fs.String("out", filepath.Join("packages", "docs", "data", "report.json"), "where to write the report")
 	commit := fs.String("commit", "", "the commit the run measured; discovered from git when empty")
+	keep := fs.String("keep", "", "an earlier report whose measurements are carried over for the modules this run did not measure")
+	modules := fs.String("modules", "", "where to list the modules this run benchmarked, one per line")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -76,6 +86,15 @@ func build(args []string) error {
 	}
 	report.Suite = suite
 
+	benchmarks, err := readBenchmarks(filepath.Join(*dir, benchDirName))
+	if err != nil {
+		return err
+	}
+	report.Benchmarks = benchmarks
+	if *keep != "" {
+		carryForward(&report, *keep)
+	}
+
 	body, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return err
@@ -86,10 +105,85 @@ func build(args []string) error {
 	if err := os.WriteFile(*out, append(body, '\n'), 0o644); err != nil {
 		return err
 	}
-	logf(levelInfo, "wrote %s: %.1f%% of %d statements, %d tests, %d fuzz targets, commit %s",
+	if *modules != "" {
+		if err := writeBenchModules(*modules, report.Benchmarks); err != nil {
+			return err
+		}
+	}
+	logf(levelInfo, "wrote %s: %.1f%% of %d statements, %d tests, %d fuzz targets, %d benchmarks, commit %s",
 		*out, report.Coverage.Total.Percent, report.Coverage.Total.Statements,
-		report.Suite.Totals.Tests, report.Suite.Totals.Fuzz, short(report.Commit))
+		report.Suite.Totals.Tests, report.Suite.Totals.Fuzz, benchCount(report.Benchmarks),
+		short(report.Commit))
 	return nil
+}
+
+// carryForward folds an earlier report's benchmark groups in for the modules
+// this run measured none of.
+//
+// It is the freshness rule stated once: a module this run benchmarked replaces
+// whatever was there, and a module it did not keeps what it had. Benchmarks
+// are the part of the report a run may legitimately skip — a release that
+// rebuilt only the docs measured nothing — and a page that lost its numbers
+// because a run had nothing to say about them would be worse than one showing
+// the last measurement with the commit that took it.
+//
+// A missing or unreadable file is a warning, not a failure: there is usually
+// no earlier report at all, which is the normal case rather than a mistake.
+func carryForward(report *Report, path string) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		logf(levelWarn, "no earlier report at %s: %v; this run's measurements stand alone", path, err)
+		return
+	}
+	var previous Report
+	if err := json.Unmarshal(body, &previous); err != nil {
+		logf(levelWarn, "%s is not a report: %v; this run's measurements stand alone", path, err)
+		return
+	}
+	fresh := map[string]bool{}
+	for _, group := range report.Benchmarks.Groups {
+		fresh[group.Path] = true
+	}
+	for _, group := range previous.Benchmarks.Groups {
+		if fresh[group.Path] {
+			logf(levelDebug, "benchmarks: %s measured by this run", group.Path)
+			continue
+		}
+		logf(levelInfo, "benchmarks: %s carried over from %s (measured at commit %s)",
+			group.Path, path, short(previous.Commit))
+		report.Benchmarks.Groups = append(report.Benchmarks.Groups, group)
+	}
+	sort.Slice(report.Benchmarks.Groups, func(i, j int) bool {
+		return report.Benchmarks.Groups[i].Path < report.Benchmarks.Groups[j].Path
+	})
+}
+
+// writeBenchModules lists the modules the report carries measurements for,
+// one per line.
+//
+// It exists so that the script driving a build can say which packages a run
+// re-measured without parsing JSON in shell. The list is the freshness signal
+// the release carries forward as an output, and a plain file is the one shape
+// every caller already knows how to read.
+func writeBenchModules(path string, b Benchmarks) error {
+	var out strings.Builder
+	for _, group := range b.Groups {
+		out.WriteString(group.Path)
+		out.WriteByte('\n')
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(out.String()), 0o644)
+}
+
+// benchCount is the measurements across every module, for the summary line.
+func benchCount(b Benchmarks) int {
+	n := 0
+	for _, group := range b.Groups {
+		n += len(group.Results)
+	}
+	return n
 }
 
 // mergeOutputs are the files scripts/coverage-badge.sh writes back into the
@@ -179,6 +273,10 @@ func readSuite(dir string) (Suite, error) {
 			// Not fatal: the report describes what happened, and the run that
 			// produced a failure has already failed on its own exit code.
 			logf(levelWarn, "%s: %d failed", id, log.Failed)
+		}
+		if log.Benchmarks > 0 {
+			logf(levelWarn, "%s: %d benchmark functions ran in a test pass; `testreport bench` is what measures them",
+				id, log.Benchmarks)
 		}
 		logf(levelDebug, "%s: %d tests, %d fuzz targets, %d subtests, %d packages, %.0fs",
 			id, log.Tests, log.Fuzz, log.Subtests, log.Packages, log.Elapsed)

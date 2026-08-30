@@ -9,10 +9,10 @@ import type {ReportData} from './types';
 import {validateReport} from './validate';
 
 /**
- * Where the release workflow puts the report before building the site. It is
- * gitignored: the numbers describe a test run, not a revision, so they travel
- * as an artifact from the job that measured them (see
- * .github/workflows/release.yml).
+ * Where the release run puts the report before building the site. It is
+ * gitignored: the numbers describe a test run, not a revision, so they are
+ * measured into place by the docs package's own beforeBuild hook (see
+ * packages/docs/dispat.yaml) rather than committed or carried by CI.
  */
 const REPORT = path.join('data', 'report.json');
 
@@ -25,8 +25,9 @@ const REPORT = path.join('data', 'report.json');
 const REQUIRE = 'DISPAT_DOCS_REQUIRE_REPORT';
 
 /**
- * Feeds the coverage and test-results pages from the report a release run
- * measured, so no statement about the test suite is written by hand.
+ * Feeds the coverage, test-results and benchmarks pages from the report a
+ * release run measured, so no statement about the test suite — and no
+ * performance figure — is written by hand.
  */
 export default function testReport(context: LoadContext): Plugin {
   const reportPath = path.resolve(context.siteDir, REPORT);
@@ -45,7 +46,7 @@ export default function testReport(context: LoadContext): Plugin {
           logger.error`A release build needs path=${REPORT}, which could not be read. It is built by ${'go run github.com/yohimik/dispat/tools/testreport build'} from a full test run and downloaded by the release workflow.`;
           throw cause;
         }
-        logger.warn`No path=${REPORT} in this build: the coverage and test-results pages will render without numbers. This is expected outside a release.`;
+        logger.warn`No path=${REPORT} in this build: the coverage, test-results and benchmarks pages will render without numbers. This is expected outside a release.`;
         return {report: null};
       }
       const report = validateReport(JSON.parse(source));

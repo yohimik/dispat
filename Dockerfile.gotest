@@ -223,6 +223,38 @@ FROM scratch AS export-integration
 COPY --from=test-integration /src/coverage/integration.out /integration.out
 COPY --from=test-integration /src/coverage/testlog /testlog
 
+# The benchmark gates: one stage per module that has benchmarks, each writing
+# its stream to /src/coverage/benchlog for the report to read. Separate from
+# the test stages on purpose — a benchmark is a measurement rather than a
+# tally, and a suite that ran with -bench would report its measurements as
+# tests and its timings as coverage of nothing.
+#
+# -run '^$' is what keeps them measurements: without it every test runs again
+# beside the benchmarks, and the timings become a number about a machine that
+# was busy doing something else. -benchtime is left at go's default, because a
+# measurement taken over fewer iterations than the tool chose is a measurement
+# nobody can compare.
+FROM src-ccme AS bench-ccme
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/ccme && go run github.com/yohimik/dispat/tools/testreport bench ccme -- \
+    ./... -run '^$' -bench . -benchmem -timeout 20m
+FROM scratch AS export-bench-ccme
+COPY --from=bench-ccme /src/coverage /
+
+FROM src-config AS bench-config
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/config && go run github.com/yohimik/dispat/tools/testreport bench config -- \
+    ./... -run '^$' -bench . -benchmem -timeout 20m
+FROM scratch AS export-bench-config
+COPY --from=bench-config /src/coverage /
+
+FROM src-dispat AS bench-dispat
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd services/dispat && go run github.com/yohimik/dispat/tools/testreport bench dispat -- \
+    ./... -run '^$' -bench . -benchmem -timeout 20m
+FROM scratch AS export-bench-dispat
+COPY --from=bench-dispat /src/coverage /
+
 # The post-version release gate, run from flow.beforeBuild once autoVersion
 # has rewritten a releasing module's go.mod and syncLock has tidied it. No
 # workspace on purpose: the module resolves its providers from the tags the
@@ -342,6 +374,11 @@ COPY --from=badge /src/coverage/coverage.json /src/coverage/coverage.out \
 # The site's report.json, from the same complete profile and log set. The
 # commit arrives as a build argument because a build has no $GITHUB_SHA of
 # its own.
+#
+# This target reads the host's coverage/ folder, so its caller is whoever just
+# ran the suite: `dispat exec test-report` after `dispat run tests --since
+# all`. The `measured` target below is the same report built from the stages
+# themselves, for the caller that has no coverage/ folder to point at.
 FROM runner AS report
 ARG COMMIT
 COPY --chown=gopher:gopher coverage ./coverage
@@ -349,3 +386,40 @@ RUN mkdir -p packages/docs/data \
  && go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT"
 FROM scratch AS report-export
 COPY --from=report /src/packages/docs/data/report.json /
+
+# The same report, self-contained: every profile, log and benchmark stream
+# taken from the stage that produced it rather than from a folder the caller
+# had to fill first.
+#
+# This is what the release run builds. The release job is a fresh checkout on
+# a different runner from the job that gated it, so there is no coverage/ in
+# its working tree and there was no artifact to hand it one; asking for the
+# stages by name is how the release measures the numbers it is about to
+# publish. Identical inputs are a cache hit against the gating job's own
+# build, so the stages that did not change are replayed rather than re-run.
+#
+# It measures every module every time, so there is nothing to carry forward
+# here: a fresh checkout holds no earlier report, and the freshness rule
+# `testreport build -keep` implements is for the caller that has one. What
+# this build owes the site instead is the list of modules it measured, which
+# rides out beside the report as benchmarked.txt and becomes the docs build's
+# per-package check.
+FROM runner AS measured
+ARG COMMIT
+COPY --from=test-ccme /src/coverage ./coverage
+COPY --from=test-config /src/coverage ./coverage
+COPY --from=test-manifest /src/coverage ./coverage
+COPY --from=test-models /src/coverage ./coverage
+COPY --from=test-scanner /src/coverage ./coverage
+COPY --from=test-writer /src/coverage ./coverage
+COPY --from=test-dispat /src/coverage ./coverage
+COPY --from=test-integration /src/coverage/integration.out ./coverage/integration.out
+COPY --from=test-integration /src/coverage/testlog ./coverage/testlog
+COPY --from=bench-ccme /src/coverage/benchlog ./coverage/benchlog
+COPY --from=bench-config /src/coverage/benchlog ./coverage/benchlog
+COPY --from=bench-dispat /src/coverage/benchlog ./coverage/benchlog
+RUN go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
+    -modules packages/docs/data/benchmarked.txt
+FROM scratch AS measured-export
+COPY --from=measured /src/packages/docs/data/report.json \
+     /src/packages/docs/data/benchmarked.txt /

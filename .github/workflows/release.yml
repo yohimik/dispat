@@ -164,9 +164,15 @@ jobs:
           dispat run unlink --since all -p dispat
           dispat run verify-unlinked --since all -p dispat
 
-      # The three steps below run through `dispat exec` so the release logic
+      # The two steps below run through `dispat exec` so the release logic
       # they carry is dispat.yaml's, and this workflow stays plumbing: what
-      # remains here is checkouts, Docker plumbing and artifact transport.
+      # remains here is checkouts and Docker plumbing.
+      #
+      # The site's report used to be built here as well and handed to the
+      # release job as an artifact. It is the release run's own now — the docs
+      # package measures it in a beforeBuild hook, from the same buildx stages
+      # this job just built, so the numbers the site ships are the release's
+      # rather than a courier's. This job stays the gate it always was.
       - name: Compute coverage totals
         run: dispat exec coverage-badge
 
@@ -177,21 +183,6 @@ jobs:
           path: |
             coverage/coverage.out
             coverage/coverage.json
-          retention-days: 7
-
-      # The same run, as the documentation site consumes it: per-package
-      # coverage and what the suite actually did, from the profiles and the
-      # `go test -json` logs the tests scripts left behind. It travels to the
-      # release job as an artifact rather than a commit — the numbers describe
-      # a run, not a revision, and the site is built there.
-      - name: Build the test report
-        run: dispat exec test-report
-
-      - name: Upload the test report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: test-report
-          path: packages/docs/data/report.json
           retention-days: 7
 
       - name: Push badge JSON to the badges branch
@@ -257,18 +248,6 @@ jobs:
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
-
-      # The test report from the job that gated this one, put where the docs
-      # package's build expects it. Deliberately not tolerant of a missing
-      # artifact: the site that ships must carry the numbers of the run that
-      # let it ship, and a silently numberless page is worse than a failed job.
-      # The docs build refuses to produce a release site without it either —
-      # see DOCS_REQUIRE_REPORT in packages/docs/dispat.yaml.
-      - name: Fetch the test report
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: test-report
-          path: packages/docs/data
 
       - name: Run the release
         id: dispat

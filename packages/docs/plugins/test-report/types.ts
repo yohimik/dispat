@@ -41,6 +41,11 @@ export interface Counts {
   packages: number;
   tests: number;
   fuzz: number;
+  /**
+   * Benchmark functions that ran in a test pass, which is nought for every
+   * suite: benchmarks are measured in a pass of their own, not tallied here.
+   */
+  benchmarks: number;
   subtests: number;
   passed: number;
   failed: number;
@@ -54,11 +59,60 @@ export interface Group extends Counts {
   id: string;
   path: string;
   race: boolean;
+  fuzzTargets: FuzzTarget[];
+}
+
+/**
+ * One fuzz function and what the run put through it. A fuzz target under a
+ * plain `go test` runs its corpus — the f.Add seeds plus whatever testdata
+ * holds — so `seeds` is what was exercised rather than a promise about a
+ * fuzzing session nobody ran.
+ */
+export interface FuzzTarget {
+  name: string;
+  package: string;
+  seeds: number;
 }
 
 export interface Suite {
   totals: Counts;
   groups: Group[];
+}
+
+/**
+ * One benchmark's result. Zero means the benchmark did not report the figure:
+ * a run without -benchmem leaves the two allocation numbers at nought, and
+ * only a benchmark calling SetBytes reports a throughput.
+ */
+export interface Benchmark {
+  name: string;
+  package: string;
+  /** The GOMAXPROCS the name carried as its -N suffix. */
+  procs: number;
+  /** The iterations the timing was averaged over. */
+  runs: number;
+  nsPerOp: number;
+  bytesPerOp: number;
+  allocsPerOp: number;
+  mbPerSec: number;
+}
+
+/**
+ * One `testreport bench` invocation, with the machine it ran on. The machine
+ * is part of the measurement: a nanosecond figure without the CPU that
+ * produced it is a number nobody can compare anything to.
+ */
+export interface BenchGroup {
+  id: string;
+  path: string;
+  goos: string;
+  goarch: string;
+  cpu: string;
+  results: Benchmark[];
+}
+
+export interface Benchmarks {
+  groups: BenchGroup[];
 }
 
 export interface Report {
@@ -67,6 +121,7 @@ export interface Report {
   commit: string;
   coverage: Coverage;
   suite: Suite;
+  benchmarks: Benchmarks;
 }
 
 /** What the plugin puts in global data: the report, or nothing measured. */

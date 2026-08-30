@@ -77,14 +77,47 @@ RUN pnpm --filter dispat-docs typecheck
 # building twice is a no-op the second time.
 #
 # DOCS_REQUIRE_REPORT=1 makes the build refuse to start without
-# packages/docs/data/report.json, the coverage and test-results numbers the
-# release measured. The release passes it and nothing else does: a local build
-# and the CI build gate have no report and render those pages without figures,
-# which is fine for them and would not be fine for the site people read.
+# packages/docs/data/report.json, the coverage, test-results and benchmark
+# numbers the release measured. The release passes it and nothing else does: a
+# local build and the CI build gate have no report and render those pages
+# without figures, which is fine for them and would not be fine for the site
+# people read.
 FROM source AS build
 ARG DOCS_VERSION
 ARG DOCS_REQUIRE_REPORT
+ARG DOCS_BENCH_PACKAGES
 ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
+# The per-package freshness check, before anything is built.
+#
+# The release's beforeBuild hook measured a set of modules and said which; the
+# report has to carry every one of them, or a page would ship with a package
+# silently absent from a table that lists the others. Checked here rather than
+# in the site's own code because a missing section renders as an empty table
+# and an empty table reads as "this package has no benchmarks".
+#
+# It also checks that every frozen docs version carries the benchmarks page.
+# The numbers are global — every version's page renders the same measured
+# report — so a version whose copy of the page is missing is a version that
+# shows the site's other numbers and not these, and a patch release cuts no
+# new snapshot to fix it with.
+RUN <<'EOF'
+set -eu
+[ -n "${DOCS_BENCH_PACKAGES}" ] || exit 0
+for pkg in ${DOCS_BENCH_PACKAGES}; do
+  grep -q "\"path\": \"${pkg}\"" packages/docs/data/report.json || {
+    echo "the release measured ${pkg} but data/report.json carries nothing for it" >&2
+    exit 1
+  }
+  echo "report carries ${pkg}"
+done
+for dir in packages/docs/versioned_docs/version-*; do
+  [ -d "$dir" ] || continue
+  [ -f "$dir/internals/benchmarks.mdx" ] || {
+    echo "$dir has no internals/benchmarks.mdx: the measured numbers would reach the current docs and not that version" >&2
+    exit 1
+  }
+done
+EOF
 RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-${DOCS_VERSION}" ]; then \
       pnpm --filter dispat-docs exec docusaurus docs:version "${DOCS_VERSION}"; \
       echo "cut docs version ${DOCS_VERSION}"; \

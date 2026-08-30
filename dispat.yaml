@@ -76,6 +76,11 @@ scripts:
       docker buildx build --file Dockerfile.gotest --target badge-export
       $(sh scripts/buildx-cache.sh badge) --output type=local,dest=coverage .
     - cat coverage/summary.md >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  # The host-side report, from the profiles and logs in coverage/: what a
+  # `dispat run tests --since all` on this machine leaves behind, rendered as
+  # the site reads it. The release builds its own from the stages themselves
+  # (see the docs package's test-report hook), because a release job has no
+  # coverage/ folder to point at.
   test-report: >-
     docker buildx build --file Dockerfile.gotest --target report-export
     --build-arg COMMIT="$GITHUB_SHA"

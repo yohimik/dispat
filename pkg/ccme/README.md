@@ -177,24 +177,17 @@ execution across sixteen goroutines:
 go test -bench . -benchmem ./...
 ```
 
-Measured on an Apple M5 Pro, Go 1.26:
+The figures each release measured are on the [benchmarks page](https://dispat.dev/internals/benchmarks/), injected
+there from the run that took them. There are none in this file on purpose: a timing is a fact about a machine and a
+toolchain, and a number pasted into a document goes stale the day after it is written while still reading like a
+promise.
 
-| Benchmark                                     | ns/op | B/op | allocs/op |
-|-----------------------------------------------|------:|-----:|----------:|
-| `ParseSubject` (63 B header only)             |   137 |  640 |         2 |
-| `ParseSimple` (217 B, header + body)          |   331 | 1008 |         5 |
-| `ParseDirectives` (375 B, sigils + 5 footers) |   876 | 2152 |        15 |
-| `ParseMultiUnit` (178 B, 4 units)             |   818 | 3200 |        12 |
-| `NormalizeFastPath`                           |  19.8 |    0 |         0 |
-| `NormalizeRewrite`                            |   104 |  240 |         1 |
+`alloc_test.go` is where the shape of those numbers is held rather than merely reported. It pins the allocation count
+of each parse as a test, because an allocation count is a property of the code rather than of the machine: it moves
+only when somebody changes what the parser does, which is exactly when a build should say so.
 
-> These figures predate the two-axis grammar, which widened `InlineDirectives` and `Directives` by a few words each.
-> The shape of the numbers is unchanged (the work per message is still one pass with no backtracking) but `B/op`
-> will have moved. Re-run `go test -bench . -benchmem` on your own hardware before quoting them; the `ns/op` column
-> is machine-specific anyway.
-
-Throughput reaches roughly 1.8M simple messages per second on a single core. Memory use in `B/op` comes from `Unit`
-struct allocations rather than input copies, so a message ten times longer incurs no extra allocation overhead.
+The allocations come from `Unit` struct allocations rather than from copies of the input, so a message ten times
+longer incurs no extra allocation overhead.
 
 `ParseSimple` incurs one allocation during normalisation because its sample input ends in a newline, matching
 `git log --format=%B`. Stripping that trailing newline allows the input to take the zero-allocation path.
@@ -202,17 +195,16 @@ struct allocations rather than input copies, so a message ten times longer incur
 ### Tune `GOGC` for bulk sweeps
 
 A `Parser` stores no mutable state, allowing it to scale across goroutines until garbage collection limits throughput.
-Processing over a million messages per second creates gigabytes of short-lived allocations for the runtime to collect.
-The following benchmarks show this impact on the same hardware:
+Processing a large history creates gigabytes of short-lived allocations for the runtime to collect, and beyond a point
+the collector rather than the parser is what sets the pace. `BenchmarkParseParallel` is where that shows: raising
+`GOGC` leaves the allocation volume per message exactly as it was and still moves the throughput, which is the whole
+evidence that the cost is collection rather than parsing.
 
-| `BenchmarkParseParallel` | ns/op | speedup vs serial |
-|--------------------------|------:|------------------:|
-| default `GOGC=100`       |   641 |              1.4x |
-| `GOGC=800`               |   232 |              3.5x |
+If your tool parses a history once and exits, increase `GOGC` or call `debug.SetMemoryLimit` with `GOGC` disabled to
+improve throughput at the cost of higher peak RSS.
 
-Both runs produce identical allocation volume (2152 B/op across 15 allocs/op), meaning the performance gain comes
-entirely from reduced GC overhead. If your CLI tool parses a history once and exits, increase `GOGC` or call
-`debug.SetMemoryLimit` with `GOGC` disabled to improve throughput at the cost of higher peak RSS.
+Run the benchmark yourself rather than trusting a number here; what the release measured is on the
+[benchmarks page](https://dispat.dev/internals/benchmarks/).
 
 ## What it covers
 

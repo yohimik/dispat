@@ -1,13 +1,14 @@
 import Link from '@docusaurus/Link';
 import {usePluginData} from '@docusaurus/useGlobalData';
 import {TEST_REPORT_PLUGIN} from '@site/plugins/test-report/name';
-import type {Counts, Group, Report, ReportData} from '@site/plugins/test-report/types';
+import type {BenchGroup, Counts, Group, Report, ReportData} from '@site/plugins/test-report/types';
 import Admonition from '@theme/Admonition';
 import React from 'react';
 
 import styles from './styles.module.css';
 
-// The coverage and test-results pages, insofar as they are numbers.
+// The coverage, test-results and benchmarks pages, insofar as they are
+// numbers.
 //
 // Everything here comes from one report measured by the release that published
 // this site (tools/testreport). Nothing on either page is a figure someone
@@ -233,6 +234,162 @@ export function SuiteTable(): React.ReactElement | null {
                 ? `passed${group.skipped > 0 ? `, ${count(group.skipped)} skipped` : ''}`
                 : `${count(group.failed)} failed`}
             </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * A duration in the unit it deserves. A benchmark spans nine orders of
+ * magnitude — a fold is nanoseconds, a file rewrite is milliseconds — and one
+ * unit across all of them is a column of zeroes or a column of exponents.
+ */
+function perOp(ns: number): string {
+  if (ns < 1_000) {
+    return `${ns.toFixed(ns < 100 ? 2 : 1)} ns`;
+  }
+  if (ns < 1_000_000) {
+    return `${(ns / 1_000).toFixed(1)} µs`;
+  }
+  return `${(ns / 1_000_000).toFixed(1)} ms`;
+}
+
+/** Bytes as a size, for the same reason perOp exists. */
+function bytes(n: number): string {
+  if (n < 1_024) {
+    return `${count(n)} B`;
+  }
+  if (n < 1_024 * 1_024) {
+    return `${(n / 1_024).toFixed(1)} KiB`;
+  }
+  return `${(n / (1_024 * 1_024)).toFixed(1)} MiB`;
+}
+
+/** The machine a group was measured on, as one clause. */
+function machine(group: BenchGroup): string {
+  const cpu = group.cpu ? `, ${group.cpu}` : '';
+  return `${group.goos}/${group.goarch}${cpu}`;
+}
+
+/**
+ * What the run measured, in a sentence: how many benchmarks across how many
+ * modules, and on what.
+ */
+export function BenchmarkSummary(): React.ReactElement | null {
+  const report = useReport();
+  if (!report) {
+    return null;
+  }
+  const groups = report.benchmarks.groups;
+  const total = groups.reduce((n, group) => n + group.results.length, 0);
+  if (total === 0) {
+    return null;
+  }
+  const machines = Array.from(new Set(groups.map(machine)));
+  return (
+    <p>
+      This release measured <strong>{count(total)} benchmarks</strong> across{' '}
+      <strong>{count(groups.length)} modules</strong>, on {machines.join(' and ')}.
+    </p>
+  );
+}
+
+/**
+ * One table per module: every benchmark it declares, with the iteration count
+ * the timing was averaged over.
+ *
+ * The iteration count is a column rather than a footnote because it is what
+ * says how much to trust the row beside it: a benchmark the tool ran ten times
+ * and one it ran ten million times are not the same kind of number.
+ */
+export function BenchmarkTable(): React.ReactElement | null {
+  const report = useReport();
+  if (!report) {
+    return null;
+  }
+  const groups = report.benchmarks.groups.filter((group) => group.results.length > 0);
+  if (groups.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group.id}>
+          <h3>
+            <code>{group.path}</code>
+          </h3>
+          <p>
+            <em>{machine(group)}</em>
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Benchmark</th>
+                <th className={styles.number}>Time/op</th>
+                <th className={styles.number}>Bytes/op</th>
+                <th className={styles.number}>Allocs/op</th>
+                <th className={styles.number}>Iterations</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.results.map((result) => (
+                <tr key={`${result.package}/${result.name}`}>
+                  <td>
+                    <code>{result.name}</code>
+                  </td>
+                  <td className={styles.number}>{perOp(result.nsPerOp)}</td>
+                  <td className={styles.number}>{bytes(result.bytesPerOp)}</td>
+                  <td className={styles.number}>{count(result.allocsPerOp)}</td>
+                  <td className={styles.number}>{count(result.runs)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Every fuzz target the suite ran, with the corpus entries it was run against.
+ *
+ * A plain `go test` runs a fuzz target's corpus rather than fuzzing, so this
+ * is what the suite exercised and not a claim about a fuzzing session. The
+ * seed count is the honest half of the number.
+ */
+export function FuzzTable(): React.ReactElement | null {
+  const report = useReport();
+  if (!report) {
+    return null;
+  }
+  const targets = report.suite.groups
+    .filter((group) => !group.race)
+    .flatMap((group) => group.fuzzTargets);
+  if (targets.length === 0) {
+    return null;
+  }
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Target</th>
+          <th>Package</th>
+          <th className={styles.number}>Corpus entries</th>
+        </tr>
+      </thead>
+      <tbody>
+        {targets.map((target) => (
+          <tr key={`${target.package}/${target.name}`}>
+            <td>
+              <code>{target.name}</code>
+            </td>
+            <td>
+              <code>{target.package}</code>
+            </td>
+            <td className={styles.number}>{count(target.seeds)}</td>
           </tr>
         ))}
       </tbody>
