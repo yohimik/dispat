@@ -4,6 +4,16 @@
 tagFormat: docker/{name}/v{version}
 autoVersion:
   enabled: true
+# An image releases whenever the CLI it installs does, so most of its entries
+# have nothing of their own to group. The line naming the shared version is
+# true but unhelpful: what a reader wants is the release the image is actually
+# carrying, so each destination points at it in the form that destination
+# renders. The changelog file writes the URL plainly, because a changelog is
+# read as often in a terminal as on a page, and the release body links it.
+changelog:
+  noChangesText: "The image ships the dispat release it installs; what changed is in https://github.com/yohimik/dispat/blob/main/services/dispat/CHANGELOG.md"
+github:
+  noChangesText: "The image ships the dispat release it installs; what changed is in [the dispat release notes](https://github.com/yohimik/dispat/releases/tag/services/dispat/v${DISPAT_NEW_VERSION})."
 # `tests` validates the manifest rather than building it: it proves the
 # DISPAT_WORKSPACE_DISPAT_VERSION interpolation and the channel overlay
 # still resolve — the breakage that would otherwise surface first at
