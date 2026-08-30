@@ -1,5 +1,24 @@
 # Changelog
 
+## pkg/models/v1.4.0 (2026-08-30)
+
+### Features
+
+- github draft config option
+github.draft creates every GitHub release as a draft, so a human reads
+the rendered notes before the release goes out. It is a tri-state
+boolean defaulting to false and overridable through the whole layering
+(root, space, space file, package) exactly like github.allPackages: a
+repository can hold every release back while one package publishes
+straight away, or the other way round.
+
+A draft carries no tag ref until it is published, so nothing that looks
+a release up by its tag sees it meanwhile.
+
+The resolved GitHubSpec carries the flag and its Key() encodes it:
+packages sharing a key share one releaser, so a draft setting left out
+of the key would leak one package's policy onto a sibling.
+
 ## pkg/models/v1.3.0 (2026-08-28)
 
 ### Features
