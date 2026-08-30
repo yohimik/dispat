@@ -73,7 +73,7 @@ measurement.
 [install command](../cli/install.md), which is also how you would install it:
 
 ```sh
-dispat install yohimik/tinygo --prerelease --release 0.42.0-net.2 \
+dispat install yohimik/tinygo --prerelease --release 0.42.0-net.3 \
   --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
 ```
 
@@ -111,15 +111,15 @@ darwin/amd64          4787896       10863904      0.441
 darwin/arm64          4361072       9912290       0.440
 ```
 
-The fork at 0.42.0-net.2, which carries a real `net`, `crypto/tls`, `crypto/x509` and process spawning, cross-built for
+The fork at 0.42.0-net.3, which carries a real `net`, `crypto/tls`, `crypto/x509` and process spawning, cross-built for
 all four targets from one macOS host, its own toolchain over go1.26.7:
 
 ```
 target                tinygo        gc            ratio
-linux/amd64           6462688       10686626      0.605
-linux/arm64           6095688       9699490       0.628
-darwin/amd64          6687464       10884416      0.614
-darwin/arm64          5749616       9928850       0.579
+linux/amd64           6475768       10686626      0.606
+linux/arm64           6107624       9699490       0.630
+darwin/amd64          6699232       10884416      0.615
+darwin/arm64          5771008       9928850       0.581
 ```
 
 The fork's binaries are the larger of the two TinyGo columns by about 1.5 MB, which is what a real TLS stack and a real
@@ -159,33 +159,62 @@ and curl, records what each said, and never modifies the keychain: trusting a ge
 measure the modification rather than the toolchain. Read the trusted rows against that answer, and compare the gc
 control with the fork row to tell a verifier's refusal from a toolchain's failure. D and E hold either way.
 
-## What 0.42.0-net.2 answered, and what still blocks a release
+## What 0.42.0-net.3 answered, and what still blocks a release
 
-The matrix passes at 0.42.0-net.2, which is the first release where it can: the fork implements `os.StartProcess` over
+The matrix passes at 0.42.0-net.3, as it first did at 0.42.0-net.2: the fork implements `os.StartProcess` over
 `posix_spawn`, so C downloads the release, executes the new binary as its own smoke check, swaps it in and keeps the
 old one, and C2 puts the old one back with nothing listening. It passes on `linux/arm64` in the container and on both
 `darwin/arm64` and `darwin/amd64` on a Mac. Rows D and E hold, and F walks the network layers again with a real
 handshake read from the far end of the wire.
 
-The matrix is not the whole product, though, and the wider validation runs found three things a release built with this
-toolchain would carry. The self-update path does not meet any of them, which is why the matrix is green.
+The matrix is not the whole product, and the question a release turns on is the wider one: the black-box integration
+suite run against a fork-built binary rather than a gc one. Three of the four things that suite found at 0.42.0-net.2
+are closed at net.3.
 
-**Redirects are not followed.** TinyGo's `net/http` keeps the `Client.CheckRedirect` field and the documentation for it
-but not the loop that uses it, so a 302 comes back as a 302 rather than as the resource. Every GitHub release asset
-redirects to a content host, so `dispat install` and self-update's download step fail against real GitHub while passing
-against the spike's own server, which never redirects. The spike's fetches are made by the gc binary, so they say
-nothing about this.
+**Process groups are honoured.** `os.StartProcess` accepts `SysProcAttr.Setpgid` through `POSIX_SPAWN_SETPGROUP`, so
+dispat puts every script it runs into its own process group as it always has. Any other `Sys` field still fails, but it
+fails closed and names the field it could not honour. The 275 "sys setting not implemented" failures the suite reported
+at net.2 are gone.
 
-**`SysProcAttr` is not implemented.** `os.StartProcess` refuses any non-nil `ProcAttr.Sys` with "sys setting not
-implemented", and dispat puts every script it runs into its own process group so that an interrupt reaches the whole
-tree. So every build, publish and `dispat run` script fails under a fork-built binary.
+**Redirects are followed.** `net/http` carries the redirect loop again: ten hops, 301, 302 and 303 rewritten to GET,
+307 and 308 replayed through `GetBody`, and credentials stripped when a hop crosses hosts. Every GitHub release asset
+redirects to a content host, so this is what `dispat install` and self-update's download step need against real GitHub.
 
-**A goroutine deadlock.** A fork-built dispat intermittently stops in the concurrent dispatch and never exits: its
-threads park in `sync.WaitGroup.Wait`, `sync.RWMutex` and TinyGo's own `task.Mutex` with nothing left running, and the
-process is left behind for whoever started it.
+**The dispatch deadlock is fixed.** The intermittent stop in the concurrent dispatch was two faults: an upstream
+`RWMutex` that conflated readers holding the lock with readers queued for it, and a darwin `fcntl` variadic call that
+passed its argument wrongly and so broke `CloseOnExec` and descriptor inheritance. The suite runs to completion.
 
-Until those are closed, the release binaries stay gc's. What the fork already gives is the harder half: real sockets,
-real TLS, real certificate verification and real process spawning, in a binary around 60% of gc's size.
+What is left is one blocker, and it is the reason the release binaries stay gc's:
+
+**Signals are swallowed.** A fork-built binary registers the operating system handler that `signal.Notify` asks for,
+which is enough to suppress the default disposition, so the process is no longer terminated. Nothing is ever delivered
+to the channel. `SIGINT` and `SIGTERM` therefore do nothing at all: a fork-built dispat neither shuts down gracefully
+nor dies, and only `SIGKILL` ends it. A signal nobody registered still kills the process normally, which places the
+fault in the delivery path rather than in the registration. Four integration tests hold dispat to the opposite
+behaviour, since an interrupt has to reach the in-flight script, cancel the packages behind it, and give the release
+lock back; under a fork-built binary all four wait on a process that never exits.
+
+What the fork already gives is the harder half: real sockets, real TLS, real certificate verification, real process
+spawning and a suite of 540 black-box assertions that pass against it, in a binary around 60% of gc's size.
+
+### Caveats a fork-built release would carry
+
+Recorded rather than fixed, because none of them blocks the matrix and all of them change what a reader should expect:
+
+- **`http.Client.Timeout` arms nothing.** The fork's `net/http` keeps the field and decorates an error with it, but no
+  clock is started from it, so a server that accepts a connection and then says nothing can block a download for as
+  long as it likes. dispat sets that timeout on its self-update and install clients, and under a fork build it is
+  inert.
+- **Socket deadlines stretch.** The netdev `Recv` path restarts `SO_RCVTIMEO` after `EINTR`, so a read deadline is
+  measured per uninterrupted attempt rather than once. Under garbage collection pressure a deadline can outlast the
+  duration it was set to.
+- **A rare hang under emulation.** Roughly one run in three hundred hangs on `amd64` under QEMU, in the emulator's
+  futex rather than in the program. It is not reproducible on native hardware, and the fork's own release notes carry
+  it.
+- **darwin roots reach `net/http` only.** On macOS the fork loads the platform's certificate roots for `net/http` but
+  not for a bare `crypto/tls` dial, which is why `darwin-net.log` shows an `https` request returning 200 beside a raw
+  TLS row refusing the same certificate. dispat only ever reaches TLS through `net/http`, so nothing in dispat sees
+  this.
 
 ## Reading the logs
 
