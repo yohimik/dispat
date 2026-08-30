@@ -9,6 +9,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/yohimik/dispat/pkg/ccme"
+	lib "github.com/yohimik/dispat/pkg/config"
 
 	public "github.com/yohimik/dispat/pkg/models"
 
@@ -326,173 +328,66 @@ func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, e
 	if explicit {
 		return filepath.Join(root, name), root, nil
 	}
-	var candidate, candidateRoot string // declares packages, not spaces
-	var fallback, fallbackRoot string   // declares neither
-	// A directory contributes its first candidate name alone — the name-order
-	// precedence within one folder predates the ascent and stays.
-	try := func(dir string) (string, string, error) {
-		names, err := configCandidates(dir)
-		if err != nil {
-			return "", "", fmt.Errorf("config: %s: %s: %w", dir, DispatexcludeName, err)
-		}
-		if len(names) == 0 {
-			return "", "", nil
-		}
-		p := filepath.Join(dir, names[0])
-		// One parse answers both questions this file is asked, so a candidate
-		// on the way up is read once however far the ascent goes.
-		t, readErr := readTree(p)
-		if readErr != nil {
-			// A file dispat cannot read is broken rather than skippable: Load
-			// is where a broken config fails loudly, and stepping over it to
-			// use a parent's file would hide the breakage.
-			return p, dir, nil
-		}
-		switch classifyTree(t.root) {
-		case configRoot:
-			// A candidate below is a space folder's file when this root claims
-			// its folder, and a monorepo of its own when it does not.
-			if candidate != "" && !ownsSpaceFolder(t.root, dir, candidateRoot) {
-				return candidate, candidateRoot, nil
-			}
-			return p, dir, nil
-		case configPackages:
-			if candidate == "" {
-				candidate, candidateRoot = p, dir
-			}
-		default:
-			if fallback == "" {
-				fallback, fallbackRoot = p, dir
-			}
-		}
-		return "", "", nil
+	p, r, err := loader.Resolve(context.Background(), root, dispatResolver())
+	if errors.Is(err, lib.ErrNoConfig) {
+		// The library names the directory and the candidates; dispat names
+		// itself and says what to do about it.
+		return "", "", noConfigError{root: root}
 	}
-	dirs := []string{root}
-	// Beyond root itself the walk ascends; absolute paths make it
-	// well-defined wherever the relative root pointed.
-	if abs, absErr := filepath.Abs(root); absErr == nil {
-		for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
-			dirs = append(dirs, dir)
-			if dir == filepath.Dir(dir) { // filesystem root
-				break
-			}
-		}
-	}
-	for _, dir := range dirs {
-		p, r, err := try(dir)
-		if err != nil {
-			return "", "", err
-		}
-		if p != "" {
-			return p, r, nil
-		}
-	}
-	if candidate != "" {
-		return candidate, candidateRoot, nil
-	}
-	if fallback != "" {
-		return fallback, fallbackRoot, nil
-	}
-	return "", "", fmt.Errorf(
-		"config: no dispat config file found in %s or any parent directory (tried %s); run `dispat init` to create one",
-		root, strings.Join(defaultFileNames, ", "))
-}
-
-// configClass is what a file found during the ascent turns out to be.
-type configClass int
-
-const (
-	// configLoose declares neither spaces nor packages: a package folder's
-	// override file, or a root config missing both.
-	configLoose configClass = iota
-	// configPackages declares packages but no spaces: either a monorepo of
-	// standalone packages, or a space folder's own file.
-	configPackages
-	// configRoot declares spaces, so it is a monorepo root.
-	configRoot
-)
-
-// classifyTree places a parsed file. A key holding null is not a declaration,
-// which is the rule the rest of the configuration follows too: a space map
-// spelled out as empty says no more than an absent one.
-func classifyTree(root map[string]any) configClass {
-	switch {
-	case declares(root, "spaces"):
-		return configRoot
-	case declares(root, "packages"):
-		return configPackages
-	default:
-		return configLoose
-	}
-}
-
-// declares reports that a file states a key and gives it a value. Keys are
-// matched case-insensitively, because the tree is spelled as the file wrote it
-// while the probe asking about it is spelled in the language's own lowercase.
-func declares(root map[string]any, key string) bool {
-	v, ok := lookupFold(root, key)
-	return ok && v != nil
-}
-
-// ownsSpaceFolder reports whether the root config parsed into root, sitting in
-// rootDir, declares a space whose folder is dir — which is what tells a space
-// folder's config file apart from a monorepo of standalone packages. Folders
-// are compared by identity, so a symlinked or case-insensitive path still
-// matches itself.
-func ownsSpaceFolder(root map[string]any, rootDir, dir string) bool {
-	target, err := os.Stat(dir)
 	if err != nil {
-		return false
+		return "", "", err
 	}
-	raw, _ := lookupFold(root, "spaces")
-	spaces, ok := raw.(map[string]any)
-	if !ok {
-		return false
-	}
-	for _, raw := range spaces {
-		fields, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		// The raw shape mirrors PathList: a scalar folder or a list of them,
-		// and any of a space's folders owns the file found inside it.
-		rawPath, ok := lookupFold(fields, "path")
-		if !ok {
-			continue
-		}
-		paths, ok := stringList(rawPath)
-		if !ok {
-			continue
-		}
-		for _, p := range paths {
-			if p == "" {
-				continue
-			}
-			info, err := os.Stat(filepath.Join(rootDir, filepath.FromSlash(p)))
-			if err == nil && os.SameFile(info, target) {
-				return true
-			}
-		}
-	}
-	return false
+	return p, r, nil
 }
+
+// dispatResolver is what the ascent is asked about a dispat repository: the
+// four names, the folder's own .dispatexclude, `spaces` as the mark of a root
+// and `packages` as the mark of a candidate, and a root's space paths as what
+// claims a candidate's folder.
+func dispatResolver() lib.Resolver {
+	return lib.Resolver{
+		Names: defaultFileNames,
+		Candidates: func(dir string) ([]string, error) {
+			names, err := configCandidates(dir)
+			if err != nil {
+				return nil, fmt.Errorf("config: %s: %s: %w", dir, DispatexcludeName, err)
+			}
+			return names, nil
+		},
+		Classify: lib.MarkerClassify([]string{"spaces"}, []string{"packages"}),
+		Owns:     lib.FolderOwner("spaces", "path"),
+	}
+}
+
+// noConfigError is the ascent finding nothing, in dispat's own words: the
+// directory it started in, the four names it looked for, and the command that
+// writes one.
+type noConfigError struct{ root string }
+
+func (e noConfigError) Error() string {
+	return fmt.Sprintf(
+		"config: no dispat config file found in %s or any parent directory (tried %s); run `dispat init` to create one",
+		e.root, strings.Join(defaultFileNames, ", "))
+}
+
+func (e noConfigError) Unwrap() error { return lib.ErrNoConfig }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	t, err := readTree(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	raw := normalizeTree(t, flags)
 
 	// The keys a package entry may never hold are refused by name, at every
 	// map that holds entries, before decoding drops them into an unknown-key
-	// error that could not say why.
-	if err := refusePackageEntryKeys("packages", rawEntries(raw, "packages")); err != nil {
+	// error that could not say why. Asked of the tree rather than of the
+	// settings map, because that is where the keys the file wrote still are.
+	if err := refusePackageEntryKeys("packages", rawEntries(t.Root, "packages")); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	for _, sn := range sortedKeys(rawEntries(raw, "spaces")) {
+	for _, sn := range sortedKeys(rawEntries(t.Root, "spaces")) {
 		if err := refusePackageEntryKeys(fmt.Sprintf("spaces[%q]: packages", sn),
-			rawEntries(raw, "spaces", sn, "packages")); err != nil {
+			rawEntries(t.Root, "spaces", sn, "packages")); err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
 	}
@@ -502,10 +397,10 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	// the shorthands the language admits: a scalar concurrency lifts into its
 	// pair, a {consumer: provider(s)} object expands into dependency edges, and
 	// a bare record line becomes a full entry.
-	if err := decodeRootConfig(settings(raw), &cfg); err != nil {
+	if err := decodeRootConfig(t.Settings(loader, flagOverrides(flags)), &cfg); err != nil {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
 	}
-	cfg.SourceFiles = t.files
+	cfg.SourceFiles = t.Files
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}

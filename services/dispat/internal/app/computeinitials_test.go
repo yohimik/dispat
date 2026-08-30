@@ -117,7 +117,7 @@ func TestPickManifestVersionReportsDisagreement(t *testing.T) {
 func TestManifestBaselinesLeaveDecidedPackagesAlone(t *testing.T) {
 	// An entry already in the config is the operator's own statement and the
 	// way to silence the suggestion for good. Matching is case-insensitive,
-	// because viper lowercases map keys.
+	// because every name in the configuration is.
 	cfg := libsConfig()
 	cfg.Initials = map[string]string{"core": "0.0.0"}
 	root, _, a := computeRepo(t, cfg, zerolog.Nop())
@@ -170,9 +170,9 @@ func TestInitialSuggestionRendersItsEvidence(t *testing.T) {
 }
 
 func TestCollectInitialEditsMergeWithoutRenaming(t *testing.T) {
-	// The map is re-read from the file, not taken from the loaded config:
-	// viper lowercases map keys, so writing the parsed map back would rename
-	// an entry its author spelled otherwise.
+	// The map is re-read from the file, not taken from the loaded config: the
+	// loaded view is merged and validated, so writing it back would lose the
+	// entries this run had no opinion about.
 	cfg := libsConfig()
 	cfg.Initials = map[string]string{"@acme/Core": "2.0.0"}
 	_, cfgPath, a := computeRepo(t, cfg, zerolog.Nop())

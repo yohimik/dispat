@@ -3,7 +3,7 @@
 # dispat.example.* files beside this one are documentation samples, not
 # configuration; dispat resolves the exact names dispat.{json,yaml,yml,toml}.
 versionGroup: cli
-dependencies: [ccme, manifest, models, scanner, writer]
+dependencies: [ccme, config, manifest, models, scanner, writer]
 aliasTags:
   - format: v{version}
   - format: v{major}
@@ -37,7 +37,7 @@ scripts:
   # scan can see, so it stays a grep.
   verify-unlinked: |
     dispat scanner --root-only --verify-unlinked || exit 1
-    for m in ccme manifest models scanner writer; do
+    for m in ccme config manifest models scanner writer; do
       if ! grep -q "^github.com/yohimik/dispat/pkg/$m " go.sum; then
         echo "go.sum lost its entry for pkg/$m" >&2
         exit 1

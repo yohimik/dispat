@@ -41,7 +41,7 @@ func TestReadTreeFormats(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tree, err := readTree(writeFile(t, dir, tc.name, tc.body))
 			require.NoError(t, err)
-			assert.Equal(t, map[string]any{"env": map[string]any{"MiXed": "v"}}, tree.root)
+			assert.Equal(t, map[string]any{"env": map[string]any{"MiXed": "v"}}, tree.Root)
 		})
 	}
 }
@@ -75,7 +75,7 @@ func TestReadTreeMalformedFileIsReported(t *testing.T) {
 func TestReadTreeEmptyFileIsAnEmptyObject(t *testing.T) {
 	tree, err := readTree(writeFile(t, t.TempDir(), "dispat.yaml", ""))
 	require.NoError(t, err)
-	assert.Empty(t, tree.root)
+	assert.Empty(t, tree.Root)
 
 	_, err = Load(writeFile(t, t.TempDir(), "dispat.yaml", ""), nil)
 	require.Error(t, err)
@@ -93,53 +93,48 @@ func TestReadTreeTopLevelMustBeAnObject(t *testing.T) {
 	assert.Contains(t, err.Error(), "the top level is not an object")
 }
 
-// TestNormalizeTreeRenamesNothing: the decode's view carries every key exactly
-// as the file wrote it, all the way down and inside lists too. It is still a
-// copy, because the flag overlay writes into it, and a config file the loader
-// edited on its way past would surprise everything that goes back to the tree.
-func TestNormalizeTreeRenamesNothing(t *testing.T) {
-	root := map[string]any{
+// TestReadTreeRenamesNothing: the tree carries every key exactly as the file
+// wrote it, all the way down and inside lists too, and the settings rendered
+// from it leave it alone — a config file the loader edited on its way past
+// would surprise everything that goes back to the tree.
+func TestReadTreeRenamesNothing(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "dispat.json", `{
+		"spaces": {"Libs": {
+			"env": {"MiXed": "v"},
+			"aliasTags": [{"Format": "latest"}]
+		}}
+	}`)
+
+	tree, err := readTree(path)
+	require.NoError(t, err)
+	want := map[string]any{
 		"spaces": map[string]any{"Libs": map[string]any{
 			"env":       map[string]any{"MiXed": "v"},
 			"aliasTags": []any{map[string]any{"Format": "latest"}},
 		}},
 	}
-	tree := &tree{root: root}
+	assert.Equal(t, want, tree.Root, "every key arrives as it was written, lists included")
 
-	raw := normalizeTree(tree, nil)
-	assert.Equal(t, root, raw, "every key arrives as it was written, lists included")
-
-	raw["spaces"].(map[string]any)["Libs"].(map[string]any)["env"].(map[string]any)["MiXed"] = "changed"
-	assert.Equal(t, "v", root["spaces"].(map[string]any)["Libs"].(map[string]any)["env"].(map[string]any)["MiXed"],
-		"and the tree is not written through")
+	out := tree.Settings(loader, nil)
+	out["spaces"].(map[string]any)["Libs"].(map[string]any)["env"].(map[string]any)["MiXed"] = "changed"
+	assert.Equal(t, want, tree.Root, "and the tree is not written through")
 }
 
-// TestNormalizeTreeHandlesEveryKindOfMap: the decode meets one kind of map, so
-// a yaml mapping with a non-string key becomes a string-keyed one on the way,
-// its keys rendered the way a value would be. A list of strings is the flag
-// overlay's, and is copied rather than shared so that nothing here can write
-// through into the flag set. Anything else is a value no parser builds, and
-// passes through as it came: this is the contract the reflected deep copy used
-// to cover, narrowed to the containers that exist.
-func TestNormalizeTreeHandlesEveryKindOfMap(t *testing.T) {
-	strs := []string{"one", "two"}
-	typed := map[string][]string{"Keep": {"As-Is"}}
-	tree := &tree{root: map[string]any{
-		"Generic": map[any]any{"MiXed": "v", 1: "one", true: "yes"},
-		"List":    []any{map[any]any{"Nested": "v"}},
-		"Strings": strs,
-		"Typed":   typed,
-	}}
+// TestReadTreeHandlesEveryKindOfMap: the decode meets one kind of map, so a
+// yaml mapping with a non-string key becomes a string-keyed one on the way,
+// its keys rendered the way a value would be. The conversion happens in the
+// walk that resolves the references, which is what makes it one pass over the
+// document rather than a second deep copy of it.
+func TestReadTreeHandlesEveryKindOfMap(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "dispat.yaml", "generic:\n  MiXed: v\n  1: one\n  true: yes\nlist:\n  - Nested: v\n")
 
-	raw := normalizeTree(tree, nil)
-	assert.Equal(t, map[string]any{"MiXed": "v", "1": "one", "true": "yes"}, raw["Generic"],
+	tree, err := readTree(path)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"MiXed": "v", "1": "one", "true": "yes"}, tree.Root["generic"],
 		"a generic map becomes a string-keyed one, its keys spelled as they were written")
-	assert.Equal(t, []any{map[string]any{"Nested": "v"}}, raw["List"])
-	assert.Equal(t, strs, raw["Strings"], "a list of strings arrives as it was written")
-	assert.Equal(t, typed, raw["Typed"], "a typed container keeps its own keys")
-
-	raw["Strings"].([]string)[0] = "changed"
-	assert.Equal(t, "one", strs[0], "and the flag overlay's list is copied rather than shared")
+	assert.Equal(t, []any{map[string]any{"Nested": "v"}}, tree.Root["list"])
 }
 
 // TestSettingsPrunesEmptyObjectsAndSplitsPaths pins the two rules the decode
@@ -167,13 +162,13 @@ func TestSettingsPrunesEmptyObjectsAndSplitsPaths(t *testing.T) {
 	assert.Contains(t, out, "nothing", "a key written with no value is still a key")
 }
 
-// TestNormalizeTreeFlagOverridesOnlyWhenPassed pins the one thing a flag binding
-// ever meant: a flag the caller actually passed replaces what the file says,
-// and a flag left alone carries its default into nothing at all. The two cases
-// are one test because the bug they guard against is the pair being confused —
-// an unset --log-level clobbering a configured logLevel with "" looks like a
+// TestFlagOverridesOnlyWhenPassed pins the one thing a flag binding ever
+// meant: a flag the caller actually passed replaces what the file says, and a
+// flag left alone carries its default into nothing at all. The two cases are
+// one test because the bug they guard against is the pair being confused — an
+// unset --log-level clobbering a configured logLevel with "" looks like a
 // config that was never read.
-func TestNormalizeTreeFlagOverridesOnlyWhenPassed(t *testing.T) {
+func TestFlagOverridesOnlyWhenPassed(t *testing.T) {
 	newFlags := func() *pflag.FlagSet {
 		fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 		fs.IntSlice("concurrency", nil, "")
@@ -182,7 +177,7 @@ func TestNormalizeTreeFlagOverridesOnlyWhenPassed(t *testing.T) {
 		return fs
 	}
 	configured := func() *tree {
-		return &tree{root: map[string]any{
+		return &tree{Root: map[string]any{
 			"concurrency": []any{4, 2},
 			"logLevel":    "debug",
 			"logFormat":   "json",
@@ -190,17 +185,21 @@ func TestNormalizeTreeFlagOverridesOnlyWhenPassed(t *testing.T) {
 	}
 
 	t.Run("unset", func(t *testing.T) {
-		raw := normalizeTree(configured(), newFlags())
+		raw := configured().Settings(loader, flagOverrides(newFlags()))
 		assert.Equal(t, []any{4, 2}, raw["concurrency"])
 		assert.Equal(t, "debug", raw["logLevel"])
 		assert.Equal(t, "json", raw["logFormat"])
+	})
+
+	t.Run("nil flag set", func(t *testing.T) {
+		assert.Nil(t, flagOverrides(nil), "no flags at all is no overrides at all")
 	})
 
 	t.Run("passed", func(t *testing.T) {
 		fs := newFlags()
 		require.NoError(t, fs.Parse([]string{"--concurrency", "1,3", "--log-level", "warn"}))
 
-		raw := normalizeTree(configured(), fs)
+		raw := configured().Settings(loader, flagOverrides(fs))
 		// A list flag hands over its elements: its printed form is "[1,3]",
 		// which no list field could be weakly typed out of.
 		assert.Equal(t, []string{"1", "3"}, raw["concurrency"])
@@ -217,7 +216,7 @@ func TestNormalizeTreeFlagOverridesOnlyWhenPassed(t *testing.T) {
 		for _, spelling := range []string{"logLevel", "loglevel", "LOGLEVEL"} {
 			fs := newFlags()
 			require.NoError(t, fs.Parse([]string{"--log-level", "warn"}))
-			raw := normalizeTree(&tree{root: map[string]any{spelling: "debug"}}, fs)
+			raw := (&tree{Root: map[string]any{spelling: "debug"}}).Settings(loader, flagOverrides(fs))
 			assert.Equal(t, map[string]any{"logLevel": "warn"}, raw,
 				"the file wrote %q and the flag replaced it", spelling)
 		}
@@ -799,31 +798,6 @@ func TestRefRefusalsSurviveAReference(t *testing.T) {
 	_, _, _, err = Discover(loaded, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declares spaces")
-}
-
-// TestCloneValueCopiesEveryContainer: the parsers in use produce string-keyed
-// maps, generic maps and lists, the flag overlay adds a list of strings, and
-// every one of them is copied rather than shared. A value of any other type is
-// passed through, which is what the clone now says instead of reflecting over
-// containers nothing builds.
-func TestCloneValueCopiesEveryContainer(t *testing.T) {
-	original := map[string]any{
-		"generic": map[any]any{1: map[string]any{"deep": "v"}},
-		"list":    []any{map[string]any{"deep": "v"}},
-		"strings": []string{"one"},
-		"nils":    []any{nil},
-		"scalar":  "v",
-	}
-	clone := cloneTree(original)
-	require.Equal(t, original, clone)
-
-	clone["generic"].(map[any]any)[1].(map[string]any)["deep"] = "changed"
-	clone["list"].([]any)[0].(map[string]any)["deep"] = "changed"
-	clone["strings"].([]string)[0] = "changed"
-
-	assert.Equal(t, "v", original["generic"].(map[any]any)[1].(map[string]any)["deep"])
-	assert.Equal(t, "v", original["list"].([]any)[0].(map[string]any)["deep"])
-	assert.Equal(t, "one", original["strings"].([]string)[0])
 }
 
 // TestRefEmptyFileInEveryFormat: "this file is empty" is one answer across the

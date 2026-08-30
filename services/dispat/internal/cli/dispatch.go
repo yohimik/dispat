@@ -713,6 +713,11 @@ func (r *runner) runConfigured() int {
 	// the CLI works from inside a package folder with the config's own
 	// directory as the effective monorepo root. `dispat init --format yaml`
 	// and a plain `dispat status` compose without flags either way.
+	// The loader's own events — every directory the ascent tried, every file a
+	// $ref pulled in — go to the boot logger, which is the one that exists
+	// while the configuration is still being found: the configured logger is
+	// built from the file about to be read.
+	config.UseLogger(r.boot)
 	cfgPath, resolvedRoot, err := config.ResolveFile(*r.o.root, *r.o.cfgName, r.fs.Changed("config"))
 	if err != nil {
 		r.boot.Error().Err(err).Msg("config file not found")

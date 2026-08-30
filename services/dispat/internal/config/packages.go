@@ -281,17 +281,6 @@ func refusePackageEntryKeys(label string, entries map[string]any) error {
 	return nil
 }
 
-// sortedKeys returns a raw map's keys in order, so a config with several
-// mistakes always reports the same one first.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // rawEntries reads a raw map value out of a lowered tree, at the key path
 // given. Anything that is not a map of objects yields nothing: decoding is
 // what reports a malformed shape, in its own words.
@@ -923,7 +912,7 @@ func openFolderConfig(dir string) (map[string]any, string, error) {
 	if err != nil {
 		return nil, p, err
 	}
-	return normalizeTree(t, nil), p, nil
+	return t.Root, p, nil
 }
 
 // refuseNestedRoot rejects a folder file declaring one of the keys only a

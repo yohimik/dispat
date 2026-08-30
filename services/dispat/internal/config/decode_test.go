@@ -25,27 +25,27 @@ import (
 )
 
 // decodeRoot runs one raw document through exactly the path Load takes: the
-// lowered view of the tree, the settings shape, then the decoder. Tests write
+// settings shape, then the decoder. Tests write
 // the document the way a file writes it — mixed case included — so the case
 // folding every convention below sits on top of is part of what they exercise.
 func decodeRoot(t *testing.T, doc map[string]any) (File, error) {
 	t.Helper()
 	var cfg File
-	return cfg, decodeRootConfig(settings(normalizeTree(&tree{root: doc}, nil)), &cfg)
+	return cfg, decodeRootConfig(settings(doc), &cfg)
 }
 
 // decodePackage is decodeRoot for a package folder's own file.
 func decodePackage(t *testing.T, doc map[string]any) (PackageConfig, error) {
 	t.Helper()
 	var pc PackageConfig
-	return pc, decodePackageConfig(settings(normalizeTree(&tree{root: doc}, nil)), &pc)
+	return pc, decodePackageConfig(settings(doc), &pc)
 }
 
 // decodeSpace is decodeRoot for a space folder's own file.
 func decodeSpace(t *testing.T, doc map[string]any) (SpaceFile, error) {
 	t.Helper()
 	var sf SpaceFile
-	return sf, decodeSpaceFile(settings(normalizeTree(&tree{root: doc}, nil)), &sf)
+	return sf, decodeSpaceFile(settings(doc), &sf)
 }
 
 // TestDecodeUnknownKeyWithNoValueStillErrors: a key written with nothing after
