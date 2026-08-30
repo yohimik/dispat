@@ -639,7 +639,7 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 func applyMerged(pkg *model.Package, merged SpaceConfig, ex *packageExtras) {
 	pkg.BuildWeight, pkg.PublishWeight = packageWeights(merged.Concurrency)
 	pkg.Src = merged.Src
-	pkg.Changelog = changelogSpec(merged.Changelog)
+	pkg.Changelog = changelogSpec(merged.Changelog, merged.GitHub)
 	pkg.GitHub = githubSpec(merged.GitHub)
 	pkg.Webhooks = merged.Webhooks
 	pkg.ManifestNames = ex.manifestNames
@@ -707,8 +707,48 @@ func overlayFormat(base, over EntryFormatConfig) EntryFormatConfig {
 	if len(over.Footer) > 0 {
 		base.Footer = over.Footer
 	}
+	if over.DependencyLink != "" {
+		base.DependencyLink = over.DependencyLink
+	}
+	if over.NoChangesText != "" {
+		base.NoChangesText = over.NoChangesText
+	}
+	// The section order replaces whole, for the reason header and footer do:
+	// the nearer layer states what the entry renders and in what order, and
+	// appending to an inherited order could never take a section away or move
+	// one earlier.
+	if len(over.Sections) > 0 {
+		base.Sections = over.Sections
+	}
 	base.Authors = overlayAuthors(base.Authors, over.Authors)
+	base.CommitRefs = overlayCommitRefs(base.CommitRefs, over.CommitRefs)
 	return base
+}
+
+// overlayCommitRefs folds one layer's commitRefs object onto what it
+// inherited, field by field for the reason overlayAuthors does: a space that
+// turns references on and a package that only changes the link template should
+// not have to restate the rest. An empty string is the absence of a value,
+// which is why "off" is spelled out as a placement — only a value can defeat a
+// broader layer's "suffix".
+func overlayCommitRefs(base, over *CommitRefsConfig) *CommitRefsConfig {
+	if over == nil {
+		return base
+	}
+	out := CommitRefsConfig{}
+	if base != nil {
+		out = *base
+	}
+	if over.Placement != "" {
+		out.Placement = over.Placement
+	}
+	if over.Format != "" {
+		out.Format = over.Format
+	}
+	if over.Link != "" {
+		out.Link = over.Link
+	}
+	return &out
 }
 
 // overlayAuthors folds one layer's authors object onto what it inherited.
@@ -764,6 +804,9 @@ func overlayChangelog(base, over *ChangelogConfig) *ChangelogConfig {
 	if len(over.FileTitle) > 0 {
 		out.FileTitle = over.FileTitle
 	}
+	if over.EntrySpacing != nil {
+		out.EntrySpacing = over.EntrySpacing
+	}
 	out.EntryFormatConfig = overlayFormat(out.EntryFormatConfig, over.EntryFormatConfig)
 	return &out
 }
@@ -814,7 +857,10 @@ func packageWeights(conc []int) (build, publish int) {
 }
 
 // recordFormat maps the config entry-format options onto the resolved model.
-func recordFormat(f EntryFormatConfig) model.RecordFormat {
+// gh is the package's github policy, which the record borrows its forge
+// coordinates from; the changelog destination has none of its own and links to
+// the same repository the releases live in.
+func recordFormat(f EntryFormatConfig, gh *GitHubConfig) model.RecordFormat {
 	out := model.RecordFormat{
 		DateFormat:        f.DateFormat,
 		BreakingTitle:     f.BreakingTitle,
@@ -824,8 +870,15 @@ func recordFormat(f EntryFormatConfig) model.RecordFormat {
 		ReleaseName:       f.ReleaseName,
 		Header:            entryLines(f.Header),
 		Footer:            entryLines(f.Footer),
+		DependencyLink:    f.DependencyLink,
+		NoChangesText:     f.NoChangesText,
 	}
-	// The nested object flattens here: the resolved model is a value the
+	// The section order was resolved and validated by validateEntryFormat,
+	// which every layer that may carry one passes through; resolving it again
+	// here can only reproduce that answer, so the error is discarded rather
+	// than given a second, later, worse-placed report.
+	out.Sections, _ = resolveSections("", f.Sections)
+	// The nested objects flatten here: the resolved model is a value the
 	// renderer and the releaser key both read field by field, and a pointer in
 	// it would make two policies that say the same thing compare unequal.
 	if a := f.Authors; a != nil {
@@ -835,6 +888,14 @@ func recordFormat(f EntryFormatConfig) model.RecordFormat {
 		out.AuthorsInclude = a.Include
 		out.AuthorsExclude = a.Exclude
 		out.AuthorsTitle = a.Title
+	}
+	if r := f.CommitRefs; r != nil {
+		out.CommitRefsPlacement = r.Placement
+		out.CommitRefsFormat = r.Format
+		out.CommitRefsLink = r.Link
+	}
+	if gh != nil {
+		out.LinkOwner, out.LinkRepo, out.LinkAPIURL = gh.Owner, gh.Repo, gh.APIURL
 	}
 	return out
 }
@@ -862,16 +923,17 @@ func entryLines(lines []EntryLine) []model.EntryLine {
 // changelogSpec resolves a changelog config onto a package's record policy.
 // Nil-safe like IsEnabled: DiscoverPackages accepts configs that skipped
 // Load's optional-object filling.
-func changelogSpec(cc *ChangelogConfig) model.ChangelogSpec {
+func changelogSpec(cc *ChangelogConfig, gc *GitHubConfig) model.ChangelogSpec {
 	if cc == nil {
 		cc = &ChangelogConfig{}
 	}
 	return model.ChangelogSpec{
-		Enabled:   cc.IsEnabled(),
-		Channels:  cc.RecordChannels(),
-		File:      cc.File,
-		FileTitle: entryLines(cc.FileTitle),
-		Format:    recordFormat(cc.EntryFormatConfig),
+		Enabled:      cc.IsEnabled(),
+		Channels:     cc.RecordChannels(),
+		File:         cc.File,
+		FileTitle:    entryLines(cc.FileTitle),
+		EntrySpacing: cc.EntrySpacingOrDefault(),
+		Format:       recordFormat(cc.EntryFormatConfig, gc),
 	}
 }
 
@@ -890,7 +952,7 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 		Repo:        gc.Repo,
 		APIURL:      gc.APIURL,
 		TokenEnv:    gc.TokenEnv,
-		Format:      recordFormat(gc.EntryFormatConfig),
+		Format:      recordFormat(gc.EntryFormatConfig, gc),
 	}
 }
 
@@ -949,6 +1011,9 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		return pc, p, fmt.Errorf(
 			"%s: %s", p, pathRefused("a package folder's config file"))
 	}
+	if err := refuseFolderSectionBumps(p, formatsOf(pc.Changelog, pc.GitHub)...); err != nil {
+		return pc, p, err
+	}
 	return pc, p, nil
 }
 
@@ -975,6 +1040,9 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	}
 	if err := decodeSpaceFile(settings(raw), &sf); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, withSchemaHint(err))
+	}
+	if err := refuseFolderSectionBumps(p, formatsOf(sf.Changelog, sf.GitHub)...); err != nil {
+		return sf, p, err
 	}
 	return sf, p, nil
 }

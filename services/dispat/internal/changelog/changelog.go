@@ -46,6 +46,32 @@ type Format struct {
 	AuthorsInclude   []string
 	AuthorsExclude   []string
 	AuthorsTitle     string
+
+	// Sections is the whole render order, built-ins and custom sections
+	// together. Empty is the default order, which is what keeps an entry byte
+	// for byte what it was before sections were configurable.
+	Sections []model.RecordSection
+
+	// DependencyLink turns a dependency line into a link: empty renders the
+	// plain line, model.LinkAuto derives the forge URL, anything else is a
+	// template.
+	DependencyLink string
+	// NoChangesText replaces the sentence an entry with no sections carries;
+	// empty keeps the built-in sentences.
+	NoChangesText string
+
+	// The commit-reference policy. Placement defaults to "off", which is what
+	// keeps an entry what it was before references existed.
+	CommitRefsPlacement string
+	CommitRefsFormat    string
+	CommitRefsLink      string
+
+	// The forge coordinates model.LinkAuto derives its URLs from: the
+	// recording package's github owner, repo and API URL. A changelog borrows
+	// its package's, since a file has no coordinates of its own.
+	LinkOwner  string
+	LinkRepo   string
+	LinkAPIURL string
 }
 
 func (f Format) withDefaults() Format {
@@ -58,7 +84,30 @@ func (f Format) withDefaults() Format {
 	defaultStr(&f.AuthorsFormat, AuthorsFullName)
 	defaultStr(&f.AuthorsCommits, AuthorsCommitsCCME)
 	defaultStr(&f.AuthorsTitle, "Authors")
+	defaultStr(&f.CommitRefsPlacement, RefsOff)
+	defaultStr(&f.CommitRefsFormat, "$"+VarCommitShort)
+	fillRepoFromEnv(&f)
 	return f
+}
+
+// fillRepoFromEnv completes the forge coordinates from $GITHUB_REPOSITORY when
+// the configuration states none.
+//
+// It is the same fallback the GitHub releaser resolves its repository through,
+// applied here so that "auto" links work in the ordinary CI setup, where the
+// repository is what the workflow runs in and nobody writes it into the config
+// file. Configuration wins over the environment, and a half-configured pair is
+// completed rather than replaced.
+func fillRepoFromEnv(f *Format) {
+	if f.LinkOwner != "" && f.LinkRepo != "" {
+		return
+	}
+	owner, repo, ok := strings.Cut(os.Getenv("GITHUB_REPOSITORY"), "/")
+	if !ok {
+		return
+	}
+	defaultStr(&f.LinkOwner, owner)
+	defaultStr(&f.LinkRepo, repo)
 }
 
 func defaultStr(s *string, def string) {
@@ -84,6 +133,18 @@ func SpecFormat(f model.RecordFormat) Format {
 		AuthorsInclude:    f.AuthorsInclude,
 		AuthorsExclude:    f.AuthorsExclude,
 		AuthorsTitle:      f.AuthorsTitle,
+
+		Sections:       f.Sections,
+		DependencyLink: f.DependencyLink,
+		NoChangesText:  f.NoChangesText,
+
+		CommitRefsPlacement: f.CommitRefsPlacement,
+		CommitRefsFormat:    f.CommitRefsFormat,
+		CommitRefsLink:      f.CommitRefsLink,
+
+		LinkOwner:  f.LinkOwner,
+		LinkRepo:   f.LinkRepo,
+		LinkAPIURL: f.LinkAPIURL,
 	}
 }
 
@@ -140,74 +201,34 @@ func HasEntry(content []byte, tag string) bool {
 
 // RenderSections renders the grouped commit sections of a release (breaking
 // changes, features, fixes, dependency updates) without any entry header —
-// suitable as the body of a GitHub release.
+// suitable as the body of a GitHub release. It interpolates against the
+// release's own variables; RenderBody hands its own lookup down instead, so
+// that one entry reads every template against the same values.
 func RenderSections(rel *plan.Release, f Format) string {
-	f = f.withDefaults()
-	// A shared-versioning ride has no content to group: one line states that
-	// the version moved and nothing else did, in the changelog and in the
-	// GitHub release alike.
-	if rel.NoChanges() {
-		return noChangesLine(rel)
-	}
-	var parts []string
-	// NotesUnits, not Units: a prerelease's entry contains only its own
-	// changeset, while a stable release (a graduation included) collects the
-	// whole pending window since the last stable tag.
-	collect := func(title string, kind ccme.Bump) {
-		var lines []string
-		for _, c := range rel.NotesUnits() {
-			if c.Bump == kind {
-				// The attribution follows the correction note: the note is part
-				// of what the line says about the work, and who did it comes
-				// after what was done.
-				lines = append(lines, "- "+c.Header.Description+correctionNote(rel, c)+
-					authorSuffix(rel, c, f)+"\n"+c.Body)
-			}
-		}
-		if len(lines) > 0 {
-			parts = append(parts, "### "+title+"\n\n"+strings.Join(lines, "\n")+"\n")
-		}
-	}
-	collect(f.BreakingTitle, ccme.BumpMajor)
-	collect(f.FeaturesTitle, ccme.BumpMinor)
-	collect(f.FixesTitle, ccme.BumpPatch)
-	if len(rel.Updates) > 0 {
-		// One line per provider whose version this release picks up, carrying
-		// the movement — a bare name would leave the reader to hunt the
-		// provider's own changelog for what actually changed underneath. On a
-		// catch-up the provider's version was already out, so the plan spans
-		// the movement from what this package's previous release shipped
-		// against (§13.10, providerUpdates), not from the provider's own
-		// collapsed before-and-after.
-		//
-		// Updates rather than DueTo, so the section appears whenever a
-		// provider moved rather than only when it propagated a bump. A
-		// consumer released beside its provider with no caret between them
-		// genuinely ships against the new version, and a changelog that says
-		// nothing about it is the reader's problem later.
-		lines := make([]string, 0, len(rel.Updates))
-		for _, u := range rel.Updates {
-			lines = append(lines, "- "+u.Name+": "+u.From.String()+" -> "+u.To.String())
-		}
-		parts = append(parts, "### "+f.DependenciesTitle+"\n\n"+strings.Join(lines, "\n")+"\n")
-	}
-	// Sections are never empty: a release can be admitted to the plan with
-	// nothing to group (a pin, a channel transition, work its reverts cancel
-	// out), and a record with an empty body reads as a broken write rather
-	// than a deliberate one. The line names the release's actual cause.
-	if len(parts) == 0 {
-		return noChangesLine(rel)
-	}
-	return strings.Join(parts, "\n")
+	return renderSections(rel, f.withDefaults(), ReleaseLookup(rel))
 }
 
-// noChangesLine states why an entry carries no sections. The ride line names
-// the part of the version the group holds in common, so a reader of a
+// noChangesLine states why an entry carries no sections: the configured
+// sentence, or the built-in that names the release's actual cause.
+//
+// A configured sentence that expands to nothing falls back rather than
+// standing: an expansion is empty when a variable it names is not set, which
+// is a mistake in the template rather than an instruction to publish an empty
+// entry.
+func noChangesLine(rel *plan.Release, f Format, look Lookup) string {
+	if text := Expand(f.NoChangesText, look); text != "" {
+		return text + "\n"
+	}
+	return builtinNoChangesLine(rel)
+}
+
+// builtinNoChangesLine states why an entry carries no sections. The ride line
+// names the part of the version the group holds in common, so a reader of a
 // fixedMajor changelog is not told that the whole version is shared when only
 // the major is; the other causes are named in the order that best explains an
 // empty body — suppression explains missing sections even when commits exist,
 // a pin and a channel move explain a release that never had any.
-func noChangesLine(rel *plan.Release) string {
+func builtinNoChangesLine(rel *plan.Release) string {
 	switch {
 	case rel.FixedRide:
 		return "No changes: a version bump to keep the versioning group on " + plan.SharedPartName(rel.SharedDepth()) + ".\n"
@@ -256,7 +277,7 @@ func RenderBody(rel *plan.Release, f Format, look Lookup, extra ...string) strin
 	}
 	blocks := make([]string, 0, len(extra)+4)
 	blocks = appendBlock(blocks, RenderLines(f.Header, rel, look))
-	blocks = appendBlock(blocks, RenderSections(rel, f))
+	blocks = appendBlock(blocks, renderSections(rel, f, look))
 	// The authors block sits after the sections it attributes and before
 	// anything the caller appends, so the GitHub recorder's "### Release"
 	// details stay the last thing before the footer. The footer staying last
@@ -409,6 +430,10 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 			Msg("changelog entry already exists, skipped")
 		return nil
 	}
+	// What the entry's own policy could not do, said once for the entry that
+	// is actually about to be written rather than for the skip above it.
+	LogRecordPolicy(w.Log, rel, w.Format)
+
 	body := strings.TrimPrefix(string(existing), header)
 	body = strings.TrimLeft(body, "\n")
 

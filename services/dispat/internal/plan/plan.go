@@ -219,6 +219,17 @@ const (
 	// already happened, and a listener that missed a notification is never a
 	// reason to fail the release it was watching.
 	CodeWebhookFailed = "W239"
+	// CodeCommitRefUnavailable reports entry lines a configured commitRefs
+	// policy could not reference: the planner has no sha for the commit that
+	// carried them, which happens only where the Git implementation reports
+	// none and the window key stands in for it. The lines render without a
+	// reference rather than with one that resolves nowhere.
+	//
+	// W240 continues dispat's own range past W239 rather than starting a new
+	// one. §16's registry runs to W215 and reserves nothing above it, and the
+	// numbers a reader looks up are dispat's from W220 on; a code out of a
+	// fresh hundred would say a boundary exists where none does.
+	CodeCommitRefUnavailable = "W240"
 
 	// --- release outcomes (§13.7a, §13.9) ---
 
@@ -519,6 +530,11 @@ type StaleSource struct {
 type ProviderUpdate struct {
 	Name     string
 	From, To ccme.Version
+	// Tag is the release tag the provider's To version was published under,
+	// rendered through the provider's own tag format. It is what a record
+	// links a dependency line to; a name and a version alone would leave the
+	// renderer to guess a format only the provider's configuration knows.
+	Tag string
 }
 
 // Release describes what (if anything) will happen to one package.
@@ -690,6 +706,13 @@ type Release struct {
 	// of FreshUnits. AllAuthors picks between the two.
 	FreshWindowAuthors []Author
 
+	// UnitCommits is the commit each unit was written in, keyed by unit
+	// pointer alongside the other unit-keyed marks and shared, unchanged, by
+	// every release the unit reaches. A record uses it to point a line at the
+	// change behind it; read it through UnitCommit, which is what decides
+	// whether the key is a commit id at all.
+	UnitCommits map[*ccme.Unit]string
+
 	Diagnostics []Diagnostic
 }
 
@@ -703,6 +726,22 @@ func (r *Release) UnitSuppressed(u *ccme.Unit) bool { return r.SuppressedNotes[u
 
 // AuthorsFor returns who the unit is by, empty for a unit nothing attributed.
 func (r *Release) AuthorsFor(u *ccme.Unit) []Author { return r.UnitAuthors[u] }
+
+// UnitCommit is the sha of the commit the unit was written in, empty when the
+// planner has none to offer.
+//
+// A window key is a sha except where the Git implementation reports none, and
+// what stands in for it there identifies an entry in this run's window rather
+// than an object anything else could resolve. Answering empty is what keeps a
+// synthetic key out of a published record, where it would render as a
+// reference that leads nowhere.
+func (r *Release) UnitCommit(u *ccme.Unit) string {
+	key := r.UnitCommits[u]
+	if strings.HasPrefix(key, syntheticKeyPrefix) {
+		return ""
+	}
+	return key
+}
 
 // AllAuthors returns every author of the release's window, narrowed exactly as
 // NotesUnits narrows the units it renders: a prerelease is attributed to the
@@ -1307,6 +1346,12 @@ type computation struct {
 	// of the commit that carried it, not of the package it resolved onto.
 	unitAuthors map[*ccme.Unit][]Author
 
+	// unitCommits is the commit each parsed unit was written in, filled
+	// alongside the authors and shared the same way: the commit behind a unit
+	// is a property of the message that carried it, not of the package it
+	// resolved onto.
+	unitCommits map[*ccme.Unit]string
+
 	// channel axis state, produced by §9.2 phase 1 and settled by §13.8.
 	proposed    map[string]channelPick
 	channel     map[string]string
@@ -1374,6 +1419,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		corrects:    make(map[string]map[*ccme.Unit][]string),
 		noteDrops:   make(map[string]map[*ccme.Unit]bool),
 		unitAuthors: make(map[*ccme.Unit][]Author),
+		unitCommits: make(map[*ccme.Unit]string),
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
@@ -1907,6 +1953,10 @@ func (cp *computation) parseAndResolve() error {
 		cp.resolveAuthors(rec)
 		rec.scope = make([]map[string]bool, len(rec.units))
 		for i, u := range rec.units {
+			// The commit behind the unit, recorded here because this is the
+			// one place a unit and the record that carried it are both in
+			// hand. Every unit of one message shares its key.
+			cp.unitCommits[u] = rec.key
 			scopes, written := unitScopes(u)
 			res := cp.resolveScopeSet(scopes, written, rec)
 			cp.reportScope(res, rec, "")
@@ -2240,6 +2290,7 @@ func (cp *computation) finalise() {
 		// themselves are: it is read-only from here on, and a unit reaching two
 		// packages is by the same people in both.
 		rel.UnitAuthors = cp.unitAuthors
+		rel.UnitCommits = cp.unitCommits
 		rel.WindowAuthors, rel.FreshWindowAuthors = cp.collectWindowAuthors(name)
 		if len(rel.WindowAuthors) > 0 {
 			cp.log.Debug().Str("package", name).Int("window", len(rel.WindowAuthors)).
@@ -2573,6 +2624,14 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			seen[prov] = true
 			out = append(out, ProviderUpdate{Name: prov, From: from, To: pr.Previous()})
 		}
+	}
+	// The tags come last, over the finished list, rather than at each of the
+	// three places an update is appended: the graduation widening above
+	// rewrites the From of entries the earlier loops added, and a tag computed
+	// alongside an append would have to be kept in step with every future
+	// rewrite. Rendering here is the one pass that cannot miss one.
+	for i := range out {
+		out[i].Tag = TagFormatFor(cp.byName[out[i].Name]).Render(out[i].Name, out[i].To)
 	}
 	return out
 }

@@ -213,7 +213,7 @@ func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 		name: sn, dirs: dirs, sc: sc, files: files, srcs: srcs,
 		base: base, baseScope: baseScope,
 		chains:        chains,
-		changelog:     changelogSpec(sc.Changelog),
+		changelog:     changelogSpec(sc.Changelog, sc.GitHub),
 		github:        githubSpec(sc.GitHub),
 		buildWeight:   buildWeight,
 		publishWeight: publishWeight,
@@ -480,7 +480,7 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 		Dir:           dir,
 		BuildWeight:   1,
 		PublishWeight: 1,
-		Changelog:     changelogSpec(d.c.Changelog),
+		Changelog:     changelogSpec(d.c.Changelog, d.c.GitHub),
 		GitHub:        githubSpec(d.c.GitHub),
 		Src:           d.c.Src,
 	}

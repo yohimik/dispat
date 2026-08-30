@@ -779,7 +779,7 @@ func (cp *computation) pending(pkg, key string) bool {
 // except for Git implementations that report no sha at all, whose synthetic
 // keys are left as they are.
 func shortKey(key string) string {
-	if strings.HasPrefix(key, "msg:") || len(key) <= 12 {
+	if strings.HasPrefix(key, syntheticKeyPrefix) || len(key) <= 12 {
 		return key
 	}
 	return key[:12]

@@ -40,6 +40,8 @@ type (
 	RunConfig                = public.RunConfig
 	EntryFormatConfig        = public.EntryFormatConfig
 	AuthorsConfig            = public.AuthorsConfig
+	SectionConfig            = public.SectionConfig
+	CommitRefsConfig         = public.CommitRefsConfig
 	EntryLine                = public.EntryLine
 	ChangelogConfig          = public.ChangelogConfig
 	GitHubConfig             = public.GitHubConfig
@@ -474,6 +476,12 @@ func validateRecordObjects(clLabel, ghLabel string, cl *ChangelogConfig, gh *Git
 		if err := validateChannels(clLabel, cl.Channels); err != nil {
 			return err
 		}
+		if cl.EntrySpacing != nil {
+			if n := *cl.EntrySpacing; n < public.MinEntrySpacing || n > public.MaxEntrySpacing {
+				return fmt.Errorf("%s: entrySpacing must be between %d and %d, got %d",
+					clLabel, public.MinEntrySpacing, public.MaxEntrySpacing, n)
+			}
+		}
 		if err := validateEntryFormat(clLabel, cl.EntryFormatConfig); err != nil {
 			return err
 		}
@@ -508,7 +516,120 @@ func validateEntryFormat(label string, f EntryFormatConfig) error {
 	if err := validateEntryLines(label, "footer", f.Footer); err != nil {
 		return err
 	}
-	return validateAuthors(label, f.Authors)
+	if err := validateAuthors(label, f.Authors); err != nil {
+		return err
+	}
+	if err := validateCommitRefs(label, f.CommitRefs); err != nil {
+		return err
+	}
+	if err := validateNoChangesText(label, f.NoChangesText); err != nil {
+		return err
+	}
+	_, err := resolveSections(label, f.Sections)
+	return err
+}
+
+// commitRefsPlacements are the values the placement key accepts, and the
+// error message's own source, exactly as the authors enums are.
+var commitRefsPlacements = []string{"off", "suffix"}
+
+// validateCommitRefs refuses a commitRefs object naming a placement the
+// renderer cannot do. The link and the format are free text — a template is
+// whatever the operator's forge wants — so only the closed set is checked.
+func validateCommitRefs(label string, c *CommitRefsConfig) error {
+	if c == nil {
+		return nil
+	}
+	if c.Placement != "" && !slices.Contains(commitRefsPlacements, c.Placement) {
+		return fmt.Errorf("%s: commitRefs.placement: unknown value %q (want one of %s)",
+			label, c.Placement, strings.Join(commitRefsPlacements, ", "))
+	}
+	return nil
+}
+
+// validateNoChangesText refuses a sentence beginning with the horizontal rule
+// `dispat self-update` cuts release notes at. An entry whose only content sat
+// below the cut would print as nothing at all after an update, which is a
+// failure nobody would think to look for in a changelog setting.
+func validateNoChangesText(label, text string) error {
+	if strings.HasPrefix(strings.TrimSpace(text), "---") {
+		return fmt.Errorf(
+			"%s: noChangesText must not begin with \"---\": that is where `dispat self-update` cuts a release's notes, "+
+				"so the sentence would never be shown", label)
+	}
+	return nil
+}
+
+// resolveSections validates one destination's `sections` list and resolves it
+// onto the render order: the elements as written, then every built-in the list
+// omitted, appended in the default relative order.
+//
+// Nothing is ever dropped by omission. A list is how sections are ordered and
+// how custom ones are added; taking a built-in out of the record would take
+// released work with it, so a `sections` naming only "features" still renders
+// the fixes below it.
+func resolveSections(label string, list []SectionConfig) ([]model.RecordSection, error) {
+	if len(list) == 0 {
+		return nil, nil
+	}
+	out := make([]model.RecordSection, 0, len(list)+len(model.DefaultSectionOrder()))
+	seenBuiltin := make(map[string]bool, len(list))
+	claimed := make(map[string]int, len(list))
+	for i, s := range list {
+		at := fmt.Sprintf("%s: sections[%d]", label, i)
+		title := strings.TrimSpace(s.Title)
+		if len(s.Types) == 0 {
+			// No types: the element names a built-in. A custom section with
+			// nothing to claim would select the bump-keyed grouping's leftovers,
+			// which is what the built-ins already are.
+			key := strings.ToLower(title)
+			if !slices.Contains(model.DefaultSectionOrder(), key) {
+				return nil, fmt.Errorf(
+					"%s: %q is not a built-in section (want one of %s); a custom section needs a types list",
+					at, s.Title, strings.Join(model.DefaultSectionOrder(), ", "))
+			}
+			if s.Bump != "" {
+				return nil, fmt.Errorf("%s: bump belongs to a custom section: the built-in %q takes its bump "+
+					"from the commit types themselves", at, key)
+			}
+			if seenBuiltin[key] {
+				return nil, fmt.Errorf("%s: the built-in section %q is listed twice", at, key)
+			}
+			seenBuiltin[key] = true
+			out = append(out, model.RecordSection{Builtin: key})
+			continue
+		}
+		if title == "" {
+			return nil, fmt.Errorf("%s: title is required: a section with no heading has nowhere to render", at)
+		}
+		section := model.RecordSection{Title: title, Bump: s.Bump}
+		if section.Bump != "" {
+			if _, ok := ccme.ParseBump(section.Bump); !ok {
+				return nil, fmt.Errorf("%s: bump: unknown value %q (want none, patch, minor or major)", at, section.Bump)
+			}
+		}
+		for j, raw := range s.Types {
+			t := strings.ToLower(strings.TrimSpace(raw))
+			if t == "" {
+				return nil, fmt.Errorf("%s: types[%d]: a commit type must not be empty", at, j)
+			}
+			if prev, dup := claimed[t]; dup {
+				return nil, fmt.Errorf("%s: types[%d]: the type %q is already claimed by sections[%d]; "+
+					"a commit belongs to one section", at, j, t, prev)
+			}
+			claimed[t] = i
+			section.Types = append(section.Types, t)
+		}
+		out = append(out, section)
+	}
+	// The built-ins the list left out come after the ones it named, in the
+	// order they render by default.
+	for _, key := range model.DefaultSectionOrder() {
+		if !seenBuiltin[key] {
+			out = append(out, model.RecordSection{Builtin: key})
+		}
+	}
+	return out, nil
 }
 
 // The values the three authors enums accept. Each list is the error message's
@@ -876,7 +997,123 @@ func validate(c *File) error {
 	if err != nil {
 		return err
 	}
+	if err := foldSectionBumps(c, &parserCfg); err != nil {
+		return err
+	}
 	c.ResolvedParser = parserCfg
+	return nil
+}
+
+// foldSectionBumps merges the bumps custom sections declare into the parser's
+// type table, so declaring the section that renders a type is enough to make
+// commits of that type release at all.
+//
+// The parser is one table for the whole repository while sections are per
+// package and per destination, so the fold runs across every layer of the root
+// file and refuses a type two of them give different bumps. Agreeing
+// declarations are fine: a space and its package restating the same section is
+// how the two destinations of one package are kept in step.
+//
+// Only explicit declarations conflict. A section may give a type the
+// specification already knows a different bump for — `docs` rendered under a
+// "Documentation" section that releases a patch is a deliberate override, not
+// a mistake — so the table starts as ccme's own defaults and only what
+// `parser.types` and other sections stated is held to agreement.
+func foldSectionBumps(c *File, cfg *ccme.Config) error {
+	declared := make(map[string]string, len(c.Parser.Types))
+	for name := range c.Parser.Types {
+		declared[strings.ToLower(name)] = "parser.types"
+	}
+	fold := func(label string, formats ...EntryFormatConfig) error {
+		for _, f := range formats {
+			for _, s := range f.Sections {
+				bump, ok := ccme.ParseBump(s.Bump)
+				if s.Bump == "" || !ok {
+					continue // absent, or already refused by resolveSections
+				}
+				for _, raw := range s.Types {
+					t := strings.ToLower(strings.TrimSpace(raw))
+					if t == "" {
+						continue
+					}
+					if where, explicit := declared[t]; explicit && cfg.Types[t] != bump {
+						return fmt.Errorf(
+							"%s: sections: the commit type %q is declared as %q here and as %q by %s; "+
+								"a commit type has one bump for the whole repository",
+							label, t, bump, cfg.Types[t], where)
+					}
+					if cfg.Types == nil {
+						// A non-nil table replaces ccme's wholesale, so the
+						// declarations are folded onto a copy of the defaults
+						// rather than onto nothing: a repository that declares
+						// one section must not lose `feat` and `fix` with it.
+						cfg.Types = ccme.DefaultTypes()
+					}
+					cfg.Types[t] = bump
+					declared[t] = label
+				}
+			}
+		}
+		return nil
+	}
+	if err := fold("changelog/github", formatsOf(c.Changelog, c.GitHub)...); err != nil {
+		return err
+	}
+	for _, name := range sortedKeys(c.Packages) {
+		po := c.Packages[name]
+		if err := fold(fmt.Sprintf("packages[%q]", name), formatsOf(po.Changelog, po.GitHub)...); err != nil {
+			return err
+		}
+	}
+	for _, sn := range sortedSpaceNames(c) {
+		s := c.Spaces[sn]
+		if err := fold(fmt.Sprintf("spaces[%q]", sn), formatsOf(s.Changelog, s.GitHub)...); err != nil {
+			return err
+		}
+		for _, name := range sortedKeys(s.Packages) {
+			po := s.Packages[name]
+			label := fmt.Sprintf("spaces[%q]: packages[%q]", sn, name)
+			if err := fold(label, formatsOf(po.Changelog, po.GitHub)...); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// formatsOf is the entry-format half of one layer's two record objects, absent
+// objects dropped. It exists so the fold above reads as one line per layer.
+func formatsOf(cl *ChangelogConfig, gh *GitHubConfig) []EntryFormatConfig {
+	var out []EntryFormatConfig
+	if cl != nil {
+		out = append(out, cl.EntryFormatConfig)
+	}
+	if gh != nil {
+		out = append(out, gh.EntryFormatConfig)
+	}
+	return out
+}
+
+// refuseFolderSectionBumps rejects a `sections` bump written in a folder's own
+// config file.
+//
+// The bump merges into the commit parser, which is built once for the whole
+// run from the root file alone: an in-folder file is read later, during
+// discovery, and a type it declared there would render under its section
+// without ever becoming releasable. Refusing it says where the declaration
+// belongs rather than leaving the operator with a section nothing ever reaches.
+func refuseFolderSectionBumps(path string, formats ...EntryFormatConfig) error {
+	for _, f := range formats {
+		for i, s := range f.Sections {
+			if s.Bump == "" {
+				continue
+			}
+			return fmt.Errorf(
+				"%s: sections[%d]: bump cannot be set in a folder's own config file: the commit parser is built once "+
+					"for the whole repository, so declare the bump under `parser.types` or in the root config's sections",
+				path, i)
+		}
+	}
 	return nil
 }
 

@@ -449,6 +449,77 @@ type RecordFormat struct {
 	AuthorsInclude []string
 	AuthorsExclude []string
 	AuthorsTitle   string
+
+	// Sections is the whole order of the entry's sections, built-ins and
+	// custom ones together, resolved from the config's `sections` list. Empty
+	// means the default order.
+	Sections []RecordSection
+
+	// DependencyLink turns a dependency line into a link: empty for the plain
+	// line, LinkAuto for the derived forge URL, anything else a template.
+	DependencyLink string
+	// NoChangesText replaces the sentence an entry with no sections carries;
+	// empty keeps the built-in sentences.
+	NoChangesText string
+
+	// The resolved commit-reference policy, flattened from the config's nested
+	// `commitRefs` object for the same reason the authors policy is: two
+	// packages saying the same thing must produce the same policy key.
+	//
+	// CommitRefsPlacement is "off" (the renderer default) or "suffix";
+	// CommitRefsFormat the reference text; CommitRefsLink empty, LinkAuto or a
+	// URL template.
+	CommitRefsPlacement string
+	CommitRefsFormat    string
+	CommitRefsLink      string
+
+	// The forge coordinates LinkAuto derives its URLs from: the recording
+	// package's own github owner, repo and API URL, copied here at resolution
+	// time so the renderer needs no configuration of its own. They are filled
+	// for the changelog format too, which borrows the package's github
+	// coordinates because a changelog has none.
+	LinkOwner  string
+	LinkRepo   string
+	LinkAPIURL string
+}
+
+// LinkAuto is the link value that asks for a URL derived from the package's
+// own forge coordinates rather than written out as a template.
+const LinkAuto = "auto"
+
+// The built-in section keys, in the order an entry renders them when nothing
+// is configured. They are what a `sections` list names a built-in by.
+const (
+	SectionBreaking     = "breaking"
+	SectionFeatures     = "features"
+	SectionFixes        = "fixes"
+	SectionDependencies = "dependencies"
+)
+
+// DefaultSectionOrder is the order sections render in when the configuration
+// says nothing, and the order the built-ins a `sections` list omitted are
+// appended in. It is the single source of both, so a section can never be
+// ordered one way by default and another way by omission.
+func DefaultSectionOrder() []string {
+	return []string{SectionBreaking, SectionFeatures, SectionFixes, SectionDependencies}
+}
+
+// RecordSection is one entry of a resolved section order: a built-in named by
+// key, or a custom section claiming commit types of its own.
+type RecordSection struct {
+	// Builtin is the built-in key this entry names, empty for a custom
+	// section. The two are mutually exclusive by construction: validation
+	// refuses an element that is neither.
+	Builtin string
+	// Title heads a custom section. A built-in takes its title from the
+	// format's own breakingTitle/featuresTitle/fixesTitle/dependenciesTitle
+	// instead, so the same configured word heads it wherever it is ordered.
+	Title string
+	// Types are the lowercased commit types the custom section claims.
+	Types []string
+	// Bump is the version bump those types carry, merged into the parser's
+	// type table at load; empty when the section states none.
+	Bump string
 }
 
 // ChannelsAdmit reports whether a channel restriction admits a release on
@@ -482,7 +553,10 @@ type ChangelogSpec struct {
 	File     string // empty means the writer default (CHANGELOG.md)
 	// FileTitle heads the file; an empty list means the writer default.
 	FileTitle []EntryLine
-	Format    RecordFormat
+	// EntrySpacing is how many blank lines separate one entry from the entry
+	// below it. Resolved, so 0 never reaches the writer.
+	EntrySpacing int
+	Format       RecordFormat
 }
 
 // Records reports whether a release on this policy is written at all: enabled,
@@ -550,8 +624,22 @@ func (f RecordFormat) writeKey(b *strings.Builder) {
 		f.FixesTitle, f.DependenciesTitle, f.ReleaseName)
 	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q\x00%q", f.AuthorsPlacement, f.AuthorsFormat,
 		f.AuthorsCommits, f.AuthorsInclude, f.AuthorsExclude, f.AuthorsTitle)
+	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q", f.DependencyLink, f.NoChangesText,
+		f.CommitRefsPlacement, f.CommitRefsFormat, f.CommitRefsLink)
+	fmt.Fprintf(b, "\x00%q\x00%q\x00%q", f.LinkOwner, f.LinkRepo, f.LinkAPIURL)
 	writeLinesKey(b, f.Header)
 	writeLinesKey(b, f.Footer)
+	writeSectionsKey(b, f.Sections)
+}
+
+// writeSectionsKey appends a section order's contribution to a policy key, by
+// the same rule writeLinesKey follows: the length first, so no arrangement of
+// sections can encode as another's.
+func writeSectionsKey(b *strings.Builder, sections []RecordSection) {
+	fmt.Fprintf(b, "\x00%d", len(sections))
+	for _, s := range sections {
+		fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q", s.Builtin, s.Title, s.Types, s.Bump)
+	}
 }
 
 func writeLinesKey(b *strings.Builder, lines []EntryLine) {

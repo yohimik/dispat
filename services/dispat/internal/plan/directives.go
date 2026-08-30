@@ -21,8 +21,14 @@ func commitKey(c gitx.Commit) string {
 	if c.SHA != "" {
 		return c.SHA
 	}
-	return "msg:" + c.Message
+	return syntheticKeyPrefix + c.Message
 }
+
+// syntheticKeyPrefix marks a window key built from a message rather than from
+// a sha. Nothing outside the plan may present such a key as a commit id: it
+// identifies an entry in this run's window and names no object a forge or a
+// `git show` could resolve.
+const syntheticKeyPrefix = "msg:"
 
 // ---------------------------------------------------------------------------
 // versions

@@ -424,6 +424,13 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 	if token == "" {
 		return nil, fmt.Errorf("no token found in $%s", tokenEnv)
 	}
+	format := changelog.SpecFormat(spec.Format)
+	// The record's "auto" links hang off the repository the release is
+	// actually created in, which is this resolution's answer rather than the
+	// configuration's: a workflow that states the repository only in
+	// $GITHUB_REPOSITORY would otherwise publish a body whose links point
+	// nowhere while the release beside them lands correctly.
+	format.LinkOwner, format.LinkRepo = owner, repo
 	return &github.Releaser{
 		APIURL:      spec.APIURL,
 		AllPackages: spec.AllPackages,
@@ -431,7 +438,7 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 		Owner:       owner,
 		Repo:        repo,
 		Token:       token,
-		Format:      changelog.SpecFormat(spec.Format),
+		Format:      format,
 		Log:         log,
 	}, nil
 }

@@ -212,10 +212,11 @@ func runFields(dst *RunConfig) fields {
 // boundary.
 func changelogFields(dst *ChangelogConfig) fields {
 	return merge(fields{
-		"enabled":   flagPtr(&dst.Enabled),
-		"file":      str(&dst.File),
-		"filetitle": recordLines(&dst.FileTitle),
-		"channels":  strs(&dst.Channels),
+		"enabled":      flagPtr(&dst.Enabled),
+		"file":         str(&dst.File),
+		"filetitle":    recordLines(&dst.FileTitle),
+		"channels":     strs(&dst.Channels),
+		"entryspacing": numPtr(&dst.EntrySpacing),
 	}, entryFormatFields(&dst.EntryFormatConfig))
 }
 
@@ -246,6 +247,31 @@ func entryFormatFields(dst *EntryFormatConfig) fields {
 		"header":            recordLines(&dst.Header),
 		"footer":            recordLines(&dst.Footer),
 		"authors":           obj(&dst.Authors, authorsFields),
+		"dependencylink":    str(&dst.DependencyLink),
+		"nochangestext":     str(&dst.NoChangesText),
+		"sections":          recordSections(&dst.Sections),
+		"commitrefs":        obj(&dst.CommitRefs, commitRefsFields),
+	}
+}
+
+// sectionFields is one element of a `sections` list written as a full object:
+// the title (or the built-in's key), the commit types a custom section claims,
+// and the bump those types carry.
+func sectionFields(dst *SectionConfig) fields {
+	return fields{
+		"title": str(&dst.Title),
+		"types": strs(&dst.Types),
+		"bump":  str(&dst.Bump),
+	}
+}
+
+// commitRefsFields is a `commitRefs` object: whether an entry line names the
+// commit behind it, how, and whether the name links anywhere.
+func commitRefsFields(dst *CommitRefsConfig) fields {
+	return fields{
+		"placement": str(&dst.Placement),
+		"format":    str(&dst.Format),
+		"link":      str(&dst.Link),
 	}
 }
 

@@ -363,6 +363,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	// One lookup for the whole release: the name and every configured line
 	// interpolate against the same variables.
 	look := changelog.ReleaseLookup(rel)
+	changelog.LogRecordPolicy(r.Log, rel, r.Format)
 	var release string
 	if sha != "" {
 		release = "### Release\n\n- commit: " + sha + "\n- tag: " + tag + "\n"

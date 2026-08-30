@@ -195,6 +195,70 @@ func recordLines(dst *[]EntryLine) setter {
 	}
 }
 
+// recordSections fills a `sections` list. A whole list written as one string
+// names one built-in section, and inside a list a bare string is a built-in
+// named by key, which is the common case — reordering the defaults — and needs
+// no object at all.
+func recordSections(dst *[]SectionConfig) setter {
+	return func(val any, at string) error {
+		if s, ok := val.(string); ok {
+			*dst = []SectionConfig{{Title: s}}
+			return nil
+		}
+		items, ok := weakList(val)
+		if !ok {
+			items = []any{val}
+		}
+		out := make([]SectionConfig, 0, len(items))
+		for i, item := range items {
+			section, err := sectionOf(item, indexPath(at, i))
+			if err != nil {
+				return err
+			}
+			out = append(out, section)
+		}
+		*dst = out
+		return nil
+	}
+}
+
+// sectionOf reads one element of a `sections` list in either of its two
+// shapes: a built-in's key, or a full object.
+func sectionOf(item any, at string) (SectionConfig, error) {
+	var section SectionConfig
+	if item == nil {
+		return section, nil
+	}
+	if _, isObject := item.(map[string]any); isObject {
+		// Two statements rather than `return section, decodeObject(...)`, for
+		// the reason entryLineOf spells out: gc and TinyGo disagree about
+		// whether the returned copy is taken before or after the call.
+		err := decodeObject(item, at, sectionFields(&section))
+		return section, err
+	}
+	if s, ok := item.(string); ok {
+		section.Title = s
+		return section, nil
+	}
+	return section, wants(at, "a built-in section name or an object")
+}
+
+// numPtr fills a tri-state whole number: the pointer is allocated only because
+// the file wrote the key, so a layer that says nothing about the option stays
+// nil and a nearer layer's value, or the default, survives. It is the Int
+// counterpart of the library's BoolPtr, which the library does not carry
+// because entrySpacing is so far the only key that needs it.
+func numPtr(dst **int) setter {
+	return func(val any, at string) error {
+		n, err := weakInt(val, at)
+		if err != nil {
+			return err
+		}
+		*dst = &n
+		return nil
+	}
+}
+
 // entryLineOf reads one element of a record-line list in whichever of its
 // three shapes it was written.
 func entryLineOf(item any, at string) (EntryLine, error) {
