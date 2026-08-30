@@ -41,6 +41,8 @@ func TestFieldTablesCoverEveryModelField(t *testing.T) {
 		{"EntryFormatConfig", EntryFormatConfig{}, entryFormatFields(&EntryFormatConfig{})},
 		{"EntryLine", EntryLine{}, entryLineFields(&EntryLine{})},
 		{"AuthorsConfig", AuthorsConfig{}, authorsFields(&AuthorsConfig{})},
+		{"SectionConfig", SectionConfig{}, sectionFields(&SectionConfig{})},
+		{"CommitRefsConfig", CommitRefsConfig{}, commitRefsFields(&CommitRefsConfig{})},
 		{"CommitConfig", CommitConfig{}, commitFields(&CommitConfig{})},
 		{"AliasTagConfig", AliasTagConfig{}, aliasTagFields(&AliasTagConfig{})},
 		{"WebhookConfig", WebhookConfig{}, webhookFields(&WebhookConfig{})},

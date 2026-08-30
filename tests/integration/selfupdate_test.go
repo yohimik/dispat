@@ -782,3 +782,69 @@ func suEvent(t *testing.T, stream, message string) map[string]any {
 	t.Fatalf("no %q event in:\n%s", message, stream)
 	return nil
 }
+
+// TestSelfUpdateReadsNotesFromTheCurrentRenderer: the two halves of this
+// feature are written years apart. A release body is produced by whichever
+// dispat cut the release, and read by whichever dispat is being updated, so a
+// change to the renderer is a change to an input the notes parser will meet
+// for as long as that release exists.
+//
+// Every other scenario here hands the fake a body written by hand. This one
+// hands it a body this build actually rendered — indented commit bodies, the
+// release details, the footer rule — so the shape under test is the shape that
+// will be published rather than a fixture somebody remembered to update.
+func TestSelfUpdateReadsNotesFromTheCurrentRenderer(t *testing.T) {
+	body := renderedReleaseBody(t)
+	require.Contains(t, body, "\n  The first paragraph says why it was done.",
+		"the renderer indents a commit body under its bullet:\n%s", body)
+
+	r := newSURepo(t)
+	r.body = body
+	r.serve(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+
+	res := r.update()
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+
+	assertOrderedIn(t, res.Stdout,
+		"what changed in "+suNew,
+		"Features",
+		"- add streaming",
+		"The first paragraph says why it was done.",
+		"The second paragraph says how.",
+		"Fixes",
+		"- close a leak",
+	)
+	// The cut still lands on the footer's rule: an indented body must not
+	// carry the release details and the links into the terminal with it.
+	assert.NotContains(t, res.Stdout, "Questions? open an issue.")
+	assert.NotContains(t, res.Stdout, "### Release")
+}
+
+// renderedReleaseBody runs one real release into a fake GitHub API and returns
+// the body it created: the notes fixture nobody has to keep in step with the
+// renderer, because it is the renderer's own output.
+func renderedReleaseBody(t *testing.T) string {
+	t.Helper()
+	srv, bodies := githubFake(t)
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		// The footer dispat's own releases carry: the rule first, which is
+		// where the notes parser cuts.
+		EntryFormatConfig: models.EntryFormatConfig{
+			Footer: recordLines("---", "", "Questions? open an issue."),
+		},
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): add streaming\n\n" +
+		"The first paragraph says why it was done.\n\n" +
+		"The second paragraph says how.\n---\nfix(core): close a leak")
+	r.ReleaseOK()
+
+	return bodyFor(t, bodies(), "core@0.1.0")
+}

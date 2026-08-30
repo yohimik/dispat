@@ -219,6 +219,27 @@ func TestGitHubSpecKeyDistinguishesPolicies(t *testing.T) {
 		"authors include":   func(s *GitHubSpec) { s.Format.AuthorsInclude = []string{"a*"} },
 		"authors exclude":   func(s *GitHubSpec) { s.Format.AuthorsExclude = []string{"*bot*"} },
 		"authors title":     func(s *GitHubSpec) { s.Format.AuthorsTitle = "Contributors" },
+		// The record's own link, section and reference policy, for the same
+		// reason: each shapes every body the shared releaser sends.
+		"dependency link":     func(s *GitHubSpec) { s.Format.DependencyLink = LinkAuto },
+		"no-changes text":     func(s *GitHubSpec) { s.Format.NoChangesText = "see the changelog" },
+		"refs placement":      func(s *GitHubSpec) { s.Format.CommitRefsPlacement = "suffix" },
+		"refs format":         func(s *GitHubSpec) { s.Format.CommitRefsFormat = "$DISPAT_COMMIT" },
+		"refs link":           func(s *GitHubSpec) { s.Format.CommitRefsLink = LinkAuto },
+		"link owner":          func(s *GitHubSpec) { s.Format.LinkOwner = "other" },
+		"link repo":           func(s *GitHubSpec) { s.Format.LinkRepo = "other" },
+		"link api url":        func(s *GitHubSpec) { s.Format.LinkAPIURL = "https://ghe/api/v3" },
+		"sections length":     func(s *GitHubSpec) { s.Format.Sections = []RecordSection{{Builtin: SectionFixes}} },
+		"a section's builtin": func(s *GitHubSpec) { s.Format.Sections = []RecordSection{{Builtin: SectionFeatures}} },
+		"a section's title": func(s *GitHubSpec) {
+			s.Format.Sections = []RecordSection{{Title: "Added", Types: []string{"add"}}}
+		},
+		"a section's types": func(s *GitHubSpec) {
+			s.Format.Sections = []RecordSection{{Title: "Added", Types: []string{"new"}}}
+		},
+		"a section's bump": func(s *GitHubSpec) {
+			s.Format.Sections = []RecordSection{{Title: "Added", Types: []string{"add"}, Bump: "minor"}}
+		},
 	}
 	for name, change := range cases {
 		other := base
@@ -240,6 +261,15 @@ func TestGitHubSpecKeySeparatesFields(t *testing.T) {
 	c := GitHubSpec{Format: RecordFormat{AuthorsInclude: []string{"a", "b"}}}
 	d := GitHubSpec{Format: RecordFormat{AuthorsInclude: []string{"a"}, AuthorsExclude: []string{"b"}}}
 	assert.NotEqual(t, c.Key(), d.Key())
+
+	// A section order is the arrangement, not the set: two policies holding
+	// the same sections in different orders render different entries and must
+	// not share a releaser.
+	e := GitHubSpec{Format: RecordFormat{Sections: []RecordSection{
+		{Builtin: SectionFixes}, {Builtin: SectionFeatures}}}}
+	f := GitHubSpec{Format: RecordFormat{Sections: []RecordSection{
+		{Builtin: SectionFeatures}, {Builtin: SectionFixes}}}}
+	assert.NotEqual(t, e.Key(), f.Key())
 }
 
 // TestGitHubSpecKeySharesOnEqualAuthorPolicies: the other half of the claim.

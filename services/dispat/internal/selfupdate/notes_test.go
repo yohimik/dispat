@@ -338,3 +338,23 @@ func TestNotesRenderIsEmptyWhenThereIsNothingToSay(t *testing.T) {
 	assert.Empty(t, Notes{}.Render("1.1.0"))
 	assert.Zero(t, Notes{}.Items())
 }
+
+// TestParseNotesReadsIndentedBodiesIdentically pins the assumption the
+// renderer's bullet-continuation fix rests on: dispat now indents a commit
+// body two spaces so it stays inside its bullet, and every release note
+// already published is flush-left. Both shapes have to parse to the same
+// notes, or an update would print one shape correctly and the other as a
+// broken list.
+func TestParseNotesReadsIndentedBodiesIdentically(t *testing.T) {
+	flush := "### Features\n\n- streaming\nwhy it was done\n\nand a second paragraph\n\n" +
+		"### Fixes\n\n- close leak\n\n---\n\ninstall instructions\n"
+	indented := "### Features\n\n- streaming\n  why it was done\n\n  and a second paragraph\n\n" +
+		"### Fixes\n\n- close leak\n\n---\n\ninstall instructions\n"
+
+	assert.Equal(t, ParseNotes(flush), ParseNotes(indented))
+	assert.Equal(t, ParseNotes(flush).Render("1.0.0"), ParseNotes(indented).Render("1.0.0"))
+
+	// And the cut still lands on the rule: an indented body must not carry the
+	// footer into the printed notes.
+	assert.NotContains(t, ParseNotes(indented).Render("1.0.0"), "install instructions")
+}

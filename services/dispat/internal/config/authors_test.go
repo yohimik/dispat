@@ -87,7 +87,7 @@ func TestRecordFormatFlattensTheAuthorsObject(t *testing.T) {
 	got := recordFormat(EntryFormatConfig{Authors: &AuthorsConfig{
 		Placement: "both", Format: "username", Commits: "all",
 		Include: []string{"a*"}, Exclude: []string{"*bot*"}, Title: "Contributors",
-	}})
+	}}, nil)
 	assert.Equal(t, "both", got.AuthorsPlacement)
 	assert.Equal(t, "username", got.AuthorsFormat)
 	assert.Equal(t, "all", got.AuthorsCommits)
@@ -97,7 +97,7 @@ func TestRecordFormatFlattensTheAuthorsObject(t *testing.T) {
 
 	// No object means the renderer defaults, which is the shape every existing
 	// configuration has.
-	empty := recordFormat(EntryFormatConfig{})
+	empty := recordFormat(EntryFormatConfig{}, nil)
 	assert.Empty(t, empty.AuthorsPlacement)
 	assert.Empty(t, empty.AuthorsInclude)
 }

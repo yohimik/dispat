@@ -78,6 +78,33 @@ func TestEnabledDefaults(t *testing.T) {
 	}
 }
 
+// The entry seam is the one option whose absence and whose zero are different
+// answers: a file writing 0 is refused by the loader, while a file writing
+// nothing takes the default. The pointer is what tells the two apart, and Int
+// is how a caller building a model in code writes one.
+func TestEntrySpacingDefaults(t *testing.T) {
+	if got := (&ChangelogConfig{}).EntrySpacingOrDefault(); got != DefaultEntrySpacing {
+		t.Errorf("an unset entrySpacing takes the default: got %d, want %d", got, DefaultEntrySpacing)
+	}
+	if got := (&ChangelogConfig{EntrySpacing: Int(1)}).EntrySpacingOrDefault(); got != 1 {
+		t.Errorf("a stated entrySpacing is the answer: got %d, want 1", got)
+	}
+	if got := (&ChangelogConfig{EntrySpacing: Int(MaxEntrySpacing)}).EntrySpacingOrDefault(); got != MaxEntrySpacing {
+		t.Errorf("the ceiling is a value like any other: got %d, want %d", got, MaxEntrySpacing)
+	}
+	var nilChangelog *ChangelogConfig
+	if got := nilChangelog.EntrySpacingOrDefault(); got != DefaultEntrySpacing {
+		t.Errorf("an absent object means the default: got %d, want %d", got, DefaultEntrySpacing)
+	}
+	if n := Int(3); n == nil || *n != 3 {
+		t.Error("Int carries the value it was given")
+	}
+	if MinEntrySpacing >= MaxEntrySpacing || DefaultEntrySpacing < MinEntrySpacing ||
+		DefaultEntrySpacing > MaxEntrySpacing {
+		t.Error("the default has to sit inside the bounds the loader validates against")
+	}
+}
+
 func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	// A map key holds the case its file wrote, and a name is matched against it
 	// case-insensitively, so neither side has to remember the other's spelling.

@@ -504,11 +504,13 @@ func TestRecordEveryEntryCarriesItsOwnBlocks(t *testing.T) {
 	assert.True(t, HasEntry([]byte(content), "core@2.1.0"), "the entry stays findable under its sub-header")
 }
 
-// TestRecordChangedFileTitleIsNotStripped documents the one sharp edge of a
-// file title: the writer strips the title it renders now, so a title that
-// changed since the last release is not recognised and the old one stays in
-// the file. A title must not carry anything that varies per release.
-func TestRecordChangedFileTitleIsNotStripped(t *testing.T) {
+// TestRecordChangedFileTitleLeavesTheFilesOwnTitleInPlace documents the one
+// sharp edge of a file title: the writer recognises the title it renders now,
+// so a title that changed since the last release is not recognised at all —
+// and an unrecognised title is a title the file brought with it. It stays
+// where it is, the new one is never written, and the entry goes under it. A
+// title must not carry anything that varies per release.
+func TestRecordChangedFileTitleLeavesTheFilesOwnTitleInPlace(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 	first := &FileWriter{FileTitle: titleLines("# Changelog"), Now: func() time.Time { return testDate }}
@@ -520,6 +522,180 @@ func TestRecordChangedFileTitleIsNotStripped(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
 	require.NoError(t, err)
 	content := string(data)
-	assert.True(t, strings.HasPrefix(content, "# History\n"), "the new title heads the file")
-	assert.Contains(t, content, "# Changelog", "and the old one survives below, unrecognised")
+	assert.True(t, strings.HasPrefix(content, "# Changelog\n"),
+		"the file keeps the title it already had:\n%s", content)
+	assert.NotContains(t, content, "# History",
+		"and the unrecognised new title is never written, so the file grows no second H1")
+	assertOrder(t, content, "# Changelog", "## core@2.1.0 (", "## core@2.0.0 (")
+}
+
+// --- Adoption: what a changelog written before dispat keeps.
+//
+// The guarantee these pin is one sentence: dispat never rewrites content it
+// did not write, and never moves it. Everything above the first entry heading
+// of a file dispat does not recognise is that file's preamble — front matter,
+// a title in somebody else's words, a badge row, an introduction — and it
+// stays at the head of the file with the new entry inserted below it.
+
+// recordInto writes one release into dir's changelog over the given existing
+// content and returns the file afterwards.
+func recordInto(t *testing.T, existing string, w *FileWriter, next ccme.Version) string {
+	t.Helper()
+	dir := t.TempDir()
+	if existing != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte(existing), 0o644))
+	}
+	if w.Now == nil {
+		w.Now = func() time.Time { return testDate }
+	}
+	require.NoError(t, w.Record(context.Background(), testRelease(dir, next)))
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	return string(data)
+}
+
+func TestRecordKeepsAPreambleAboveTheEntryItInserts(t *testing.T) {
+	cases := []struct {
+		name     string
+		existing string
+		// keep is the leading run of bytes that must survive untouched, at the
+		// very top of the file.
+		keep string
+	}{{
+		name:     "a title in somebody else's words",
+		existing: "# Change Log\n\n## v1.2.0 (2024-01-01)\n\n- something old\n",
+		keep:     "# Change Log",
+	}, {
+		name: "YAML front matter",
+		existing: "---\ntitle: Releases\nsidebar_position: 3\n---\n\n# Change Log\n\n" +
+			"## v1.2.0 (2024-01-01)\n\n- something old\n",
+		keep: "---\ntitle: Releases\nsidebar_position: 3\n---\n\n# Change Log",
+	}, {
+		name: "a badge row and an introduction",
+		existing: "# Change Log\n\n[![build](https://img.shields.io/x)](https://example.test)\n\n" +
+			"All notable changes, by hand, since 2019.\n\n## v1.2.0 (2024-01-01)\n\n- something old\n",
+		keep: "# Change Log\n\n[![build](https://img.shields.io/x)](https://example.test)\n\n" +
+			"All notable changes, by hand, since 2019.",
+	}, {
+		name:     "a file with no entry headings at all",
+		existing: "# Change Log\n\nNothing has shipped yet.\n",
+		keep:     "# Change Log\n\nNothing has shipped yet.",
+	}, {
+		name:     "a file that opens straight on an entry",
+		existing: "## v1.2.0 (2024-01-01)\n\n- something old\n",
+		keep:     "",
+	}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := recordInto(t, c.existing, &FileWriter{}, ccme.Version{Major: 2})
+
+			assert.True(t, strings.HasPrefix(out, c.keep),
+				"the preamble must head the file byte for byte:\n%s", out)
+			assert.NotContains(t, out, "# Changelog",
+				"a file with a title of its own is not given dispat's as well")
+			assert.Contains(t, out, "## core@2.0.0 (", "the entry was written:\n%s", out)
+			if strings.Contains(c.existing, "## v1.2.0") {
+				assertOrder(t, out, "## core@2.0.0 (", "## v1.2.0 (", "- something old")
+			}
+			// The seam above the entry is the entry seam: the preamble sits
+			// where a title would, and what dispat writes around an entry is
+			// the same width wherever the entry is.
+			if c.keep != "" {
+				assert.Contains(t, out, c.keep+"\n\n\n## core@2.0.0 (",
+					"the preamble is separated from the entry by the entry seam:\n%q", out)
+			} else {
+				assert.True(t, strings.HasPrefix(out, "## core@2.0.0 ("), "%q", out)
+			}
+		})
+	}
+}
+
+func TestRecordUnderAMatchingTitleKeepsWhatFollowsIt(t *testing.T) {
+	// The other half of adoption: a file that already heads with the title
+	// dispat renders is the file dispat has been writing, so the title is
+	// re-rendered and the entry goes directly under it — which is what it has
+	// always done. Content between the title and the first entry is not
+	// rewritten either; it simply ends up below the entry, where the entries
+	// it was already above are.
+	out := recordInto(t,
+		"# Changelog\n\n[![build](https://img.shields.io/x)](https://example.test)\n\n"+
+			"## v1.2.0 (2024-01-01)\n\n- something old\n",
+		&FileWriter{}, ccme.Version{Major: 2})
+
+	assert.True(t, strings.HasPrefix(out, "# Changelog\n\n## core@2.0.0 ("), "%q", out)
+	assert.Equal(t, 1, strings.Count(out, "# Changelog"), "the title is never duplicated")
+	assertOrder(t, out, "## core@2.0.0 (", "[![build]", "## v1.2.0 (", "- something old")
+}
+
+func TestRecordKeepsTheFilesByteOrderMarkAndLineEndings(t *testing.T) {
+	// A changelog checked out on Windows: a UTF-8 byte-order mark, CRLF
+	// endings throughout. Neither may defeat the title match — a title the
+	// match misses is a title the next release writes a second copy of — and
+	// neither may be rewritten: the mark stays at the very top, before
+	// anything, and the old entries keep the endings they were written with.
+	existing := "\ufeff# Changelog\r\n\r\n## v1.2.0 (2024-01-01)\r\n\r\n- something old\r\n"
+	out := recordInto(t, existing, &FileWriter{}, ccme.Version{Major: 2})
+
+	require.True(t, strings.HasPrefix(out, "\ufeff"), "the mark stays at the head of the file: %q", out)
+	assert.True(t, strings.HasPrefix(out, "\ufeff# Changelog\n\n## core@2.0.0 ("),
+		"the title was recognised through the mark and the CRLF: %q", out)
+	assert.Equal(t, 1, strings.Count(out, "# Changelog"),
+		"a CRLF title must not grow a second copy of itself")
+	assert.Contains(t, out, "## v1.2.0 (2024-01-01)\r\n\r\n- something old\r\n",
+		"the old content keeps its own line endings")
+	assert.Equal(t, 1, strings.Count(out, "\ufeff"), "and the mark is written exactly once")
+}
+
+func TestRecordKeepsTheByteOrderMarkAboveAPreamble(t *testing.T) {
+	// The same mark on a file dispat did not write: it belongs before the
+	// preamble, because it belongs before everything.
+	out := recordInto(t, "\ufeff# Change Log\r\n\r\n## v1.2.0 (2024-01-01)\r\n\r\n- old\r\n",
+		&FileWriter{}, ccme.Version{Major: 2})
+
+	assert.True(t, strings.HasPrefix(out, "\ufeff# Change Log\n\n\n## core@2.0.0 ("), "%q", out)
+	assert.Contains(t, out, "## v1.2.0 (2024-01-01)\r\n\r\n- old\r\n")
+}
+
+func TestHasEntryReadsThroughAByteOrderMark(t *testing.T) {
+	// The idempotence check is what stops an entry being written twice, so it
+	// has to see an entry however the file was saved. A mark sits in front of
+	// the first line, which is the one line a changelog can open an entry on.
+	assert.True(t, HasEntry([]byte("\ufeff## core@1.3.0 (2026-08-09)\n"), "core@1.3.0"))
+	assert.True(t, HasEntry([]byte("\ufeff# Changelog\r\n\r\n## core@1.3.0 (2026-08-09)\r\n"), "core@1.3.0"))
+}
+
+func TestRecordOverAPreambleIsIdempotent(t *testing.T) {
+	// Adoption converges: the second run over the file the first produced
+	// recognises its own entry, skips, and changes nothing — and a third
+	// release still inserts between the preamble and the entries rather than
+	// above the preamble.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "CHANGELOG.md"),
+		[]byte("---\ntitle: Releases\n---\n\n# Change Log\n\n## v1.2.0 (2024-01-01)\n\n- old\n"), 0o644))
+	w := &FileWriter{Now: func() time.Time { return testDate }}
+	ctx := context.Background()
+
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+	first, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2})))
+	again, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(again), "a repeated write is byte-identical")
+
+	require.NoError(t, w.Record(ctx, testRelease(dir, ccme.Version{Major: 2, Minor: 1})))
+	third, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(third), "---\ntitle: Releases\n---\n\n# Change Log\n\n\n## core@2.1.0 ("),
+		"the front matter is still front matter:\n%s", third)
+	assertOrder(t, string(third), "## core@2.1.0 (", "## core@2.0.0 (", "## v1.2.0 (")
+}
+
+func TestRecordPreambleSeamFollowsEntrySpacing(t *testing.T) {
+	// The seam above the inserted entry is the configured one, like every
+	// other seam the writer owns.
+	out := recordInto(t, "# Change Log\n\n## v1.2.0 (2024-01-01)\n\n- old\n",
+		&FileWriter{EntrySpacing: 1}, ccme.Version{Major: 2})
+	assert.Contains(t, out, "# Change Log\n\n## core@2.0.0 (")
+	assert.NotContains(t, out, "\n\n\n")
 }

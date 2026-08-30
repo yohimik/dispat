@@ -488,3 +488,94 @@ func TestDerivedOwnershipHonoursIgnore(t *testing.T) {
 		})
 	}
 }
+
+// TestUnitCommitNamesTheCommitBehindAUnit: a record links an entry line to the
+// change behind it, which needs the sha the unit was written in.
+func TestUnitCommitNamesTheCommitBehindAUnit(t *testing.T) {
+	git := newFakeGit(
+		commit{sha: "aaaa1111", message: "feat(core): streaming"},
+		commit{sha: "bbbb2222", message: "fix(core): leak\n\n---\n\nfix(core): another leak"},
+	).tag("core", "1.0.0", "")
+
+	p := compute(t, git, nil)
+	core := p.Releases["core"]
+	require.Len(t, core.Units, 3)
+
+	seen := map[string]string{}
+	for _, u := range core.Units {
+		seen[u.Header.Description] = core.UnitCommit(u)
+	}
+	assert.Equal(t, "aaaa1111", seen["streaming"])
+	assert.Equal(t, "bbbb2222", seen["leak"], "every unit of one message shares its commit")
+	assert.Equal(t, "bbbb2222", seen["another leak"])
+
+	// The map is shared by every release the unit reaches, exactly as the
+	// authors map is: a unit's commit is a property of the message that
+	// carried it, not of the package it resolved onto.
+	assert.Equal(t, core.UnitCommits, p.Releases["core"].UnitCommits)
+}
+
+// TestUnitCommitHidesASyntheticWindowKey: where a Git implementation reports
+// no sha, the window key stands in for one. It names an entry in this run and
+// nothing a reader could open, so nothing may present it as a commit.
+func TestUnitCommitHidesASyntheticWindowKey(t *testing.T) {
+	git := newFakeGit(commit{message: "feat(core): streaming"}).tag("core", "1.0.0", "")
+
+	p := compute(t, git, nil)
+	core := p.Releases["core"]
+	require.Len(t, core.Units, 1)
+	assert.NotEmpty(t, core.UnitCommits[core.Units[0]], "the planner still keys the unit")
+	assert.Empty(t, core.UnitCommit(core.Units[0]), "but it is not offered as a commit id")
+}
+
+// TestProviderUpdatesCarryTheProvidersTag: a dependency line links to the
+// provider's release, which is named by the provider's own tag format — a
+// name and a version alone would leave the renderer to guess it.
+func TestProviderUpdatesCarryTheProvidersTag(t *testing.T) {
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core)^: streaming"},
+	).tag("core", "1.0.0", "").tag("app", "2.0.0", "")
+
+	pkgs, deps := testPackages()
+	// The provider versions under a format of its own, which is exactly the
+	// case a renderer cannot reconstruct.
+	pkgs[0].Space = &model.Space{Name: "libs", TagFormat: "libs/{name}/v{version}"}
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+
+	app := p.Releases["app"]
+	require.Len(t, app.Updates, 1)
+	assert.Equal(t, "libs/core/v1.1.0", app.Updates[0].Tag)
+}
+
+// TestProviderUpdateTagsOnCatchUpAndGraduation: the tag is rendered over the
+// finished list, so it reaches the updates the catch-up and the graduation
+// append and rewrite as well as the ones the ordinary loops add.
+func TestProviderUpdateTagsOnCatchUpAndGraduation(t *testing.T) {
+	// Catch-up: core published in a run app's leg missed, so this update is
+	// appended by the catch-up half rather than by the releasing loop.
+	catchUp := compute(t, newFakeGit(
+		commit{sha: "c0", message: "chore: baseline"},
+		commit{sha: "c1", message: "fix(core)^: reaches app, whose leg died"},
+	).tag("core", "1.4.0", "c0").tag("core", "1.4.1", "c1").
+		tag("app", "1.2.3", "c0"), nil)
+	app := catchUp.Releases["app"]
+	require.True(t, app.CatchUp)
+	require.Len(t, app.Updates, 1)
+	assert.Equal(t, "core@1.4.1", app.Updates[0].Tag)
+
+	// Graduation: the entry spans the whole train, and the widening rewrites
+	// the From of the entries the loops above it added. The tag follows To,
+	// which the rewrite does not touch.
+	grad := compute(t, newFakeGit(
+		commit{sha: "c0", message: "chore: baseline"},
+		commit{sha: "c1", message: "feat(app)%beta: board the train"},
+		commit{sha: "c2", message: "fix(core)^: repair underneath"},
+		commit{sha: "c3", message: "release(app)%stable: graduate"},
+	).tag("core", "1.4.0", "c0").tag("core", "1.4.1", "c2").
+		tag("app", "1.2.3", "c0").
+		tag("app", "1.3.0-beta.0", "c1").tag("app", "1.3.0-beta.1", "c2"), nil)
+	graduated := grad.Releases["app"]
+	require.Len(t, graduated.Updates, 1, "the stable entry documents what moved underneath")
+	assert.Equal(t, "core@1.4.1", graduated.Updates[0].Tag)
+}
