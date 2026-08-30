@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	models "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -166,7 +167,10 @@ func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 		LogSkip(d.Log, spec, rel)
 		return nil
 	}
-	w := &FileWriter{File: spec.File, FileTitle: spec.FileTitle, Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log}
+	w := &FileWriter{
+		File: spec.File, FileTitle: spec.FileTitle, EntrySpacing: spec.EntrySpacing,
+		Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log,
+	}
 	return w.Record(ctx, rel)
 }
 
@@ -189,14 +193,39 @@ func LogSkip(log zerolog.Logger, spec model.ChangelogSpec, rel *plan.Release) {
 // merely quotes a header does not count, and the trailing " (" keeps a tag
 // that is a prefix of another (core@1.2.0 vs core@1.2.0-beta.1) from matching
 // its extension.
+//
+// A byte-order mark is cut before the match, so a file that opens on its first
+// entry is still read as carrying it; CRLF endings need no handling at all,
+// since the marker is anchored at the start of the line rather than the end.
+// Both matter because this is the idempotence check of the whole record path:
+// an entry the check fails to see is an entry written a second time.
 func HasEntry(content []byte, tag string) bool {
 	marker := "## " + tag + " ("
-	for _, line := range strings.Split(string(content), "\n") {
+	_, text := cutBOM(string(content))
+	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, marker) {
 			return true
 		}
 	}
 	return false
+}
+
+// utf8BOM is the byte-order mark an editor on Windows leaves at the head of a
+// UTF-8 file.
+const utf8BOM = "\ufeff"
+
+// cutBOM separates a leading byte-order mark from the rest of a file.
+//
+// The mark is not content: it belongs before everything, including whatever a
+// rewrite puts above the old entries, and a title compared against it would
+// fail to match for a reason nobody would find by reading the changelog. It is
+// carried through the rewrite rather than dropped, because removing it is a
+// change to a file dispat was asked to append to.
+func cutBOM(s string) (bom, rest string) {
+	if strings.HasPrefix(s, utf8BOM) {
+		return utf8BOM, s[len(utf8BOM):]
+	}
+	return "", s
 }
 
 // RenderSections renders the grouped commit sections of a release (breaking
@@ -357,15 +386,28 @@ type FileWriter struct {
 	// default "# Changelog".
 	FileTitle []model.EntryLine
 	Format    Format
-	Now       func() time.Time // injectable clock; defaults to time.Now
-	Log       zerolog.Logger   // carries the entry-exists skip notice; zero value discards
+	// EntrySpacing is how many blank lines separate the entry being written
+	// from the one below it. 0 means the default, so a writer assembled by
+	// hand needs no more configuration than it ever did.
+	EntrySpacing int
+	Now          func() time.Time // injectable clock; defaults to time.Now
+	Log          zerolog.Logger   // carries the entry-exists skip notice; zero value discards
+}
+
+// spacing is the writer's blank-line count with the default applied.
+func (w *FileWriter) spacing() int {
+	if w.EntrySpacing <= 0 {
+		return models.DefaultEntrySpacing
+	}
+	return w.EntrySpacing
 }
 
 // title renders the file's opening block for rel, with the default applied.
-// The same text heads a new file and is stripped off an existing one before
-// the new entry goes in, which is why a title that varies from one release to
-// the next does not belong here: the strip would miss and the old title would
-// survive inside the file.
+// The same text heads a new file and is what an existing one is recognised by,
+// which is why a title that varies from one release to the next does not
+// belong here: a title the recognition misses is read as a preamble the file
+// brought with it, and from then on the file keeps the title it had while the
+// configured one is never written at all.
 func (w *FileWriter) title(rel *plan.Release) string {
 	if len(w.FileTitle) == 0 {
 		return "# Changelog\n"
@@ -434,18 +476,137 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	// is actually about to be written rather than for the skip above it.
 	LogRecordPolicy(w.Log, rel, w.Format)
 
-	body := strings.TrimPrefix(string(existing), header)
-	body = strings.TrimLeft(body, "\n")
+	bom, rest := cutBOM(string(existing))
+	parts := w.divide(rest, header)
 
-	content := header + "\n" + entry
-	if body != "" {
-		content += "\n" + body
+	// The entry is closed on exactly one newline and the seam below it is
+	// exactly the configured number of blank lines. Left to the entry's own
+	// tail the seam varied with what the last section happened to be — a
+	// dependencies list ended one way and a section of bodiless bullets
+	// another — so a file's spacing recorded the shape of each release rather
+	// than one rule.
+	var b strings.Builder
+	b.WriteString(bom)
+	if top := strings.TrimRight(parts.top, "\r\n"); top != "" {
+		b.WriteString(top)
+		b.WriteString("\n")
+		b.WriteString(strings.Repeat("\n", parts.blank))
+	}
+	b.WriteString(strings.TrimRight(entry, "\n"))
+	b.WriteString("\n")
+	if parts.body != "" {
+		b.WriteString(strings.Repeat("\n", w.spacing()))
+		b.WriteString(parts.body)
 	}
 	// The write replaces the whole file after the publish already happened; an
 	// interrupted plain write here would take the package's history with it,
 	// so it goes through the atomic replace.
-	if err := fsx.WriteFileAtomic(path, []byte(content), mode); err != nil {
+	if err := fsx.WriteFileAtomic(path, []byte(b.String()), mode); err != nil {
 		return fmt.Errorf("changelog: %w", err)
 	}
 	return nil
+}
+
+// fileParts is how an existing changelog divides for a rewrite: what stays
+// above the new entry, how far below it the entry sits, and what the entry is
+// written above. Only the top of a file dispat wrote is ever re-rendered;
+// everything else is the file's own bytes.
+type fileParts struct {
+	top   string // the rendered title, or the file's own preamble
+	blank int    // blank lines between top and the new entry
+	body  string // from the first entry heading down, untouched
+}
+
+// divide splits an existing changelog into what stays above the new entry and
+// what the new entry is written above.
+//
+// Two shapes reach here, and the invariant is the same for both: content that
+// predates dispat is preserved, and it is preserved *where it is*.
+//
+// A file dispat has been writing heads with the title dispat renders. The
+// title is stripped and written again, the entry goes one blank line under it,
+// and the entries below are untouched — what the writer has always done.
+//
+// A file dispat did not write heads with something else: YAML front matter, a
+// title in somebody else's words, a badge row, a paragraph of introduction.
+// All of it is a preamble, ending at the first line that opens an entry
+// heading, and it stays at the top of the file with the new entry inserted
+// below it. Prepending above it — which is what the writer used to do —
+// published a second H1 over the file's own and pushed front matter off the
+// head of the file, where it stops being front matter at all. No title is
+// written in that case either: the file already has one, in its own words, and
+// adding dispat's would say it twice.
+//
+// The preamble's own line endings are left alone; only the blank lines between
+// it and the entry are dispat's to write, and those it writes as the rest of
+// the entry is written.
+func (w *FileWriter) divide(rest, title string) fileParts {
+	// Nothing to preserve: a file that is empty or blank is a fresh file, and
+	// a fresh file gets the title.
+	if strings.TrimSpace(rest) == "" {
+		return fileParts{top: title, blank: 1}
+	}
+	if n := titleMatch(rest, title); n >= 0 {
+		return fileParts{top: title, blank: 1, body: strings.TrimLeft(rest[n:], "\r\n")}
+	}
+	at := entryHeadingIndex(rest)
+	if at < 0 {
+		// A changelog with no entry headings at all: every byte of it is
+		// preamble, and this release opens the record below it.
+		return fileParts{top: rest, blank: w.spacing()}
+	}
+	return fileParts{top: rest[:at], blank: w.spacing(), body: rest[at:]}
+}
+
+// titleMatch reports how many bytes at the head of content the rendered title
+// covers, -1 when the title does not head it.
+//
+// The comparison runs line by line so that a file whose endings became CRLF —
+// checked out on Windows, or saved by an editor that converts — still matches
+// the title dispat renders with "\n". A title the strip fails to see is a
+// title the next release writes a second copy of, above the first.
+func titleMatch(content, title string) int {
+	at := 0
+	for _, want := range strings.SplitAfter(title, "\n") {
+		if want == "" {
+			continue // SplitAfter's empty tail after a final newline
+		}
+		text, terminated := strings.CutSuffix(want, "\n")
+		if !strings.HasPrefix(content[at:], text) {
+			return -1
+		}
+		at += len(text)
+		if !terminated {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(content[at:], "\r\n"):
+			at += 2
+		case strings.HasPrefix(content[at:], "\n"):
+			at++
+		default:
+			return -1
+		}
+	}
+	return at
+}
+
+// entryHeadingIndex is the offset of the first line opening an entry heading,
+// -1 when the content has none. It is where a file's own preamble ends and the
+// changelog's records begin. Anchored at the start of a line, so a heading
+// quoted inside a commit body — or a "### " section heading, which shares the
+// first two characters — is not mistaken for one.
+func entryHeadingIndex(s string) int {
+	const heading = "## "
+	for at := 0; at < len(s); {
+		if strings.HasPrefix(s[at:], heading) {
+			return at
+		}
+		nl := strings.IndexByte(s[at:], '\n')
+		if nl < 0 {
+			return -1
+		}
+		at += nl + 1
+	}
+	return -1
 }

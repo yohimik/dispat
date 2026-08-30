@@ -119,10 +119,11 @@ func (w *changelogWork) resolve(_ context.Context, rel *plan.Release) (task, err
 		return nil, nil
 	}
 	fw := &changelog.FileWriter{
-		File:      firstOf(w.opts.File, spec.File),
-		FileTitle: spec.FileTitle,
-		Format:    changelog.SpecFormat(w.opts.Authors.apply(spec.Format)),
-		Log:       w.app.log,
+		File:         firstOf(w.opts.File, spec.File),
+		FileTitle:    spec.FileTitle,
+		EntrySpacing: spec.EntrySpacing,
+		Format:       changelog.SpecFormat(w.opts.Authors.apply(spec.Format)),
+		Log:          w.app.log,
 	}
 	// A flag states the whole title, the same way a nearer configuration layer
 	// does: one line, no filters, replacing whatever was configured.
