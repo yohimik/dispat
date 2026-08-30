@@ -1,5 +1,107 @@
 # Changelog
 
+## services/dispat/v1.4.0 (2026-08-30)
+
+### Features
+
+- minified linux binaries ride the release
+A release now carries dispat-tiny-linux-amd64 and
+dispat-tiny-linux-arm64 beside the six it always has: the same source
+and the same version stamp, built by the TinyGo fork at 0.42.0-net.4,
+at roughly 60% of the bytes. They are additive downloads under names
+of their own, so dispat-<os>-<arch>, which self-update and install.sh
+resolve, is untouched.
+
+The toolchain arrives as its release tarball by URL and against the
+digest that release published, not through dispat install: a build of
+dispat that needs a working dispat to start is a bootstrap cycle. The
+checksum is the part install would have done, kept. Debian rather
+than alpine, because the fork ships a glibc-linked LLVM and musl does
+not run it; what comes out is static either way.
+
+A TinyGo binary carries no Go build info, so the tiny pair is proven
+by running it rather than by reading it back, which the smoke loop
+now does for all four linux binaries. The spike stays the deep gate,
+and internals/tinygo.md carries what those binaries can do.
+- the loaded configuration says what it holds
+The post-load debug line said which file was read and which folder
+became the root, which answers "did it read the file I meant" and
+nothing after it. A configuration that read as almost nothing — a $ref
+resolving to an empty fragment, a spaces object under a key nobody
+meant — still looks like a run that simply found no work.
+
+So the line now counts what the loader made of the file: the package
+entries it names, the scripts it binds and the webhooks it notifies,
+across every level of the root file that may declare one. In-folder
+files are deliberately not counted; they are read later, and a number
+that grew afterwards would describe a configuration nobody had yet.
+- first-party config decoder
+The config language is a table now: one entry per key a file may write,
+saying what writing it does. A key with no entry is a key the model has
+no field for, so the unknown-key refusal every typo lands in is
+structural rather than a setting somebody remembered to turn on.
+
+What this replaces is a reflected decoder told its exceptions through
+hooks that fire on a Go type and cannot see the key that produced it.
+The hazard was never hypothetical: the conversion lifting a scalar into
+a list splits it on commas, which is right for a list of script names
+and wrong for a shell command, and the two were kept apart only by the
+order the hooks were composed in. They are different setters here, so
+the order that used to matter cannot exist.
+
+Nothing calls it yet. fields_test.go reads the models' own json tags and
+refuses any disagreement with the tables in either direction, and
+decode_parity_test.go runs a corpus through both decoders and fails on
+any difference the migration did not declare.
+- the command that installs a tool is called install
+The word says what the command leaves behind rather than how it gets
+there: `dispat install <repo>` puts a verified release asset on PATH,
+and download was the mechanism, not the outcome. The flags, the
+behavior and the machinery are unchanged; the command word, the
+package (internal/install), the error prefixes and the report texts
+follow the new name, and every doc page moves with it.
+
+`install` permanently shadows a run script of the same name, as every
+command word does; a script called install stays reachable as `dispat
+run install` and from flow sequences, which the example configs use it
+in.
+- download installs a tool from any github release
+dispat download <repo> is self-update pointed at somebody else's
+repository: the same listing walk, the same streamed download checked
+against the published size and checksum, the same two renames that keep
+what they replace. It needs no config file and no git repository.
+
+The repository is named however it is at hand, and a host that is not
+github.com derives a GitHub Enterprise endpoint. --asset says which of
+the release's files is the binary, as a name or a glob, with {os},
+{arch}, {version}, {tag} and {name} expanded; nothing is guessed, since
+the wrong guess is installed globally and run. --bin-dir and --as say
+where it goes and what it is called, defaulting to the ladder install.sh
+climbs. --pipe hands the verified file to a command in that folder
+instead, which is how an archive is unpacked and a release's own install
+script is run.
+
+The destination is hashed against the release's digest, so the command
+is idempotent: --check gates on it and --force installs over it.
+--rollback restores what the last download replaced. GITHUB_TOKEN is
+sent to github.com alone, because the endpoint comes from an argument.
+
+### Fixes
+
+- a record line is read after it is decoded
+A record line written as an object went through `return line,
+decodeObject(item, at, entryLineFields(&line))`, which leaves the order
+of copying line and running the call to the compiler. gc runs the call
+first and returns the filled line; TinyGo copies line first and returns
+it empty, so every object-form footer, header and fileTitle decoded to
+nothing and the load failed with "line is required". Found by the
+0.42.0-net.2 validation run; no assertion can catch it under gc, so the
+sequencing comment is the guard.
+
+### Dependencies
+
+- models: 1.3.0 -> 1.4.0
+
 ## services/dispat/v1.3.1 (2026-08-28)
 
 ### Fixes
