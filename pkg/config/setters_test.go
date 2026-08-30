@@ -149,3 +149,64 @@ func TestRawMapCopiesItsOwnLevel(t *testing.T) {
 		t.Error("the source map was written into")
 	}
 }
+
+// TestMapOfCarriesTheObjectRules: a caller whose values are neither a scalar
+// nor an object writes the reader and gets the rules — an object, no two keys
+// folding together, keys in order, names as written — for free.
+func TestMapOfCarriesTheObjectRules(t *testing.T) {
+	type entry []string
+	read := func(val any, at string) (entry, error) {
+		if val == nil {
+			// The reader decides what an absent value means; here it is an
+			// entry the file named and said nothing about.
+			return nil, nil
+		}
+		if s, ok := val.(string); ok {
+			return entry{s}, nil // a scalar that never splits, unlike Strings
+		}
+		items, ok := WeakList(val)
+		if !ok {
+			return nil, Wants(at, "a name or a list of names")
+		}
+		out := make(entry, 0, len(items))
+		for i, item := range items {
+			s, err := WeakString(item, IndexPath(at, i))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, s)
+		}
+		return out, nil
+	}
+
+	var dst map[string]entry
+	set := MapOf(&dst, read)
+
+	if err := set(map[string]any{
+		"Build": "make all,now",
+		"test":  []any{"one", "two"},
+		"empty": nil,
+	}, "scripts"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	want := map[string]entry{
+		"Build": {"make all,now"},
+		"test":  {"one", "two"},
+		"empty": nil,
+	}
+	if !reflect.DeepEqual(want, dst) {
+		t.Errorf("dst = %#v, want %#v", dst, want)
+	}
+
+	if err := set("text", "scripts"); err == nil || err.Error() != "scripts: wants an object" {
+		t.Errorf("err = %v", err)
+	}
+	err := set(map[string]any{"a": "1", "A": "2"}, "scripts")
+	if err == nil || err.Error() != `scripts: keys "A" and "a" collide case-insensitively` {
+		t.Errorf("err = %v", err)
+	}
+	err = set(map[string]any{"a": map[string]any{}}, "scripts")
+	if err == nil || err.Error() != "scripts.a: wants a name or a list of names" {
+		t.Errorf("err = %v", err)
+	}
+}

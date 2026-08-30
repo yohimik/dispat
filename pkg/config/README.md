@@ -104,15 +104,18 @@ The setters are the shapes a key can hold:
 |---|---|---|
 | `String`, `Int`, `Bool`, `BoolPtr` | a scalar field | any format's spelling of the value |
 | `Strings`, `Ints` | a list | a scalar is the one-element list; a comma-separated string is the list |
-| `StringMap` | a map of names to values | keys keep the case the file wrote |
+| `StringMap`, `MapOf[T]` | a map of names to values | keys keep the case the file wrote |
 | `RawMap` | a free-form block | nothing inside is a key the model has to know |
 | `Object[T]` | an optional sub-object | allocated only when the file wrote one |
 | `ObjectMap[T]`, `ObjectList[T]` | named entries, a list of objects | a lone object is the one-element list |
 
-A setter is a `func(val any, at string) error`, so a key whose shape is your own is a closure you write. The comma
-shorthand lives in `Strings` and `Ints` and nowhere else, which is what keeps a comma inside a shell command the
-character the file wrote — the mistake a reflected decoder makes when the hook that lifts a scalar into a list fires on
-a Go type and cannot see the key that produced it.
+A setter is a `func(val any, at string) error`, so a key whose shape is your own is a closure you write. `MapOf` is the
+setter to write a setter with: it carries the object rules and takes your reader for each value, which is how a map of
+something the library has no shape for still gets them.
+
+The comma shorthand lives in `Strings` and `Ints` and nowhere else, which is what keeps a comma inside a shell command
+the character the file wrote — the mistake a reflected decoder makes when the hook that lifts a scalar into a list
+fires on a Go type and cannot see the key that produced it.
 
 ## Overrides
 

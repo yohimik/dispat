@@ -123,11 +123,23 @@ func fillInts(dst *[]int, at string, items []any) error {
 	return nil
 }
 
-// StringMap fills a map of names to plain values — an env layer, a table of
-// initials, a parser's type table. The keys are copied exactly as the file
-// wrote them, which is what an env layer needs (PATH and Path are two
-// variables) and what every other name gets for free.
-func StringMap(dst *map[string]string) Setter {
+// MapOf fills a map of named values of any shape at all: the object rules —
+// the value has to be an object, no two of its keys may fold together, and its
+// keys are visited in order — with the caller's own reader for each value.
+//
+// It is the setter to write a setter with. StringMap and ObjectMap are this
+// with their readers filled in, and a caller whose values are neither a scalar
+// nor an object — a list with a shorthand of its own, a type with its own
+// normaliser — gets the rules by writing the reader alone.
+//
+// The reader is called for every key, a key holding nothing included: a map of
+// named values has no "this entry said nothing" the way an object's key does,
+// and what an absent value means is the reader's to decide.
+//
+// The keys are copied exactly as the file wrote them, which is what an env
+// layer needs — PATH and Path are two variables — and what every other name
+// gets for free.
+func MapOf[T any](dst *map[string]T, read func(val any, at string) (T, error)) Setter {
 	return func(val any, at string) error {
 		m, ok := val.(map[string]any)
 		if !ok {
@@ -137,17 +149,23 @@ func StringMap(dst *map[string]string) Setter {
 		if err := refuseFoldDuplicates(keys, at); err != nil {
 			return err
 		}
-		out := make(map[string]string, len(m))
+		out := make(map[string]T, len(m))
 		for _, k := range keys {
-			s, err := WeakString(m[k], KeyPath(at, k))
+			value, err := read(m[k], KeyPath(at, k))
 			if err != nil {
 				return err
 			}
-			out[k] = s
+			out[k] = value
 		}
 		*dst = out
 		return nil
 	}
+}
+
+// StringMap fills a map of names to plain values — an env layer, a table of
+// initials, a parser's type table.
+func StringMap(dst *map[string]string) Setter {
+	return MapOf(dst, WeakString)
 }
 
 // RawMap fills a free-form object the program never reads. Its contents are
