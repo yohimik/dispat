@@ -311,6 +311,11 @@
           "type": "doc",
           "id": "internals/test-results",
           "label": "Test results"
+        },
+        {
+          "type": "doc",
+          "id": "internals/benchmarks",
+          "label": "Benchmarks"
         }
       ]
     }
