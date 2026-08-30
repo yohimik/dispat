@@ -649,7 +649,12 @@ func entryLineOf(item any, at string) (EntryLine, error) {
 		return line, nil
 	}
 	if _, isObject := item.(map[string]any); isObject {
-		return line, decodeObject(item, at, entryLineFields(&line))
+		// Sequenced in two statements on purpose: a `return line, decode(&line)`
+		// leaves the order of reading line and running the call to the
+		// compiler, and gc and TinyGo choose differently — one returns the
+		// filled line, the other a copy taken before the call filled it.
+		err := decodeObject(item, at, entryLineFields(&line))
+		return line, err
 	}
 	if lines, ok := stringList(item); ok {
 		line.Line = lines
