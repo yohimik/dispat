@@ -33,12 +33,20 @@ import "strings"
 //
 // A nil Loader reads the defaults, which is the delimiter DefaultKeyDelim and
 // nothing else that matters here.
+//
+// It takes no context, so its one event goes to Options.Logger and nowhere
+// else: a rendering is a pure function of a tree, and threading a context
+// through one to say how many overrides landed would be the tail wagging the
+// dog.
 func (t *Tree) Settings(l *Loader, ov Overrides) map[string]any {
 	l = l.loader()
 	out := make(map[string]any, len(t.Root))
 	s := settings{delim: l.opts.KeyDelim, out: out}
 	s.fill(t.Root, nil)
 	ov.applyTo(out, l.opts.KeyDelim)
+	if len(ov) > 0 && l.opts.Logger != nil && l.opts.Logger.Enabled(LevelDebug) {
+		l.opts.Logger.Log(LevelDebug, EventOverridesApplied, Num("count", len(ov)))
+	}
 	return out
 }
 

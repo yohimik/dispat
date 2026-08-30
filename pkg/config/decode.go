@@ -40,6 +40,7 @@ package config
 //     run to the next is a load nobody can fix.
 
 import (
+	"context"
 	"fmt"
 	"maps"
 )
@@ -95,6 +96,23 @@ func DecodeObject(val any, at string, f Fields) error {
 		}
 	}
 	return nil
+}
+
+// Decode is DecodeObject with the loader's events around it, for a caller that
+// wants the decode's outcome in the same log as the load's. The decode itself
+// is a package-level function because a fields table belongs to a struct
+// rather than to a loader.
+func (l *Loader) Decode(ctx context.Context, val any, at string, f Fields) error {
+	log := l.loader().logger(ctx)
+	err := DecodeObject(val, at, f)
+	switch {
+	case !log.Enabled(LevelDebug):
+	case err != nil:
+		log.Log(LevelDebug, EventDecodeFailed, Str("at", objectAt(at)), Err(err))
+	default:
+		log.Log(LevelDebug, EventDecodeDone, Str("at", objectAt(at)), Num("keys", len(f)))
+	}
+	return err
 }
 
 // refuseFoldDuplicates refuses an object holding two keys that fold together.

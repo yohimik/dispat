@@ -38,6 +38,17 @@ const (
 	ClassRoot
 )
 
+// String names the class as the resolve events spell it.
+func (c Class) String() string {
+	switch c {
+	case ClassRoot:
+		return "root"
+	case ClassCandidate:
+		return "candidate"
+	}
+	return "fallback"
+}
+
 // Resolver is the caller's half of the ascent.
 //
 // The zero value resolves nothing: Names and Candidates are what a directory
@@ -86,6 +97,7 @@ type Resolver struct {
 // found at all, the error is a *NoConfigError naming every candidate tried.
 func (l *Loader) Resolve(ctx context.Context, dir string, r Resolver) (path, root string, err error) {
 	l = l.loader()
+	log := l.logger(ctx)
 	var candidate, candidateRoot string // could be a root, could be a layer
 	var fallback, fallbackRoot string   // declares nothing either way
 	try := func(at string) (string, string, error) {
@@ -106,7 +118,12 @@ func (l *Loader) Resolve(ctx context.Context, dir string, r Resolver) (path, roo
 			// it to use a parent's file would hide the breakage.
 			return p, at, nil
 		}
-		switch r.classify(t.Root) {
+		class := r.classify(t.Root)
+		if log.Enabled(LevelTrace) {
+			log.Log(LevelTrace, EventResolveStep, Str("dir", at), Str("candidate", p),
+				Str("class", class.String()))
+		}
+		switch class {
 		case ClassRoot:
 			// A candidate below is a sub-folder's file when this root claims
 			// its folder, and a project of its own when it does not.
@@ -125,20 +142,26 @@ func (l *Loader) Resolve(ctx context.Context, dir string, r Resolver) (path, roo
 		}
 		return "", "", nil
 	}
+	found := func(p, rt string) (string, string, error) {
+		if log.Enabled(LevelDebug) {
+			log.Log(LevelDebug, EventResolveDone, Str("path", p), Str("root", rt))
+		}
+		return p, rt, nil
+	}
 	for _, at := range ascent(dir) {
 		p, rt, err := try(at)
 		if err != nil {
 			return "", "", err
 		}
 		if p != "" {
-			return p, rt, nil
+			return found(p, rt)
 		}
 	}
 	if candidate != "" {
-		return candidate, candidateRoot, nil
+		return found(candidate, candidateRoot)
 	}
 	if fallback != "" {
-		return fallback, fallbackRoot, nil
+		return found(fallback, fallbackRoot)
 	}
 	return "", "", &NoConfigError{Dir: dir, Names: r.Names}
 }

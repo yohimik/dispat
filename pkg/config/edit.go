@@ -75,12 +75,14 @@ type PreparedEdit struct {
 	out  []byte      // the rendered replacement
 	mode os.FileMode // the file's own permissions, kept across the rewrite
 	noop bool        // the edit set changes nothing; Commit writes nothing
+	log  Logger      // the logger the preparation was asked for, for Commit
 }
 
 // PrepareEdits renders every edit against the file's current bytes without
 // writing anything — the validating half of ApplyEdits.
 func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit, error) {
-	p := &PreparedEdit{Path: path, noop: true}
+	log := GetLogger(ctx)
+	p := &PreparedEdit{Path: path, noop: true, log: log}
 	if len(edits) == 0 {
 		return p, nil
 	}
@@ -107,17 +109,25 @@ func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	if bytes.Equal(out, data) {
+	changed := !bytes.Equal(out, data)
+	if log.Enabled(LevelDebug) {
+		log.Log(LevelDebug, EventEditPrepared, Str("path", path), Num("edits", len(edits)),
+			Flag("changed", changed))
+	}
+	if !changed {
 		return p, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
-	return &PreparedEdit{Path: path, data: data, out: out, mode: info.Mode().Perm()}, nil
+	return &PreparedEdit{Path: path, data: data, out: out, mode: info.Mode().Perm(), log: log}, nil
 }
 
 // Commit writes the prepared replacement: the backup first, then the file.
+// It takes no context: the logger the preparation was given is the one that
+// hears about the write, so a prepared edit committed later still reports to
+// whoever asked for it.
 // Both writes are atomic — the backup exists for the moment something goes
 // wrong, which is exactly when a truncated half-written copy would be found
 // instead — and the backup carries the config's own permissions: a 0600 config
@@ -129,7 +139,14 @@ func (p *PreparedEdit) Commit() error {
 	if err := writeFileAtomic(p.Path+BackupSuffix, p.data, p.mode); err != nil {
 		return fmt.Errorf("saving backup: %w", err)
 	}
-	return writeFileAtomic(p.Path, p.out, p.mode)
+	if err := writeFileAtomic(p.Path, p.out, p.mode); err != nil {
+		return err
+	}
+	if p.log != nil && p.log.Enabled(LevelInfo) {
+		p.log.Log(LevelInfo, EventEditCommitted, Str("path", p.Path),
+			Str("backup", p.Path+BackupSuffix))
+	}
+	return nil
 }
 
 // RenderKeyTOML renders one value nested under its key path — the paste-ready
@@ -156,17 +173,18 @@ func RenderKeyTOML(keyPath []string, value any) (string, error) {
 // spliced. A key no file holds comes back unchanged, for the writers to create
 // or refuse as they already do.
 func (l *Loader) ResolveEdit(ctx context.Context, path string, keyPath []string) (string, []string, error) {
-	return l.loader().resolveEdit(path, keyPath, 0)
+	l = l.loader()
+	return l.resolveEdit(l.logger(ctx), path, keyPath, 0)
 }
 
 // resolveEdit is ResolveEdit with the number of references already followed,
 // which is what bounds it: the loader refuses a cycle long before an edit is
 // collected, so this only has to stop rather than explain.
-func (l *Loader) resolveEdit(path string, keyPath []string, followed int) (string, []string, error) {
+func (l *Loader) resolveEdit(log Logger, path string, keyPath []string, followed int) (string, []string, error) {
 	if followed > l.opts.MaxRefDepth {
 		return "", nil, fmt.Errorf("$ref nesting is more than %d files deep at %s", l.opts.MaxRefDepth, path)
 	}
-	doc, err := l.decodeFile(path)
+	doc, err := l.decodeFile(log, path)
 	if err != nil {
 		return "", nil, &FileError{Path: path, Err: err}
 	}
@@ -214,7 +232,7 @@ func (l *Loader) resolveEdit(path string, keyPath []string, followed int) (strin
 				Err: fmt.Errorf("%w; write %s beside the %s, or point the %s at a single file",
 					ErrMultiRefEdit, keyPath[len(keyPath)-1], l.opts.RefKey, l.opts.RefKey)}
 		}
-		return l.resolveEdit(refPath(targets[0], path), rest, followed+1)
+		return l.resolveEdit(log, refPath(targets[0], path), rest, followed+1)
 	}
 	return path, keyPath, nil
 }

@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Tree is one parsed config file: the document, and every file the document
@@ -50,7 +51,9 @@ type Tree struct {
 // with every `$ref` it holds resolved.
 func (l *Loader) ReadTree(ctx context.Context, path string) (*Tree, error) {
 	l = l.loader()
-	r := &refResolver{l: l}
+	log := l.logger(ctx)
+	start := time.Now()
+	r := &refResolver{l: l, log: log}
 	doc, err := r.document(path)
 	if err != nil {
 		return nil, err
@@ -58,6 +61,10 @@ func (l *Loader) ReadTree(ctx context.Context, path string) (*Tree, error) {
 	root, err := documentObject(doc, path)
 	if err != nil {
 		return nil, err
+	}
+	if log.Enabled(LevelDebug) {
+		log.Log(LevelDebug, EventTreeLoaded, Str("path", path), Num("files", len(r.files)),
+			Str("duration", time.Since(start).String()))
 	}
 	return &Tree{Root: root, Files: r.files}, nil
 }
@@ -67,6 +74,7 @@ func (l *Loader) ReadTree(ctx context.Context, path string) (*Tree, error) {
 // closed it rather than as a stack overflow.
 type refResolver struct {
 	l     *Loader
+	log   Logger
 	chain []refFrame
 	files []string
 }
@@ -82,7 +90,7 @@ type refFrame struct {
 // document parses one file and resolves what it holds: the entry point for the
 // file ReadTree was asked for and for every file a reference names.
 func (r *refResolver) document(path string) (any, error) {
-	doc, err := r.l.decodeFile(path)
+	doc, err := r.l.decodeFile(r.log, path)
 	if err != nil {
 		return nil, &FileError{Path: path, Err: err}
 	}
@@ -196,6 +204,10 @@ func (r *refResolver) object(node map[string]any, file, label string) (any, erro
 		}
 		object[key] = resolved
 	}
+	if r.log.Enabled(LevelTrace) {
+		r.log.Log(LevelTrace, EventRefMerge, Str("file", file), Str("key", labelOr(label)),
+			Num("keys", len(node)-1))
+	}
 	return object, nil
 }
 
@@ -282,6 +294,11 @@ func (r *refResolver) follow(target, file, label string) (any, error) {
 	if err := r.checkChain(path); err != nil {
 		return nil, err
 	}
+	if r.log.Enabled(LevelTrace) {
+		r.log.Log(LevelTrace, EventRefFollow, Str("file", file), Str("key", labelOr(label)),
+			Str("target", path), Num("depth", len(r.chain)))
+	}
+
 	doc, err := r.document(path)
 	if err != nil {
 		var chain *RefChainError
@@ -423,7 +440,7 @@ func documentObject(doc any, path string) (map[string]any, error) {
 
 // decodeFile parses one file with its format's own parser and returns whatever
 // the document holds.
-func (l *Loader) decodeFile(path string) (any, error) {
+func (l *Loader) decodeFile(log Logger, path string) (any, error) {
 	data, err := l.opts.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -437,6 +454,9 @@ func (l *Loader) decodeFile(path string) (any, error) {
 		if parse, ok = l.opts.Formats[""]; !ok {
 			return nil, ErrUnsupportedFormat
 		}
+	}
+	if log.Enabled(LevelTrace) {
+		log.Log(LevelTrace, EventFileRead, Str("path", path), Num("bytes", len(data)), Str("format", ext))
 	}
 	return parse(data)
 }

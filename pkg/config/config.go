@@ -136,6 +136,12 @@ type Options struct {
 	// An entry under the empty string handles every file no other entry
 	// claims. Without one, such a file is ErrUnsupportedFormat.
 	Formats map[string]Unmarshal
+
+	// Logger receives the events listed in log.go. Zero value: the logger the
+	// context carries, and Nop when it carries none — so a program with one
+	// logger sets this once and a program with several passes them on the
+	// context instead.
+	Logger Logger
 }
 
 // Default returns the options fully populated, the convenient starting point
