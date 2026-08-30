@@ -152,3 +152,89 @@ over, but keep three things in mind:
 
 Read the full rules in [the compute command](../cli/compute.md) and
 [`initials`](../configuration/versions.md#initials).
+
+## Existing changelogs and history
+
+A repository that has shipped for years arrives with a `CHANGELOG.md` somebody wrote by hand and a history written
+before the commit convention existed. dispat never rewrites what it did not write, and never moves it. What follows is
+what that means in each of the places it is easy to worry about.
+
+### The file keeps everything above its first entry
+
+dispat recognises a changelog by the title it renders itself. A file that opens with that title is the shape dispat has
+been writing: the title is rendered again and the new entry goes one blank line under it, with everything below
+untouched.
+
+A file that opens with anything else keeps that opening exactly as it is. Front matter, a title in your own words, a
+badge row, a paragraph of introduction: everything above the first line beginning `## ` is the file's preamble, it
+stays at the head of the file, and the new entry is inserted below it across the
+[entry seam](../configuration/records.md#the-seam-between-entries). dispat's own `# Changelog` is never written into
+such a file, because the file already has a title and adding one would say it twice.
+
+```markdown
+---
+title: Releases
+sidebar_position: 3
+---
+
+# Change Log            <- the preamble ends here, at the first entry heading
+
+## core@1.5.0 (2026-08-31)   <- the new entry
+
+### Features
+
+- read the manifest before the lock file
+
+## v1.4.2 (2024-01-01)  <- everything that was already there, where it was
+```
+
+Two details follow from recognising the title rather than the preamble. A file that *does* open with the configured
+title has no preamble at all, so a badge row written between that title and the first entry stays where it is in the
+file and ends up below the newest entry. And a hand-maintained `## Unreleased` heading is an entry heading like any
+other, so new entries are written above it rather than into it.
+
+A byte-order mark stays at the very top, ahead of everything, and a title terminated with CRLF is still recognised as
+the title. Old content keeps the line endings it was checked out with; only the seam dispat writes is `\n`. Run the
+release twice and the second run finds its entry and skips it, so adoption converges instead of layering.
+
+The same writer serves [`dispat changelog`](../cli/changelog.md), so a flow that writes its entries from a stage script
+adopts a file in exactly this way.
+
+### The first release documents the whole history
+
+A package with no release tag has no baseline, so its first window is its entire history. Every conventional commit in
+it is rendered into that one entry. This is worth knowing before the first run rather than after it, because a
+long-lived repository gets one very large first entry.
+
+The way to a smaller one is a baseline the first run can start from. A `tagFormat` matching the tags you already have
+adopts them:
+
+```yaml
+tagFormat: "v{version}"
+```
+
+dispat then reads `v1.4.2` as the package's baseline, and the first entry documents only the commits after it. Where no
+tag matches, [`initials`](../configuration/versions.md#initials) states the starting version and the window still spans
+the history behind it.
+
+### A history that predates the convention
+
+Old commits are not conventional commits, and dispat says so once per offending message. The default
+[`commitErrors: "warn"`](../configuration/parser.md#commiterrors) is what makes this survivable: each unrecognised unit
+contributes nothing and the run proceeds. Setting `commitErrors: "error"` over a pre-convention history refuses every
+release until the history itself is rewritten, which is not a trade a repository adopting dispat should take.
+
+Set [`parser.quiet: true`](../configuration/parser.md#quiet) to keep the findings out of the log. The diagnostics are
+still raised and counted, and the summary line reports how many went unprinted, so "nothing is wrong" and "you asked
+not to see it" never look the same.
+
+### When a hand-written heading matches the tag
+
+dispat identifies an entry by its heading. A changelog whose headings were written in the shape your `tagFormat`
+produces can therefore already carry the heading for the version this release is about to write. dispat reads it as an
+entry that exists, leaves the file alone, and reports the skip as `W226`. The release itself goes through: only the
+record is held.
+
+That is a skip rather than an overwrite because the alternative is rewriting a line a person wrote, and from inside the
+file the two cases look the same. Only the colliding version is ever ambiguous, so the next release writes its entry
+normally.

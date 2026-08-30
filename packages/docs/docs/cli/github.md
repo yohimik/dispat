@@ -22,6 +22,16 @@ publishes nothing and exits with `0`.
 The command covers packages one at a time. A repository has one index and one HEAD, and a clear release order is worth
 reading.
 
+## The shape of the body
+
+The body is rendered exactly as the release stage's recorder renders it, so a release created from a stage script and
+one created by the release itself carry the same text. Items inside a section are separated by a single blank line, a
+commit body is indented two spaces under the bullet it belongs to so that it stays part of that item, and every section
+ends the same way whether or not its last line carried a body. A release body is one document with no entry beneath it,
+so the changelog file's [entry seam](../configuration/records.md#the-seam-between-entries) does not apply here.
+
+See [Release records](../configuration/records.md) for the entry format options the body is rendered under.
+
 ## The selection it shares
 
 `dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native

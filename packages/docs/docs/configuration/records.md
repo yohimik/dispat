@@ -18,8 +18,13 @@ at another repository.
 | `header`            | none               | Lines written inside every entry, above the sections.                                                                                          |
 | `footer`            | none               | Lines written inside every entry, after the sections.                                                                                          |
 | `authors`           | off                | Attributes the entry to the people who wrote it. See [Attributing an entry to its authors](#attributing-an-entry-to-its-authors).               |
+| `sections`          | the built-in order | The entry's sections and the order they render in, the built-ins and sections of your own together. See [Choosing the sections and their order](#choosing-the-sections-and-their-order). |
+| `dependencyLink`    | off                | Links each dependency line to the release the provider moved to. See [Linking a dependency line to its release](#linking-a-dependency-line-to-its-release). |
+| `commitRefs`        | off                | Names the commit behind each entry line, optionally as a link. See [Naming the commit behind a line](#naming-the-commit-behind-a-line).         |
+| `noChangesText`     | the built-in lines | Replaces the line an entry with nothing to group carries. See [What an entry with no sections says](#what-an-entry-with-no-sections-says).      |
 
-`releaseName`, `header` and `footer` are interpolated. See [Variables in record text](#variables-in-record-text).
+`releaseName`, `header`, `footer` and `noChangesText` are interpolated, as are the URL templates `dependencyLink` and
+`commitRefs.link` take. See [Variables in record text](#variables-in-record-text).
 
 ## Attributing an entry to its authors
 
@@ -88,6 +93,180 @@ away with the footer.
 Authors are listed in the order the release collected its commits, newest first, rather than by the size of the
 change each of them happened to make.
 
+## Linking a dependency line to its release
+
+`dependencyLink` turns each line of the dependencies section into a link to the release the provider moved to. It is
+empty by default, so a repository that says nothing writes the plain line it always wrote.
+
+```yaml
+changelog:
+  dependencyLink: auto
+github:
+  dependencyLink: auto
+```
+
+A linked line names the provider, links the name, and keeps the movement after it:
+
+```markdown
+### Dependencies
+
+- [core](https://github.com/acme/monorepo/releases/tag/core@1.4.0): 1.3.2 -> 1.4.0
+```
+
+`auto` derives the URL from the package's own [`github`](#github) owner and repo, as
+`https://github.com/{owner}/{repo}/releases/tag/$DISPAT_DEP_TAG`. The tag is the provider's own, rendered through the
+provider's [`tagFormat`](./versions.md#tagformat), so the link points at the release that exists rather than at a name
+dispat guessed. A configuration that names no owner and repo falls back to `$GITHUB_REPOSITORY`, which every run inside
+GitHub Actions already carries. The changelog destination borrows the package's `github` block for all of this,
+including its `apiUrl`, because a file has no forge coordinates of its own.
+
+Anything else is a URL template, interpolated the way the rest of an entry's text is, with the
+[dependency variables](#the-variables-a-line-adds) added on top:
+
+```yaml
+changelog:
+  dependencyLink: "https://git.acme.example/${DISPAT_DEP_NAME}/-/tags/${DISPAT_DEP_TAG}"
+```
+
+A template always wins over `auto`, because a template is what you write when the derivation is not what you want.
+
+Two cases write the plain line instead of a broken link. `auto` declines when the owner and the repo cannot be
+resolved, and when [`github.apiUrl`](#github) points anywhere other than github.com, since a GitHub Enterprise
+installation serves its web pages on a host the API URL does not state. A template that expands to nothing declines the
+same way. A record is published and permanent, so a link leading nowhere is worse than no link, and the decision is
+reported at debug level rather than guessed at.
+
+## Naming the commit behind a line
+
+`commitRefs` appends the commit an entry line came out of to the line, so a reader can reach the change itself. It is
+off by default.
+
+| Key         | Default                | Description                                                                                                     |
+|-------------|------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `placement` | `off`                  | Where the reference goes: `off`, or `suffix` for the end of the line.                                            |
+| `format`    | `$DISPAT_COMMIT_SHORT` | The reference's text. Interpolated, with the [commit variables](#the-variables-a-line-adds) added.               |
+| `link`      | none                   | Empty writes the text plain, `auto` derives the forge URL, and anything else is a URL template.                  |
+
+```yaml
+changelog:
+  commitRefs:
+    placement: suffix
+    link: auto
+```
+
+The reference follows the description and the correction note and precedes the authors attribution. The note and the
+reference are part of what the line says about the work, and who did it comes after what was done:
+
+```markdown
+- read the manifest before the lock file ([a1b2c3d](https://github.com/acme/monorepo/commit/a1b2c3d)) (by Ada Lovelace)
+```
+
+`auto` derives `https://github.com/{owner}/{repo}/commit/$DISPAT_COMMIT` from the same coordinates
+[`dependencyLink`](#linking-a-dependency-line-to-its-release) uses, and declines the same way, leaving the plain
+`(a1b2c3d)` behind.
+
+A line dispat has no commit id for renders without a reference rather than with one that resolves nowhere. This happens
+only where the git implementation reports no sha and an internal key stands in for it. The recorder reports it once per
+release as [`W240`](../reference/plan-errors.md#a-record-that-renders-less-than-it-was-asked-to), naming the package and
+how many lines it covers.
+
+## Choosing the sections and their order
+
+An entry groups its lines by the bump each commit carries: breaking changes, then features, then fixes, then the
+dependency updates. `sections` states a different order, and adds sections of your own that claim commit types out of
+that grouping.
+
+A list of built-in names reorders the four and needs nothing else. A bare string names a built-in, and so does an
+object carrying only a title:
+
+```yaml
+changelog:
+  sections: [fixes, features]
+```
+
+An element with a `types` list is a section of your own. It needs a `title`, and it may declare the version bump its
+types carry:
+
+```yaml
+changelog:
+  sections:
+    - breaking
+    - title: Added
+      types: [add]
+      bump: minor
+    - features
+    - title: Documentation
+      types: [docs]
+      bump: patch
+```
+
+| Key     | Description                                                                                                                                    |
+|---------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `title` | The section's heading. On an element with no `types` it is the built-in's key instead: `breaking`, `features`, `fixes` or `dependencies`, matched case-insensitively. |
+| `types` | The commit types this section claims, matched case-insensitively against the type each commit was written with. An element carrying types is a section of your own. |
+| `bump`  | Optional, and only on a section of your own: the bump those types carry (`none`, `patch`, `minor` or `major`), merged into the [parser's type table](./parser.md#parser). |
+
+Sections render in the order the list gives them. **A built-in the list omits is not removed.** It is appended after the
+listed ones in the default relative order, because a section dropped in silence would take released work out of the
+record with it. A list naming one section of your own and nothing else therefore renders that section above all four
+built-ins.
+
+Three things are refused when the config loads: a built-in listed twice, an element with no `types` whose title is not
+a built-in's key, and one commit type claimed by two sections of the same destination.
+
+### The bump a section declares
+
+`bump` is what makes a type dispat has never heard of releasable. Declaring the section that renders `add` is enough,
+and [`parser.types`](./parser.md#parser) needs no separate entry for it.
+
+The declaration merges into the one type table the whole repository parses with, so two levels declaring the same type
+with different bumps are refused while two agreeing declarations are fine. That is how the two destinations of one
+package restate the same section without conflict. The merge lands on the standard table rather than replacing it, so
+declaring a section never costs the repository `feat` and `fix` the way a bare `parser.types` map does.
+
+Because the table is the repository's, the declaration belongs in the root configuration file. A `bump` written in a
+[package's or space's own config file](./packages.md#in-folder-configuration-files) is refused as that folder is
+discovered: the parser is built before the folder is read, so the type would render under its section without ever
+becoming releasable.
+
+A type whose bump resolves to `none` never reaches an entry at all. It releases nothing, so it is not part of any
+release's notes, and a section claiming only such types never appears.
+
+### What each section claims
+
+A line is grouped by the first of these that holds:
+
+1. **A breaking change always renders under the breaking section**, whatever claims its type. Letting `add(x)!:` sit
+   under "Added" would put the one thing a reader scans an entry for behind the word its author chose for ordinary
+   work.
+2. A section of your own claiming the commit's type takes it.
+3. Everything else falls to the bump-keyed built-in it always had.
+
+A built-in keeps its configured title wherever it is ordered. `breakingTitle`, `featuresTitle`, `fixesTitle` and
+`dependenciesTitle` name the four, and `sections` only says where each of them goes.
+
+A `sections` list [states a package's whole order](#overriding-a-list) rather than adding to the one it inherited, the
+way `header` and `footer` do.
+
+## What an entry with no sections says
+
+An entry is never empty. A release with nothing for its notes to group renders a single line naming the cause, and
+`noChangesText` replaces that line with your own:
+
+```yaml
+changelog:
+  noChangesText: "Released with the group. What changed is in https://github.com/acme/monorepo/blob/main/core/CHANGELOG.md"
+```
+
+The text is interpolated like every other record line, so a ride release can name the version it moved to or link the
+package that actually changed. An expansion that comes out empty falls back to the built-in lines rather than standing,
+because an empty expansion is a template naming a variable nobody set rather than an instruction to publish an empty
+entry.
+
+The sentence must not begin with `---`. That is where [self-update](../reference/self-update.md) cuts a release's notes,
+so a sentence written below the rule would never be shown to anyone reading them. dispat refuses it when the config
+loads rather than at the release that would have published it.
+
 ## `changelog`
 
 | Key       | Default        | Description                                   |
@@ -96,9 +275,12 @@ change each of them happened to make.
 | `channels`   | every release  | Which releases get an entry. See [Choosing the channels that record](#choosing-the-channels-that-record). |
 | `file`       | `CHANGELOG.md` | File name inside the package folder.                                                   |
 | `fileTitle`  | `# Changelog`  | Heads the file, above every entry. Takes the [line shapes](#your-own-words-around-an-entry) `header` and `footer` take, so it can be several lines and can differ per package. |
+| `entrySpacing` | `2`          | Blank lines between the new entry and the entry below it, from 1 to 10. See [The seam between entries](#the-seam-between-entries). |
 | *format*     |                | All entry format options above.                                                        |
 
-dispat prepends new entries below the title, newest first.
+dispat prepends new entries below the title, newest first. A file that does not open with the configured title keeps
+everything above its first entry heading where it is, and the new entry goes below that. See
+[Existing changelogs and history](../examples/adopting.md#existing-changelogs-and-history).
 
 **What an entry contains: the release-notes windowing.** An entry holds the release's notes grouped by bump (breaking
 changes, features, fixes) plus the provider-updates section. On the stable channel that is every pending commit since
@@ -131,10 +313,23 @@ No changes: the pending work and its reverts cancel out.
 No changes: a version bump to keep the versioning group on one version.
 ```
 
+Set [`noChangesText`](#what-an-entry-with-no-sections-says) to say something of your own instead, such as where the
+work behind a shared-versioning ride is actually written down.
+
 A changelog write is idempotent. dispat leaves a file untouched if it already carries the entry for the planned tag (a
 line starting `## <tag> (`) and reports the skip as `W226`. That makes the [`dispat changelog`](../cli/changelog.md)
 step command safe to run before the release, because the entry it writes lands inside the release commit, and the
 release stage's own recorder finds it and skips.
+
+### The seam between entries
+
+dispat closes the new entry on a single newline and writes exactly `entrySpacing` blank lines between it and the entry
+below. Left to each entry's own tail the seam varied with whatever the last section happened to be, so a file recorded
+the shape of every release rather than one rule.
+
+The count applies at that seam alone. Nothing already in the file is rewritten: the entries below keep the spacing and
+the line endings they were written with, and lowering the setting today closes up no gap last year's releases left.
+`entrySpacing` belongs to the changelog file only, since a GitHub release body is one document with no entry under it.
 
 ## `github`
 
@@ -369,13 +564,32 @@ Three sources answer, in this order:
 A name that none of the three defines expands to nothing, the way a shell expands an unset variable. Half-written
 `${...}` in a published release reads worse than the gap it would have filled.
 
+### The variables a line adds
+
+Two settings interpolate against something narrower than a release. Each adds its own names on top of the three sources
+above, and a name it does not define falls through to them:
+
+| Variable              | Added for                                                          | Holds                                                                                     |
+|-----------------------|--------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| `DISPAT_DEP_NAME`     | [`dependencyLink`](#linking-a-dependency-line-to-its-release)      | The provider the line is about.                                                           |
+| `DISPAT_DEP_FROM`     | `dependencyLink`                                                   | The version the consumer shipped against before.                                          |
+| `DISPAT_DEP_TO`       | `dependencyLink`                                                   | The version it picks up.                                                                  |
+| `DISPAT_DEP_TAG`      | `dependencyLink`                                                   | The provider's release tag for `DISPAT_DEP_TO`, rendered through the provider's own `tagFormat`. |
+| `DISPAT_COMMIT`       | [`commitRefs`](#naming-the-commit-behind-a-line)                   | The full sha of the commit the line came out of.                                          |
+| `DISPAT_COMMIT_SHORT` | `commitRefs`                                                       | The same sha, abbreviated to seven characters.                                            |
+
+They are scoped to the line being rendered rather than to the release, which is why they are not among the release's
+own `DISPAT_*` variables: a release has no one commit and no one provider.
+
 Two things worth knowing:
 
 * **Everything in the environment expands, secrets included.** `${GITHUB_TOKEN}` in a footer would publish your token.
   Only name variables you mean to show.
 * **A `fileTitle` must not contain anything that changes between releases.** The title is written once and matched
-  against on the next release so it is not duplicated. A title holding `${DISPAT_TAG}` looks different every time, the
-  match fails, and the old title stays behind in the file. Package and space names are safe; versions and tags are not.
+  against on the next release so it is not duplicated. A title holding `${DISPAT_TAG}` looks different every time and
+  the match fails. What the file opens with is then read as the file's own preamble: the file keeps the title it
+  already carries, the configured one is never written into it again, and every later entry goes below. Package and
+  space names are safe; versions and tags are not.
 
 ## Choosing the channels that record
 

@@ -515,7 +515,7 @@ parser. dispat raises `E210`-`E213` and `W209`-`W215` here. These resolve an `Ed
 history and report what the correction did (see [Correcting a record](../reference/corrections.md)). Read
 [Diagnostic codes](../reference/plan-errors.md) to see what each of those six means and what to do about it.
 
-In the other direction, thirty codes are dispat's own. They sit outside the specification's registry, attached to
+In the other direction, thirty-one codes are dispat's own. They sit outside the specification's registry, attached to
 features the specification predates or does not have. They are numbered from `W220` and `E215` upward. This clears the
 registry, which ends at `W215` and `E213`. It also clears `W195` and `W196`, which the specification reserves for the
 audit features above.
@@ -534,6 +534,7 @@ audit features above.
 | `W233`                 | A [versioning group](../reference/releasing/versioning.md) whose members sit on different major versions, so the newest one decides where they all land |
 | `W238`                 | A `Release-As` footer naming a package whose [versioning is `none`](../reference/releasing/versioning.md#packages-that-never-release-none): the directive moves nothing |
 | `W239`                 | A [webhook](../configuration/webhooks.md) delivery that did not get through: the endpoint kept refusing, never answered, or the queue was full. Warn-only by design, like `W232`: a listener that missed a notification is never a reason to fail the release it was watching |
+| `W240`                 | [Commit references](../configuration/records.md#naming-the-commit-behind-a-line) are configured but some entry lines have no commit id to point at, so those lines render without one. The planner has a sha for every commit a Git implementation reports one for; a window key that stands in for a missing sha names nothing a reader could open |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 

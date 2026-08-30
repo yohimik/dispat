@@ -128,6 +128,20 @@ must align to the run that invoked them. Two codes belong to that alignment.
 | `E219` | The step cannot align to the run. The package is missing from its plan, or the run's version renders a different tag. dispat writes nothing. A failed leg re-runs, but a drifted record does not. |
 | `W229` | A wired `dispat github` ran before the run's tag existed. GitHub would invent the tag at the default branch head. Run the commit step first. |
 
+## A record that renders less than it was asked to
+
+Records are written after the plan is settled and, for a GitHub release, after the package is already published. What a
+record's own configuration could not do is therefore reported rather than refused, and the entry is published in the
+shape dispat could actually render.
+
+| Code | Means |
+|------|-------|
+| `W240` | [Commit references](../configuration/records.md#naming-the-commit-behind-a-line) are configured, and some of the entry's lines have no commit id to point at. Those lines render without a reference instead of with one that resolves nowhere. The warning names the package and how many lines it covers, once per release and per record. |
+
+An `auto` link that cannot be derived is the quieter member of the same family. It falls back to the plain unlinked
+text and says so at `debug` level, because a repository with no GitHub coordinates configured is a normal thing to be
+rather than something to warn about on every release.
+
 ## The plan is fine and nothing releases
 
 These are not errors, but they read like errors.

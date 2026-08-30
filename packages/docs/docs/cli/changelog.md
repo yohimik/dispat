@@ -7,6 +7,19 @@ script, before `dispat commit`, lands inside the tagged commit.
 
 dispat writes these entries inside each package's own folder. The command rides your build concurrency budget.
 
+## The shape of what it writes
+
+One entry has one shape, whichever door writes it. Items inside a section are separated by a single blank line, a
+commit body is indented two spaces under the bullet it belongs to so that it stays part of that item, and every section
+ends the same way whether or not its last line carried a body. In the file, the new entry is separated from the entry
+below it by [`changelog.entrySpacing`](../configuration/records.md#the-seam-between-entries) blank lines, two by
+default.
+
+This command renders exactly what the release stage's recorder renders, so an entry written from a stage script and one
+written by the release itself are the same bytes. See [Release records](../configuration/records.md) for the entry
+format options and [Existing changelogs and history](../examples/adopting.md#existing-changelogs-and-history) for what
+happens to a file that already had content.
+
 ## The selection it shares
 
 `dispat changelog`, `dispat autoversion`, `dispat commit`, and `dispat github` expose the release pipeline's native

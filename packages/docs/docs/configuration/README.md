@@ -17,7 +17,9 @@ dispat fails with an error naming every name it tried when no candidate exists a
 Pass an explicit `--config` to use a specific file with no fallback. A typo there fails loudly instead of quietly
 loading a different file.
 
-**Unknown keys are rejected** as typo protection. Put keys dispat does not know in [`custom`](./custom.md).
+**Unknown keys are rejected** as typo protection. Put keys dispat does not know in [`custom`](./custom.md). A rejected
+key that looks like a real setting can also mean the file was written for a newer dispat than the one reading it, and
+`dispat self-update --check` reports whether a newer one exists.
 
 **Case.** Every key keeps the spelling you write, and dispat matches keys case-insensitively. A script, space, package
 or versioning group is therefore named once, in the case you chose, and reached from anywhere by any spelling: a
