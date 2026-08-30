@@ -42,7 +42,10 @@ func (t *Tree) Settings(l *Loader, ov Overrides) map[string]any {
 	l = l.loader()
 	out := make(map[string]any, len(t.Root))
 	s := settings{delim: l.opts.KeyDelim, out: out}
-	s.fill(t.Root, nil)
+	// The walk extends one path buffer rather than allocating a slice per key.
+	// Eight levels covers any configuration anyone writes; a deeper one grows
+	// the buffer for the branch it is on and costs what it always did.
+	s.fill(t.Root, make([]string, 0, 8))
 	ov.applyTo(out, l.opts.KeyDelim)
 	if len(ov) > 0 && l.opts.Logger != nil && l.opts.Logger.Enabled(LevelDebug) {
 		l.opts.Logger.Log(LevelDebug, EventOverridesApplied, Num("count", len(ov)))
@@ -62,9 +65,11 @@ type settings struct {
 // with them; everything else, lists included, is a leaf.
 //
 // path is the levels above m, already split on the delimiter. It is extended
-// in place: a sibling's extension overwrites the previous sibling's, which is
-// safe because the walk is depth-first and nothing keeps the slice — the
-// strings in it become map keys, and a string is its own copy.
+// in place: a sibling's extension overwrites the previous sibling's, and a
+// child's overwrites what the sibling before it wrote further along. Both are
+// safe because the walk is depth-first — everything past len(path) is finished
+// with before the next sibling is reached — and because nothing keeps the
+// slice: the strings in it become map keys, and a string is its own copy.
 func (s *settings) fill(m map[string]any, path []string) {
 	for _, k := range SortedKeys(m) {
 		v := m[k]

@@ -58,6 +58,39 @@ func TestSettingsMergesTheLevelsADottedKeyNames(t *testing.T) {
 	}
 }
 
+// TestSettingsExtendsOnePathBuffer: the walk reuses one slice for the levels
+// above the leaf it is writing, so a sibling's extension overwrites the
+// previous sibling's and a child's overwrites what a cousin wrote further
+// along. This is the shape that would break if it did not: a dotted key naming
+// two levels, a deeper dotted key under it, and a plain sibling that has to
+// land back at the shallower level rather than at the deep one.
+func TestSettingsExtendsOnePathBuffer(t *testing.T) {
+	out := settingsOf(map[string]any{
+		"a.b": map[string]any{
+			"c.d": map[string]any{
+				"e.f": "deep",
+				"g":   map[string]any{"h.i": "deeper"},
+			},
+			"z": "shallow",
+		},
+		"top": "root",
+	}, nil)
+
+	want := map[string]any{
+		"a": map[string]any{"b": map[string]any{
+			"c": map[string]any{"d": map[string]any{
+				"e": map[string]any{"f": "deep"},
+				"g": map[string]any{"h": map[string]any{"i": "deeper"}},
+			}},
+			"z": "shallow",
+		}},
+		"top": "root",
+	}
+	if !reflect.DeepEqual(want, out) {
+		t.Errorf("out  = %#v\nwant = %#v", out, want)
+	}
+}
+
 // TestSettingsIsTheSameEveryRun: a key that is both a leaf and a level is a
 // configuration nobody meant to write, and the point is only that it resolves
 // the same way every time — a load that fails differently from one run to the

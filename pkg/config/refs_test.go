@@ -269,6 +269,22 @@ func TestStringKeyedSettlesCollisionsTheSameWay(t *testing.T) {
 	}
 }
 
+// TestReadTreeGenericRootIsAnObject: a yaml document whose top-level mapping
+// has a non-string key is an object like any other, its keys rendered the way
+// a value would be. The conversion happens in the walk, before the top level
+// is asked what it is, so there is one answer to "is this an object" rather
+// than one for the root and another for everything below it.
+func TestReadTreeGenericRootIsAnObject(t *testing.T) {
+	tree, err := readTree(t, writeFile(t, t.TempDir(), "app.yaml", "1: one\ntwo: 2\n"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	want := map[string]any{"1": "one", "two": 2}
+	if !reflect.DeepEqual(want, tree.Root) {
+		t.Errorf("root = %#v, want %#v", tree.Root, want)
+	}
+}
+
 // TestReadTreeDoesNotShareWithTheParser: the tree is built by the walk rather
 // than handed over by the parser, so writing into it reaches nothing else, and
 // the settings it renders leave it alone in turn.
