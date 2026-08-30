@@ -12,21 +12,36 @@
 # that cannot update itself. The names are part of that contract and must not
 # change.
 #
-# What the smoke proves is tiered by what one builder can execute. Every
+# Two more linux binaries ride along, built from the same source by the
+# TinyGo fork at roughly half the size and named `dispat-tiny-linux-<arch>`.
+# They are additive: the six names above are what self-update and install.sh
+# resolve, and nothing about them changes. See internals/tinygo.md.
+#
+# What the smoke proves is tiered by what one builder can execute. Every gc
 # binary is read back (`go version -m`) to prove it is a Go executable for the
-# platform its name claims. Both linux binaries are run — the foreign
-# architecture through binfmt, which the workflows' setup-qemu step and Docker
-# Desktop both provide. The builder's own linux binary then carries the e2e
-# smoke suite (tests/integration, -run 'TestSmoke'). The darwin and windows
-# binaries cannot run here at all; executing those falls to the release's
-# post-release matrix, which installs the published binary on all three
-# runner operating systems.
+# platform its name claims — a TinyGo binary carries no such build info, so
+# the tiny pair is proven by running it instead. All four linux binaries are
+# run — the foreign architecture through binfmt, which the workflows'
+# setup-qemu step and Docker Desktop both provide. The builder's own gc linux
+# binary then carries the e2e smoke suite (tests/integration, -run
+# 'TestSmoke'). The darwin and windows binaries cannot run here at all;
+# executing those falls to the release's post-release matrix, which installs
+# the published binary on all three runner operating systems.
 #
 # The build runs here rather than on the runner so that a CI job needs a Go
 # toolchain for nothing but bootstrapping dispat itself. Cross-compilation is
 # Go's own, from one native builder — there is no --platform fan-out and no
 # emulation, which is why six targets cost roughly what one does.
 ARG GO_VERSION=1.26
+
+# The TinyGo fork the two extra linux assets are built with, and the digests
+# its release published for the tarballs this build downloads. A pin like
+# GO_VERSION, never passed as --build-arg: moving to a newer fork is bumping
+# these three values, and the same number is bumped in Dockerfile.tinygo,
+# which is where the toolchain is interrogated rather than merely used.
+ARG TINYGO_FORK_VERSION=0.42.0-net.4
+ARG TINYGO_FORK_SHA256_AMD64=793f100e5ade5c909e8fc0854d3a28b67af1a289c951213669eb289341960752
+ARG TINYGO_FORK_SHA256_ARM64=5f6d49ee57d583b740beeffd4dd3e14f2e534ffde6b573a7a7c7a0ebefcdd5e2
 
 FROM golang:${GO_VERSION}-alpine AS build
 
@@ -75,6 +90,90 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     done; \
     echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output
 
+# The two extra linux binaries, built by the TinyGo fork: the same source and
+# the same version stamp, roughly half the bytes. They are additive downloads
+# under names of their own — `dispat self-update` and install.sh resolve
+# `dispat-<os>-<arch>`, which is a contract nothing here touches — so a
+# release carries them beside the six rather than instead of any of them.
+#
+# The toolchain is fetched as its release tarball, by URL and against the
+# digest that release published, rather than with `dispat install`: the thing
+# being built here is dispat, and a build of dispat that needs a working
+# dispat to start is a bootstrap cycle. The checksum is the part `install`
+# would have done, kept.
+#
+# Debian rather than alpine, unlike every other stage in this file: the fork
+# ships a glibc-linked LLVM beside its own binary, and musl does not run it.
+# TinyGo's linux targets link its bundled musl statically, so what comes out
+# is a static binary either way — see internals/tinygo.md for what those
+# binaries can do, which as of the fork is everything the gc ones can.
+FROM golang:${GO_VERSION} AS tiny-toolchain
+ARG TARGETARCH
+ARG TINYGO_FORK_VERSION
+ARG TINYGO_FORK_SHA256_AMD64
+ARG TINYGO_FORK_SHA256_ARM64
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) sha="$TINYGO_FORK_SHA256_AMD64" ;; \
+      arm64) sha="$TINYGO_FORK_SHA256_ARM64" ;; \
+      *) echo "no fork toolchain pinned for $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/yohimik/tinygo/releases/download/v${TINYGO_FORK_VERSION}/tinygo${TINYGO_FORK_VERSION}.linux-${TARGETARCH}.tar.gz"; \
+    curl -fsSL -o /tmp/tinygo.tar.gz "$url"; \
+    echo "$sha  /tmp/tinygo.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/tinygo.tar.gz -C /usr/local; \
+    rm /tmp/tinygo.tar.gz; \
+    /usr/local/tinygo/bin/tinygo version
+
+# The compile itself, in a stage of its own so that a source edit never
+# re-downloads the toolchain. Same layout and same GOWORK=off as the gc build
+# above, for the same reasons.
+#
+# One LLVM warning repeats once per inline asm block on arm64 — hundreds of
+# identical lines that bury every other answer — so the build's output is
+# captured, the warning counted rather than kept, and the whole of it printed
+# when the compile fails. Exactly what the spike does with the same noise.
+FROM tiny-toolchain AS tiny-build
+ARG DISPAT_VERSION=dev
+WORKDIR /src
+COPY pkg ./pkg
+COPY services/dispat ./services/dispat
+WORKDIR /src/services/dispat
+ENV GOWORK=off
+ENV PATH=/usr/local/tinygo/bin:$PATH
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.cache/tinygo \
+    --mount=type=cache,target=/go/pkg/mod \
+    set -eu; \
+    mkdir -p /out; \
+    for arch in amd64 arm64; do \
+      name="dispat-tiny-linux-${arch}"; \
+      if GOOS=linux GOARCH="$arch" tinygo build -opt=z -no-debug \
+        -ldflags "-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${DISPAT_VERSION}" \
+        -o "/out/$name" . > /tmp/tinygo.raw 2>&1; then :; else \
+        cat /tmp/tinygo.raw >&2; exit 1; fi; \
+      noise="Reserved registers on the clobber list"; \
+      n="$(grep -c "$noise" /tmp/tinygo.raw || true)"; \
+      grep -v "$noise" /tmp/tinygo.raw || true; \
+      [ "$n" -eq 0 ] || echo "($n identical \"$noise\" warnings elided)"; \
+      echo "built $name (version ${DISPAT_VERSION})"; \
+    done
+
+# The two binaries joined to the six, and the asset list extended with their
+# names. The list is rewritten as one line because that is what the staged
+# stage below joins paths onto; the tiny names go last, so the six the
+# contract names keep the order they were built in.
+FROM build AS tiny
+COPY --from=tiny-build /out/dispat-tiny-linux-amd64 /out/dispat-tiny-linux-arm64 /out/
+RUN set -eu; \
+    assets="$(sed -n 's/^DISPAT_EXPORT_GITHUB=//p' /out/dispat-output)"; \
+    for name in dispat-tiny-linux-amd64 dispat-tiny-linux-arm64; do \
+      [ -s "/out/$name" ] || { echo "$name did not come out of the fork build" >&2; exit 1; }; \
+      assets="$assets $name"; \
+    done; \
+    echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output; \
+    cat /out/dispat-output
+
 # The smoke gate: the binaries above, proven to work before anything exports
 # them. Tests run against /out's exact bytes — a fresh native build passing
 # says nothing about what a cross-compile produced — via DISPAT_TEST_BINARY,
@@ -84,7 +183,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # The suite drives dispat against disposable git repositories, so git is
 # installed and then asserted: without it the harness skips every test, and a
 # gate that passes by skipping is worse than no gate.
-FROM build AS test
+FROM tiny AS test
 
 # The builder's own architecture — which of the six binaries can carry the
 # test suite natively.
@@ -137,13 +236,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
       echo "$info" | grep -q "GOARCH=$GOARCH" || { echo "$name is not a $GOARCH binary" >&2; exit 1; }; \
       echo "validated $name"; \
     done; \
-    for arch in amd64 arm64; do \
-      out="$(/out/dispat-linux-$arch --version)"; \
-      echo "$out" | grep -q "(linux_$arch)" || { echo "dispat-linux-$arch reports the wrong platform: $out" >&2; exit 1; }; \
+    for name in dispat-linux-amd64 dispat-linux-arm64 \
+                dispat-tiny-linux-amd64 dispat-tiny-linux-arm64; do \
+      arch="${name##*-}"; \
+      out="$(/out/$name --version)"; \
+      echo "$out" | grep -q "(linux_$arch)" || { echo "$name reports the wrong platform: $out" >&2; exit 1; }; \
       if [ -n "$DISPAT_VERSION" ] && [ "$DISPAT_VERSION" != "dev" ]; then \
-        echo "$out" | grep -q "dispat $DISPAT_VERSION " || { echo "dispat-linux-$arch reports the wrong version: $out" >&2; exit 1; }; \
+        echo "$out" | grep -q "dispat $DISPAT_VERSION " || { echo "$name reports the wrong version: $out" >&2; exit 1; }; \
       fi; \
-      echo "executed dispat-linux-$arch: $(echo "$out" | grep 'dispat ')"; \
+      echo "executed $name: $(echo "$out" | grep 'dispat ')"; \
     done; \
     GOWORK=/src/go.work DISPAT_TEST_BINARY="/out/dispat-linux-${TARGETARCH}" \
       go test -C /src/tests/integration -run 'TestSmoke' -count=1 -timeout 20m .; \
