@@ -361,6 +361,60 @@ type AuthorsConfig struct {
 	Title string `json:"title,omitempty"`
 }
 
+// SectionConfig is one element of an entry's `sections` list: either a
+// built-in section named by key, or a custom section claiming commit types of
+// its own.
+//
+// The two are told apart by `types`. An element with no types names a built-in
+// — "breaking", "features", "fixes" or "dependencies", matched
+// case-insensitively — and in a list a bare string is the shorthand for it, so
+// `sections: [fixes, features]` reorders the defaults with no objects at all.
+// An element with types is a custom section: it claims those commit types out
+// of the bump-keyed grouping and renders them under its own title.
+//
+// Listing sections is never how one is removed. A built-in the list omits is
+// appended after the listed ones in the default relative order, because a
+// section silently dropped would take released work out of the record with it.
+type SectionConfig struct {
+	// Title is the custom section's heading, or the built-in's key when the
+	// element names one. A built-in keeps its configured title
+	// (breakingTitle, featuresTitle, fixesTitle, dependenciesTitle), so the
+	// key here only says which section is meant and where it goes.
+	Title string `json:"title,omitempty"`
+	// Types are the commit types the custom section claims, matched
+	// case-insensitively against the type a commit was written with. A type
+	// claimed here is grouped under this section instead of the bump-keyed
+	// built-in, except when the unit is breaking: a breaking change is always
+	// rendered under the breaking section, so `add(x)!:` cannot hide in
+	// "Added".
+	Types []string `json:"types,omitempty"`
+	// Bump is the version bump the claimed types carry: "none", "patch",
+	// "minor" or "major". It merges into the parser's own type table, which is
+	// what makes a type dispat has never heard of releasable by declaring the
+	// section that renders it. Optional, and only meaningful on a custom
+	// section; a type declared both here and under `parser.types` must agree.
+	Bump string `json:"bump,omitempty"`
+}
+
+// CommitRefsConfig appends the commit behind an entry line to the line, so a
+// reader can reach the change itself. Off by default, which is what keeps an
+// entry byte for byte what it was before refs existed.
+type CommitRefsConfig struct {
+	// Placement decides where the reference appears: "off" (default) or
+	// "suffix", after the description and its attribution. "off" is a value
+	// rather than an absence, so a package can switch off what its space
+	// turned on.
+	Placement string `json:"placement,omitempty"`
+	// Format is the reference's text, interpolated like every other record
+	// line and additionally carrying $DISPAT_COMMIT and $DISPAT_COMMIT_SHORT.
+	// Default "$DISPAT_COMMIT_SHORT".
+	Format string `json:"format,omitempty"`
+	// Link turns the reference into a markdown link. Empty renders it plain;
+	// "auto" derives the forge URL from the package's github owner and repo;
+	// anything else is a URL template interpolated the same way Format is.
+	Link string `json:"link,omitempty"`
+}
+
 // EntryFormatConfig customises how a release entry is rendered; shared by the
 // changelog file and the GitHub release body. All fields are optional.
 //
@@ -386,6 +440,30 @@ type EntryFormatConfig struct {
 	// layer says nothing about attribution, which is what lets a nearer layer
 	// inherit a broader one field by field.
 	Authors *AuthorsConfig `json:"authors,omitempty"`
+	// DependencyLink turns each line of the dependencies section into a link
+	// to the provider's release. Empty renders the plain line; "auto" derives
+	// the forge URL from the package's github owner and repo; anything else is
+	// a URL template interpolated against the release's variables plus
+	// $DISPAT_DEP_NAME, $DISPAT_DEP_FROM, $DISPAT_DEP_TO and $DISPAT_DEP_TAG.
+	//
+	// "auto" degrades to the plain line rather than to a broken one whenever
+	// the owner and repo are unresolvable, or a github API URL outside
+	// github.com is configured.
+	DependencyLink string `json:"dependencyLink,omitempty"`
+	// NoChangesText replaces the sentence an entry with no sections carries.
+	// It is interpolated like every other record line, and an expansion that
+	// comes out empty falls back to the built-in sentences: an entry must
+	// never render empty. It must not begin with "---", which is where
+	// `dispat self-update` cuts a release's notes.
+	NoChangesText string `json:"noChangesText,omitempty"`
+	// Sections states the whole order of the entry's sections, built-ins and
+	// custom ones together. An empty list is the default order: breaking
+	// changes, features, fixes, dependencies.
+	Sections []SectionConfig `json:"sections,omitempty"`
+	// CommitRefs appends the commit behind each entry line to the line. Nil
+	// means the layer says nothing about references, which is what lets a
+	// nearer layer inherit a broader one field by field.
+	CommitRefs *CommitRefsConfig `json:"commitRefs,omitempty"`
 }
 
 // ChangelogConfig customises (or disables) the per-package changelog file.
@@ -409,8 +487,30 @@ type ChangelogConfig struct {
 	// restricts the channels opts back in with ["stable", "*"], which the two
 	// values together cover.
 	Channels []string `json:"channels,omitempty"`
+	// EntrySpacing is how many blank lines separate one entry from the entry
+	// below it, 1 to 10. Nil is the default 2, which is what makes the seam
+	// the same wherever the entry above it happened to end.
+	EntrySpacing *int `json:"entrySpacing,omitempty"`
 	EntryFormatConfig
 }
+
+// EntrySpacingOrDefault is the blank-line count between entries, with the
+// default applied. Nil-safe.
+func (c *ChangelogConfig) EntrySpacingOrDefault() int {
+	if c == nil || c.EntrySpacing == nil {
+		return DefaultEntrySpacing
+	}
+	return *c.EntrySpacing
+}
+
+// The bounds of changelog.entrySpacing. One blank line is the tightest seam
+// that still separates two entries; ten is a generous ceiling that keeps a
+// mistyped value from writing a screenful of nothing between every release.
+const (
+	DefaultEntrySpacing = 2
+	MinEntrySpacing     = 1
+	MaxEntrySpacing     = 10
+)
 
 // IsEnabled reports whether the changelog file is written (default true). It
 // is nil-safe: an absent changelog object means all defaults.
@@ -1169,6 +1269,10 @@ func DefaultNonPackageScopes() []string { return []string{"release"} }
 // fields (Changelog.Enabled, GitHub.Enabled, Commit.Enabled, Commit.Verify),
 // whose nil means "use the default".
 func Bool(b bool) *bool { return &b }
+
+// Int returns a pointer to n — the same helper for the tri-state *int option
+// fields (Changelog.EntrySpacing), whose nil means "use the default".
+func Int(n int) *int { return &n }
 
 // UpdateCheckEnabled reports whether dispat looks for a newer release of
 // itself (default true). Nil-safe, so a configuration that never mentions it
