@@ -1,4 +1,4 @@
-# The pkg space: the five published Go libraries. This file is the space's own
+# The pkg space: the six published Go libraries. This file is the space's own
 # configuration; the space itself, and its path, are declared at the root.
 tagFormat: pkg/{name}/v{version}
 isBuildWaitingPublish: true
