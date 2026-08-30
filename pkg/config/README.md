@@ -203,6 +203,29 @@ file itself follows the old inode into the void. The watch set is derived from t
 configuration composed through `$ref` watches every fragment, and a reload that changes which fragments are involved
 moves the watches with it. A reload that fails keeps the last good value.
 
+## Performance
+
+The package is alloc-budgeted rather than merely fast. `bench_test.go` measures every stage against fixtures built in
+code and served through `Options.ReadFile`, so a run measures the loader and not the filesystem underneath it; the two
+benchmarks that cannot be — the ascent, which stats directories, and the writers, which rewrite files — use a temp tree
+and say so. Benchmarks run with `-run '^$'`, because a pass that runs the tests alongside them is timing a machine that
+was busy doing something else.
+
+`alloc_test.go` is what turns those measurements into a gate. It pins the allocation counts as tests, with one
+allocation of headroom so a toolchain change does not fail a build for a rounding difference, and a reintroduced deep
+copy of the tree — or a flat intermediate map in the settings rendering — fails it immediately. An allocation count is
+a property of the code rather than of the machine, which is what makes it worth pinning at all.
+
+There are no figures in this file on purpose. The numbers each release measured are on the
+[benchmarks page](https://dispat.dev/internals/benchmarks/), injected there from the run that took them: a timing is a
+fact about a machine and a toolchain, and a number pasted into a document goes stale the day after it is written while
+still reading like a promise.
+
+```sh
+go test ./... -run '^$' -bench . -benchmem   # what the release measures
+go test ./...                                # the budgets, as ordinary tests
+```
+
 ## Compared to viper and koanf
 
 Named here as the two libraries most Go programs reach for, and only to say what is different. Neither is a dependency
