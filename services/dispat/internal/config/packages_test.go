@@ -2187,8 +2187,11 @@ func TestSpacePackagesKeyExcluded(t *testing.T) {
 	assert.Contains(t, err.Error(), "excluded by "+DispatexcludeName)
 }
 
-// TestSpacePackagesKeyAmbiguous: one lowercased key matching two folders of
-// the space has no single package to configure.
+// TestSpacePackagesKeyAmbiguous: two folders of one space differing only by
+// case are refused by discovery itself, before any entry could try to choose
+// between them — the same rule TestPackagesKeyAmbiguous pins at the root, one
+// level down. The keyCheck's "ambiguously" report is defense in depth this
+// refusal makes unreachable.
 func TestSpacePackagesKeyAmbiguous(t *testing.T) {
 	cfg := validConfig()
 	withLibs(&cfg, func(s *SpaceConfig) {
@@ -2203,7 +2206,9 @@ func TestSpacePackagesKeyAmbiguous(t *testing.T) {
 	}
 	_, err := discoverPackages(t, root)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ambiguously")
+	assert.Contains(t, err.Error(), "package names must be unique, case included")
+	assert.Contains(t, err.Error(), `packages "Core" and "core"`,
+		"both spellings are named, or the reader sees one name colliding with itself")
 }
 
 // TestSpacePackagesEmptyKey: a nameless entry configures nothing.
