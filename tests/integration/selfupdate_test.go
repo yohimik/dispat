@@ -8,10 +8,19 @@ package integration
 // running from.
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -84,10 +93,30 @@ func newSURepo(t *testing.T) *suRepo {
 	return r
 }
 
-// serve stands up the fake API. versions maps a version to the binary its
-// release hands out, which is what lets a scenario ask for a version and get
-// that version rather than whatever is on disk.
+// serve stands up the fake API over plain HTTP. versions maps a version to the
+// binary its release hands out, which is what lets a scenario ask for a version
+// and get that version rather than whatever is on disk.
 func (r *suRepo) serve(t *testing.T, versions map[string]string) {
+	t.Helper()
+	r.serveOn(t, versions, false)
+}
+
+// serveTLS is serve over https, behind a certificate authority generated for
+// this one server, and returns the path of the root's PEM. A scenario points
+// the binary at that file with SSL_CERT_FILE to make the fake trustworthy, and
+// omits it to see what an untrusted release host looks like.
+//
+// The URL names localhost rather than the listener's address, so the leaf's DNS
+// name is what the client verifies and the handshake carries an SNI, which is
+// how a real release host is reached.
+func (r *suRepo) serveTLS(t *testing.T, versions map[string]string) string {
+	t.Helper()
+	return r.serveOn(t, versions, true)
+}
+
+// serveOn is the one fake both spellings run. It returns the CA PEM's path when
+// secure is set and the empty string otherwise.
+func (r *suRepo) serveOn(t *testing.T, versions map[string]string, secure bool) string {
 	t.Helper()
 	type entry struct {
 		tag, version string
@@ -160,10 +189,72 @@ func (r *suRepo) serve(t *testing.T, versions map[string]string) {
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	}))
-	base = "http://" + srv.Listener.Addr().String()
-	srv.Start()
+	var ca string
+	if secure {
+		ca = filepath.Join(t.TempDir(), "ca.pem")
+		leaf := suChain(t, ca)
+		// Set before StartTLS, which only supplies its own certificate when
+		// the configuration carries none.
+		srv.TLS = &tls.Config{Certificates: []tls.Certificate{leaf}}
+		_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+		require.NoError(t, err)
+		base = "https://localhost:" + port
+		srv.StartTLS()
+	} else {
+		base = "http://" + srv.Listener.Addr().String()
+		srv.Start()
+	}
 	t.Cleanup(srv.Close)
 	r.api = base
+	return ca
+}
+
+// suChain generates the root a scenario asks the binary to trust and the leaf
+// the fake API presents, and writes the root's PEM to caPath. Nothing outside
+// the test process ever needs the keys, so they live only as long as the server
+// does and the leaf is issued for the minutes the run takes.
+//
+// The shape mirrors what a release host presents: an ECDSA P-256 root that is a
+// certificate authority, and a leaf carrying both the DNS name the URL uses and
+// the loopback address the listener is on, so verification is exercised rather
+// than skipped for want of a matching name.
+func suChain(t *testing.T, caPath string) tls.Certificate {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "dispat integration root"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(caPath,
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0o600))
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	leafTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
+	require.NoError(t, err)
+	// The root travels with the leaf, which is what a server that is not itself
+	// a trust anchor has to send.
+	return tls.Certificate{Certificate: [][]byte{leafDER, caDER}, PrivateKey: leafKey}
 }
 
 // update runs the binary under test with the fake API wired in.
@@ -348,6 +439,49 @@ func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(r.exe))
 	require.NoError(t, err)
 	assert.Len(t, entries, 1, "the refused download is cleaned up: %v", entries)
+}
+
+// TestSelfUpdateOverTLS: the release host every real invocation talks to is an
+// https one, and every other scenario here reaches its fake over plain HTTP.
+// This is the one that puts a certificate in the path: the API is served with a
+// leaf issued for localhost by an authority made for this run, so the binary
+// has to complete a handshake, present an SNI and verify a chain before it can
+// say a word about versions.
+//
+// Both halves are the same invocation with one variable added or removed, which
+// is what makes the pair say something: the trust decision is the only thing
+// that differs between an answer and a refusal.
+func TestSelfUpdateOverTLS(t *testing.T) {
+	r := newSURepo(t)
+	ca := r.serveTLS(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+	args := []string{"self-update", "--check", "--api-url", r.api, "--owner", "o", "--repo", "r"}
+
+	t.Run("trusting the authority", func(t *testing.T) {
+		if runtime.GOOS == "darwin" {
+			// Stock Go on darwin verifies through the platform's own verifier,
+			// which reads the system trust store and ignores SSL_CERT_FILE, so
+			// there is no way to make a test authority trusted for the child
+			// process. The refusal below is the half that still means something
+			// here; the trusted path is proven on the platforms that honour the
+			// variable. See coverage/tinygo-spike/darwin-selfupdate.log.
+			t.Skip("darwin verifies through the platform verifier, which ignores SSL_CERT_FILE")
+		}
+		res := r.CommandBinEnv(r.exe, []string{"SSL_CERT_FILE=" + ca}, args...)
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "available dispat "+suNew,
+			"the release was read off an https response")
+		assert.Equal(t, suOld, r.version(r.exe), "--check over TLS installs nothing either")
+	})
+
+	// Verifier-independent, and so this half runs everywhere: with no authority
+	// named, nothing in any trust store signed this leaf.
+	t.Run("without the authority", func(t *testing.T) {
+		res := r.CommandBinEnv(r.exe, nil, args...)
+		assert.NotEqual(t, 0, res.Code, "an unverifiable host is not an update")
+		assert.Contains(t, strings.ToLower(res.Stdout+res.Stderr), "certificate",
+			"and the refusal says what could not be trusted")
+		assert.Equal(t, suOld, r.version(r.exe))
+	})
 }
 
 // TestSelfUpdateWithNothingForThisPlatform: a release cut before a platform
