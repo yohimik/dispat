@@ -1,8 +1,8 @@
 # The TinyGo spike
 
-Read this page to understand why dispat's release binaries are built with the Go compiler and what would have to change
-for that to be worth revisiting. It describes a spike: an experiment kept in the repository because its answer is a
-version number away from changing, not a gate any job runs.
+Read this page to understand why dispat's six release binaries are built with the Go compiler, and why a release also
+carries two linux binaries built by a TinyGo fork at roughly 60% of the size. It describes a spike: an experiment kept
+in the repository because its answer is a version number away from changing, not a gate any job runs.
 
 TinyGo produces much smaller binaries than gc for the same source. A CLI distributed as six platform binaries has an
 obvious interest in that, so the question was asked properly, with the whole answer written down.
@@ -73,7 +73,7 @@ measurement.
 [install command](../cli/install.md), which is also how you would install it:
 
 ```sh
-dispat install yohimik/tinygo --prerelease --release 0.42.0-net.3 \
+dispat install yohimik/tinygo --prerelease --release 0.42.0-net.4 \
   --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
 ```
 
@@ -111,14 +111,14 @@ darwin/amd64          4787896       10863904      0.441
 darwin/arm64          4361072       9912290       0.440
 ```
 
-The fork at 0.42.0-net.3, which carries a real `net`, `crypto/tls`, `crypto/x509` and process spawning, cross-built for
-all four targets from one macOS host, its own toolchain over go1.26.7:
+The fork at 0.42.0-net.4, which carries a real `net`, `crypto/tls`, `crypto/x509`, process spawning and signal
+delivery, cross-built for all four targets from one macOS host, its own toolchain over go1.26.7:
 
 ```
 target                tinygo        gc            ratio
-linux/amd64           6475768       10686626      0.606
-linux/arm64           6107624       9699490       0.630
-darwin/amd64          6699232       10884416      0.615
+linux/amd64           6475800       10686626      0.606
+linux/arm64           6107688       9699490       0.630
+darwin/amd64          6699208       10884416      0.615
 darwin/arm64          5771008       9928850       0.581
 ```
 
@@ -159,17 +159,17 @@ and curl, records what each said, and never modifies the keychain: trusting a ge
 measure the modification rather than the toolchain. Read the trusted rows against that answer, and compare the gc
 control with the fork row to tell a verifier's refusal from a toolchain's failure. D and E hold either way.
 
-## What 0.42.0-net.3 answered, and what still blocks a release
+## What 0.42.0-net.4 answered
 
-The matrix passes at 0.42.0-net.3, as it first did at 0.42.0-net.2: the fork implements `os.StartProcess` over
+The matrix passes at 0.42.0-net.4, as it first did at 0.42.0-net.2: the fork implements `os.StartProcess` over
 `posix_spawn`, so C downloads the release, executes the new binary as its own smoke check, swaps it in and keeps the
 old one, and C2 puts the old one back with nothing listening. It passes on `linux/arm64` in the container and on both
 `darwin/arm64` and `darwin/amd64` on a Mac. Rows D and E hold, and F walks the network layers again with a real
 handshake read from the far end of the wire.
 
 The matrix is not the whole product, and the question a release turns on is the wider one: the black-box integration
-suite run against a fork-built binary rather than a gc one. Three of the four things that suite found at 0.42.0-net.2
-are closed at net.3.
+suite run against a fork-built binary rather than a gc one. That suite found four faults at 0.42.0-net.2, and all four
+are closed by net.4.
 
 **Process groups are honoured.** `os.StartProcess` accepts `SysProcAttr.Setpgid` through `POSIX_SPAWN_SETPGROUP`, so
 dispat puts every script it runs into its own process group as it always has. Any other `Sys` field still fails, but it
@@ -184,22 +184,29 @@ redirects to a content host, so this is what `dispat install` and self-update's 
 `RWMutex` that conflated readers holding the lock with readers queued for it, and a darwin `fcntl` variadic call that
 passed its argument wrongly and so broke `CloseOnExec` and descriptor inheritance. The suite runs to completion.
 
-What is left is one blocker, and it is the reason the release binaries stay gc's:
+**Signals are delivered.** At net.3 a fork-built binary installed the operating system handler `signal.Notify` asked
+for, which was enough to suppress the default disposition, and then delivered nothing to the channel: a fork-built
+dispat neither shut down gracefully nor died, and only `SIGKILL` ended it. The receiving goroutine parked itself and
+the only thing that resumed it was the cooperative scheduler's idle hook, which a hosted target running under
+`-scheduler=threads` never calls. net.4 gives the receiver a futex of its own, woken by the handler on the protocol the
+handler already ran, and gives `signal.Stop` a futex rather than a spin. `SIGINT` and `SIGTERM` now reach
+`signal.NotifyContext`, which is the one signal call dispat makes.
 
-**Signals are swallowed.** A fork-built binary registers the operating system handler that `signal.Notify` asks for,
-which is enough to suppress the default disposition, so the process is no longer terminated. Nothing is ever delivered
-to the channel. `SIGINT` and `SIGTERM` therefore do nothing at all: a fork-built dispat neither shuts down gracefully
-nor dies, and only `SIGKILL` ends it. A signal nobody registered still kills the process normally, which places the
-fault in the delivery path rather than in the registration. Four integration tests hold dispat to the opposite
-behaviour, since an interrupt has to reach the in-flight script, cancel the packages behind it, and give the release
-lock back; under a fork-built binary all four wait on a process that never exits.
+Against a fork-built `darwin/arm64` binary the black-box suite reports 543 tests, 694 counting subtests, all passing,
+none failing, in 173 seconds, with one skip: the darwin trust row described above, which the platform verifier decides
+rather than the toolchain. That includes the four tests an interrupt has to satisfy, since it must reach the in-flight
+script, cancel the packages behind it, report the outcome to a webhook listener and give the release lock back. A
+graceful shutdown under the fork binary completes in 3.2 seconds.
 
-What the fork already gives is the harder half: real sockets, real TLS, real certificate verification, real process
-spawning and a suite of 540 black-box assertions that pass against it, in a binary around 60% of gc's size.
+So the fork gives all of it: real sockets, real TLS, real certificate verification, real process spawning, real signal
+delivery, and a suite of 694 black-box assertions that pass against it, in a binary around 60% of gc's size. That is
+what puts `dispat-tiny-linux-amd64` and `dispat-tiny-linux-arm64` on a release beside the six the self-update contract
+names.
 
-### Caveats a fork-built release would carry
+### Caveats a fork-built release carries
 
-Recorded rather than fixed, because none of them blocks the matrix and all of them change what a reader should expect:
+Carried rather than fixed, because none of them blocks the matrix or the suite, and all of them change what a reader
+should expect:
 
 - **`http.Client.Timeout` arms nothing.** The fork's `net/http` keeps the field and decorates an error with it, but no
   clock is started from it, so a server that accepts a connection and then says nothing can block a download for as
@@ -215,6 +222,8 @@ Recorded rather than fixed, because none of them blocks the matrix and all of th
   not for a bare `crypto/tls` dial, which is why `darwin-net.log` shows an `https` request returning 200 beside a raw
   TLS row refusing the same certificate. dispat only ever reaches TLS through `net/http`, so nothing in dispat sees
   this.
+- **`signal.Ignored` does not link.** The runtime has never implemented `os/signal.signal_ignored`, so a program
+  calling it fails at link time. dispat's only signal call is `signal.NotifyContext`, so nothing in dispat reaches it.
 
 ## Reading the logs
 
