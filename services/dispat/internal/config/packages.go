@@ -943,7 +943,7 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 		return pc, p, err
 	}
 	if err := decodePackageConfig(settings(raw), &pc); err != nil {
-		return pc, p, fmt.Errorf("invalid format in %s: %w", p, err)
+		return pc, p, fmt.Errorf("invalid format in %s: %w", p, withSchemaHint(err))
 	}
 	if pc.Path != "" {
 		return pc, p, fmt.Errorf(
@@ -974,7 +974,7 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 		return sf, p, err
 	}
 	if err := decodeSpaceFile(settings(raw), &sf); err != nil {
-		return sf, p, fmt.Errorf("invalid format in %s: %w", p, err)
+		return sf, p, fmt.Errorf("invalid format in %s: %w", p, withSchemaHint(err))
 	}
 	return sf, p, nil
 }

@@ -372,6 +372,27 @@ func (e noConfigError) Error() string {
 
 func (e noConfigError) Unwrap() error { return lib.ErrNoConfig }
 
+// schemaHint is what an unknown key is told besides its own name.
+//
+// A key the loader has no field for is usually a typo, and pkg/config says so
+// on its own. The other cause it cannot know about is a config written for a
+// newer dispat than the one reading it: the key exists, in a schema this
+// binary predates, and the file is right while the binary is behind. The hint
+// belongs here rather than in the generic loader, which knows nothing about
+// dispat's releases or how one updates.
+const schemaHint = "; if the key is not a typo it may belong to a newer config schema than this dispat, " +
+	"which `dispat self-update --check` reports on"
+
+// withSchemaHint appends the newer-schema hint to an unknown-key failure and
+// leaves every other error exactly as it was, wrapping so errors.Is and
+// errors.As still reach what the loader reported.
+func withSchemaHint(err error) error {
+	if err == nil || !errors.Is(err, lib.ErrUnknownKey) {
+		return err
+	}
+	return fmt.Errorf("%w%s", err, schemaHint)
+}
+
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	t, err := readTree(path)
 	if err != nil {
@@ -398,7 +419,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 	// pair, a {consumer: provider(s)} object expands into dependency edges, and
 	// a bare record line becomes a full entry.
 	if err := decodeRootConfig(t.Settings(loader, flagOverrides(flags)), &cfg); err != nil {
-		return nil, fmt.Errorf("config: invalid format in %s: %w", path, err)
+		return nil, fmt.Errorf("config: invalid format in %s: %w", path, withSchemaHint(err))
 	}
 	cfg.SourceFiles = t.Files
 	if err := validate(&cfg); err != nil {
