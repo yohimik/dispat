@@ -1,5 +1,11 @@
 # Changelog
 
+## docker/dispat-ubuntu/v1.4.0 (2026-08-30)
+
+### Dependencies
+
+- dispat: 1.3.1 -> 1.4.0
+
 ## docker/dispat-ubuntu/v1.3.1 (2026-08-28)
 
 ### Dependencies

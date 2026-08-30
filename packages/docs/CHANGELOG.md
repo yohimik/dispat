@@ -1,5 +1,33 @@
 # Changelog
 
+## packages/docs/v1.4.0 (2026-08-30)
+
+### Features
+
+- the download command has a page
+The command page covers naming a repository, choosing the file and the
+destination, the pipe for an asset that is not a binary, the idempotence
+gate, the tag prefix, and the rollback. The CI guide gains the section
+it belongs in, since a runner that already has dispat needs no second
+downloader, and the self-update guide points at the other half of the
+same engine. Mirrored into version-1.3, which is what the site serves.
+
+The roadmap entry that described this as future work now describes what
+is left of it: the declarative half, where a configuration lists the
+tools a stage needs.
+
+### Fixes
+
+- the download variables reach the canonical listings
+DISPAT_BIN_DIR joins the switches dotenv.md names as the variables
+dispat reads for itself, and the environment reference points at the
+two variables the pipe hands its command, so the page that promises
+every DISPAT_* variable keeps that promise.
+
+### Dependencies
+
+- dispat: 1.3.1 -> 1.4.0
+
 ## packages/docs/v1.3.2 (2026-08-28)
 
 ### Dependencies
