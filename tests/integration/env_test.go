@@ -86,6 +86,46 @@ func TestStaticEnvCannotShadowComputedVariables(t *testing.T) {
 	assert.Contains(t, res.Stderr, "reserved DISPAT_ prefix")
 }
 
+// TestReleaseGroupVariableReachesScripts: DISPAT_GROUP is the package's third
+// address beside its name and its space, so a stage script can tell which other
+// packages this release takes with it — something neither of the other two can
+// answer, since a group may span spaces and a space may version independently.
+// It is left unset rather than empty for a package that versions on its own,
+// the same convention DISPAT_COUNTER keeps, and like every computed variable it
+// is one a static `env` may not shadow.
+func TestReleaseGroupVariableReachesScripts(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(`printf '%s' "${DISPAT_GROUP-unset}" > group.txt`, 1)
+	cfg.VersionGroups = map[string]models.VersionGroupConfig{"gang": {Versioning: models.VersioningFixed}}
+	cfg.Packages = map[string]models.PackageConfig{"core": {VersionGroup: "gang"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.Commit("feat(core,web): group probe")
+	r.ReleaseOK()
+
+	grouped, err := os.ReadFile(r.Path("packages", "core", "group.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "gang", string(grouped), "a member carries the group whose versions move together")
+
+	independent, err := os.ReadFile(r.Path("packages", "web", "group.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "unset", string(independent),
+		"an independently versioned package is in no group, and unset is how a shell can tell")
+
+	// The layering the reserved prefix guarantees: a configuration cannot lie
+	// to a script about which group its release belongs to.
+	shadow := harness.New(t)
+	shadowCfg := libsConfig(echoBuild, 1)
+	shadowCfg.Env = map[string]string{"DISPAT_GROUP": "fake"}
+	shadow.WriteConfigModel(shadowCfg)
+	shadow.SeedPackage("packages", "core")
+	shadow.Commit("feat(core): first")
+	res := shadow.Status()
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stderr, "reserved DISPAT_ prefix")
+}
+
 // TestStaticEnvRefusesUnusableKeys: the two other spellings that could never
 // reach a script intact, each named where it was written.
 func TestStaticEnvRefusesUnusableKeys(t *testing.T) {

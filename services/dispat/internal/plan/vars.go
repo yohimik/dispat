@@ -18,6 +18,14 @@ import (
 // GitHubExport opt-in it finds there.
 const PackageEnvVar = "DISPAT_PACKAGE"
 
+// GroupEnvVar names the versioning group the package shares its version with:
+// the declared versionGroups entry, or the space's own name where a space
+// versions as a group. It is a package's third address beside its name and its
+// space, and a script that has to know which packages move together — a
+// coordinated deploy, a shared release note — cannot derive it from the other
+// two. It is left unset for an independently versioned package; see Vars.
+const GroupEnvVar = "DISPAT_GROUP"
+
 // NewVersionEnvVar and TagEnvVar carry the run's planned version and tag for
 // the package a script runs for. The step commands' wiring reads them back to
 // hold a mid-run replan to the run's own answers; see the app's step wiring.
@@ -121,6 +129,13 @@ func (r *Release) Vars() []string {
 	// stable baseline (initials or 0.0.0) there. When set, the two are equal.
 	if r.HasBaseline {
 		env = append(env, "DISPAT_BASELINE="+r.Baseline.String())
+	}
+	// The versioning group, left unset — not empty — when the package versions
+	// on its own, by the same convention the counters below keep: an independent
+	// package is not a member of a group called "", and ${DISPAT_GROUP+x} is how
+	// a script asks whether this release moves anything else with it.
+	if group := r.Pkg.VersionGroupName(); group != "" {
+		env = append(env, GroupEnvVar+"="+group)
 	}
 	// The counters are left unset — not empty — when the version has none, so
 	// a shell's ${DISPAT_COUNTER+x} distinguishes "a stable release" from "a

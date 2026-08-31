@@ -55,6 +55,37 @@ func TestReleaseVars(t *testing.T) {
 	assert.NotContains(t, vars, "DISPAT_BASELINE", "a package that never released has no baseline")
 	assert.NotContains(t, vars, "DISPAT_COUNTER", "a stable version has no counter")
 	assert.NotContains(t, vars, "DISPAT_OLD_COUNTER")
+	assert.NotContains(t, vars, GroupEnvVar, "an independently versioned package is in no group")
+}
+
+// TestReleaseVarsCarriesTheVersioningGroup: DISPAT_GROUP names the group whose
+// versions move together, so a script can tell which other packages this
+// release takes with it — something neither the package name nor the space name
+// can answer, since a group may span spaces and a space may version
+// independently.
+func TestReleaseVarsCarriesTheVersioningGroup(t *testing.T) {
+	release := func(space *model.Space) *Release {
+		return &Release{
+			Pkg:     &model.Package{Name: "core", Space: space},
+			Next:    v(1, 0, 0),
+			Current: v(1, 0, 0),
+			Channel: "stable", BaselineChannel: "stable",
+		}
+	}
+
+	shared := varsMap(t, release(&model.Space{Name: "libs", Versioning: model.VersioningFixed}).Vars())
+	assert.Equal(t, "libs", shared[GroupEnvVar],
+		"a space that versions as a group declares nothing, so its members carry its name")
+
+	declared := varsMap(t, release(&model.Space{
+		Name: "libs", Versioning: model.VersioningFixed, VersionGroup: "gang"}).Vars())
+	assert.Equal(t, "gang", declared[GroupEnvVar], "a declared group outranks the space's own name")
+
+	// Unset rather than empty, by the same rule the counters keep: an
+	// independent package is not a member of a group called "", and
+	// ${DISPAT_GROUP+x} is what tells the two apart.
+	independent := varsMap(t, release(&model.Space{Name: "libs"}).Vars())
+	assert.NotContains(t, independent, GroupEnvVar)
 }
 
 func TestReleaseVarsOnAPrereleaseTrain(t *testing.T) {
