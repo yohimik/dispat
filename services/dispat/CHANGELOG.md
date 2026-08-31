@@ -1,5 +1,115 @@
 # Changelog
 
+## services/dispat/v1.5.0 (2026-08-31)
+
+### Features
+
+- sections, links and refs on release records ([b14b1f3](https://github.com/yohimik/dispat/commit/b14b1f3ae83f1963a76c80eea8d8de9c4ddb3992)) (by yohimik, Claude Fable 5)
+  An entry could say four things it had no way to say. It can now.
+
+  `sections` states the whole render order of an entry, the built-ins and
+  sections of its own together, and a custom section claims commit types out of
+  the bump-keyed grouping. A section may declare the bump its types carry, which
+  merges into the parser's one type table, so declaring the section that renders
+  `add` is what makes an `add` commit release at all. Breaking always wins the
+  grouping: letting `add(x)!:` sit under "Added" would hide the one thing a
+  reader scans an entry for. A built-in the list omits is appended after the
+  listed ones rather than dropped, because a section removed in silence takes
+  released work out of the record with it. The bump belongs to the root file,
+  since the parser is built once for the repository, and a folder's own config
+  file is refused with the reason rather than left with a section nothing reaches.
+
+  `dependencyLink` links a dependency line to the release the provider moved to,
+  and `commitRefs` names the commit behind each entry line. Both take a URL
+  template or `auto`, which derives github.com's own URLs from the package's
+  owner and repo, and both fall back to the plain text rather than to a link that
+  leads nowhere: a record is published and permanent, and there is no later run
+  in which a broken link comes out right. The provider's tag is rendered by the
+  plan through the provider's own tagFormat, and a unit the planner has no sha
+  for is left unreferenced and reported once per release under W240.
+
+  `noChangesText` replaces the sentence an entry with nothing to group carries.
+  It falls back to the built-in sentences when it expands to nothing, because an
+  entry that renders empty reads as a broken write.
+
+  The renderer moves into sections.go with one change of shape that is a fix
+  rather than an option: a commit body is indented two spaces under its bullet,
+  so the paragraphs after the first stay inside the list item instead of ending
+  it, and every section now closes on exactly one newline whether or not its last
+  line carried a body.
+
+- unknown config keys hint at self-update ([947c3e5](https://github.com/yohimik/dispat/commit/947c3e56af8d37274bb8231ee8cc52b84cb46229)) (by yohimik, Claude Fable 5)
+  A key the loader has no field for is usually a typo, and pkg/config already
+  says so. The cause it cannot know about is a configuration written for a newer
+  dispat than the one reading it: the key is real, in a schema this binary
+  predates, and the file is right while the binary is behind. An operator who
+  reads only "unknown key" spends the next minutes hunting a spelling mistake
+  that is not there.
+
+  Every place dispat surfaces a config load failure, the root file and a folder's
+  own package or space file alike, now appends the other explanation and names
+  the command that answers it, `dispat self-update --check`. The hint is dispat's
+  rather than the library's, because pkg/config knows nothing about dispat's
+  releases or how one updates, and it wraps rather than replaces, so errors.Is
+  and errors.As still reach what the loader reported.
+
+### Fixes
+
+- record rendering hardened after review ([24cf9b8](https://github.com/yohimik/dispat/commit/24cf9b83f7c7146227c013c705877fe737d118e4)) (by yohimik, Claude Fable 5)
+  A review pass over the new record features closed what it found. An entry
+  whose file title renders empty for the release keeps the file's own head
+  instead of writing above it, and a preamble containing a fenced example is
+  split after the fence rather than inside it. An auto link declines when the
+  step environment aligned the updates without their tags, when the resolved
+  API URL points outside github.com, and when the repository pair is only half
+  configured; the half pair is no longer completed from the environment, and
+  the completion itself moved from the renderer to the recorders, so rendering
+  no longer reads the process environment at all. A record link inherited from
+  a broader layer can be declined with the value off. A no-changes text that
+  expands to nothing falls back to the built-in line and says so as W241, and
+  one carrying a thematic break on any line is refused at load. The auto base
+  is derived once per entry rather than once per line.
+
+- the dependencies section stays a tight list ([de93ba8](https://github.com/yohimik/dispat/commit/de93ba8a80c9543bb55475119e42e681232bc6ab)) (by yohimik, Claude Fable 5)
+  The loose joining the sections gained for their bullet-and-body items had
+  reached the dependencies list, and a multi-provider entry rendered with a
+  blank line between movements. The section is a table: its lines never carry
+  bodies, and every changelog written so far renders them as one block, so the
+  tight joining is restored there alone. The command pages state the exception.
+
+- entry spacing and adopted changelog preambles ([7e71494](https://github.com/yohimik/dispat/commit/7e714946cc4c09b0d3d899610fe54b7260b823e6)) (by yohimik, Claude Fable 5)
+  Two things the changelog writer got wrong, both of them about bytes it did not
+  write.
+
+  The seam between one entry and the next was whatever the entry above it
+  happened to end with, so a release whose last section was a dependencies list
+  spaced differently from one that ended on a bullet with a body, and a file
+  recorded the shape of each release rather than one rule. The writer now closes
+  an entry on exactly one newline and writes exactly `changelog.entrySpacing`
+  blank lines below it, two by default. Only the seam is written: the entries
+  underneath keep the spacing and the line endings they were published with.
+
+  Adoption was the sharper one. A file that does not open with the title dispat
+  renders was prepended to, which published a second H1 over the file's own and
+  pushed YAML front matter off the head of the file, where it stops being front
+  matter at all. Everything above the first entry heading is now the file's
+  preamble: it stays at the top, the new entry goes in below it, and dispat's own
+  title is never written into a file that already has one. A byte-order mark is
+  carried through at the very head and cut before the title match and the
+  entry-exists check, and a title terminated with CRLF is matched line by line,
+  because a title the strip fails to see is a title written twice.
+
+### Dependencies
+
+- [config](https://github.com/yohimik/dispat/releases/tag/pkg/config/v1.0.0): 0.0.0 -> 1.0.0
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.5.0): 1.4.0 -> 1.5.0
+
+### Authors
+
+- yohimik
+- Claude Fable 5
+
+
 ## services/dispat/v1.4.0 (2026-08-30)
 
 ### Features
