@@ -42,13 +42,10 @@ scripts:
     # until its first tag, and the release's own go-mod-tidy is what
     # writes the requirement in. The guard is what lets the list name
     # every library, released or not.
-    for m in ccme config manifest models scanner writer; do
-      grep -q "github.com/yohimik/dispat/pkg/$m " go.mod || continue
-      if ! grep -q "^github.com/yohimik/dispat/pkg/$m " go.sum; then
-        echo "go.sum lost its entry for pkg/$m" >&2
-        exit 1
-      fi
-    done
+    dispat for ccme config manifest models scanner writer --do '
+      grep -q "github.com/yohimik/dispat/pkg/$DISPAT_ITEM " go.mod || exit 0
+      grep -q "^github.com/yohimik/dispat/pkg/$DISPAT_ITEM " go.sum \
+        || { echo "go.sum lost its entry for pkg/$DISPAT_ITEM" >&2; exit 1; }'
   build:
     - dispat exec link --for pkg:dispat
     # DISPAT_EXPORT_BASE is where the export is about to land, which is

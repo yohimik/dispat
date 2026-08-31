@@ -92,12 +92,10 @@ jobs:
       - name: No local link survived a build
         run: |
           dispat scanner --verify-unlinked
-          for m in ccme manifest models scanner writer; do
-            if ! grep -q "^github.com/yohimik/dispat/pkg/$m " services/dispat/go.sum; then
-              echo "services/dispat/go.sum lost its entry for pkg/$m; a go work sync pruned it"
-              exit 1
-            fi
-          done
+          dispat for ccme config manifest models scanner writer --do '
+            grep -q "github.com/yohimik/dispat/pkg/$DISPAT_ITEM " services/dispat/go.mod || exit 0
+            grep -q "^github.com/yohimik/dispat/pkg/$DISPAT_ITEM " services/dispat/go.sum \
+              || { echo "services/dispat/go.sum lost its entry for pkg/$DISPAT_ITEM; a go work sync pruned it"; exit 1; }'
 
   test:
     name: Tests
