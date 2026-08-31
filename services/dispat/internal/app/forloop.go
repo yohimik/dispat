@@ -94,8 +94,9 @@ func RunFor(ctx context.Context, opts ForOptions) (int, error) {
 			return 1, err
 		}
 		// An empty list is an honest no-op, the same answer `for x in $EMPTY`
-		// gives: the loop ran, zero times.
-		opts.Log.Info().Msg("nothing to iterate over, nothing to run")
+		// gives: the loop ran, zero times. Debug, like every line the shell
+		// helpers speak: glue stays quiet unless it refuses.
+		opts.Log.Debug().Msg("nothing to iterate over, nothing to run")
 		return 0, nil
 	}
 
@@ -145,7 +146,9 @@ func RunFor(ctx context.Context, opts ForOptions) (int, error) {
 	}
 	// items is the list's length and ran what the loop got through, which differ
 	// exactly when something stopped it early: a failure, or an interruption.
-	opts.Log.Info().Int("items", total).Int("ran", ran).Int("failed", failed).Msg("loop finished")
+	// Debug rather than info: a loop is glue like `if`, and glue in a pipeline
+	// must not add lines the summarised scripts did not write.
+	opts.Log.Debug().Int("items", total).Int("ran", ran).Int("failed", failed).Msg("loop finished")
 
 	if code == 0 || opts.OnFailure == "" {
 		return code, nil
