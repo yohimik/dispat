@@ -298,13 +298,14 @@ WORKDIR /src
 # ccme and manifest carry no go.sum: they have no module dependencies to sum,
 # and a COPY that names a file that does not exist fails the build.
 COPY pkg/ccme/go.mod pkg/ccme/
+COPY pkg/config/go.mod pkg/config/go.sum pkg/config/
 COPY pkg/manifest/go.mod pkg/manifest/
 COPY pkg/models/go.mod pkg/models/go.sum pkg/models/
 COPY pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
 COPY pkg/writer/go.mod pkg/writer/go.sum pkg/writer/
 COPY services/dispat/go.mod services/dispat/go.sum services/dispat/
 ARG GO_VERSION
-RUN printf 'go %s\n\nuse (\n\t./services/dispat\n\t./pkg/ccme\n\t./pkg/manifest\n\t./pkg/models\n\t./pkg/scanner\n\t./pkg/writer\n)\n' \
+RUN printf 'go %s\n\nuse (\n\t./services/dispat\n\t./pkg/ccme\n\t./pkg/config\n\t./pkg/manifest\n\t./pkg/models\n\t./pkg/scanner\n\t./pkg/writer\n)\n' \
       "$GO_VERSION" > /src/go.work
 RUN go mod download
 
