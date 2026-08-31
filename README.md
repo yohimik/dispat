@@ -147,6 +147,10 @@ dispat stands on the shoulders of two things:
   specification, the two-axis propagation grammar, performance notes, and fuzzing.
 - **[models](./pkg/models)**: the public configuration model. External tooling uses this to author dispat configs as
   typed values and marshal them to loadable files.
+- **[config](./pkg/config)**: the configuration loader as a standalone Go library. It parses JSON, YAML, and TOML into
+  one tree, composes files through `$ref`, finds the file a command was run beneath, and decodes through setter tables
+  with no reflection at all, which is what lets it link under TinyGo. This is the library behind dispat's own config
+  reading.
 - **[manifest](./pkg/manifest)**: the shared manifest vocabulary. It defines dependency kinds, manifest file-name
   rules, and name normalisation. This keeps the reader and writer halves in exact agreement.
 - **[scanner](./pkg/scanner)**: the manifest reader as a standalone Go library. It parses package.json, go.mod,
@@ -160,6 +164,9 @@ dispat stands on the shoulders of two things:
   auto-versioning and the `dispat writer` command.
 - **[docker](./docker)**: the four container images. Each is a dispat package whose `docker-compose.yml` *is* its
   manifest. The build stage runs `docker compose build`, and the publish stage runs `docker compose build --push`.
+- **[infra](./infra)**: the Google Cloud footprint that serves [dispat.dev](https://dispat.dev), written only from CI
+  through the dispat release: Terraform plans in the build stage, applies in the publish stage, and each applied state
+  is an `infra/v*` tag.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories. Read about setup, running, results, and the test plan.
 - **[docs](./packages/docs)**: the documentation site itself, released by dispat like any other package. Learn how to
