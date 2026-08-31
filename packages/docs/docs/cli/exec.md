@@ -22,14 +22,16 @@ graph. They run one script and get out of the way.
 
 | You want to                                        | Use                          |
 |----------------------------------------------------|------------------------------|
-| run a script in every changed package, in order     | `dispat run <script>`        |
+| run a script in every changed package, in order (`--since all` for every package) | `dispat run <script>` |
 | run one declared script, once, right here           | `dispat exec <script>`       |
 | choose between shell commands based on a variable   | `dispat if <cond>`           |
+| run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
 
 Use `dispat run` to compute a plan across your monorepo. It finds changed
 packages and runs the script in dependency order. `dispat exec` ignores the
 graph and runs one script by name. Call it when you are inside a stage script
-and need to trigger another command.
+and need to trigger another command. Use [`dispat for`](./for.md) when one
+command line loops over a list, of packages or of anything else.
 
 ## dispat exec
 

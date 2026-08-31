@@ -8,32 +8,41 @@ packages.
 
 Everything dispat runs is a shell command. Stages, hooks, and `run` scripts are
 strings handed to `/bin/sh -c`. This works well until your script needs to
-branch on a variable or call another script.
+branch on a variable, call another script, or loop over a list.
 
-Two small commands cover those needs.
+Three small commands cover those needs.
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
 $ dispat exec build --for pkg:core
+$ dispat for core web --do 'make "$DISPAT_ITEM"'
 ```
 
-Neither command plans a release, sweeps your packages, or touches the
-dependency graph. They run one script and exit.
+None of the three plans a release, sweeps your packages, or touches the
+dependency graph. They run your script and exit.
 
 ## Which command do I want
 
 | You want to                                        | Use                          |
 |----------------------------------------------------|------------------------------|
-| run a script in every changed package, in order     | `dispat run <script>`        |
+| run a script in every changed package, in order (`--since all` for every package) | `dispat run <script>` |
 | run one declared script, once, right here           | `dispat exec <script>`       |
 | choose between shell commands based on a condition  | `dispat if <cond>`           |
 | run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
 
 `dispat run` knows about your monorepo. It computes a plan, finds which
-packages changed, and runs the script in each of them in dependency order.
+packages changed, and runs the script in each of them in dependency order;
+`--since all` widens the sweep to every package, changed or not.
 `dispat exec` ignores the dependency graph. It looks up one script by name and
 runs it. Call `dispat exec` when you are inside a stage script and need to run
 another script.
+
+[`dispat for`](./for.md) sits between the two. Like `dispat run` it can visit
+every changed package, but it runs the shell text you typed rather than a
+script each package declares, one item at a time, in the folder you invoked it
+from, with the item described by `DISPAT_*` variables. Use `dispat run` when
+each package says what the work is; use `dispat for` when the command line
+does, or when the list is not packages at all.
 
 ## dispat if
 
