@@ -24,8 +24,24 @@ scripts:
   # would leave the gate compiling against the published pkg/*, which
   # is exactly the mistake the bracket exists to prevent, and it would
   # fail only in CI. flow.onFail keeps unlink as the release's net.
-  link: dispat autowriter --package dispat --since all --sync-lock=false --link-local
-  unlink: dispat autowriter --package dispat --since all --sync-lock=false --unlink-local
+  # The derived links cover what go.mod declares, and a library that has
+  # never been released is declared nowhere: pkg/config awaits its first
+  # tag, so the bracket writes its requirement and redirect by hand and
+  # takes both out again. The version is a placeholder the redirect makes
+  # unreachable. Once the first release lands, go.mod carries a real
+  # requirement, the grep finds it, and this pair of lines is dead code
+  # to delete.
+  link: |
+    dispat autowriter --package dispat --since all --sync-lock=false --link-local
+    grep -q "github.com/yohimik/dispat/pkg/config " go.mod || {
+      echo "require github.com/yohimik/dispat/pkg/config v0.0.0"
+      echo "replace github.com/yohimik/dispat/pkg/config => ../../pkg/config"
+    } >> go.mod
+  unlink: |
+    dispat autowriter --package dispat --since all --sync-lock=false --unlink-local
+    grep -Ev "^(require|replace) github.com/yohimik/dispat/pkg/config (v0.0.0|=> ../../pkg/config)$" go.mod > go.mod.unlinked
+    printf '%s\n' "$(cat go.mod.unlinked)" > go.mod
+    rm go.mod.unlinked
   # The two ways the bracket leaks, both of which only fail for whoever
   # consumes the published module, long after the tag exists. The
   # first is the scanner's own gate, which reads the replace directives
