@@ -172,9 +172,13 @@ func (a *App) packageItems(names []string) ([]ForItem, error) {
 // rather than empty for an independently versioned package, the same
 // unset-not-empty convention DISPAT_COUNTER keeps.
 func packageItem(p *model.Package) ForItem {
+	space := ""
+	if p.Space != nil {
+		space = p.Space.Name
+	}
 	env := []string{
 		plan.PackageEnvVar + "=" + p.Name,
-		"DISPAT_SPACE=" + p.Space.Name,
+		"DISPAT_SPACE=" + space,
 		DirEnvVar + "=" + absDir(p.Dir),
 	}
 	if group := p.VersionGroupName(); group != "" {

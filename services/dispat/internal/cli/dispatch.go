@@ -495,7 +495,9 @@ func (r *runner) runFor() (int, bool) {
 			return 1, true
 		}
 	}
-	return r.runForItems(dir, literalItems(r.inv.items), nil, r.logger()), true
+	ctx, stop := signalCtx()
+	defer stop()
+	return r.runForItems(ctx, dir, literalItems(r.inv.items), nil, r.logger()), true
 }
 
 // forSource validates the flags that can name a loop's list and reports which
@@ -563,9 +565,8 @@ func (r *runner) forSource() (app.ForDomain, int) {
 
 // runForItems performs the loop over a resolved list. Both callers reach the
 // command through here, so the options it runs with are written once.
-func (r *runner) runForItems(dir string, items []app.ForItem, runner script.Runner, log zerolog.Logger) int {
-	ctx, stop := signalCtx()
-	defer stop()
+func (r *runner) runForItems(ctx context.Context, dir string, items []app.ForItem,
+	runner script.Runner, log zerolog.Logger) int {
 	opts := r.forOpts
 	opts.Items, opts.Dir, opts.Runner, opts.Log = items, dir, runner, log
 	code, err := app.RunFor(ctx, opts)
@@ -956,6 +957,8 @@ func (r *runner) runConfigured() int {
 		// this. Above the update check for the same reason `if` is: no loop path
 		// may cost a GitHub request, however much else it asked for.
 		a := app.New(resolvedRoot, cfg, log)
+		ctx, stop := signalCtx()
+		defer stop()
 		dir := *r.o.root
 		if r.forIn != nil {
 			var err error
@@ -966,8 +969,6 @@ func (r *runner) runConfigured() int {
 		}
 		items := literalItems(r.inv.items)
 		if r.forDomain != "" {
-			ctx, stop := signalCtx()
-			defer stop()
 			// Dir is --root as the user spelled it, so a loop invoked inside a
 			// package folder narrows its window to that package exactly as every
 			// other command does. It is inert for the three domains whose terms
@@ -985,7 +986,7 @@ func (r *runner) runConfigured() int {
 		// The configured shell, which is the whole point of the command: a loop
 		// spelled here runs its body through the same shell every other script
 		// of this repository runs through.
-		return r.runForItems(dir, items, &script.ShellRunner{Shell: cfg.Shell, Log: log}, log)
+		return r.runForItems(ctx, dir, items, &script.ShellRunner{Shell: cfg.Shell, Log: log}, log)
 	}
 	// Now that the configuration has spoken, the check can start: a run that
 	// switched it off must make no request at all, which means not making one
