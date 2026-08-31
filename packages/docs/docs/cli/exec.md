@@ -24,7 +24,7 @@ graph. They run one script and get out of the way.
 |----------------------------------------------------|------------------------------|
 | run a script in every changed package, in order (`--since all` for every package) | `dispat run <script>` |
 | run one declared script, once, right here           | `dispat exec <script>`       |
-| choose between shell commands based on a variable   | `dispat if <cond>`           |
+| choose between shell commands based on a condition  | `dispat if <cond>`           |
 | run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
 
 Use `dispat run` to compute a plan across your monorepo. It finds changed
