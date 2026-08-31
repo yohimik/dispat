@@ -77,6 +77,10 @@ type options struct {
 	ifChanged      *bool
 	ifDir          *string
 
+	// for, which shares --changed and the selection flags with if
+	forDo                                  *[]string
+	forKeepGoing, forUnchanged, forRequire *bool
+
 	// exec
 	execFor, execScriptFrom, execEnv *string
 	execFallback                     *bool
@@ -230,9 +234,17 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.ifElse = fs.String("else", "",
 		"the script to run when no condition held; without it, nothing matching runs nothing and exits 0")
 	o.ifChanged = fs.Bool("changed", false,
-		"if: the leading condition holds when changed packages are selected (the release window, or what --since addresses), expanded downstream by --consumers and then narrowed by --package/--space/--group")
+		"the changed packages: the release window, or what --since addresses, expanded downstream by --consumers and then narrowed by --package/--space/--group; if: the leading condition holds when the selection is non-empty; for: iterate over it")
 	o.ifDir = fs.StringP("dir", "d", "",
 		"if: the leading condition holds when this path exists and is a folder; a relative path resolves where the chosen script runs, after --in")
+	o.forDo = fs.StringArray("do", nil,
+		"for: the script to run for each item; repeatable, run in order per item and stopping at the first one that fails")
+	o.forKeepGoing = fs.Bool("keep-going", false,
+		"for: run the remaining items after one fails; the exit code is still the first failure's")
+	o.forUnchanged = fs.Bool("unchanged", false,
+		"for: iterate over the packages the --changed window leaves out, narrowed by the same --since/--consumers/--package/--space/--group")
+	o.forRequire = fs.Bool("require-items", false,
+		"for: exit 1 when the iteration is empty, so a CI stage whose point is that the list held something fails instead of passing quietly")
 	o.execFor = fs.String("for", "",
 		"run the script of this level, in its environment: pkg:<name>, space:<name>, root or cwd (the package or space the invocation stands in); one exact name, no globs")
 	o.execFallback = fs.Bool("fallback", false,

@@ -21,6 +21,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/install"
+	"github.com/yohimik/dispat/services/dispat/internal/script"
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
 )
 
@@ -57,6 +58,9 @@ type runner struct {
 	ifBranches []app.Branch
 	ifIn       *app.Location
 	ifFile     *fileTest
+	forOpts    app.ForOptions
+	forDomain  app.ForDomain
+	forIn      *app.Location
 }
 
 // fileTest is an if invocation whose leading condition is --file or --dir. The
@@ -454,6 +458,133 @@ func (r *runner) runIfIn(dir string) int {
 	return code
 }
 
+// runFor performs `dispat for` for the one shape that needs nothing read: a
+// literal list, in a folder the command line already spelled in full. Every
+// other source names something only a configuration can resolve — which
+// packages exist, which of them changed — so the phase settles the usage
+// questions, records what it parsed and defers, exactly as `if` does for
+// --changed and a named --in. No path here starts an update check: a loop is
+// glue, and glue in a script must not cost a GitHub request.
+func (r *runner) runFor() (int, bool) {
+	if r.inv.cmd != cmdFor {
+		return 0, false
+	}
+	domain, code := r.forSource()
+	if code != 0 {
+		return code, true
+	}
+	in, ok := helperIn(r.o, r.boot)
+	if !ok {
+		return 2, true
+	}
+	r.forDomain, r.forIn = domain, in
+	r.forOpts = app.ForOptions{
+		Scripts: *r.o.forDo, KeepGoing: *r.o.forKeepGoing, RequireItems: *r.o.forRequire,
+		OnFailure: *r.o.onFailure, Stdout: r.stdout, Stderr: r.stderr,
+	}
+	if domain != "" || (in != nil && in.Deferred()) {
+		return 0, false
+	}
+	dir := *r.o.root
+	if in != nil {
+		// Neither kind left needs the configuration, so no App is built to
+		// resolve them: a path and cwd are answered by the command line alone.
+		var err error
+		if dir, err = app.PlainDir(*in, dir); err != nil {
+			r.boot.Error().Err(err).Msg("invalid --in")
+			return 1, true
+		}
+	}
+	return r.runForItems(dir, literalItems(r.inv.items), nil, r.logger()), true
+}
+
+// forSource validates the flags that can name a loop's list and reports which
+// of them spoke, "" for a literal list. The non-zero exit code reports a
+// refusal, already logged.
+//
+// Exactly one source may speak, because two lists would leave one of them
+// silently unvisited. The one composition that is not two sources is the same
+// one `if --changed` allows: under a window, -p/-s/-g narrow it rather than
+// naming a list of their own, which is why they are counted only when no window
+// flag is present.
+func (r *runner) forSource() (app.ForDomain, int) {
+	o := r.o
+	if len(*o.forDo) == 0 {
+		r.boot.Error().Msg("for needs at least one --do: the script each item runs")
+		r.usage(cmdFor)
+		return "", 2
+	}
+	if *o.ifChanged && *o.forUnchanged {
+		r.boot.Error().Msg("--changed and --unchanged are the two halves of one window; pick one")
+		r.usage(cmdFor)
+		return "", 2
+	}
+	window := *o.ifChanged || *o.forUnchanged || r.fs.Changed("since")
+	named := 0
+	for _, terms := range [][]string{*o.pkgFilter, *o.spaceFilter, *o.groupFilter} {
+		if len(terms) > 0 {
+			named++
+		}
+	}
+	if len(r.inv.items) > 0 && (window || named > 0) {
+		r.boot.Error().Strs("items", r.inv.items).
+			Msg("for takes a list of items or a flag naming one, not both")
+		r.usage(cmdFor)
+		return "", 2
+	}
+	if !window {
+		if named > 1 {
+			r.boot.Error().Msg("for iterates over one kind of thing; pick one of --package, --space and --group, or add --changed, --unchanged or --since, under which they narrow the window instead")
+			r.usage(cmdFor)
+			return "", 2
+		}
+		if *o.consumers {
+			r.boot.Error().Msg("--consumers expands a changed window and means nothing without --changed, --unchanged or --since")
+			r.usage(cmdFor)
+			return "", 2
+		}
+	}
+	switch {
+	case *o.forUnchanged:
+		return app.ForUnchanged, 0
+	case window:
+		// --changed, or a bare --since, which is how `dispat run` already spells
+		// the same window.
+		return app.ForChanged, 0
+	case len(*o.pkgFilter) > 0:
+		return app.ForPackages, 0
+	case len(*o.spaceFilter) > 0:
+		return app.ForSpaces, 0
+	case len(*o.groupFilter) > 0:
+		return app.ForGroups, 0
+	}
+	return "", 0 // the positional list, empty or not
+}
+
+// runForItems performs the loop over a resolved list. Both callers reach the
+// command through here, so the options it runs with are written once.
+func (r *runner) runForItems(dir string, items []app.ForItem, runner script.Runner, log zerolog.Logger) int {
+	ctx, stop := signalCtx()
+	defer stop()
+	opts := r.forOpts
+	opts.Items, opts.Dir, opts.Runner, opts.Log = items, dir, runner, log
+	code, err := app.RunFor(ctx, opts)
+	if err != nil {
+		return 1
+	}
+	return code
+}
+
+// literalItems is the positional list as typed: words with nothing to describe
+// them beyond themselves.
+func literalItems(values []string) []app.ForItem {
+	items := make([]app.ForItem, 0, len(values))
+	for _, value := range values {
+		items = append(items, app.ForItem{Value: value})
+	}
+	return items
+}
+
 // prepareExec validates exec's flags and builds its options. The command
 // itself needs the config, so it runs later; only its usage checks belong
 // here, for the same reason every other command's do.
@@ -818,6 +949,43 @@ func (r *runner) runConfigured() int {
 				Msg("changed selection resolved")
 		}
 		return r.runIfIn(dir)
+	}
+	if r.inv.cmd == cmdFor {
+		// Only a domain source, or an --in naming a package, a space or the
+		// root, gets this far; a literal list already ran without reading any of
+		// this. Above the update check for the same reason `if` is: no loop path
+		// may cost a GitHub request, however much else it asked for.
+		a := app.New(resolvedRoot, cfg, log)
+		dir := *r.o.root
+		if r.forIn != nil {
+			var err error
+			if dir, err = a.ResolveDir(*r.forIn, *r.o.root); err != nil {
+				log.Error().Err(err).Msg("invalid --in")
+				return 1
+			}
+		}
+		items := literalItems(r.inv.items)
+		if r.forDomain != "" {
+			ctx, stop := signalCtx()
+			defer stop()
+			// Dir is --root as the user spelled it, so a loop invoked inside a
+			// package folder narrows its window to that package exactly as every
+			// other command does. It is inert for the three domains whose terms
+			// are the source, since explicit terms beat the inference.
+			sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
+				Groups: *r.o.groupFilter, Dir: *r.o.root}
+			var err error
+			if items, err = a.ForItems(ctx, app.ForSelection{Domain: r.forDomain,
+				Window: app.WindowOptions{Filter: sel, Since: *r.o.since, Consumers: *r.o.consumers},
+			}); err != nil {
+				log.Error().Err(err).Msg("cannot resolve what to iterate over")
+				return 1
+			}
+		}
+		// The configured shell, which is the whole point of the command: a loop
+		// spelled here runs its body through the same shell every other script
+		// of this repository runs through.
+		return r.runForItems(dir, items, &script.ShellRunner{Shell: cfg.Shell, Log: log}, log)
 	}
 	// Now that the configuration has spoken, the check can start: a run that
 	// switched it off must make no request at all, which means not making one

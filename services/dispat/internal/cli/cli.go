@@ -32,8 +32,10 @@ const (
 
 	// The shell helpers, which run one script rather than sweeping a
 	// selection: a condition picks the script for one, the configuration
-	// names it for the other. Both propagate the script's own exit code.
+	// names it for the other, and the third runs one script per item of a
+	// list. All three propagate the script's own exit code.
 	cmdIf   = "if"   // run one of several scripts, chosen by an env condition
+	cmdFor  = "for"  // run a script once per item of a list
 	cmdExec = "exec" // run one declared script here, for a named subject
 
 	// The standalone step commands, exposing the release pipeline's native
@@ -197,6 +199,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	for _, phase := range []func() (int, bool){
 		r.validateFlags, // what the flags alone decide
 		r.runIf,         // the environment, without a repository
+		r.runFor,        // a literal list, without a repository
 		r.prepareExec,   // exec's usage checks, before its config
 		r.runPreConfig,  // init, self-update and the manifest commands
 	} {
@@ -215,6 +218,10 @@ type invocation struct {
 	cond    string // if: the leading condition
 	condSet bool   // if: a positional condition was given, even an empty one
 	dir     string // scanner: the optional folder to scan
+	// for: the literal items to iterate over, as typed. Empty is legal — an
+	// empty list is an empty loop — so there is no "was one given" flag beside
+	// it: whether a flag source spoke instead is the for phase's own check.
+	items []string
 	// install: the repository to install from, as it was typed. Parsed in
 	// the flag phase, where every other usage mistake is caught.
 	repository string
@@ -302,6 +309,11 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) == 2 {
 			inv.cond, inv.condSet = rest[1], true
 		}
+	case cmdFor:
+		// Any arity: the items are the list, and a list may be empty, because
+		// the source may be a flag instead — or because an empty loop is what
+		// the caller asked for. Which of the two it was is the for phase's check.
+		inv.items = rest[1:]
 	case cmdExec:
 		if len(rest) != 2 {
 			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for pkg:<name>, space:<name>, root or cwd; pass arguments to the script after `--`)")

@@ -112,6 +112,76 @@ func TestCoveredSelectionReportsActivity(t *testing.T) {
 	}
 }
 
+// TestChangedAndUnchangedPartitionThePlan pins what `dispat for --unchanged`
+// is: not a second window with rules of its own, but the complement of the one
+// `--changed` selects. The two are asserted together at every composition,
+// because the only property worth having is that each package lands in exactly
+// one of them — a flag that moved a package out of the changed half without
+// moving it into the unchanged one would leave it unreachable by either loop.
+func TestChangedAndUnchangedPartitionThePlan(t *testing.T) {
+	root := t.TempDir()
+	// b consumes a, c consumes b, d is independent; a alone is releasing, so
+	// the window holds a, and a, b and c with --consumers.
+	pl := runPlan(root, []string{"a", "b", "c", "d"},
+		map[string][]string{"b": {"a"}, "c": {"b"}})
+	pl.Releases["a"].Pinned = true
+	app := runApp(root)
+	ctx := context.Background()
+
+	for name, tc := range map[string]struct {
+		opts      WindowOptions
+		changed   []string
+		unchanged []string
+	}{
+		"the release window and its complement": {
+			WindowOptions{}, []string{"a"}, []string{"b", "c", "d"}},
+		"consumers move packages from one half to the other": {
+			WindowOptions{Consumers: true}, []string{"a", "b", "c"}, []string{"d"}},
+		"a filter narrows both halves the same way": {
+			WindowOptions{Filter: filter.Filter{Packages: []string{"a", "d"}}},
+			[]string{"a"}, []string{"d"}},
+		"since all leaves the complement empty": {
+			WindowOptions{Since: SinceAll}, []string{"a", "b", "c", "d"}, []string{}},
+		"a term inside the window covers nothing unchanged": {
+			WindowOptions{Filter: filter.Filter{Packages: []string{"a"}}},
+			[]string{"a"}, []string{}},
+		"the invocation folder narrows both": {
+			WindowOptions{Filter: filter.Filter{Dir: filepath.Join(root, "libs", "b")}},
+			[]string{}, []string{"b"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed, err := app.changedSelection(ctx, pl, tc.opts)
+			require.NoError(t, err)
+			assert.Equal(t, tc.changed, changed)
+			unchanged, err := app.unchangedSelection(ctx, pl, tc.opts)
+			require.NoError(t, err)
+			assert.Equal(t, tc.unchanged, unchanged, "the complement, in plan order")
+			assert.Empty(t, intersect(changed, unchanged), "no package may be in both halves")
+		})
+	}
+
+	// A term matching nothing is an error on either half, never an empty loop.
+	_, err := app.unchangedSelection(ctx, pl, WindowOptions{Filter: filter.Filter{Packages: []string{"nope"}}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `--package "nope" matches no package`)
+}
+
+// intersect is the overlap of two selections, which the partition claim needs
+// to be empty.
+func intersect(a, b []string) []string {
+	in := make(map[string]bool, len(a))
+	for _, name := range a {
+		in[name] = true
+	}
+	var both []string
+	for _, name := range b {
+		if in[name] {
+			both = append(both, name)
+		}
+	}
+	return both
+}
+
 func TestSincePackagesAll(t *testing.T) {
 	root := t.TempDir()
 	pl := runPlan(root, []string{"a", "b"}, map[string][]string{})

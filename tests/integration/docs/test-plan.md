@@ -8,10 +8,10 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Forty-five goals across forty-seven test files, one file each except goal 21, which the two shell helpers split
-between `if_test.go`, `if_changed_test.go` and `exec_test.go`. They are grouped by what they are about rather than by
-the order they were written in, so you land in one place when looking for how a plan gets computed or which command
-does what.
+Forty-five goals across forty-nine test files, one file each except goal 21, which the three shell helpers split
+between `if_test.go`, `if_changed_test.go`, `for_test.go`, `for_changed_test.go` and `exec_test.go`. They are grouped
+by what they are about rather than by the order they were written in, so you land in one place when looking for how a
+plan gets computed or which command does what.
 
 ### Planning and versioning
 
@@ -152,17 +152,21 @@ does what.
     shares: the term spellings and their globs, the invocation folder standing in for the terms nobody typed, the
     filter narrowing a window and never widening it, and partial releases, where publish order withholds a consumer
     whose provider was left out (`W230`) and a split versioning group is warned about and released (`W231`).
-21. **The shell helpers** (`if_test.go`, `if_changed_test.go`, `exec_test.go`): the two commands that run one script
-    instead of sweeping a selection. `dispat if` picks a shell string from a condition on the environment, the
-    filesystem (`--file`/`--dir`) or the repository (`--changed`); `dispat exec` runs one *declared* script, where one
-    subject decides both which level is read and whose environment the script gets. The pair's load-bearing claim is
-    that a declared script reading `DISPAT_*` becomes runnable outside a release. Both take a place in the monorepo the
-    same way, `pkg:`, `space:`, `root` or `cwd`, on the subject, on the script source and on the folder the script runs
-    in, so the second claim is that each of the three moves only its own half: `--for cwd` infers a subject without a
-    plan, `--script-from` still leaves the environment alone, and `--in` changes nothing about resolution. The third is
-    `dispat if`'s cost, which stays nil until an `--in` names something only a configuration can place or `--changed`
-    asks about the repository itself. The fourth is `--changed`'s selection: the same window, filter and consumer
-    expansion every sweeping command uses, composed so that `--consumers` reaches downstream of the changes.
+21. **The shell helpers** (`if_test.go`, `if_changed_test.go`, `for_test.go`, `for_changed_test.go`, `exec_test.go`):
+    the three commands that run one script instead of sweeping a selection. `dispat if` picks a shell string from a
+    condition on the environment, the filesystem (`--file`/`--dir`) or the repository (`--changed`); `dispat for` runs
+    a script once per item of a list; `dispat exec` runs one *declared* script, where one subject decides both which
+    level is read and whose environment the script gets. The group's load-bearing claim is that a declared script
+    reading `DISPAT_*` becomes runnable outside a release. All three take a place in the monorepo the same way, `pkg:`,
+    `space:`, `root` or `cwd`, on the subject, on the script source and on the folder the script runs in, so the second
+    claim is that each of the three moves only its own half: `--for cwd` infers a subject without a plan,
+    `--script-from` still leaves the environment alone, and `--in` changes nothing about resolution. The third is the
+    cost of `dispat if` and `dispat for`, which stays nil until an `--in` names something only a configuration can
+    place, or the command asks about the repository itself. The fourth is `--changed`'s selection: the same window,
+    filter and consumer expansion every sweeping command uses, composed so that `--consumers` reaches downstream of the
+    changes. `dispat for` adds two of its own: that its list comes from exactly one source, where the same `-p`/`-s`/
+    `-g` flags are the source without a window flag and a narrowing with one; and that `--changed` and `--unchanged`
+    partition the repository, so every package is in exactly one of the two loops.
 22. **Self-update** (`selfupdate_test.go`): dispat replacing its own binary, which is the one thing no other area can
     witness, because it is the one command that overwrites the file it is running from. Two binaries are built at two
     versions and a fake releases API hands one out.
@@ -338,6 +342,8 @@ tests/integration/
   filter_test.go            goal 20
   if_test.go                goal 21 (dispat if)
   if_changed_test.go        goal 21 (dispat if --changed)
+  for_test.go               goal 21 (dispat for)
+  for_changed_test.go       goal 21 (dispat for --changed/--unchanged)
   exec_test.go              goal 21 (dispat exec)
   selfupdate_test.go        goal 22
   install_test.go           goal 45
@@ -777,7 +783,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestFilterReleaseByGroupNeverSplitsIt`         | Naming a member of a group under `--strict` is refused (`W231`) while naming the group releases every member at once, clean under `--strict`, across a space and a standalone package alike; a later unfiltered run finishes the rest.            |
 | `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
 
-### Goal 21: the shell helpers (`if_test.go`, `exec_test.go`)
+### Goal 21: the shell helpers (`if_test.go`, `for_test.go`, `exec_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                        |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -801,6 +807,26 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestIfChangedChainsWithElif`                   | `--changed` leads the chain like any other condition: true it wins even over a true `--elif` behind it, false the elifs get their ordinary turn.                                                                                                           |
 | `TestIfChangedReadsTheConfigOnlyWhenAsked`      | `--changed` is the one condition that costs a config file and a git repository, and only it pays: with the file broken or the repository gone, a bare condition still runs where `--changed` refuses.                                                      |
 | `TestIfChangedPropagatesTheExitCode`            | The helper stays transparent whatever the condition asked: the chosen script's code is the command's, `--on-failure` stays quiet on success, and a false answer with no `--else` runs nothing and succeeds.                                                |
+| `TestForIteratesALiteralList`                   | A list of words, one script per word, in the order they were typed, with `DISPAT_ITEM`, `DISPAT_INDEX` and `DISPAT_TOTAL` per iteration, in a repository holding no config file at all — so anything that works there provably read none. An item is one argument whatever is inside it, spaces and quotes included: the shell that typed the line already decided where the words end. |
+| `TestForPropagatesTheExitCode`                  | The failing item's own code becomes the command's and the items after it never start; `--keep-going` finishes the list and still reports that first code even though a later item failed worse; `--on-failure` replaces the code and runs once for the loop rather than once per failing item, and stays quiet when nothing failed. |
+| `TestForRunsEveryDoScriptPerItem`               | Several `--do` scripts are one item's sequence: they run in order per item, an item stops inside its own sequence at the first failure, and that failure stops the loop.                                        |
+| `TestForOverNothingSucceedsUnlessItemsAreRequired` | An empty list runs the body zero times and exits 0, which is what `for x in $EMPTY` does; `--require-items` turns that into exit 1, for the literal list and for a domain whose window is legitimately empty alike, and leaves a non-empty iteration alone. |
+| `TestForIteratesPackages`                       | `-p` iterates over the packages the terms name, in discovery order, describing each with the release environment's own variable names: a declared group, a space that versions as one lending its members its name, and `DISPAT_GROUP` unset rather than empty for an independent package. A term matching nothing is an error, never a loop that ran zero times. |
+| `TestForRunsEveryItemWhereTheCommandWasInvoked` | The two halves of one decision: a relative path in the script resolves in the invocation folder for every item, so one path means one file however long the list, while `DISPAT_DIR` carries the item's own folder as an absolute path for a script that wants it. |
+| `TestForIteratesSpacesAndGroups`                | `-s` and `-g` iterate over the spaces and the versioning groups themselves rather than over the packages inside them; a space carries its primary folder, a group carries no folder because it is a versioning relationship; and an unknown term fails with the filter's own message, cross-flag hint included. |
+| `TestForReadsTheConfigOnlyWhenTheListNeedsIt`   | The command's cost rule as one comparison: a path and `cwd` place the loop with nothing read, `pkg:` places it correctly, and then the config file is broken and only the invocations that had to look something up notice. `--in` moves every iteration, not only the first. |
+| `TestForCannotBeToldWhichItemItIsOn`            | The iterator variables are appended last, so an outer `DISPAT_ITEM`, `DISPAT_INDEX`, `DISPAT_TOTAL` or `DISPAT_PACKAGE` inherited from an enclosing run loses. That is what makes a loop safe to nest inside a release stage, which is its natural home. |
+| `TestForUsesTheConfiguredShell`                 | The reason the command exists: a bashism invalid under `/bin/sh -c` succeeds once `shell` names bash, so the loop body runs through the shell the repository configured rather than through a fixed one.        |
+| `TestForIsReservedAndRefusesBadFlags`           | `for` is a command word, never the run shorthand; a missing `--do`, items beside a flag source, two of `-p`/`-s`/`-g` without a window, `--changed` with `--unchanged`, `--consumers` without a window, a malformed `--in` and arguments after `--` are all usage exits taken before any config is read. |
+| `TestForShadowsARunScriptCalledFor`             | The cost of the word, pinned deliberately: the command wins over a run script named `for`, and `dispat run for` is the spelling that still reaches it.                                                          |
+| `TestForChangedIteratesTheReleaseWindow`        | Without `--since` the loop covers what a release would, covers nothing once the release has happened, and `--unchanged` holds exactly the complement at each step.                                              |
+| `TestForChangedWithSince`                       | A bare `--since` is `--changed --since`, spelled as `dispat run` spells it, and the two spellings are one source rather than two; `--since` moves the complement with it; `--since all` covers every package and empties the complement; a revision git cannot resolve is a failure naming it, never an empty list. |
+| `TestForChangedNarrowsToTheSelection`           | The overload stated as one scenario: under a window flag `-p`, `-s` and `-g` narrow it, and with no window flag the same three are the source and two of them together are refused. A term matching no package is an error on either half. |
+| `TestForChangedConsumersReachDownstream`        | `--consumers` expands the window downstream, moving a package out of the complement by exactly what the window gained — and unlike `dispat if --changed`, the no-terms root invocation is ordinary here rather than refused, because the flag really does change the list. |
+| `TestForChangedIteratesInDependencyOrder`       | The window comes out in the plan's dependency order, so a provider is visited before its consumer whatever order the folders or the commit named.                                                               |
+| `TestForChangedInfersFromTheInvocationFolder`   | Invoked inside a package folder with no terms, the window narrows to that package: the same invocation means "every changed package" at the root and "this one, if it changed" inside one, with `--unchanged` answering for the package that did not. |
+| `TestForChangedNeedsTheRepositoryItAsksAbout`   | The window sources are the ones that cost a config file and a git repository, and only they pay: with the file broken or the repository gone, a literal list still runs in the same folder where `--changed` and `--unchanged` refuse. |
+| `TestForChangedPropagatesTheExitCode`           | The helper stays transparent whatever the list came from: a failing item ends the loop with its own code, and `--keep-going` finishes the window while still reporting that first failure.                       |
 | `TestExecResolvesTheSubjectsScriptThroughTheBinary`             | The subject picks the level, and only that level: root, space and package each answer with their own text, a package declaring nothing is a reported miss, and standing in a package folder changes no answer.         |
 | `TestExecForCwdReadsTheInvocationFolder`        | `--for cwd` reads the folder the way `dispat run` reads it: a package, a folder below one, the space holding it, the root, and a folder inside neither widening to the top level with the widening said out loud.      |
 | `TestExecForCwdCarriesTheFoldersEnvironment`    | An inferred subject is a subject, so it moves the environment as well as the text, reaches the `DISPAT_*` variables from a package folder, and is refused from a space folder once the folder has been read.           |

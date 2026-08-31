@@ -128,6 +128,19 @@ func TestHelpIsScopedToTheCommand(t *testing.T) {
 			// answer for it.
 			hasNot: []string{"--for ", "--script-from", "--env string", "--tag", "--on-error"},
 		},
+		"for, whose every arity is legal so nothing else would print it": {
+			args: []string{"for", "--help"},
+			usage: "usage: dispat for [item]... | -p|-s|-g <globs> | --changed | " +
+				"--unchanged | --since <rev> [flags]",
+			// The loop's own, plus everything it shares with `if --changed`:
+			// the same window describes which packages it iterates over.
+			has: []string{"--do", "--keep-going", "--unchanged", "--require-items",
+				"--changed", "--since", "--consumers", "--package", "--on-failure", "--in"},
+			// A loop runs one script per item and nothing depends on anything,
+			// so a sweep's --on-error means nothing here; neither helper's own
+			// flags leak in either.
+			hasNot: []string{"--then", "--elif", "--else", "--for ", "--script-from", "--on-error"},
+		},
 		"exec": {
 			args: []string{"exec", "--help"}, usage: "usage: dispat exec <script> [-- args...] [flags]",
 			has: []string{"--for ", "--fallback", "--script-from",
@@ -335,6 +348,7 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		cmdTrigger:      {"trigger", "deployed"},
 		cmdCompute:      {"compute"},
 		cmdIf:           {"if", "CI", "--then", "true"},
+		cmdFor:          {"for", "--do", "true"},
 		cmdExec:         {"exec", "build"},
 		cmdSelfUpdate:   {"self-update", "--api-url", srv.URL},
 		cmdInstall:      {"install", "acme/tool", "--api-url", srv.URL},
@@ -443,6 +457,19 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 		{"commit", "--", "x"},                    // nor do the step commands
 		{"trigger", "progress", "10", "--", "x"}, // trigger forwards nothing either
 		{"if", "CI", "--then", "a", "--", "x"},   // nor `if`, whose branches are already shell text
+		{"for", "a", "--do", "t", "--", "x"},     // nor `for`, for the same reason
+
+		// `for` takes one source for its list, because a second one would be
+		// silently unvisited. Every refusal here is decided by the flags alone.
+		{"for", "a"},                                      // a list with nothing to run over it
+		{"for", "--changed"},                              // ...and so is a flag source
+		{"for", "a", "-p", "core", "--do", "t"},           // items beside a flag source
+		{"for", "a", "--changed", "--do", "t"},            //
+		{"for", "-p", "core", "-s", "libs", "--do", "t"},  // two kinds of thing to iterate over
+		{"for", "-s", "libs", "-g", "gang", "--do", "t"},  //
+		{"for", "--changed", "--unchanged", "--do", "t"},  // the two halves of one window
+		{"for", "-p", "core", "--consumers", "--do", "t"}, // consumers without a window
+		{"for", "a", "--do", "t", "--in", "pkg:"},         // a malformed --in, like if's
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)

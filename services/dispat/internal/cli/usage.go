@@ -68,6 +68,11 @@ var windowFlags = append([]string{"since", "consumers", "on-error"}, selectionFl
 // selection, which all describe its --changed condition.
 var ifFlags = []string{"then", "elif", "else", "changed", "file", "dir"}
 
+// forFlags are the loop's own. It shares --changed, --since, --consumers and
+// the selection with if, which is why only --unchanged is here beside the three
+// flags nothing else reads.
+var forFlags = []string{"do", "keep-going", "unchanged", "require-items", "changed"}
+
 var execFlags = []string{"for", "fallback", "script-from", "env"}
 
 // helperFlags are what the two shell helpers share.
@@ -360,6 +365,53 @@ space:<name>, root or cwd. Needs no config file and no git repository, unless
 --in names a package, a space or the root, which only a configuration can
 point at, or --changed asks about the repository itself.`,
 		flags: append(append(append([]string{}, ifFlags...),
+			"since", "consumers"), append(append([]string{}, selectionFlags...), helperFlags...)...),
+	},
+	{
+		name:     cmdFor,
+		args:     "[item]...",
+		argsLong: "[item]... | -p|-s|-g <globs> | --changed | --unchanged | --since <rev>",
+		short:    "run a script once per item of a list",
+		long: `Run a script once for each item of a list: the shell's own
+"for x in ...; do ...; done", spelled so it means the same thing under every
+shell a configuration may name. A loop copied from a POSIX script is the one
+construct that breaks the moment "shell" is something else.
+
+The list comes from exactly one source. Positional items are the list as
+typed, and need no configuration at all. -p, -s and -g iterate over the
+packages the terms name, over the spaces themselves, or over the versioning
+groups themselves. --changed iterates over the changed packages, --unchanged
+over the ones it leaves out, and --since <rev> alone is --changed --since
+<rev>, spelled as "dispat run" spells it. Under any of those three, -p, -s
+and -g narrow the window instead of being the source, exactly as they do for
+"dispat if --changed", and --consumers expands it downstream; without one,
+naming two of them at once has no meaning and is refused.
+
+--do is the script, repeatable: several run in order for each item and stop
+at the first one of them that fails. Each iteration exports DISPAT_ITEM, the
+item, plus DISPAT_INDEX (0-based) and DISPAT_TOTAL. A package item also
+exports DISPAT_PACKAGE, DISPAT_SPACE, DISPAT_DIR and DISPAT_GROUP (unset when
+the package versions on its own); a space exports DISPAT_SPACE and
+DISPAT_DIR, a group DISPAT_GROUP. The names are the release environment's, so
+a script moves between a stage and a loop unchanged.
+
+Every iteration runs where the invocation stands, or where --in points; no
+item is cd'ed into, so a relative path means one thing throughout, and
+DISPAT_DIR is what a script that wants the item's folder reads. The loop is
+sequential: a shell's for runs one body at a time, and concurrency over a
+selection is what "dispat run" already is.
+
+The first failing item stops the loop and its exit code becomes the command's;
+--keep-going runs the rest and still reports that first code, and --on-failure
+replaces it once for the whole loop. An empty list runs nothing and exits 0,
+which is what "for x in $EMPTY" does; --require-items makes it exit 1 instead.
+
+Needs no config file and no git repository for a literal list, unless --in
+names a package, a space or the root. Every other source is a question about
+the monorepo and reads the configuration; --changed, --unchanged and --since
+read the repository too. Note that the word now shadows a run script called
+"for": spell that one "dispat run for".`,
+		flags: append(append(append([]string{}, forFlags...),
 			"since", "consumers"), append(append([]string{}, selectionFlags...), helperFlags...)...),
 	},
 	{

@@ -202,6 +202,13 @@ func (a *App) windowPackages(ctx context.Context, pl *plan.Plan, opts WindowOpti
 // reportOutsideWindow says out loud which explicitly named packages the window
 // left out, because "I asked for core and nothing happened" deserves a reason.
 func (a *App) reportOutsideWindow(sel filter.Result, covered []string) {
+	a.reportUncovered(sel, covered, "package is outside the window, nothing to do")
+}
+
+// reportUncovered is the same sentence for either half of the window: the
+// complement leaves a named package out for the opposite reason, and "I asked
+// for core and nothing happened" deserves an answer there too.
+func (a *App) reportUncovered(sel filter.Result, covered []string, msg string) {
 	if !sel.Active() {
 		return
 	}
@@ -211,7 +218,7 @@ func (a *App) reportOutsideWindow(sel filter.Result, covered []string) {
 	}
 	for _, name := range sel.Names {
 		if !kept[name] {
-			a.log.Info().Str("package", name).Msg("package is outside the window, nothing to do")
+			a.log.Info().Str("package", name).Msg(msg)
 		}
 	}
 }
@@ -270,19 +277,76 @@ func (a *App) ChangedSelection(ctx context.Context, opts WindowOptions) ([]strin
 	if err != nil {
 		return nil, err
 	}
-	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
+	return a.changedSelection(ctx, pl, opts)
+}
+
+// changedSelection is ChangedSelection over a plan already computed, which is
+// also the half that can be asked about without a repository.
+func (a *App) changedSelection(ctx context.Context, pl *plan.Plan, opts WindowOptions) ([]string, error) {
+	sel, window, err := a.expandedWindow(ctx, pl, opts)
 	if err != nil {
 		return nil, err
 	}
+	covered := sel.Keep(window)
+	a.reportOutsideWindow(sel, covered)
+	return covered, nil
+}
+
+// expandedWindow is what both halves are built from: the filter resolved, and
+// the window the flags describe with --consumers already applied. Sharing it is
+// what makes the two selections a partition rather than two answers that
+// happen to agree.
+func (a *App) expandedWindow(ctx context.Context, pl *plan.Plan, opts WindowOptions) (filter.Result, []string, error) {
+	sel, err := a.selectPackages(a.planWorkspace(pl), opts.Filter)
+	if err != nil {
+		return filter.Result{}, nil, err
+	}
 	window, err := a.windowPackages(ctx, pl, opts)
 	if err != nil {
-		return nil, err
+		return filter.Result{}, nil, err
 	}
 	if opts.Consumers {
 		window = withConsumers(pl, window)
 	}
-	covered := sel.Keep(window)
-	a.reportOutsideWindow(sel, covered)
+	return sel, window, nil
+}
+
+// UnchangedSelection is ChangedSelection's complement: the packages the window
+// leaves out, narrowed by the same filter, in the same plan order. It answers
+// `dispat for --unchanged`, whose whole point is the half a sweep never
+// reaches — the packages nothing addressed, which is where a coverage report,
+// a staleness check or a nightly rebuild belongs.
+//
+// The complement is taken over the *expanded* window, so --consumers moves a
+// package out of this list exactly when it would have moved it into the changed
+// one: the two selections partition the plan whatever the flags say, and a
+// package can never be in both or in neither.
+func (a *App) UnchangedSelection(ctx context.Context, opts WindowOptions) ([]string, error) {
+	pl, err := a.stepPlan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.unchangedSelection(ctx, pl, opts)
+}
+
+// unchangedSelection is UnchangedSelection over a plan already computed.
+func (a *App) unchangedSelection(ctx context.Context, pl *plan.Plan, opts WindowOptions) ([]string, error) {
+	sel, window, err := a.expandedWindow(ctx, pl, opts)
+	if err != nil {
+		return nil, err
+	}
+	inWindow := make(map[string]bool, len(window))
+	for _, name := range window {
+		inWindow[name] = true
+	}
+	rest := make([]string, 0, len(pl.Order))
+	for _, name := range pl.Order {
+		if pl.Releases[name] != nil && !inWindow[name] {
+			rest = append(rest, name)
+		}
+	}
+	covered := sel.Keep(rest)
+	a.reportUncovered(sel, covered, "package is inside the window, nothing to do")
 	return covered, nil
 }
 

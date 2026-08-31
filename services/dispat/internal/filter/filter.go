@@ -196,6 +196,56 @@ func Resolve(f Filter, ws Workspace) (Result, error) {
 	return res, nil
 }
 
+// MatchSpaces resolves --space terms onto the configured spaces they name,
+// rather than onto the packages those spaces hold. `dispat for -s` iterates
+// over the spaces themselves, so it asks the shorter question; every other
+// caller wants the packages and goes through Resolve.
+//
+// It is a thin wrapper on purpose: the matching and the unknown-term error are
+// Resolve's own, so a term that fails here fails with the same sentence it
+// would have failed with anywhere else.
+func MatchSpaces(ws Workspace, terms []string) ([]string, error) {
+	seen := make(map[string]bool, len(ws.Spaces))
+	var out []string
+	for _, term := range terms {
+		names := spaceNames(term, ws)
+		if len(names) == 0 {
+			return nil, unknownSpace(term, ws)
+		}
+		for _, name := range sortedSet(names) {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// MatchGroups is MatchSpaces for versioning groups: the groups a term names,
+// declared entries and the ones the packages carry alike, which is the same set
+// --group resolves against.
+func MatchGroups(ws Workspace, terms []string) ([]string, error) {
+	groups := knownGroups(ws) // one pass over the packages, however many terms
+	seen := make(map[string]bool, len(groups))
+	var out []string
+	for _, term := range terms {
+		names := sortedMatches(term, groups)
+		if len(names) == 0 {
+			return nil, unknownGroup(term, ws)
+		}
+		for _, name := range names {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // Location is what a folder stands for: the package whose folder it is inside,
 // or failing that the space, or neither. At most one field is ever set.
 type Location struct {
