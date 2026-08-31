@@ -284,12 +284,3 @@ Run this once after a failed loop, and exit with its code instead.
 The command forwards nothing after `--`. The `--do` scripts are shell text you
 already write in full, so there is nothing a forwarded argument would reach
 that a script could not say itself.
-
-## A note on the word
-
-`for` is a command word, so `dispat for` never means `dispat run for`. A run
-script named `for` is still reachable by its two-word spelling.
-
-```sh
-dispat run for
-```
