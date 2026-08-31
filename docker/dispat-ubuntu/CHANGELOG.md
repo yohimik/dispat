@@ -1,5 +1,12 @@
 # Changelog
 
+## docker/dispat-ubuntu/v1.6.0 (2026-08-31)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.6.0): 1.5.0 -> 1.6.0
+
+
 ## docker/dispat-ubuntu/v1.5.0 (2026-08-31)
 
 ### Dependencies

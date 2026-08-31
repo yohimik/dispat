@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.6.0 (2026-08-31)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.6.0): 1.5.0 -> 1.6.0
+
+
 ## packages/docs/v1.5.0 (2026-08-31)
 
 No changes.
