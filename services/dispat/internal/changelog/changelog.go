@@ -87,28 +87,44 @@ func (f Format) withDefaults() Format {
 	defaultStr(&f.AuthorsTitle, "Authors")
 	defaultStr(&f.CommitRefsPlacement, RefsOff)
 	defaultStr(&f.CommitRefsFormat, "$"+VarCommitShort)
-	fillRepoFromEnv(&f)
 	return f
 }
 
-// fillRepoFromEnv completes the forge coordinates from $GITHUB_REPOSITORY when
-// the configuration states none.
+// ResolveRepoEnv completes a pair of forge coordinates from $GITHUB_REPOSITORY
+// when the configuration states neither of them.
 //
 // It is the same fallback the GitHub releaser resolves its repository through,
-// applied here so that "auto" links work in the ordinary CI setup, where the
-// repository is what the workflow runs in and nobody writes it into the config
-// file. Configuration wins over the environment, and a half-configured pair is
-// completed rather than replaced.
-func fillRepoFromEnv(f *Format) {
-	if f.LinkOwner != "" && f.LinkRepo != "" {
-		return
+// applied to the record's link coordinates so that "auto" works in the
+// ordinary CI setup, where the repository is what the workflow runs in and
+// nobody writes it into the config file. Configuration wins over the
+// environment.
+//
+// Only a wholly unstated pair is completed. A half-configured pair comes back
+// as it went in, so "auto" declines rather than crossing a configured owner
+// with the environment's repo: that names a repository nobody stated, and a
+// published link into it is worse than the plain line the decline renders.
+//
+// The completion belongs where a recorder is built, once, rather than in the
+// renderer: an entry renders the same text wherever it is rendered from, and a
+// record that read the environment per line would say different things in a
+// run and in a `dispat changelog` step.
+func ResolveRepoEnv(owner, repo string) (string, string) {
+	if owner != "" || repo != "" {
+		return owner, repo
 	}
-	owner, repo, ok := strings.Cut(os.Getenv("GITHUB_REPOSITORY"), "/")
-	if !ok {
-		return
+	envOwner, envRepo, ok := strings.Cut(os.Getenv("GITHUB_REPOSITORY"), "/")
+	if !ok || envOwner == "" || envRepo == "" {
+		return owner, repo
 	}
-	defaultStr(&f.LinkOwner, owner)
-	defaultStr(&f.LinkRepo, repo)
+	return envOwner, envRepo
+}
+
+// WithRepoEnv completes the format's link coordinates from the environment.
+// Every recorder applies it as it is constructed, which is the one place the
+// environment is read.
+func (f Format) WithRepoEnv() Format {
+	f.LinkOwner, f.LinkRepo = ResolveRepoEnv(f.LinkOwner, f.LinkRepo)
+	return f
 }
 
 func defaultStr(s *string, def string) {
@@ -169,7 +185,7 @@ func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 	}
 	w := &FileWriter{
 		File: spec.File, FileTitle: spec.FileTitle, EntrySpacing: spec.EntrySpacing,
-		Format: SpecFormat(spec.Format), Now: d.Now, Log: d.Log,
+		Format: SpecFormat(spec.Format).WithRepoEnv(), Now: d.Now, Log: d.Log,
 	}
 	return w.Record(ctx, rel)
 }
@@ -244,8 +260,13 @@ func RenderSections(rel *plan.Release, f Format) string {
 // standing: an expansion is empty when a variable it names is not set, which
 // is a mistake in the template rather than an instruction to publish an empty
 // entry.
+//
+// Whitespace is nothing. "${A} ${B}" with neither name set expands to a single
+// space, which publishes an entry whose only content is a blank line — the
+// same mistake, wearing the one character that would let it through an
+// emptiness test. The recorder reports the fallback as W241.
 func noChangesLine(rel *plan.Release, f Format, look Lookup) string {
-	if text := Expand(f.NoChangesText, look); text != "" {
+	if text := Expand(f.NoChangesText, look); strings.TrimSpace(text) != "" {
 		return text + "\n"
 	}
 	return builtinNoChangesLine(rel)
@@ -478,6 +499,14 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 
 	bom, rest := cutBOM(string(existing))
 	parts := w.divide(rest, header)
+	if parts.preamble {
+		// The file heads with something dispat did not write, so it keeps its
+		// own head and the entry goes underneath it. Said once per write,
+		// because a configured title that is never written looks from the
+		// outside like a title that was ignored.
+		w.Log.Debug().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).Str("path", path).
+			Msg("existing changelog keeps its own head, the configured title is not written")
+	}
 
 	// The entry is closed on exactly one newline and the seam below it is
 	// exactly the configured number of blank lines. Left to the entry's own
@@ -515,6 +544,9 @@ type fileParts struct {
 	top   string // the rendered title, or the file's own preamble
 	blank int    // blank lines between top and the new entry
 	body  string // from the first entry heading down, untouched
+	// preamble records that top is the file's own head rather than the
+	// rendered title, so the writer can say so once per write.
+	preamble bool
 }
 
 // divide splits an existing changelog into what stays above the new entry and
@@ -546,16 +578,25 @@ func (w *FileWriter) divide(rest, title string) fileParts {
 	if strings.TrimSpace(rest) == "" {
 		return fileParts{top: title, blank: 1}
 	}
-	if n := titleMatch(rest, title); n >= 0 {
-		return fileParts{top: title, blank: 1, body: strings.TrimLeft(rest[n:], "\r\n")}
+	// An empty title is nothing to recognise a file by, and titleMatch answers
+	// that it covers the first zero bytes of every file there is. Taken as a
+	// match it would strip nothing, write nothing in its place, and insert the
+	// entry above the file's own head — the one shape the preamble path exists
+	// to prevent. A title renders empty when every line of the configured
+	// fileTitle is filtered out for this package, which is a package the
+	// configuration deliberately gave no title to.
+	if title != "" {
+		if n := titleMatch(rest, title); n >= 0 {
+			return fileParts{top: title, blank: 1, body: strings.TrimLeft(rest[n:], "\r\n")}
+		}
 	}
 	at := entryHeadingIndex(rest)
 	if at < 0 {
 		// A changelog with no entry headings at all: every byte of it is
 		// preamble, and this release opens the record below it.
-		return fileParts{top: rest, blank: w.spacing()}
+		return fileParts{top: rest, blank: w.spacing(), preamble: true}
 	}
-	return fileParts{top: rest[:at], blank: w.spacing(), body: rest[at:]}
+	return fileParts{top: rest[:at], blank: w.spacing(), body: rest[at:], preamble: at > 0}
 }
 
 // titleMatch reports how many bytes at the head of content the rendered title
@@ -596,17 +637,50 @@ func titleMatch(content, title string) int {
 // changelog's records begin. Anchored at the start of a line, so a heading
 // quoted inside a commit body — or a "### " section heading, which shares the
 // first two characters — is not mistaken for one.
+//
+// A heading inside a fenced code block is not one either. A preamble that
+// explains the file's own shape shows an entry heading as an example, and
+// splitting the file there would leave the opening fence above the new entry
+// and its closing fence below: the preamble is cut in half and the markdown
+// after it never closes.
 func entryHeadingIndex(s string) int {
 	const heading = "## "
+	fence := "" // the marker of the fence currently open, "" outside one
 	for at := 0; at < len(s); {
-		if strings.HasPrefix(s[at:], heading) {
+		line := s[at:]
+		nl := strings.IndexByte(line, '\n')
+		if nl >= 0 {
+			line = line[:nl]
+		}
+		trimmed := strings.TrimSpace(line)
+		switch marker := isFence(trimmed); {
+		case fence != "":
+			if marker == fence {
+				fence = ""
+			}
+		case marker != "":
+			fence = marker
+		case strings.HasPrefix(line, heading):
 			return at
 		}
-		nl := strings.IndexByte(s[at:], '\n')
 		if nl < 0 {
 			return -1
 		}
 		at += nl + 1
 	}
 	return -1
+}
+
+// isFence reports the marker a line opens or closes a fenced block with, "" for
+// a line that is not a fence. The semantics are self-update's own notes parser,
+// spelled again here rather than shared: both read the markdown a release
+// writes, and a fence one of them sees and the other does not is a file cut in
+// a place its author never wrote.
+func isFence(trimmed string) string {
+	for _, marker := range []string{"```", "~~~"} {
+		if strings.HasPrefix(trimmed, marker) {
+			return marker
+		}
+	}
+	return ""
 }

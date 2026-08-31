@@ -231,6 +231,14 @@ const (
 	// fresh hundred would say a boundary exists where none does.
 	CodeCommitRefUnavailable = "W240"
 
+	// CodeNoChangesTextEmpty marks a configured noChangesText that expanded to
+	// nothing, or to whitespace alone: the names it interpolates are unset, so
+	// the entry carries the built-in line naming the release's cause rather
+	// than the sentence the configuration asked for. The record is written and
+	// what it says is true, which is exactly why the substitution is invisible
+	// in the file and has to be said in the log.
+	CodeNoChangesTextEmpty = "W241"
+
 	// --- release outcomes (§13.7a, §13.9) ---
 
 	// CodeCatchUp marks a release whose entire cause is propagation from a

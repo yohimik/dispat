@@ -137,6 +137,7 @@ shape dispat could actually render.
 | Code | Means |
 |------|-------|
 | `W240` | [Commit references](../configuration/records.md#naming-the-commit-behind-a-line) are configured, and some of the entry's lines have no commit id to point at. Those lines render without a reference instead of with one that resolves nowhere. The warning names the package and how many lines it covers, once per release and per record. |
+| `W241` | [`noChangesText`](../configuration/records.md#what-an-entry-with-no-sections-says) is configured, and it expanded to nothing or to whitespace alone. The entry carries the built-in line naming the release's cause instead. The substitution is invisible in the file itself, which is why it is reported once per release and per record. |
 
 An `auto` link that cannot be derived is the quieter member of the same family. It falls back to the plain unlinked
 text and says so at `debug` level, because a repository with no GitHub coordinates configured is a normal thing to be

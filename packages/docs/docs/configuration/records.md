@@ -116,9 +116,11 @@ A linked line names the provider, links the name, and keeps the movement after i
 `auto` derives the URL from the package's own [`github`](#github) owner and repo, as
 `https://github.com/{owner}/{repo}/releases/tag/$DISPAT_DEP_TAG`. The tag is the provider's own, rendered through the
 provider's [`tagFormat`](./versions.md#tagformat), so the link points at the release that exists rather than at a name
-dispat guessed. A configuration that names no owner and repo falls back to `$GITHUB_REPOSITORY`, which every run inside
-GitHub Actions already carries. The changelog destination borrows the package's `github` block for all of this,
-including its `apiUrl`, because a file has no forge coordinates of its own.
+dispat guessed. A configuration that names neither the owner nor the repo falls back to `$GITHUB_REPOSITORY`, which
+every run inside GitHub Actions already carries. A configuration that names one of the two is taken as written, and
+`auto` declines rather than crossing the half you wrote with the half the workflow happens to supply. The changelog
+destination borrows the package's `github` block for all of this, including its `apiUrl`, because a file has no forge
+coordinates of its own.
 
 Anything else is a URL template, interpolated the way the rest of an entry's text is, with the
 [dependency variables](#the-variables-a-line-adds) added on top:
@@ -130,11 +132,27 @@ changelog:
 
 A template always wins over `auto`, because a template is what you write when the derivation is not what you want.
 
-Two cases write the plain line instead of a broken link. `auto` declines when the owner and the repo cannot be
+`off` writes the plain line, spelled out as a value. An omitted key inherits the broader layer, so a package under a
+space that turned linking on has no other way to turn it off:
+
+```yaml
+spaces:
+  libs:
+    changelog:
+      dependencyLink: auto
+packages:
+  vendored:
+    changelog:
+      dependencyLink: off
+```
+
+Several cases write the plain line instead of a broken link. `auto` declines when the owner and the repo cannot be
 resolved, and when [`github.apiUrl`](#github) points anywhere other than github.com, since a GitHub Enterprise
-installation serves its web pages on a host the API URL does not state. A template that expands to nothing declines the
-same way. A record is published and permanent, so a link leading nowhere is worse than no link, and the decision is
-reported at debug level rather than guessed at.
+installation serves its web pages on a host the API URL does not state. It declines again when the provider's tag is
+unknown, which is what a [`dispat changelog`](../cli/changelog.md) step aligned to a run's environment sees: the
+movement is stated there and the tag it was published under is not. A template that expands to nothing declines the
+same way, and is expanded even without a tag, since a template need not name one. A record is published and permanent,
+so a link leading nowhere is worse than no link, and the decision is reported at debug level rather than guessed at.
 
 ## Naming the commit behind a line
 
@@ -145,7 +163,7 @@ off by default.
 |-------------|------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `placement` | `off`                  | Where the reference goes: `off`, or `suffix` for the end of the line.                                            |
 | `format`    | `$DISPAT_COMMIT_SHORT` | The reference's text. Interpolated, with the [commit variables](#the-variables-a-line-adds) added.               |
-| `link`      | none                   | Empty writes the text plain, `auto` derives the forge URL, and anything else is a URL template.                  |
+| `link`      | none                   | Empty and `off` write the text plain, `auto` derives the forge URL, and anything else is a URL template.         |
 
 ```yaml
 changelog:
@@ -163,7 +181,8 @@ reference are part of what the line says about the work, and who did it comes af
 
 `auto` derives `https://github.com/{owner}/{repo}/commit/$DISPAT_COMMIT` from the same coordinates
 [`dependencyLink`](#linking-a-dependency-line-to-its-release) uses, and declines the same way, leaving the plain
-`(a1b2c3d)` behind.
+`(a1b2c3d)` behind. `link: off` writes the plain reference as a value, which is how a package switches off a link its
+space configured; `placement: off` switches off the reference itself.
 
 A line dispat has no commit id for renders without a reference rather than with one that resolves nowhere. This happens
 only where the git implementation reports no sha and an internal key stands in for it. The recorder reports it once per
@@ -259,13 +278,21 @@ changelog:
 ```
 
 The text is interpolated like every other record line, so a ride release can name the version it moved to or link the
-package that actually changed. An expansion that comes out empty falls back to the built-in lines rather than standing,
-because an empty expansion is a template naming a variable nobody set rather than an instruction to publish an empty
-entry.
+package that actually changed. An expansion that comes out empty, or that comes out as whitespace alone, falls back to
+the built-in lines rather than standing, because such an expansion is a template naming variables nobody set rather
+than an instruction to publish an empty entry. The fallback is reported as
+[`W241`](../reference/plan-errors.md#a-record-that-renders-less-than-it-was-asked-to), once per release and per record,
+since nothing in the written entry shows that a sentence was configured at all.
 
-The sentence must not begin with `---`. That is where [self-update](../reference/self-update.md) cuts a release's notes,
-so a sentence written below the rule would never be shown to anyone reading them. dispat refuses it when the config
-loads rather than at the release that would have published it.
+The sentence must contain no horizontal rule: no line of three or more `-`, `*` or `_` characters, at the head of the
+text or anywhere inside it. That is where [self-update](../reference/self-update.md) cuts a release's notes, so
+everything from the rule down would never be shown to anyone reading them. dispat refuses it when the config loads
+rather than at the release that would have published it.
+
+Unlike the link keys, `noChangesText` has no `off` spelling. A nearer layer can replace an inherited sentence with one
+of its own, and it cannot take the inherited sentence away: the entry falls back to the built-in lines only when no
+layer states one. Write the built-in wording out as the package's own sentence where a package under a configured space
+should read the way an unconfigured one does.
 
 ## `changelog`
 
@@ -339,8 +366,8 @@ the line endings they were written with, and lowering the setting today closes u
 | `allPackages`  | `false`                  | Create a release for every published package, even when no script exported `DISPAT_EXPORT_GITHUB`. The export then only adds assets. Default: the export is the per-package opt-in. |
 | `draft`    | `false`                   | Create every release as a draft, for a person to publish after reading it. A draft carries no tag ref until it is published, so nothing that resolves a release by its tag sees it meanwhile: [`dispat install`](../cli/install.md), [self-update](../cli/self-update.md) and the alias-tag chain all skip it. A re-run finds the draft through the repository's release listing and skips it (`W224`), so a flow converges on one draft rather than a stack of them. Turning this off again leaves any draft already created where it is: dispat creates the published release beside it, and the stale draft is yours to delete. |
 | `channels` | every release             | Which releases get a GitHub release. See [Choosing the channels that record](#choosing-the-channels-that-record). A created release is flagged as a prerelease on GitHub whenever the version is one, whatever this says.             |
-| `owner`    | from `$GITHUB_REPOSITORY` | Repository owner.                                                                                                                                                                                                                                                      |
-| `repo`     | from `$GITHUB_REPOSITORY` | Repository name.                                                                                                                                                                                                                                                       |
+| `owner`    | from `$GITHUB_REPOSITORY` | Repository owner. The environment supplies the pair only when neither `owner` nor `repo` is configured, so a half-written pair fails rather than being completed from a second source.                                                                                  |
+| `repo`     | from `$GITHUB_REPOSITORY` | Repository name. Configured together with `owner`, or by neither of them.                                                                                                                                                                                              |
 | `apiUrl`   | `https://api.github.com`  | REST endpoint. Set this for GitHub Enterprise.                                                                                                                                                                                                                              |
 | `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                                                                                                                                                                                                                |
 | *format*   |                           | All entry format options above. The release body contains the sections, with `header` and `footer` around them. The `## pkg@version (date)` header line used in changelog files is omitted, since GitHub shows the release's name and its own date, so `dateFormat` has no effect here. `releaseName` sets the release's name, which otherwise is the tag. |

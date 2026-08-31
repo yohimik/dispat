@@ -354,6 +354,61 @@ func TestNoChangesTextMustNotOpenTheSelfUpdateCut(t *testing.T) {
 	assert.Contains(t, err.Error(), "noChangesText must not begin")
 }
 
+// TestNoChangesTextMustNotCarryAnInteriorRule: the cut takes everything from
+// the first rule down, not only a text that opens on one. A sentence with a
+// rule in the middle of it loses its second half after an update, and a
+// multi-line sentence — a line and the link under it — is an ordinary thing to
+// write.
+func TestNoChangesTextMustNotCarryAnInteriorRule(t *testing.T) {
+	for name, text := range map[string]string{
+		"a rule after a blank line": "Released with the group.\n\n---\nSee the monorepo changelog.",
+		"a rule of asterisks":       "Released with the group.\n***\nSee the monorepo changelog.",
+		"a spaced rule":             "Released with the group.\n- - -\nSee the monorepo changelog.",
+		"a rule of underscores":     "Released with the group.\n____\nSee the monorepo changelog.",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := minimalConfig()
+			cfg.GitHub = &GitHubConfig{EntryFormatConfig: EntryFormatConfig{NoChangesText: text}}
+			_, err := loadModel(t, cfg, "pkgs/core")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "noChangesText must not contain the horizontal rule")
+		})
+	}
+
+	// A sentence that merely mentions the characters is not a rule: the line
+	// has to be nothing else.
+	cfg := minimalConfig()
+	cfg.GitHub = &GitHubConfig{EntryFormatConfig: EntryFormatConfig{
+		NoChangesText: "Released with the group.\nSee core -> utils in the monorepo changelog.",
+	}}
+	_, err := loadModel(t, cfg, "pkgs/core")
+	assert.NoError(t, err)
+}
+
+// TestOverlayFormatTurnsAnInheritedLinkOff: a nearer layer states "off" to
+// render the plain line a repository configuring nothing renders. An omitted
+// key inherits, so without the written value a package under a space that
+// turned linking on could never turn it off again.
+func TestOverlayFormatTurnsAnInheritedLinkOff(t *testing.T) {
+	space := EntryFormatConfig{
+		DependencyLink: "auto",
+		CommitRefs:     &CommitRefsConfig{Placement: "suffix", Link: "auto"},
+	}
+	pkg := overlayFormat(space, EntryFormatConfig{
+		DependencyLink: "off",
+		CommitRefs:     &CommitRefsConfig{Link: "off"},
+	})
+	assert.Equal(t, "off", pkg.DependencyLink)
+	assert.Equal(t, "off", pkg.CommitRefs.Link)
+	assert.Equal(t, "suffix", pkg.CommitRefs.Placement,
+		"the reference itself stays: placement is what removes it")
+	assert.Equal(t, "auto", space.DependencyLink, "the space is not mutated")
+
+	got := recordFormat(pkg, &GitHubConfig{Owner: "acme", Repo: "tools"})
+	assert.Equal(t, model.LinkOff, got.DependencyLink, "the value reaches the renderer as written")
+	assert.Equal(t, model.LinkOff, got.CommitRefsLink)
+}
+
 // --- the resolved spec -----------------------------------------------------
 
 func TestChangelogSpecResolvesSpacingAndForgeCoordinates(t *testing.T) {

@@ -217,6 +217,12 @@ func TestDependencyLink(t *testing.T) {
 		"a template expanding to nothing falls back too": {
 			Format{DependencyLink: "$NOTHING_DEFINES_THIS_NAME"},
 			"### Dependencies\n\n- utils: 1.1.0 -> 1.2.0\n"},
+		// "off" is the written form of empty: a package under a space that
+		// turned linking on has no other way to turn it off, and the word left
+		// to the template branch would publish "[utils](off)".
+		"off renders the plain line": {
+			Format{DependencyLink: model.LinkOff, LinkOwner: "acme", LinkRepo: "tools"},
+			"### Dependencies\n\n- utils: 1.1.0 -> 1.2.0\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, RenderSections(rel, tc.f))
@@ -242,25 +248,86 @@ func TestDependenciesStayATightList(t *testing.T) {
 		RenderSections(rel, Format{}))
 }
 
-func TestAutoLinksReadTheRepositoryFromTheEnvironment(t *testing.T) {
-	// The ordinary CI setup states the repository nowhere in the config file:
-	// the workflow runs in it, and the GitHub releaser resolves it from
-	// $GITHUB_REPOSITORY. The record's own links resolve the same way, or
-	// "auto" would silently do nothing in exactly the setup it is meant for.
-	t.Setenv("GITHUB_REPOSITORY", "acme/tools")
+// TestDependencyLinkDeclinesAnAutoLinkWithNoTag: an update the plan took from
+// a step's environment states the movement without the tag it was published
+// under. "auto" would append an empty tag and publish a link to the releases
+// listing, which is not this release; a template is the operator's own and may
+// not name the tag at all, so it expands.
+func TestDependencyLinkDeclinesAnAutoLinkWithNoTag(t *testing.T) {
 	rel := &plan.Release{
-		Pkg:     &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
-		Next:    ccme.Version{Major: 1, Minor: 1},
-		Updates: []plan.ProviderUpdate{{Name: "utils", To: ccme.Version{Major: 1}, Tag: "utils@1.0.0"}},
+		Pkg:  &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
+		Next: ccme.Version{Major: 1, Minor: 1},
+		Updates: []plan.ProviderUpdate{{
+			Name: "utils",
+			From: ccme.Version{Major: 1, Minor: 1},
+			To:   ccme.Version{Major: 1, Minor: 2},
+		}},
 	}
-	assert.Contains(t, RenderSections(rel, Format{DependencyLink: model.LinkAuto}),
-		"https://github.com/acme/tools/releases/tag/utils@1.0.0")
+	assert.Equal(t, "### Dependencies\n\n- utils: 1.1.0 -> 1.2.0\n",
+		RenderSections(rel, Format{DependencyLink: model.LinkAuto, LinkOwner: "acme", LinkRepo: "tools"}),
+		"a tagless update renders the plain line rather than a link to /releases/tag/")
 
-	// Configuration wins: a package that names its repository is not
-	// overruled by the workflow it happens to run in.
-	assert.Contains(t,
-		RenderSections(rel, Format{DependencyLink: model.LinkAuto, LinkOwner: "other", LinkRepo: "repo"}),
-		"https://github.com/other/repo/releases/tag/utils@1.0.0")
+	assert.Equal(t,
+		"### Dependencies\n\n- [utils](https://pkg.example/utils/1.2.0): 1.1.0 -> 1.2.0\n",
+		RenderSections(rel, Format{
+			DependencyLink: "https://pkg.example/$DISPAT_DEP_NAME/$DISPAT_DEP_TO",
+			LinkOwner:      "acme", LinkRepo: "tools",
+		}), "a template that never names the tag still resolves")
+}
+
+// TestResolveRepoEnvCompletesOnlyAnUnstatedPair: the ordinary CI setup states
+// the repository nowhere in the config file, so "auto" would do nothing in
+// exactly the setup it is meant for without the fallback. A pair that is half
+// written is left as it was written, because crossing it with the environment
+// names a repository nobody stated.
+func TestResolveRepoEnvCompletesOnlyAnUnstatedPair(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "acme/tools")
+	for name, tc := range map[string]struct{ owner, repo, wantOwner, wantRepo string }{
+		"nothing configured takes both":     {"", "", "acme", "tools"},
+		"configuration wins over the env":   {"other", "repo", "other", "repo"},
+		"a configured owner alone stays so": {"other", "", "other", ""},
+		"a configured repo alone stays so":  {"", "repo", "", "repo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			owner, repo := ResolveRepoEnv(tc.owner, tc.repo)
+			assert.Equal(t, tc.wantOwner, owner)
+			assert.Equal(t, tc.wantRepo, repo)
+		})
+	}
+
+	t.Run("an environment naming no repository completes nothing", func(t *testing.T) {
+		t.Setenv("GITHUB_REPOSITORY", "acme")
+		owner, repo := ResolveRepoEnv("", "")
+		assert.Empty(t, owner)
+		assert.Empty(t, repo)
+	})
+}
+
+// TestRecordersResolveTheRepositoryOnceAtConstruction: the completion belongs
+// to the recorder rather than to the renderer, so an entry renders the same
+// text wherever it is rendered from and the environment is read once per
+// record instead of once per template.
+func TestRecordersResolveTheRepositoryOnceAtConstruction(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "acme/tools")
+	dir := t.TempDir()
+	rel := testRelease(dir, ccme.Version{Major: 2})
+	rel.Updates[0].Tag = "utils@1.2.0"
+	rel.Pkg.Changelog = model.ChangelogSpec{
+		Enabled: true,
+		Format:  model.RecordFormat{DependencyLink: model.LinkAuto},
+	}
+	d := &Dispatcher{Now: func() time.Time { return testDate }}
+	require.NoError(t, d.Record(context.Background(), rel))
+
+	data, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "https://github.com/acme/tools/releases/tag/utils@1.2.0")
+
+	// The renderer itself reads no environment. A format nobody completed
+	// renders the plain line under the same $GITHUB_REPOSITORY, which is what
+	// makes a rendered entry a function of its format alone.
+	assert.NotContains(t, RenderSections(rel, Format{DependencyLink: model.LinkAuto}),
+		"https://github.com/")
 }
 
 func TestNoChangesTextReplacesTheBuiltinSentence(t *testing.T) {
@@ -351,4 +418,74 @@ func TestRenderEntryCarriesNoEntrySeam(t *testing.T) {
 	// after it.
 	out := RenderEntry(testRelease("/tmp/x", ccme.Version{Major: 2}), testDate, Format{})
 	assert.True(t, strings.HasSuffix(out, "- utils: 1.1.0 -> 1.2.0\n"), "%q", out)
+}
+
+// TestCommitRefLinkOffRendersThePlainReference: the reference itself is what
+// `placement: off` removes; `link: off` keeps it and removes the link, which
+// is how a package under a space that linked its references stops linking
+// them without the word "off" being published as the URL.
+func TestCommitRefLinkOffRendersThePlainReference(t *testing.T) {
+	unit := testUnit("feat", ccme.BumpMinor, "add streaming")
+	rel := &plan.Release{
+		Pkg:         &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
+		Next:        ccme.Version{Major: 1, Minor: 1},
+		Units:       []*ccme.Unit{unit},
+		UnitCommits: map[*ccme.Unit]string{unit: "a1b2c3d4e5f6"},
+	}
+	assert.Equal(t, "### Features\n\n- add streaming (a1b2c3d)\n",
+		RenderSections(rel, Format{
+			CommitRefsPlacement: RefsSuffix, CommitRefsLink: model.LinkOff,
+			LinkOwner: "acme", LinkRepo: "tools",
+		}))
+}
+
+// TestRenderOrderHoldsEveryBuiltinSection: a section order missing a built-in
+// is not a section left out of the record, it is released work the record
+// drops with nothing to show it happened. The configuration's own resolution
+// completes the list, and the renderer completes it again, because a Format
+// assembled in code goes through no resolution at all.
+func TestRenderOrderHoldsEveryBuiltinSection(t *testing.T) {
+	rel := sectionsRelease()
+	out := RenderSections(rel, Format{
+		Sections: []model.RecordSection{{Title: "Docs", Types: []string{"docs"}}},
+	})
+
+	assert.Contains(t, out, "### Breaking Changes\n\n- drop old API")
+	assert.Contains(t, out, "### Features\n\n- add streaming")
+	assert.Contains(t, out, "### Fixes\n\n- close leak")
+	assert.Contains(t, out, "### Dependencies\n\n- utils: 1.1.0 -> 1.2.0")
+	assertOrder(t, out, "### Breaking Changes", "### Features", "### Fixes", "### Dependencies")
+}
+
+// TestLogRecordPolicyOnTheNoChangesText: the entry says which sentence it
+// carries only to a reader who knows what was configured, so the recorder
+// says it. The debug line claims the configured sentence was applied, which
+// means it may only be written when it actually was.
+func TestLogRecordPolicyOnTheNoChangesText(t *testing.T) {
+	rel := &plan.Release{
+		Pkg:    &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
+		Next:   ccme.Version{Major: 2},
+		Pinned: true,
+	}
+	logged := func(f Format) string {
+		var buf strings.Builder
+		LogRecordPolicy(zerolog.New(&buf).Level(zerolog.DebugLevel), rel, f)
+		return buf.String()
+	}
+
+	// Two names nobody set expand to the single space between them, which is
+	// an empty entry wearing the one character that would pass an emptiness
+	// test.
+	blank := Format{NoChangesText: "${UNSET_ONE} ${UNSET_TWO}"}
+	assert.Equal(t, "No changes: a version set by Release-As.\n", RenderSections(rel, blank),
+		"a blank expansion falls back to the built-in line")
+	out := logged(blank)
+	assert.Contains(t, out, plan.CodeNoChangesTextEmpty)
+	assert.Contains(t, out, `"package":"core"`)
+	assert.Contains(t, out, "the built-in line was written instead")
+	assert.NotContains(t, out, "applied from configuration")
+
+	applied := logged(Format{NoChangesText: "see the changelog for $DISPAT_TAG."})
+	assert.Contains(t, applied, "no-changes text applied from configuration")
+	assert.NotContains(t, applied, plan.CodeNoChangesTextEmpty)
 }

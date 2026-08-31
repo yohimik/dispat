@@ -60,16 +60,22 @@ func scoped(look Lookup, extra map[string]string) Lookup {
 }
 
 // sectionOrder is the order an entry renders its sections in: the configured
-// one, or the built-ins when nothing is configured. A configured order always
-// holds every built-in already — the resolution appends the ones the list
-// omitted — so the two answers differ in arrangement alone.
+// one, or the built-ins when nothing is configured. The two answers differ in
+// arrangement alone, because every built-in the configured list omitted is
+// appended to it in the default relative order.
+//
+// The appending is done here as well as in the configuration's own resolution,
+// which is where a list anyone can write is completed. A Format assembled in
+// code goes through no resolution at all, and a built-in missing from the
+// order is not a section left out of the record: it is released work that the
+// record silently drops, with nothing in the file to say it happened.
 func sectionOrder(f Format) []model.RecordSection {
-	if len(f.Sections) > 0 {
-		return f.Sections
-	}
-	out := make([]model.RecordSection, 0, 4)
+	out := make([]model.RecordSection, 0, len(f.Sections)+len(model.DefaultSectionOrder()))
+	out = append(out, f.Sections...)
 	for _, key := range model.DefaultSectionOrder() {
-		out = append(out, model.RecordSection{Builtin: key})
+		if builtinIndex(out, key) < 0 {
+			out = append(out, model.RecordSection{Builtin: key})
+		}
 	}
 	return out
 }
@@ -92,8 +98,9 @@ func sectionTitle(s model.RecordSection, f Format) string {
 }
 
 // builtinIndex finds a built-in section in the order, -1 when the order does
-// not hold it. Every resolved order holds all four, so -1 is the shape of a
-// Format assembled by hand rather than a configuration anyone can write.
+// not hold it. Every order sectionOrder answers with holds all four, so a
+// caller reading one never sees -1; the search itself is what sectionOrder
+// completes an order with.
 func builtinIndex(order []model.RecordSection, key string) int {
 	for i, s := range order {
 		if s.Builtin == key {
@@ -101,6 +108,19 @@ func builtinIndex(order []model.RecordSection, key string) int {
 		}
 	}
 	return -1
+}
+
+// sectionClaims indexes an order by the commit types its custom sections
+// claim, which is what sectionFor asks before falling back to the bump-keyed
+// built-ins.
+func sectionClaims(order []model.RecordSection) map[string]int {
+	claims := make(map[string]int)
+	for i, s := range order {
+		for _, t := range s.Types {
+			claims[t] = i
+		}
+	}
+	return claims
 }
 
 // sectionFor decides which section a unit's line belongs to.
@@ -129,6 +149,20 @@ func sectionFor(order []model.RecordSection, claims map[string]int, u *ccme.Unit
 	return -1
 }
 
+// renderCtx is what every line of one entry shares: the format, the entry's
+// lookup, and the base URL "auto" links hang off.
+//
+// The base is derived once per entry rather than once per line. It parses the
+// configured API URL to decide whether the derivation applies at all, and the
+// answer is the same for every line of the entry; a first release rendering a
+// whole history's worth of lines would otherwise parse it thousands of times
+// to reach the same string.
+type renderCtx struct {
+	f    Format
+	look Lookup
+	base string // the "auto" repository URL, empty when it cannot be derived
+}
+
 // renderSections groups the release's work and renders it, in the configured
 // order. It is what RenderSections and RenderBody both go through; the lookup
 // is the caller's, so one entry interpolates every template against the same
@@ -140,20 +174,16 @@ func renderSections(rel *plan.Release, f Format, look Lookup) string {
 	if rel.NoChanges() {
 		return noChangesLine(rel, f, look)
 	}
+	rc := renderCtx{f: f, look: look, base: autoBase(f)}
 	order := sectionOrder(f)
-	claims := make(map[string]int)
-	for i, s := range order {
-		for _, t := range s.Types {
-			claims[t] = i
-		}
-	}
+	claims := sectionClaims(order)
 	items := make([][]string, len(order))
 	// NotesUnits, not Units: a prerelease's entry contains only its own
 	// changeset, while a stable release (a graduation included) collects the
 	// whole pending window since the last stable tag.
 	for _, u := range rel.NotesUnits() {
 		if i := sectionFor(order, claims, u); i >= 0 {
-			items[i] = append(items[i], unitLine(rel, u, f, look))
+			items[i] = append(items[i], unitLine(rel, u, rc))
 		}
 	}
 	if i := builtinIndex(order, model.SectionDependencies); i >= 0 {
@@ -171,7 +201,7 @@ func renderSections(rel *plan.Release, f Format, look Lookup) string {
 		// genuinely ships against the new version, and a changelog that says
 		// nothing about it is the reader's problem later.
 		for _, u := range rel.Updates {
-			items[i] = append(items[i], dependencyLine(u, f, look))
+			items[i] = append(items[i], dependencyLine(u, rc))
 		}
 	}
 	var parts []string
@@ -211,9 +241,9 @@ func renderSections(rel *plan.Release, f Format, look Lookup) string {
 // The attribution follows the correction note and the reference: the note and
 // the reference are part of what the line says about the work, and who did it
 // comes after what was done.
-func unitLine(rel *plan.Release, u *ccme.Unit, f Format, look Lookup) string {
+func unitLine(rel *plan.Release, u *ccme.Unit, rc renderCtx) string {
 	line := "- " + u.Header.Description + correctionNote(rel, u) +
-		commitRefSuffix(rel, u, f, look) + authorSuffix(rel, u, f)
+		commitRefSuffix(rel, u, rc) + authorSuffix(rel, u, rc.f)
 	if body := strings.TrimRight(u.Body, "\n"); body != "" {
 		line += "\n" + indentBody(body)
 	}
@@ -246,20 +276,20 @@ func indentBody(body string) string {
 // window key that stands in for one: the key names an entry in this run and
 // nothing a reader could open. Whoever configured references is told once per
 // release, by the recorder, rather than per line.
-func commitRefSuffix(rel *plan.Release, u *ccme.Unit, f Format, look Lookup) string {
-	if f.CommitRefsPlacement != RefsSuffix {
+func commitRefSuffix(rel *plan.Release, u *ccme.Unit, rc renderCtx) string {
+	if rc.f.CommitRefsPlacement != RefsSuffix {
 		return ""
 	}
 	sha := rel.UnitCommit(u)
 	if sha == "" {
 		return ""
 	}
-	look = scoped(look, map[string]string{VarCommit: sha, VarCommitShort: shortSHA(sha)})
-	text := Expand(f.CommitRefsFormat, look)
+	look := scoped(rc.look, map[string]string{VarCommit: sha, VarCommitShort: shortSHA(sha)})
+	text := Expand(rc.f.CommitRefsFormat, look)
 	if text == "" {
 		return ""
 	}
-	if u := linkURL(f.CommitRefsLink, f, look, "/commit/"+sha); u != "" {
+	if u := linkURL(rc.f.CommitRefsLink, rc.base, look, "/commit/"+sha); u != "" {
 		return " ([" + text + "](" + u + "))"
 	}
 	return " (" + text + ")"
@@ -277,33 +307,63 @@ func shortSHA(sha string) string {
 
 // dependencyLine renders one provider's movement, linked to the provider's own
 // release when the policy asks for it and the link resolves.
-func dependencyLine(u plan.ProviderUpdate, f Format, look Lookup) string {
+func dependencyLine(u plan.ProviderUpdate, rc renderCtx) string {
 	from, to := u.From.String(), u.To.String()
 	name := u.Name
-	look = scoped(look, map[string]string{
-		VarDepName: u.Name, VarDepFrom: from, VarDepTo: to, VarDepTag: u.Tag,
-	})
-	if target := linkURL(f.DependencyLink, f, look, "/releases/tag/"+u.Tag); target != "" {
-		name = "[" + u.Name + "](" + target + ")"
+	// The per-line variables are layered only for a policy that interpolates
+	// them. The default writes the plain line, and a consumer that picks up
+	// fifty providers should not build a lookup layer per line to throw it
+	// away unread.
+	if linkable(rc.f.DependencyLink) && !taglessAuto(rc.f.DependencyLink, u.Tag) {
+		look := scoped(rc.look, map[string]string{
+			VarDepName: u.Name, VarDepFrom: from, VarDepTo: to, VarDepTag: u.Tag,
+		})
+		if target := linkURL(rc.f.DependencyLink, rc.base, look, "/releases/tag/"+u.Tag); target != "" {
+			name = "[" + u.Name + "](" + target + ")"
+		}
 	}
 	return "- " + name + ": " + from + " -> " + to
 }
 
-// linkURL resolves one configured link value: empty renders plain, a template
-// is interpolated, and "auto" is the package's own forge with autoPath
-// appended. A template always wins over "auto", because a template is what an
-// operator writes when the derivation is not what they want.
+// taglessAuto reports an "auto" dependency link with no tag to hang itself off.
+//
+// An update the plan built from a step's environment states the movement and
+// not the tag it was published under: `dispat changelog` aligned to a run
+// knows core moved 1.3.2 -> 1.4.0 without knowing what core's own tagFormat
+// called it. "auto" would append an empty tag and publish
+// ".../releases/tag/", which is a listing page rather than the release, so the
+// line renders plain — the same answer "auto" gives to coordinates it cannot
+// derive a base from.
+//
+// A template is the operator's own and is expanded regardless: it may name the
+// versions rather than the tag, and refusing to render it would decline a link
+// that would have resolved.
+func taglessAuto(value, tag string) bool {
+	return value == model.LinkAuto && tag == ""
+}
+
+// linkURL resolves one configured link value against the entry's "auto" base:
+// empty and "off" render plain, a template is interpolated, and "auto" is the
+// base with autoPath appended. A template always wins over "auto", because a
+// template is what an operator writes when the derivation is not what they
+// want.
+//
+// "off" is the written form of empty, and it is checked before the template
+// branch because that is where it would otherwise land: a package that says
+// "off" over a space's "auto" means to switch the link off, and rendering the
+// word as a URL template would publish "[core](off)". Empty cannot serve on
+// its own, since an omitted key inherits the broader layer rather than
+// clearing it.
 //
 // "auto" that cannot be derived answers empty, which every caller renders as
 // the plain unlinked form. A record is published and permanent: a link that
 // leads nowhere is worse than no link, and there is no later run in which it
 // would come out right.
-func linkURL(value string, f Format, look Lookup, autoPath string) string {
+func linkURL(value, base string, look Lookup, autoPath string) string {
 	switch value {
-	case "":
+	case "", model.LinkOff:
 		return ""
 	case model.LinkAuto:
-		base := autoBase(f)
 		if base == "" {
 			return ""
 		}
@@ -311,6 +371,12 @@ func linkURL(value string, f Format, look Lookup, autoPath string) string {
 	default:
 		return Expand(value, look)
 	}
+}
+
+// linkable reports whether a link value can produce a URL at all, so a caller
+// can skip the work of preparing one it would never use.
+func linkable(value string) bool {
+	return value != "" && value != model.LinkOff
 }
 
 // autoBase is the repository URL "auto" hangs its paths off, empty when the
@@ -339,6 +405,31 @@ func isPublicGitHub(apiURL string) bool {
 	}
 	host := strings.ToLower(u.Hostname())
 	return host == "api.github.com" || host == "github.com"
+}
+
+// carriesNoChangesLine reports whether the entry's body will be the single
+// line naming the release's cause rather than grouped sections. It answers by
+// the same rules renderSections renders by, so the recorder speaks about the
+// entry that is actually written.
+//
+// rel.NoChanges() alone would not do it. That names one of the causes, the
+// shared-versioning ride; a pin, a channel transition and a window whose work
+// its reverts cancel out reach the same line by grouping into nothing at all.
+func carriesNoChangesLine(rel *plan.Release, f Format) bool {
+	if rel.NoChanges() {
+		return true
+	}
+	if len(rel.Updates) > 0 {
+		return false // the dependencies section, which every order holds
+	}
+	order := sectionOrder(f)
+	claims := sectionClaims(order)
+	for _, u := range rel.NotesUnits() {
+		if sectionFor(order, claims, u) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // LogRecordPolicy reports, once per release and per destination, what the
@@ -370,8 +461,18 @@ func LogRecordPolicy(log zerolog.Logger, rel *plan.Release, f Format) {
 				Msg("commit refs are configured but some entry lines have no commit id, rendered without one")
 		}
 	}
-	if f.NoChangesText != "" && rel.NoChanges() {
-		log.Debug().Str("package", pkg).Msg("no-changes text applied from configuration")
+	if f.NoChangesText != "" && carriesNoChangesLine(rel, f) {
+		// What the entry carries, not what was configured: a sentence whose
+		// every variable is unset expands to nothing, or to the space between
+		// two of them, and the entry falls back to the built-in line. The
+		// fallback is visible in the file only to a reader who knows what the
+		// configuration said, so it is warned rather than left to be found.
+		if strings.TrimSpace(Expand(f.NoChangesText, ReleaseLookup(rel))) == "" {
+			log.Warn().Str("code", plan.CodeNoChangesTextEmpty).Str("package", pkg).
+				Msg("no-changes text expands to nothing, the built-in line was written instead")
+		} else {
+			log.Debug().Str("package", pkg).Msg("no-changes text applied from configuration")
+		}
 	}
 	if len(f.Sections) > 0 {
 		log.Debug().Str("package", pkg).Int("sections", len(f.Sections)).

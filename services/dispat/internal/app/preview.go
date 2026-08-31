@@ -89,7 +89,11 @@ func (a *App) Preview(ctx context.Context, opts PreviewOptions) (PreviewResult, 
 // previewOne renders one package's pending notes; empty when nothing is
 // pending.
 func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
-	format := changelog.SpecFormat(rel.Pkg.Changelog.Format)
+	// The preview resolves its link coordinates the way the recorders do, so
+	// what it shows is what the record will say. It is the same completion at
+	// the same point: nothing about a rendered entry depends on the
+	// environment once the format is built.
+	format := changelog.SpecFormat(rel.Pkg.Changelog.Format).WithRepoEnv()
 	// Whether there is anything to preview is whether the package has a
 	// reason to release at all — the sections themselves never render empty,
 	// so they cannot be the gate. A workspace-wide footer would otherwise
@@ -146,7 +150,7 @@ func (a *App) previewGitHubBody(rel *plan.Release) string {
 	if reason := withheldReason(spec.Enabled, spec.Channels, rel.Channel); reason != "" {
 		return "github release withheld: " + reason + "\n"
 	}
-	return changelog.RenderEntryBody(rel, changelog.SpecFormat(spec.Format), nil)
+	return changelog.RenderEntryBody(rel, changelog.SpecFormat(spec.Format).WithRepoEnv(), nil)
 }
 
 // withheldReason says why a record policy would write nothing for a release,

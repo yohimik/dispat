@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -698,4 +699,63 @@ func TestRecordPreambleSeamFollowsEntrySpacing(t *testing.T) {
 		&FileWriter{EntrySpacing: 1}, ccme.Version{Major: 2})
 	assert.Contains(t, out, "# Change Log\n\n## core@2.0.0 (")
 	assert.NotContains(t, out, "\n\n\n")
+}
+
+// TestRecordEmptyFileTitleKeepsTheFilesOwnHead: a fileTitle whose every line
+// is filtered out for this release renders as nothing, and nothing heads every
+// file there is. Read as a match it would strip no bytes, write no title in
+// their place, and put the entry at byte zero — above the head the file
+// brought with it. The preamble path is what an unrecognisable title has
+// always meant.
+func TestRecordEmptyFileTitleKeepsTheFilesOwnHead(t *testing.T) {
+	w := &FileWriter{
+		FileTitle: []model.EntryLine{
+			{Line: []string{"# Changelog"}, Channels: []string{"beta"}},
+		},
+	}
+	out := recordInto(t, "# Change Log\n\n## v1.2.0 (2024-01-01)\n\n- something old\n",
+		w, ccme.Version{Major: 2})
+
+	assert.True(t, strings.HasPrefix(out, "# Change Log\n"),
+		"the file keeps its own head:\n%s", out)
+	assertOrder(t, out, "# Change Log", "## core@2.0.0 (", "## v1.2.0 (", "- something old")
+}
+
+// TestRecordKeepsAFencedExampleInThePreambleWhole: a preamble that documents
+// the file's own shape shows an entry heading as an example. Splitting the
+// file at it would leave the opening fence above the new entry and the closing
+// one below, which breaks both the preamble and every entry under it.
+func TestRecordKeepsAFencedExampleInThePreambleWhole(t *testing.T) {
+	preamble := "# Change Log\n\nEntries are written like this:\n\n" +
+		"```markdown\n## v1.0.0 (2024-01-01)\n\n- what changed\n```"
+	out := recordInto(t, preamble+"\n\n## v1.2.0 (2024-01-01)\n\n- something old\n",
+		&FileWriter{}, ccme.Version{Major: 2})
+
+	assert.True(t, strings.HasPrefix(out, preamble),
+		"the fenced example survives byte for byte:\n%s", out)
+	assertOrder(t, out, "## v1.0.0 (2024-01-01)", "## core@2.0.0 (", "## v1.2.0 (")
+	assert.Equal(t, 2, strings.Count(out, "```"), "the fence is neither split nor duplicated:\n%s", out)
+}
+
+// TestRecordSaysWhenTheFileKeepsItsOwnHead: a configured title that is never
+// written looks from the outside like a title dispat ignored, so the writer
+// says which of the two happened, once per write.
+func TestRecordSaysWhenTheFileKeepsItsOwnHead(t *testing.T) {
+	var buf strings.Builder
+	w := &FileWriter{Log: zerolog.New(&buf).Level(zerolog.DebugLevel)}
+	recordInto(t, "# Change Log\n\n## v1.2.0 (2024-01-01)\n\n- something old\n", w, ccme.Version{Major: 2})
+
+	out := buf.String()
+	assert.Contains(t, out, "existing changelog keeps its own head")
+	assert.Contains(t, out, `"package":"core"`)
+	assert.Contains(t, out, `"tag":"core@2.0.0"`)
+	assert.Contains(t, out, "CHANGELOG.md")
+	assert.Equal(t, 1, strings.Count(out, "keeps its own head"), "said once per write:\n%s", out)
+
+	// A file dispat has been writing is not the preamble path, and says
+	// nothing about it.
+	var wrote strings.Builder
+	own := &FileWriter{Log: zerolog.New(&wrote).Level(zerolog.DebugLevel)}
+	recordInto(t, "# Changelog\n\n## core@1.0.0 (2024-01-01)\n\n- old\n", own, ccme.Version{Major: 2})
+	assert.NotContains(t, wrote.String(), "keeps its own head")
 }

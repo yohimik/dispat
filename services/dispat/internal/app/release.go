@@ -399,20 +399,13 @@ func (a *App) githubDispatch(pl *plan.Plan) *ghDispatch {
 // ("owner/repo"), the token from the configured env var (default
 // $GITHUB_TOKEN).
 func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser, error) {
-	owner, repo := spec.Owner, spec.Repo
-	if owner == "" || repo == "" {
-		if env := os.Getenv("GITHUB_REPOSITORY"); env != "" {
-			parts := strings.SplitN(env, "/", 2)
-			if len(parts) == 2 {
-				if owner == "" {
-					owner = parts[0]
-				}
-				if repo == "" {
-					repo = parts[1]
-				}
-			}
-		}
-	}
+	// The environment completes the pair only when the configuration states
+	// neither half of it, which is the record renderer's rule too: one helper,
+	// so a release and the links inside its body can never be resolved from
+	// different sources. A half-configured pair is left as written and fails
+	// below, rather than crossing a configured owner with the environment's
+	// repo to reach a repository nobody named.
+	owner, repo := changelog.ResolveRepoEnv(spec.Owner, spec.Repo)
 	if owner == "" || repo == "" {
 		return nil, errors.New("no repository configured (set github.owner and github.repo, or $GITHUB_REPOSITORY)")
 	}
@@ -430,7 +423,15 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 	// configuration's: a workflow that states the repository only in
 	// $GITHUB_REPOSITORY would otherwise publish a body whose links point
 	// nowhere while the release beside them lands correctly.
+	//
+	// The API URL travels with them, and for the same reason. It is what
+	// decides whether "auto" derives a github.com URL at all, and the spec's
+	// is the resolved one: `dispat github --api-url https://ghe.corp/api/v3`
+	// overrides the configuration the format was built from, so a format
+	// keeping the configured value would publish github.com links into a body
+	// whose release lives on the enterprise host.
 	format.LinkOwner, format.LinkRepo = owner, repo
+	format.LinkAPIURL = spec.APIURL
 	return &github.Releaser{
 		APIURL:      spec.APIURL,
 		AllPackages: spec.AllPackages,

@@ -455,8 +455,9 @@ type RecordFormat struct {
 	// means the default order.
 	Sections []RecordSection
 
-	// DependencyLink turns a dependency line into a link: empty for the plain
-	// line, LinkAuto for the derived forge URL, anything else a template.
+	// DependencyLink turns a dependency line into a link: empty or LinkOff for
+	// the plain line, LinkAuto for the derived forge URL, anything else a
+	// template.
 	DependencyLink string
 	// NoChangesText replaces the sentence an entry with no sections carries;
 	// empty keeps the built-in sentences.
@@ -467,8 +468,8 @@ type RecordFormat struct {
 	// packages saying the same thing must produce the same policy key.
 	//
 	// CommitRefsPlacement is "off" (the renderer default) or "suffix";
-	// CommitRefsFormat the reference text; CommitRefsLink empty, LinkAuto or a
-	// URL template.
+	// CommitRefsFormat the reference text; CommitRefsLink empty, LinkOff,
+	// LinkAuto or a URL template.
 	CommitRefsPlacement string
 	CommitRefsFormat    string
 	CommitRefsLink      string
@@ -486,6 +487,13 @@ type RecordFormat struct {
 // LinkAuto is the link value that asks for a URL derived from the package's
 // own forge coordinates rather than written out as a template.
 const LinkAuto = "auto"
+
+// LinkOff is the written form of an unlinked line: the record renders the
+// plain text it renders when nothing is configured. It exists because an
+// omitted key inherits, so a package under a space that turned linking on has
+// no other way to turn it off — and "off" left to the template branch would
+// publish the word itself as the URL.
+const LinkOff = "off"
 
 // The built-in section keys, in the order an entry renders them when nothing
 // is configured. They are what a `sections` list names a built-in by.

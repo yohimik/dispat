@@ -547,17 +547,53 @@ func validateCommitRefs(label string, c *CommitRefsConfig) error {
 	return nil
 }
 
-// validateNoChangesText refuses a sentence beginning with the horizontal rule
-// `dispat self-update` cuts release notes at. An entry whose only content sat
-// below the cut would print as nothing at all after an update, which is a
-// failure nobody would think to look for in a changelog setting.
+// validateNoChangesText refuses a sentence carrying the horizontal rule
+// `dispat self-update` cuts release notes at. An entry whose content sat below
+// the cut would print as nothing at all after an update, which is a failure
+// nobody would think to look for in a changelog setting.
+//
+// The rule is refused wherever it appears, not only at the head: the cut takes
+// everything from the first rule down, so a sentence that opens on a line of
+// prose and closes under a rule loses its closing half exactly as a sentence
+// written entirely below one loses all of it. A multi-line noChangesText is
+// ordinary — a line and the link under it — so this is not a theoretical
+// shape.
 func validateNoChangesText(label, text string) error {
 	if strings.HasPrefix(strings.TrimSpace(text), "---") {
 		return fmt.Errorf(
 			"%s: noChangesText must not begin with \"---\": that is where `dispat self-update` cuts a release's notes, "+
 				"so the sentence would never be shown", label)
 	}
+	for _, line := range strings.Split(text, "\n") {
+		rule := strings.TrimSpace(line)
+		if !isRule(rule) {
+			continue
+		}
+		return fmt.Errorf(
+			"%s: noChangesText must not contain the horizontal rule %q: that is where `dispat self-update` cuts a "+
+				"release's notes, so nothing from that line down would ever be shown", label, rule)
+	}
 	return nil
+}
+
+// isRule reports a thematic break: three or more of `-`, `*` or `_`, spaces
+// aside, and nothing else on the line.
+//
+// It is self-update's own reading of a rule, spelled again here rather than
+// shared, so that the configuration refuses exactly the lines the notes parser
+// would cut at. A rule one of them sees and the other does not is a release
+// note published with its own content below the fold.
+func isRule(line string) bool {
+	line = strings.ReplaceAll(line, " ", "")
+	if len(line) < 3 {
+		return false
+	}
+	switch line[0] {
+	case '-', '*', '_':
+	default:
+		return false
+	}
+	return strings.Count(line, string(line[0])) == len(line)
 }
 
 // resolveSections validates one destination's `sections` list and resolves it

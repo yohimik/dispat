@@ -401,8 +401,10 @@ type SectionConfig struct {
 // entry byte for byte what it was before refs existed.
 type CommitRefsConfig struct {
 	// Placement decides where the reference appears: "off" (default) or
-	// "suffix", after the description and its attribution. "off" is a value
-	// rather than an absence, so a package can switch off what its space
+	// "suffix", after the description and any correction note and before the
+	// attribution. The note and the reference are part of what the line says
+	// about the work, and who did it comes after what was done. "off" is a
+	// value rather than an absence, so a package can switch off what its space
 	// turned on.
 	Placement string `json:"placement,omitempty"`
 	// Format is the reference's text, interpolated like every other record
@@ -411,7 +413,9 @@ type CommitRefsConfig struct {
 	Format string `json:"format,omitempty"`
 	// Link turns the reference into a markdown link. Empty renders it plain;
 	// "auto" derives the forge URL from the package's github owner and repo;
-	// anything else is a URL template interpolated the same way Format is.
+	// "off" renders it plain as a written value, which is how a package
+	// switches off what its space turned on; anything else is a URL template
+	// interpolated the same way Format is.
 	Link string `json:"link,omitempty"`
 }
 
@@ -442,19 +446,21 @@ type EntryFormatConfig struct {
 	Authors *AuthorsConfig `json:"authors,omitempty"`
 	// DependencyLink turns each line of the dependencies section into a link
 	// to the provider's release. Empty renders the plain line; "auto" derives
-	// the forge URL from the package's github owner and repo; anything else is
-	// a URL template interpolated against the release's variables plus
-	// $DISPAT_DEP_NAME, $DISPAT_DEP_FROM, $DISPAT_DEP_TO and $DISPAT_DEP_TAG.
+	// the forge URL from the package's github owner and repo; "off" renders
+	// the plain line as a written value, which is how a package switches off
+	// what its space turned on; anything else is a URL template interpolated
+	// against the release's variables plus $DISPAT_DEP_NAME, $DISPAT_DEP_FROM,
+	// $DISPAT_DEP_TO and $DISPAT_DEP_TAG.
 	//
 	// "auto" degrades to the plain line rather than to a broken one whenever
-	// the owner and repo are unresolvable, or a github API URL outside
-	// github.com is configured.
+	// the owner and repo are unresolvable, a github API URL outside github.com
+	// is configured, or the provider's tag is unknown.
 	DependencyLink string `json:"dependencyLink,omitempty"`
 	// NoChangesText replaces the sentence an entry with no sections carries.
 	// It is interpolated like every other record line, and an expansion that
-	// comes out empty falls back to the built-in sentences: an entry must
-	// never render empty. It must not begin with "---", which is where
-	// `dispat self-update` cuts a release's notes.
+	// comes out empty, or blank, falls back to the built-in sentences: an
+	// entry must never render empty. It must contain no horizontal rule, which
+	// is where `dispat self-update` cuts a release's notes.
 	NoChangesText string `json:"noChangesText,omitempty"`
 	// Sections states the whole order of the entry's sections, built-ins and
 	// custom ones together. An empty list is the default order: breaking

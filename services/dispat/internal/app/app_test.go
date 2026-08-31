@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/pkg/ccme"
 
+	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -170,6 +171,64 @@ func TestGithubReleaserResolution(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	_, err = githubReleaser(model.GitHubSpec{Owner: "acme", Repo: "mono"}, zerolog.Nop())
 	assert.ErrorContains(t, err, "GITHUB_TOKEN")
+}
+
+// TestGithubReleaserMirrorsTheResolvedCoordinatesOntoTheRecord: the body's
+// "auto" links hang off the repository the release is actually created in,
+// which is this resolution's answer rather than the configuration's. The API
+// URL travels with the owner and the repo, because it is what decides whether
+// "auto" derives a github.com URL at all: `--api-url` naming an enterprise
+// host would otherwise publish github.com links inside a release that lives
+// somewhere else.
+func TestGithubReleaserMirrorsTheResolvedCoordinatesOntoTheRecord(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
+	t.Setenv("GITHUB_TOKEN", "envtoken")
+
+	gh, err := githubReleaser(model.GitHubSpec{}, zerolog.Nop())
+	require.NoError(t, err)
+	assert.Equal(t, "envowner", gh.Format.LinkOwner)
+	assert.Equal(t, "envrepo", gh.Format.LinkRepo)
+	assert.Empty(t, gh.Format.LinkAPIURL, "the default endpoint stays the default")
+
+	// The flag override reaches githubReleaser as the spec's own API URL,
+	// having beaten the configured value in githubSpec; the format the config
+	// resolved still carries the configured one.
+	ghe, err := githubReleaser(model.GitHubSpec{
+		APIURL: "https://ghe.corp/api/v3",
+		Format: model.RecordFormat{
+			DependencyLink: model.LinkAuto,
+			LinkOwner:      "acme", LinkRepo: "mono", LinkAPIURL: "https://api.github.com",
+		},
+	}, zerolog.Nop())
+	require.NoError(t, err)
+	assert.Equal(t, "https://ghe.corp/api/v3", ghe.Format.LinkAPIURL,
+		"the record links resolve against the host the release is created on")
+
+	rel := &plan.Release{
+		Pkg:  &model.Package{Name: "core", Dir: t.TempDir(), Space: &model.Space{Name: "libs"}},
+		Next: ccme.Version{Major: 1},
+		Updates: []plan.ProviderUpdate{{
+			Name: "utils", From: ccme.Version{Major: 1}, To: ccme.Version{Major: 1, Minor: 1},
+			Tag: "utils@1.1.0",
+		}},
+	}
+	assert.NotContains(t, changelog.RenderSections(rel, ghe.Format), "https://github.com/",
+		"an enterprise endpoint declines the derivation rather than guessing a web host")
+}
+
+// TestGithubReleaserLeavesAHalfConfiguredPairAlone: the environment completes
+// the repository only when the configuration states neither half of it, which
+// is the record renderer's rule too. Crossing a configured owner with the
+// environment's repo would name a repository nobody stated and create the
+// release in it.
+func TestGithubReleaserLeavesAHalfConfiguredPairAlone(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
+	t.Setenv("GITHUB_TOKEN", "envtoken")
+
+	_, err := githubReleaser(model.GitHubSpec{Owner: "acme"}, zerolog.Nop())
+	assert.ErrorContains(t, err, "no repository")
+	_, err = githubReleaser(model.GitHubSpec{Repo: "mono"}, zerolog.Nop())
+	assert.ErrorContains(t, err, "no repository")
 }
 
 // guardRepo builds an App over a real one-commit repository on branch "main".
