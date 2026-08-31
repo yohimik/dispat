@@ -32,7 +32,7 @@ names.
 | run a script in every changed package, in order (`--since all` for every package) | [`dispat run <script>`](./run.md) |
 | run one declared script, once, right here           | [`dispat exec <script>`](./exec.md) |
 | choose between shell commands based on a condition  | [`dispat if <cond>`](./if.md) |
-| run one shell command per item of a list            | `dispat for <item>...`       |
+| run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
 
 `dispat run` knows about your monorepo. It computes a plan, finds which
 packages changed, and runs the script in each of them in dependency order;

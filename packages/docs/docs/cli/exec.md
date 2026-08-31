@@ -6,25 +6,26 @@ and sweeps no packages.
 
 Everything dispat runs is a shell command. Stages, hooks, and `run` scripts are
 strings handed to `/bin/sh -c`. That works well until a script needs to branch
-on a variable or call another script you already wrote.
+on a variable, call another script you already wrote, or loop over a list.
 
-Two small commands cover those needs.
+Three small commands cover those needs.
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
 $ dispat exec build --for pkg:core
+$ dispat for core web --do 'make "$DISPAT_ITEM"'
 ```
 
-Neither command plans a release. They ignore your packages and the dependency
-graph. They run one script and get out of the way.
+None of the three plans a release. They ignore your packages and the dependency
+graph. They run your script and get out of the way.
 
 ## Which command do I want
 
 | You want to                                        | Use                          |
 |----------------------------------------------------|------------------------------|
-| run a script in every changed package, in order (`--since all` for every package) | `dispat run <script>` |
-| run one declared script, once, right here           | `dispat exec <script>`       |
-| choose between shell commands based on a condition  | `dispat if <cond>`           |
+| run a script in every changed package, in order (`--since all` for every package) | [`dispat run <script>`](./run.md) |
+| run one declared script, once, right here           | [`dispat exec <script>`](./exec.md) |
+| choose between shell commands based on a condition  | [`dispat if <cond>`](./if.md) |
 | run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
 
 Use `dispat run` to compute a plan across your monorepo. It finds changed
