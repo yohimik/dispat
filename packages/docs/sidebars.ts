@@ -24,6 +24,7 @@ const sidebars: SidebarsConfig = {
   docs: [
     'getting-started',
     'concepts',
+    {type: 'doc', id: 'comparison', label: 'Beside other release tools'},
     {type: 'doc', id: 'monorepo', label: 'One repository or many'},
     {type: 'doc', id: 'control-repository', label: 'A control repository'},
     {
