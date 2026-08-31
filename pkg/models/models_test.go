@@ -105,6 +105,76 @@ func TestEntrySpacingDefaults(t *testing.T) {
 	}
 }
 
+// TestRecordFormatRoundTrip: the record options added for links, sections and
+// commit references marshal under their config keys and survive the trip. The
+// typed integration harness authors configs by marshalling these models, so a
+// tag that drifts from the loader's field table is a key a real run rejects.
+func TestRecordFormatRoundTrip(t *testing.T) {
+	f := File{
+		Changelog: &ChangelogConfig{
+			EntrySpacing: Int(1),
+			EntryFormatConfig: EntryFormatConfig{
+				DependencyLink: "auto",
+				NoChangesText:  "see the dispat changelog",
+				Sections: []SectionConfig{
+					{Title: "Added", Types: []string{"add"}, Bump: "minor"},
+					{Title: "features"},
+				},
+				CommitRefs: &CommitRefsConfig{Placement: "suffix", Link: "auto"},
+			},
+		},
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	cl := raw["changelog"].(map[string]any)
+	for _, key := range []string{"entrySpacing", "dependencyLink", "noChangesText", "sections", "commitRefs"} {
+		if _, ok := cl[key]; !ok {
+			t.Errorf("changelog is missing key %q: %s", key, data)
+		}
+	}
+
+	var back File
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	got := back.Changelog
+	if got.EntrySpacing == nil || *got.EntrySpacing != 1 {
+		t.Errorf("entrySpacing lost: %+v", got.EntrySpacing)
+	}
+	if got.DependencyLink != "auto" || got.NoChangesText != "see the dispat changelog" {
+		t.Errorf("link and text fields lost: %+v", got.EntryFormatConfig)
+	}
+	if len(got.Sections) != 2 || got.Sections[0].Title != "Added" ||
+		got.Sections[0].Bump != "minor" || len(got.Sections[0].Types) != 1 ||
+		got.Sections[1].Title != "features" {
+		t.Errorf("sections lost: %+v", got.Sections)
+	}
+	if got.CommitRefs == nil || got.CommitRefs.Placement != "suffix" || got.CommitRefs.Link != "auto" {
+		t.Errorf("commitRefs lost: %+v", got.CommitRefs)
+	}
+	// A format that never set the new options marshals without their keys, so
+	// yesterday's configs keep reading exactly as they were written.
+	plain, err := json.Marshal(File{Changelog: &ChangelogConfig{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plainRaw map[string]any
+	if err := json.Unmarshal(plain, &plainRaw); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"entrySpacing", "dependencyLink", "noChangesText", "sections", "commitRefs"} {
+		if _, ok := plainRaw["changelog"].(map[string]any)[key]; ok {
+			t.Errorf("unset option %q must not marshal: %s", key, plain)
+		}
+	}
+}
+
 func TestScriptLookupsAreCaseInsensitive(t *testing.T) {
 	// A map key holds the case its file wrote, and a name is matched against it
 	// case-insensitively, so neither side has to remember the other's spelling.
