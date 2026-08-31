@@ -1,5 +1,91 @@
 # Changelog
 
+## services/dispat/v1.6.0 (2026-08-31)
+
+### Features
+
+- dispat for runs a script once per item ([2aa6053](https://github.com/yohimik/dispat/commit/2aa60534c97080afd303c944339bbface82123cd)) (by yohimik, Claude Fable 5)
+  The third shell helper, beside if and exec. A POSIX `for x in ...; do
+  ...; done` copied into a configured script is the one construct that
+  breaks the moment `shell` names something else, and a loop is what a
+  script reaches for the instant it has more than one thing to do.
+
+  The list comes from exactly one source: positional items, which need no
+  configuration at all; -p, -s or -g, which iterate over the packages the
+  terms name, over the spaces themselves, or over the versioning groups
+  themselves; or --changed, --unchanged and a bare --since, which iterate
+  over the window every sweeping command covers and over its complement.
+  Under a window source the same three selection flags stop being the
+  source and become the narrowing they are everywhere else, exactly as
+  they compose for `dispat if --changed`.
+
+  Every iteration exports DISPAT_ITEM, DISPAT_INDEX and DISPAT_TOTAL,
+  appended last so nothing an item or an enclosing run carries can shadow
+  them, plus the release environment's own names for what the item is:
+  DISPAT_PACKAGE, DISPAT_SPACE, DISPAT_DIR and DISPAT_GROUP. A script
+  therefore moves between a release stage and a loop unchanged.
+
+  Like `dispat if`, the command conditionally requires configuration: a
+  literal list reads nothing and starts no update check, and every source
+  that asks about the monorepo defers to the configured phase, where the
+  loop body also picks up the configured shell -- which is the whole point
+  of the command.
+
+- the release environment names the versioning group ([a06b54f](https://github.com/yohimik/dispat/commit/a06b54fcbb338428c13a913a21081e5f7cbc44c6)) (by yohimik, Claude Fable 5)
+  DISPAT_GROUP is the package's third address, beside its name and its
+  space: a script that has to know which packages move together with this
+  release could not derive it from the other two, since a group may span
+  spaces and a space may version independently. It is rendered from the
+  package's own group -- a declared versionGroups entry, or the space's
+  name where a space versions as one -- and left unset rather than empty
+  for an independently versioned package, the same unset-not-empty
+  convention DISPAT_COUNTER keeps.
+
+- the step environment carries each update's tag ([ed151aa](https://github.com/yohimik/dispat/commit/ed151aa3812eaca304f224f93146864ac82573a3)) (by yohimik, Claude Fable 5)
+  A nested step command that aligns its updates to the run rebuilt them
+  from the environment without their tags, and the renderer rightly
+  declines an auto dependency link it cannot spell, so an aligned record
+  rendered plain lines where the run's own record linked them. The
+  listing now writes DISPAT_UPDATED_<KEY>_TAG beside the name and the
+  versions, the step reader carries it back, and absence stays legal: a
+  parent run predating the variable leaves the tag empty and the decline
+  applies as before. Tags alone are never drift, because a tag mismatch
+  is not a movement mismatch and either side of the alignment rendered
+  its tags through the same formats.
+
+### Fixes
+
+- the loop speaks at the level if does ([a710926](https://github.com/yohimik/dispat/commit/a710926db91b69bc2159fade9867d73435576fdf)) (by yohimik, Claude Fable 5)
+  The shell helpers are glue, and if says everything at debug: a chosen
+  branch, an empty result, nothing at info. for's summary and its empty
+  list said the same kinds of things one level louder, so a quiet pipeline
+  gained lines its scripts did not write. Both drop to debug; the
+  --require-items refusal stays an error, because a refusal is not
+  narration.
+
+- every source package of a unit reaches DueTo ([c7bfcb5](https://github.com/yohimik/dispat/commit/c7bfcb57978e41752f703c187a38b49ef3c5cf44)) (by yohimik, Claude Fable 5)
+  A unit written over several packages propagated its bump correctly but
+  credited only the package the traversal happened to arrive from: the
+  walk visits a target once, and the first source out of the queue was
+  the one recorded. A consumer of all of them was told it releases
+  because of one, and the miscredit was not cosmetic. A catch-up record
+  reaches a provider that is not releasing only through the attribution,
+  so the dependencies section listed one movement and silently dropped
+  the rest, and a release explained by a releasing source was labelled a
+  catch-up whenever the credited source happened to be the one already
+  shipped. Section 9.2 attributes the whole source set, prov[d] |=
+  sources, and the plan now records one contribution per source package.
+
+### Dependencies
+
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.6.0): 1.5.0 -> 1.6.0
+
+### Authors
+
+- yohimik
+- Claude Fable 5
+
+
 ## services/dispat/v1.5.0 (2026-08-31)
 
 ### Features
