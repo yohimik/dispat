@@ -1,5 +1,10 @@
 # Changelog
 
+## packages/docs/v1.5.0 (2026-08-31)
+
+No changes.
+
+
 ## packages/docs/v1.4.0 (2026-08-30)
 
 ### Features

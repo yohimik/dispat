@@ -1,0 +1,236 @@
+# The TinyGo spike
+
+Read this page to understand why dispat's six release binaries are built with the Go compiler, and why a release also
+carries two linux binaries built by a TinyGo fork at roughly 60% of the size. It describes a spike: an experiment kept
+in the repository because its answer is a version number away from changing, not a gate any job runs.
+
+TinyGo produces much smaller binaries than gc for the same source. A CLI distributed as six platform binaries has an
+obvious interest in that, so the question was asked properly, with the whole answer written down.
+
+## What the spike is
+
+[`Dockerfile.tinygo`](https://github.com/yohimik/dispat/blob/main/Dockerfile.tinygo) at the repository root, run by the
+`tinygo-spike` script in the root `dispat.yaml`:
+
+```sh
+dispat exec tinygo-spike
+```
+
+It is a chain of build targets, one question each, and no target aborts. A spike exists for its log, and a build that
+dies on its first failure reports one fact where the matrix needs all of them, so every step records its own exit
+status and the export stage collects the logs whatever they say. They land in `coverage/tinygo-spike/`.
+
+| Stage | Asks |
+|-------|------|
+| `tinygo-spike-build` | Does TinyGo build the CLI for four unix targets, and how large is the result beside its gc twin? |
+| `tinygo-spike-run` | Does the binary run, report its platform, and reach the network? |
+| `tinygo-spike-net` | The four network layers one at a time, both toolchains, plus what `-X` does to a version variable and what actually arrives on a TLS socket. |
+| `tinygo-spike-fork` | Does the [fork](#the-fork) install and report its version? |
+| `tinygo-spike-selfupdate` | Does dispat update itself over real TLS when built by the fork? |
+| `tinygo-spike-test` | Does `tinygo test` run each module's unit tests? |
+
+Buildx reaches only linux, so the darwin binaries the spike builds are never executed there. The other half runs
+natively on a Mac:
+
+```sh
+sh scripts/tinygo-spike-darwin.sh
+```
+
+It mirrors the same stages for `darwin/arm64` and, when Rosetta answers, `darwin/amd64`, writing
+`coverage/tinygo-spike/darwin-*.log`. It extracts the container's probe programs from the Dockerfile at run time rather
+than carrying copies, so the two halves cannot drift apart.
+
+## The verdict, as of TinyGo 0.41.1
+
+**No, and the reason is the network.** TinyGo does not use the host's `net`. It ships a port of the package over
+netdev, its network *device driver* interface, which a driver from `tinygo.org/x/drivers` installs at startup. On a
+host operating system there is no such driver, so the default netdev is a stub: DNS resolution and TLS both return
+`Netdev not set`, and `net/http` dereferences nil and aborts.
+
+That is every release path dispat has: the GitHub API, webhooks, self-update's download, the update check. So nothing
+is built with it. The other answers were good, which is why the file is kept rather than deleted.
+
+The spike also found the linker difference the CLI's own source now records: upstream TinyGo's `-X` applies only to a
+string variable declared with no value, and silently ignores the flag for one declared with a value.
+`internal/cli.Version` is therefore declared bare. A stamped version matters more than it looks: a binary reporting
+`dev` is a local build to [self-update](../reference/self-update.md), which refuses one before it reaches the network,
+so nothing below could be asked at all until this was fixed. The fork stamps both declarations, which the `ldflags` row
+records; the bare one is what both toolchains agree on.
+
+### Why a "does https work" check is not enough
+
+A stubbed `crypto/tls` returns no errors. It completes a handshake that never happened and writes plaintext to port
+443, and a client asking itself whether the request went well is happy throughout. Only the far end of the wire can
+tell the two apart, so the spike holds the socket itself. An assertion server records a connection's first bytes (a
+ClientHello opens `0x16 0x03`), then runs a real handshake with the Go compiler's own TLS, and prints both facts. Every
+instrument in the spike is built with gc for this reason. The thing measuring TLS is never made of the thing under
+measurement.
+
+## The fork
+
+[`github.com/yohimik/tinygo`](https://github.com/yohimik/tinygo) closes both gaps the verdict rests on: a real
+`crypto/tls` and a netdev that speaks to the host's sockets. The spike fetches it with dispat's own
+[install command](../cli/install.md), which is also how you would install it:
+
+```sh
+dispat install yohimik/tinygo --prerelease --release 0.42.0-net.4 \
+  --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
+```
+
+The base image stays at upstream 0.41.1 and every stage up to `tinygo-spike-net` still measures it, so the verdict
+above keeps its evidence. The two fork stages are the re-asking.
+
+The fetch is a build-time network step, and it sits in a stage of its own so that editing a probe below it never
+re-downloads a toolchain. That cuts both ways: no target here aborts, so a *failed* fetch exits 0 like every other
+step and is cached as a perfectly valid layer. Re-asking after a release lands wants the layer thrown away:
+
+```sh
+docker buildx build --file Dockerfile.tinygo --target tinygo-spike-export \
+  --no-cache-filter tinygo-spike-fork --output type=local,dest=coverage/tinygo-spike .
+```
+
+`fork.log` says which toolchain was installed, and `selfupdate.log` opens by naming the toolchain its rows are about,
+so a run served from a cached failure reports upstream rather than silently passing them off as the fork's.
+
+## Sizes
+
+The size question is what made the network worth proving, so it is measured the same way every time: the same source,
+the same four unix targets, both toolchains in one environment, and both stamped. The gc column is the release
+pipeline's exact line (`-trimpath -s -w`), the TinyGo column the line a release would replace it with (`-opt=z
+-no-debug`). There are two datasets, because the two toolchain generations answer differently and only one of them can
+reach a network.
+
+Upstream TinyGo 0.41.1, measured by `tinygo-spike-build` inside the spike's container, whose binaries cannot resolve a
+name or open a TLS connection:
+
+```
+target                tinygo        gc            ratio
+linux/amd64           4628472       10666146      0.434
+linux/arm64           4707712       9699490       0.485
+darwin/amd64          4787896       10863904      0.441
+darwin/arm64          4361072       9912290       0.440
+```
+
+The fork at 0.42.0-net.4, which carries a real `net`, `crypto/tls`, `crypto/x509`, process spawning and signal
+delivery, cross-built for all four targets from one macOS host, its own toolchain over go1.26.7:
+
+```
+target                tinygo        gc            ratio
+linux/amd64           6475800       10686626      0.606
+linux/arm64           6107688       9699490       0.630
+darwin/amd64          6699208       10884416      0.615
+darwin/arm64          5771008       9928850       0.581
+```
+
+The fork's binaries are the larger of the two TinyGo columns by about 1.5 MB, which is what a real TLS stack and a real
+certificate verifier weigh. They are still around 60% of their gc twins.
+
+## The self-update matrix
+
+`tinygo-spike-selfupdate` is the acceptance test the fork exists for: dispat updating *itself*, through the one release
+path that touches every layer at once. Listing, download, digest check, a smoke execution of the new binary, and the
+atomic swap that keeps the old one as `.backup`.
+
+The server it runs against is `sufake`, generated per run: a CA and a leaf valid for `localhost` and `127.0.0.1`, the
+same release listing shape the black-box suite's fixture serves, and a log line for every connection and every request
+carrying the negotiated TLS version, cipher and SNI. The client is pointed at the root with `SSL_CERT_FILE`, so the
+fork's own x509 root loading is under test too.
+
+| Row | Setup | Expected |
+|-----|-------|----------|
+| zero | The fork's binary stamped `1.0.0` | Reports `dispat 1.0.0`, not `dev` |
+| A | gc control, CA trusted, full update | Exit 0, now `1.1.0` |
+| B | Fork `--check`, CA trusted | Exit 1, pending, API paths only |
+| B2 | The same by IP literal | Exit 1, SNI waived by the client |
+| C | Fork full update, CA trusted | Exit 0, binary `1.1.0`, backup `1.0.0` |
+| C2 | `--rollback`, nothing listening | Exit 0, binary `1.0.0` again |
+| D | C's setup with the CA withheld | Nonzero, a certificate error |
+| E | Plain HTTP at the TLS port | Nonzero, refused by the listener |
+| F | The net stage's layers, re-asked with the fork | Recorded |
+
+Rows D and E are the ones a stub cannot survive. D fails only if the client really verified a chain against real roots,
+which a no-op handshake never does; E is refused by the listener itself, and the connection log shows the request
+method's bytes where a ClientHello belongs.
+
+On macOS the two toolchains need not agree about where roots come from: a darwin build from the Go compiler hands
+certificate verification to the platform verifier rather than reading `SSL_CERT_FILE`, so a generated CA can be
+invisible to a trusted row even though the file is perfectly good. The darwin script probes that with both a Go client
+and curl, records what each said, and never modifies the keychain: trusting a generated root to make a row pass would
+measure the modification rather than the toolchain. Read the trusted rows against that answer, and compare the gc
+control with the fork row to tell a verifier's refusal from a toolchain's failure. D and E hold either way.
+
+## What 0.42.0-net.4 answered
+
+The matrix passes at 0.42.0-net.4, as it first did at 0.42.0-net.2: the fork implements `os.StartProcess` over
+`posix_spawn`, so C downloads the release, executes the new binary as its own smoke check, swaps it in and keeps the
+old one, and C2 puts the old one back with nothing listening. It passes on `linux/arm64` in the container and on both
+`darwin/arm64` and `darwin/amd64` on a Mac. Rows D and E hold, and F walks the network layers again with a real
+handshake read from the far end of the wire.
+
+The matrix is not the whole product, and the question a release turns on is the wider one: the black-box integration
+suite run against a fork-built binary rather than a gc one. That suite found four faults at 0.42.0-net.2, and all four
+are closed by net.4.
+
+**Process groups are honoured.** `os.StartProcess` accepts `SysProcAttr.Setpgid` through `POSIX_SPAWN_SETPGROUP`, so
+dispat puts every script it runs into its own process group as it always has. Any other `Sys` field still fails, but it
+fails closed and names the field it could not honour. The 275 "sys setting not implemented" failures the suite reported
+at net.2 are gone.
+
+**Redirects are followed.** `net/http` carries the redirect loop again: ten hops, 301, 302 and 303 rewritten to GET,
+307 and 308 replayed through `GetBody`, and credentials stripped when a hop crosses hosts. Every GitHub release asset
+redirects to a content host, so this is what `dispat install` and self-update's download step need against real GitHub.
+
+**The dispatch deadlock is fixed.** The intermittent stop in the concurrent dispatch was two faults: an upstream
+`RWMutex` that conflated readers holding the lock with readers queued for it, and a darwin `fcntl` variadic call that
+passed its argument wrongly and so broke `CloseOnExec` and descriptor inheritance. The suite runs to completion.
+
+**Signals are delivered.** At net.3 a fork-built binary installed the operating system handler `signal.Notify` asked
+for, which was enough to suppress the default disposition, and then delivered nothing to the channel: a fork-built
+dispat neither shut down gracefully nor died, and only `SIGKILL` ended it. The receiving goroutine parked itself and
+the only thing that resumed it was the cooperative scheduler's idle hook, which a hosted target running under
+`-scheduler=threads` never calls. net.4 gives the receiver a futex of its own, woken by the handler on the protocol the
+handler already ran, and gives `signal.Stop` a futex rather than a spin. `SIGINT` and `SIGTERM` now reach
+`signal.NotifyContext`, which is the one signal call dispat makes.
+
+Against a fork-built `darwin/arm64` binary the black-box suite reports 543 tests, 694 counting subtests, all passing,
+none failing, in 173 seconds, with one skip: the darwin trust row described above, which the platform verifier decides
+rather than the toolchain. That includes the four tests an interrupt has to satisfy, since it must reach the in-flight
+script, cancel the packages behind it, report the outcome to a webhook listener and give the release lock back. A
+graceful shutdown under the fork binary completes in 3.2 seconds.
+
+So the fork gives all of it: real sockets, real TLS, real certificate verification, real process spawning, real signal
+delivery, and a suite of 694 black-box assertions that pass against it, in a binary around 60% of gc's size. That is
+what puts `dispat-tiny-linux-amd64` and `dispat-tiny-linux-arm64` on a release beside the six the self-update contract
+names.
+
+### Caveats a fork-built release carries
+
+Carried rather than fixed, because none of them blocks the matrix or the suite, and all of them change what a reader
+should expect:
+
+- **`http.Client.Timeout` arms nothing.** The fork's `net/http` keeps the field and decorates an error with it, but no
+  clock is started from it, so a server that accepts a connection and then says nothing can block a download for as
+  long as it likes. dispat sets that timeout on its self-update and install clients, and under a fork build it is
+  inert.
+- **Socket deadlines stretch.** The netdev `Recv` path restarts `SO_RCVTIMEO` after `EINTR`, so a read deadline is
+  measured per uninterrupted attempt rather than once. Under garbage collection pressure a deadline can outlast the
+  duration it was set to.
+- **A rare hang under emulation.** Roughly one run in three hundred hangs on `amd64` under QEMU, in the emulator's
+  futex rather than in the program. It is not reproducible on native hardware, and the fork's own release notes carry
+  it.
+- **darwin roots reach `net/http` only.** On macOS the fork loads the platform's certificate roots for `net/http` but
+  not for a bare `crypto/tls` dial, which is why `darwin-net.log` shows an `https` request returning 200 beside a raw
+  TLS row refusing the same certificate. dispat only ever reaches TLS through `net/http`, so nothing in dispat sees
+  this.
+- **`signal.Ignored` does not link.** The runtime has never implemented `os/signal.signal_ignored`, so a program
+  calling it fails at link time. dispat's only signal call is `signal.NotifyContext`, so nothing in dispat reaches it.
+
+## Reading the logs
+
+The logs are the artefact. Each is a sequence of `=== what ===` headers followed by the step's output and its
+`exit=` status, so a step that failed says so where it happened rather than stopping the run. `fork.log` carries the
+toolchain version that was installed; `selfupdate.log` carries the matrix above, with `sufake:` lines interleaved from
+the far end of the wire.
+
+Nothing here gates a release, and nothing in CI runs it. Re-asking the question is bumping one version number in
+`Dockerfile.tinygo` and running one command.
