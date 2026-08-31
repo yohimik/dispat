@@ -37,6 +37,24 @@ Selection happens in three steps, in this order:
 Run `dispat <script>` as a shorthand whenever `<script>` is not a command name. Both spellings take the same flags and
 narrow to the same folders.
 
+## Which command do I want
+
+| You want to                                        | Use                          |
+|----------------------------------------------------|------------------------------|
+| run a script in every changed package, in order (`--since all` for every package) | [`dispat run <script>`](./run.md) |
+| run one declared script, once, right here           | [`dispat exec <script>`](./exec.md) |
+| choose between shell commands based on a condition  | [`dispat if <cond>`](./if.md) |
+| run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
+
+`dispat run` knows about your monorepo. It computes a plan, finds which packages changed, and runs the script in each
+of them in dependency order; `--since all` widens the sweep to every package, changed or not. `dispat exec` ignores
+the dependency graph. It looks up one script by name and runs it.
+
+[`dispat for`](./for.md) sits between the two. Like `dispat run` it can visit every changed package, but it runs the
+shell text you typed rather than a script each package declares, one item at a time, in the folder you invoked it
+from, with the item described by `DISPAT_*` variables. Use `dispat run` when each package says what the work is; use
+`dispat for` when the command line does, or when the list is not packages at all.
+
 ## Choosing the packages
 
 Three flags name the same thing three ways. Use `--package` (`-p`) to name packages, `--space` (`-s`) to name spaces
