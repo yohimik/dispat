@@ -68,6 +68,13 @@ type providerUpdate struct {
 	// script can tell a prerelease dependency from a stable one — the case
 	// §9.4 reports as W203 and cannot make safe by itself.
 	Channel string
+	// Tag is the release tag the new version was published under, rendered
+	// through the *provider's* own tagFormat. A consumer's script cannot
+	// derive it: the format belongs to the provider's configuration, and a
+	// consumer guessing at it would fetch a tag nobody created. It is also
+	// what a record's dependency line links to, which is why a nested step
+	// command reads it back out of this listing.
+	Tag string
 }
 
 // workspaceVersion is one entry of the workspace listing: a package and the
@@ -113,6 +120,7 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 			OldVersion: u.From.String(),
 			NewVersion: u.To.String(),
 			Channel:    pr.Channel,
+			Tag:        u.Tag,
 		})
 	}
 	return updates
@@ -156,12 +164,29 @@ func WorkspaceEnv(p *plan.Plan, log zerolog.Logger) []string {
 }
 
 // updatedEnv renders the live provider updates the same way, under
-// DISPAT_UPDATED_*. It is built per task because the update list is: which
-// providers are still live differs between a package's build and its publish.
+// DISPAT_UPDATED_*:
+//
+//	DISPAT_UPDATED_<KEY>_NAME            the raw provider name
+//	DISPAT_UPDATED_<KEY>_SPACE           the space the provider belongs to
+//	DISPAT_UPDATED_<KEY>_OLD_VERSION     version the consumer was on
+//	DISPAT_UPDATED_<KEY>_NEW_VERSION     version the consumer picks up
+//	DISPAT_UPDATED_<KEY>_CHANNEL         channel the provider releases on
+//	DISPAT_UPDATED_<KEY>_TAG             tag the new version is published under
+//
+// It is built per task because the update list is: which providers are still
+// live differs between a package's build and its publish.
+//
+// Every field of a listed key is written even when its value is empty, the
+// same contract the listings themselves keep: a script addressing a key that
+// the listing names reads a variable rather than an unset name. A plan always
+// renders a tag for an update it carries, so an empty _TAG means the update
+// reached this renderer from somewhere that could not state one, and saying so
+// with an empty value is honest where omitting the variable would be
+// indistinguishable from a typo in the key.
 func updatedEnv(updates []providerUpdate) []string {
 	keys := make([]string, 0, len(updates))
 	taken := make(map[string]bool, len(updates))
-	out := make([]string, 0, len(updates)*5+1)
+	out := make([]string, 0, len(updates)*6+1)
 	for _, u := range updates {
 		k := plan.EnvKey(u.Package)
 		if taken[k] {
@@ -175,7 +200,8 @@ func updatedEnv(updates []providerUpdate) []string {
 			pre+"_SPACE="+u.Space,
 			pre+"_OLD_VERSION="+u.OldVersion,
 			pre+"_NEW_VERSION="+u.NewVersion,
-			pre+"_CHANNEL="+u.Channel)
+			pre+"_CHANNEL="+u.Channel,
+			pre+"_TAG="+u.Tag)
 	}
 	// Set even when empty: `for k in $DISPAT_UPDATED_PACKAGES` should iterate
 	// zero times, not read an unset variable.

@@ -116,7 +116,15 @@ DISPAT_UPDATED_CORE_SPACE="libs"
 DISPAT_UPDATED_CORE_OLD_VERSION="1.2.3"
 DISPAT_UPDATED_CORE_NEW_VERSION="1.3.0"
 DISPAT_UPDATED_CORE_CHANNEL="stable"
+DISPAT_UPDATED_CORE_TAG="core@1.3.0"          # the provider's own tagFormat spelled it
 ```
+
+`_TAG` holds the release tag the provider's new version is published under. The provider's space owns the
+[`tagFormat`](../configuration/versions.md#tagformat) that renders it, so a consumer cannot derive the tag from the
+name and the version alone. Read it whenever a script has to name the provider's release rather than its version, such
+as fetching that tag or linking to it. A [step command](./releasing/steps.md) invoked inside a run reads the same
+field, which is how a record it writes keeps the `dependencyLink: auto` links of its dependencies section. Every field
+of a listed key is set even when it is empty, so addressing a key the listing names never reads an unset variable.
 
 "Picks up" is deliberately wider than "was bumped by". A provider that releases alongside this package for its own
 reasons is listed, even with no propagation between them. The two ship together, so the consumer's manifests still have

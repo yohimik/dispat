@@ -61,6 +61,12 @@ the planned version and provider movements listed in `DISPAT_UPDATED_*`. If a pl
 `W228`, but if a plan cannot align because a package is missing or renders a different tag, dispat halts with `E219`
 and writes nothing.
 
+Each movement carries the provider's release tag in `DISPAT_UPDATED_<KEY>_TAG`, so a corrected record still resolves
+its [`dependencyLink: auto`](../../configuration/records.md#linking-a-dependency-line-to-its-release) targets. A run
+started by a dispat older than that field states the movements without the tags, and the dependency lines of a
+corrected record render as plain text there. Tags alone never count as drift, because a movement is what a record
+states.
+
 The `dispat github` command reads release attachments from `DISPAT_EXPORT_GITHUB`, whether set by an earlier stage or
 appended to `$DISPAT_OUTPUT`. It logs warning `W229` if run before the git tag exists, because GitHub would otherwise
 create the tag at the default branch HEAD, so run your commit step first. Running any step twice within a single flow

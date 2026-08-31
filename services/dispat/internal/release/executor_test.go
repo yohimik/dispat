@@ -231,7 +231,11 @@ func fillUpdates(p *plan.Plan) {
 			}
 			seen[prov] = true
 			rel.Updates = append(rel.Updates, plan.ProviderUpdate{
-				Name: prov, From: pr.Previous(), To: pr.Next,
+				// The tag is rendered from the provider's own release, exactly
+				// as plan.Compute renders it: a fixture stating a movement
+				// without the tag it was published under would describe an
+				// update the planner cannot produce.
+				Name: prov, From: pr.Previous(), To: pr.Next, Tag: pr.TagName(),
 			})
 		}
 		for _, prov := range rel.DueTo {
@@ -654,6 +658,8 @@ func TestRunVersionStageWorkspaceVersions(t *testing.T) {
 	assert.Equal(t, "1.0.0", envValue(t, env, "DISPAT_UPDATED_A_OLD_VERSION"))
 	assert.Equal(t, "1.1.0", envValue(t, env, "DISPAT_UPDATED_A_NEW_VERSION"))
 	assert.Equal(t, "stable", envValue(t, env, "DISPAT_UPDATED_A_CHANNEL"))
+	assert.Equal(t, "a@1.1.0", envValue(t, env, "DISPAT_UPDATED_A_TAG"),
+		"the provider's own tagFormat rendered it; a consumer cannot derive it")
 
 	assert.Equal(t, "", envValue(t, r.envs["build a"], "DISPAT_UPDATED_PACKAGES"),
 		"empty, not unset: a for-loop over it must iterate zero times")

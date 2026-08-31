@@ -74,6 +74,14 @@ func stepRunEnv() (*runEnv, error) {
 // error, the same rule as an unparseable pinned version: the record's
 // dependency lines are at stake, and writing them wrong is worse than
 // failing a leg that can re-run.
+//
+// The provider's tag is read beside the movement and deliberately stays out
+// of that strictness. It is what a record's `dependencyLink: auto` hangs the
+// line off, and a step invoked by a run older than the variable inherits an
+// environment that never carried one; the update is still a true statement of
+// the movement, and the renderer already declines an "auto" link it has no tag
+// for. Refusing the leg over an absent tag would turn a cosmetic difference
+// into a failed release.
 func (e *runEnv) readUpdates() error {
 	list, ok := os.LookupEnv(plan.UpdatedPackagesEnvVar)
 	if !ok {
@@ -89,7 +97,9 @@ func (e *runEnv) readUpdates() error {
 			return fmt.Errorf("%s names %s, but the %s_* variables do not describe an update",
 				plan.UpdatedPackagesEnvVar, key, pre)
 		}
-		e.updates = append(e.updates, plan.ProviderUpdate{Name: name, From: from, To: to})
+		e.updates = append(e.updates, plan.ProviderUpdate{
+			Name: name, From: from, To: to, Tag: os.Getenv(pre + "_TAG"),
+		})
 	}
 	return nil
 }
@@ -212,6 +222,19 @@ func (a *App) alignStep(pl *plan.Plan, env *runEnv) error {
 
 // sameUpdates reports whether two update listings state the same movements
 // in the same order.
+//
+// Movements only: the providers' tags are carried by both listings and
+// compared by neither. Drift is what the alignment exists to correct, and a
+// tag is not a movement — two listings naming the same providers at the same
+// versions describe the same run whatever their tags are spelled like, so a
+// tag alone must not raise W228 over a record that says the right thing.
+//
+// Nothing is lost by leaving it out, because of which listing survives in each
+// branch. Agreement keeps the replan's own updates, whose tags this process
+// rendered through each provider's real tagFormat. Drift replaces them
+// wholesale with the environment's, whose tags the run rendered the same way
+// and wrote into DISPAT_UPDATED_<KEY>_TAG. Either way the surviving listing's
+// tags came from the configuration that owns them.
 func sameUpdates(a, b []plan.ProviderUpdate) bool {
 	if len(a) != len(b) {
 		return false

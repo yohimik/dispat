@@ -351,3 +351,77 @@ func TestStepsCatchUpEntrySpansTheProvidersMovement(t *testing.T) {
 	assert.Contains(t, string(spanLog), "core: 0.1.0 -> 0.1.1",
 		"the script environment reads the same span the records carry")
 }
+
+// TestStepsAlignedRecordsKeepTheirDependencyLinks: an aligned record links its
+// dependency lines to the providers' releases, exactly as the record the run
+// would have written itself.
+//
+// A dependency line's "auto" link is built from the provider's release tag,
+// which only the provider's own tagFormat can spell. The run knows it, so it
+// states it in DISPAT_UPDATED_<KEY>_TAG beside the movement, and a step whose
+// replan drifted picks the whole listing up from there. Without the tag the
+// aligned record renders plain lines where an ordinary record links them, and
+// a published record is permanent.
+//
+// The drift is forced the way a real one arrives: a tag the run did not create
+// appears mid-run — a concurrent job publishing the provider is the plausible
+// source — and the consumer's replan reads the provider as already released
+// and drops it from its updates. That is the "provider dropped as already
+// released" shape the alignment exists for.
+func TestStepsAlignedRecordsKeepTheirDependencyLinks(t *testing.T) {
+	r := harness.New(t)
+	bin, _ := harness.Build(t)
+	r.AddBareRemote()
+
+	cfg := harness.BaseFile(1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true,
+		Name: "steps-test", Email: "steps@example.com"}
+	// The coordinates alone, with the recorder off: the changelog borrows them
+	// to derive the "auto" link, and the assertion stays on the file.
+	cfg.GitHub = &models.GitHubConfig{Enabled: models.Bool(false), Owner: "acme", Repo: "mono"}
+	cfg.Changelog = &models.ChangelogConfig{
+		EntryFormatConfig: models.EntryFormatConfig{DependencyLink: "auto"},
+	}
+	cfg.Scripts = map[string]models.Script{
+		"build":  {echoBuild},
+		"record": {bin + " changelog", bin + " commit --tag --push"},
+		// The interloper, in the consumer's own publish stage so that it lands
+		// after the provider's leg is done recording: a core tag the run never
+		// planned, which the wiring has no reason to mask.
+		"stray": {"git tag core@0.2.0"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, IsBuildWaitingPublish: models.Bool(true),
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
+		"svc": {Path: models.PathList{"services"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"stray", "record"}}},
+	}
+	cfg.Dependencies = models.Dependencies{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("services", "web")
+
+	// The consumer moves for its own reasons, so it releases whatever the
+	// interloping tag does to the provider's replanned state.
+	r.Commit("feat(core): the provider moves")
+	r.WriteFile("services/web/w.txt", "w")
+	r.Commit("feat(web): the consumer moves too")
+
+	res := r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("web@0.1.0"), "tags: %v", r.TagList())
+
+	// The drift happened and was corrected: without this the scenario would
+	// prove nothing, because a replan agreeing with the run keeps its own
+	// updates and their locally rendered tags.
+	assert.Contains(t, res.Stdout, "W228",
+		"the interloping tag drifted the replan's updates, stdout:\n%s", res.Stdout)
+	assert.NotContains(t, res.Stdout, "E219")
+
+	entry := entryOf(t, spacedChangelog(t, r, "services", "web"), "web@0.1.0")
+	assert.Contains(t, entry,
+		"- [core](https://github.com/acme/mono/releases/tag/core@0.1.0): 0.0.0 -> 0.1.0",
+		"the aligned record links the run's own provider tag:\n%s", entry)
+	assert.NotContains(t, entry, "releases/tag/:",
+		"and never an empty tag appended to the releases path")
+}
