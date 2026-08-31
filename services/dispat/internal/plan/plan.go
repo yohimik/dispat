@@ -527,10 +527,14 @@ func (d Diagnostic) String() string {
 // is the consumer-side view of §9.2 that §13.7b asks implementations to offer:
 // "which of my packages are behind their dependencies, and behind which?".
 type StaleSource struct {
-	Provider string    // the package the contribution came from
-	Commit   string    // the commit carrying the unit
-	Level    int       // hops from the provider to this package
-	Bump     ccme.Bump // the bump the unit propagates
+	Provider string // the package the contribution came from
+	Commit   string // the commit carrying the unit
+	// Level is the number of hops to this package, measured from the unit's
+	// whole source set the way §9.2 measures depth. A unit written over
+	// several packages records one contribution per source, all at the
+	// target's own level.
+	Level int
+	Bump  ccme.Bump // the bump the unit propagates
 }
 
 // ProviderUpdate is one provider whose version this release picks up, with

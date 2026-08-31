@@ -1289,6 +1289,50 @@ func TestRecordsAliasTagFailureIsOnlyAWarning(t *testing.T) {
 // after have collapsed onto the published version, and a body reading them
 // would say "0.1.1 -> 0.1.1" — the movement line the docs leg of the 1.3.0
 // release actually shipped.
+func TestRecordsCatchUpSpansEveryProviderOfAMultiScopeUnit(t *testing.T) {
+	// One commit written across two providers, published for the providers
+	// alone: the consumer's catch-up reaches both movements only through the
+	// unit's attribution, because neither provider releases beside it. The
+	// plan attributes the unit's whole source set (SPEC.md, section 9.2:
+	// prov[d] |= sources), so the record spans both; crediting only the
+	// package the traversal arrived from left the second movement out of the
+	// catch-up's dependencies section entirely.
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Dependencies = models.Dependencies{
+		{Consumer: "app", Provider: "core"},
+		{Consumer: "app", Provider: "util"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "util")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core, util)^: reaches app; all release once")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("util@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+
+	r.CommitEmpty("fix(core, util)^: published alone; app catches up next run")
+	res := r.Command("release", "-p", "core,util")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("util@0.1.1"), "tags: %v", r.TagList())
+
+	res = r.ReleaseOK()
+	require.True(t, harness.HasCodeForPackage(res.Events, "W193", "app"), "the catch-up is labelled")
+	require.True(t, r.HasTag("app@0.0.2"), "tags: %v", r.TagList())
+
+	data, err := os.ReadFile(r.Path("packages", "app", "CHANGELOG.md"))
+	require.NoError(t, err)
+	log := string(data)
+	entry := log[:strings.Index(log, "## app@0.0.1")]
+	assert.Contains(t, entry, "- core: 0.1.0 -> 0.1.1",
+		"the catch-up spans the first provider's movement")
+	assert.Contains(t, entry, "- util: 0.1.0 -> 0.1.1",
+		"the catch-up spans the second provider's movement too")
+}
+
 func TestRecordsCatchUpGithubBodySpansTheProvidersMovement(t *testing.T) {
 	type ghRelease struct {
 		TagName string `json:"tag_name"`

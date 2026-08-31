@@ -510,6 +510,88 @@ func TestSinglePatchForMultipleProviders(t *testing.T) {
 	assert.ElementsMatch(t, []string{"core", "utils"}, app.DueTo)
 }
 
+func TestMultiScopeUnitAttributesEveryProvider(t *testing.T) {
+	// One unit, several source packages: §9.2 attributes the whole source set
+	// to every dependent it reaches (prov[d] |= sources), not the package the
+	// traversal happened to arrive from. The walk visits app once, and before
+	// the fix the arrival's origin was the only provider recorded, so a
+	// consumer of both packages was told it releases because of one of them.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(core, utils)^: one change across both"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	assertVersion(t, v(1, 0, 1), app.Next, "app -> 1.0.1")
+	assert.ElementsMatch(t, []string{"core", "utils"}, app.DueTo,
+		"every source package of the unit forced the bump")
+	assert.Equal(t, "propagated from core, utils", app.Reason())
+
+	providers := map[string]bool{}
+	for _, s := range app.Sources {
+		providers[s.Provider] = true
+		assert.Equal(t, "c1", s.Commit)
+		assert.Equal(t, 1, s.Level)
+	}
+	assert.Len(t, providers, 2, "one contribution per source package: %v", app.Sources)
+}
+
+func TestMultiScopeSourceOutsideTheManifestsStaysOutOfUpdates(t *testing.T) {
+	// §9.2 attributes the unit's whole source set, whether or not the target
+	// consumes each member: DueTo answers why the package releases, and one
+	// change written across two packages is one cause with two names. The
+	// dependencies record keeps speaking the target's own manifest language,
+	// so the source it never consumes stays out of Updates.
+	libs := &model.Space{Name: "libs"}
+	pkgs := []*model.Package{
+		{Name: "core", Dir: "/r/core", Space: libs},
+		{Name: "side", Dir: "/r/side", Space: libs},
+		{Name: "app", Dir: "/r/app", Space: libs},
+	}
+	deps := []model.Dependency{{Consumer: "app", Provider: "core"}}
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(core, side)^: one change across both"},
+	).tag("core", "1.0.0", "").tag("side", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+
+	app := p.Releases["app"]
+	assert.ElementsMatch(t, []string{"core", "side"}, app.DueTo)
+	names := make([]string, 0, len(app.Updates))
+	for _, u := range app.Updates {
+		names = append(names, u.Name)
+	}
+	assert.Equal(t, []string{"core"}, names,
+		"the record names only the provider the manifests mention")
+}
+
+func TestMultiScopeReleasingSourceExplainsTheRelease(t *testing.T) {
+	// One source of the unit already shipped the commit, the other releases
+	// beside the consumer in this run. The releasing source is what explains
+	// the consumer's presence in the plan, so this is an ordinary propagated
+	// release. Before the whole set was attributed, the traversal credited
+	// only the source it arrived from; when that happened to be the shipped
+	// one, the plan called an explained release a catch-up.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(core, utils)^: one change across both"},
+	).tag("core", "1.0.1", "c1").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+
+	p := compute(t, git, nil)
+
+	app := p.Releases["app"]
+	assert.ElementsMatch(t, []string{"core", "utils"}, app.DueTo)
+	assert.False(t, app.CatchUp, "a releasing source explains the release")
+	assert.NotContains(t, codes(p), CodeCatchUp, "got %v", codes(p))
+	names := make([]string, 0, len(app.Updates))
+	for _, u := range app.Updates {
+		names = append(names, u.Name)
+	}
+	assert.ElementsMatch(t, []string{"core", "utils"}, names,
+		"the shipped source's movement reaches the record through the attribution")
+}
+
 func TestBreakingChange(t *testing.T) {
 	git := newFakeGit(
 		commit{sha: "c1", message: "feat(core)!: drop old API"},

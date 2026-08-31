@@ -387,6 +387,15 @@ func (cp *computation) propagateBumps() {
 					anyStable = true
 				}
 			}
+			// §9.2 attributes the whole source set to every dependent the
+			// unit reaches: prov[d] |= sources. The traversal visits a target
+			// once and knows only the package it arrived from, so attribution
+			// cannot be read off the walk — a unit written over several
+			// packages would credit whichever one the queue served first, and
+			// a consumer of all of them would be told it releases because of
+			// one. Hoisted here because the set is the unit's, not the
+			// target's.
+			srcNames := sortedKeys(sources)
 
 			reached := 0
 			walked := cp.walk(sources, prop.Depth, prop.kinds)
@@ -433,14 +442,21 @@ func (cp *computation) propagateBumps() {
 					continue
 				}
 				rel.NewWork = true
-				rel.Sources = append(rel.Sources, StaleSource{
-					Provider: t.from,
-					Commit:   rec.key,
-					Level:    t.level,
-					Bump:     prop.Bump,
-				})
+				// One contribution per source package of the unit, not per
+				// arrival: all of them forced this bump, and a catch-up
+				// record reaches a provider that is not releasing only
+				// through this attribution. The level is the target's, which
+				// §9.2 measures from the source set as a whole.
+				for _, src := range srcNames {
+					rel.Sources = append(rel.Sources, StaleSource{
+						Provider: src,
+						Commit:   rec.key,
+						Level:    t.level,
+						Bump:     prop.Bump,
+					})
+				}
 				if cp.log.Trace().Enabled() {
-					cp.log.Trace().Str("package", t.name).Str("from", t.from).
+					cp.log.Trace().Str("package", t.name).Str("from", joinSorted(sources)).
 						Int("level", t.level).Str("bump", prop.Bump.String()).
 						Str("commit", rec.key).Msg("plan: bump propagated")
 				}
