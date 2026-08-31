@@ -162,6 +162,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'cli/trigger', label: 'trigger'},
         {type: 'doc', id: 'cli/compute', label: 'compute'},
         {type: 'doc', id: 'cli/if', label: 'if'},
+        {type: 'doc', id: 'cli/for', label: 'for'},
         {type: 'doc', id: 'cli/exec', label: 'exec'},
         {type: 'doc', id: 'cli/locations', label: 'Naming a place'},
         {type: 'doc', id: 'cli/self-update', label: 'self-update'},

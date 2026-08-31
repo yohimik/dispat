@@ -25,6 +25,7 @@ dispat [command] [flags]
 | `trigger <event>`         | Deliver one script-raised `script.<event>` webhook event, from inside a stage script; see [The trigger command](./trigger.md). |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
 | `if [cond]`               | Run one of several shell scripts. dispat chooses the script based on a condition matching the environment, the filesystem, or the changed packages; see [The if command](./if.md). |
+| `for [item]...`           | Run one shell command per item of a list: the words you type, the packages, spaces or versioning groups you select, or the changed packages; see [The for command](./for.md). |
 | `exec <script>`           | Run one declared script here exactly once. You can run it for a named subject or the folder you are in; see [The exec command](./exec.md). |
 | `self-update`             | Replace this binary with the latest release; see [The self-update command](./self-update.md).                             |
 | `install <repo>`          | Install a tool from any GitHub repository's releases; see [The install command](./install.md).                            |

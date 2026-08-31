@@ -27,6 +27,7 @@ dependency graph. They run one script and exit.
 | run a script in every changed package, in order     | `dispat run <script>`        |
 | run one declared script, once, right here           | `dispat exec <script>`       |
 | choose between shell commands based on a condition  | `dispat if <cond>`           |
+| run one shell command per item of a list            | [`dispat for <item>...`](./for.md) |
 
 `dispat run` knows about your monorepo. It computes a plan, finds which
 packages changed, and runs the script in each of them in dependency order.

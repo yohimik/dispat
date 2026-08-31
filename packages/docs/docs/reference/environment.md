@@ -27,6 +27,7 @@ that page, because they exist only inside that one command.
 |-------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `DISPAT_PACKAGE`              | `core`               | Package name.                                                                                                                                                                           |
 | `DISPAT_SPACE`                | `libs`               | Space name.                                                                                                                                                                             |
+| `DISPAT_GROUP`                | `platform`           | The versioning group whose versions move together. It is **Unset** when the package versions on its own. Read the note below.                                                            |
 | `DISPAT_OLD_VERSION`          | `1.2.3`              | The version the package last published. It holds `0.0.0` for a first release.                                                                                                           |
 | `DISPAT_NEW_VERSION`          | `1.3.0-beta.4`       | Version being released. It includes the version, channel, and counter in SemVer spelling.                                                                                               |
 | `DISPAT_VERSION`              | `1.3.0`              | The core version alone. It holds `MAJOR.MINOR.PATCH` with the channel and counter stripped.                                                                                             |
@@ -66,6 +67,13 @@ beside `image:1.4.2`. All three are always set, even when they are `0`. They des
 `DISPAT_BASELINE` is what the computed version must exceed. dispat reads the channel from it. It is unset, not empty,
 for a package that has never released. Use `${DISPAT_BASELINE+x}` to detect a first release. When set, it equals
 `DISPAT_OLD_VERSION`.
+
+`DISPAT_GROUP` is the package's third address, beside its name and its space. It holds the
+[`versionGroups`](../configuration/spaces.md#versioning-groups) entry the package joined, or the space's own name
+where a space versions as a group. A group may span spaces and a space may version independently, so neither of the
+other two variables can answer it. It is unset, not empty, for a package that versions on its own. Use
+`${DISPAT_GROUP+x}` to ask whether this release moves anything else with it. [`dispat for -g`](../cli/for.md) iterates
+over the groups themselves and exports the same variable.
 
 `DISPAT_OLD_VERSION` and `DISPAT_STABLE_BASELINE` differ only on a prerelease train. A package on `1.3.0-beta.1` whose
 last stable release was `1.2.3` reports both. The first is what it shipped, and the second is what dispat computes the
