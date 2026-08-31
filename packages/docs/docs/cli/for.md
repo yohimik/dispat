@@ -52,8 +52,8 @@ dispat for --since <rev>      [--consumers] [-p|-s|-g <globs>] --do <script>
 
 The `-s` and `-g` sources iterate over the spaces and the groups themselves,
 not over the packages inside them. A loop over the three packages of a space is
-not the job a loop over the space is, and `-p -s libs` is how you ask for the
-first.
+not the job a loop over the space is, and `--since all -s libs` is how you ask
+for the first: the window that selects every package, narrowed to the space.
 
 ### The selection flags mean two things
 
