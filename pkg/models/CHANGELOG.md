@@ -1,5 +1,47 @@
 # Changelog
 
+## pkg/models/v1.5.0 (2026-08-31)
+
+### Features
+
+- sections, commit refs and record link fields ([267f1e3](https://github.com/yohimik/dispat/commit/267f1e3c5b9a9b7d5c735327b4b0c10cb73edb6f)) (by yohimik, Claude Fable 5)
+  The record models gain the four options an entry needs to say more than it
+  could: `sections`, which states the whole render order of an entry and the
+  custom sections in it; `commitRefs`, which names the commit behind an entry
+  line; `dependencyLink`, which points a dependency line at the release it moved
+  to; and `noChangesText`, for the sentence an entry with nothing to group
+  carries. The changelog file gains `entrySpacing`, the blank-line count between
+  one entry and the next, with EntrySpacingOrDefault and the Int helper beside
+  it for the tri-state pointer the other options already use.
+
+  Every default is the behaviour that was already there, so a configuration
+  saying none of this records exactly what it recorded before. SectionConfig
+  carries both shapes a list element comes in, a built-in named by key and a
+  custom section claiming commit types, told apart by whether types are stated.
+
+### Fixes
+
+- record rendering hardened after review ([24cf9b8](https://github.com/yohimik/dispat/commit/24cf9b83f7c7146227c013c705877fe737d118e4)) (by yohimik, Claude Fable 5)
+  A review pass over the new record features closed what it found. An entry
+  whose file title renders empty for the release keeps the file's own head
+  instead of writing above it, and a preamble containing a fenced example is
+  split after the fence rather than inside it. An auto link declines when the
+  step environment aligned the updates without their tags, when the resolved
+  API URL points outside github.com, and when the repository pair is only half
+  configured; the half pair is no longer completed from the environment, and
+  the completion itself moved from the renderer to the recorders, so rendering
+  no longer reads the process environment at all. A record link inherited from
+  a broader layer can be declined with the value off. A no-changes text that
+  expands to nothing falls back to the built-in line and says so as W241, and
+  one carrying a thematic break on any line is refused at load. The auto base
+  is derived once per entry rather than once per line.
+
+### Authors
+
+- yohimik
+- Claude Fable 5
+
+
 ## pkg/models/v1.4.0 (2026-08-30)
 
 ### Features
