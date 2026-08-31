@@ -165,16 +165,53 @@ the binary it replaced is now the backup, so another --rollback returns to it
 
 These flags apply alongside the [global flags](./README.md#global-flags):
 
-| Flag           | Default              | Effect                                                                                                                                                                                                                 |
-|----------------|----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--asset`      |                      | Which of the release's files to install, by name or glob. `{os}`, `{arch}`, `{version}`, `{tag}` and `{name}` are expanded. A release carrying exactly one file needs none.                    |
-| `--bin-dir`    | see above            | The folder to install into. Without it, `$DISPAT_BIN_DIR`, then `/usr/local/bin` when it is writable, then `~/.local/bin`.                                                                            |
-| `--as`         | the repository name  | What to call the installed tool. It takes a file name, not a path.                                                                                                                                        |
-| `--pipe`       |                      | Hand the verified file to this command's standard input instead of installing it. The command runs in `--bin-dir`, with `$DISPAT_ASSET` and `$DISPAT_ASSET_NAME` set.                                         |
-| `--tag-prefix` | `v`                  | What a release tag carries before its version. An empty value considers every tag whose whole name is a version.                                                                                          |
-| `--release`    | the highest stable   | Install exactly this version, including downgrades. A leading `v` is fine.                                                                                                                                    |
-| `--prerelease` |                      | Consider prereleases too. Standard ordering still decides, so a released `1.2.0` wins over `1.2.0-rc.1`.                                                                                                     |
-| `--check`      |                      | Report only, change nothing, and exit `1` when the destination does not already hold that exact file. With `--pipe`, there is no destination to compare, so this always exits `1`.                        |
-| `--force`      |                      | Install even when the destination already carries that file, which repairs a damaged or tampered binary.                                                                                                  |
-| `--rollback`   |                      | Restore the binary the last download replaced, without downloading anything. This refuses to run alongside the flags that choose something to download, but it combines with `--check`.                     |
-| `--api-url`, `--token-env` | derived  | Point dispat at another API endpoint, and name the variable a token is read from. `GITHUB_TOKEN` is sent to `github.com` alone.                                                                              |
+### `--asset`
+
+Which of the release's files to install, by name or glob. `{os}`, `{arch}`, `{version}`, `{tag}` and `{name}` are
+expanded. A release carrying exactly one file needs none.
+
+### `--bin-dir`
+
+The folder to install into. Without it, `$DISPAT_BIN_DIR`, then `/usr/local/bin` when it is writable, then
+`~/.local/bin`.
+
+### `--as`
+
+The default is the repository name. What to call the installed tool. It takes a file name, not a path.
+
+### `--pipe`
+
+Hand the verified file to this command's standard input instead of installing it. The command runs in `--bin-dir`, with
+`$DISPAT_ASSET` and `$DISPAT_ASSET_NAME` set.
+
+### `--tag-prefix`
+
+The default is `v`. What a release tag carries before its version. An empty value considers every tag whose whole name
+is a version.
+
+### `--release`
+
+The default is the highest stable version. Install exactly this version, including downgrades. A leading `v` is fine.
+
+### `--prerelease`
+
+Consider prereleases too. Standard ordering still decides, so a released `1.2.0` wins over `1.2.0-rc.1`.
+
+### `--check`
+
+Report only, change nothing, and exit `1` when the destination does not already hold that exact file. With `--pipe`,
+there is no destination to compare, so this always exits `1`.
+
+### `--force`
+
+Install even when the destination already carries that file, which repairs a damaged or tampered binary.
+
+### `--rollback`
+
+Restore the binary the last download replaced, without downloading anything. This refuses to run alongside the flags
+that choose something to download, but it combines with `--check`.
+
+### `--api-url`, `--token-env`
+
+The default is derived. Point dispat at another API endpoint, and name the variable a token is read from.
+`GITHUB_TOKEN` is sent to `github.com` alone.

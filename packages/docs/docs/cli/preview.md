@@ -42,10 +42,29 @@ value, so the note only covers the configured policy you can act on.
 
 You can also use the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--changelog`         | `false`     | Print the changelog entry body. This is the default when you omit `--github`.                                                                                                                 |
-| `--github`            | `false`     | Print the GitHub release body using the `github` entry format. Pass this with `--changelog` to print and label both.                                                                                    |
-| `--package`, `-p`     |             | Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). You can repeat the flag, separate names with commas, and use case-insensitive `*` globs (`-p '*'` matches every package). See [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | Narrow to every package in the named spaces for the same eleven commands, using the same spelling rules. A standalone package belongs to no space. See [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | Narrow to every package in the named [versioning groups](../reference/releasing/versioning.md) for the same eleven commands. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces. See [Choosing the packages](./run.md#choosing-the-packages).            |
+### `--changelog`
+
+The default is `false`. Print the changelog entry body. This is the default when you omit `--github`.
+
+### `--github`
+
+The default is `false`. Print the GitHub release body using the `github` entry format. Pass this with `--changelog` to
+print and label both.
+
+### `--package`, `-p`
+
+Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`,
+`autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). You can repeat the flag, separate names
+with commas, and use case-insensitive `*` globs (`-p '*'` matches every package). See
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--space`, `-s`
+
+Narrow to every package in the named spaces for the same eleven commands, using the same spelling rules. A standalone
+package belongs to no space. See [Choosing the packages](./run.md#choosing-the-packages).
+
+### `--group`, `-g`
+
+Narrow to every package in the named [versioning groups](../reference/releasing/versioning.md) for the same eleven
+commands. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces. See
+[Choosing the packages](./run.md#choosing-the-packages).

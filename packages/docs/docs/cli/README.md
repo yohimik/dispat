@@ -35,17 +35,54 @@ dispat [command] [flags]
 
 ## Global flags
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--root`              | `.`         | Set the starting directory for config resolution. This defaults to your current directory. The *effective* monorepo root is the directory containing the config file (see `--config`), so the CLI works from inside a package folder. |
-| `--config`            | auto        | Set the config file name relative to `--root`. Leave this unset to let dispat discover the file using the [resolution rules](../configuration/README.md). Passing an explicit name uses that exact file with no fallback and no ascent.  |
-| `--env-file`          | `./.env`    | Read environment variables from this file instead of `./.env`. You can repeat this flag, and later files win. A named file that does not exist stops the run, but the default file is allowed to be missing; see [The `.env` file](../configuration/dotenv.md). |
-| `--concurrency`       | from config | Override the concurrency limit. Pass one value for both stages (`7`) or separate values for `build,publish` (`4,2`). `dispat run` uses the build value as its budget.                                                                                 |
-| `--log-level`         | from config | Override the log level. Choose `trace`, `debug`, `info`, `warn`, or `error`.                                                                                                                                                   |
-| `--log-format`        | from config | Override the log format. Choose `pretty` or `json`.                                                                                                                                                                          |
-| `--quiet-parser`      | from config | Override `parser.quiet` to hide the commit-message parser's own diagnostics. Pass `--quiet-parser=false` to show them again when your config sets `quiet: true`; see [the parser options](../configuration/parser.md#quiet). |
-| `--version`           |             | Print the dispat logo, version, and platform (`dispat 1.2.3 (darwin_arm64)`) and exit. This needs no config file. Release binaries carry the release tag's version, local builds report `dev`, and a binary installed with `go install` says so in the parenthesis because that decides how it is [updated](../reference/self-update.md#how-you-installed-it-matters). |
-| `--help`, `-h`        |             | Print help and exit. Running this without a command word prints the command list and the global flags. Running it after a command word prints that command's synopsis and its own flags; see [Getting help](#getting-help).                            |
+### `--root`
+
+The default is `.`. Set the starting directory for config resolution. This defaults to your current directory. The
+*effective* monorepo root is the directory containing the config file (see `--config`), so the CLI works from inside a
+package folder.
+
+### `--config`
+
+The default is auto. Set the config file name relative to `--root`. Leave this unset to let dispat discover the file
+using the [resolution rules](../configuration/README.md). Passing an explicit name uses that exact file with no
+fallback and no ascent.
+
+### `--env-file`
+
+The default is `./.env`. Read environment variables from this file instead of `./.env`. You can repeat this flag, and
+later files win. A named file that does not exist stops the run, but the default file is allowed to be missing; see
+[The `.env` file](../configuration/dotenv.md).
+
+### `--concurrency`
+
+The default comes from config. Override the concurrency limit. Pass one value for both stages (`7`) or separate
+values for `build,publish` (`4,2`). `dispat run` uses the build value as its budget.
+
+### `--log-level`
+
+The default comes from config. Override the log level. Choose `trace`, `debug`, `info`, `warn`, or `error`.
+
+### `--log-format`
+
+The default comes from config. Override the log format. Choose `pretty` or `json`.
+
+### `--quiet-parser`
+
+The default comes from config. Override `parser.quiet` to hide the commit-message parser's own diagnostics. Pass
+`--quiet-parser=false` to show them again when your config sets `quiet: true`; see
+[the parser options](../configuration/parser.md#quiet).
+
+### `--version`
+
+Print the dispat logo, version, and platform (`dispat 1.2.3 (darwin_arm64)`) and exit. This needs no config file.
+Release binaries carry the release tag's version, local builds report `dev`, and a binary installed with `go install`
+says so in the parenthesis because that decides how it is
+[updated](../reference/self-update.md#how-you-installed-it-matters).
+
+### `--help`, `-h`
+
+Print help and exit. Running this without a command word prints the command list and the global flags. Running it after
+a command word prints that command's synopsis and its own flags; see [Getting help](#getting-help).
 
 Every other flag belongs to a command and is listed on that command's page.
 

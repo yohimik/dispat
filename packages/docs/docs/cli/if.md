@@ -236,19 +236,51 @@ configuration.
 
 ## Flags
 
-| Flag                  | Effect                                                                        |
-|-----------------------|--------------------------------------------------------------------------------|
-| `--then <script>`     | The script the preceding condition runs. Repeatable, one per condition.        |
-| `--elif <cond>`       | Another condition, tried when every earlier one was false. Repeatable.         |
-| `--else <script>`     | The script to run when no condition held.                                      |
-| `--file <path>`, `-f` | The leading condition: the path exists and is a regular file.                   |
-| `--dir <path>`, `-d`  | The leading condition: the path exists and is a folder.                         |
-| `--changed`           | The leading condition: changed packages are selected.                          |
-| `--since <rev>`       | With `--changed`: count changes from this revision instead of the release window; `all` selects every package. |
-| `--consumers`         | With `--changed`: expand the window to everything downstream of the changes.   |
-| `-p`, `-s`, `-g`      | With `--changed`: narrow to the named packages, spaces or groups.               |
-| `--in <folder>`       | Run the chosen script in this folder: a path, or any [place name](./locations.md). |
-| `--on-failure <script>` | Run this when the chosen script fails, and exit with its code instead.       |
+### `--then <script>`
+
+The script the preceding condition runs. Repeatable, one per condition.
+
+### `--elif <cond>`
+
+Another condition, tried when every earlier one was false. Repeatable.
+
+### `--else <script>`
+
+The script to run when no condition held.
+
+### `--file <path>`, `-f`
+
+The leading condition: the path exists and is a regular file.
+
+### `--dir <path>`, `-d`
+
+The leading condition: the path exists and is a folder.
+
+### `--changed`
+
+The leading condition: changed packages are selected.
+
+### `--since <rev>`
+
+With `--changed`: count changes from this revision instead of the release
+window; `all` selects every package.
+
+### `--consumers`
+
+With `--changed`: expand the window to everything downstream of the changes.
+
+### `-p`, `-s`, `-g`
+
+With `--changed`: narrow to the named packages, spaces or groups.
+
+### `--in <folder>`
+
+Run the chosen script in this folder: a path, or any
+[place name](./locations.md).
+
+### `--on-failure <script>`
+
+Run this when the chosen script fails, and exit with its code instead.
 
 The command needs no config file and no git repository. This changes only when
 `--in` names a package, a space, or the root, or when `--changed` asks about

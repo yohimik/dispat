@@ -21,11 +21,36 @@ Read [Manifest tools](../editing/manifests.md) for the full guide, worked exampl
 
 These options apply alongside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--set-version`       |             | `writer` and `autowriter`: rewrite the manifest's own version field. Pass `{version}` to `autowriter` to write the covered package's planned version, which touches only the package's root manifests. |
-| `--set-build`         |             | `writer` only: write the manifest's build counter where its format keeps one, such as `CFBundleVersion`, `android:versionCode`, `CURRENT_PROJECT_VERSION`, Gradle's `versionCode`, a pubspec version's `+` suffix, Unity's `AndroidBundleVersionCode` and every platform entry under `buildNumber`, Godot's `version/code` in every export preset, an Unreal plugin's `Version`, and the Android `StoreVersion`. dispat will not create a counter the file does not declare, except for the pubspec suffix because it is part of the version scalar. Every integer counter refuses a non-integer before the file is opened. |
-| `--set`               |             | `writer` and `autowriter`: set one dependency's declared range using `[kind:]name=range`. You can repeat this flag. Pass `{version}` in the range to `autowriter` to use the planned version of the package the edit names. |
-| `--link`              |             | `writer` and `autowriter`: point a dependency at a local folder using `name=path`. Pass an empty path to remove the redirect. You can repeat this flag. |
-| `--drop-links`        |             | `writer` only: remove every local-link directive the named manifests carry. You do not need to provide the dependencies' names. You cannot combine this with `--link`. |
-| `--strict`            |             | Turn a tolerated finding into a failure. For `scanner`, `writer`, and `replacer`, this fails on a manifest that failed to parse, an edit the manifest does not declare, or a `--replace` that matched nothing. |
+### `--set-version`
+
+`writer` and `autowriter`: rewrite the manifest's own version field. Pass `{version}` to `autowriter` to write the
+covered package's planned version, which touches only the package's root manifests.
+
+### `--set-build`
+
+`writer` only: write the manifest's build counter where its format keeps one, such as `CFBundleVersion`,
+`android:versionCode`, `CURRENT_PROJECT_VERSION`, Gradle's `versionCode`, a pubspec version's `+` suffix, Unity's
+`AndroidBundleVersionCode` and every platform entry under `buildNumber`, Godot's `version/code` in every export preset,
+an Unreal plugin's `Version`, and the Android `StoreVersion`. dispat will not create a counter the file does not
+declare, except for the pubspec suffix because it is part of the version scalar. Every integer counter refuses a
+non-integer before the file is opened.
+
+### `--set`
+
+`writer` and `autowriter`: set one dependency's declared range using `[kind:]name=range`. You can repeat this flag.
+Pass `{version}` in the range to `autowriter` to use the planned version of the package the edit names.
+
+### `--link`
+
+`writer` and `autowriter`: point a dependency at a local folder using `name=path`. Pass an empty path to remove the
+redirect. You can repeat this flag.
+
+### `--drop-links`
+
+`writer` only: remove every local-link directive the named manifests carry. You do not need to provide the
+dependencies' names. You cannot combine this with `--link`.
+
+### `--strict`
+
+Turn a tolerated finding into a failure. For `scanner`, `writer`, and `replacer`, this fails on a manifest that failed
+to parse, an edit the manifest does not declare, or a `--replace` that matched nothing.

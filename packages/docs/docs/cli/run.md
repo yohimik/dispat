@@ -139,11 +139,37 @@ ignoring it.
 
 Beside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Use with every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`) and `if --changed` to narrow to the named packages. The flag is repeatable, comma-separated, matched case-insensitively, and accepts `*` globs (`-p '*'` is every package). See [Choosing the packages](#choosing-the-packages).                     |
-| `--space`, `-s`       |             | Use with the same commands to narrow to every package of the named spaces, using the same spellings. A standalone package belongs to no space. See [Choosing the packages](#choosing-the-packages).            |
-| `--group`, `-g`       |             | Use with the same commands to narrow to every package of the named [versioning groups](../reference/releasing/versioning.md), using the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces. See [Choosing the packages](#choosing-the-packages).            |
-| `--since`             |             | Use with the seven sweeping commands and `if --changed` to cover the packages the commits since a git revision address, instead of the release window. Pass `all` to cover every package. See [the run command](./run.md).                |
-| `--consumers`         |             | Use with the seven sweeping commands and `if --changed` to additionally cover every package that transitively depends on a selected one. For `if`, the expansion runs before the selection narrows. See [the if command](./if.md#changed-packages).                                                          |
-| `--on-error`          | `skip`      | Use with every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`) to control what a failed package does to its dependents. Choose `skip` (transitive) or `continue`. Either way, the command exits `1` on any failure.                                         |
+### `--package`, `-p`
+
+Use with every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
+`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) and `if --changed` to narrow to the named packages. The
+flag is repeatable, comma-separated, matched case-insensitively, and accepts `*` globs (`-p '*'` is every package). See
+[Choosing the packages](#choosing-the-packages).
+
+### `--space`, `-s`
+
+Use with the same commands to narrow to every package of the named spaces, using the same spellings. A standalone
+package belongs to no space. See [Choosing the packages](#choosing-the-packages).
+
+### `--group`, `-g`
+
+Use with the same commands to narrow to every package of the named
+[versioning groups](../reference/releasing/versioning.md), using the same spellings. A group is a `versionGroups` entry
+or a space that versions as one, so it may cross spaces. See [Choosing the packages](#choosing-the-packages).
+
+### `--since`
+
+Use with the seven sweeping commands and `if --changed` to cover the packages the commits since a git revision address,
+instead of the release window. Pass `all` to cover every package. See [the run command](./run.md).
+
+### `--consumers`
+
+Use with the seven sweeping commands and `if --changed` to additionally cover every package that transitively depends
+on a selected one. For `if`, the expansion runs before the selection narrows. See
+[the if command](./if.md#changed-packages).
+
+### `--on-error`
+
+The default is `skip`. Use with every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`,
+`autoversion`, `commit`, `github`) to control what a failed package does to its dependents. Choose `skip` (transitive)
+or `continue`. Either way, the command exits `1` on any failure.

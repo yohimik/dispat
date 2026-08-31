@@ -21,7 +21,12 @@ The replacer has [a page of its own](../editing/replacer.md).
 
 These apply alongside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--replace`           |             | Use with `replacer` and `autoreplacer` to replace literal text using `find=>write`. You can repeat this flag to apply multiple replacements in order. See [The replacer](../editing/replacer.md). |
-| `--strict`            |             | Turn a tolerated finding into a failure. For `scanner`, `writer`, and `replacer`, this fails the command if a manifest fails to parse, an edit targets a missing declaration, or a `--replace` matches nothing. |
+### `--replace`
+
+Use with `replacer` and `autoreplacer` to replace literal text using `find=>write`. You can repeat this flag to apply
+multiple replacements in order. See [The replacer](../editing/replacer.md).
+
+### `--strict`
+
+Turn a tolerated finding into a failure. For `scanner`, `writer`, and `replacer`, this fails the command if a manifest
+fails to parse, an edit targets a missing declaration, or a `--replace` matches nothing.

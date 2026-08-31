@@ -101,11 +101,34 @@ source. Use this as the CI gate for a config lagging the manifests.
 
 Beside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and comma-separated, matched case-insensitively, and accepts `*` globs (`-p '*'` is every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | Narrow to every package of the named spaces for the same eleven commands, using the same spellings. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | Narrow to every package of the named [versioning groups](../reference/releasing/versioning.md) for the same eleven commands, using the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--write`             |             | Apply every suggestion to the config file for `compute` only. The previous copy is saved as `<name>.backup`.                                                                                                    |
-| `--interactive`, `-i` |             | Confirm each suggestion (`y`/`N` on stdin) before applying it for `compute` only. This flag wins over `--write`.                                                                                                    |
-| `--check`             |             | Report only, change nothing, and exit `1` when there is something to do for `compute` and `self-update`. For `compute`, this triggers on any suggestion at all, edges and baselines alike. This is the CI gate for a config lagging the manifests, and it overrides both apply modes.  |
+### `--package`, `-p`
+
+Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`,
+`autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and
+comma-separated, matched case-insensitively, and accepts `*` globs (`-p '*'` is every package); see
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--space`, `-s`
+
+Narrow to every package of the named spaces for the same eleven commands, using the same spellings. A standalone
+package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).
+
+### `--group`, `-g`
+
+Narrow to every package of the named [versioning groups](../reference/releasing/versioning.md) for the same eleven
+commands, using the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross
+spaces; see [Choosing the packages](./run.md#choosing-the-packages).
+
+### `--write`
+
+Apply every suggestion to the config file for `compute` only. The previous copy is saved as `<name>.backup`.
+
+### `--interactive`, `-i`
+
+Confirm each suggestion (`y`/`N` on stdin) before applying it for `compute` only. This flag wins over `--write`.
+
+### `--check`
+
+Report only, change nothing, and exit `1` when there is something to do for `compute` and `self-update`. For `compute`,
+this triggers on any suggestion at all, edges and baselines alike. This is the CI gate for a config lagging the
+manifests, and it overrides both apply modes.

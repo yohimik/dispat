@@ -48,11 +48,31 @@ environment. Read the full guide at [Updating dispat](../reference/self-update.m
 
 These flags apply alongside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--check`             |             | `compute` and `self-update`: report only, change nothing, and exit `1` when there is something to do. For `self-update`, this means a release is available to install.  |
-| `--force`             |             | `self-update` only: install the selected release even if it is not newer. This repairs a damaged binary and leaves a prerelease line.                                    |
-| `--prerelease`        |             | `self-update` only: consider prereleases too. Standard ordering still decides, so a released `1.2.0` wins over `1.2.0-rc.1`.                                                   |
-| `--release`           |             | `self-update` only: install exactly this version, including downgrades. A leading `v` is fine.                                                                              |
-| `--rollback`          |             | `self-update` only: restore the binary the last update replaced, without downloading anything. This refuses to run alongside release selection flags, but it combines with `--check`.              |
-| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | `self-update`: point dispat at another repository or a GitHub Enterprise endpoint instead of its own releases.  |
+### `--check`
+
+`compute` and `self-update`: report only, change nothing, and exit `1` when there is something to do. For
+`self-update`, this means a release is available to install.
+
+### `--force`
+
+`self-update` only: install the selected release even if it is not newer. This repairs a damaged binary and leaves a
+prerelease line.
+
+### `--prerelease`
+
+`self-update` only: consider prereleases too. Standard ordering still decides, so a released `1.2.0` wins over
+`1.2.0-rc.1`.
+
+### `--release`
+
+`self-update` only: install exactly this version, including downgrades. A leading `v` is fine.
+
+### `--rollback`
+
+`self-update` only: restore the binary the last update replaced, without downloading anything. This refuses to run
+alongside release selection flags, but it combines with `--check`.
+
+### `--owner`, `--repo`, `--api-url`, `--token-env`
+
+The default comes from config. `self-update`: point dispat at another repository or a GitHub Enterprise endpoint
+instead of its own releases.

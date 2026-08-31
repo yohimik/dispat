@@ -236,18 +236,50 @@ one loop, one meaning, whichever shell the repository builds with.
 
 ## Flags
 
-| Flag                    | Effect                                                                        |
-|-------------------------|--------------------------------------------------------------------------------|
-| `--do <script>`         | The script each item runs. Repeatable, run in order per item, stopping at the first failure. |
-| `--keep-going`          | Run the remaining items after one fails. The exit code is still the first failure's. |
-| `--require-items`       | Exit `1` when the iteration is empty, instead of `0`.                          |
-| `--unchanged`           | Iterate over the packages the `--changed` window leaves out.                    |
-| `--changed`             | Iterate over the changed packages.                                             |
-| `--since <rev>`         | Count changes from this revision instead of the release window; `all` selects every package. On its own it means `--changed --since`. |
-| `--consumers`           | Expand the window to everything downstream of the changes.                     |
-| `-p`, `-s`, `-g`        | The list of packages, spaces or groups; under a window flag, the narrowing instead. |
-| `--in <folder>`         | Run every iteration in this folder: a path, or any [place name](./locations.md). |
-| `--on-failure <script>` | Run this once after a failed loop, and exit with its code instead.             |
+### `--do <script>`
+
+The script each item runs. Repeatable, run in order per item, stopping at
+the first failure.
+
+### `--keep-going`
+
+Run the remaining items after one fails. The exit code is still the first
+failure's.
+
+### `--require-items`
+
+Exit `1` when the iteration is empty, instead of `0`.
+
+### `--unchanged`
+
+Iterate over the packages the `--changed` window leaves out.
+
+### `--changed`
+
+Iterate over the changed packages.
+
+### `--since <rev>`
+
+Count changes from this revision instead of the release window; `all`
+selects every package. On its own it means `--changed --since`.
+
+### `--consumers`
+
+Expand the window to everything downstream of the changes.
+
+### `-p`, `-s`, `-g`
+
+The list of packages, spaces or groups; under a window flag, the narrowing
+instead.
+
+### `--in <folder>`
+
+Run every iteration in this folder: a path, or any
+[place name](./locations.md).
+
+### `--on-failure <script>`
+
+Run this once after a failed loop, and exit with its code instead.
 
 The command forwards nothing after `--`. The `--do` scripts are shell text you
 already write in full, so there is nothing a forwarded argument would reach

@@ -45,25 +45,80 @@ always triggers the native command.
 Type `dispat run commit` to run your custom script instead.
 
 Every config value these commands use is also available as a flag. Pass the flag to override the config for a single
-run, as shown in the [flags table](#flags).
+run, as shown in [Flags](#flags).
 
 ## Flags
 
 These flags apply alongside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                                                                                                                                             |
-|-----------------------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Pass this to narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. You can repeat the flag or separate names with commas. dispat matches names case-insensitively and supports `*` globs, so `-p '*'` selects every package. See [Choosing the packages](./run.md#choosing-the-packages). |
-| `--space`, `-s`       |             | Pass this to narrow the same eleven commands to every package in the named spaces. This flag uses the same spelling rules as `--package`. Standalone packages belong to no space. See [Choosing the packages](./run.md#choosing-the-packages).                                                                                   |
-| `--group`, `-g`       |             | Pass this to narrow the same eleven commands to every package in the named [versioning groups](../reference/releasing/versioning.md). This flag uses the same spelling rules. A group is a `versionGroups` entry or a space that versions as one, meaning it can cross spaces. See [Choosing the packages](./run.md#choosing-the-packages). |
-| `--since`             |             | Pass this to the same seven commands to cover packages modified by commits since a specific git revision. This overrides the release window. Pass `all` to cover every package. See [the run command](./run.md).                                                                                                                   |
-| `--consumers`         |             | Pass this to the same seven commands to also cover every package that transitively depends on a selected one. See [the run command](./run.md).                                                                                                                                                                                     |
-| `--on-error`          | `skip`      | Pass `skip` or `continue` to every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`) to decide what a failed package does to its dependents. The `skip` option is transitive. The command exits `1` on any failure regardless of this setting.                                |
-| `--tag`               |             | Pass this to `commit` to create an annotated release tag at the resulting commit. dispat skips an identical existing tag. If a tag exists at a different commit, dispat leaves it alone and reports `E221`.                                                                                                                        |
-| `--push`              |             | Pass this to `commit` to push the branch. If you also pass `--tag`, dispat pushes the tags too.                                                                                                                                                                                                                                    |
-| `--no-force`          |             | Pass this to `commit` to turn [`commit.force`](../configuration/records.md#force) off for this run. dispat leaves any tag the repository or remote already carries exactly as it is.                                                                                                                                               |
-| `--name`, `--email`   | from config | Pass these to `commit` to override the `commit.name` and `commit.email` committer identity.                                                                                                                                                                                                                                        |
-| `--remote`            | from config | Pass this to `commit` to override the `commit.remote` push target.                                                                                                                                                                                                                                                                 |
-| `--tag-name`          | computed    | Pass this to `commit` to name the annotated tag yourself instead of letting dispat compute it. You can pass `$DISPAT_TAG` from a release stage. This works for one package only.                                                                                                                                                   |
-| `--message-format`    | from config | Pass this to `commit` to override the `commit.messageFormat` template.                                                                                                                                                                                                                                                             |
-| `--include`           | from config | Pass this to `commit` to override the `commit.include` extra staged paths.                                                                                                                                                                                                                                                         |
+### `--package`, `-p`
+
+Pass this to narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
+`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. You can repeat the flag or separate
+names with commas. dispat matches names case-insensitively and supports `*` globs, so `-p '*'` selects every package.
+See [Choosing the packages](./run.md#choosing-the-packages).
+
+### `--space`, `-s`
+
+Pass this to narrow the same eleven commands to every package in the named spaces. This flag uses the same spelling
+rules as `--package`. Standalone packages belong to no space. See
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--group`, `-g`
+
+Pass this to narrow the same eleven commands to every package in the named
+[versioning groups](../reference/releasing/versioning.md). This flag uses the same spelling rules. A group is a
+`versionGroups` entry or a space that versions as one, meaning it can cross spaces. See
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--since`
+
+Pass this to the same seven commands to cover packages modified by commits since a specific git revision. This
+overrides the release window. Pass `all` to cover every package. See [the run command](./run.md).
+
+### `--consumers`
+
+Pass this to the same seven commands to also cover every package that transitively depends on a selected one. See
+[the run command](./run.md).
+
+### `--on-error`
+
+The default is `skip`. Pass `skip` or `continue` to every sweeping command (`run`, `autowriter`, `autoreplacer`,
+`changelog`, `autoversion`, `commit`, `github`) to decide what a failed package does to its dependents. The `skip`
+option is transitive. The command exits `1` on any failure regardless of this setting.
+
+### `--tag`
+
+Pass this to `commit` to create an annotated release tag at the resulting commit. dispat skips an identical existing
+tag. If a tag exists at a different commit, dispat leaves it alone and reports `E221`.
+
+### `--push`
+
+Pass this to `commit` to push the branch. If you also pass `--tag`, dispat pushes the tags too.
+
+### `--no-force`
+
+Pass this to `commit` to turn [`commit.force`](../configuration/records.md#force) off for this run. dispat leaves any
+tag the repository or remote already carries exactly as it is.
+
+### `--name`, `--email`
+
+The default comes from config. Pass these to `commit` to override the `commit.name` and `commit.email` committer
+identity.
+
+### `--remote`
+
+The default comes from config. Pass this to `commit` to override the `commit.remote` push target.
+
+### `--tag-name`
+
+The default is computed by dispat. Pass this to `commit` to name the annotated tag yourself instead of letting dispat
+compute it. You can pass `$DISPAT_TAG` from a release stage. This works for one package only.
+
+### `--message-format`
+
+The default comes from config. Pass this to `commit` to override the `commit.messageFormat` template.
+
+### `--include`
+
+The default comes from config. Pass this to `commit` to override the `commit.include` extra staged paths.

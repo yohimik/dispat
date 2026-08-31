@@ -256,14 +256,31 @@ in mind if your script also exits `2`. End `--on-failure` with an explicit
 
 ## Flags
 
-| Flag                    | Effect                                                                                |
-|-------------------------|-----------------------------------------------------------------------------------------|
-| `--for <place>`         | Run that level's script, in its environment: `pkg:<name>`, `space:<name>`, `root` or `cwd`. One exact name, no globs. |
-| `--fallback`            | Resolve the name the way `dispat run` does, walking up to the top level.                |
-| `--script-from <place>` | Take the script text from somewhere else, leaving the environment with the subject.     |
-| `--env <scope>`         | What the subject adds: `static` (default), `dispat` or `both`.                          |
-| `--in <folder>`         | Run the script in this folder: a path, or any [place name](./locations.md).             |
-| `--on-failure <script>` | Run this when the script fails, and exit with its code instead.                         |
+### `--for <place>`
+
+Run that level's script, in its environment: `pkg:<name>`, `space:<name>`,
+`root` or `cwd`. One exact name, no globs.
+
+### `--fallback`
+
+Resolve the name the way `dispat run` does, walking up to the top level.
+
+### `--script-from <place>`
+
+Take the script text from somewhere else, leaving the environment with the
+subject.
+
+### `--env <scope>`
+
+What the subject adds: `static` (default), `dispat` or `both`.
+
+### `--in <folder>`
+
+Run the script in this folder: a path, or any [place name](./locations.md).
+
+### `--on-failure <script>`
+
+Run this when the script fails, and exit with its code instead.
 
 The command needs a config file to look up the script name. It uses the
 configured `shell` if you set one.

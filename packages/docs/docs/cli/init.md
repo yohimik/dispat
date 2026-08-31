@@ -13,6 +13,7 @@ dispat never overwrites your work. The command throws an error if a config file 
 
 In addition to the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--format`            | `json`      | Sets the config file format to write (`json`, `yaml`, or `toml`). This flag applies to `init` only.                                                                                                    |
+### `--format`
+
+The default is `json`. Sets the config file format to write (`json`, `yaml`, or `toml`). This flag applies to `init`
+only.

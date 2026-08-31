@@ -62,21 +62,89 @@ options in the [flags table](#flags).
 
 Beside the [global flags](./README.md#global-flags):
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and comma-separated. It matches case-insensitively and accepts `*` globs (`-p '*'` covers every package); see [Choosing the packages](./run.md#choosing-the-packages).                     |
-| `--space`, `-s`       |             | Narrow the same eleven commands to every package in the named spaces. This accepts the same spellings and globs as the package flag. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--group`, `-g`       |             | Narrow the same eleven commands to every package in the named [versioning groups](../reference/releasing/versioning.md). This accepts the same spellings and globs. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces; see [Choosing the packages](./run.md#choosing-the-packages).            |
-| `--since`             |             | Cover the packages modified by commits since a specific git revision. This applies to the same seven commands and replaces the release window. Pass `all` to cover every package; see [the run command](./run.md).                |
-| `--consumers`         |             | Expand the selection downstream for the same seven commands. This covers every package that transitively depends on a selected one; see [the run command](./run.md).                                                          |
-| `--on-error`          | `skip`      | Decide what a failed package does to its dependents for every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` (transitive) or `continue`. The command exits `1` on any failure regardless of this setting.                                         |
-| `--owner`, `--repo`, `--api-url`, `--token-env` | from config | Override the matching `github.*` values for every package in the `github` command invocation.  |
-| `--target`            |             | Push the commit to the remote before you use this. It tells the `github` command to create the tag at this commit or branch (`target_commitish`).   |
-| `--draft`             | from config | Override [`github.draft`](../configuration/records.md#github) for every package in the invocation. `--draft` creates the release for a person to publish, and `--draft=false` publishes straight away over a configured draft. |
-| `--release-name`      | from config | Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for the `changelog` and `github` commands. Environment variables like `$VAR` and `${VAR}` expand exactly as they do in the config. |
-| `--authors`           | from config | Override [`authors.placement`](../configuration/records.md#attributing-an-entry-to-its-authors) for the `changelog` and `github` commands: `off`, `inline`, `section` or `both`. Any other value is refused before anything is planned. |
-| `--authors-format`    | from config | Override `authors.format`: `fullname`, or `username` for the local part of the email address. |
-| `--authors-commits`   | from config | Override `authors.commits`: `ccme` for the commits behind the entry's own lines, or `all` for every commit in the release window. |
-| `--authors-include`   | from config | Override `authors.include`. This repeatable, comma-separated list of case-insensitive globs replaces the configured list whole, and each pattern is tried against the full name, the username and the email. |
-| `--authors-exclude`   | from config | Override `authors.exclude`, with the same spellings. It is applied after `--authors-include` and wins. |
-| `--authors-title`     | from config | Override `authors.title`, the heading of the authors section. |
+### `--package`, `-p`
+
+Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`,
+`autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and
+comma-separated. It matches case-insensitively and accepts `*` globs (`-p '*'` covers every package); see
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--space`, `-s`
+
+Narrow the same eleven commands to every package in the named spaces. This accepts the same spellings and globs as the
+package flag. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).
+
+### `--group`, `-g`
+
+Narrow the same eleven commands to every package in the named
+[versioning groups](../reference/releasing/versioning.md). This accepts the same spellings and globs. A group is a
+`versionGroups` entry or a space that versions as one, so it can cross spaces; see
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--since`
+
+Cover the packages modified by commits since a specific git revision. This applies to the same seven commands and
+replaces the release window. Pass `all` to cover every package; see [the run command](./run.md).
+
+### `--consumers`
+
+Expand the selection downstream for the same seven commands. This covers every package that transitively depends on a
+selected one; see [the run command](./run.md).
+
+### `--on-error`
+
+The default is `skip`. Decide what a failed package does to its dependents for every sweeping command (`run`,
+`autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` (transitive) or
+`continue`. The command exits `1` on any failure regardless of this setting.
+
+### `--owner`, `--repo`, `--api-url`, `--token-env`
+
+The default comes from config. Override the matching `github.*` values for every package in the `github` command
+invocation.
+
+### `--target`
+
+Push the commit to the remote before you use this. It tells the `github` command to create the tag at this commit or
+branch (`target_commitish`).
+
+### `--draft`
+
+The default comes from config. Override [`github.draft`](../configuration/records.md#github) for every package in the
+invocation. `--draft` creates the release for a person to publish, and `--draft=false` publishes straight away over a
+configured draft.
+
+### `--release-name`
+
+The default comes from config. Override [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) for
+the `changelog` and `github` commands. Environment variables like `$VAR` and `${VAR}` expand exactly as they do in the
+config.
+
+### `--authors`
+
+The default comes from config. Override
+[`authors.placement`](../configuration/records.md#attributing-an-entry-to-its-authors) for the `changelog` and `github`
+commands: `off`, `inline`, `section` or `both`. Any other value is refused before anything is planned.
+
+### `--authors-format`
+
+The default comes from config. Override `authors.format`: `fullname`, or `username` for the local part of the email
+address.
+
+### `--authors-commits`
+
+The default comes from config. Override `authors.commits`: `ccme` for the commits behind the entry's own lines, or
+`all` for every commit in the release window.
+
+### `--authors-include`
+
+The default comes from config. Override `authors.include`. This repeatable, comma-separated list of case-insensitive
+globs replaces the configured list whole, and each pattern is tried against the full name, the username and the email.
+
+### `--authors-exclude`
+
+The default comes from config. Override `authors.exclude`, with the same spellings. It is applied after
+`--authors-include` and wins.
+
+### `--authors-title`
+
+The default comes from config. Override `authors.title`, the heading of the authors section.

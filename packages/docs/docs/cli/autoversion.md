@@ -36,23 +36,74 @@ The four command words are reserved. Each wins the `dispat <script>` shorthand o
 Run `dispat run commit` to reach the script instead.
 
 Every config value the commands consume is also a flag. You can use these flags to override the config for a single
-invocation. See the [flags table](#flags) for details.
+invocation. See [Flags](#flags) for details.
 
 ## Flags
 
 These commands accept the [global flags](./README.md#global-flags) alongside the following:
 
-| Flag                  | Default     | Effect                                                                                                                                                                                                 |
-|-----------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--package`, `-p`     |             | Narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. This flag is repeatable, comma-separated, and case-insensitive. It supports `*` globs, so `-p '*'` selects every package; see [Choosing the packages](./run.md#choosing-the-packages). |
-| `--space`, `-s`       |             | Narrow the same eleven commands to every package in the named spaces. This uses the same spelling rules as packages. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages). |
-| `--group`, `-g`       |             | Narrow the same eleven commands to every package in the named [versioning groups](../reference/releasing/versioning.md). This uses the same spelling rules. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces; see [Choosing the packages](./run.md#choosing-the-packages). |
-| `--since`             |             | Apply to the same seven commands. Cover the packages addressed by commits since a git revision, instead of the release window. Pass `all` to cover every package; see [the run command](./run.md). |
-| `--consumers`         |             | Apply to the same seven commands. Cover every package that transitively depends on a selected one. See [the run command](./run.md). |
-| `--on-error`          | `skip`      | Decide what a failed package does to its dependents in every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Pass `skip` to skip transitively, or `continue` to proceed. The command exits `1` on any failure either way. |
-| `--match`, `--write-version` | from config | Apply to `autoversion` only. Override the matching `autoVersion.*` policy for this invocation. |
-| `--range`             | from config | Apply to `autoversion` and `autowriter`. Override the [`autoVersion.range`](../configuration/autoversion.md) write policy. This policy defines how dispat spells a reconciled range (`caret`, `tilde`, `exact`, a `{version}` template, or a literal). |
-| `--manifests`         | from config | Apply to `autoversion` and `autowriter`. Choose which of a package's manifests dispat rewrites, passing `root` for manifests in the package folder or `all` for every manifest under it. `autoversion` also accepts `none` to turn off its parsing strategy. |
-| `--only-updated`      |             | Apply to `autoversion` and `autowriter`. Rewrite only the declarations naming a package this run updates. This leaves a range that fell behind an earlier release exactly as it is. |
-| `--no-replace`        |             | Apply to `autoversion` only. Skip the `autoVersion.replace` rules for this invocation. |
-| `--sync-lock`         | `true`      | Apply to `autoversion` and `autowriter`. Run the `syncLock` scripts for packages whose manifests changed. Pass `--sync-lock=false` to skip them. |
+### `--package`, `-p`
+
+Narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
+`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. This flag is repeatable,
+comma-separated, and case-insensitive. It supports `*` globs, so `-p '*'` selects every package; see
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--space`, `-s`
+
+Narrow the same eleven commands to every package in the named spaces. This uses the same spelling rules as packages. A
+standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).
+
+### `--group`, `-g`
+
+Narrow the same eleven commands to every package in the named
+[versioning groups](../reference/releasing/versioning.md). This uses the same spelling rules. A group is a
+`versionGroups` entry or a space that versions as one, so it can cross spaces; see
+[Choosing the packages](./run.md#choosing-the-packages).
+
+### `--since`
+
+Apply to the same seven commands. Cover the packages addressed by commits since a git revision, instead of the release
+window. Pass `all` to cover every package; see [the run command](./run.md).
+
+### `--consumers`
+
+Apply to the same seven commands. Cover every package that transitively depends on a selected one. See
+[the run command](./run.md).
+
+### `--on-error`
+
+The default is `skip`. Decide what a failed package does to its dependents in every sweeping command (`run`,
+`autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Pass `skip` to skip transitively, or
+`continue` to proceed. The command exits `1` on any failure either way.
+
+### `--match`, `--write-version`
+
+The default comes from config. Apply to `autoversion` only. Override the matching `autoVersion.*` policy for this
+invocation.
+
+### `--range`
+
+The default comes from config. Apply to `autoversion` and `autowriter`. Override the
+[`autoVersion.range`](../configuration/autoversion.md) write policy. This policy defines how dispat spells a reconciled
+range (`caret`, `tilde`, `exact`, a `{version}` template, or a literal).
+
+### `--manifests`
+
+The default comes from config. Apply to `autoversion` and `autowriter`. Choose which of a package's manifests dispat
+rewrites, passing `root` for manifests in the package folder or `all` for every manifest under it. `autoversion` also
+accepts `none` to turn off its parsing strategy.
+
+### `--only-updated`
+
+Apply to `autoversion` and `autowriter`. Rewrite only the declarations naming a package this run updates. This leaves a
+range that fell behind an earlier release exactly as it is.
+
+### `--no-replace`
+
+Apply to `autoversion` only. Skip the `autoVersion.replace` rules for this invocation.
+
+### `--sync-lock`
+
+The default is `true`. Apply to `autoversion` and `autowriter`. Run the `syncLock` scripts for packages whose manifests
+changed. Pass `--sync-lock=false` to skip them.
