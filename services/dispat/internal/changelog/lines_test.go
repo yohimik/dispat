@@ -227,11 +227,11 @@ func assertOrder(t *testing.T, out string, markers ...string) {
 	}
 }
 
-var placementFormat = Format{
+var placementFormat = SpecFormat(model.RecordFormat{
 	ReleaseName: "Winter release",
 	Header:      titleLines("header line"),
 	Footer:      titleLines("footer line"),
-}
+})
 
 // TestRenderEntryBodyPlacement: in a changelog entry the release name opens
 // the body as a sub-header, then the header lines, the sections, the footer.
@@ -264,11 +264,11 @@ func TestRenderBodyBlockSpacing(t *testing.T) {
 	rel.Units = []*ccme.Unit{testUnit("feat", ccme.BumpMinor, "add streaming")}
 	rel.DueTo, rel.Updates = nil, nil
 
-	out := RenderEntryBody(rel, Format{
+	out := RenderEntryBody(rel, SpecFormat(model.RecordFormat{
 		ReleaseName: "Name",
 		Header:      titleLines("header"),
 		Footer:      titleLines("footer"),
-	}, nil)
+	}), nil)
 	assert.Equal(t, "### Name\n\nheader\n\n### Features\n\n- add streaming\n\nfooter\n", out)
 	assert.NotContains(t, out, "\n\n\n", "no block may leave a double blank line")
 }
@@ -290,7 +290,7 @@ func TestRenderBodyWithoutSections(t *testing.T) {
 		Pkg:  &model.Package{Name: "core", Space: &model.Space{Name: "libs"}},
 		Next: ccme.Version{Major: 2},
 	}
-	out := RenderBody(rel, Format{Header: titleLines("header"), Footer: titleLines("footer")}, nil)
+	out := RenderBody(rel, SpecFormat(model.RecordFormat{Header: titleLines("header"), Footer: titleLines("footer")}), nil)
 	assert.Equal(t, "header\n\nNo changes.\n\nfooter\n", out)
 }
 
@@ -303,7 +303,7 @@ func TestRenderBodyAroundASharedVersioningRide(t *testing.T) {
 	rel.Pkg.Space.Versioning = model.VersioningFixed
 	require.True(t, rel.NoChanges(), "fixture must be a shared-versioning ride")
 
-	out := RenderBody(rel, Format{Header: titleLines("header"), Footer: titleLines("footer")}, nil)
+	out := RenderBody(rel, SpecFormat(model.RecordFormat{Header: titleLines("header"), Footer: titleLines("footer")}), nil)
 	assert.Equal(t, "header\n\nNo changes: a version bump to keep the versioning group on one version.\n\nfooter\n", out)
 }
 
@@ -311,11 +311,11 @@ func TestRenderBodyAroundASharedVersioningRide(t *testing.T) {
 // all interpolate against the same release.
 func TestRenderBodyExpandsEveryBlock(t *testing.T) {
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
-	out := RenderEntryBody(rel, Format{
+	out := RenderEntryBody(rel, SpecFormat(model.RecordFormat{
 		ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
 		Header:      titleLines("space: ${DISPAT_SPACE}"),
 		Footer:      titleLines("tag: ${DISPAT_TAG}"),
-	}, nil)
+	}), nil)
 
 	assert.Contains(t, out, "### core 2.0.0")
 	assert.Contains(t, out, "space: libs")
@@ -326,11 +326,11 @@ func TestRenderBodyExpandsEveryBlock(t *testing.T) {
 // the release name beneath it.
 func TestRenderEntryCarriesTheBlocks(t *testing.T) {
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
-	out := RenderEntry(rel, testDate, Format{
+	out := RenderEntry(rel, testDate, SpecFormat(model.RecordFormat{
 		ReleaseName: "Winter release",
 		Header:      titleLines("header line"),
 		Footer:      titleLines("footer line"),
-	})
+	}))
 
 	assert.True(t, strings.HasPrefix(out, "## core@2.0.0 (2026-07-26)\n\n### Winter release\n"), out)
 	assert.True(t, strings.HasSuffix(out, "footer line\n"), out)
@@ -342,8 +342,8 @@ func TestRenderEntryCarriesTheBlocks(t *testing.T) {
 func TestRenderEntryFilteredOutBlocksLeaveNothing(t *testing.T) {
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
 	plain := RenderEntry(rel, testDate, Format{})
-	filtered := RenderEntry(rel, testDate, Format{
+	filtered := RenderEntry(rel, testDate, SpecFormat(model.RecordFormat{
 		Header: []model.EntryLine{lineFor("not for core", []string{"other"}, nil, nil)},
-	})
+	}))
 	assert.Equal(t, plain, filtered)
 }

@@ -23,58 +23,35 @@ import (
 
 // Format customises how a release entry is rendered. Zero values fall back to
 // defaults, so an empty Format is always valid.
+//
+// The options themselves are model.RecordFormat, embedded rather than
+// restated. The renderer used to keep its own copy of every field and a
+// SpecFormat that assigned them one by one, which made a forgotten field the
+// cheapest mistake in the package: a new option added to the model and missed
+// in the copy compiled cleanly, passed every test that did not configure it,
+// and then rendered the default for the packages that did, silently, in
+// released changelogs. The embed is what makes that forgetting impossible.
+// There is no copy left to forget, so an option reaches the renderer the moment
+// it reaches the model.
+//
+// Anything the renderer needs that the resolved model does not carry belongs
+// here beside the embed. Today there is nothing: the two describe the same
+// entry, and the renderer's defaults live in withDefaults rather than in
+// fields of its own.
 type Format struct {
-	DateFormat        string // Go time layout, default "2006-01-02"
-	BreakingTitle     string // default "Breaking Changes"
-	FeaturesTitle     string // default "Features"
-	FixesTitle        string // default "Fixes"
-	DependenciesTitle string // default "Dependencies"
-	// ReleaseName names the release. In a changelog entry it writes a
-	// sub-header under the date line; empty writes none. The GitHub recorder
-	// reads it as the release's name instead.
-	ReleaseName string
-	// Header and Footer bracket the sections of an entry. They carry their
-	// own package filters, so one configured list serves a whole workspace.
-	Header []model.EntryLine
-	Footer []model.EntryLine
-
-	// The authors policy, resolved from the package's record format. Placement
-	// defaults to "off", which is what keeps an entry byte for byte what it
-	// was before attribution existed.
-	AuthorsPlacement string
-	AuthorsFormat    string
-	AuthorsCommits   string
-	AuthorsInclude   []string
-	AuthorsExclude   []string
-	AuthorsTitle     string
-
-	// Sections is the whole render order, built-ins and custom sections
-	// together. Empty is the default order, which is what keeps an entry byte
-	// for byte what it was before sections were configurable.
-	Sections []model.RecordSection
-
-	// DependencyLink turns a dependency line into a link: empty renders the
-	// plain line, model.LinkAuto derives the forge URL, anything else is a
-	// template.
-	DependencyLink string
-	// NoChangesText replaces the sentence an entry with no sections carries;
-	// empty keeps the built-in sentences.
-	NoChangesText string
-
-	// The commit-reference policy. Placement defaults to "off", which is what
-	// keeps an entry what it was before references existed.
-	CommitRefsPlacement string
-	CommitRefsFormat    string
-	CommitRefsLink      string
-
-	// The forge coordinates model.LinkAuto derives its URLs from: the
-	// recording package's github owner, repo and API URL. A changelog borrows
-	// its package's, since a file has no coordinates of its own.
-	LinkOwner  string
-	LinkRepo   string
-	LinkAPIURL string
+	model.RecordFormat
 }
 
+// withDefaults fills the fields the model leaves empty, which is where the
+// renderer's own defaults live now that it holds no fields of its own: the
+// date layout, the four built-in section titles, and the attribution and
+// reference policies.
+//
+// Both policies default to "off", and the section order defaults to nothing at
+// all (sectionOrder completes the list from model.DefaultSectionOrder).
+// That is what keeps an entry byte for byte what it was before attribution,
+// references and configurable sections existed: a configuration that says
+// nothing about them renders exactly the entry it always did.
 func (f Format) withDefaults() Format {
 	defaultStr(&f.DateFormat, "2006-01-02")
 	defaultStr(&f.BreakingTitle, "Breaking Changes")
@@ -133,37 +110,13 @@ func defaultStr(s *string, def string) {
 	}
 }
 
-// SpecFormat maps a package's resolved record format onto the renderer's.
-func SpecFormat(f model.RecordFormat) Format {
-	return Format{
-		DateFormat:        f.DateFormat,
-		BreakingTitle:     f.BreakingTitle,
-		FeaturesTitle:     f.FeaturesTitle,
-		FixesTitle:        f.FixesTitle,
-		DependenciesTitle: f.DependenciesTitle,
-		ReleaseName:       f.ReleaseName,
-		Header:            f.Header,
-		Footer:            f.Footer,
-		AuthorsPlacement:  f.AuthorsPlacement,
-		AuthorsFormat:     f.AuthorsFormat,
-		AuthorsCommits:    f.AuthorsCommits,
-		AuthorsInclude:    f.AuthorsInclude,
-		AuthorsExclude:    f.AuthorsExclude,
-		AuthorsTitle:      f.AuthorsTitle,
-
-		Sections:       f.Sections,
-		DependencyLink: f.DependencyLink,
-		NoChangesText:  f.NoChangesText,
-
-		CommitRefsPlacement: f.CommitRefsPlacement,
-		CommitRefsFormat:    f.CommitRefsFormat,
-		CommitRefsLink:      f.CommitRefsLink,
-
-		LinkOwner:  f.LinkOwner,
-		LinkRepo:   f.LinkRepo,
-		LinkAPIURL: f.LinkAPIURL,
-	}
-}
+// SpecFormat presents a package's resolved record format as the renderer's.
+//
+// It is the embed and nothing else. It stays a named function because the call
+// sites read better for it (a recorder is built from a spec's format, and
+// saying so is clearer than the composite literal), and because a wrapper that
+// copies no field can never fall behind the model it wraps.
+func SpecFormat(f model.RecordFormat) Format { return Format{RecordFormat: f} }
 
 // Dispatcher routes each release through a FileWriter built from the
 // package's resolved changelog policy — per-package configuration decides

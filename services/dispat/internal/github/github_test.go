@@ -178,7 +178,7 @@ func TestRecordCustomFormat(t *testing.T) {
 
 	rel := &Releaser{
 		APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
-		Format: changelog.Format{FeaturesTitle: "New Stuff"},
+		Format: changelog.SpecFormat(model.RecordFormat{FeaturesTitle: "New Stuff"}),
 	}
 	require.NoError(t, rel.Record(context.Background(), testRelease()))
 	assert.Contains(t, gotBody.Body, "### New Stuff")
@@ -205,10 +205,10 @@ func TestRecordAuthorsSectionSitsBeforeTheReleaseBlockAndFooter(t *testing.T) {
 	rel := &Releaser{
 		APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
 		CommitSHA: "abc123def456",
-		Format: changelog.Format{
+		Format: changelog.SpecFormat(model.RecordFormat{
 			AuthorsPlacement: changelog.AuthorsBoth,
 			Footer:           []model.EntryLine{{Line: []string{"---", "Released by dispat."}}},
-		},
+		}),
 	}
 	require.NoError(t, rel.Record(context.Background(), r))
 
@@ -561,7 +561,7 @@ func TestRecordReleaseNameOverridesTheName(t *testing.T) {
 	srv, gotBody := captureServer(t)
 
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
-		Format: changelog.Format{ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION} is out"}}
+		Format: changelog.SpecFormat(model.RecordFormat{ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION} is out"})}
 	require.NoError(t, r.Record(context.Background(), testRelease()))
 
 	assert.Equal(t, "core 1.3.0 is out", gotBody.Name, "the name is interpolated")
@@ -578,10 +578,10 @@ func TestRecordBodyOrder(t *testing.T) {
 
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
 		CommitSHA: "abc123",
-		Format: changelog.Format{
+		Format: changelog.SpecFormat(model.RecordFormat{
 			Header: []model.EntryLine{{Line: []string{"Built by CI."}}},
 			Footer: []model.EntryLine{{Line: []string{"", "Changelog: /blob/${DISPAT_TAG}/CHANGELOG.md"}}},
-		}}
+		})}
 	require.NoError(t, r.Record(context.Background(), testRelease()))
 
 	body := gotBody.Body
@@ -605,10 +605,10 @@ func TestRecordSkipsLinesForOtherPackages(t *testing.T) {
 
 	srv, gotBody := captureServer(t)
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
-		Format: changelog.Format{
+		Format: changelog.SpecFormat(model.RecordFormat{
 			Header: []model.EntryLine{{Line: []string{"apps only"}, Space: []string{"apps"}}},
 			Footer: []model.EntryLine{{Line: []string{"other only"}, Package: []string{"other"}}},
-		}}
+		})}
 	require.NoError(t, r.Record(context.Background(), testRelease()))
 
 	assert.Equal(t, plainBody.Body, gotBody.Body)
@@ -623,7 +623,7 @@ func TestRecordExpandsAScriptOutput(t *testing.T) {
 	rel.Outputs = append(rel.Outputs, plan.Output{Name: "IMAGE", Value: "acme/core:1.3.0", Source: "core:build"})
 
 	r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
-		Format: changelog.Format{Footer: []model.EntryLine{{Line: []string{"image: ${DISPAT_OUTPUT_IMAGE}"}}}}}
+		Format: changelog.SpecFormat(model.RecordFormat{Footer: []model.EntryLine{{Line: []string{"image: ${DISPAT_OUTPUT_IMAGE}"}}}})}
 	require.NoError(t, r.Record(context.Background(), rel))
 
 	assert.Contains(t, gotBody.Body, "image: acme/core:1.3.0")

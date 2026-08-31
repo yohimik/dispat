@@ -2,9 +2,12 @@ package model
 
 import (
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVersioningShared(t *testing.T) {
@@ -292,4 +295,165 @@ func TestGitHubSpecKeySharesOnEqualAuthorPolicies(t *testing.T) {
 	}
 	a, b := spec(), spec()
 	assert.Equal(t, a.Key(), b.Key())
+}
+
+// keyExcludedRecordFormatLeaves names the RecordFormat leaves that are
+// deliberately left out of writeKey, addressed the way recordFormatLeaves
+// addresses them ("AuthorsTitle", "Header.Line", ...).
+//
+// It is empty, and it should stay empty. Every field of the format shapes the
+// body a shared releaser renders, so a field outside the key would let two
+// packages that render differently share one releaser, and the second package
+// would silently be given the first one's format. An entry added here has to
+// carry a comment saying why the field cannot change a rendered entry.
+var keyExcludedRecordFormatLeaves = map[string]string{}
+
+// TestRecordFormatKeyCoversEveryField is the seam test over the policy key.
+//
+// The key is written by hand, field by field, while RecordFormat grows by
+// configuration: the two are exactly the kind of pair that drifts, and a field
+// added to the format but forgotten in writeKey compiles cleanly, passes every
+// test that does not name it, and is discovered only as one package wearing
+// another's changelog format in a release that already went out.
+//
+// So the fields are not listed here. Reflection walks RecordFormat down to its
+// leaves, entering a slice at a single element (which is the shape writeKey
+// encodes), and for each leaf builds two formats that agree on everything else
+// and differ in that one leaf alone. A leaf the key ignores makes the two keys
+// equal, and the case fails naming the field. A field of a kind the marker
+// builder does not know fails too, rather than passing by accident: a new kind
+// in the format is a decision about the key, and it should be made on purpose.
+func TestRecordFormatKeyCoversEveryField(t *testing.T) {
+	// The key is read through the exported door rather than through writeKey,
+	// because Key is what the releaser cache actually compares. Owner and Repo
+	// are fixed so that only the format's contribution varies.
+	keyOf := func(f RecordFormat) string {
+		return GitHubSpec{Enabled: true, Owner: "acme", Repo: "mono", Format: f}.Key()
+	}
+
+	leaves := recordFormatLeaves(t, reflect.TypeOf(RecordFormat{}), nil)
+	require.NotEmpty(t, leaves, "the walk found no fields, which means it is not walking")
+
+	for _, path := range leaves {
+		name := strings.Join(path, ".")
+		t.Run(name, func(t *testing.T) {
+			if why, ok := keyExcludedRecordFormatLeaves[name]; ok {
+				t.Skip("deliberately outside the policy key: " + why)
+			}
+			var base, other RecordFormat
+			fillRecordFormat(t, reflect.ValueOf(&base).Elem(), markerOne)
+			fillRecordFormat(t, reflect.ValueOf(&other).Elem(), markerOne)
+			setRecordFormatLeaf(t, reflect.ValueOf(&other).Elem(), path, markerTwo)
+
+			require.NotEqual(t, base, other, "the two formats must actually differ in %s", name)
+			assert.NotEqual(t, keyOf(base), keyOf(other),
+				"%s is missing from GitHubSpec.Key: two packages that render differently would share a releaser", name)
+		})
+	}
+}
+
+// The two marker values every leaf is filled with. They differ in every kind
+// the builder knows, so a leaf set to one and then to the other is a format
+// that changed in exactly one place.
+const (
+	markerOne = "one"
+	markerTwo = "two"
+)
+
+// recordFormatLeaves lists the paths of a format's leaves: the field names
+// that reach each value the key could encode. A slice of structs is entered
+// rather than treated as a leaf, so the fields of an EntryLine and of a
+// RecordSection are walked too, and a filter added to either is covered by the
+// same test that covers the format's own fields.
+func recordFormatLeaves(t *testing.T, typ reflect.Type, prefix []string) [][]string {
+	t.Helper()
+	var out [][]string
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		path := append(append([]string(nil), prefix...), f.Name)
+		switch {
+		case f.Type.Kind() == reflect.Struct:
+			out = append(out, recordFormatLeaves(t, f.Type, path)...)
+		case f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Struct:
+			out = append(out, recordFormatLeaves(t, f.Type.Elem(), path)...)
+		default:
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+// fillRecordFormat sets every leaf of v to the marker, giving each slice of
+// structs a single element. A fully populated pair is what makes the
+// difference between the two values a single leaf: a base of zero values would
+// let a slice's length carry the change instead of the field under test.
+func fillRecordFormat(t *testing.T, v reflect.Value, marker string) {
+	t.Helper()
+	typ := v.Type()
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		switch {
+		case f.Type.Kind() == reflect.Struct:
+			fillRecordFormat(t, v.Field(i), marker)
+		case f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Struct:
+			s := reflect.MakeSlice(f.Type, 1, 1)
+			fillRecordFormat(t, s.Index(0), marker)
+			v.Field(i).Set(s)
+		default:
+			v.Field(i).Set(markerValue(t, f.Type, marker))
+		}
+	}
+}
+
+// setRecordFormatLeaf walks v along the path and writes the marker at its end.
+// The slices on the way already hold their single element, because the value
+// was filled before the walk.
+func setRecordFormatLeaf(t *testing.T, v reflect.Value, path []string, marker string) {
+	t.Helper()
+	for i, name := range path {
+		v = v.FieldByName(name)
+		require.True(t, v.IsValid(), "no field %s on the way to %s", name, strings.Join(path, "."))
+		if i == len(path)-1 {
+			v.Set(markerValue(t, v.Type(), marker))
+			return
+		}
+		if v.Kind() == reflect.Slice {
+			require.Equal(t, 1, v.Len(), "the fill left %s without its element", name)
+			v = v.Index(0)
+		}
+	}
+}
+
+// markerValue is a marker as a value of typ. It knows the kinds a record
+// format is made of; anything else fails the test rather than being guessed
+// at, because a field the builder cannot vary is a field the seam test would
+// otherwise report as covered without ever having changed it.
+func markerValue(t *testing.T, typ reflect.Type, marker string) reflect.Value {
+	t.Helper()
+	switch typ.Kind() {
+	case reflect.String:
+		return reflect.ValueOf(marker).Convert(typ)
+	case reflect.Bool:
+		return reflect.ValueOf(marker == markerOne).Convert(typ)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n := int64(1)
+		if marker == markerTwo {
+			n = 2
+		}
+		return reflect.ValueOf(n).Convert(typ)
+	case reflect.Slice:
+		s := reflect.MakeSlice(typ, 1, 1)
+		s.Index(0).Set(markerValue(t, typ.Elem(), marker))
+		return s
+	default:
+		t.Fatalf("a record format field of kind %s has no marker: teach markerValue about it, "+
+			"and decide whether GitHubSpec.Key should encode it", typ.Kind())
+		return reflect.Value{}
+	}
 }

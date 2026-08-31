@@ -75,13 +75,13 @@ func TestRenderEntryDefaults(t *testing.T) {
 }
 
 func TestRenderEntryCustomFormat(t *testing.T) {
-	f := Format{
+	f := SpecFormat(model.RecordFormat{
 		DateFormat:        "02.01.2006",
 		BreakingTitle:     "Breaking",
 		FeaturesTitle:     "Added",
 		FixesTitle:        "Fixed",
 		DependenciesTitle: "Bumped",
-	}
+	})
 	out := RenderEntry(testRelease("/tmp/x", ccme.Version{Major: 2}), testDate, f)
 
 	assert.Contains(t, out, "## core@2.0.0 (26.07.2026)")
@@ -186,7 +186,7 @@ func TestRecordCustomFileAndTitle(t *testing.T) {
 	w := &FileWriter{
 		File:      "HISTORY.md",
 		FileTitle: titleLines("# History"),
-		Format:    Format{FeaturesTitle: "Added"},
+		Format:    SpecFormat(model.RecordFormat{FeaturesTitle: "Added"}),
 		Now:       func() time.Time { return testDate },
 	}
 	require.NoError(t, w.Record(context.Background(), testRelease(dir, ccme.Version{Major: 2})))
@@ -483,11 +483,11 @@ func TestRecordFileTitleIsFiltered(t *testing.T) {
 func TestRecordEveryEntryCarriesItsOwnBlocks(t *testing.T) {
 	dir := t.TempDir()
 	w := &FileWriter{
-		Format: Format{
+		Format: SpecFormat(model.RecordFormat{
 			ReleaseName: "${DISPAT_PACKAGE} ${DISPAT_VERSION}",
 			Header:      titleLines("Built by CI."),
 			Footer:      titleLines("---"),
-		},
+		}),
 		Now: func() time.Time { return testDate },
 	}
 	ctx := context.Background()

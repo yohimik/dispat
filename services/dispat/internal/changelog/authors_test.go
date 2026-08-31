@@ -97,16 +97,16 @@ func TestAuthorSuffixPlacements(t *testing.T) {
 		"both":    {AuthorsBoth, " (by Ada Lovelace, Grace Hopper)"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := Format{AuthorsPlacement: tc.placement}.withDefaults()
+			f := SpecFormat(model.RecordFormat{AuthorsPlacement: tc.placement}).withDefaults()
 			assert.Equal(t, tc.want, authorSuffix(rel, u, f))
 		})
 	}
 
-	f := Format{AuthorsPlacement: AuthorsInline, AuthorsFormat: AuthorsUsername}.withDefaults()
+	f := SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsInline, AuthorsFormat: AuthorsUsername}).withDefaults()
 	assert.Equal(t, " (by ada, grace)", authorSuffix(rel, u, f))
 
 	// Filtered to nobody renders nothing rather than an empty bracket.
-	f = Format{AuthorsPlacement: AuthorsInline, AuthorsExclude: []string{"*"}}.withDefaults()
+	f = SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsInline, AuthorsExclude: []string{"*"}}).withDefaults()
 	assert.Equal(t, "", authorSuffix(rel, u, f))
 }
 
@@ -117,7 +117,7 @@ func TestAuthorSuffixFollowsTheCorrectionNote(t *testing.T) {
 	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {ada}}, ada)
 	rel.Corrects = map[*ccme.Unit][]string{u: {"abc1234"}}
 
-	out := RenderSections(rel, Format{AuthorsPlacement: AuthorsInline})
+	out := RenderSections(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsInline}))
 	assert.Contains(t, out, "- close leak (corrects abc1234) (by Ada Lovelace)")
 }
 
@@ -127,12 +127,12 @@ func TestAuthorsSectionRendersUnderItsTitle(t *testing.T) {
 	rel := authored([]*ccme.Unit{u1, u2},
 		map[*ccme.Unit][]plan.Author{u1: {ada, grace}, u2: {grace, alan}}, ada, grace, alan)
 
-	out := authorsSection(rel, Format{AuthorsPlacement: AuthorsSection}.withDefaults())
+	out := authorsSection(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection}).withDefaults())
 	assert.Equal(t, "### Authors\n\n- Ada Lovelace\n- Grace Hopper\n- Alan Turing\n", out,
 		"deduped across units, in the order the entry's own lines are in")
 
 	custom := authorsSection(rel,
-		Format{AuthorsPlacement: AuthorsBoth, AuthorsTitle: "Thanks to"}.withDefaults())
+		SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsBoth, AuthorsTitle: "Thanks to"}).withDefaults())
 	assert.True(t, strings.HasPrefix(custom, "### Thanks to\n\n"), custom)
 }
 
@@ -141,12 +141,12 @@ func TestAuthorsSectionIsSilentWhenItWouldBeEmpty(t *testing.T) {
 	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {bot}}, bot)
 
 	// A heading over no names reads as a failed write, so nothing is rendered.
-	f := Format{AuthorsPlacement: AuthorsSection, AuthorsExclude: []string{"*bot*"}}.withDefaults()
+	f := SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection, AuthorsExclude: []string{"*bot*"}}).withDefaults()
 	assert.Equal(t, "", authorsSection(rel, f))
 
 	// And the placements that do not ask for a section never render one.
 	for _, p := range []string{AuthorsOff, AuthorsInline} {
-		assert.Equal(t, "", authorsSection(rel, Format{AuthorsPlacement: p}.withDefaults()))
+		assert.Equal(t, "", authorsSection(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: p}).withDefaults()))
 	}
 }
 
@@ -158,11 +158,11 @@ func TestAuthorsSectionCCMEVersusAll(t *testing.T) {
 	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {ada}}, ada, grace)
 
 	ccmeOut := authorsSection(rel,
-		Format{AuthorsPlacement: AuthorsSection, AuthorsCommits: AuthorsCommitsCCME}.withDefaults())
+		SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection, AuthorsCommits: AuthorsCommitsCCME}).withDefaults())
 	assert.Equal(t, "### Authors\n\n- Ada Lovelace\n", ccmeOut)
 
 	allOut := authorsSection(rel,
-		Format{AuthorsPlacement: AuthorsSection, AuthorsCommits: AuthorsCommitsAll}.withDefaults())
+		SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection, AuthorsCommits: AuthorsCommitsAll}).withDefaults())
 	assert.Equal(t, "### Authors\n\n- Ada Lovelace\n- Grace Hopper\n", allOut)
 }
 
@@ -175,9 +175,9 @@ func TestAuthorsSectionOnANoChangesRelease(t *testing.T) {
 	require.True(t, rel.NoChanges())
 
 	assert.Equal(t, "", authorsSection(rel,
-		Format{AuthorsPlacement: AuthorsSection}.withDefaults()))
+		SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection}).withDefaults()))
 	assert.Equal(t, "### Authors\n\n- Ada Lovelace\n", authorsSection(rel,
-		Format{AuthorsPlacement: AuthorsSection, AuthorsCommits: AuthorsCommitsAll}.withDefaults()))
+		SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection, AuthorsCommits: AuthorsCommitsAll}).withDefaults()))
 }
 
 func TestRenderBodyBlockOrderIsHeaderSectionsAuthorsExtraFooter(t *testing.T) {
@@ -189,11 +189,11 @@ func TestRenderBodyBlockOrderIsHeaderSectionsAuthorsExtraFooter(t *testing.T) {
 	u := testUnit("feat", ccme.BumpMinor, "add streaming")
 	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {ada}}, ada)
 
-	f := Format{
+	f := SpecFormat(model.RecordFormat{
 		AuthorsPlacement: AuthorsSection,
 		Header:           []model.EntryLine{{Line: []string{"Header line."}}},
 		Footer:           []model.EntryLine{{Line: []string{"---", "Footer line."}}},
-	}
+	})
 	got := RenderBody(rel, f, nil, "### Release\n\n- commit: abc\n")
 
 	assert.Equal(t, "Header line.\n"+
@@ -219,7 +219,7 @@ func TestRenderBodyWithAuthorsOffIsUnchanged(t *testing.T) {
 	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {ada, grace}}, ada, grace)
 
 	assert.Equal(t, RenderBody(rel, Format{}, nil),
-		RenderBody(rel, Format{AuthorsPlacement: AuthorsOff, AuthorsTitle: "Ignored"}, nil))
+		RenderBody(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsOff, AuthorsTitle: "Ignored"}), nil))
 	assert.NotContains(t, RenderBody(rel, Format{}, nil), "Ada")
 }
 
@@ -231,8 +231,8 @@ func TestWithDefaultsFillsTheAuthorsPolicy(t *testing.T) {
 	assert.Equal(t, "Authors", f.AuthorsTitle)
 
 	// A configured value is never overwritten by a default.
-	set := Format{AuthorsPlacement: AuthorsBoth, AuthorsFormat: AuthorsUsername,
-		AuthorsCommits: AuthorsCommitsAll, AuthorsTitle: "Contributors"}.withDefaults()
+	set := SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsBoth, AuthorsFormat: AuthorsUsername,
+		AuthorsCommits: AuthorsCommitsAll, AuthorsTitle: "Contributors"}).withDefaults()
 	assert.Equal(t, AuthorsBoth, set.AuthorsPlacement)
 	assert.Equal(t, AuthorsUsername, set.AuthorsFormat)
 	assert.Equal(t, AuthorsCommitsAll, set.AuthorsCommits)
@@ -241,7 +241,9 @@ func TestWithDefaultsFillsTheAuthorsPolicy(t *testing.T) {
 
 func TestSpecFormatCarriesTheAuthorsPolicy(t *testing.T) {
 	// The renderer reads its policy from the resolved record format, so a
-	// field the mapping forgets is one the configuration cannot reach.
+	// field that fails to arrive is one the configuration cannot reach. The
+	// embed makes the arrival structural rather than copied; this case stands
+	// as the guard against SpecFormat ever regrowing a field-by-field mapping.
 	got := SpecFormat(model.RecordFormat{
 		AuthorsPlacement: AuthorsBoth,
 		AuthorsFormat:    AuthorsUsername,
@@ -270,7 +272,7 @@ func TestSectionAuthorsNarrowsWithNotesUnitsOnAPrerelease(t *testing.T) {
 	rel.FreshUnits = []*ccme.Unit{fresh}
 	rel.FreshWindowAuthors = []plan.Author{grace}
 
-	f := Format{AuthorsPlacement: AuthorsSection}.withDefaults()
+	f := SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection}).withDefaults()
 	assert.Equal(t, "### Authors\n\n- Grace Hopper\n", authorsSection(rel, f))
 
 	f.AuthorsCommits = AuthorsCommitsAll
@@ -287,7 +289,7 @@ func TestSuppressedUnitLeavesTheAttributionWithTheLine(t *testing.T) {
 		map[*ccme.Unit][]plan.Author{kept: {ada}, gone: {grace}}, ada, grace)
 	rel.SuppressedNotes = map[*ccme.Unit]bool{gone: true}
 
-	f := Format{AuthorsPlacement: AuthorsSection}.withDefaults()
+	f := SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection}).withDefaults()
 	assert.Equal(t, "### Authors\n\n- Ada Lovelace\n", authorsSection(rel, f))
 
 	f.AuthorsCommits = AuthorsCommitsAll
