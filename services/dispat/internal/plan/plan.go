@@ -239,6 +239,15 @@ const (
 	// in the file and has to be said in the log.
 	CodeNoChangesTextEmpty = "W241"
 
+	// CodePushRebased marks a release whose push was refused because commits
+	// landed on the branch while the run was working, and that recovered by
+	// pulling them and replaying its release commit on top. The release is
+	// still the one that was planned: the commits that arrived were not in the
+	// plan and belong to the next window. What changed is the tree the release
+	// went out on, which is why this is a warning rather than an ordinary
+	// line: it did not go out on the tree the run was planned against.
+	CodePushRebased = "W242"
+
 	// --- release outcomes (§13.7a, §13.9) ---
 
 	// CodeCatchUp marks a release whose entire cause is propagation from a

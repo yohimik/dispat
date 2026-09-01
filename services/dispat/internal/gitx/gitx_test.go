@@ -1074,3 +1074,109 @@ func TestMutates(t *testing.T) {
 		assert.Equalf(t, tc.want, mutates(tc.args), "mutates(%v)", tc.args)
 	}
 }
+
+// TestPushReportsARejectedBranchAsRecoverable: the two failures a push can
+// meet call for entirely different answers, so they have to be told apart. A
+// branch somebody moved is recoverable and comes back as ErrRejected; a remote
+// nobody can reach is not, and replaying commits onto it would be nonsense.
+func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+	_, err := cli.Push(ctx, "origin", nil, false)
+	require.NoError(t, err)
+
+	// Another clone lands a commit, which is what leaves this one unable to
+	// push what it built on the old tip.
+	other := t.TempDir()
+	otherGit := func(args ...string) {
+		t.Helper()
+		out, gerr := exec.Command("git", append([]string{"-C", other}, args...)...).CombinedOutput()
+		require.NoError(t, gerr, "git %v: %s", args, out)
+	}
+	out, cerr := exec.Command("git", "clone", "-q", bare, other).CombinedOutput()
+	require.NoError(t, cerr, "git clone: %s", out)
+	otherGit("config", "user.email", "other@example.com")
+	otherGit("config", "user.name", "Other")
+	require.NoError(t, os.WriteFile(filepath.Join(other, "theirs.txt"), []byte("theirs\n"), 0o644))
+	otherGit("add", ".")
+	otherGit("commit", "-qm", "chore: landed elsewhere")
+	otherGit("push", "-q", "origin", "HEAD")
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "CHANGELOG.md"),
+		[]byte("# Changelog\n"), 0o644))
+	committed, err := cli.CommitDirs(ctx, []string{filepath.Join(root, "packages", "core")}, "chore(release): core@0.2.0")
+	require.NoError(t, err)
+	require.True(t, committed)
+
+	_, err = cli.Push(ctx, "origin", nil, false)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRejected, "a branch that moved is something the caller can recover from")
+	assert.Contains(t, err.Error(), "[rejected]", "and the wrapped error still says what git said")
+
+	// The recovery itself: what landed comes down, the local commit goes on
+	// top of it, and the push then succeeds.
+	branch, err := cli.CurrentBranch(ctx)
+	require.NoError(t, err)
+	require.NoError(t, cli.Reapply(ctx, "origin", branch))
+	subjects, oerr := exec.Command("git", "-C", root, "log", "--format=%s", "-3").Output()
+	require.NoError(t, oerr)
+	lines := strings.Split(strings.TrimSpace(string(subjects)), "\n")
+	assert.Equal(t, "chore(release): core@0.2.0", lines[0], "the release commit is on top")
+	assert.Equal(t, "chore: landed elsewhere", lines[1], "and what landed is underneath it")
+	_, err = cli.Push(ctx, "origin", nil, false)
+	assert.NoError(t, err)
+
+	// A remote nobody can reach is a different failure and must not be
+	// mistaken for one worth replaying commits onto.
+	_, err = exec.Command("git", "-C", root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone")).Output()
+	require.NoError(t, err)
+	_, err = cli.Push(ctx, "origin", nil, false)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrRejected)
+}
+
+// TestReapplyUndoesARebaseItCannotFinish: a conflict leaves the working tree
+// as the run had it rather than half way through a rebase somebody else then
+// has to find and abort.
+func TestReapplyUndoesARebaseItCannotFinish(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+	_, err := cli.Push(ctx, "origin", nil, false)
+	require.NoError(t, err)
+
+	other := t.TempDir()
+	out, cerr := exec.Command("git", "clone", "-q", bare, other).CombinedOutput()
+	require.NoError(t, cerr, "git clone: %s", out)
+	for _, args := range [][]string{
+		{"config", "user.email", "other@example.com"},
+		{"config", "user.name", "Other"},
+	} {
+		out, gerr := exec.Command("git", append([]string{"-C", other}, args...)...).CombinedOutput()
+		require.NoError(t, gerr, "git %v: %s", args, out)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(other, "packages", "core", "CHANGELOG.md"),
+		[]byte("# Their changelog\n"), 0o644))
+	for _, args := range [][]string{
+		{"add", "."}, {"commit", "-qm", "docs: their changelog"}, {"push", "-q", "origin", "HEAD"},
+	} {
+		out, gerr := exec.Command("git", append([]string{"-C", other}, args...)...).CombinedOutput()
+		require.NoError(t, gerr, "git %v: %s", args, out)
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "CHANGELOG.md"),
+		[]byte("# Our changelog\n"), 0o644))
+	_, err = cli.CommitDirs(ctx, []string{filepath.Join(root, "packages", "core")}, "chore(release): core@0.2.0")
+	require.NoError(t, err)
+
+	branch, err := cli.CurrentBranch(ctx)
+	require.NoError(t, err)
+	require.Error(t, cli.Reapply(ctx, "origin", branch), "the two sides wrote the same file")
+	assert.NoDirExists(t, filepath.Join(root, ".git", "rebase-merge"))
+	assert.NoDirExists(t, filepath.Join(root, ".git", "rebase-apply"))
+	head, err := exec.Command("git", "-C", root, "log", "--format=%s", "-1").Output()
+	require.NoError(t, err)
+	assert.Equal(t, "chore(release): core@0.2.0", strings.TrimSpace(string(head)),
+		"the run's own commit is still what HEAD names")
+}

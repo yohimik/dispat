@@ -203,9 +203,11 @@ plan gets computed or which command does what.
 
 ### The guards
 
-29. **The release guards** (`guard_test.go`): the two refusals that stop a release before it starts. `run.allowBranch`
-    turns a branch list into a precondition; the push-mode behind-remote check compares the checkout against the branch
-    it would push to and refuses a stale one. The pair is also proven to be off unless asked for.
+29. **The release guards** (`guard_test.go`): the two refusals that stop a release before it starts, and the recovery
+    at the other end. `run.allowBranch` turns a branch list into a precondition; the push-mode behind-remote check
+    compares the checkout against the branch it would push to and refuses a stale one. The pair is also proven to be
+    off unless asked for. The guard closes before the plan exists, so a commit pushed while the run is working reaches
+    the finalize push instead, where the release replays itself on top of what landed or says why it cannot.
 30. **The release lock** (`lock_test.go`): one tag on the remote decides who releases. Two runs against one repository
     is not a race dispat can win by being careful, so it refuses to enter it: the first to push the lock tag releases,
     the second is told to come back later, and the tag is gone by the time either exits.
@@ -1020,8 +1022,10 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestGuardAllowBranch`                     | Setting `run.allowBranch` restricts releases to listed branch patterns. Running on an unlisted branch prints the branch and configured globs, exits 1, and creates no tags. Wildcard `*` patterns match branch names with slashes like `release/v1`, while `dispat status` runs on any branch.             |
 | `TestGuardAllowBranchRefusesDetachedHead`  | A detached HEAD matches no branch patterns, including `*`. dispat aborts the run before creating tags.                                                                                                                     |
 | `TestGuardBehindRemote`                    | In push mode, dispat checks whether local branches lag behind the remote. If behind, the run aborts with "behind origin/main" *before the plan is computed at all*: no build script runs and no planning diagnostic is reported, while the same window does report W131 once the checkout has caught up and a plan is actually built. Running `git pull --rebase` allows the release to tag and push successfully. |
-| `TestGuardBehindRemoteHonoursCommitVerify` | The behind check runs `git ls-remote`. Setting `commit.verify: false` disables this check alongside reachability checks, allowing the run to build, tag, and publish before git rejects the push.                   |
+| `TestGuardBehindRemoteHonoursCommitVerify` | The behind check runs `git ls-remote`. Setting `commit.verify: false` disables this check alongside reachability checks, so the run builds, publishes and tags against a plan computed from tags it could no longer see, and the push it is then rejected on is recovered by the replay, reported as `W242`. What the guard protects is the plan, not the push. |
 | `TestGuardsAreUnsetByDefault`              | Guards remain inactive until configured. Unconfigured repositories on any branch name release and push to remotes without restrictions.                                                                                                                  |
+| `TestReleaseReappliesWhatLandedDuringTheRun` | A commit pushed from a second clone while the build runs reaches the finalize push as a rejection, after the packages have published. dispat pulls it, replays the release commit on top, re-points the tags at the replayed commit and pushes again, exiting `0` and reporting `W242`. The release is still the planned one: the commit that arrived is not in the changelog this run wrote, and the tag names the commit that was actually pushed. |
+| `TestReleaseCannotReapplyWhatConflicts` | What landed touches the same file the release commit writes, so the replay conflicts. The run exits non-zero naming that commits landed during the release and could not be merged, no tag reaches the remote, the rebase is undone rather than left in the working tree, and the release lock is given back. |
 
 ### Goal 30: the release lock (`lock_test.go`)
 

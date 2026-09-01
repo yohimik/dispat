@@ -56,5 +56,39 @@ old range until its own next release, when the version stage reconciles the rang
 [the auto-version reconciliation](../../configuration/autoversion.md#picking-up-providers-released-without-you), not a
 release triggered by the provider.
 
+## When somebody pushes while the release runs
+
+The [behind-remote guard](./release-lock.md) closes before the plan is computed, so it cannot cover a commit pushed
+after the run has started. Such a commit reaches the release at the very end, as a rejected push, by which point the
+packages have already published: refusing there would leave a released package with no commit, no tag and nothing on
+the remote.
+
+dispat therefore recovers rather than refuses. It pulls the branch, replays its release commit on top of what landed,
+moves the release tags onto the replayed commit, and pushes again. The run exits `0` and says what it did:
+
+```console
+12:04:05 WRN pulled the branch during the release to sync changes that landed while it ran; the release commit was replayed on top of them branch=main code=W242 remote=origin
+```
+
+The warning is there because the release went out on a tree that is not the one the run was planned against. What was
+planned is still what was released: the commit that arrived was not in the plan, and it is not in the changelog entries
+or the version numbers this run wrote. It sits underneath the release commit, and therefore inside the window the
+release just closed, so it carries no entry of its own and will not release anything on the next run. Read the
+`W242` warning as a prompt to check whether that commit needed a release, and cut one for it if it did.
+
+Tags are only ever pushed on the commit that was pushed. If the replay conflicts with what landed, dispat has nothing
+to decide on its own and stops:
+
+```console
+12:04:05 ERR push failed code=E224 error="commits landed on origin/main during the release and could not be merged with it: ..." remote=origin
+```
+
+The run exits non-zero, no tag reaches the remote, the working tree is left out of the rebase dispat started, and the
+[release lock](./release-lock.md) is given back as it is on every other way out. Merge the two sides yourself, then
+push the release commit and its tags.
+
+A release whose tag is pinned to a commit its own scripts exported is never replayed, because replaying rewrites that
+commit too. dispat reports the same failure and leaves the merge to you.
+
 Read [Concepts](../../concepts.md#catch-up-failed-consumers-are-never-lost) to understand the properties that make this
 safe and why dispat needs no state file. You can look up each diagnostic code in [Diagnostic codes](../plan-errors.md).

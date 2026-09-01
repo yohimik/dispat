@@ -138,6 +138,7 @@ shape dispat could actually render.
 |------|-------|
 | `W240` | [Commit references](../configuration/records.md#naming-the-commit-behind-a-line) are configured, and some of the entry's lines have no commit id to point at. Those lines render without a reference instead of with one that resolves nowhere. The warning names the package and how many lines it covers, once per release and per record. |
 | `W241` | [`noChangesText`](../configuration/records.md#what-an-entry-with-no-sections-says) is configured, and it expanded to nothing or to whitespace alone. The entry carries the built-in line naming the release's cause instead. The substitution is invisible in the file itself, which is why it is reported once per release and per record. |
+| `W242` | The release push was refused because commits landed on the branch while the run was working. dispat pulled them, replayed its release commit on top, moved its tags onto the replayed commit and pushed again. The release is still the one that was planned: the commits that arrived are not in its records, and they sit underneath the release commit. See [When somebody pushes while the release runs](./releasing/recovery.md#when-somebody-pushes-while-the-release-runs). |
 
 An `auto` link that cannot be derived is the quieter member of the same family. It falls back to the plain unlinked
 text and says so at `debug` level, because a repository with no GitHub coordinates configured is a normal thing to be

@@ -6,7 +6,10 @@
 package integration
 
 import (
+	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -163,12 +166,20 @@ func TestGuardBehindRemoteHonoursCommitVerify(t *testing.T) {
 		"with verification off the checkout is never compared to the remote")
 
 	// And this is what the guard buys when it is on. The run went all the way
-	// through — built, published and tagged — before git rejected the push,
-	// which is the wasted release the check exists to prevent.
+	// through, building, publishing and tagging, against a plan computed from
+	// tags this checkout had already stopped being able to see: exactly the
+	// release the check exists to prevent from being planned at all.
+	//
+	// It still lands, because the push it is rejected on is recovered from
+	// (see TestReleaseReappliesWhatLandedDuringTheRun). What the guard was
+	// protecting is the plan, not the push, and the W242 warning is the only
+	// thing left saying the tree it went out on is not the one it was planned
+	// against.
 	assert.Contains(t, res.Stdout, "published")
-	assert.True(t, r.HasTag("core@0.2.0"), "the tag was already created; tags: %v", r.TagList())
-	assert.Contains(t, res.Stdout, "push failed")
-	assert.Equal(t, 1, res.Code)
+	assert.True(t, r.HasTag("core@0.2.0"), "the tag was created; tags: %v", r.TagList())
+	assert.True(t, harness.HasCode(res.Events, "W242"),
+		"the release pulled what it could not see when it planned: %v", res.Events)
+	assert.Equal(t, 0, res.Code)
 }
 
 // TestGuardsAreUnsetByDefault: neither guard applies to a configuration that
@@ -186,4 +197,112 @@ func TestGuardsAreUnsetByDefault(t *testing.T) {
 
 	r.ReleaseOK()
 	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+}
+
+// midReleasePush is a build script that pushes a commit from a second clone
+// while the release is running: exactly the window the behind-remote guard
+// cannot cover, because it closes before the plan exists and this happens
+// after it. The file it writes decides whether the release commit can be
+// replayed on top of what landed, since a conflict is a conflict over content.
+func midReleasePush(t *testing.T, bare, message, file, contents string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the mid-release push is a POSIX shell script")
+	}
+	return strings.Join([]string{
+		"d=$(mktemp -d)",
+		"git clone -q --branch " + harness.DefaultBranch + " " + shellQuote(bare) + " \"$d\"",
+		"printf '%s' " + shellQuote(contents) + " > \"$d\"/" + file,
+		"git -C \"$d\" add -A",
+		"git -C \"$d\" -c user.email=other@dispat.test -c user.name='other clone' commit -q -m " +
+			shellQuote(message),
+		"git -C \"$d\" push -q origin HEAD:refs/heads/" + harness.DefaultBranch,
+	}, " && ")
+}
+
+// shellQuote wraps a value in single quotes for the script above.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// TestReleaseReappliesWhatLandedDuringTheRun: the recovery at the far end of a
+// release. The behind-remote guard closes before the plan is computed, so a
+// commit pushed while the run is working reaches the finalize push as a
+// rejection, and the run has already published: refusing there would leave a
+// released package with no commit, no tag and nothing on the remote.
+//
+// So the release takes what landed, replays its own commit on top of it, moves
+// its tags onto the replayed commit and pushes again, and says so at warning
+// level: what went out is not the tree the run was planned against.
+//
+// The release is still the one that was planned. The commit that arrived was
+// not in the plan and is not in the record this run wrote, which is asserted
+// here because it is the whole reason the recovery is safe.
+func TestReleaseReappliesWhatLandedDuringTheRun(t *testing.T) {
+	r := harness.New(t)
+	bare := r.AddBareRemote()
+	cfg := libsConfig(midReleasePush(t, bare, "feat(core): landed mid-release", "NOTES.md", "landed\n"), 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+	res := r.Release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.HasCode(res.Events, "W242"),
+		"the pull during the release is reported: %v", res.Events)
+	assert.Contains(t, res.Stdout, "pulled the branch during the release")
+
+	// The release landed, on top of what arrived rather than beside it.
+	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0",
+		"the tag reached the remote on the second attempt")
+	log := r.Git("log", "--format=%s", "-3")
+	assert.Contains(t, log, "landed mid-release", "the foreign commit is in this branch's history")
+	first, _, _ := strings.Cut(log, "\n")
+	assert.Contains(t, first, "chore(release)", "and the release commit sits on top of it")
+
+	// The tag is on the commit that was actually pushed, which is what makes
+	// the record readable at all: a tag left on the replaced commit would name
+	// an object on no branch.
+	assert.Equal(t, strings.TrimSpace(r.Git("rev-parse", "HEAD")),
+		strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")))
+
+	// The plan was computed before any of this and did not change: the commit
+	// that arrived mid-run is not in the record this release wrote.
+	changelog, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(changelog), "first")
+	assert.NotContains(t, string(changelog), "landed mid-release",
+		"a commit that arrived after the plan was computed is not in this release's record")
+}
+
+// TestReleaseCannotReapplyWhatConflicts: the other outcome. What landed
+// touches the same file the release commit writes, so the replay conflicts and
+// there is nothing dispat can decide on its own. It says which side of the
+// problem it is on, leaves no tag on the remote, leaves the working tree out
+// of the rebase it started, and gives the lock back on the way out.
+func TestReleaseCannotReapplyWhatConflicts(t *testing.T) {
+	r := harness.New(t)
+	bare := r.AddBareRemote()
+	script := midReleasePush(t, bare, "docs(core): a changelog of their own",
+		"packages/core/CHANGELOG.md", "# Changelog\n\nwritten by somebody else\n")
+	cfg := libsConfig(script, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+	res := releaseLocked(r)
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "commits landed on origin/"+harness.DefaultBranch+" during the release")
+	assert.Contains(t, res.Stdout, "could not be merged")
+
+	remote := r.Git("ls-remote", "origin")
+	assert.NotContains(t, remote, "refs/tags/core@0.1.0", "a release nobody could push publishes no tag")
+	assertLockCleared(t, r, bare)
+
+	// The rebase is undone rather than left for the next person to find.
+	assert.NoDirExists(t, r.Path(".git", "rebase-merge"))
+	assert.NoDirExists(t, r.Path(".git", "rebase-apply"))
 }

@@ -987,6 +987,66 @@ func (c *CLI) RemoteTags(ctx context.Context, remote string) (map[string]bool, e
 	return tags, nil
 }
 
+// ErrRejected is what a push refused by the remote because the branch has
+// moved under it answers with: somebody landed commits on it while this run
+// was working. It is a recoverable answer rather than a failure, which is why
+// it is a sentinel: the caller replays its work on the new tip and pushes
+// again.
+var ErrRejected = errors.New("the remote branch has commits this push does not build on")
+
+// rejectedPhrases are how git spells that refusal. The exact wording depends
+// on the version and on whether the remote ref was fetched, so the test is on
+// the phrases every spelling shares rather than on one sentence.
+var rejectedPhrases = []string{"non-fast-forward", "fetch first", "stale info", "cannot lock ref"}
+
+// classifyPush turns a push failure into ErrRejected when the remote refused
+// it over a branch that moved, and leaves every other failure alone: a missing
+// credential and a moved branch call for entirely different answers, and
+// replaying commits onto a remote nobody could reach would be neither.
+func classifyPush(err error) error {
+	if err == nil {
+		return nil
+	}
+	text := err.Error()
+	if !strings.Contains(text, "[rejected]") && !strings.Contains(text, "Updates were rejected") {
+		return err
+	}
+	for _, phrase := range rejectedPhrases {
+		if strings.Contains(text, phrase) {
+			return fmt.Errorf("%w: %v", ErrRejected, err)
+		}
+	}
+	return err
+}
+
+// Reapply replays the commits this clone has and the remote does not on top of
+// the remote's tip of branch: the recovery from a push refused because someone
+// landed work while the release ran.
+//
+// A rebase rather than a merge, so what comes out is the branch's history with
+// this run's commits at the end of it, which is what the release then tags and
+// pushes. On a conflict the rebase is undone before the error is returned, so
+// the working tree is left exactly as the run had it rather than mid-rebase.
+//
+// The fetch is deliberately --no-tags: the tags this run just created are its
+// own records, and pulling the remote's would be a second, unrelated change to
+// the refs under a run that is already recovering from one surprise.
+func (c *CLI) Reapply(ctx context.Context, remote, branch string) error {
+	if _, err := c.run(ctx, "fetch", "--no-tags", remote, branch); err != nil {
+		return err
+	}
+	if _, err := c.run(ctx, "rebase", "FETCH_HEAD"); err != nil {
+		// The abort's own failure is not what the caller needs to hear about:
+		// the rebase is the thing that did not work, and saying so twice would
+		// bury it.
+		if _, abortErr := c.run(ctx, "rebase", "--abort"); abortErr != nil {
+			c.Log.Warn().Err(abortErr).Msg("could not abort the rebase")
+		}
+		return err
+	}
+	return nil
+}
+
 // PushReport says what the push did about tags the remote already carried.
 // Exactly one of the two lists is ever populated, decided by force.
 type PushReport struct {
@@ -1009,12 +1069,14 @@ type PushReport struct {
 //
 // **The branch is never force pushed.** A rejected branch push means someone
 // else pushed while this run was working, and the answer to that is to look,
-// not to overwrite their commits. Only the tag refs — dispat's own namespace —
-// are ever forced.
+// not to overwrite their commits. Only the tag refs, which are dispat's own
+// namespace, are ever forced. A refusal of that kind comes back wrapping
+// ErrRejected, so the caller can replay its commits on the new tip with
+// Reapply and push again rather than reporting a release that never landed.
 func (c *CLI) Push(ctx context.Context, remote string, tags []string, force bool) (PushReport, error) {
 	var report PushReport
 	if _, err := c.run(ctx, "push", remote, "HEAD"); err != nil {
-		return report, err
+		return report, classifyPush(err)
 	}
 	if len(tags) == 0 {
 		return report, nil

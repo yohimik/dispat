@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,6 +185,12 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	if a.cfg.Commit.PushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
 		report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
+		if errors.Is(err, gitx.ErrRejected) {
+			// Somebody pushed to the branch while this run was working. The
+			// release still owes its commit and tags, and the way to deliver
+			// them is to take what landed and put this run's work on top.
+			report, err = a.reapplyAndPush(ctx, fin, rels, pushTags)
+		}
 		a.reportPush(report, fin.remote)
 		if err != nil {
 			// The commit and the tags are local records already; the remote
@@ -219,6 +227,69 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			}
 		}
 	}
+}
+
+// reapplyAndPush recovers a push the remote refused because the branch moved
+// under this run, which is what commits landed by another clone look like from
+// here.
+//
+// The release still releases exactly what it planned. The commits that arrived
+// during the run were not in the plan and do not enter it: they end up
+// underneath the release commit and belong to the next window. What the replay
+// changes is only which commit the release commit sits on, and so its hash,
+// which is why the tags are re-pointed here. A tag left where it was written
+// would name a commit the replay rewrote away, and pushing it would put a
+// release record on a commit that is on no branch.
+//
+// A release whose tag is pinned to a commit its own scripts exported is not
+// recovered. The replay rewrites that commit too, and re-pointing the tag at
+// the release commit would silently publish something the package never asked
+// for; merging by hand is the honest answer there.
+//
+// The warning is the point of the whole recovery: the release went out on a
+// tree that is not the one the run was planned against, and nobody reading
+// afterwards should have to work that out from the commit graph.
+func (a *App) reapplyAndPush(ctx context.Context, fin finalizer, rels []*plan.Release,
+	pushTags []string) (gitx.PushReport, error) {
+	branch, err := a.git.CurrentBranch(ctx)
+	if err != nil {
+		return gitx.PushReport{}, err
+	}
+	if branch == "" {
+		return gitx.PushReport{}, fmt.Errorf(
+			"commits landed on %s during the release, and this is a detached HEAD with no branch to replay them onto",
+			fin.remote)
+	}
+	for _, rel := range rels {
+		if rel.ExportedCommit() != "" {
+			return gitx.PushReport{}, fmt.Errorf(
+				"commits landed on %s/%s during the release, and %s pinned its tag to a commit its own scripts made,"+
+					" which replaying would rewrite: merge them yourself and push",
+				fin.remote, branch, rel.Pkg.Name)
+		}
+	}
+	if err := a.git.Reapply(ctx, fin.remote, branch); err != nil {
+		return gitx.PushReport{}, fmt.Errorf(
+			"commits landed on %s/%s during the release and could not be merged with it: %w",
+			fin.remote, branch, err)
+	}
+	for _, rel := range rels {
+		message := "release " + rel.TagName()
+		names := []string{rel.TagName()}
+		for _, alias := range rel.AliasTags() {
+			names = append(names, alias.Name)
+		}
+		for _, name := range names {
+			if err := a.git.CreateTagForce(ctx, name, message, ""); err != nil {
+				return gitx.PushReport{}, fmt.Errorf(
+					"re-pointing %s at the replayed release commit: %w", name, err)
+			}
+		}
+	}
+	a.log.Warn().Str("code", plan.CodePushRebased).Str("remote", fin.remote).Str("branch", branch).
+		Msg("pulled the branch during the release to sync changes that landed while it ran; " +
+			"the release commit was replayed on top of them")
+	return a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
 }
 
 // reportPush logs what the push did about tags the remote already carried.
