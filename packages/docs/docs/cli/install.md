@@ -79,8 +79,20 @@ The value also matches as a glob, which reaches an asset whose exact spelling no
 dispat install acme/tool --asset '*linux-amd64'
 ```
 
-An exact name always wins over a glob. A pattern matching two files is refused with both listed, and so is a release
-carrying several files when you named none. A release carrying exactly one file needs no `--asset` at all.
+An exact name always wins over a glob, and a pattern matching two files is refused with both listed.
+
+Without `--asset`, dispat looks for the name most projects publish under: `{name}-{os}-{arch}`, the repository's own
+name and the platform, with `.exe` appended on Windows. That is the convention dispat's own releases follow, so
+installing dispat, or anything released the same way, needs no flag:
+
+```sh
+dispat install acme/tool          # installs tool-linux-amd64
+```
+
+The default is matched exactly and never as a glob, so what a bare invocation installs is decided by the release
+rather than by which of several near-misses came first. A release carrying exactly one file needs no `--asset` either.
+Anything else is refused with the name dispat looked for and the files the release does carry, so the next invocation
+can name one.
 
 ## Choosing the destination
 
@@ -195,7 +207,8 @@ These flags apply alongside the [global flags](./README.md#global-flags):
 ### `--asset`
 
 Which of the release's files to install, by name or glob. `{os}`, `{arch}`, `{version}`, `{tag}` and `{name}` are
-expanded. A release carrying exactly one file needs none.
+expanded. Without it, dispat takes the release's `{name}-{os}-{arch}` file, `.exe` included on Windows, and a release
+carrying exactly one file needs none either way. See [Choosing the file](#choosing-the-file).
 
 ### `--bin-dir`
 

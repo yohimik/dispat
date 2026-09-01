@@ -75,14 +75,39 @@ func placeholderNames(values map[string]string) []string {
 	return names
 }
 
+// DefaultAssetPattern is what a release is looked in for when nothing said
+// which file to take: the repository's own name, the platform, and on Windows
+// the extension a program has to carry. It is the convention this repository
+// publishes under, and the one the Go release tooling around it produces, so a
+// project following it needs no --asset at all.
+const DefaultAssetPattern = "{name}-{os}-{arch}"
+
+// DefaultAssetName renders that convention for a platform. The extension is
+// appended exactly as selfupdate.AssetName appends it, because the two are the
+// same convention seen from two sides: what dispat publishes for itself and
+// what dispat looks for in somebody else's release.
+func DefaultAssetName(f Fields) string {
+	name := f.Name + "-" + f.OS + "-" + f.Arch
+	if f.OS == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
 // SelectAsset picks the file to download out of what the release carries.
 //
 // A pattern names it: expanded first, then matched by name, then as a glob, so
 // "*linux-amd64*" reaches an asset whose exact spelling nobody wants to type.
-// Without a pattern the choice has to be unambiguous, which means the release
-// carries exactly one asset; every other case is answered by listing what is
-// there and asking for a pattern, because guessing which of nine files is the
-// binary is how the wrong thing gets installed globally.
+//
+// Without a pattern the choice has to be unambiguous. A release carrying one
+// asset is that; a release carrying several is answered by the convention
+// first, DefaultAssetName, matched exactly and never as a glob, so a project
+// naming its binaries after its repository needs no flag. Only when the
+// convention names nothing the release carries is the choice refused, and the
+// refusal says which name was looked for as well as what is there: guessing
+// which of nine files is the binary is how the wrong thing gets installed
+// globally, and a reader who has to pick needs to know what dispat already
+// tried.
 func SelectAsset(rel selfupdate.Release, pattern string, f Fields) (selfupdate.Asset, error) {
 	if len(rel.Assets) == 0 {
 		return selfupdate.Asset{}, fmt.Errorf("install: %s carries no files to download", rel.Tag)
@@ -91,9 +116,15 @@ func SelectAsset(rel selfupdate.Release, pattern string, f Fields) (selfupdate.A
 		if len(rel.Assets) == 1 {
 			return rel.Assets[0], nil
 		}
+		want := DefaultAssetName(f)
+		for _, a := range rel.Assets {
+			if a.Name == want {
+				return a, nil
+			}
+		}
 		return selfupdate.Asset{}, fmt.Errorf(
-			"install: %s carries %d files, so --asset has to say which one: %s",
-			rel.Tag, len(rel.Assets), strings.Join(rel.AssetNames(), ", "))
+			"install: %s carries %d files and none is called %s, so --asset has to say which one: %s",
+			rel.Tag, len(rel.Assets), want, strings.Join(rel.AssetNames(), ", "))
 	}
 	want, err := Expand(pattern, f)
 	if err != nil {

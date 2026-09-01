@@ -64,15 +64,44 @@ func TestSelectAssetNeedsNoPatternForAnUnambiguousRelease(t *testing.T) {
 	assert.Equal(t, "tool", got.Name)
 }
 
+// TestSelectAssetTakesTheConventionalNameWithoutAPattern: most projects name
+// their binaries after the repository and the platform, dispat's own releases
+// among them, so a release that follows the convention needs no --asset at
+// all. The name is matched exactly and never as a glob, so what a bare
+// invocation installs is decided by the release rather than by which of
+// several near-misses sorted first.
+func TestSelectAssetTakesTheConventionalNameWithoutAPattern(t *testing.T) {
+	rel := release("tool-linux-amd64", "tool-darwin-arm64", "checksums.txt")
+	got, err := SelectAsset(rel, "", fields)
+	require.NoError(t, err)
+	assert.Equal(t, "tool-linux-amd64", got.Name)
+
+	// Windows carries the extension, exactly as selfupdate.AssetName writes it
+	// for dispat's own releases.
+	windows := Fields{OS: "windows", Arch: "amd64", Version: "1.4.0", Tag: "v1.4.0", Name: "tool"}
+	assert.Equal(t, "tool-windows-amd64.exe", DefaultAssetName(windows))
+	got, err = SelectAsset(release("tool-windows-amd64.exe", "tool-linux-amd64"), "", windows)
+	require.NoError(t, err)
+	assert.Equal(t, "tool-windows-amd64.exe", got.Name)
+
+	// Exact, so a name the convention is only a part of is not it: the release
+	// below carries no "tool-linux-amd64" and the choice goes back to being
+	// the reader's.
+	_, err = SelectAsset(release("dist/tool-linux-amd64", "tool-linux-amd64.sha256"), "", fields)
+	require.Error(t, err)
+}
+
 // TestSelectAssetRefusesToGuess: which of nine files is the binary is exactly
 // the question that must not be answered by inference, because the wrong
-// answer is installed globally and run. The refusal lists them, so the next
-// invocation can name one.
+// answer is installed globally and run. The refusal lists them, and names the
+// convention it already looked for, so the reader knows what dispat tried
+// before asking.
 func TestSelectAssetRefusesToGuess(t *testing.T) {
-	rel := release("tool-linux-amd64", "tool-darwin-arm64", "checksums.txt")
+	rel := release("mytool_linux_x86_64.tar.gz", "mytool_darwin_arm64.tar.gz", "checksums.txt")
 	_, err := SelectAsset(rel, "", fields)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--asset")
+	assert.Contains(t, err.Error(), "tool-linux-amd64", "the refusal names the name it looked for")
 	for _, name := range rel.AssetNames() {
 		assert.Contains(t, err.Error(), name, "the refusal names what is there")
 	}

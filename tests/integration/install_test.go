@@ -457,15 +457,28 @@ func TestInstallNamesTheFileAndTheFolder(t *testing.T) {
 	assert.NotContains(t, res.Stdout, "is not on PATH")
 }
 
-// TestInstallRefusesToGuessWhichFileIsTheBinary: a release carries a binary,
-// a checksum file and often much more, and installing the wrong one globally
-// is worse than any amount of typing. The refusal lists what is there.
+// TestInstallRefusesToGuessWhichFileIsTheBinary: a release carries a binary, a
+// checksum file and often much more, and installing the wrong one globally is
+// worse than any amount of typing.
+//
+// One name is not a guess. Most projects call their binary after the
+// repository and the platform, dispat's own releases among them, so that name
+// is looked for first and exactly; everything else is refused with what dispat
+// tried and what the release has.
 func TestInstallRefusesToGuessWhichFileIsTheBinary(t *testing.T) {
 	r := newToolRepo(t)
 
 	res := r.bare("--check")
+	assert.Equal(t, 1, res.Code, "a gate: there is something to install")
+	assert.Contains(t, res.Stdout, "asset      tool-"+platform(),
+		"the conventional name needs no --asset")
+
+	// A release naming its files anything else is where guessing would start.
+	r.attach(toolNew, "mytool_"+runtime.GOOS+"_x86_64.tar.gz", "checksums.txt")
+	res = r.bare("--check")
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stdout, "--asset")
+	assert.Contains(t, res.Stdout, "tool-"+platform(), "the name it looked for first")
 	assert.Contains(t, res.Stdout, "checksums.txt", "it says what it found")
 
 	// A release carrying exactly one file has one answer, and asking for a
@@ -490,6 +503,18 @@ func TestInstallRefusesToGuessWhichFileIsTheBinary(t *testing.T) {
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stdout, "tool-"+platform(), "the one it wanted")
 	assert.Contains(t, res.Stdout, "tool-plan9-386", "and the one there is")
+
+	// Last, because installing for real is what every check above is about
+	// avoiding until the choice is unambiguous: with the conventional names
+	// back, a bare invocation puts the binary for this platform on PATH and it
+	// runs. Only Windows sits this out, where the fixture's tool is a script
+	// rather than a program.
+	if runtime.GOOS == "windows" {
+		return
+	}
+	r.attach(toolNew, "tool-"+platform(), "checksums.txt")
+	require.Equal(t, 0, r.bare().Code)
+	assert.Equal(t, toolNew, r.version(r.installed()), "the default asset is the one that landed")
 }
 
 // TestInstallRefusesWhatItCannotTrust: the checks stand between a download
